@@ -45,7 +45,7 @@ impl RenderPass {
 
         pass.push_debug_group(name);
 
-        if let Some(resource) = as_vulkan(descriptor.target).map(|target| target.resource()) {
+        if let Some(resource) = as_vulkan(descriptor.target).map(super::draw_target::DrawTarget::resource) {
             resource.bind();
             pass.render_pass = resource.get_render_pass();
             pass.extent = resource.get_extent();
@@ -84,16 +84,19 @@ impl RenderPass {
         pass
     }
 
+    #[must_use]
     pub fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
 
     /// The command buffer the pass records into.
+    #[must_use]
     pub fn get_command_buffer(&self) -> vk::CommandBuffer {
         self.command_buffer
     }
 
     /// The render pass of the draw target, which pipelines are made for.
+    #[must_use]
     pub fn get_vulkan_render_pass(&self) -> vk::RenderPass {
         self.render_pass
     }
@@ -104,6 +107,7 @@ impl RenderPass {
     }
 
     /// Whether draws can be recorded.
+    #[must_use]
     pub fn is_encoding(&self) -> bool {
         self.encoding
     }

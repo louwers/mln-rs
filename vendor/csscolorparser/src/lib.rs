@@ -31,19 +31,9 @@ impl Default for Color {
 
 impl Color {
     /// The C++ constructor: clamps alpha to 0..1 (NaN passes through).
+    #[must_use]
     pub fn new(r: u8, g: u8, b: u8, a: f32) -> Self {
-        Color {
-            r,
-            g,
-            b,
-            a: if a > 1.0 {
-                1.0
-            } else if a < 0.0 {
-                0.0
-            } else {
-                a
-            },
-        }
+        Color { r, g, b, a: a.clamp(0.0, 1.0) }
     }
 }
 
@@ -51,7 +41,7 @@ impl Color {
 impl PartialEq for Color {
     fn eq(&self, rhs: &Color) -> bool {
         // ::fabs(lhs.a - rhs.a) < 0.0001f: the float difference, promoted.
-        self.r == rhs.r && self.g == rhs.g && self.b == rhs.b && ((self.a - rhs.a) as f64).abs() < 0.0001f32 as f64
+        self.r == rhs.r && self.g == rhs.g && self.b == rhs.b && f64::from(self.a - rhs.a).abs() < f64::from(0.0001f32)
     }
 }
 
@@ -207,10 +197,10 @@ const NAMED_COLORS: [(&str, [u8; 3], f32); 148] = [
     ("yellowgreen", [154, 205, 50], 1.0),
 ];
 
-/// x86-64 `cvttsd2si`: what a double -> int64_t conversion compiles to; out
-/// of range (UB in C++) gives INT64_MIN.
+/// x86-64 `cvttsd2si`: what a double -> `int64_t` conversion compiles to; out
+/// of range (UB in C++) gives `INT64_MIN`.
 fn double_to_int64(d: f64) -> i64 {
-    if d.is_nan() || !(-9.223372036854775808e18..9.223372036854775808e18).contains(&d) { i64::MIN } else { d as i64 }
+    if d.is_nan() || !(-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&d) { i64::MIN } else { d as i64 }
 }
 
 /// `clamp_css_byte<float>`: clamp to integer 0 .. 255.
@@ -240,13 +230,7 @@ fn clamp_css_byte_i64(i: i64) -> u8 {
 
 /// `clamp_css_float<float>`: clamp to float 0.0 .. 1.0 (NaN passes through).
 fn clamp_css_float(f: f32) -> f32 {
-    if f < 0.0 {
-        0.0
-    } else if f > 1.0 {
-        1.0
-    } else {
-        f
-    }
+    f.clamp(0.0, 1.0)
 }
 
 fn parse_float(s: &[u8]) -> f32 {
@@ -312,12 +296,13 @@ fn modf(x: f32) -> f32 {
     }
 }
 
+#[must_use]
 pub fn parse(css_str: &str) -> Option<Color> {
     // Remove all whitespace, not compliant, but should just be more accepting.
     // Convert to lowercase (::tolower in the C locale only maps A-Z).
     let str: Vec<u8> = css_str.bytes().filter(|&c| c != b' ').map(|c| c.to_ascii_lowercase()).collect();
 
-    for (name, [r, g, b], a) in NAMED_COLORS.iter() {
+    for (name, [r, g, b], a) in &NAMED_COLORS {
         if str == name.as_bytes() {
             return Some(Color::new(*r, *g, *b, *a));
         }
@@ -330,53 +315,49 @@ pub fn parse(css_str: &str) -> Option<Color> {
             let iv = parse_int(&str[1..], 16); // TODO(deanm): Stricter parsing.
             if !(0..=0xfff).contains(&iv) {
                 return None;
-            } else {
-                return Some(Color::new(
-                    (((iv & 0xf00) >> 4) | ((iv & 0xf00) >> 8)) as u8,
-                    ((iv & 0xf0) | ((iv & 0xf0) >> 4)) as u8,
-                    ((iv & 0xf) | ((iv & 0xf) << 4)) as u8,
-                    1.0,
-                ));
             }
+            return Some(Color::new(
+                (((iv & 0xf00) >> 4) | ((iv & 0xf00) >> 8)) as u8,
+                ((iv & 0xf0) | ((iv & 0xf0) >> 4)) as u8,
+                ((iv & 0xf) | ((iv & 0xf) << 4)) as u8,
+                1.0,
+            ));
         } else if str.len() == 5 {
             // #RGBA
             let iv = parse_int(&str[1..], 16); // TODO(deanm): Stricter parsing.
             if !(0..=0xffff).contains(&iv) {
                 return None;
-            } else {
-                return Some(Color::new(
-                    (((iv & 0xf000) >> 8) | ((iv & 0xf000) >> 12)) as u8,
-                    (((iv & 0xf00) >> 4) | ((iv & 0xf00) >> 8)) as u8,
-                    ((iv & 0xf0) | ((iv & 0xf0) >> 4)) as u8,
-                    (((iv & 0xf) | ((iv & 0xf) << 4)) as f32) / 255.0f32,
-                ));
             }
+            return Some(Color::new(
+                (((iv & 0xf000) >> 8) | ((iv & 0xf000) >> 12)) as u8,
+                (((iv & 0xf00) >> 4) | ((iv & 0xf00) >> 8)) as u8,
+                ((iv & 0xf0) | ((iv & 0xf0) >> 4)) as u8,
+                (((iv & 0xf) | ((iv & 0xf) << 4)) as f32) / 255.0f32,
+            ));
         } else if str.len() == 7 {
             // #RRGGBB
             let iv = parse_int(&str[1..], 16); // TODO(deanm): Stricter parsing.
-            if !(0..=0xffffff).contains(&iv) {
+            if !(0..=0x00ff_ffff).contains(&iv) {
                 return None; // Covers NaN.
-            } else {
-                return Some(Color::new(
-                    ((iv & 0xff0000) >> 16) as u8,
-                    ((iv & 0xff00) >> 8) as u8,
-                    (iv & 0xff) as u8,
-                    1.0,
-                ));
             }
+            return Some(Color::new(
+                ((iv & 0x00ff_0000) >> 16) as u8,
+                ((iv & 0xff00) >> 8) as u8,
+                (iv & 0xff) as u8,
+                1.0,
+            ));
         } else if str.len() == 9 {
             // #RRGGBBAA
             let iv = parse_int(&str[1..], 16); // TODO(deanm): Stricter parsing.
-            if !(0..=0xffffffff).contains(&iv) {
+            if !(0..=0xffff_ffff).contains(&iv) {
                 return None; // Covers NaN.
-            } else {
-                return Some(Color::new(
-                    ((iv & 0xff000000) >> 24) as u8,
-                    ((iv & 0xff0000) >> 16) as u8,
-                    ((iv & 0xff00) >> 8) as u8,
-                    ((iv & 0xff) as f32) / 255.0f32,
-                ));
             }
+            return Some(Color::new(
+                ((iv & 0xff00_0000) >> 24) as u8,
+                ((iv & 0x00ff_0000) >> 16) as u8,
+                ((iv & 0xff00) >> 8) as u8,
+                ((iv & 0xff) as f32) / 255.0f32,
+            ));
         }
 
         return None;
@@ -451,37 +432,37 @@ mod tests {
     // Smoke tests; //difftest/util checks the port against the C++.
     use super::*;
 
-    fn c(r: u8, g: u8, b: u8, a: f32) -> Option<Color> {
-        Some(Color::new(r, g, b, a))
+    fn c(r: u8, g: u8, b: u8, a: f32) -> Color {
+        Color::new(r, g, b, a)
     }
 
     #[test]
     fn upstream() {
-        assert_eq!(c(255, 128, 12, 0.5), parse(" rgba (255, 128, 12, 0.5)"));
-        assert_eq!(c(255, 255, 255, 1.0), parse("#fff"));
-        assert_eq!(c(255, 0, 17, 1.0), parse("#ff0011"));
-        assert_eq!(c(106, 90, 205, 1.0), parse("slateblue"));
+        assert_eq!(Some(c(255, 128, 12, 0.5)), parse(" rgba (255, 128, 12, 0.5)"));
+        assert_eq!(Some(c(255, 255, 255, 1.0)), parse("#fff"));
+        assert_eq!(Some(c(255, 0, 17, 1.0)), parse("#ff0011"));
+        assert_eq!(Some(c(106, 90, 205, 1.0)), parse("slateblue"));
         assert_eq!(None, parse("blah"));
         assert_eq!(None, parse("ffffff"));
-        assert_eq!(c(226, 233, 233, 0.5), parse("hsla(900, 15%, 90%, 0.5)"));
+        assert_eq!(Some(c(226, 233, 233, 0.5)), parse("hsla(900, 15%, 90%, 0.5)"));
         assert_eq!(None, parse("hsla(900, 15%, 90%)"));
-        assert_eq!(c(226, 233, 233, 1.0), parse("hsl(900, 15%, 90%)"));
-        assert_eq!(c(226, 233, 233, 1.0), parse("hsl(900, 0.15, 90%)")); // NOTE: not spec compliant.
-        assert_eq!(c(0, 0, 0, 1.0), parse("hsl(9999999999999999999, 0, 0)")); // NOTE: float precision loss
-        assert_eq!(c(255, 191, 0, 1.0), parse("hsl(45, 100%, 50%)"));
-        assert_eq!(c(255, 191, 0, 1.0), parse("hsl(-315, 100%, 50%)"));
-        assert_eq!(c(255, 191, 0, 1.0), parse("hsl(-675, 100%, 50%)"));
+        assert_eq!(Some(c(226, 233, 233, 1.0)), parse("hsl(900, 15%, 90%)"));
+        assert_eq!(Some(c(226, 233, 233, 1.0)), parse("hsl(900, 0.15, 90%)")); // NOTE: not spec compliant.
+        assert_eq!(Some(c(0, 0, 0, 1.0)), parse("hsl(9999999999999999999, 0, 0)")); // NOTE: float precision loss
+        assert_eq!(Some(c(255, 191, 0, 1.0)), parse("hsl(45, 100%, 50%)"));
+        assert_eq!(Some(c(255, 191, 0, 1.0)), parse("hsl(-315, 100%, 50%)"));
+        assert_eq!(Some(c(255, 191, 0, 1.0)), parse("hsl(-675, 100%, 50%)"));
         // Out of range:
         assert_eq!(None, parse("xxx"));
-        assert_eq!(c(255, 128, 12, 1.0), parse(" rgba (255, 128, 12, 2)"));
-        assert_eq!(c(255, 128, 12, 1.0), parse(" rgba (400, 128, 12, 2)"));
+        assert_eq!(Some(c(255, 128, 12, 1.0)), parse(" rgba (255, 128, 12, 2)"));
+        assert_eq!(Some(c(255, 128, 12, 1.0)), parse(" rgba (400, 128, 12, 2)"));
         // 5% -> 0.05f * 255 = 12.75 -> 13
-        assert_eq!(c(255, 128, 13, 1.0), parse(" rgba (100%, 50%, 5%, 2)"));
-        assert_eq!(c(255, 128, 13, 0.0), parse(" rgba (100%, 50%, 5%, -2)"));
-        assert_eq!(c(255, 128, 13, 1.0), parse(" rgba (100%, 50%, 5%, 1e9)"));
+        assert_eq!(Some(c(255, 128, 13, 1.0)), parse(" rgba (100%, 50%, 5%, 2)"));
+        assert_eq!(Some(c(255, 128, 13, 0.0)), parse(" rgba (100%, 50%, 5%, -2)"));
+        assert_eq!(Some(c(255, 128, 13, 1.0)), parse(" rgba (100%, 50%, 5%, 1e9)"));
         // Hex alpha
-        assert_eq!(c(255, 0, 17, 0.0), parse("#ff001100"));
-        assert_eq!(c(255, 255, 255, 1.0), parse("#ffff"));
+        assert_eq!(Some(c(255, 0, 17, 0.0)), parse("#ff001100"));
+        assert_eq!(Some(c(255, 255, 255, 1.0)), parse("#ffff"));
     }
 
     #[test]
@@ -490,7 +471,7 @@ mod tests {
         assert_eq!(split(b",", b','), vec![b"" as &[u8]]);
         assert_eq!(split(b"1,,2,", b','), vec![b"1" as &[u8], b"", b"2"]);
         // "rgb(,,,)" has three empty fields, each parsing as 0.
-        assert_eq!(c(0, 0, 0, 1.0), parse("rgb(,,,)"));
+        assert_eq!(Some(c(0, 0, 0, 1.0)), parse("rgb(,,,)"));
         assert_eq!(None, parse("rgb(,,)"));
     }
 }

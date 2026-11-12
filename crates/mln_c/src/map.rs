@@ -632,7 +632,7 @@ pub unsafe extern "C" fn mln_map_set_feature_state(
         // SAFETY: the caller's contract.
         let state = feature_state(unsafe { buffer::text(state, "feature state") }?)?;
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| map.set_feature_state(selector, state)) }
+        unsafe { command(map, completion, |map| map.set_feature_state(&selector, state)) }
     })
 }
 
@@ -656,7 +656,7 @@ pub unsafe extern "C" fn mln_map_get_feature_state(
             query(
                 map,
                 completion,
-                |map| map.feature_state(selector),
+                |map| map.feature_state(&selector),
                 |state| {
                     let json = mln_conversion::value_conversion::value_to_json(&Value::Object(state));
                     LentText::new(&json.to_string())
@@ -682,7 +682,7 @@ pub unsafe extern "C" fn mln_map_remove_feature_state(
         // SAFETY: the caller's contract.
         let selector = unsafe { self::selector(selector) }?;
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| map.remove_feature_state(selector)) }
+        unsafe { command(map, completion, |map| map.remove_feature_state(&selector)) }
     })
 }
 
@@ -713,7 +713,9 @@ pub(crate) mod tests {
         let waiter = Waiter::new();
         let mut map = 0;
         // SAFETY: local arguments.
-        let status = unsafe { mln_runtime_create_map(runtime, options, &mut map, &waiter.descriptor, NO_DIAGNOSTIC) };
+        let status = unsafe {
+            mln_runtime_create_map(runtime, options, &raw mut map, &raw const waiter.descriptor, NO_DIAGNOSTIC)
+        };
         assert_eq!(status, MLN_STATUS_OK);
         assert_eq!(waiter.status(), MLN_STATUS_OK);
         map
@@ -722,7 +724,7 @@ pub(crate) mod tests {
     pub(crate) fn release_map(map: mln_map) {
         let waiter = Waiter::new();
         // SAFETY: a local completion.
-        assert_eq!(unsafe { mln_map_release(map, &waiter.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_map_release(map, &raw const waiter.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         assert_eq!(waiter.status(), MLN_STATUS_OK);
     }
 
@@ -731,7 +733,7 @@ pub(crate) mod tests {
         let mut snapshot: mln_map_snapshot = unsafe { core::mem::zeroed() };
         snapshot.size = size_of::<mln_map_snapshot>() as u32;
         // SAFETY: a local snapshot.
-        assert_eq!(unsafe { mln_map_get_snapshot(map, &mut snapshot, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_map_get_snapshot(map, &raw mut snapshot, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         snapshot
     }
 
@@ -765,7 +767,10 @@ pub(crate) mod tests {
         let (completion, receiver) = channel_completion::<String>(send_text);
         // SAFETY: local arguments, and a completion whose sender the library
         // releases after its call.
-        assert_eq!(unsafe { mln_map_get_feature_state(map, selector, &completion, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(
+            unsafe { mln_map_get_feature_state(map, selector, &raw const completion, NO_DIAGNOSTIC) },
+            MLN_STATUS_OK
+        );
         receiver.recv_timeout(std::time::Duration::from_secs(30)).unwrap()
     }
 
@@ -781,10 +786,13 @@ pub(crate) mod tests {
         release_map(map);
         let mut out = diagnostic();
         // SAFETY: a null snapshot.
-        assert_eq!(unsafe { mln_map_get_snapshot(map, core::ptr::null_mut(), &mut *out) }, MLN_STATUS_INVALID_ARGUMENT);
+        assert_eq!(
+            unsafe { mln_map_get_snapshot(map, core::ptr::null_mut(), &raw mut *out) },
+            MLN_STATUS_INVALID_ARGUMENT
+        );
         let mut stale = snapshot;
         // SAFETY: a local snapshot.
-        assert_eq!(unsafe { mln_map_get_snapshot(map, &mut stale, &mut *out) }, MLN_STATUS_INVALID_STATE);
+        assert_eq!(unsafe { mln_map_get_snapshot(map, &raw mut stale, &raw mut *out) }, MLN_STATUS_INVALID_STATE);
         release(runtime);
     }
 
@@ -802,7 +810,15 @@ pub(crate) mod tests {
             (mln_map_options { fallback_font_faces: view("{}"), ..options(1.0) }, "fallback_font_faces is invalid"),
         ] {
             // SAFETY: local arguments.
-            let status = unsafe { mln_runtime_create_map(runtime, &options, &mut map, &waiter.descriptor, &mut *out) };
+            let status = unsafe {
+                mln_runtime_create_map(
+                    runtime,
+                    &raw const options,
+                    &raw mut map,
+                    &raw const waiter.descriptor,
+                    &raw mut *out,
+                )
+            };
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
             assert!(message(&out).contains(expected), "{}", message(&out));
             assert_eq!(map, 0);
@@ -830,7 +846,7 @@ pub(crate) mod tests {
         // SAFETY: local arguments.
         unsafe {
             assert_eq!(
-                mln_map_set_feature_state(map, &numbered, view(state), core::ptr::null(), NO_DIAGNOSTIC),
+                mln_map_set_feature_state(map, &raw const numbered, view(state), core::ptr::null(), NO_DIAGNOSTIC),
                 MLN_STATUS_OK
             );
         }
@@ -839,14 +855,19 @@ pub(crate) mod tests {
         let mut out = diagnostic();
         // SAFETY: local arguments.
         unsafe {
-            let array = mln_map_set_feature_state(map, &numbered, view("[1]"), core::ptr::null(), &mut *out);
+            let array =
+                mln_map_set_feature_state(map, &raw const numbered, view("[1]"), core::ptr::null(), &raw mut *out);
             assert_eq!(array, MLN_STATUS_INVALID_ARGUMENT);
             assert!(message(&out).contains("must be a JSON object"));
             let source = selector("points", None);
-            let state = mln_map_set_feature_state(map, &source, view(state), core::ptr::null(), &mut *out);
+            let state =
+                mln_map_set_feature_state(map, &raw const source, view(state), core::ptr::null(), &raw mut *out);
             assert_eq!(state, MLN_STATUS_INVALID_ARGUMENT);
             assert!(message(&out).contains("requires feature_id"));
-            assert_eq!(mln_map_remove_feature_state(map, &source, core::ptr::null(), NO_DIAGNOSTIC), MLN_STATUS_OK);
+            assert_eq!(
+                mln_map_remove_feature_state(map, &raw const source, core::ptr::null(), NO_DIAGNOSTIC),
+                MLN_STATUS_OK
+            );
         }
         assert_eq!(read_state(map, &named), "{}");
         release_map(map);

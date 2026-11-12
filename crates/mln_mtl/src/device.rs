@@ -85,15 +85,18 @@ impl Device {
             && Retained::as_ptr(&self.queue) == Retained::as_ptr(&other.queue)
     }
 
+    #[must_use]
     pub fn device(&self) -> &MTLDevicePtr {
         &self.device
     }
 
+    #[must_use]
     pub fn queue(&self) -> &MTLCommandQueuePtr {
         &self.queue
     }
 
     /// The name of the GPU.
+    #[must_use]
     pub fn name(&self) -> String {
         self.device.name().to_string()
     }

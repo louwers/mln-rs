@@ -28,6 +28,7 @@ impl Default for RendererBackendBase {
 }
 
 impl RendererBackendBase {
+    #[must_use]
     pub fn new() -> Self {
         RendererBackendBase { unique_id: SimpleIdentity::new(), context: OnceCell::new() }
     }

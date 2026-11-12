@@ -22,8 +22,8 @@ pub const TILE_SIZE: f64 = TILE_SIZE_D;
 pub const EXTENT: i32 = 8192;
 
 pub const M2PI: f64 = std::f64::consts::PI * 2.0;
-pub const EARTH_RADIUS_M: f64 = 6378137.0;
-pub const LATITUDE_MAX: f64 = 85.051128779806604;
+pub const EARTH_RADIUS_M: f64 = 6_378_137.0;
+pub const LATITUDE_MAX: f64 = 85.051_128_779_806_6;
 pub const LONGITUDE_MAX: f64 = 180.0;
 pub const DEGREES_MAX: f64 = 360.0;
 pub const PITCH_MIN: f64 = 0.0;
@@ -33,14 +33,14 @@ pub const PITCH_MAX: f64 = std::f64::consts::PI;
 /// to be defined as 1.5 screen heights above the ground, which was an
 /// arbitrary choice. This is the fov equivalent to that value calculated
 /// with: `fov = 2 * arctan((height / 2) / (height * 1.5))`
-pub const DEFAULT_FOV: f64 = 0.6435011087932844;
+pub const DEFAULT_FOV: f64 = 0.643_501_108_793_284_4;
 pub const MIN_ZOOM: f64 = 0.0;
 pub const MAX_ZOOM: f64 = 25.5;
 pub const MIN_ZOOM_F: f32 = MIN_ZOOM as f32;
 pub const MAX_ZOOM_F: f32 = MAX_ZOOM as f32;
 pub const DEFAULT_MAX_ZOOM: u8 = 22;
 
-/// ONE_EM constant used to go between "em" units used in style spec and
+/// `ONE_EM` constant used to go between "em" units used in style spec and
 /// "points" used internally for layout.
 pub const ONE_EM: f32 = 24.0;
 
@@ -48,7 +48,7 @@ pub const DEFAULT_PREFETCH_ZOOM_DELTA: u8 = 4;
 
 pub const DEFAULT_MAX_CACHE_SIZE: u64 = 50 * 1024 * 1024;
 
-/// Default ImageManager's cache size for images added via
+/// Default `ImageManager`'s cache size for images added via
 /// onStyleImageMissing API. Average sprite size with 1.0 pixel ratio is
 /// ~2kB, 8kB for pixel ratio of 2.0.
 pub const DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE: usize = 100 * 8192;

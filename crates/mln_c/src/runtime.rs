@@ -78,7 +78,7 @@ pub unsafe extern "C" fn mln_runtime_create(
         };
         // SAFETY: the caller's contract.
         let out_runtime = unsafe { handles::out_handle(out_runtime, "out_runtime") }?;
-        let runtime = Runtime::new(options)?;
+        let runtime = Runtime::new(&options)?;
         *out_runtime =
             RUNTIMES.insert(Arc::new(RuntimeObject { runtime, maps: Arc::new(Mutex::new(HashMap::new())) }))?;
         Ok(())
@@ -319,7 +319,7 @@ pub(crate) mod tests {
     fn current() -> mln_network_status {
         let mut status = 0;
         // SAFETY: a local output and a null diagnostic.
-        assert_eq!(unsafe { mln_network_get_status(&mut status, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_network_get_status(&raw mut status, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         status
     }
 
@@ -330,10 +330,10 @@ pub(crate) mod tests {
             assert_eq!(mln_network_set_status(MLN_NETWORK_STATUS_OFFLINE, NO_DIAGNOSTIC), MLN_STATUS_OK);
             assert_eq!(current(), MLN_NETWORK_STATUS_OFFLINE);
             let mut out = diagnostic();
-            assert_eq!(mln_network_set_status(0, &mut *out), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(mln_network_set_status(0, &raw mut *out), MLN_STATUS_INVALID_ARGUMENT);
             assert!(message(&out).contains("network status"));
             assert_eq!(current(), MLN_NETWORK_STATUS_OFFLINE);
-            assert_eq!(mln_network_get_status(core::ptr::null_mut(), &mut *out), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(mln_network_get_status(core::ptr::null_mut(), &raw mut *out), MLN_STATUS_INVALID_ARGUMENT);
             assert!(message(&out).contains("out_status"));
             assert_eq!(mln_network_set_status(MLN_NETWORK_STATUS_ONLINE, NO_DIAGNOSTIC), MLN_STATUS_OK);
             assert_eq!(current(), MLN_NETWORK_STATUS_ONLINE);
@@ -403,14 +403,14 @@ pub(crate) mod tests {
     pub(crate) fn create() -> mln_runtime {
         let mut runtime = 0;
         // SAFETY: null options, a local out-handle and a null diagnostic.
-        assert_eq!(unsafe { mln_runtime_create(core::ptr::null(), &mut runtime, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_runtime_create(core::ptr::null(), &raw mut runtime, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         runtime
     }
 
     pub(crate) fn release(runtime: mln_runtime) {
         let waiter = Waiter::new();
         // SAFETY: a local completion and a null diagnostic.
-        assert_eq!(unsafe { mln_runtime_release(runtime, &waiter.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_runtime_release(runtime, &raw const waiter.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         assert_eq!(waiter.status(), MLN_STATUS_OK);
     }
 
@@ -422,7 +422,10 @@ pub(crate) mod tests {
         let mut out = diagnostic();
         // SAFETY: local arguments.
         unsafe {
-            assert_eq!(mln_runtime_release(runtime, &waiter.descriptor, &mut *out), MLN_STATUS_INVALID_STATE);
+            assert_eq!(
+                mln_runtime_release(runtime, &raw const waiter.descriptor, &raw mut *out),
+                MLN_STATUS_INVALID_STATE
+            );
             assert!(message(&out).contains("stale"), "{}", message(&out));
             assert_eq!(mln_runtime_dispose(runtime, NO_DIAGNOSTIC), MLN_STATUS_INVALID_STATE);
             // The rejected release left the user data with the caller.
@@ -437,10 +440,16 @@ pub(crate) mod tests {
         let mut out = diagnostic();
         // SAFETY: local arguments.
         unsafe {
-            assert_eq!(mln_runtime_create(&options, &mut runtime, &mut *out), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(
+                mln_runtime_create(&raw const options, &raw mut runtime, &raw mut *out),
+                MLN_STATUS_INVALID_ARGUMENT
+            );
             assert!(message(&out).contains("size"));
             let mut occupied = 7;
-            assert_eq!(mln_runtime_create(core::ptr::null(), &mut occupied, &mut *out), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(
+                mln_runtime_create(core::ptr::null(), &raw mut occupied, &raw mut *out),
+                MLN_STATUS_INVALID_ARGUMENT
+            );
             assert_eq!(occupied, 7);
             assert_eq!(runtime, 0);
         }
@@ -464,14 +473,17 @@ pub(crate) mod tests {
         unsafe {
             let rejected = mln_runtime_event_handler { callback: None, ..handler };
             assert_eq!(
-                mln_runtime_set_event_handler(runtime, &rejected, core::ptr::null(), NO_DIAGNOSTIC),
+                mln_runtime_set_event_handler(runtime, &raw const rejected, core::ptr::null(), NO_DIAGNOSTIC),
                 MLN_STATUS_INVALID_ARGUMENT
             );
             assert_eq!(
-                mln_runtime_set_event_handler(runtime, &handler, core::ptr::null(), NO_DIAGNOSTIC),
+                mln_runtime_set_event_handler(runtime, &raw const handler, core::ptr::null(), NO_DIAGNOSTIC),
                 MLN_STATUS_OK
             );
-            assert_eq!(mln_runtime_clear_event_handler(runtime, &waiter.descriptor, NO_DIAGNOSTIC), MLN_STATUS_OK);
+            assert_eq!(
+                mln_runtime_clear_event_handler(runtime, &raw const waiter.descriptor, NO_DIAGNOSTIC),
+                MLN_STATUS_OK
+            );
         }
         assert_eq!(waiter.status(), MLN_STATUS_OK);
         assert_eq!(log.take(), "hr");

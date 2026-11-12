@@ -44,7 +44,7 @@ impl Default for MomentumEasing {
 ///
 /// maplibre-native-ffi's C API gives each setting a field bit, and a setting
 /// whose bit isn't set takes the part's default. In Rust that is struct
-/// update from the part's constant: UIScrollView's normal deceleration with
+/// update from the part's constant: `UIScrollView`'s normal deceleration with
 /// the pan's other defaults is
 /// `MomentumDecay { half_life: Duration::from_millis(346), ..MomentumDecay::PAN }`.
 #[derive(Clone, Copy, Debug, PartialEq)]

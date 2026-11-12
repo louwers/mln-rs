@@ -80,6 +80,7 @@ fn unexpected(resource: &Resource) -> Option<Response> {
 }
 
 impl StubFileSource {
+    #[must_use]
     pub fn new(type_: ResponseType) -> Self {
         let state = Rc::new(RefCell::new(State::default()));
         if type_ == ResponseType::Asynchronous {

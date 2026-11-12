@@ -105,11 +105,12 @@ fn snap(options: &mln_momentum_snap, mut snap: MomentumSnap) -> Result<MomentumS
     snap.offset = fields.get(MLN_MOMENTUM_SNAP_OFFSET, options.offset).unwrap_or(snap.offset);
     snap.tolerance = fields.get(MLN_MOMENTUM_SNAP_TOLERANCE, options.tolerance).unwrap_or(snap.tolerance);
     let duration_ms = fields.get(MLN_MOMENTUM_SNAP_DURATION_MS, options.duration_ms);
-    if !positive(snap.spacing)
-        || !snap.offset.is_finite()
-        || !(snap.tolerance.is_finite() && snap.tolerance >= 0.0)
-        || !duration_ms.is_none_or(is_duration_ms)
-    {
+    let valid = positive(snap.spacing)
+        && snap.offset.is_finite()
+        && snap.tolerance.is_finite()
+        && snap.tolerance >= 0.0
+        && duration_ms.is_none_or(is_duration_ms);
+    if !valid {
         return Err(Error::invalid_argument(
             "a momentum snap needs a positive spacing, a finite offset, a tolerance that isn't negative, and a \
              duration in the native range",

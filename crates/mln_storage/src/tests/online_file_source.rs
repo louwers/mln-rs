@@ -306,7 +306,7 @@ fn respect_prior_expires() {
 
     // Very long expiration time, should never arrive.
     let mut resource1 = Resource::new(Kind::Unknown, server.url("/test"));
-    resource1.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100000));
+    resource1.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
     let _req1 = fs.request(&resource1, Box::new(|_: Response| panic!("Should never be called")));
 
@@ -318,7 +318,7 @@ fn respect_prior_expires() {
 
     // Very long expiration time, should never arrive.
     let mut resource3 = Resource::new(Kind::Unknown, server.url("/test"));
-    resource3.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100000));
+    resource3.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
     let _req3 = fs.request(&resource3, Box::new(|_: Response| panic!("Should never be called")));
 
@@ -356,13 +356,13 @@ fn respect_minimum_update_interval() {
 // gtest: OnlineFileSource.Load
 #[test]
 fn load() {
+    const CONCURRENCY: usize = 50;
+    const MAX: i32 = 10000;
+
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let fs = online_file_source();
-
-    const CONCURRENCY: usize = 50;
-    const MAX: i32 = 10000;
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
     let base = server.url("/load/");
@@ -643,12 +643,12 @@ fn change_tile_server_options() {
 // gtest: OnlineFileSource.LowHighPriorityRequests
 #[test]
 fn low_high_priority_requests() {
+    const NUM_REQUESTS: usize = 3;
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let fs = online_file_source();
     let response_counter = Rc::new(Cell::new(0usize));
-    const NUM_REQUESTS: usize = 3;
 
     NetworkStatus::set(Status::Offline);
     fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));

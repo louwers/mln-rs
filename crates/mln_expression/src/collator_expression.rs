@@ -19,6 +19,7 @@ pub struct CollatorExpression {
 }
 
 impl CollatorExpression {
+    #[must_use]
     pub fn new(
         case_sensitive: Box<dyn Expression>,
         diacritic_sensitive: Box<dyn Expression>,

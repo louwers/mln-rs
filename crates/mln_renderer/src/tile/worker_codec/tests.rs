@@ -24,7 +24,7 @@ use super::envelope::{self, Request};
 use super::fields;
 use super::map_side::{MapCodec, Reply};
 use super::worker_side::{WorkerAction, WorkerCodec};
-use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
+use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, ImageVersionMap};
 use crate::layermanager;
 use crate::text::glyph_manager::HBShapeResults;
 use crate::tile::geometry_tile::LayoutResult;
@@ -65,7 +65,7 @@ fn convert(json: &str) -> Box<dyn Layer> {
 }
 
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
-/// the RenderOrchestrator evaluates it.
+/// the `RenderOrchestrator` evaluates it.
 fn layer(json: &str, z: f32) -> Immutable<dyn LayerProperties> {
     let render_layer = layermanager::create_render_layer(&convert(json).base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
@@ -143,7 +143,7 @@ fn answer(request: &TileMessage) -> WorkerMessage {
             WorkerMessage::ImagesAvailable {
                 icon_map,
                 pattern_map,
-                version_map: Default::default(),
+                version_map: ImageVersionMap::default(),
                 image_correlation_id: *image_correlation_id,
             }
         }
@@ -214,7 +214,7 @@ impl ThroughCodec {
     }
 
     /// Sends a message; returns the replies it caused, decoded.
-    fn send(&mut self, message: WorkerMessage) -> Vec<TileMessage> {
+    fn send(&mut self, message: &WorkerMessage) -> Vec<TileMessage> {
         let request = self.map.message(TILE, message).unwrap();
         self.handle(&request);
         self.replies.take().into_iter().map(|reply| self.reply(reply)).collect()
@@ -245,7 +245,7 @@ impl ThroughCodec {
     fn layout(&mut self, messages: Vec<WorkerMessage>) -> LayoutResult {
         let mut replies = Vec::new();
         for message in messages {
-            replies.extend(self.send(message));
+            replies.extend(self.send(&message));
         }
         loop {
             let mut next = Vec::new();
@@ -253,7 +253,7 @@ impl ThroughCodec {
                 match reply {
                     TileMessage::Layout { result, .. } => return result,
                     TileMessage::Error { error, .. } => panic!("{error}"),
-                    request => next.extend(self.send(answer(&request))),
+                    request => next.extend(self.send(&answer(&request))),
                 }
             }
             replies = next;
@@ -453,7 +453,7 @@ fn pattern_layouts_cross() {
     else {
         panic!("not a data-driven pattern");
     };
-    assert!(!zoom_in_vertex_vector.is_empty());
+    assert_ne!(*zoom_in_vertex_vector, Vec::<[u16; 4]>::new());
 }
 
 /// GeoJSON tiles cross as their features: each geometry type, properties
@@ -539,8 +539,8 @@ fn properties_cross_while_a_paint_property_transitions() {
     assert!(!get_evaluated::<FillLayerProperties>(&transitioning).get::<FillColor>().is_constant());
 
     let mut codec = ThroughCodec::new();
-    codec.send(set_layers(std::slice::from_ref(&transitioning), 1));
-    let mut replies = codec.send(set_data(&tile_data(), 2));
+    codec.send(&set_layers(std::slice::from_ref(&transitioning), 1));
+    let mut replies = codec.send(&set_data(&tile_data(), 2));
     let TileMessage::Layout { result, .. } = replies.remove(0) else {
         panic!("not a layout");
     };
@@ -555,11 +555,11 @@ fn layouts_have_the_layers_they_answer() {
     let newer = layers(&[FILL, LINE]);
 
     let mut codec = ThroughCodec::new();
-    codec.send(set_layers(&sent, 1));
-    let request = codec.map.message(TILE, set_data(&tile_data(), 2)).unwrap();
+    codec.send(&set_layers(&sent, 1));
+    let request = codec.map.message(TILE, &set_data(&tile_data(), 2)).unwrap();
     codec.handle(&request);
     let reply = codec.worker_codec.encode(TILE, codec.replies.take().remove(0));
-    codec.map.message(TILE, set_layers(&newer, 3)).unwrap();
+    codec.map.message(TILE, &set_layers(&newer, 3)).unwrap();
     drop(newer);
 
     let Some((_, Reply::Geometry(TileMessage::Layout { result, correlation_id: 2 }))) =
@@ -585,8 +585,8 @@ fn map_codec() -> MapCodec {
 fn layers_are_defined_once() {
     let mut map = map_codec();
     let mut layers = layers(&[FILL, LINE]);
-    let first = map.message(TILE, set_layers(&layers, 1)).unwrap();
-    let second = map.message(TILE, set_layers(&layers, 2)).unwrap();
+    let first = map.message(TILE, &set_layers(&layers, 1)).unwrap();
+    let second = map.message(TILE, &set_layers(&layers, 2)).unwrap();
     assert!(second.len() * 15 < first.len(), "{} bytes, then {}", first.len(), second.len());
 
     // Evaluated again (another zoom), the layers' properties travel again,
@@ -599,7 +599,7 @@ fn layers_are_defined_once() {
             render_layer.borrow().base().evaluated_properties.clone()
         })
         .collect();
-    let third = map.message(TILE, set_layers(&again, 3)).unwrap();
+    let third = map.message(TILE, &set_layers(&again, 3)).unwrap();
     assert!(third.len() < first.len() / 2 && third.len() > second.len());
 
     // Once nothing holds the line layer, the instance forgets it, its
@@ -624,11 +624,11 @@ fn images_are_defined_once() {
     let images = |image_correlation_id| WorkerMessage::ImagesAvailable {
         icon_map: icon_map.clone(),
         pattern_map: ImageMap::new(),
-        version_map: Default::default(),
+        version_map: ImageVersionMap::default(),
         image_correlation_id,
     };
-    let first = map.message(TILE, images(1)).unwrap();
-    let second = map.message(TILE, images(2)).unwrap();
+    let first = map.message(TILE, &images(1)).unwrap();
+    let second = map.message(TILE, &images(2)).unwrap();
     assert!(second.len() * 20 < first.len(), "{} bytes, then {}", first.len(), second.len());
 }
 
@@ -656,12 +656,12 @@ fn failed_set_layers_define_nothing() {
     let fill = layer(FILL, 0.0);
     let unknown: Immutable<dyn LayerProperties> =
         Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(layer(LINE, 0.0).base_impl.clone())));
-    assert!(map.message(TILE, set_layers(&[fill.clone(), unknown], 1)).is_err());
+    assert!(map.message(TILE, &set_layers(&[fill.clone(), unknown], 1)).is_err());
 
     // Decoded without the failed request, the next one defines the layer.
     let mut worker_codec = WorkerCodec::new();
     worker_codec.decode(&MapCodec::new().create(TILE, &parameters())).unwrap();
-    let request = map.message(TILE, set_layers(&[fill], 2)).unwrap();
+    let request = map.message(TILE, &set_layers(&[fill], 2)).unwrap();
     let WorkerAction::Message { message, .. } = worker_codec.decode(&request).unwrap() else { panic!("not a message") };
     let WorkerMessage::SetLayers { layers, .. } = worker_codec.decode_message(&message).unwrap() else {
         panic!("not setLayers")

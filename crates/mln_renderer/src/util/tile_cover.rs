@@ -43,7 +43,7 @@ fn std_max(a: f64, b: f64) -> f64 {
 }
 
 /// `LatLng{lat, lon}` built from the coordinates of an existing
-/// `LatLngBounds` (with the latitude clamped to ±LATITUDE_MAX), so the
+/// `LatLngBounds` (with the latitude clamped to ±`LATITUDE_MAX`), so the
 /// constructor's checks cannot fail.
 fn bounds_lat_lng(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).expect("LatLng from LatLngBounds coordinates")
@@ -75,8 +75,8 @@ impl Edge {
 
 /// scan-line conversion
 fn scan_spans(mut e0: Edge, mut e1: Edge, ymin: i32, ymax: i32, scan_line: &mut ScanLine<'_>) {
-    let y0 = fmax(ymin as f64, e1.y0.floor());
-    let y1 = fmin(ymax as f64, e1.y1.ceil());
+    let y0 = fmax(f64::from(ymin), e1.y0.floor());
+    let y1 = fmin(f64::from(ymax), e1.y1.ceil());
 
     // sort edges by x-coordinate
     let swap = if e0.x0 == e1.x0 && e0.y0 == e1.y0 {
@@ -140,15 +140,15 @@ fn tile_cover_points(
     c: &Point<f64>,
     z: u8,
 ) -> Vec<UnwrappedTileID> {
-    // `1 << z` (an int shift).
-    let tiles: i32 = 1i32.wrapping_shl(z as u32);
-
     #[derive(Clone, Copy, Debug)]
     struct ID {
         x: i32,
         y: i32,
         sq_dist: f64,
     }
+
+    // `1 << z` (an int shift).
+    let tiles: i32 = 1i32.wrapping_shl(u32::from(z));
 
     // skip the first few allocations, assuming we usually end up with at least a few tiles
     let mut t: Vec<ID> = Vec::with_capacity(8);
@@ -160,8 +160,8 @@ fn tile_cover_points(
             if y >= 0 && y <= tiles {
                 let mut x = x0;
                 while x < x1 {
-                    let dx = x as f64 + 0.5 - c.x;
-                    let dy = y as f64 + 0.5 - c.y;
+                    let dx = f64::from(x) + 0.5 - c.x;
+                    let dy = f64::from(y) + 0.5 - c.y;
                     t.push(ID { x, y, sq_dist: dx * dx + dy * dy });
                     x += 1;
                 }
@@ -194,7 +194,7 @@ fn tile_cover_points(
 
     let mut result = Vec::with_capacity(t.len());
     for id in &t {
-        result.push(UnwrappedTileID::new(z, id.x as i64, id.y as i64));
+        result.push(UnwrappedTileID::new(z, i64::from(id.x), i64::from(id.y)));
     }
     result
 }
@@ -206,6 +206,7 @@ pub struct TileCover {
 
 impl TileCover {
     /// `TileCover(const LatLngBounds&, uint8_t z)`.
+    #[must_use]
     pub fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
         let mut bounds = LatLngBounds::hull(
             bounds_lat_lng(std_max(bounds_.south(), -constants::LATITUDE_MAX), bounds_.west()),
@@ -218,15 +219,15 @@ impl TileCover {
 
         // `Projection::project(LatLng, uint8_t)` picks the `int32_t zoom`
         // overload (integral promotion beats the conversion to double).
-        let sw = Projection::project_zoom(&bounds.southwest(), z as i32);
-        let ne = Projection::project_zoom(&bounds.northeast(), z as i32);
-        let se = Projection::project_zoom(&bounds.southeast(), z as i32);
-        let nw = Projection::project_zoom(&bounds.northwest(), z as i32);
+        let sw = Projection::project_zoom(&bounds.southwest(), i32::from(z));
+        let ne = Projection::project_zoom(&bounds.northeast(), i32::from(z));
+        let se = Projection::project_zoom(&bounds.southeast(), i32::from(z));
+        let nw = Projection::project_zoom(&bounds.northwest(), i32::from(z));
 
         let p: Polygon<f64> = vec![vec![sw, nw, ne, se, sw]];
         // Nothing is projected (`project = false`), so nothing can throw.
         TileCover {
-            impl_: Box::new(Impl::new(z as i32, &Geometry::Polygon(p), false).expect("unprojected tile cover")),
+            impl_: Box::new(Impl::new(i32::from(z), &Geometry::Polygon(p), false).expect("unprojected tile cover")),
         }
     }
 
@@ -236,15 +237,20 @@ impl TileCover {
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point that
     /// isn't a valid `LatLng`.
     pub fn new_from_geometry(geom: &Geometry<f64>, z: u8, project: bool) -> Result<TileCover, Error> {
-        Ok(TileCover { impl_: Box::new(Impl::new(z as i32, geom, project)?) })
+        Ok(TileCover { impl_: Box::new(Impl::new(i32::from(z), geom, project)?) })
     }
 
-    pub fn next(&mut self) -> Option<UnwrappedTileID> {
-        self.impl_.next()
-    }
-
+    #[must_use]
     pub fn has_next(&self) -> bool {
         self.impl_.has_next()
+    }
+}
+
+impl Iterator for TileCover {
+    type Item = UnwrappedTileID;
+
+    fn next(&mut self) -> Option<UnwrappedTileID> {
+        self.impl_.next()
     }
 }
 
@@ -282,9 +288,10 @@ impl TileCoverParameters {
     }
 }
 
+#[must_use]
 pub fn covering_zoom_level(zoom: f64, type_: SourceType, size: u16) -> i32 {
     let mut zoom = zoom;
-    zoom += mln_math::log2(constants::TILE_SIZE_D / size as f64);
+    zoom += mln_math::log2(constants::TILE_SIZE_D / f64::from(size));
     if type_ == SourceType::Raster || type_ == SourceType::RasterDEM || type_ == SourceType::Video {
         zoom.round() as i32
     } else {
@@ -784,10 +791,6 @@ pub fn tile_cover(
     zoom_range: Range<u8>,
     overscaled_z: Option<u8>,
 ) -> Vec<OverscaledTileID> {
-    if state.transform_state.is_globe_rendering() {
-        return globe::tile_cover(state, z, zoom_range, overscaled_z);
-    }
-
     #[derive(Clone, Copy, Debug)]
     struct Node {
         aabb: AABB,
@@ -802,6 +805,10 @@ pub fn tile_cover(
     struct ResultTile {
         id: OverscaledTileID,
         sqr_dist: f64,
+    }
+
+    if state.transform_state.is_globe_rendering() {
+        return globe::tile_cover(state, z, zoom_range, overscaled_z);
     }
 
     let children_of = |node: &Node| -> Vec<Node> {
@@ -822,7 +829,7 @@ pub fn tile_cover(
     };
 
     let transform = &state.transform_state;
-    let num_tiles = 2.0f64.powf(z as f64);
+    let num_tiles = 2.0f64.powf(f64::from(z));
     let world_size = Projection::world_size(transform.get_scale());
     let allow_variable_zoom = transform.get_pitch() > state.tile_lod_pitch_threshold;
     let min_zoom: u8 = if allow_variable_zoom { zoom_range.min } else { z };
@@ -835,7 +842,7 @@ pub fn tile_cover(
     let center_point = TileCoordinate::from_screen_coordinate(
         transform,
         z,
-        &ScreenCoordinate::new(size.width as f64 / 2.0, size.height as f64 / 2.0),
+        &ScreenCoordinate::new(f64::from(size.width) / 2.0, f64::from(size.height) / 2.0),
     )
     .p;
 
@@ -846,12 +853,17 @@ pub fn tile_cover(
     let Some(camera_position_mercator) = camera_position else {
         return Vec::new();
     };
-    let nominal_scale = 2.0f64.powf(z as f64);
+    let nominal_scale = 2.0f64.powf(f64::from(z));
     let camera_coord = vec3_scale(&camera_position_mercator, nominal_scale);
     let camera_to_center_distance_mercator = vec3_length(&vec3_sub(&camera_coord, &center_coord)) / world_size;
 
-    let frustum =
-        Frustum::from_inv_proj_matrix(&transform.get_inv_projection_matrix(), world_size, z as f64, flipped_y, None);
+    let frustum = Frustum::from_inv_proj_matrix(
+        &transform.get_inv_projection_matrix(),
+        world_size,
+        f64::from(z),
+        flipped_y,
+        None,
+    );
 
     // There should always be a certain number of maximum zoom level tiles
     // surrounding the center location
@@ -861,8 +873,8 @@ pub fn tile_cover(
     let new_root_tile = |wrap: i16| -> Node {
         Node {
             aabb: AABB::new(
-                [wrap as f64 * num_tiles, 0.0, 0.0],
-                [(wrap as i32 + 1) as f64 * num_tiles, num_tiles, 0.0],
+                [f64::from(wrap) * num_tiles, 0.0, 0.0],
+                [f64::from(i32::from(wrap) + 1) * num_tiles, num_tiles, 0.0],
             ),
             zoom: 0,
             x: 0,
@@ -897,16 +909,15 @@ pub fn tile_cover(
             node.fully_visible = intersection == IntersectionResult::Contains;
         }
 
-        let should_split_tile;
-        if state.tile_lod_mode == TileLodMode::Distance {
+        let should_split_tile = if state.tile_lod_mode == TileLodMode::Distance {
             let cam_to_tile_mercator = vec3_scale(&node.aabb.distance_xyz(&camera_coord), 1.0 / world_size);
             let distance_to_tile_mercator = vec3_length(&cam_to_tile_mercator);
             let cos_pitch_to_tile = std_max(0.0, cam_to_tile_mercator[2] / distance_to_tile_mercator);
             let pitch_exponent = 0.5; // 0: constant screen width, 1/2: constant screen area, 1: constant screen height
-            let tile_scale = 2.0f64.powf(node.zoom as f64);
-            should_split_tile = distance_to_tile_mercator * tile_scale
+            let tile_scale = 2.0f64.powf(f64::from(node.zoom));
+            distance_to_tile_mercator * tile_scale
                 < cos_pitch_to_tile.powf(pitch_exponent) * camera_to_center_distance_mercator / state.tile_lod_scale
-                    * nominal_scale;
+                    * nominal_scale
         } else {
             let distance_xyz = node.aabb.distance_xyz(&center_coord);
             // `std::max_element`: the first largest element.
@@ -927,10 +938,10 @@ pub fn tile_cover(
             // This is the same as:
             // f(k) = offset + 2^(k+1)-2
             let dist_to_split = radius_of_max_lvl_lod_in_tiles
-                + 1i32.wrapping_shl((max_zoom as i32 - node.zoom as i32) as u32) as f64
+                + f64::from(1i32.wrapping_shl((i32::from(max_zoom) - i32::from(node.zoom)) as u32))
                 - 2.0;
-            should_split_tile = distance_xyz[longest_dim] * state.tile_lod_scale < dist_to_split;
-        }
+            distance_xyz[longest_dim] * state.tile_lod_scale < dist_to_split
+        };
 
         // Have we reached the target depth or is the tile too far away to be any split further?
         if node.zoom == max_zoom || (!should_split_tile && node.zoom >= min_zoom) {
@@ -946,8 +957,8 @@ pub fn tile_cover(
                 );
                 let coord_to_load_first: Vec3 =
                     if state.tile_lod_mode == TileLodMode::Distance { camera_coord } else { center_coord };
-                let dx = node.wrap as f64 * num_tiles + node.x as f64 + 0.5 - coord_to_load_first[0];
-                let dy = node.y as f64 + 0.5 - coord_to_load_first[1];
+                let dx = f64::from(node.wrap) * num_tiles + f64::from(node.x) + 0.5 - coord_to_load_first[0];
+                let dy = f64::from(node.y) + 0.5 - coord_to_load_first[1];
 
                 result.push(ResultTile { id, sqr_dist: dx * dx + dy * dy });
             }
@@ -970,6 +981,7 @@ pub fn tile_cover(
 }
 
 /// `tileCover(const LatLngBounds&, uint8_t z)`.
+#[must_use]
 pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> {
     if bounds_.is_empty() || bounds_.south() > constants::LATITUDE_MAX || bounds_.north() < -constants::LATITUDE_MAX {
         return Vec::new();
@@ -980,7 +992,7 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
         bounds_lat_lng(std_min(bounds_.north(), constants::LATITUDE_MAX), bounds_.east()),
     );
 
-    let zoom = z as i32;
+    let zoom = i32::from(z);
     tile_cover_points(
         &Projection::project_zoom(&bounds.northwest(), zoom),
         &Projection::project_zoom(&bounds.northeast(), zoom),
@@ -1007,13 +1019,14 @@ pub fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<Unwrap
 /// Taken from <https://github.com/mapbox/sphericalmercator#xyzbbox-zoom-tms_style-srs>
 /// Computes the projected tiles for the lower left and upper right points of the bounds
 /// and uses that to compute the tile cover count
+#[must_use]
 pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
     if zoom == 0 {
         return 1;
     }
-    let sw = Projection::project_zoom(&bounds.southwest(), zoom as i32);
-    let ne = Projection::project_zoom(&bounds.northeast(), zoom as i32);
-    let max_tile = 2.0f64.powf(zoom as f64);
+    let sw = Projection::project_zoom(&bounds.southwest(), i32::from(zoom));
+    let ne = Projection::project_zoom(&bounds.northeast(), i32::from(zoom));
+    let max_tile = 2.0f64.powf(f64::from(zoom));
     let x1 = sw.x.floor();
     let x2 = ne.x.ceil() - 1.0;
     let y1 = mln_math::clamp_f64(sw.y.floor(), 0.0, max_tile - 1.0);
@@ -1125,7 +1138,7 @@ fn unguarded_partition<T: Copy, F: FnMut(&T, &T) -> bool>(
         while comp(&v[pivot], &v[last]) {
             last -= 1;
         }
-        if !(first < last) {
+        if first >= last {
             return first;
         }
         v.swap(first, last);
@@ -1281,77 +1294,77 @@ mod tests {
     // the FNV-1a hash of the resulting index order is printed.
     fn make(n: u32, keys: u32) -> Vec<E> {
         let mut state = n.wrapping_mul(31).wrapping_add(keys);
-        (0..n as u64)
+        (0..u64::from(n))
             .map(|idx| {
-                state = state.wrapping_mul(1103515245).wrapping_add(12345);
+                state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
                 E { key: ((state >> 16) & 0x7fff) % keys, idx }
             })
             .collect()
     }
 
     fn hash(v: &[E]) -> u64 {
-        let mut h: u64 = 1469598103934665603;
+        let mut h: u64 = 1_469_598_103_934_665_603;
         for e in v {
             h ^= e.idx;
-            h = h.wrapping_mul(1099511628211);
+            h = h.wrapping_mul(1_099_511_628_211);
         }
         h
     }
 
     const SORT: &[(u32, u32, u64)] = &[
-        (0, 3, 1469598103934665603),
-        (1, 3, 4953163356653287321),
-        (2, 1000, 11125488673309971922),
-        (5, 1, 16553567279584964729),
-        (5, 3, 14394188932140642875),
-        (5, 1000, 12850371070075698435),
-        (16, 1, 615731795747517251),
-        (16, 3, 14598784300330927239),
-        (16, 1000, 13067083390130113883),
-        (17, 1, 12142191458066772073),
-        (17, 3, 13853817294641342161),
-        (17, 1000, 563012451418373431),
-        (18, 1, 5036946713153761986),
-        (18, 3, 9359206580369302924),
-        (18, 1000, 3489360189878631466),
-        (33, 1, 4342150641277792007),
-        (33, 3, 16809619996606302123),
-        (33, 1000, 17786421032727766049),
-        (100, 1, 1494447923934049643),
-        (100, 3, 14657547681949098889),
-        (100, 1000, 5015142636931887253),
-        (257, 1, 9451109056036632721),
-        (257, 3, 12779444720448154427),
-        (257, 1000, 11065013591796304113),
-        (1000, 1, 12134223775326807227),
-        (1000, 3, 12493799056634839375),
-        (1000, 1000, 3068094519739835583),
-        (5000, 1, 7884124110981860555),
-        (5000, 3, 10004906514490205587),
-        (5000, 1000, 14874049691706547159),
+        (0, 3, 1_469_598_103_934_665_603),
+        (1, 3, 4_953_163_356_653_287_321),
+        (2, 1000, 11_125_488_673_309_971_922),
+        (5, 1, 16_553_567_279_584_964_729),
+        (5, 3, 14_394_188_932_140_642_875),
+        (5, 1000, 12_850_371_070_075_698_435),
+        (16, 1, 615_731_795_747_517_251),
+        (16, 3, 14_598_784_300_330_927_239),
+        (16, 1000, 13_067_083_390_130_113_883),
+        (17, 1, 12_142_191_458_066_772_073),
+        (17, 3, 13_853_817_294_641_342_161),
+        (17, 1000, 563_012_451_418_373_431),
+        (18, 1, 5_036_946_713_153_761_986),
+        (18, 3, 9_359_206_580_369_302_924),
+        (18, 1000, 3_489_360_189_878_631_466),
+        (33, 1, 4_342_150_641_277_792_007),
+        (33, 3, 16_809_619_996_606_302_123),
+        (33, 1000, 17_786_421_032_727_766_049),
+        (100, 1, 1_494_447_923_934_049_643),
+        (100, 3, 14_657_547_681_949_098_889),
+        (100, 1000, 5_015_142_636_931_887_253),
+        (257, 1, 9_451_109_056_036_632_721),
+        (257, 3, 12_779_444_720_448_154_427),
+        (257, 1000, 11_065_013_591_796_304_113),
+        (1000, 1, 12_134_223_775_326_807_227),
+        (1000, 3, 12_493_799_056_634_839_375),
+        (1000, 1000, 3_068_094_519_739_835_583),
+        (5000, 1, 7_884_124_110_981_860_555),
+        (5000, 3, 10_004_906_514_490_205_587),
+        (5000, 1000, 14_874_049_691_706_547_159),
     ];
 
     const HEAP: &[(u32, u32, u64)] = &[
-        (5, 1, 15486957069233966805),
-        (5, 3, 14394188932140642875),
-        (16, 1, 7474976027390535375),
-        (16, 3, 12283545573958081619),
-        (16, 1000, 16629833858576844435),
-        (17, 1, 6653128762809732651),
-        (17, 3, 9499825458292309071),
-        (17, 1000, 14243645748220843191),
-        (18, 1, 6369017254872719408),
-        (18, 3, 11697980667836372002),
-        (18, 1000, 9138633810072843698),
-        (33, 1, 10763085765877827387),
-        (33, 3, 10625529904606193397),
-        (33, 1000, 10570816534142537483),
-        (100, 1, 17524909542049215755),
-        (100, 3, 1648911209219688905),
-        (100, 1000, 8297980626135366727),
-        (257, 1, 17857370511256261451),
-        (257, 3, 14779427894545510531),
-        (257, 1000, 15786095388650306839),
+        (5, 1, 15_486_957_069_233_966_805),
+        (5, 3, 14_394_188_932_140_642_875),
+        (16, 1, 7_474_976_027_390_535_375),
+        (16, 3, 12_283_545_573_958_081_619),
+        (16, 1000, 16_629_833_858_576_844_435),
+        (17, 1, 6_653_128_762_809_732_651),
+        (17, 3, 9_499_825_458_292_309_071),
+        (17, 1000, 14_243_645_748_220_843_191),
+        (18, 1, 6_369_017_254_872_719_408),
+        (18, 3, 11_697_980_667_836_372_002),
+        (18, 1000, 9_138_633_810_072_843_698),
+        (33, 1, 10_763_085_765_877_827_387),
+        (33, 3, 10_625_529_904_606_193_397),
+        (33, 1000, 10_570_816_534_142_537_483),
+        (100, 1, 17_524_909_542_049_215_755),
+        (100, 3, 1_648_911_209_219_688_905),
+        (100, 1000, 8_297_980_626_135_366_727),
+        (257, 1, 17_857_370_511_256_261_451),
+        (257, 3, 14_779_427_894_545_510_531),
+        (257, 1000, 15_786_095_388_650_306_839),
     ];
 
     #[test]
@@ -1383,8 +1396,8 @@ mod tests {
     #[test]
     fn tile_count_geometry_counts_the_cover() {
         let line = vec![
-            Point::new(-121.49368286132812, 38.57903714667459),
-            Point::new(-122.4422836303711, 37.773157169570695),
+            Point::new(-121.493_682_861_328_12, 38.579_037_146_674_59),
+            Point::new(-122.442_283_630_371_1, 37.773_157_169_570_695),
         ];
         let geom = Geometry::LineString(line);
         assert_eq!(7, tile_count_geometry(&geom, 10).unwrap());

@@ -179,6 +179,7 @@ impl Grammar {
 }
 
 /// `path::is_relative()`.
+#[must_use]
 pub fn is_relative(path: &str) -> bool {
     NATIVE.is_relative(path)
 }
@@ -187,31 +188,37 @@ pub fn is_relative(path: &str) -> bool {
 /// otherwise a separator goes between them unless `base` is empty or already
 /// ends with one (and on Windows, `rel`'s root directory keeps only `base`'s
 /// root name).
+#[must_use]
 pub fn join(base: &str, rel: &str) -> String {
     NATIVE.join(base, rel)
 }
 
 /// `path::filename()`: the part after the last separator (empty for `"a/"`).
+#[must_use]
 pub fn filename(path: &str) -> &str {
     NATIVE.filename(path)
 }
 
 /// `path::remove_filename()`: keeps the trailing separator.
+#[must_use]
 pub fn remove_filename(path: &str) -> String {
     NATIVE.remove_filename(path)
 }
 
 /// `path::stem()`.
+#[must_use]
 pub fn stem(path: &str) -> &str {
     NATIVE.stem(path)
 }
 
 /// `std::filesystem::exists` (follows symlinks).
+#[must_use]
 pub fn exists(path: &str) -> bool {
     Path::new(path).exists()
 }
 
 /// `path::lexically_normal()` ([fs.path.generic] normal form).
+#[must_use]
 pub fn lexically_normal(path: &str) -> String {
     NATIVE.lexically_normal(path)
 }
@@ -250,8 +257,9 @@ pub fn recursive_directory_entries(root: &str) -> io::Result<Vec<String>> {
 }
 
 /// `directory_entry::is_regular_file()` (follows symlinks).
+#[must_use]
 pub fn is_regular_file(path: &str) -> bool {
-    fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+    fs::metadata(path).is_ok_and(|m| m.is_file())
 }
 
 #[cfg(test)]

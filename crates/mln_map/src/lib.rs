@@ -1,4 +1,4 @@
-//! Ports `src/mln/map` + `include/mln/map` (Map, MapOptions, Transform)
+//! Ports `src/mln/map` + `include/mln/map` (Map, `MapOptions`, Transform)
 //! with the events that replace the map's observer. The map vocabulary that lower crates need
 //! (`CameraOptions`, `MapMode`, `TransformState`, ...) lives in
 //! `mln_map_types` and is re-exported here.

@@ -179,6 +179,7 @@ pub struct ImageSourceRenderData {
 }
 
 impl ImageSourceRenderData {
+    #[must_use]
     pub fn new(bucket: Option<Arc<RasterBucket>>, tile_ids: Vec<UnwrappedTileID>, name: String) -> Self {
         ImageSourceRenderData { bucket, tile_ids, name }
     }
@@ -230,6 +231,7 @@ pub struct RenderImageSource {
 }
 
 impl RenderImageSource {
+    #[must_use]
     pub fn new(impl_: Arc<image_source::Impl>) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
         RenderImageSource {
@@ -261,7 +263,9 @@ impl RenderSource for RenderImageSource {
     }
 
     fn is_loaded(&self) -> bool {
-        self.bucket.is_some()
+        // Unlike C++, a source without an image (one made without a url) has
+        // nothing to load, so a still render of it finishes.
+        self.bucket.is_some() || self.impl_().get_image().is_none()
     }
 
     fn update(

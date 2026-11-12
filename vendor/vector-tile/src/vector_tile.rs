@@ -84,7 +84,7 @@ fn lossy(bytes: &[u8]) -> String {
 pub fn parse_value(value_view: DataView<'_>) -> Result<Value, Error> {
     let mut value = Value::Null;
     let mut value_reader = PbfReader::new(value_view);
-    while value_reader.next()? {
+    while value_reader.next_field()? {
         match value_reader.tag() {
             ValueType::STRING => value = Value::String(value_reader.get_string()?),
             ValueType::FLOAT => value = Value::Double(f64::from(value_reader.get_float()?)),
@@ -112,7 +112,7 @@ impl<'l, 'a> Feature<'l, 'a> {
             geometry_iter: PackedIteratorType::default(),
         };
         let mut feature_pbf = PbfReader::new(feature_view);
-        while feature_pbf.next()? {
+        while feature_pbf.next_field()? {
             match feature_pbf.tag() {
                 FeatureType::ID => feature.id = Identifier::Uint(feature_pbf.get_uint64()?),
                 FeatureType::TAGS => feature.tags_iter = feature_pbf.get_packed_uint32()?,
@@ -124,6 +124,7 @@ impl<'l, 'a> Feature<'l, 'a> {
         Ok(feature)
     }
 
+    #[must_use]
     pub fn get_type(&self) -> GeomType {
         self.type_
     }
@@ -204,14 +205,17 @@ impl<'l, 'a> Feature<'l, 'a> {
         Ok(())
     }
 
+    #[must_use]
     pub fn get_id(&self) -> &Identifier {
         &self.id
     }
 
+    #[must_use]
     pub fn get_extent(&self) -> u32 {
         self.layer.get_extent()
     }
 
+    #[must_use]
     pub fn get_version(&self) -> u32 {
         self.layer.get_version()
     }
@@ -243,16 +247,16 @@ impl<'l, 'a> Feature<'l, 'a> {
 
         while start_itr != end_itr {
             if length == 0 {
-                let cmd_length: u32 = start_itr.post_increment()?.deref()?;
-                cmd = (cmd_length & 0x7) as u8;
-                length = cmd_length >> 3;
-                len_reserve = length;
                 // Prevents the creation of vector tiles that would cause
                 // a denial of service from massive over allocation. Protection
                 // limit is based on the assumption of an int64_t point which is
                 // 16 bytes in size and wanting to have a maximum of 1 MB of memory
                 // used.
                 const MAX_LENGTH: u32 = (1024 * 1024) / 16;
+                let cmd_length: u32 = start_itr.post_increment()?.deref()?;
+                cmd = (cmd_length & 0x7) as u8;
+                length = cmd_length >> 3;
+                len_reserve = length;
                 if len_reserve > MAX_LENGTH {
                     len_reserve = MAX_LENGTH;
                 }
@@ -303,9 +307,8 @@ impl<'l, 'a> Feature<'l, 'a> {
 
                 if px > max_coord || px < min_coord || py > max_coord || py < min_coord {
                     return Err(Error::Runtime("paths outside valid range of coordinate_type".to_owned()));
-                } else {
-                    paths.last_mut().expect("paths is never empty").push(Point::new(C::from_f32(px), C::from_f32(py)));
                 }
+                paths.last_mut().expect("paths is never empty").push(Point::new(C::from_f32(px), C::from_f32(py)));
             } else if cmd == CommandType::CLOSE {
                 let back = paths.last_mut().expect("paths is never empty");
                 if !back.is_empty() {
@@ -359,12 +362,14 @@ impl<'a> Buffer<'a> {
         Ok(Buffer { layers })
     }
 
-    /// `layerNames()`: in byte order of the names (std::map order).
+    /// `layerNames()`: in byte order of the names (`std::map` order).
+    #[must_use]
     pub fn layer_names(&self) -> Vec<String> {
         self.layers.keys().map(|name| lossy(name)).collect()
     }
 
     /// `getLayers()`: name bytes → layer view.
+    #[must_use]
     pub fn get_layers(&self) -> BTreeMap<Vec<u8>, DataView<'a>> {
         self.layers.clone()
     }
@@ -394,7 +399,7 @@ impl<'a> Layer<'a> {
         let mut has_extent = false;
         let mut has_version = false;
         let mut layer_pbf = PbfReader::new(layer_view);
-        while layer_pbf.next()? {
+        while layer_pbf.next_field()? {
             match layer_pbf.tag() {
                 LayerType::NAME => {
                     layer.name = layer_pbf.get_view()?.to_vec();
@@ -440,6 +445,7 @@ impl<'a> Layer<'a> {
         Ok(layer)
     }
 
+    #[must_use]
     pub fn feature_count(&self) -> usize {
         self.features.len()
     }
@@ -450,24 +456,29 @@ impl<'a> Layer<'a> {
     }
 
     /// `getName()` (UTF-8-lossy; see the crate docs).
+    #[must_use]
     pub fn get_name(&self) -> String {
         lossy(&self.name)
     }
 
     /// Port-only: the key table, which tags index.
+    #[must_use]
     pub fn keys(&self) -> &[DataView<'a>] {
         &self.keys
     }
 
     /// The name as the bytes of the tile.
+    #[must_use]
     pub fn get_name_bytes(&self) -> &[u8] {
         &self.name
     }
 
+    #[must_use]
     pub fn get_extent(&self) -> u32 {
         self.extent
     }
 
+    #[must_use]
     pub fn get_version(&self) -> u32 {
         self.version
     }

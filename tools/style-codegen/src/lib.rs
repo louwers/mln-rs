@@ -4,8 +4,8 @@
 //! `scripts/style-spec-reference/v8.json` and makes the same decisions
 //! (property order, data-driven / cross-faded / color-ramp kinds, type
 //! mapping, default values, enum names, the per-layer overrides) and emits
-//! Rust shaped like the C++ output into crates/mln_style/src. The output is
-//! checked in; the generated_code_test fails when it differs from fresh
+//! Rust shaped like the C++ output into `crates/mln_style/src`. The output is
+//! checked in; the `generated_code_test` fails when it differs from fresh
 //! generator output.
 
 pub mod defaults;
@@ -45,7 +45,7 @@ pub fn generate(spec_text: &str) -> Result<Vec<GeneratedFile>, String> {
     Ok(files)
 }
 
-/// Compares fresh output with the files under `root` (crates/mln_style/src);
+/// Compares fresh output with the files under `root` (`crates/mln_style/src`);
 /// returns the paths that differ or are missing.
 pub fn check(spec_text: &str, root: &std::path::Path) -> Result<Vec<String>, String> {
     let mut stale = Vec::new();

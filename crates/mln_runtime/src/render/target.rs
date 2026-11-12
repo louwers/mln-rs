@@ -313,6 +313,7 @@ impl Surface {
     /// A `CAMetalLayer`, which a session on Metal presents to. It must
     /// outlive the session's use of it, as a window must.
     #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    #[must_use]
     pub fn metal_layer(layer: mln_mtl::Layer) -> Surface {
         Surface { kind: SurfaceKind::MetalLayer(layer) }
     }
@@ -448,6 +449,7 @@ pub enum SurfaceType {
 impl SurfaceType {
     /// Whether a device of `backend` presents to the surfaces of this type
     /// on this platform, in this build.
+    #[must_use]
     pub fn presents_with(self, backend: BackendType) -> bool {
         let windowing = match self {
             SurfaceType::MetalLayer => false,
@@ -476,6 +478,7 @@ impl SurfaceType {
 
     /// Whether a device of any backend of this build presents to the
     /// surfaces of this type.
+    #[must_use]
     pub fn presents_with_any(self) -> bool {
         [BackendType::Metal, BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
             .into_iter()
@@ -485,6 +488,7 @@ impl SurfaceType {
     /// Whether a session of this build presents to the surfaces of this
     /// type without the host's device: on the device that a surface session
     /// makes when it gets none.
+    #[must_use]
     pub fn presents_without_device(self) -> bool {
         match self {
             SurfaceType::MetalLayer => self.presents_with(BackendType::Metal),
@@ -633,6 +637,7 @@ impl Device {
 
     /// Whether sessions on the device present to the surfaces of
     /// `surface`'s type.
+    #[must_use]
     pub fn presents_to(&self, surface: SurfaceType) -> bool {
         surface.presents_with(self.backend())
     }
@@ -651,6 +656,7 @@ impl Device {
     /// session configures its surfaces with `format`, which each surface
     /// must support.
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+    #[must_use]
     pub fn webgpu(
         instance: wgpu::Instance,
         device: wgpu::Device,
@@ -661,6 +667,7 @@ impl Device {
     }
 
     /// The backend the device is of.
+    #[must_use]
     pub fn backend(&self) -> BackendType {
         match *self {
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]

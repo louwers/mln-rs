@@ -26,6 +26,7 @@ pub struct Fixture {
 
 impl Fixture {
     /// The `Polygon<std::pair<short, short>>` of a `Fixture<short>`.
+    #[must_use]
     pub fn short_polygon(&self) -> Vec<Vec<(i16, i16)>> {
         assert_eq!(self.coord_type, CoordType::Short);
         self.polygon.iter().map(|r| r.iter().map(|&(x, y)| (x as i16, y as i16)).collect()).collect()
@@ -34,17 +35,20 @@ impl Fixture {
 
 /// Directory of the fixtures in this repository: the copy of earcut.hpp's
 /// in testdata/ (not in the published package).
+#[must_use]
 pub fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/vendor/earcut.hpp/test/fixtures")
 }
 
 /// All fixtures of [`fixtures_dir`], sorted by name.
+#[must_use]
 pub fn load_all() -> Vec<Fixture> {
     load_all_in(&fixtures_dir())
 }
 
 /// All fixtures in `dir` (earcut.hpp's test/fixtures), sorted by name (as
 /// `FixtureTester::collection()` sorts).
+#[must_use]
 pub fn load_all_in(dir: &Path) -> Vec<Fixture> {
     let mut fixtures: Vec<Fixture> = std::fs::read_dir(dir)
         .expect("earcut fixtures directory")
@@ -57,11 +61,13 @@ pub fn load_all_in(dir: &Path) -> Vec<Fixture> {
 }
 
 /// The fixture `name` of [`fixtures_dir`].
+#[must_use]
 pub fn load(name: &str) -> Fixture {
     load_in(&fixtures_dir(), name)
 }
 
 /// The fixture `name` in `dir`.
+#[must_use]
 pub fn load_in(dir: &Path, name: &str) -> Fixture {
     let path = dir.join(format!("{name}.cpp"));
     parse(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))

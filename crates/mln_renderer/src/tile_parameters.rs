@@ -37,6 +37,6 @@ pub struct TileParameters<'a> {
     pub image_manager: Rc<ImageManager>,
     pub glyph_manager: Rc<GlyphManager>,
     pub dynamic_texture_atlas: DynamicTextureAtlasPtr,
-    /// Port-only: creates the tiles' workers (tile_worker_transport.rs).
+    /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).
     pub tile_worker_transport: Rc<dyn TileWorkerTransport>,
 }

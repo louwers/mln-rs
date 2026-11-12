@@ -76,7 +76,7 @@ fn properties() {
     assert_eq!("", style.get_name());
     assert_eq!(99.0, style.get_default_camera().roll.unwrap());
 
-    style.load_json(r#"{}"#);
+    style.load_json(r"{}");
     assert_eq!(milliseconds(300), style.get_transition_options().duration.unwrap());
     assert_eq!(None, style.get_transition_options().delay);
 
@@ -100,7 +100,7 @@ fn projection() {
     style.load_json(r#"{"projection": {"type": "globe"}}"#);
     assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
 
-    style.load_json(r#"{}"#);
+    style.load_json(r"{}");
     assert!(style.get_projection().get_type().is_undefined());
 
     let mut projection = Projection::new();
@@ -561,7 +561,7 @@ fn sky_presence_and_replacement() {
 
     style.load_json(r#"{"sky":{"sky-color":"white"}}"#);
     assert!(style.get_sky().is_some());
-    style.load_json(r#"{}"#);
+    style.load_json(r"{}");
     assert!(style.get_sky().is_none());
 
     style.load_json(r#"{"sky":[]}"#);
@@ -598,14 +598,14 @@ fn sky_projection_and_global_state_coexist() {
     assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
 }
 
-fn vector_source(id: &str) -> Box<VectorSource> {
-    Box::new(VectorSource::new(
+fn vector_source(id: &str) -> VectorSource {
+    VectorSource::new(
         id,
         UrlOrTileset::Url("mptiler://tiles/contours".to_owned()),
         None,
         None,
         mln_util::tileset::VectorEncoding::Mapbox,
-    ))
+    )
 }
 
 // gtest: Style.DuplicateSource
@@ -615,11 +615,11 @@ fn duplicate_source() {
 
     style.load_json(&read_file("test/fixtures/resources/style-unused-sources.json"));
 
-    style.add_source(vector_source("sourceId")).unwrap();
+    style.add_source(Box::new(vector_source("sourceId"))).unwrap();
 
     // C++ throws std::runtime_error.
     assert!(
-        style.add_source(vector_source("sourceId")).is_err(),
+        style.add_source(Box::new(vector_source("sourceId"))).is_err(),
         "Should not have been allowed to add a duplicate source id"
     );
 }
@@ -632,7 +632,7 @@ fn remove_source_in_use() {
     let mut style = stub_style();
 
     style.load_json(&read_file("test/fixtures/resources/style-unused-sources.json"));
-    style.add_source(vector_source("sourceId")).unwrap();
+    style.add_source(Box::new(vector_source("sourceId"))).unwrap();
     style.add_layer(Box::new(LineLayer::new("layerId", "sourceId")), None).unwrap();
 
     // Should not remove the source
@@ -682,9 +682,9 @@ fn public_load_state_does_not_wait_for_resources() {
 fn source_impls_order() {
     let mut style = stub_style();
 
-    style.add_source(vector_source("c")).unwrap();
-    style.add_source(vector_source("b")).unwrap();
-    style.add_source(vector_source("a")).unwrap();
+    style.add_source(Box::new(vector_source("c"))).unwrap();
+    style.add_source(Box::new(vector_source("b"))).unwrap();
+    style.add_source(Box::new(vector_source("a"))).unwrap();
 
     let sources = style.get_sources();
     assert_eq!(3, sources.len());

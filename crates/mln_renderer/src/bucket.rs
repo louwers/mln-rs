@@ -45,7 +45,7 @@ pub struct RetainedFeature {
 
 /// The data members of `Bucket`.
 ///
-/// Port-only: serde writes what a worker sets (tile/worker_codec); the
+/// Port-only: serde writes what a worker sets (`tile/worker_codec`); the
 /// upload flag, the id and the version are the side's that has the bucket.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BucketBase {
@@ -76,6 +76,7 @@ impl Default for BucketBase {
 
 /// The error of a polygon with more vertices than a 16-bit index can
 /// address. The tile that holds it fails to lay out.
+#[must_use]
 pub fn geometry_too_long() -> Error {
     Error::native("a polygon has more vertices than a 16-bit index can address")
 }
@@ -173,10 +174,10 @@ static UNIDENTIFIED_FEATURE_INDEX: AtomicUsize = AtomicUsize::new(0);
 
 /// `Bucket::getRetainFeatureID(const GeometryTileFeature&)`.
 pub fn get_retain_feature_id(feature: &dyn GeometryTileFeature) -> String {
-    if let Some(id_str) = feature_id_to_string(&feature.get_id()) {
-        if !id_str.is_empty() {
-            return id_str;
-        }
+    if let Some(id_str) = feature_id_to_string(&feature.get_id())
+        && !id_str.is_empty()
+    {
+        return id_str;
     }
     // Assign a unique number to unidentified features
     format!("maplibre:{}", UNIDENTIFIED_FEATURE_INDEX.fetch_add(1, Ordering::SeqCst))

@@ -47,17 +47,20 @@ pub struct BackendImpl {
 }
 
 impl BackendImpl {
+    #[must_use]
     pub fn gl(&self) -> &Gl {
         &self.gl
     }
 
     /// The GL functions, to share with code that draws on the context's
     /// thread.
+    #[must_use]
     pub fn gl_shared(&self) -> &Arc<Gl> {
         &self.gl
     }
 
     #[cfg(target_family = "wasm")]
+    #[must_use]
     pub fn webgl2(&self) -> &web_sys::WebGl2RenderingContext {
         &self.webgl2
     }

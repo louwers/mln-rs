@@ -78,6 +78,7 @@ pub type ImageDifference = StyleDifference<image::Impl>;
 pub type SourceDifference = StyleDifference<dyn source::Impl>;
 pub type LayerDifference = StyleDifference<dyn layer::Impl>;
 
+#[must_use]
 pub fn diff_images(
     a: &Immutable<Vec<Immutable<image::Impl>>>,
     b: &Immutable<Vec<Immutable<image::Impl>>>,
@@ -85,6 +86,7 @@ pub fn diff_images(
     diff(a, b, |i| i.id.clone(), |lhs, rhs| lhs.id == rhs.id)
 }
 
+#[must_use]
 pub fn diff_sources(a: &ImmutableVector<dyn source::Impl>, b: &ImmutableVector<dyn source::Impl>) -> SourceDifference {
     diff(
         a,
@@ -94,10 +96,12 @@ pub fn diff_sources(a: &ImmutableVector<dyn source::Impl>, b: &ImmutableVector<d
     )
 }
 
+#[must_use]
 pub fn diff_layers(a: &ImmutableVector<dyn layer::Impl>, b: &ImmutableVector<dyn layer::Impl>) -> LayerDifference {
     diff(a, b, |l| l.id.clone(), |lhs, rhs| lhs.id == rhs.id && std::ptr::eq(lhs.get_type_info(), rhs.get_type_info()))
 }
 
+#[must_use]
 pub fn has_layout_difference(layer_diff: &LayerDifference, layer_id: &str) -> bool {
     if layer_diff.added.contains_key(layer_id) {
         return true;

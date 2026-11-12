@@ -36,6 +36,7 @@ pub struct UnitBezier {
 
 impl UnitBezier {
     /// Calculate the polynomial coefficients.
+    #[must_use]
     pub const fn new(p1x: f64, p1y: f64, p2x: f64, p2y: f64) -> Self {
         // C++ spells each coefficient out: bx = 3.0 * (p2x - p1x) - (3.0 *
         // p1x), ax = 1.0 - (3.0 * p1x) - (3.0 * (p2x - p1x) - (3.0 * p1x));
@@ -50,37 +51,45 @@ impl UnitBezier {
     }
 
     /// `getP1()`.
+    #[must_use]
     pub fn get_p1(&self) -> (f64, f64) {
         self.p1()
     }
 
     /// `getP2()`.
+    #[must_use]
     pub fn get_p2(&self) -> (f64, f64) {
         self.p2()
     }
 
+    #[must_use]
     pub fn p1(&self) -> (f64, f64) {
         (self.cx / 3.0, self.cy / 3.0)
     }
 
+    #[must_use]
     pub fn p2(&self) -> (f64, f64) {
         ((self.bx + (3.0 * self.cx / 3.0) + self.cx) / 3.0, (self.by + (3.0 * self.cy / 3.0) + self.cy) / 3.0)
     }
 
+    #[must_use]
     pub fn sample_curve_x(&self, t: f64) -> f64 {
         // `ax t^3 + bx t^2 + cx t` expanded using Horner's rule.
         ((self.ax * t + self.bx) * t + self.cx) * t
     }
 
+    #[must_use]
     pub fn sample_curve_y(&self, t: f64) -> f64 {
         ((self.ay * t + self.by) * t + self.cy) * t
     }
 
+    #[must_use]
     pub fn sample_curve_derivative_x(&self, t: f64) -> f64 {
         (3.0 * self.ax * t + 2.0 * self.bx) * t + self.cx
     }
 
     /// Given an x value, find a parametric value it came from.
+    #[must_use]
     pub fn solve_curve_x(&self, x: f64, epsilon: f64) -> f64 {
         // First try a few iterations of Newton's method -- normally very fast.
         let mut t2 = x;
@@ -125,6 +134,7 @@ impl UnitBezier {
         t2
     }
 
+    #[must_use]
     pub fn solve(&self, x: f64, epsilon: f64) -> f64 {
         self.sample_curve_y(self.solve_curve_x(x, epsilon))
     }

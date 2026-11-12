@@ -19,7 +19,7 @@ use crate::layer::LayerTypeInfo;
 use crate::serialization::shared_expression;
 use crate::util::AsAny;
 
-/// `mln::FontStack` (include/mln/util/font_stack.hpp).
+/// `mln::FontStack` (`include/mln/util/font_stack.hpp`).
 pub type FontStack = Vec<String>;
 
 /// The data members of `Layer::Impl`.
@@ -42,6 +42,7 @@ pub struct ImplBase {
 
 impl ImplBase {
     /// `Impl(std::string layerID, std::string sourceID)`.
+    #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         ImplBase {
             visibility_expression: None,
@@ -104,7 +105,7 @@ pub trait Impl: AsAny {
     }
 
     /// Collect the global-state properties referenced by expressions that
-    /// affect tile layout, mirroring get_layout_dependencies().
+    /// affect tile layout, mirroring `get_layout_dependencies()`.
     fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.base().collect_filter_global_state_refs(refs);
     }
@@ -127,10 +128,10 @@ impl dyn Impl {
 /// `staticImmutableCast<FooLayer::Impl>(impl)`. C++ asserts the type info;
 /// this panics on a type mismatch.
 pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Immutable<T> {
-    match impl_.clone().into_any_arc().downcast::<T>() {
-        Ok(typed) => typed,
-        Err(_) => panic!("static_immutable_cast: layer impl type mismatch"),
-    }
+    let Ok(typed) = impl_.clone().into_any_arc().downcast::<T>() else {
+        panic!("static_immutable_cast: layer impl type mismatch");
+    };
+    typed
 }
 
 // Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`

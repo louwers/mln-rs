@@ -19,10 +19,12 @@ pub struct SegmentBase {
 impl SegmentBase {
     /// `SegmentBase(vertexOffset, indexOffset, vertexLength = 0, indexLength
     /// = 0, baseInstance = 0, instanceCount = 1, sortKey = 0)`
+    #[must_use]
     pub fn new(vertex_offset: usize, index_offset: usize) -> Self {
         Self::with_lengths(vertex_offset, index_offset, 0, 0)
     }
 
+    #[must_use]
     pub fn with_lengths(vertex_offset: usize, index_offset: usize, vertex_length: usize, index_length: usize) -> Self {
         SegmentBase {
             vertex_offset,
@@ -37,6 +39,7 @@ impl SegmentBase {
 
     /// The field-by-field copy the C++ code spells out (there is no copy
     /// constructor).
+    #[must_use]
     pub fn copy(&self) -> Self {
         SegmentBase {
             vertex_offset: self.vertex_offset,

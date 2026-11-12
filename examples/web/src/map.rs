@@ -1,6 +1,6 @@
 //! The map in a Web Worker of its own: a continuous map in the page's canvas
-//! (an OffscreenCanvas), its tile workers in other Web Workers, moved by the
-//! page's input through a gesture recognizer (mln_gestures).
+//! (an `OffscreenCanvas`), its tile workers in other Web Workers, moved by the
+//! page's input through a gesture recognizer (`mln_gestures`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -25,7 +25,9 @@ use mln_util::serialization::payload::Payload;
 use mln_util::size::Size;
 use wasm_bindgen::prelude::*;
 
-use self::backend::*;
+#[cfg(feature = "webgl")]
+use self::backend::Readback;
+use self::backend::Target;
 use crate::shaper::{self, ShaperModuleEngine};
 use crate::{cooperative_scheduler, deadline, js_error};
 
@@ -55,7 +57,7 @@ thread_local! {
     static WAKE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
 }
 
-/// The RunLoop's and the scheduler's waker: tells the worker to `tick`. An
+/// The `RunLoop`'s and the scheduler's waker: tells the worker to `tick`. An
 /// instance has one thread, so this runs on the worker's.
 fn wake_host() {
     WAKE.with(|wake| {
@@ -107,14 +109,14 @@ fn physical(size: Size, pixel_ratio: f64) -> Size {
 
 /// Hands this instance's fetches the responses its Web Worker fetched ahead
 /// (web/map-worker.ts): `take(url)` returns a promise of the response
-/// fetched for exactly `url`, once, or undefined (mln_storage's
+/// fetched for exactly `url`, once, or undefined (`mln_storage`'s
 /// `set_fetch_preloads`).
 #[wasm_bindgen]
 pub fn set_preloads(take: js_sys::Function) {
     mln_storage::set_fetch_preloads(Some(take));
 }
 
-/// A continuous map in an OffscreenCanvas, in the Web Worker that runs it
+/// A continuous map in an `OffscreenCanvas`, in the Web Worker that runs it
 /// (web/map-worker.ts).
 #[wasm_bindgen]
 pub struct WebMap {
@@ -141,12 +143,13 @@ impl WebMap {
     /// `receive`. `wake()` is called whenever the map gets work between
     /// frames (a fetch finished, a reply arrived, a task was queued); the
     /// worker then calls `tick` soon. `load_shaper()` returns a promise of
-    /// the shaper module (web/pkg/mln_web_shaper.js), initialized; the map
+    /// the shaper module (`web/pkg/mln_web_shaper.js`), initialized; the map
     /// calls it the first time a style declares font faces. With
     /// `local_ideograph_font_family` (a CSS font-family list), the map draws
     /// CJK glyphs in it rather than downloading them, as GL JS's
-    /// `localIdeographFontFamily`. (map_webgl.rs has the `webgl` build's.)
+    /// `localIdeographFontFamily`. (`map_webgl.rs` has the `webgl` build's.)
     #[cfg(not(feature = "webgl"))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         canvas: web_sys::OffscreenCanvas,
         width: u32,
@@ -346,8 +349,8 @@ impl WebMap {
     /// `TileWorker::run` returns it: its bytes, then its payloads. The bytes
     /// are copied into wasm memory; the payloads stay JS arrays, which a
     /// bucket's vertices and indices stay in until they're uploaded
-    /// (mln_util::host_bytes).
-    pub fn receive(&self, instance: u32, reply: js_sys::Array) {
+    /// (`mln_util::host_bytes`).
+    pub fn receive(&self, instance: u32, reply: &js_sys::Array) {
         self.received.set(self.received.get() + 1);
         let mut parts = reply.iter().map(js_sys::Uint8Array::from);
         let bytes = parts.next().map(|bytes| bytes.to_vec()).unwrap_or_default();
@@ -362,7 +365,7 @@ impl WebMap {
 
     /// One animation frame at `now` (milliseconds, the clock of the input
     /// methods' `time`): samples the map's animations at this frame, steps
-    /// the gestures' eased zoom and ends those that time out, runs the RunLoop's
+    /// the gestures' eased zoom and ends those that time out, runs the `RunLoop`'s
     /// tasks, draws the map's latest update if it is new, then runs the
     /// cooperative scheduler's tasks (sprites, glyphs, raster tiles) for up
     /// to `budget_ms` and delivers their results. Returns whether it drew.
@@ -378,9 +381,9 @@ impl WebMap {
         drew
     }
 
-    /// Runs the map's work between frames: the RunLoop's tasks (fetches that
+    /// Runs the map's work between frames: the `RunLoop`'s tasks (fetches that
     /// finished, worker replies), then the cooperative scheduler's for up to
-    /// `budget_ms`, and the RunLoop again for what they delivered. Returns
+    /// `budget_ms`, and the `RunLoop` again for what they delivered. Returns
     /// whether tasks remain, for another `tick`. Drawing waits for `frame`.
     pub fn tick(&mut self, budget_ms: f64) -> bool {
         self.run_loop.run_once();
@@ -395,6 +398,7 @@ impl WebMap {
     /// "pen"), `button` the DOM `button` (0 primary, 1 middle, 2 secondary)
     /// and `modifiers` the bits of [`modifiers`]. `time` is in milliseconds
     /// on the clock `frame` gets. Returns whether the map used it.
+    #[allow(clippy::too_many_arguments)]
     pub fn pointer_down(
         &mut self,
         id: u32,
@@ -495,7 +499,7 @@ impl WebMap {
     /// The frame `request_pixels` asked for, as RGBA rows of the canvas's
     /// physical size, once the GPU has copied it; until then undefined.
     pub fn take_pixels(&self) -> Option<Vec<u8>> {
-        self.frontend.target.take_readback().map(|image| image.data.to_vec())
+        self.frontend.target.take_readback().map(|image| image.data)
     }
 }
 
@@ -525,7 +529,7 @@ impl WebMap {
     }
 
     /// Runs the cooperative scheduler's tasks for up to `budget_ms`, then the
-    /// RunLoop's for what they delivered. Returns whether tasks remain.
+    /// `RunLoop`'s for what they delivered. Returns whether tasks remain.
     fn run_tasks(&self, budget_ms: f64) -> bool {
         let more = self.scheduler.run_until(Some(deadline(budget_ms)));
         self.run_loop.run_once();
@@ -534,7 +538,7 @@ impl WebMap {
 }
 
 /// What draws the map: the browser's WebGPU through wgpu, or, in the `webgl`
-/// build of the module, its WebGL2 through mln_gl (map_webgl.rs).
+/// build of the module, its WebGL2 through `mln_gl` (`map_webgl.rs`).
 #[cfg(not(feature = "webgl"))]
 mod backend {
     pub use mln_webgpu::SurfaceTarget as Target;

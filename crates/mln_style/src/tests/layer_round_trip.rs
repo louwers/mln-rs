@@ -187,7 +187,7 @@ fn boolean_filters() {
     round_trip(fill.as_ref());
 }
 
-/// Every layer of the style parser fixtures (test/fixtures/style_parser)
+/// Every layer of the style parser fixtures (`test/fixtures/style_parser`)
 /// that converts.
 #[test]
 fn style_parser_fixture_layers() {

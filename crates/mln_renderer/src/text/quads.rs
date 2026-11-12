@@ -32,6 +32,7 @@ impl SymbolQuad {
     /// `SymbolQuad(tl, tr, bl, br, tex, writingMode, glyphOffset, isSDF,
     /// pixelOffsetTL, pixelOffsetBR, minFontScale, sectionIndex = 0)`.
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         tl: Point<f32>,
         tr: Point<f32>,
@@ -94,6 +95,7 @@ fn matrix_multiply(m: &[f32; 4], p: Point<f32>) -> Point<f32> {
 }
 
 /// `computeStretchSum`.
+#[must_use]
 pub fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
     let mut sum: f32 = 0.0;
     for stretch in stretches {
@@ -103,6 +105,7 @@ pub fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
 }
 
 /// `sumWithinRange`.
+#[must_use]
 pub fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
     let mut sum: f32 = 0.0;
     for stretch in stretches {
@@ -113,12 +116,14 @@ pub fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
 
 /// `getEmOffset`.
 #[inline]
+#[must_use]
 pub fn get_em_offset(stretch_offset: f32, stretch_size: f32, icon_size: f32, icon_offset: f32) -> f32 {
     icon_offset + icon_size * stretch_offset / stretch_size
 }
 
 /// `getPxOffset`.
 #[inline]
+#[must_use]
 pub fn get_px_offset(fixed_offset: f32, fixed_size: f32, stretch_offset: f32, stretch_size: f32) -> f32 {
     fixed_offset - fixed_size * stretch_offset / stretch_size
 }
@@ -134,9 +139,10 @@ pub struct Cut {
 pub type Cuts = Vec<Cut>;
 
 /// `stretchZonesToCuts`.
+#[must_use]
 pub fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, stretch_size: f32) -> Cuts {
     // `-border` is the `int` -1.
-    let mut cuts: Cuts = vec![Cut { fixed: -(BORDER as i32) as f32, stretch: 0.0 }];
+    let mut cuts: Cuts = vec![Cut { fixed: -i32::from(BORDER) as f32, stretch: 0.0 }];
 
     for zone in stretch_zones {
         let c1 = zone.0;
@@ -145,11 +151,12 @@ pub fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, st
         cuts.push(Cut { fixed: c1 - last_stretch, stretch: last_stretch });
         cuts.push(Cut { fixed: c1 - last_stretch, stretch: last_stretch + (c2 - c1) });
     }
-    cuts.push(Cut { fixed: fixed_size + BORDER as f32, stretch: stretch_size });
+    cuts.push(Cut { fixed: fixed_size + f32::from(BORDER), stretch: stretch_size });
     cuts
 }
 
 /// `getIconQuads`.
+#[must_use]
 pub fn get_icon_quads(
     shaped_icon: &PositionedIcon,
     icon_rotate: f32,
@@ -161,18 +168,18 @@ pub fn get_icon_quads(
     let image: &ImagePosition = shaped_icon.image();
     let pixel_ratio = image.pixel_ratio;
     // `int` arithmetic narrowed to `uint16_t`.
-    let image_width = (image.padded_rect.w as i32 - 2 * BORDER as i32) as u16;
-    let image_height = (image.padded_rect.h as i32 - 2 * BORDER as i32) as u16;
+    let image_width = (i32::from(image.padded_rect.w) - 2 * i32::from(BORDER)) as u16;
+    let image_height = (i32::from(image.padded_rect.h) - 2 * i32::from(BORDER)) as u16;
 
-    let stretch_x_full: ImageStretches = vec![(0.0, image_width as f32)];
-    let stretch_y_full: ImageStretches = vec![(0.0, image_height as f32)];
-    let stretch_x: &ImageStretches = if !image.stretch_x.is_empty() { &image.stretch_x } else { &stretch_x_full };
-    let stretch_y: &ImageStretches = if !image.stretch_y.is_empty() { &image.stretch_y } else { &stretch_y_full };
+    let stretch_x_full: ImageStretches = vec![(0.0, f32::from(image_width))];
+    let stretch_y_full: ImageStretches = vec![(0.0, f32::from(image_height))];
+    let stretch_x: &ImageStretches = if image.stretch_x.is_empty() { &stretch_x_full } else { &image.stretch_x };
+    let stretch_y: &ImageStretches = if image.stretch_y.is_empty() { &stretch_y_full } else { &image.stretch_y };
 
     let stretch_width = compute_stretch_sum(stretch_x);
     let stretch_height = compute_stretch_sum(stretch_y);
-    let fixed_width = image_width as f32 - stretch_width;
-    let fixed_height = image_height as f32 - stretch_height;
+    let fixed_width = f32::from(image_width) - stretch_width;
+    let fixed_height = f32::from(image_height) - stretch_height;
 
     let mut stretch_offset_x: f32 = 0.0;
     let mut stretch_content_width = stretch_width;
@@ -251,8 +258,8 @@ pub fn get_icon_quads(
         // (`paddedRect.x + border` is an `int`; adding the float makes it a
         // float, then `static_cast<uint16_t>`.)
         let sub_rect = RectU16 {
-            x: ((image.padded_rect.x as i32 + BORDER as i32) as f32 + x1) as u16,
-            y: ((image.padded_rect.y as i32 + BORDER as i32) as f32 + y1) as u16,
+            x: ((i32::from(image.padded_rect.x) + i32::from(BORDER)) as f32 + x1) as u16,
+            y: ((i32::from(image.padded_rect.y) + i32::from(BORDER)) as f32 + y1) as u16,
             w: (x2 - x1) as u16,
             h: (y2 - y1) as u16,
         };
@@ -281,8 +288,8 @@ pub fn get_icon_quads(
         make_box(
             Cut { fixed: 0.0, stretch: -1.0 },
             Cut { fixed: 0.0, stretch: -1.0 },
-            Cut { fixed: 0.0, stretch: (image_width as i32 + 1) as f32 },
-            Cut { fixed: 0.0, stretch: (image_height as i32 + 1) as f32 },
+            Cut { fixed: 0.0, stretch: (i32::from(image_width) + 1) as f32 },
+            Cut { fixed: 0.0, stretch: (i32::from(image_height) + 1) as f32 },
         );
     } else {
         let x_cuts = stretch_zones_to_cuts(stretch_x, fixed_width, stretch_width);
@@ -303,6 +310,7 @@ pub fn get_icon_quads(
 }
 
 /// `getGlyphQuads`.
+#[must_use]
 pub fn get_glyph_quads(
     shaped_text: &Shaping,
     text_offset: [f32; 2],
@@ -346,7 +354,7 @@ pub fn get_glyph_quads(
                     continue;
                 };
                 pixel_ratio = image.pixel_ratio;
-                rect_buffer = ImagePosition::PADDING as f32 / pixel_ratio;
+                rect_buffer = f32::from(ImagePosition::PADDING) / pixel_ratio;
                 is_sdf = image.sdf;
             }
 
@@ -382,8 +390,8 @@ pub fn get_glyph_quads(
             let x1 = (positioned_glyph.metrics.left - rect_buffer) * positioned_glyph.scale - half_advance
                 + built_in_offset.x;
             let y1 = (-positioned_glyph.metrics.top - rect_buffer) * positioned_glyph.scale + built_in_offset.y;
-            let x2 = x1 + rect.w as f32 / texture_scale * positioned_glyph.scale / pixel_ratio;
-            let y2 = y1 + rect.h as f32 / texture_scale * positioned_glyph.scale / pixel_ratio;
+            let x2 = x1 + f32::from(rect.w) / texture_scale * positioned_glyph.scale / pixel_ratio;
+            let y2 = y1 + f32::from(rect.h) / texture_scale * positioned_glyph.scale / pixel_ratio;
 
             let mut tl = Point::new(x1, y1);
             let mut tr = Point::new(x2, y1);
@@ -642,29 +650,23 @@ mod tests {
         }
 
         // width
-        assert_quad(
-            &fit(IconTextFitType::Width, [0.0, 0.0, 0.0, 0.0], 24.0 / 24.0),
-            -64.4444427,
-            0.0,
-            24.4444427,
-            20.0,
-        );
+        assert_quad(&fit(IconTextFitType::Width, [0.0, 0.0, 0.0, 0.0], 24.0 / 24.0), -64.444_44, 0.0, 24.444_443, 20.0);
 
         // width x textSize
         assert_quad(
             &fit(IconTextFitType::Width, [0.0, 0.0, 0.0, 0.0], 12.0 / 24.0),
-            -32.2222214,
+            -32.222_22,
             -5.0,
-            12.2222214,
+            12.222_221,
             15.0,
         );
 
         // width x textSize + padding
         assert_quad(
             &fit(IconTextFitType::Width, [5.0, 10.0, 5.0, 10.0], 12.0 / 24.0),
-            -43.3333321,
+            -43.333_332,
             -5.0,
-            23.3333321,
+            23.333_332,
             15.0,
         );
 
@@ -672,64 +674,64 @@ mod tests {
         assert_quad(
             &fit(IconTextFitType::Height, [0.0, 0.0, 0.0, 0.0], 24.0 / 24.0),
             -30.0,
-            -12.2222214,
+            -12.222_221,
             -10.0,
-            32.2222214,
+            32.222_22,
         );
 
         // height x textSize
         assert_quad(
             &fit(IconTextFitType::Height, [0.0, 0.0, 0.0, 0.0], 12.0 / 24.0),
             -20.0,
-            -6.11111069,
+            -6.111_110_7,
             0.0,
-            16.1111107,
+            16.111_11,
         );
 
         // height x textSize + padding
         assert_quad(
             &fit(IconTextFitType::Height, [5.0, 10.0, 5.0, 20.0], 12.0 / 24.0),
             -20.0,
-            -11.666666,
+            -11.666_666,
             0.0,
-            21.666666,
+            21.666_666,
         );
 
         // both
         assert_quad(
             &fit(IconTextFitType::Both, [0.0, 0.0, 0.0, 0.0], 24.0 / 24.0),
-            -64.4444427,
-            -12.2222214,
-            24.4444427,
-            32.2222214,
+            -64.444_44,
+            -12.222_221,
+            24.444_443,
+            32.222_22,
         );
 
         // both x textSize
         assert_quad(
             &fit(IconTextFitType::Both, [0.0, 0.0, 0.0, 0.0], 12.0 / 24.0),
-            -32.2222214,
-            -6.11111069,
-            12.2222214,
-            16.1111107,
+            -32.222_22,
+            -6.111_110_7,
+            12.222_221,
+            16.111_11,
         );
 
         // both x textSize + padding
         assert_quad(
             &fit(IconTextFitType::Both, [5.0, 10.0, 5.0, 10.0], 12.0 / 24.0),
-            -43.3333321,
-            -11.666666,
-            23.3333321,
-            21.666666,
+            -43.333_332,
+            -11.666_666,
+            23.333_332,
+            21.666_666,
         );
 
         // both x textSize + padding t/r/b/l
         // (C++ also sets `layout.get<TextSize>() = 12.0f` on an unused layout.)
         assert_quad(
             &fit(IconTextFitType::Both, [0.0, 5.0, 10.0, 15.0], 12.0 / 24.0),
-            -48.3333321,
-            -6.66666603,
-            18.3333321,
-            26.666666,
+            -48.333_332,
+            -6.666_666,
+            18.333_332,
+            26.666_666,
         );
     }
 }

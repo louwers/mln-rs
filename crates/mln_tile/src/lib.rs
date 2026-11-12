@@ -14,7 +14,7 @@
 //!
 //! This crate is deliberately low in the crate graph (no style, renderer or
 //! expression dependencies), so `mln_expression` and the buckets can use
-//! the geometry functions. The rest of `tile/` (Tile, GeometryTile, the
+//! the geometry functions. The rest of `tile/` (Tile, `GeometryTile`, the
 //! workers, ...) depends on the renderer and goes into a higher crate.
 
 pub mod geometry_tile_data;

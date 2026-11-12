@@ -16,7 +16,7 @@ use crate::update_parameters::UpdateParameters;
 
 pub struct Renderer {
     /// Always `Some` until `drop`, which destroys the impl inside a
-    /// BackendScope as C++ does.
+    /// `BackendScope` as C++ does.
     impl_: Option<Box<RendererImpl>>,
 }
 
@@ -59,6 +59,7 @@ impl Renderer {
         self.impl_mut().set_pixel_ratio(pixel_ratio);
     }
 
+    #[must_use]
     pub fn get_pixel_ratio(&self) -> f32 {
         self.impl_ref().pixel_ratio()
     }
@@ -157,6 +158,7 @@ impl Renderer {
     }
 
     /// `getPlacedSymbolsData()`.
+    #[must_use]
     pub fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
         self.impl_ref().orchestrator.get_placed_symbols_data()
     }
@@ -183,6 +185,7 @@ impl Renderer {
     }
 
     /// `getFeatureState(sourceID, sourceLayerID, featureID)`.
+    #[must_use]
     pub fn get_feature_state(
         &self,
         source_id: &str,
@@ -211,6 +214,7 @@ impl Renderer {
         self.impl_mut().orchestrator.set_tile_cache_enabled(enable);
     }
 
+    #[must_use]
     pub fn get_tile_cache_enabled(&self) -> bool {
         self.impl_ref().orchestrator.get_tile_cache_enabled()
     }

@@ -31,16 +31,19 @@ impl Default for Projection {
 
 impl Projection {
     /// `Projection()`.
+    #[must_use]
     pub fn new() -> Self {
         Projection::from_impl(Arc::new(Impl::default()))
     }
 
     /// `explicit Projection(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         Projection { impl_ }
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         (*self.impl_).clone()
     }
@@ -57,6 +60,7 @@ impl Projection {
         None
     }
 
+    #[must_use]
     pub fn get_property(&self, name: &str) -> StyleProperty {
         if name == "type" {
             return make_style_property(&self.get_type());
@@ -64,10 +68,12 @@ impl Projection {
         StyleProperty::default()
     }
 
+    #[must_use]
     pub fn get_default_type() -> ProjectionDefinition {
         ProjectionDefinition::default()
     }
 
+    #[must_use]
     pub fn get_type(&self) -> PropertyValue<ProjectionDefinition> {
         self.impl_.type_.clone()
     }

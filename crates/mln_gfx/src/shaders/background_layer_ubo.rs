@@ -77,6 +77,7 @@ impl Default for BackgroundDrawableUnionUBO {
 
 impl BackgroundDrawableUnionUBO {
     /// `.backgroundDrawableUBO = {...}`
+    #[must_use]
     pub fn from_drawable(ubo: &BackgroundDrawableUBO) -> Self {
         let mut u = Self::zeroed();
         u.bytes[..64].copy_from_slice(bytemuck::bytes_of(ubo));
@@ -84,6 +85,7 @@ impl BackgroundDrawableUnionUBO {
     }
 
     /// `.backgroundPatternDrawableUBO = {...}`
+    #[must_use]
     pub fn from_pattern_drawable(ubo: &BackgroundPatternDrawableUBO) -> Self {
         let mut u = Self::zeroed();
         u.bytes.copy_from_slice(bytemuck::bytes_of(ubo));

@@ -117,13 +117,15 @@ impl<V: bytemuck::Pod> Default for VertexVector<V> {
 }
 
 impl<V: bytemuck::Pod> VertexVector<V> {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// A vector holding `vertices` (C++ builds one with `emplace_back`; the
     /// renderer moves a bucket's vertices into a shared vector this way, see
-    /// mln_renderer::bucket_geometry).
+    /// `mln_renderer::bucket_geometry`).
+    #[must_use]
     pub fn from_vec(vertices: Vec<V>) -> Self {
         VertexVector {
             base: VertexVectorBaseData::default(),
@@ -136,6 +138,7 @@ impl<V: bytemuck::Pod> VertexVector<V> {
 
     /// A vector holding `vertices` that will not be updated (`release()`d):
     /// its CPU copy is freed once it is in a buffer.
+    #[must_use]
     pub fn from_vec_released(vertices: Vec<V>) -> Self {
         let mut result = Self::from_vec(vertices);
         result.release();
@@ -146,6 +149,7 @@ impl<V: bytemuck::Pod> VertexVector<V> {
     /// upload pass writes to the GPU from there. Released, it frees them once
     /// it has a buffer, so no buffer is ever updated from them.
     #[cfg(target_family = "wasm")]
+    #[must_use]
     pub fn from_host_released(vertices: HostBytes) -> Self {
         debug_assert!(vertices.len().is_multiple_of(size_of::<V>()));
         let mut result = Self::from_vec(Vec::new());
@@ -155,6 +159,10 @@ impl<V: bytemuck::Pod> VertexVector<V> {
     }
 
     /// The vertex count in a JS array.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        expect(clippy::unused_self, reason = "only the wasm build keeps vertices in a JS array")
+    )]
     fn host_count(&self) -> usize {
         #[cfg(target_family = "wasm")]
         if let Some(bytes) = &*self.host.borrow() {

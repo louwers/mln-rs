@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::tagged_string::FontStackHash;
 
-/// `GlyphIDType` (glyph_range.hpp): `FontPBF` (0) for glyphs from glyph PBFs,
+/// `GlyphIDType` (`glyph_range.hpp)`: `FontPBF` (0) for glyphs from glyph PBFs,
 /// other values are generated at runtime for HarfBuzz-shaped font faces
 /// (`genNewGlyphIDType`), so this is a newtype, not a Rust enum.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
@@ -25,12 +25,12 @@ impl GlyphIDType {
     pub const FontPBF: GlyphIDType = GlyphIDType(0x00);
 }
 
-/// `GLYPHS_PER_GLYPH_RANGE` etc. (glyph_range.hpp).
+/// `GLYPHS_PER_GLYPH_RANGE` etc. (`glyph_range.hpp`).
 pub const GLYPHS_PER_GLYPH_RANGE: u32 = 256;
 pub const GLYPH_RANGES_PER_FONT_STACK: u32 = 256;
 pub const NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK: u32 = 97;
 
-/// `GlyphRange` (glyph_range.hpp / glyph.cpp).
+/// `GlyphRange` (`glyph_range.hpp` / glyph.cpp).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct GlyphRange {
     pub first: u16,
@@ -41,6 +41,7 @@ pub struct GlyphRange {
 impl GlyphRange {
     /// `GlyphRange(uint32_t, uint32_t, GlyphIDType = FontPBF)`: the bounds
     /// are truncated to `uint16_t` as in C++.
+    #[must_use]
     pub fn new(first: u32, second: u32, type_: GlyphIDType) -> Self {
         GlyphRange { first: first as u16, second: second as u16, type_ }
     }
@@ -71,18 +72,21 @@ pub struct GlyphID {
 impl GlyphID {
     /// `GlyphID(int)` / `GlyphID(uint32_t)` / `GlyphID(char16_t)`: the
     /// codepoint is truncated to `char16_t`, the type is `FontPBF`.
+    #[must_use]
     pub fn new(codepoint: u32) -> Self {
         GlyphID { code: codepoint as u16, type_: GlyphIDType::FontPBF }
     }
 
     /// `GlyphID(char16_t index, GlyphIDType t)`.
+    #[must_use]
     pub fn with_type(index: u16, type_: GlyphIDType) -> Self {
         GlyphID { code: index, type_ }
     }
 
     /// The `hash` member of the union (x86-64 / arm64 are little endian).
+    #[must_use]
     pub fn hash(&self) -> u32 {
-        ((self.type_.0 as u32) << 16) | self.code as u32
+        (u32::from(self.type_.0) << 16) | u32::from(self.code)
     }
 }
 
@@ -101,7 +105,7 @@ impl Ord for GlyphID {
 
 impl From<u16> for GlyphID {
     fn from(code: u16) -> Self {
-        GlyphID::new(code as u32)
+        GlyphID::new(u32::from(code))
     }
 }
 
@@ -109,8 +113,9 @@ impl From<u16> for GlyphID {
 pub type GlyphIDs = std::collections::BTreeSet<GlyphID>;
 
 /// `getGlyphRange`. Note: this only works for the BMP.
+#[must_use]
 pub fn get_glyph_range(glyph: GlyphID) -> GlyphRange {
-    let start = (glyph.code as u32 / 256) * 256;
+    let start = (u32::from(glyph.code) / 256) * 256;
     let end = start + 255;
     let start = start.min(65280);
     let end = end.min(65535);
@@ -162,7 +167,7 @@ pub struct PositionedGlyph {
     pub rect: RectU16,
     pub metrics: GlyphMetrics,
     pub image_id: Option<String>,
-    /// Maps positioned glyph to TaggedString section
+    /// Maps positioned glyph to `TaggedString` section
     pub section_index: usize,
 }
 
@@ -170,6 +175,7 @@ impl PositionedGlyph {
     /// `PositionedGlyph(glyph, x, y, vertical, font, scale, rect, metrics,
     /// imageID, sectionIndex = 0)`.
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         glyph: GlyphID,
         x: f32,
@@ -187,7 +193,7 @@ impl PositionedGlyph {
 }
 
 /// `enum class WritingModeType : uint8_t`, a bitmask
-/// (util/bitmask_operations.hpp).
+/// (`util/bitmask_operations.hpp`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct WritingModeType(pub u8);
 
@@ -245,11 +251,13 @@ impl Shaping {
     pub const Y_OFFSET: i32 = -17;
 
     /// `Shaping(float x, float y, WritingModeType)`.
+    #[must_use]
     pub fn new(x: f32, y: f32, writing_mode: WritingModeType) -> Self {
         Shaping { top: y, bottom: y, left: x, right: x, writing_mode, ..Default::default() }
     }
 
     /// `explicit operator bool`: whether any line has a glyph.
+    #[must_use]
     pub fn is_some(&self) -> bool {
         self.positioned_lines.iter().any(|line| !line.positioned_glyphs.is_empty())
     }
@@ -269,11 +277,13 @@ impl FontData {
         FontData(bytes)
     }
 
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         (*self.0).as_ref()
     }
 
     /// The same bytes, for readers that take any shared bytes.
+    #[must_use]
     pub fn shared(&self) -> Arc<dyn AsRef<[u8]> + Send + Sync> {
         self.0.clone()
     }
@@ -331,12 +341,14 @@ pub struct FontFace {
 }
 
 impl FontFace {
+    #[must_use]
     pub fn new(name: &str, url: &str, ranges: Vec<FontFaceRange>) -> Self {
         FontFace { type_: GlyphIDType::FontPBF, name: name.to_string(), url: url.to_string(), ranges, data: None }
     }
 
     /// A fallback face, without a name, for the font file at `url`, which
     /// draws the code points in `ranges`, with its glyph type.
+    #[must_use]
     pub fn fallback(url: &str, ranges: Vec<FontFaceRange>) -> Self {
         let mut face = FontFace::new("", url, ranges);
         face.type_ = gen_new_glyph_id_type(&face.url, &FontStack::new(), &face.ranges);
@@ -344,11 +356,13 @@ impl FontFace {
     }
 
     /// The face with its font file in memory, so that `url` only names it.
+    #[must_use]
     pub fn with_data(mut self, data: FontData) -> Self {
         self.data = Some(data);
         self
     }
 
+    #[must_use]
     pub fn valid(&self) -> bool {
         !self.name.is_empty() && !self.url.is_empty() && !self.ranges.is_empty()
     }
@@ -411,7 +425,7 @@ static GLYPH_TYPES: Mutex<GlyphTypes> =
 
 /// `util::hash_combine` with libstdc++'s identity `std::hash<uint32_t>`.
 fn hash_combine(seed: &mut usize, v: u32) {
-    *seed ^= (v as usize).wrapping_add(0x9e3779b9).wrapping_add(*seed << 6).wrapping_add(*seed >> 2);
+    *seed ^= (v as usize).wrapping_add(0x9e37_79b9).wrapping_add(*seed << 6).wrapping_add(*seed >> 2);
 }
 
 /// `genNewGlyphIDType(url, fontStack, pairs)`: one type per (url, font

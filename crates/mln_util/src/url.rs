@@ -56,6 +56,7 @@ fn rfind(s: &[u8], c: u8, pos: usize) -> usize {
 
 /// `std::string::substr(pos, count)` on bytes (C++ throws for `pos >
 /// size()`; callers here never pass that).
+#[must_use]
 pub fn substr(s: &str, pos: usize, count: usize) -> &str {
     let pos = pos.min(s.len());
     let end = pos.saturating_add(count).min(s.len());
@@ -63,6 +64,7 @@ pub fn substr(s: &str, pos: usize, count: usize) -> &str {
 }
 
 /// `util::percentEncode`.
+#[must_use]
 pub fn percent_encode(input: &str) -> String {
     let mut encoded = String::new();
     for &c in input.as_bytes() {
@@ -78,6 +80,7 @@ pub fn percent_encode(input: &str) -> String {
 }
 
 /// `util::percentDecode`. Returns bytes: a `%xx` may produce any byte.
+#[must_use]
 pub fn percent_decode(input: &str) -> Vec<u8> {
     let bytes = input.as_bytes();
     let mut decoded = Vec::new();
@@ -107,15 +110,16 @@ pub struct URL {
 }
 
 impl URL {
+    #[must_use]
     pub fn new(str_: &str) -> URL {
         let s = str_.as_bytes();
         let query = {
             let hash_pos = find(s, b'#', 0);
             let query_pos = find(s, b'?', 0);
             if query_pos == NPOS || hash_pos < query_pos {
-                (if hash_pos != NPOS { hash_pos } else { s.len() }, 0)
+                (if hash_pos == NPOS { s.len() } else { hash_pos }, 0)
             } else {
-                (query_pos, (if hash_pos != NPOS { hash_pos } else { s.len() }) - query_pos)
+                (query_pos, if hash_pos == NPOS { s.len() } else { hash_pos } - query_pos)
             }
         };
         let scheme = {
@@ -161,11 +165,13 @@ pub struct Path {
 
 impl Path {
     /// `Path(str)` (`pos = 0`, `count = npos`).
+    #[must_use]
     pub fn new(str_: &str) -> Path {
         Path::with_range(str_, 0, NPOS)
     }
 
     /// `Path(str, pos, count)`.
+    #[must_use]
     pub fn with_range(str_: &str, pos: usize, count: usize) -> Path {
         let s = str_.as_bytes();
         let directory = {
@@ -198,6 +204,7 @@ impl Path {
 }
 
 /// `util::transformURL(tpl, str, url)`.
+#[must_use]
 pub fn transform_url_with(tpl: &str, str_: &str, url: &URL) -> String {
     let mut result = replace_tokens(tpl, |token: &str| -> Option<String> {
         match token {
@@ -224,16 +231,17 @@ pub fn transform_url_with(tpl: &str, str_: &str, url: &URL) -> String {
         let amp = if result.contains('?') { Some(result.len()) } else { None };
         result.push_str(substr(str_, url.query.0, url.query.1));
         // Transform the question mark to an ampersand if we had a query string previously.
-        if let Some(amp) = amp {
-            if amp < result.len() {
-                result.replace_range(amp..amp + 1, "&");
-            }
+        if let Some(amp) = amp
+            && amp < result.len()
+        {
+            result.replace_range(amp..=amp, "&");
         }
     }
     result
 }
 
 /// `util::transformURL(tpl, url)`.
+#[must_use]
 pub fn transform_url(tpl: &str, url: &str) -> String {
     transform_url_with(tpl, url, &URL::new(url))
 }

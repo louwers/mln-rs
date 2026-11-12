@@ -295,10 +295,10 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
         // Parse feature properties
         let mut feature = Feature::new(Geometry::Point(Point::new(0.0, 0.0)));
         let feature_object = &input[1];
-        if let Some(properties) = feature_object.get("properties") {
-            if let Some(Value::Object(p)) = json_to_value(properties) {
-                feature.properties = p;
-            }
+        if let Some(properties) = feature_object.get("properties")
+            && let Some(Value::Object(p)) = json_to_value(properties)
+        {
+            feature.properties = p;
         }
 
         if let Some(geometry) = feature_object.get("geometry") {
@@ -315,18 +315,14 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
 }
 
 /// The corpus root and the test directories (`parseArguments`).
+#[must_use]
 pub fn collect_test_paths(root_path: &Path, test_names: &[String], filter: Option<&str>) -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = test_names.iter().map(|n| root_path.join(n)).collect();
-    if paths.is_empty() {
-        paths.push(root_path.to_owned());
-    }
-
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
         let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-        entries.sort_by_key(|e| e.file_name());
+        entries.sort_by_key(std::fs::DirEntry::file_name);
         for entry in entries {
             let path = entry.path();
             if path.is_dir() {
@@ -335,6 +331,11 @@ pub fn collect_test_paths(root_path: &Path, test_names: &[String], filter: Optio
                 out.push(path);
             }
         }
+    }
+
+    let mut paths: Vec<PathBuf> = test_names.iter().map(|n| root_path.join(n)).collect();
+    if paths.is_empty() {
+        paths.push(root_path.to_owned());
     }
 
     let mut test_paths = Vec::new();
@@ -352,6 +353,7 @@ pub fn collect_test_paths(root_path: &Path, test_names: &[String], filter: Optio
 }
 
 /// `parseExpressionIgnores`.
+#[must_use]
 pub fn parse_expression_ignores(ignores_path: &Path) -> Ignores {
     let Ok(document) = read_json(ignores_path) else {
         return Vec::new();
@@ -402,6 +404,7 @@ pub fn parse_test_data(path: &Path) -> Result<TestData, String> {
 }
 
 /// `toJSON(value, indent, singleLine)`, for diff output only.
+#[must_use]
 pub fn to_json(value: &Value) -> String {
     serde_json::to_string_pretty(&mbgl_to_json_for_display(value)).unwrap_or_default()
 }
@@ -413,8 +416,7 @@ fn mbgl_to_json_for_display(value: &Value) -> serde_json::Value {
         Value::Uint(u) => serde_json::Value::from(*u),
         Value::Int(i) => serde_json::Value::from(*i),
         Value::Double(d) => serde_json::Number::from_f64(*d)
-            .map(serde_json::Value::Number)
-            .unwrap_or_else(|| serde_json::Value::String(d.to_string())),
+            .map_or_else(|| serde_json::Value::String(d.to_string()), serde_json::Value::Number),
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::Array(a) => serde_json::Value::Array(a.iter().map(mbgl_to_json_for_display).collect()),
         Value::Object(o) => {
@@ -427,6 +429,7 @@ fn mbgl_to_json_for_display(value: &Value) -> serde_json::Value {
 /// value with `writeJSON` (integral doubles through
 /// `Int64(static_cast<int64_t>(d))`, NaN/Inf make the JSON invalid) and
 /// parses it back with rapidjson.
+#[must_use]
 pub fn to_document(value: &Value) -> serde_json::Value {
     fn has_nan(value: &Value) -> bool {
         match value {
@@ -436,10 +439,7 @@ pub fn to_document(value: &Value) -> serde_json::Value {
             _ => false,
         }
     }
-    if has_nan(value) {
-        // The JSON text is invalid; the rapidjson document stays null.
-        return serde_json::Value::Null;
-    }
+
     fn convert(value: &Value) -> serde_json::Value {
         match value {
             Value::Null => serde_json::Value::Null,
@@ -449,8 +449,11 @@ pub fn to_document(value: &Value) -> serde_json::Value {
             Value::Double(d) => {
                 if *d == d.floor() {
                     // static_cast<int64_t>(d) as x86-64 computes it.
-                    let i =
-                        if *d >= -9223372036854775808.0 && *d < 9223372036854775808.0 { *d as i64 } else { i64::MIN };
+                    let i = if *d >= -9_223_372_036_854_775_808.0 && *d < 9_223_372_036_854_775_808.0 {
+                        *d as i64
+                    } else {
+                        i64::MIN
+                    };
                     // A non-negative integer reads back as uint64.
                     if i >= 0 { serde_json::Value::from(i as u64) } else { serde_json::Value::from(i) }
                 } else {
@@ -462,10 +465,16 @@ pub fn to_document(value: &Value) -> serde_json::Value {
             Value::Object(o) => serde_json::Value::Object(o.iter().map(|(k, v)| (k.clone(), convert(v))).collect()),
         }
     }
+
+    if has_nan(value) {
+        // The JSON text is invalid; the rapidjson document stays null.
+        return serde_json::Value::Null;
+    }
     convert(value)
 }
 
 /// `toValue(const Compiled&)`.
+#[must_use]
 pub fn compiled_to_value(compiled: &Compiled) -> Value {
     let mut compiled_object = ValueObject::new();
     compiled_object
@@ -486,10 +495,10 @@ pub fn expression_value_to_value(expr_value: &mln_expression::Value) -> Option<V
     use mln_expression::value::to_mbgl_value;
     Some(match expr_value {
         mln_expression::Value::Color(c) => Value::Array(vec![
-            Value::Double(c.r as f64),
-            Value::Double(c.g as f64),
-            Value::Double(c.b as f64),
-            Value::Double(c.a as f64),
+            Value::Double(f64::from(c.r)),
+            Value::Double(f64::from(c.g)),
+            Value::Double(f64::from(c.b)),
+            Value::Double(f64::from(c.a)),
         ]),
         mln_expression::Value::Formatted(formatted) => formatted.to_object(),
         mln_expression::Value::Array(values) => Value::Array(values.iter().map(to_mbgl_value).collect()),
@@ -518,7 +527,7 @@ pub fn parse_expression(
     {
         let mut error = mln_conversion::Error::default();
         parsed = mln_style::conversion::function::convert_function_to_expression_for_type(
-            expected.clone(),
+            expected,
             &convertible,
             &mut error,
             false, /*convert tokens*/

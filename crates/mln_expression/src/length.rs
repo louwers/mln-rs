@@ -17,6 +17,7 @@ pub struct Length {
 }
 
 impl Length {
+    #[must_use]
     pub fn new(input: Box<dyn Expression>) -> Self {
         Length { base: ExpressionBase::new(Kind::Length, Type::Number, input.dependencies()), input }
     }

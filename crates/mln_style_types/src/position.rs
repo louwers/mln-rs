@@ -24,16 +24,19 @@ pub struct Position {
 }
 
 impl Position {
+    #[must_use]
     pub fn new(position: [f32; 3]) -> Self {
         let mut p = Position { radial: position[0], azimuthal: position[1], polar: position[2], ..Default::default() };
         p.calculate_cartesian();
         p
     }
 
+    #[must_use]
     pub fn get_cartesian(&self) -> [f32; 3] {
         [self.x, self.y, self.z]
     }
 
+    #[must_use]
     pub fn get_spherical(&self) -> [f32; 3] {
         [self.radial, self.azimuthal, self.polar]
     }

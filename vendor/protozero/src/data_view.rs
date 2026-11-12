@@ -9,6 +9,7 @@ pub type DataView<'a> = &'a [u8];
 
 /// `data_view::compare`: memcmp of the common prefix, then size; returns
 /// <0, 0 or >0 as in C++.
+#[must_use]
 pub fn compare(lhs: DataView<'_>, rhs: DataView<'_>) -> i32 {
     match lhs.cmp(rhs) {
         std::cmp::Ordering::Less => -1,
@@ -31,18 +32,17 @@ mod tests {
         let v5: DataView = b"fooooooo";
         let v6: DataView = b"f";
 
-        assert!(v1 == v1);
-        assert!(v1 != v2);
-        assert!(v1 != v3);
-        assert!(v1 == v4);
-        assert!(v1 != v5);
-        assert!(v1 != v6);
+        assert_eq!(v1, v1);
+        assert_ne!(v1, v2);
+        assert_ne!(v1, v3);
+        assert_eq!(v1, v4);
+        assert_ne!(v1, v5);
+        assert_ne!(v1, v6);
 
-        assert!(!(v1 != v1));
-        assert!(compare(v1, v1) == 0);
+        assert_eq!(compare(v1, v1), 0);
         assert!(compare(v1, v2) > 0);
         assert!(compare(v1, v3) < 0);
-        assert!(compare(v1, v4) == 0);
+        assert_eq!(compare(v1, v4), 0);
         assert!(compare(v1, v5) < 0);
         assert!(compare(v1, v6) > 0);
         assert!(compare(v2, v1) < 0);
@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn default_constructed_data_view() {
         let view: DataView = Default::default();
-        assert!(view.is_empty());
+        assert_eq!(view, []);
         assert_eq!(view.len(), 0);
         assert_eq!(compare(view, view), 0);
     }

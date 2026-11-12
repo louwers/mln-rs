@@ -245,7 +245,7 @@ impl EndHandler {
         let end = from_transition_end(end);
         // SAFETY: the host's end callback with its user data, and an end that
         // stays valid until it returns.
-        registration.deliver(move |user_data| unsafe { callback(user_data.get(), &end) });
+        registration.deliver(move |user_data| unsafe { callback(user_data.get(), &raw const end) });
         // The accepted registration drops here, which releases the user data
         // after the call.
     }
@@ -345,16 +345,16 @@ impl Animation {
 /// once it is on its way. A handler that ends before `send` returns, on the
 /// map's thread, finds it accepted.
 fn send_with<T>(
-    handler: Option<Arc<EndHandler>>,
+    handler: Option<&EndHandler>,
     send: impl FnOnce() -> Result<T, mln_util::Error>,
 ) -> Result<T, mln_util::Error> {
-    if let Some(handler) = &handler {
+    if let Some(handler) = handler {
         handler.set_accepted(true);
     }
     // The command holds the handler too, and drops it when the send fails:
-    // this one keeps it until it is given back.
+    // the caller keeps it until it is given back.
     let sent = send();
-    if let (Err(_), Some(handler)) = (&sent, &handler) {
+    if let (Err(_), Some(handler)) = (&sent, handler) {
         handler.set_accepted(false);
     }
     sent
@@ -613,7 +613,7 @@ pub unsafe extern "C" fn mln_map_update_camera(
         let Animation { options: animation, handler } = Animation::new(&update.animation)?;
         let update = CameraUpdate { mode, camera, animation, phase };
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| send_with(handler, || map.update_camera(update))) }
+        unsafe { command(map, completion, move |map| send_with(handler.as_deref(), || map.update_camera(update))) }
     })
 }
 
@@ -658,7 +658,7 @@ pub unsafe extern "C" fn mln_map_apply_camera_delta(
         };
         delta.validate().map_err(|error| Error::invalid_argument(error.to_string()))?;
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| send_with(handler, || map.apply_camera_delta(delta))) }
+        unsafe { command(map, completion, move |map| send_with(handler.as_deref(), || map.apply_camera_delta(delta))) }
     })
 }
 
@@ -909,7 +909,7 @@ unsafe fn fit_camera(
     let Animation { options: animation, handler } = Animation::new(&update.animation)?;
     let update = CameraFitUpdate { mode, fit, animation };
     // SAFETY: the caller's contract.
-    unsafe { command(map, completion, |map| send_with(handler, || map.fit_camera(area, update))) }
+    unsafe { command(map, completion, move |map| send_with(handler.as_deref(), || map.fit_camera(area, update))) }
 }
 
 /// `mln_map_fit_camera_to_lat_lng_bounds()`.
@@ -1369,7 +1369,7 @@ mod tests {
             assert_eq!(call(tile, side, &mut camera), MLN_STATUS_INVALID_ARGUMENT, "{tile:?} {side:?}");
         }
         assert_eq!(camera.zoom, 3.0);
-        assert_eq!(call((25, 33554431, 33554431), (512, 512), &mut camera), MLN_STATUS_OK);
+        assert_eq!(call((25, 33_554_431, 33_554_431), (512, 512), &mut camera), MLN_STATUS_OK);
         assert_eq!(call((9, 0, 0), (1, 1), &mut camera), MLN_STATUS_OK);
     }
 }

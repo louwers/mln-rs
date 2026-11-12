@@ -69,10 +69,10 @@ fn interpolate_() {
 
     // The C++ test builds these (all stops at 0.0, so later ones replace
     // earlier ones) without checking the result.
-    interpolate(linear(), n(), vec![(0.0, l()), (0.0, l()), (0.0, l())]);
-    interpolate(linear(), l(), vec![(0.0, n()), (0.0, l()), (0.0, l())]);
-    interpolate(linear(), l(), vec![(0.0, l()), (0.0, n()), (0.0, l())]);
-    interpolate(linear(), l(), vec![(0.0, l()), (0.0, l()), (0.0, n())]);
+    let _ = interpolate(linear(), n(), vec![(0.0, l()), (0.0, l()), (0.0, l())]);
+    let _ = interpolate(linear(), l(), vec![(0.0, n()), (0.0, l()), (0.0, l())]);
+    let _ = interpolate(linear(), l(), vec![(0.0, l()), (0.0, n()), (0.0, l())]);
+    let _ = interpolate(linear(), l(), vec![(0.0, l()), (0.0, l()), (0.0, n())]);
 }
 
 // gtest: ExpressionDependencies.Image

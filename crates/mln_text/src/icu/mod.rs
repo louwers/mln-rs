@@ -1,6 +1,6 @@
 //! The parts of ICU (icu4c 78.3, the system ICU the Linux C++ build links)
 //! that platform/default/src/mln/text/bidi.cpp needs beyond what the
-//! `unicode-bidi` crate provides: Bidi_Mirroring_Glyph (`u_charMirror`,
+//! `unicode-bidi` crate provides: `Bidi_Mirroring_Glyph` (`u_charMirror`,
 //! from ICU's compiled-in Bidi property data, `ubidi_props.cpp`) and Arabic
 //! letter shaping (`u_shapeArabic`, `ushape.cpp`). Only the code paths for
 //! the options bidi.cpp passes are ported.
@@ -29,12 +29,14 @@ pub enum UErrorCode {
 }
 
 impl UErrorCode {
-    /// `U_FAILURE(code)`: errors are > U_ZERO_ERROR, warnings < 0.
+    /// `U_FAILURE(code)`: errors are > `U_ZERO_ERROR`, warnings < 0.
+    #[must_use]
     pub fn is_failure(self) -> bool {
         !matches!(self, UErrorCode::U_STRING_NOT_TERMINATED_WARNING | UErrorCode::U_ZERO_ERROR)
     }
 
     /// `u_errorName(code)`.
+    #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             UErrorCode::U_STRING_NOT_TERMINATED_WARNING => "U_STRING_NOT_TERMINATED_WARNING",

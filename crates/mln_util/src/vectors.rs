@@ -97,46 +97,55 @@ pub fn vec_from4<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, C: AsArray<T>,
 // --- namespace vector: arithmetic operators ---
 
 /// `vec2 + vec2`.
+#[must_use]
 pub fn vec2_add(a: &Vec2, b: &Vec2) -> Vec2 {
     [a[0] + b[0], a[1] + b[1]]
 }
 
 /// `vec2 - double`.
+#[must_use]
 pub fn vec2_sub_scalar(a: &Vec2, b: f64) -> Vec2 {
     [a[0] - b, a[1] - b]
 }
 
 /// `vec4 + vec4`.
+#[must_use]
 pub fn vec4_add(a: &Vec4, b: &Vec4) -> Vec4 {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]]
 }
 
 /// `vec2 * vec2`.
+#[must_use]
 pub fn vec2_mul(a: &Vec2, b: &Vec2) -> Vec2 {
     [a[0] * b[0], a[1] * b[1]]
 }
 
 /// `double * vec2`.
+#[must_use]
 pub fn scalar_mul_vec2(a: f64, b: &Vec2) -> Vec2 {
     [a * b[0], a * b[1]]
 }
 
 /// `vec2 * double`.
+#[must_use]
 pub fn vec2_mul_scalar(a: &Vec2, b: f64) -> Vec2 {
     [a[0] * b, a[1] * b]
 }
 
 /// `vec2 / vec2`.
+#[must_use]
 pub fn vec2_div(a: &Vec2, b: &Vec2) -> Vec2 {
     [a[0] / b[0], a[1] / b[1]]
 }
 
 /// `vec2 / double`.
+#[must_use]
 pub fn vec2_div_scalar(a: &Vec2, b: f64) -> Vec2 {
     [a[0] / b, a[1] / b]
 }
 
 /// `vec3 / double`.
+#[must_use]
 pub fn vec3_div_scalar(a: &Vec3, b: f64) -> Vec3 {
     [a[0] / b, a[1] / b, a[2] / b]
 }
@@ -147,6 +156,7 @@ fn gl_fmod(x: f64, y: f64) -> f64 {
 }
 
 /// `vector::gl_fmod(vec2, double)`.
+#[must_use]
 pub fn vec2_gl_fmod(a: &Vec2, b: f64) -> Vec2 {
     [gl_fmod(a[0], b), gl_fmod(a[1], b)]
 }
@@ -157,11 +167,13 @@ fn std_max(a: f64, b: f64) -> f64 {
 }
 
 /// `vector::max(vec2, double)` (`std::max`, not `fmax`).
+#[must_use]
 pub fn vec2_max_scalar(a: &Vec2, b: f64) -> Vec2 {
     [std_max(a[0], b), std_max(a[1], b)]
 }
 
 /// `vector::max(vec2, vec2)` (`std::max`, not `fmax`).
+#[must_use]
 pub fn vec2_max(a: &Vec2, b: &Vec2) -> Vec2 {
     [std_max(a[0], b[0]), std_max(a[1], b[1])]
 }

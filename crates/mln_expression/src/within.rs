@@ -159,7 +159,7 @@ fn line_string_within_polygons(line: &[Point<i64>], polygons: &[TilePolygon]) ->
 
 /// `latLonToTileCoodinates`.
 fn lat_lon_to_tile_coordinates(point: &Point<f64>, canonical: &CanonicalTileID) -> Point<i64> {
-    let size = EXTENT as f64 * 2f64.powi(canonical.z as i32);
+    let size = f64::from(EXTENT) * 2f64.powi(i32::from(canonical.z));
 
     let x = (point.x + LONGITUDE_MAX) * size / DEGREES_MAX;
     let y =
@@ -218,14 +218,14 @@ fn update_point(p: &mut Point<i64>, bbox: &mut WithinBBox, poly_bbox: &WithinBBo
 }
 
 /// `util::EXTENT * canonical.x`: an int32 times a uint32 is a uint32
-/// product in C++, widened to int64_t afterwards.
+/// product in C++, widened to `int64_t` afterwards.
 fn tile_shift(coordinate: u32) -> i64 {
-    (EXTENT as u32).wrapping_mul(coordinate) as i64
+    i64::from((EXTENT as u32).wrapping_mul(coordinate))
 }
 
 /// `static_cast<int64_t>(util::EXTENT * std::pow(2, canonical.z))`.
 fn world_size(canonical: &CanonicalTileID) -> i64 {
-    (EXTENT as f64 * 2f64.powi(canonical.z as i32)) as i64
+    (f64::from(EXTENT) * 2f64.powi(i32::from(canonical.z))) as i64
 }
 
 fn get_tile_points(
@@ -239,7 +239,7 @@ fn get_tile_points(
     let world_size = world_size(canonical);
     let mut results = Vec::with_capacity(points.len());
     for p in points {
-        let mut point = Point::new(p.x as i64 + x_shift, p.y as i64 + y_shift);
+        let mut point = Point::new(i64::from(p.x) + x_shift, i64::from(p.y) + y_shift);
         update_point(&mut point, bbox, poly_bbox, world_size);
         results.push(point);
     }
@@ -258,7 +258,7 @@ fn get_tile_lines(
     for line in lines {
         let mut line_string = Vec::with_capacity(line.len());
         for p in line {
-            let point = Point::new(p.x as i64 + x_shift, p.y as i64 + y_shift);
+            let point = Point::new(i64::from(p.x) + x_shift, i64::from(p.y) + y_shift);
             update_bbox(bbox, &point);
             line_string.push(point);
         }
@@ -284,7 +284,7 @@ fn feature_within_polygons(
 ) -> bool {
     let mut poly_bbox = DEFAULT_WITHIN_BBOX;
     let polygons = get_tile_polygons(polygon_geo_set, canonical, &mut poly_bbox);
-    debug_assert!(!polygons.is_empty());
+    debug_assert_ne!(polygons, Vec::<TilePolygon>::new());
     let geometries = feature.get_geometries();
     match feature.get_type() {
         FeatureType::Point => {
@@ -348,6 +348,7 @@ pub struct Within {
 }
 
 impl Within {
+    #[must_use]
     pub fn new(geojson: geojson::GeoJSON, geometries: Geometry<f64>) -> Self {
         Within {
             base: ExpressionBase::new(Kind::Within, Type::Boolean, Dependency::FEATURE),
@@ -454,15 +455,11 @@ impl Expression for Within {
 
     fn serialize(&self) -> MbglValue {
         let value = geojson::to_json(&self.geojson_source);
-        let serialized: ValueObject = match &value {
-            serde_json::Value::Object(o) => o.iter().map(|(k, v)| (k.clone(), value_converter(v))).collect(),
-            _ => {
-                Log::error(
-                    Event::General,
-                    "Failed to serialize 'within' expression, converted rapidJSON is not an object",
-                );
-                ValueObject::new()
-            }
+        let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
+            o.iter().map(|(k, v)| (k.clone(), value_converter(v))).collect()
+        } else {
+            Log::error(Event::General, "Failed to serialize 'within' expression, converted rapidJSON is not an object");
+            ValueObject::new()
         };
         MbglValue::Array(vec![MbglValue::String(self.get_operator()), MbglValue::Object(serialized)])
     }

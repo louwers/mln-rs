@@ -23,6 +23,7 @@ impl Image {
         Image { image_id: image_id.into(), available }
     }
 
+    #[must_use]
     pub fn to_value(&self) -> MbglValue {
         let mut object = ValueObject::new();
         object.insert("name".to_owned(), MbglValue::String(self.image_id.clone()));
@@ -30,14 +31,17 @@ impl Image {
         MbglValue::Object(object)
     }
 
+    #[must_use]
     pub fn id(&self) -> &str {
         &self.image_id
     }
 
+    #[must_use]
     pub fn is_available(&self) -> bool {
         self.available
     }
 
+    #[must_use]
     pub fn empty(&self) -> bool {
         self.image_id.is_empty()
     }

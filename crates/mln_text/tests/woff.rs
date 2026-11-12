@@ -124,12 +124,14 @@ fn malformed_woff_is_an_error() {
     assert!(!FreeTypeFace::from_memory(corrupt, &FreeTypeLibrary::new()).is_valid());
 }
 
+/// A decoder from a font file to its sfnt.
+type Decoder = fn(&[u8]) -> Result<Vec<u8>, WoffError>;
+
 /// Every truncation of the fixtures fails, and every one-byte change
 /// decodes or fails, without a panic.
 #[test]
 fn damaged_files_never_panic() {
-    let decoders: [(&[u8], fn(&[u8]) -> Result<Vec<u8>, WoffError>); 2] =
-        [(WOFF, woff::decode_woff), (WOFF2, woff::decode_woff2)];
+    let decoders: [(&[u8], Decoder); 2] = [(WOFF, woff::decode_woff), (WOFF2, woff::decode_woff2)];
     for (font, decode) in decoders {
         for len in 0..font.len() {
             assert!(decode(&font[..len]).is_err(), "truncated to {len}");

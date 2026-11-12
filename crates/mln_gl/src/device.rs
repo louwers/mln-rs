@@ -24,7 +24,7 @@ use crate::egl::{Egl, library};
 use crate::renderer_backend::PlatformContext;
 use crate::types::Gl;
 
-/// `EGL_PLATFORM_SURFACELESS_MESA` (EGL_MESA_platform_surfaceless).
+/// `EGL_PLATFORM_SURFACELESS_MESA` (`EGL_MESA_platform_surfaceless`).
 const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
 
 /// The EGL library and its display (`EGLDisplayConfig`), which every

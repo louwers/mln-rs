@@ -3,6 +3,7 @@
 //! correction between two sides' processes.
 
 /// The median; NaN for no values.
+#[must_use]
 pub fn median(values: &[f64]) -> f64 {
     percentile(values, 50.0)
 }
@@ -24,6 +25,7 @@ pub fn percentile(values: &[f64], p: f64) -> f64 {
 /// come from the same distribution. Exact for small samples without ties;
 /// otherwise the normal approximation with the tie correction and a
 /// continuity correction. 1 when either side is empty.
+#[must_use]
 pub fn mann_whitney(a: &[f64], b: &[f64]) -> f64 {
     let (n1, n2) = (a.len(), b.len());
     if n1 == 0 || n2 == 0 {
@@ -108,6 +110,7 @@ fn erfc(x: f64) -> f64 {
 }
 
 /// Holm's step-down correction of a family of p-values, in their order.
+#[must_use]
 pub fn holm(p_values: &[f64]) -> Vec<f64> {
     let mut order: Vec<usize> = (0..p_values.len()).collect();
     order.sort_by(|&x, &y| p_values[x].total_cmp(&p_values[y]));

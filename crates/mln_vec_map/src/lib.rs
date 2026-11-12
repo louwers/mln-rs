@@ -76,14 +76,17 @@ impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for VecMap<K, V> {
 }
 
 impl<K, V> VecMap<K, V> {
+    #[must_use]
     pub const fn new() -> Self {
         VecMap { keys: Vec::new(), values: Vec::new() }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.keys.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
@@ -113,18 +116,22 @@ impl<K, V> VecMap<K, V> {
         self.values.iter_mut()
     }
 
+    #[must_use]
     pub fn into_keys(self) -> std::vec::IntoIter<K> {
         self.keys.into_iter()
     }
 
+    #[must_use]
     pub fn into_values(self) -> std::vec::IntoIter<V> {
         self.values.into_iter()
     }
 
+    #[must_use]
     pub fn first_key_value(&self) -> Option<(&K, &V)> {
         Some((self.keys.first()?, self.values.first()?))
     }
 
+    #[must_use]
     pub fn last_key_value(&self) -> Option<(&K, &V)> {
         Some((self.keys.last()?, self.values.last()?))
     }
@@ -306,6 +313,7 @@ impl<'a, K: Ord, V> Entry<'a, K, V> {
         self.or_insert_with(V::default)
     }
 
+    #[must_use]
     pub fn and_modify(mut self, f: impl FnOnce(&mut V)) -> Self {
         if let Entry::Occupied(e) = &mut self {
             f(e.get_mut());
@@ -322,10 +330,12 @@ impl<'a, K: Ord, V> Entry<'a, K, V> {
 }
 
 impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
+    #[must_use]
     pub fn key(&self) -> &K {
         &self.map.keys[self.index]
     }
 
+    #[must_use]
     pub fn get(&self) -> &V {
         &self.map.values[self.index]
     }
@@ -334,6 +344,7 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
         &mut self.map.values[self.index]
     }
 
+    #[must_use]
     pub fn into_mut(self) -> &'a mut V {
         &mut self.map.values[self.index]
     }
@@ -342,10 +353,12 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
         std::mem::replace(self.get_mut(), value)
     }
 
+    #[must_use]
     pub fn remove(self) -> V {
         self.remove_entry().1
     }
 
+    #[must_use]
     pub fn remove_entry(self) -> (K, V) {
         (self.map.keys.remove(self.index), self.map.values.remove(self.index))
     }
@@ -471,14 +484,17 @@ impl<T: fmt::Debug> fmt::Debug for VecSet<T> {
 }
 
 impl<T> VecSet<T> {
+    #[must_use]
     pub const fn new() -> Self {
         VecSet { items: Vec::new() }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -491,10 +507,12 @@ impl<T> VecSet<T> {
         self.items.iter()
     }
 
+    #[must_use]
     pub fn first(&self) -> Option<&T> {
         self.items.first()
     }
 
+    #[must_use]
     pub fn last(&self) -> Option<&T> {
         self.items.last()
     }
@@ -508,6 +526,7 @@ impl<T> VecSet<T> {
     }
 
     /// The items in order, as a slice.
+    #[must_use]
     pub fn as_slice(&self) -> &[T] {
         &self.items
     }
@@ -587,10 +606,12 @@ impl<T: Ord> VecSet<T> {
         self.iter().filter(move |item| other.contains(*item))
     }
 
+    #[must_use]
     pub fn is_disjoint(&self, other: &Self) -> bool {
         self.intersection(other).next().is_none()
     }
 
+    #[must_use]
     pub fn is_subset(&self, other: &Self) -> bool {
         self.len() <= other.len() && self.iter().all(|item| other.contains(item))
     }
@@ -719,8 +740,8 @@ mod tests {
                     .range((Bound::Excluded(5), Bound::Unbounded))
                     .eq(btree_map.range((Bound::Excluded(5), Bound::Unbounded)))
             );
-            vec_map.retain(|k, v| (k + *v as u32) % 3 != 0);
-            btree_map.retain(|k, v| (k + *v as u32) % 3 != 0);
+            vec_map.retain(|k, v| !(k + *v as u32).is_multiple_of(3));
+            btree_map.retain(|k, v| !(k + *v as u32).is_multiple_of(3));
             assert!(vec_map.iter().eq(btree_map.iter()));
             assert_eq!(vec_map.first_key_value(), btree_map.first_key_value());
             assert_eq!(vec_map.last_key_value(), btree_map.last_key_value());
@@ -764,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "no entry found for key")]
     fn index_panics_on_a_missing_key() {
         let map: VecMap<String, u32> = [("a".to_owned(), 1)].into();
         let _ = map["c"];

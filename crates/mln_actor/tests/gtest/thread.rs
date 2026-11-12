@@ -10,7 +10,7 @@ use mln_actor::{ActorRef, RunLoop, Thread, Timer};
 use mln_util::chrono::{Duration, milliseconds};
 use mln_util::identity::SimpleIdentity;
 
-use crate::{Failures, get};
+use crate::{Failures, get, wait};
 
 struct TestObject {
     tid: ThreadId,
@@ -34,16 +34,14 @@ impl TestObject {
         cb(1);
     }
 
-    // The C++ test moves a `std::unique_ptr<int>` into the thread.
-    #[allow(clippy::boxed_local)]
-    fn transfer_in(&self, val: Box<i32>) {
+    fn transfer_in(&self, val: i32) {
         self.failures.expect(self.tid == std::thread::current().id(), "transferIn on child thread");
-        self.failures.expect(*val == 1, "*val == 1");
+        self.failures.expect(val == 1, "*val == 1");
     }
 
-    fn transfer_in_shared(&self, val: Arc<i32>) {
+    fn transfer_in_shared(&self, val: i32) {
         self.failures.expect(self.tid == std::thread::current().id(), "transferInShared on child thread");
-        self.failures.expect(*val == 1, "*val == 1");
+        self.failures.expect(val == 1, "*val == 1");
     }
 
     fn transfer_string(&self, string: &str) {
@@ -51,11 +49,11 @@ impl TestObject {
         self.failures.expect(string == "test", "string == \"test\"");
     }
 
-    fn check_context(&self, result: mpsc::Sender<bool>) {
+    fn check_context(&self, result: &mpsc::Sender<bool>) {
         result.send(self.tid == std::thread::current().id()).unwrap();
     }
 
-    fn sync(&self, result: mpsc::Sender<()>) {
+    fn sync(result: &mpsc::Sender<()>) {
         result.send(()).unwrap();
     }
 }
@@ -79,18 +77,19 @@ fn invoke() {
     thread.actor().invoke(|o: &TestObject| o.fn1(1));
     let f = failures.clone();
     thread.actor().invoke(move |o: &TestObject| o.fn2(move |result| f.expect(result == 1, "result == 1")));
+    // The C++ test moves a `std::unique_ptr<int>` into the thread.
     let val = Box::new(1);
-    thread.actor().invoke(move |o: &TestObject| o.transfer_in(val));
+    thread.actor().invoke(move |o: &TestObject| o.transfer_in(*val));
     let shared = Arc::new(1);
-    thread.actor().invoke(move |o: &TestObject| o.transfer_in_shared(shared));
+    thread.actor().invoke(move |o: &TestObject| o.transfer_in_shared(*shared));
 
     let test = String::from("test");
     thread.actor().invoke(move |o: &TestObject| o.transfer_string(&test));
 
     // Make sure the message queue was consumed before ending the test.
     let (result, result_future) = mpsc::channel();
-    thread.actor().invoke(move |o: &TestObject| o.sync(result));
-    get(&result_future);
+    thread.actor().invoke(move |_: &TestObject| TestObject::sync(&result));
+    wait(&result_future);
 
     drop(thread);
     failures.assert_none();
@@ -106,7 +105,7 @@ fn context() {
     let thread = Thread::new("Test", move |actor| TestObject::new(actor, tid, f));
 
     let (result, result_future) = mpsc::channel();
-    thread.actor().invoke(move |o: &TestObject| o.check_context(result));
+    thread.actor().invoke(move |o: &TestObject| o.check_context(&result));
 
     assert!(get(&result_future));
 
@@ -123,7 +122,7 @@ impl TestWorker {
         TestWorker { timer: Timer::new() }
     }
 
-    fn send(&self, cb: impl FnOnce()) {
+    fn send(cb: impl FnOnce()) {
         cb();
     }
 
@@ -133,12 +132,12 @@ impl TestWorker {
 }
 
 /// The pool actor flavour of `TestWorker`: a pool actor's object is `Send`,
-/// and a `Timer` belongs to its thread's RunLoop, so it has no timer (only
+/// and a `Timer` belongs to its thread's `RunLoop`, so it has no timer (only
 /// `send` is used on pool workers).
 struct PoolTestWorker;
 
 impl PoolTestWorker {
-    fn send(&mut self, cb: impl FnOnce()) {
+    fn send(cb: impl FnOnce()) {
         cb();
     }
 }
@@ -153,14 +152,14 @@ fn executes_after() {
     let did_after = Arc::new(AtomicBool::new(false));
 
     let w = did_work.clone();
-    thread.actor().invoke(move |o: &TestWorker| o.send(move || w.store(true, Ordering::SeqCst)));
+    thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || w.store(true, Ordering::SeqCst)));
     let a = did_after.clone();
     let handle = run_loop.handle();
-    thread.actor().invoke(move |o: &TestWorker| {
-        o.send(move || {
+    thread.actor().invoke(move |_: &TestWorker| {
+        TestWorker::send(move || {
             a.store(true, Ordering::SeqCst);
             handle.stop();
-        })
+        });
     });
 
     run_loop.run();
@@ -186,7 +185,7 @@ fn can_self_wake_up() {
 fn concurrency() {
     let run_loop = RunLoop::new();
 
-    let num_messages: usize = 100000;
+    let num_messages: usize = 100_000;
     let completed = Arc::new(AtomicUsize::new(num_messages));
 
     // TODO(port): platform::Settings and EXPERIMENTAL_THREAD_PRIORITY_WORKER
@@ -205,16 +204,16 @@ fn concurrency() {
         let threaded_object_ref = threaded_object_ref.clone();
         let handle = run_loop.handle();
         let completed = completed.clone();
-        pool_worker_ref.invoke(move |w: &mut PoolTestWorker| {
-            w.send(move || {
-                threaded_object_ref.invoke(move |o: &TestWorker| {
-                    o.send(move || {
+        pool_worker_ref.invoke(move |_: &mut PoolTestWorker| {
+            PoolTestWorker::send(move || {
+                threaded_object_ref.invoke(move |_: &TestWorker| {
+                    TestWorker::send(move || {
                         if completed.fetch_sub(1, Ordering::SeqCst) == 1 {
                             handle.stop();
                         }
-                    })
+                    });
                 });
-            })
+            });
         });
     }
 
@@ -237,8 +236,8 @@ fn thread_pool_messaging() {
     // a worker on the ThreadPool.
     let p = pool_worker_ref.clone();
     let handle = run_loop.handle();
-    threaded_object_ref.invoke(move |o: &TestWorker| {
-        o.send(move || p.invoke(move |w: &mut PoolTestWorker| w.send(move || handle.stop())))
+    threaded_object_ref.invoke(move |_: &TestWorker| {
+        TestWorker::send(move || p.invoke(move |_: &mut PoolTestWorker| PoolTestWorker::send(move || handle.stop())));
     });
 
     run_loop.run();
@@ -246,8 +245,8 @@ fn thread_pool_messaging() {
     // Same as before, but in the opposite direction.
     let t = threaded_object_ref.clone();
     let handle = run_loop.handle();
-    pool_worker_ref.invoke(move |w: &mut PoolTestWorker| {
-        w.send(move || t.invoke(move |o: &TestWorker| o.send(move || handle.stop())))
+    pool_worker_ref.invoke(move |_: &mut PoolTestWorker| {
+        PoolTestWorker::send(move || t.invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop())));
     });
 
     run_loop.run();
@@ -264,7 +263,7 @@ fn reference_can_outlive_thread() {
     let happened = Arc::new(AtomicBool::new(false));
     for _ in 0..1000 {
         let h = happened.clone();
-        worker.invoke(move |o: &TestWorker| o.send(move || h.store(true, Ordering::SeqCst)));
+        worker.invoke(move |_: &TestWorker| TestWorker::send(move || h.store(true, Ordering::SeqCst)));
     }
 
     std::thread::sleep(std::time::Duration::from_secs(10));
@@ -279,7 +278,7 @@ fn delete_paused_thread() {
     let thread = Thread::new("Test", TestWorker::new);
     thread.pause();
     let f = flag.clone();
-    thread.actor().invoke(move |o: &TestWorker| o.send(move || f.store(true, Ordering::SeqCst)));
+    thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || f.store(true, Ordering::SeqCst)));
 
     // Should not hang.
     drop(thread);
@@ -303,17 +302,17 @@ fn pause() {
 
     for _ in 0..100 {
         let f = flag.clone();
-        thread1.actor().invoke(move |o: &TestWorker| o.send(move || f.store(true, Ordering::SeqCst)));
+        thread1.actor().invoke(move |_: &TestWorker| TestWorker::send(move || f.store(true, Ordering::SeqCst)));
         let f = flag.clone();
         let failures = failures.clone();
-        thread2
-            .actor()
-            .invoke(move |o: &TestWorker| o.send(move || failures.expect(!f.load(Ordering::SeqCst), "!flag")));
+        thread2.actor().invoke(move |_: &TestWorker| {
+            TestWorker::send(move || failures.expect(!f.load(Ordering::SeqCst), "!flag"));
+        });
     }
 
     // Queue a message at the end of thread2 queue.
     let handle = run_loop.handle();
-    thread2.actor().invoke(move |o: &TestWorker| o.send(move || handle.stop()));
+    thread2.actor().invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop()));
     run_loop.run();
 
     failures.assert_none();
@@ -331,13 +330,13 @@ fn resume() {
 
     for _ in 0..100 {
         let f = flag.clone();
-        thread.actor().invoke(move |o: &TestWorker| o.send(move || f.store(true, Ordering::SeqCst)));
+        thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || f.store(true, Ordering::SeqCst)));
     }
 
     // Thread messages are ondered, when we resume, this is going
     // to me the last thing to run on the message queue.
     let handle = run_loop.handle();
-    thread.actor().invoke(move |o: &TestWorker| o.send(move || handle.stop()));
+    thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop()));
 
     // This test will be flaky if the thread doesn't get paused.
     assert!(!flag.load(Ordering::SeqCst));
@@ -362,7 +361,7 @@ fn pause_resume() {
     }
 
     let handle = run_loop.handle();
-    thread.actor().invoke(move |o: &TestWorker| o.send(move || handle.stop()));
+    thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop()));
     run_loop.run();
 }
 
@@ -371,12 +370,12 @@ struct TestWorkerDelayedConstruction {
 }
 
 impl TestWorkerDelayedConstruction {
-    fn new(_: ActorRef<TestWorkerDelayedConstruction>, start: mpsc::Receiver<()>) -> Self {
-        get(&start);
+    fn new(_: ActorRef<TestWorkerDelayedConstruction>, start: &mpsc::Receiver<()>) -> Self {
+        wait(start);
         TestWorkerDelayedConstruction { _timer: Timer::new() }
     }
 
-    fn send(&self, cb: impl FnOnce()) {
+    fn send(cb: impl FnOnce()) {
         cb();
     }
 }
@@ -387,21 +386,23 @@ fn invoke_before_child_starts() {
     let run_loop = RunLoop::new();
 
     let (start, start_future) = mpsc::channel();
-    let thread = Thread::new("Test", move |actor| TestWorkerDelayedConstruction::new(actor, start_future));
+    let thread = Thread::new("Test", move |actor| TestWorkerDelayedConstruction::new(actor, &start_future));
 
     let count = Arc::new(AtomicI32::new(0));
 
     for _ in 0..100 {
         let c = count.clone();
-        thread.actor().invoke(move |o: &TestWorkerDelayedConstruction| {
-            o.send(move || {
+        thread.actor().invoke(move |_: &TestWorkerDelayedConstruction| {
+            TestWorkerDelayedConstruction::send(move || {
                 c.fetch_add(1, Ordering::SeqCst);
-            })
+            });
         });
     }
 
     let handle = run_loop.handle();
-    thread.actor().invoke(move |o: &TestWorkerDelayedConstruction| o.send(move || handle.stop()));
+    thread
+        .actor()
+        .invoke(move |_: &TestWorkerDelayedConstruction| TestWorkerDelayedConstruction::send(move || handle.stop()));
 
     // This test will be flaky if messages are consumed before the target object is constructed.
     assert_eq!(count.load(Ordering::SeqCst), 0);
@@ -420,17 +421,19 @@ fn delete_before_child_starts() {
     let (start, start_future) = mpsc::channel();
 
     let control = Thread::new("Control", TestWorker::new);
-    let thread = Thread::new("Test", move |actor| TestWorkerDelayedConstruction::new(actor, start_future));
+    let thread = Thread::new("Test", move |actor| TestWorkerDelayedConstruction::new(actor, &start_future));
 
     let f = flag.clone();
-    thread.actor().invoke(move |o: &TestWorkerDelayedConstruction| o.send(move || f.store(true, Ordering::SeqCst)));
+    thread.actor().invoke(move |_: &TestWorkerDelayedConstruction| {
+        TestWorkerDelayedConstruction::send(move || f.store(true, Ordering::SeqCst));
+    });
     let start = Mutex::new(Some(start));
     control.actor().invoke(move |o: &TestWorker| {
         o.send_delayed(move || {
             if let Some(start) = start.lock().unwrap().take() {
                 start.send(()).unwrap();
             }
-        })
+        });
     });
 
     // Should not hang.
@@ -475,16 +478,17 @@ fn pool_wait_recursive_add() {
 // gtest: Thread.PoolWaitAdd
 #[test]
 fn pool_wait_add() {
-    let pool = scheduler::get_background();
-    let seq = scheduler::get_sequenced();
-
-    // add new tasks every few milliseconds
     #[derive(Default)]
     struct State {
         add_active: AtomicBool,
         added: AtomicI32,
         executed: AtomicI32,
     }
+
+    let pool = scheduler::get_background();
+    let seq = scheduler::get_sequenced();
+
+    // add new tasks every few milliseconds
     let state = Arc::new(State::default());
     state.add_active.store(true, Ordering::SeqCst);
 
@@ -537,11 +541,9 @@ fn pool_wait_exception() {
             id,
             Box::new(move || {
                 std::thread::sleep(std::time::Duration::from_millis(i as u64));
-                if i & 1 != 0 {
-                    panic!("test"); // throw std::runtime_error("test");
-                } else {
-                    std::panic::panic_any(1); // throw 1;
-                }
+                // throw std::runtime_error("test");
+                assert!(i & 1 == 0, "test");
+                std::panic::panic_any(1); // throw 1;
             }),
         );
     }
@@ -603,10 +605,10 @@ fn tagged_pools() {
     let total_runs2 = run_count2.load(Ordering::SeqCst);
 
     // No other tasks in queue 1 ran while waiting on queue 2.
-    assert!(total_runs1 == run_count1.load(Ordering::SeqCst));
+    assert_eq!(total_runs1, run_count1.load(Ordering::SeqCst));
 
     std::thread::sleep(std::time::Duration::from_millis(150));
 
     // Same for queue 2
-    assert!(total_runs2 == run_count2.load(Ordering::SeqCst));
+    assert_eq!(total_runs2, run_count2.load(Ordering::SeqCst));
 }

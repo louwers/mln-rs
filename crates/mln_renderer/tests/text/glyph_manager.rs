@@ -110,12 +110,14 @@ impl GlyphManagerObserver for StubGlyphManagerObserver {
     }
 }
 
+type OnGlyphsAvailable = Rc<dyn Fn(GlyphMap)>;
+
 /// `StubGlyphRequestor`. The callback is an `Rc<dyn Fn>` because C++'s
-/// LocalCJKGlyphPrefersLocalRasterizationOverRange calls `getGlyphs` from
+/// `LocalCJKGlyphPrefersLocalRasterizationOverRange` calls `getGlyphs` from
 /// inside it, which notifies the requestor again.
 #[derive(Default)]
 struct StubGlyphRequestor {
-    glyphs_available: RefCell<Option<Rc<dyn Fn(GlyphMap)>>>,
+    glyphs_available: RefCell<Option<OnGlyphsAvailable>>,
     missing_glyph_retries: Cell<usize>,
 }
 
@@ -138,7 +140,7 @@ struct GlyphManagerTest {
     observer: Rc<StubGlyphManagerObserver>,
     requestor: Rc<StubGlyphRequestor>,
     glyph_manager: Rc<GlyphManager>,
-    _log: Option<SquelchLog>,
+    squelch_log: Option<SquelchLog>,
 }
 
 impl GlyphManagerTest {
@@ -154,7 +156,7 @@ impl GlyphManagerTest {
             observer: Rc::new(StubGlyphManagerObserver::default()),
             requestor: Rc::new(StubGlyphRequestor::default()),
             glyph_manager: GlyphManager::new(Some(local_glyph_rasterizer)),
-            _log: None,
+            squelch_log: None,
         }
     }
 
@@ -175,7 +177,7 @@ impl GlyphManagerTest {
 
     fn run(&mut self, url: &str, dependencies: GlyphDependencies) {
         // Squelch logging.
-        self._log = Some(SquelchLog::new());
+        self.squelch_log = Some(SquelchLog::new());
 
         self.glyph_manager.set_url(url);
         self.glyph_manager.set_observer(Some(self.observer.clone()));
@@ -194,7 +196,8 @@ impl GlyphManagerTest {
         let run_loop = self.run_loop.clone();
         *self.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
         let ids: GlyphIDs = chars.iter().map(|c| gid(*c)).collect();
-        let dependencies = GlyphDependencies { glyphs: VecMap::from([(font_stack, ids)]), shapes: Default::default() };
+        let dependencies =
+            GlyphDependencies { glyphs: VecMap::from([(font_stack, ids)]), shapes: HBShapeRequests::default() };
         self.run("test/fixtures/resources/glyphs.pbf", dependencies);
     }
 }
@@ -206,7 +209,7 @@ fn test_stack() -> FontStack {
 /// `GlyphDependencies{.glyphs = {{{{"Test Stack"}}, {chars...}}}, .shapes = {}}`.
 fn dependencies(chars: &[char]) -> GlyphDependencies {
     let ids: GlyphIDs = chars.iter().map(|c| GlyphID::new(*c as u32)).collect();
-    GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: Default::default() }
+    GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: HBShapeRequests::default() }
 }
 
 fn gid(c: char) -> GlyphID {
@@ -260,7 +263,7 @@ fn loading_success() {
 }
 
 /// The requestor's `glyphsAvailable` and the observer's `glyphsError` for
-/// LoadingFail / LoadingCorrupted: the requestor gets the range's glyphs as
+/// `LoadingFail` / `LoadingCorrupted`: the requestor gets the range's glyphs as
 /// missing before the error is reported.
 fn expect_error(test: &GlyphManagerTest, message: &'static str) -> Rc<Cell<bool>> {
     let answered = Rc::new(Cell::new(false));
@@ -576,8 +579,8 @@ fn load_local_cjk_glyph() {
         assert_eq!(glyph.bitmap.size, Size::new(30, 30));
 
         let pixel_count = (glyph.bitmap.size.width * glyph.bitmap.size.height) as usize;
-        for i in 0..pixel_count {
-            assert_eq!(glyph.bitmap.data[i], SDF_BITMAP[i], "pixel {i}");
+        for (i, &expected) in SDF_BITMAP.iter().enumerate().take(pixel_count) {
+            assert_eq!(glyph.bitmap.data[i], expected, "pixel {i}");
         }
 
         a.set(true);
@@ -790,16 +793,18 @@ fn glyph_range_local_generation_count_matches_constant() {
 // Port-only: a font-face engine that gets ready later (the browser build's,
 // which loads its shaper as a second wasm module).
 
+type ReadyCallback = Box<dyn FnOnce(Result<(), String>) + Send>;
+
 /// An engine that is ready once the test calls back the `ready`s it holds.
 #[derive(Default)]
 struct DeferredEngine {
-    ready: Mutex<Vec<Box<dyn FnOnce(Result<(), String>) + Send>>>,
+    ready: Mutex<Vec<ReadyCallback>>,
     prepares: AtomicUsize,
     loads: AtomicUsize,
 }
 
 impl DeferredEngine {
-    fn report(&self, result: Result<(), String>) {
+    fn report(&self, result: &Result<(), String>) {
         let ready = std::mem::take(&mut *self.ready.lock().unwrap());
         for ready in ready {
             ready(result.clone());
@@ -856,7 +861,7 @@ fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphManagerTest {
         data: None,
     };
     test.glyph_manager.set_font_faces(Some(Arc::new(vec![face])));
-    test._log = Some(SquelchLog::new());
+    test.squelch_log = Some(SquelchLog::new());
     test
 }
 
@@ -868,7 +873,8 @@ fn request_font_face(test: &GlyphManagerTest) -> Rc<RefCell<Option<GlyphMap>>> {
         *a.borrow_mut() = Some(glyphs);
     }));
     let ids: GlyphIDs = [GlyphID::with_type(0, FONT_FACE)].into_iter().collect();
-    let dependencies = GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: Default::default() };
+    let dependencies =
+        GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: HBShapeRequests::default() };
     test.glyph_manager.get_glyphs(&test.requestor(), dependencies, Some(&test.file_source()));
     available
 }
@@ -889,7 +895,7 @@ fn font_face_waits_for_the_engine() {
     assert!(test.glyph_manager.get_hb_shaper(&test_stack(), FONT_FACE).is_none());
 
     // Once it is, the RunLoop parses the file and notifies the requestor.
-    engine.report(Ok(()));
+    engine.report(&Ok(()));
     assert!(available.borrow().is_none());
     test.run_loop.run_once();
     assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
@@ -916,7 +922,7 @@ fn font_face_engine_failure_leaves_the_face_out() {
     let engine = Arc::new(DeferredEngine::default());
     let test = font_face_test(&engine);
     let available = request_font_face(&test);
-    engine.report(Err("no shaper".to_owned()));
+    engine.report(&Err("no shaper".to_owned()));
     test.run_loop.run_once();
     // Notified, as for a file that isn't a font: without the glyph.
     assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
@@ -937,7 +943,7 @@ fn font_face_with_data_needs_no_request() {
     let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0, 0xFFFF)]) }
         .with_data(FontData::new(Arc::new(b"font".to_vec())));
     test.glyph_manager.set_font_faces(Some(Arc::new(vec![face])));
-    engine.report(Ok(()));
+    engine.report(&Ok(()));
 
     let available = request_font_face(&test);
     test.run_loop.run_once();

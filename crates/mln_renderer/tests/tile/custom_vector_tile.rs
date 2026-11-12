@@ -75,7 +75,7 @@ fn invalidate_failed_tile() {
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, Error::native("failed")));
+    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, &Error::native("failed")));
     test.run_loop.wait_for_empty();
 
     loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
@@ -98,7 +98,7 @@ fn fetch_failed_tile_again() {
     loader.self_ref().invoke(move |loader| loader.fetch_tile(&id, 0, Box::new(NullSubscriber)));
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id.canonical, Error::native("failed")));
+    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id.canonical, &Error::native("failed")));
 
     // A tile that still shows older data doesn't cancel when it leaves the
     // view, so the next request for it has to ask the host again.
@@ -221,5 +221,5 @@ fn set_mlt_tile_data() {
     let options = SourceQueryOptions { source_layers: Some(vec!["water".to_owned()]), filter: None };
     let mut result = Vec::new();
     tile.query_source_features(&mut result, &options, None).unwrap();
-    assert!(!result.is_empty());
+    assert_ne!(result, [] as [mln_util::feature::Feature; 0]);
 }

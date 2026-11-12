@@ -34,7 +34,8 @@ pub enum ErrorKind {
 }
 
 /// A failed call: its [`ErrorKind`] and a message that says what failed.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, thiserror::Error)]
+#[error("{message}")]
 pub struct Error {
     pub kind: ErrorKind,
     pub message: String,
@@ -81,14 +82,6 @@ impl Error {
         Error::new(ErrorKind::AlreadyExists, message)
     }
 }
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {

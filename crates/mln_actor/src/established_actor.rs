@@ -30,6 +30,7 @@ impl<O: 'static> Default for AspiringActor<O> {
 }
 
 impl<O: 'static> AspiringActor<O> {
+    #[must_use]
     pub fn new() -> Self {
         Self::with_mailbox(Mailbox::new())
     }
@@ -39,6 +40,7 @@ impl<O: 'static> AspiringActor<O> {
     }
 
     /// `self()`.
+    #[must_use]
     pub fn self_ref(&self) -> ActorRef<O> {
         ActorRef::new(&self.mailbox)
     }
@@ -60,6 +62,7 @@ impl<O: 'static> EstablishedActor<O> {
         EstablishedActor { mailbox: parent.mailbox.clone(), object: Some(object) }
     }
 
+    #[must_use]
     pub fn object(&self) -> &O {
         self.object.as_ref().expect("established actor object")
     }

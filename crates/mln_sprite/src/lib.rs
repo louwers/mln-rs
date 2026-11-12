@@ -1,5 +1,5 @@
 //! Ports `src/mln/sprite`: the sprite loader (requests the sprite JSON and
-//! image through a FileSource, parses them on the thread pool) and the
+//! image through a `FileSource`, parses them on the thread pool) and the
 //! sprite parser.
 
 pub mod sprite_loader;

@@ -378,7 +378,7 @@ mod tests {
         let mut out = diagnostic();
         let options = options.map_or(core::ptr::null(), core::ptr::from_ref);
         // SAFETY: locals that outlive the call.
-        let status = unsafe { mln_style_expression_create(view(json), options, &mut expression, &mut *out) };
+        let status = unsafe { mln_style_expression_create(view(json), options, &raw mut expression, &raw mut *out) };
         if status == MLN_STATUS_OK {
             Ok(expression)
         } else {
@@ -401,7 +401,14 @@ mod tests {
         let inputs = inputs.map_or(core::ptr::null(), core::ptr::from_ref);
         // SAFETY: locals that outlive the call, and the capacity of `json`.
         let status = unsafe {
-            mln_style_expression_evaluate(expression, inputs, json.as_mut_ptr(), json.len(), &mut length, &mut *out)
+            mln_style_expression_evaluate(
+                expression,
+                inputs,
+                json.as_mut_ptr(),
+                json.len(),
+                &raw mut length,
+                &raw mut *out,
+            )
         };
         if status != MLN_STATUS_OK {
             return Err((status, message(&out).to_owned()));
@@ -571,8 +578,9 @@ mod tests {
         let expression = create("1");
         let mut occupied = expression;
         // SAFETY: a local out-handle and a null diagnostic.
-        let status =
-            unsafe { mln_style_expression_create(view("1"), core::ptr::null(), &mut occupied, core::ptr::null_mut()) };
+        let status = unsafe {
+            mln_style_expression_create(view("1"), core::ptr::null(), &raw mut occupied, core::ptr::null_mut())
+        };
         assert_eq!((status, occupied), (MLN_STATUS_INVALID_ARGUMENT, expression));
         mln_style_expression_release(expression);
 
@@ -607,7 +615,7 @@ mod tests {
                 is_zoom_constant: !zoom_constant,
             };
             // SAFETY: a local output and a null diagnostic.
-            let status = unsafe { mln_style_expression_get_info(expression, &mut info, core::ptr::null_mut()) };
+            let status = unsafe { mln_style_expression_get_info(expression, &raw mut info, core::ptr::null_mut()) };
             assert_eq!(status, MLN_STATUS_OK);
             assert_eq!((info.is_feature_constant, info.is_zoom_constant), (feature_constant, zoom_constant), "{json}");
             mln_style_expression_release(expression);
@@ -619,7 +627,7 @@ mod tests {
         unsafe {
             let status = mln_style_expression_get_info(expression, core::ptr::null_mut(), core::ptr::null_mut());
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
-            let status = mln_style_expression_get_info(expression, &mut small, core::ptr::null_mut());
+            let status = mln_style_expression_get_info(expression, &raw mut small, core::ptr::null_mut());
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
         }
         mln_style_expression_release(expression);
@@ -643,13 +651,13 @@ mod tests {
                     core::ptr::null_mut(),
                 )
             };
-            assert_eq!(evaluate(core::ptr::null_mut(), 0, &mut length), MLN_STATUS_OK);
+            assert_eq!(evaluate(core::ptr::null_mut(), 0, &raw mut length), MLN_STATUS_OK);
             assert_eq!(length, 8);
-            assert_eq!(evaluate(exact.as_mut_ptr(), exact.len(), &mut length), MLN_STATUS_OK);
+            assert_eq!(evaluate(exact.as_mut_ptr(), exact.len(), &raw mut length), MLN_STATUS_OK);
             assert!(exact.iter().all(|byte| *byte == b'x' as c_char));
-            assert_eq!(evaluate(fits.as_mut_ptr(), fits.len(), &mut length), MLN_STATUS_OK);
+            assert_eq!(evaluate(fits.as_mut_ptr(), fits.len(), &raw mut length), MLN_STATUS_OK);
             assert_eq!(fits.map(|byte| byte as u8), *b"\"abcdef\"\0");
-            assert_eq!(evaluate(core::ptr::null_mut(), 1, &mut length), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(evaluate(core::ptr::null_mut(), 1, &raw mut length), MLN_STATUS_INVALID_ARGUMENT);
             assert_eq!(evaluate(fits.as_mut_ptr(), fits.len(), core::ptr::null_mut()), MLN_STATUS_INVALID_ARGUMENT);
         }
         mln_style_expression_release(expression);
@@ -734,7 +742,7 @@ mod tests {
         let mut info = mln_style_expression_info { size: 4, is_feature_constant: false, is_zoom_constant: false };
         info.size = size_of_val(&info) as u32;
         // SAFETY: a local output and a null diagnostic.
-        let status = unsafe { mln_style_expression_get_info(expression, &mut info, core::ptr::null_mut()) };
+        let status = unsafe { mln_style_expression_get_info(expression, &raw mut info, core::ptr::null_mut()) };
         assert_eq!(status, MLN_STATUS_INVALID_STATE);
         assert_eq!(evaluate_with(handles::NULL, None).unwrap_err().0, MLN_STATUS_INVALID_ARGUMENT);
     }

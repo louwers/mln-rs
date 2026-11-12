@@ -1,6 +1,6 @@
 //! Ports the high-level files of `src/mln/text` (glyph requests, symbol
 //! geometry, collision and placement). They include the renderer's
-//! buckets, layers and storage, so they live in mln_renderer; shaping,
+//! buckets, layers and storage, so they live in `mln_renderer`; shaping,
 //! glyph PBFs and BiDi are in the low `mln_text` crate.
 
 pub mod check_max_angle;

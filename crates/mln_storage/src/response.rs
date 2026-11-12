@@ -21,7 +21,8 @@ pub enum Reason {
 }
 
 /// Why a resource request failed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct ResourceError {
     pub reason: Reason,
     /// An error message from the request handler, e.g. a server message or a
@@ -39,14 +40,6 @@ impl ResourceError {
         ResourceError { reason, message: message.into(), retry_after }
     }
 }
-
-impl std::fmt::Display for ResourceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ResourceError {}
 
 /// `Response`. `Clone` is the C++ copy constructor (the error is copied,
 /// the data shared).
@@ -76,11 +69,13 @@ pub struct Response {
 }
 
 impl Response {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// `isFresh()`.
+    #[must_use]
     pub fn is_fresh(&self) -> bool {
         match self.expires {
             Some(expires) => expires > now(),
@@ -90,6 +85,7 @@ impl Response {
 
     /// `isUsable()`: whether we are allowed to use this response according
     /// to HTTP caching rules. It may or may not be stale.
+    #[must_use]
     pub fn is_usable(&self) -> bool {
         !self.must_revalidate || self.expires.is_some_and(|expires| expires > now())
     }

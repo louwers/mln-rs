@@ -19,6 +19,7 @@ pub struct ProgramSource {
 
 impl ProgramSource {
     /// The provided source code is intended for use with the given backend.
+    #[must_use]
     pub fn new(for_backend: BackendType, vertex: &str, fragment: &str) -> Self {
         ProgramSource { backend: Some(for_backend), vertex: vertex.to_owned(), fragment: fragment.to_owned() }
     }
@@ -47,6 +48,7 @@ fn to_string_decimal(value: f32) -> String {
 }
 
 impl ProgramParameters {
+    #[must_use]
     pub fn new(pixel_ratio: f32, overdraw: bool) -> Self {
         let mut defines = VecMap::new();
         defines.insert("DEVICE_PIXEL_RATIO".to_owned(), to_string_decimal(pixel_ratio));
@@ -67,6 +69,7 @@ impl ProgramParameters {
     }
 
     /// Provide custom shader code which overrides any default source present
+    #[must_use]
     pub fn with_shader_source(&self, source: &ProgramSource) -> Self {
         let mut params = self.clone();
         let backend = source.backend.expect("ProgramSource without backend");
@@ -75,6 +78,7 @@ impl ProgramParameters {
     }
 
     /// Provide default shader source
+    #[must_use]
     pub fn with_default_source(&self, source: &ProgramSource) -> Self {
         let mut params = self.clone();
         let backend = source.backend.expect("ProgramSource without backend");
@@ -83,6 +87,7 @@ impl ProgramParameters {
     }
 
     /// Provide a `BuiltIn` value used to indicate the program type
+    #[must_use]
     pub fn with_program_type(&self, type_: BuiltIn) -> Self {
         let mut params = self.clone();
         params.program_type = type_;

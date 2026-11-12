@@ -1,5 +1,5 @@
 //! The map's font faces (a style's "font-faces"), shaped and rasterized by
-//! the shaper module (crates/mln_web_shaper, web/pkg/mln_web_shaper.js): the
+//! the shaper module (`crates/mln_web_shaper`, `web/pkg/mln_web_shaper.js`): the
 //! map's `FontFaceEngine`. This module is built without the in-process
 //! shaper, so HarfRust, skrifa and the FreeType port are only in that one,
 //! which the map's Web Worker loads the first time a style declares font
@@ -113,7 +113,7 @@ impl FontFaceEngine for ShaperModuleEngine {
             }),
         }
         let Step::Load(loader) = step else { return };
-        let promise = loader.call0(&JsValue::NULL).and_then(|p| p.dyn_into::<js_sys::Promise>());
+        let promise = loader.call0(&JsValue::NULL).and_then(JsCast::dyn_into::<js_sys::Promise>);
         wasm_bindgen_futures::spawn_local(async move {
             let loaded = match promise {
                 Ok(promise) => JsFuture::from(promise).await,
@@ -168,7 +168,7 @@ impl FontFaceShaper for ShaperFace {
     fn shape(&self, text: &[u16], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
         match self.face.shape(text, rtl) {
             Ok(shaped) => {
-                for glyph in shaped.chunks_exact(4) {
+                for glyph in shaped.as_chunks::<4>().0 {
                     glyph_ids.push(GlyphID::with_type(glyph[0] as u16, self.type_));
                     adjusts.push(HBShapeAdjust::new(glyph[1], glyph[2], glyph[3]));
                 }

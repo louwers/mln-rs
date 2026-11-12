@@ -17,6 +17,7 @@ pub trait LayerFactory: Send + Sync {
 }
 
 /// `LayerFactory::getSource` (protected helper).
+#[must_use]
 pub fn get_source(value: &Convertible<'_>) -> Option<String> {
     let source_value = value.object_member("source")?;
     source_value.to_string()

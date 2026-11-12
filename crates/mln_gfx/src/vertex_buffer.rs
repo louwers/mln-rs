@@ -25,11 +25,13 @@ pub struct IndexBuffer {
 }
 
 impl IndexBuffer {
+    #[must_use]
     pub fn new(elements: usize, resource: Box<dyn IndexBufferResource>) -> Self {
         IndexBuffer { elements, resource }
     }
 
     /// `getResource<T>()`: the C++ `static_cast` becomes a checked downcast.
+    #[must_use]
     pub fn get_resource<T: 'static>(&self) -> Option<&T> {
         self.resource.as_any().downcast_ref::<T>()
     }

@@ -17,6 +17,7 @@ pub struct HBShapeAdjust {
 }
 
 impl HBShapeAdjust {
+    #[must_use]
     pub fn new(x: f32, y: f32, a: f32) -> Self {
         HBShapeAdjust { x_offset: x, y_offset: y, advance: a }
     }

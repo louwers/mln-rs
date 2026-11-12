@@ -75,11 +75,13 @@ const _: () = {
 };
 
 impl UpdateSlot {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// A reader of this slot's updates.
+    #[must_use]
     pub fn reader(&self) -> UpdateReader {
         self.shared.reader()
     }
@@ -104,6 +106,7 @@ impl UpdateSlot {
     }
 
     /// Counts the updates that readers could see.
+    #[must_use]
     pub fn generation(&self) -> u64 {
         self.shared.state.lock_unpoisoned().generation
     }
@@ -111,6 +114,7 @@ impl UpdateSlot {
     /// The generation of the update that shows what was published last:
     /// the current one, or while a group holds an update back, the one its
     /// end shows.
+    #[must_use]
     pub fn pending_generation(&self) -> u64 {
         let state = self.shared.state.lock_unpoisoned();
         state.generation + u64::from(state.held.is_some())
@@ -171,6 +175,7 @@ impl UpdateSlot {
     }
 
     /// How many command groups are open.
+    #[must_use]
     pub fn group_depth(&self) -> u32 {
         self.shared.state.lock_unpoisoned().group_depth
     }
@@ -210,6 +215,7 @@ impl Drop for UpdateReader {
 
 impl UpdateReader {
     /// The latest update, if the map published one and is still there.
+    #[must_use]
     pub fn latest(&self) -> Option<Update> {
         let state = self.shared.state.lock_unpoisoned();
         let parameters = state.latest.clone()?;
@@ -217,11 +223,13 @@ impl UpdateReader {
     }
 
     /// The generation of the latest update, or 0 before the first.
+    #[must_use]
     pub fn generation(&self) -> u64 {
         self.shared.state.lock_unpoisoned().generation
     }
 
     /// Whether the map that published to the slot is gone.
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.shared.state.lock_unpoisoned().closed
     }
@@ -238,6 +246,7 @@ impl UpdateReader {
     }
 
     /// Whether both read the same slot.
+    #[must_use]
     pub fn ptr_eq(&self, other: &UpdateReader) -> bool {
         Arc::ptr_eq(&self.shared, &other.shared)
     }

@@ -8,7 +8,9 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO};
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_properties::*;
+use mln_style::layers::heatmap_layer_properties::{
+    HeatmapIntensity, HeatmapLayerProperties, HeatmapRadius, HeatmapWeight,
+};
 use mln_style::properties::Property;
 use mln_style_types::TranslateAnchorType;
 use mln_util::immutable::Immutable;
@@ -78,6 +80,8 @@ impl LayerTweaker for HeatmapLayerTweaker {
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
+            const NEAR_CLIPPED: bool = false;
+            const IN_VIEWPORT_PIXEL_UNITS: bool = false;
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
             };
@@ -104,8 +108,6 @@ impl LayerTweaker for HeatmapLayerTweaker {
             };
             let binders = binders_lock.read_unpoisoned();
 
-            const NEAR_CLIPPED: bool = false;
-            const IN_VIEWPORT_PIXEL_UNITS: bool = false;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,

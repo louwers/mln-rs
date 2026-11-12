@@ -29,6 +29,7 @@ pub struct GeoJSONTileFeature<'a> {
 static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
 impl<'a> GeoJSONTileFeature<'a> {
+    #[must_use]
     pub fn new(feature: &'a Feature<i16>) -> Self {
         GeoJSONTileFeature { feature, geometry: OnceCell::new(), error: OnceCell::new() }
     }
@@ -83,6 +84,7 @@ pub struct GeoJSONTileLayer {
 }
 
 impl GeoJSONTileLayer {
+    #[must_use]
     pub fn new(features: Arc<TileFeatureCollection>) -> Self {
         GeoJSONTileLayer { features }
     }
@@ -109,14 +111,17 @@ pub struct GeoJSONTileData {
 }
 
 impl GeoJSONTileData {
+    #[must_use]
     pub fn new(features: TileFeatureCollection) -> Self {
         GeoJSONTileData { features: Arc::new(features) }
     }
 
+    #[must_use]
     pub fn from_shared(features: Arc<TileFeatureCollection>) -> Self {
         GeoJSONTileData { features }
     }
 
+    #[must_use]
     pub fn features(&self) -> &Arc<TileFeatureCollection> {
         &self.features
     }

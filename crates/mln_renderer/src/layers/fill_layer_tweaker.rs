@@ -3,7 +3,10 @@
 // branches: the port's backend is WebGPU).
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
-use mln_gfx::shaders::fill_layer_ubo::*;
+use mln_gfx::shaders::fill_layer_ubo::{
+    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO,
+    FillOutlineTriangulatedDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO, FillTilePropsUnionUBO,
+};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_TILE_PROPS_UBO,
@@ -11,7 +14,9 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::fill_layer_properties::*;
+use mln_style::layers::fill_layer_properties::{
+    FillColor, FillLayerProperties, FillOpacity, FillOutlineColor, FillPattern, FillTranslate, FillTranslateAnchor,
+};
 use mln_style::properties::Property;
 use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_util::constants::TILE_SIZE_D;
@@ -47,7 +52,7 @@ impl FillLayerTweaker {
 
 /// `util::cast<float>(std::array<uint16_t, 4>)`.
 fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
-    [a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32]
+    [f32::from(a[0]), f32::from(a[1]), f32::from(a[2]), f32::from(a[3])]
 }
 
 impl LayerTweaker for FillLayerTweaker {
@@ -102,6 +107,8 @@ impl LayerTweaker for FillLayerTweaker {
         let self_ptr: *const Self = self;
         let id = self.base.id.clone();
         visit_layer_group_drawables(layer_group, |drawable| {
+            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
+            const NEAR_CLIPPED: bool = false;
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
             };
@@ -136,8 +143,6 @@ impl LayerTweaker for FillLayerTweaker {
             let pattern_pos_b = tile.and_then(|t| t.get_pattern(fill_pattern_value.to.id()));
             binders.set_pattern_parameters(pattern_pos_a.as_ref(), pattern_pos_b.as_ref(), &crossfade);
 
-            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
-            const NEAR_CLIPPED: bool = false;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
@@ -152,12 +157,13 @@ impl LayerTweaker for FillLayerTweaker {
             projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             // from FillPatternProgram::layoutUniformValues
-            let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, int_zoom as f32);
-            let tile_size_at_nearest_zoom =
-                (TILE_SIZE_D * parameters.state.zoom_scale(int_zoom as f64 - tile_id.canonical.z as f64)) as i32;
-            let pixel_x = (tile_size_at_nearest_zoom as f64
-                * (tile_id.canonical.x as f64
-                    + tile_id.wrap as f64 * parameters.state.zoom_scale(tile_id.canonical.z as f64)))
+            let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
+            let tile_size_at_nearest_zoom = (TILE_SIZE_D
+                * parameters.state.zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z)))
+                as i32;
+            let pixel_x = (f64::from(tile_size_at_nearest_zoom)
+                * (f64::from(tile_id.canonical.x)
+                    + f64::from(tile_id.wrap) * parameters.state.zoom_scale(f64::from(tile_id.canonical.z))))
                 as i32;
             let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
 
@@ -188,7 +194,7 @@ impl LayerTweaker for FillLayerTweaker {
                         pad2: 0.0,
                     });
                 }
-                Some(FillVariant::FillPattern) | Some(FillVariant::FillOutlinePattern) => {
+                Some(FillVariant::FillPattern | FillVariant::FillOutlinePattern) => {
                     ubo.set_fill_pattern(&FillPatternDrawableUBO {
                         matrix: cast_matrix(&matrix),
                         pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],

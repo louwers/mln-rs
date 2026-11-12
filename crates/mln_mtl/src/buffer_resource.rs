@@ -23,7 +23,7 @@ use crate::renderer_backend::BackendImpl;
 
 /// `setVertexBytes:length:atIndex:` is the best option for binding a very
 /// small amount (less than 4 KB) of dynamic buffer data, which avoids the
-/// overhead of creating an intermediary MTLBuffer object.
+/// overhead of creating an intermediary `MTLBuffer` object.
 const BUFFER_THRESHOLD: usize = 4096;
 
 thread_local! {

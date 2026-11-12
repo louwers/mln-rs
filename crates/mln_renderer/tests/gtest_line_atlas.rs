@@ -20,16 +20,16 @@ struct Mt19937 {
 impl Mt19937 {
     const N: usize = 624;
     const M: usize = 397;
-    const MATRIX_A: u32 = 0x9908b0df;
-    const UPPER_MASK: u32 = 0x80000000;
-    const LOWER_MASK: u32 = 0x7fffffff;
+    const MATRIX_A: u32 = 0x9908_b0df;
+    const UPPER_MASK: u32 = 0x8000_0000;
+    const LOWER_MASK: u32 = 0x7fff_ffff;
 
     /// `mersenne_twister_engine(result_type value)`.
     fn new(value: u32) -> Self {
         let mut state = [0u32; Self::N];
         state[0] = value;
         for i in 1..Self::N {
-            state[i] = 1812433253u32.wrapping_mul(state[i - 1] ^ (state[i - 1] >> 30)).wrapping_add(i as u32);
+            state[i] = 1_812_433_253_u32.wrapping_mul(state[i - 1] ^ (state[i - 1] >> 30)).wrapping_add(i as u32);
         }
         Mt19937 { state, index: Self::N }
     }
@@ -54,8 +54,8 @@ impl Mt19937 {
         let mut z = self.state[self.index];
         self.index += 1;
         z ^= z >> 11;
-        z ^= (z << 7) & 0x9d2c5680;
-        z ^= (z << 15) & 0xefc60000;
+        z ^= (z << 7) & 0x9d2c_5680;
+        z ^= (z << 15) & 0xefc6_0000;
         z ^= z >> 18;
         z
     }
@@ -83,7 +83,7 @@ fn uniform_int(g: &mut Mt19937, a: u64, b: u64) -> u64 {
 /// draw, `float(g() - min) / 2^32`, clamped below 1.
 fn generate_canonical_f32(g: &mut Mt19937) -> f32 {
     let sum = g.next_u32() as f32;
-    let ret = sum / 4294967296.0f32;
+    let ret = sum / 4_294_967_296.0_f32;
     // `std::nextafter(1.0f, 0.0f)`.
     if ret >= 1.0 { f32::from_bits(1.0f32.to_bits() - 1) } else { ret }
 }
@@ -103,10 +103,9 @@ impl NormalDistribution {
     }
 
     fn sample(&mut self, g: &mut Mt19937) -> f32 {
-        let ret;
-        if self.saved_available {
+        let ret = if self.saved_available {
             self.saved_available = false;
-            ret = self.saved;
+            self.saved
         } else {
             let (mut x, mut y, mut r2);
             loop {
@@ -120,8 +119,8 @@ impl NormalDistribution {
             let mult = (-2.0 * r2.ln() / r2).sqrt();
             self.saved = x * mult;
             self.saved_available = true;
-            ret = y * mult;
-        }
+            y * mult
+        };
         ret * self.stddev + self.mean
     }
 }

@@ -36,7 +36,7 @@ fn prefetch_tiles() {
     let observer = Rc::new(StubMapObserver::default());
     {
         let run_loop = run_loop.clone();
-        observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+        observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     }
 
     let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
@@ -74,7 +74,7 @@ fn prefetch_tiles() {
             map.style_mut().load_json(&read_file("test/fixtures/map/prefetch/style.json"));
             map.jump_to(
                 &CameraOptions::default()
-                    .with_center(Some(LatLng::new(40.726989, -73.992857).unwrap()))
+                    .with_center(Some(LatLng::new(40.726_989, -73.992_857).unwrap()))
                     .with_zoom(Some(f64::from(zoom))),
             ); // Manhattan
         }

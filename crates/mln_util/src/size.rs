@@ -10,19 +10,23 @@ pub struct Size {
 }
 
 impl Size {
+    #[must_use]
     pub const fn new(width: u32, height: u32) -> Self {
         Size { width, height }
     }
 
     /// C++ multiplies two `uint32_t`s, which wraps on overflow.
+    #[must_use]
     pub const fn area(&self) -> u32 {
         self.width.wrapping_mul(self.height)
     }
 
+    #[must_use]
     pub fn aspect_ratio(&self) -> f32 {
         self.width as f32 / self.height as f32
     }
 
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
@@ -35,7 +39,7 @@ mod tests {
     #[test]
     fn basics() {
         let s = Size::new(512, 256);
-        assert_eq!(s.area(), 131072);
+        assert_eq!(s.area(), 131_072);
         assert_eq!(s.aspect_ratio(), 2.0);
         assert!(!s.is_empty());
         assert!(Size::default().is_empty());

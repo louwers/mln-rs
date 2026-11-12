@@ -23,10 +23,10 @@ use crate::shaders::segment::SegmentBase;
 /// appearance of dashed lines we add extra points near sharp corners so that
 /// a smaller part of the line is tilted.
 ///
-/// COS_HALF_SHARP_CORNER controls how sharp a corner has to be for us to add
+/// `COS_HALF_SHARP_CORNER` controls how sharp a corner has to be for us to add
 /// an extra vertex. The default is 75 degrees.
 ///
-/// The newly created vertices are placed SHARP_CORNER_OFFSET pixels from the
+/// The newly created vertices are placed `SHARP_CORNER_OFFSET` pixels from the
 /// corner.
 fn cos_half_sharp_corner() -> f32 {
     // `std::cos(75.0f / 2.0f * (pi_v<float> / 180.0f))`: computed in float.
@@ -58,11 +58,13 @@ pub struct PolylineGeneratorDistances {
 }
 
 impl PolylineGeneratorDistances {
+    #[must_use]
     pub fn new(clip_start: f64, clip_end: f64, total: f64) -> Self {
         PolylineGeneratorDistances { clip_start, clip_end, total }
     }
 
     /// Scale line distance from tile units to [0, 2^15).
+    #[must_use]
     pub fn scale_to_max_line_distance(&self, tile_distance: f64) -> f64 {
         let mut relative_tile_distance = tile_distance / self.total;
         if relative_tile_distance.is_infinite() || relative_tile_distance.is_nan() {
@@ -70,7 +72,7 @@ impl PolylineGeneratorDistances {
             relative_tile_distance = 0.0;
         }
         (relative_tile_distance * (self.clip_end - self.clip_start) + self.clip_start)
-            * (MAX_LINE_DISTANCE - 1.0) as f64
+            * f64::from(MAX_LINE_DISTANCE - 1.0)
     }
 }
 
@@ -151,15 +153,15 @@ fn round(a: Point<f64>) -> Point<f64> {
 /// `point<int16_t> - point<int16_t>`: the `int` difference narrowed back to
 /// `int16_t`.
 fn sub_i16(a: GeometryCoordinate, b: GeometryCoordinate) -> GeometryCoordinate {
-    Point::new((a.x as i32 - b.x as i32) as i16, (a.y as i32 - b.y as i32) as i16)
+    Point::new((i32::from(a.x) - i32::from(b.x)) as i16, (i32::from(a.y) - i32::from(b.y)) as i16)
 }
 /// `point<int16_t> + point<int16_t>`.
 fn add_i16(a: GeometryCoordinate, b: GeometryCoordinate) -> GeometryCoordinate {
-    Point::new((a.x as i32 + b.x as i32) as i16, (a.y as i32 + b.y as i32) as i16)
+    Point::new((i32::from(a.x) + i32::from(b.x)) as i16, (i32::from(a.y) + i32::from(b.y)) as i16)
 }
 /// `convertPoint<double>(Point<int16_t>)`
 fn to_f64(a: GeometryCoordinate) -> Point<f64> {
-    Point::new(a.x as f64, a.y as f64)
+    Point::new(f64::from(a.x), f64::from(a.y))
 }
 /// `convertPoint<int16_t>(Point<double>)`: `static_cast<int16_t>`; the
 /// values are rounded tile coordinates, in range. Out of range is UB in C++;
@@ -169,10 +171,11 @@ fn to_i16(a: Point<f64>) -> GeometryCoordinate {
 }
 /// `util::dist<double>(Point<int16_t>, Point<int16_t>)`: `int` arithmetic,
 /// then `std::sqrt(int)`.
+#[must_use]
 pub fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
-    let dx = b.x as i32 - a.x as i32;
-    let dy = b.y as i32 - a.y as i32;
-    (dx.wrapping_mul(dx).wrapping_add(dy.wrapping_mul(dy)) as f64).sqrt()
+    let dx = i32::from(b.x) - i32::from(a.x);
+    let dy = i32::from(b.y) - i32::from(a.y);
+    f64::from(dx.wrapping_mul(dx).wrapping_add(dy.wrapping_mul(dy))).sqrt()
 }
 
 /// `gfx::PolylineGenerator<PolylineLayoutVertex, PolylineSegment>`.
@@ -212,6 +215,8 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
     }
 
     pub fn generate(&mut self, coordinates: &GeometryCoordinates, options: &PolylineGeneratorOptions) {
+        // Pre-allocate for triangles based on measuring benchmark execution
+        const APPROX_TRIANGLES_PER_SEGMENT: usize = 6;
         let len = {
             let mut l = coordinates.len();
             // If the line has duplicate vertices at the end, adjust length to remove them.
@@ -242,9 +247,9 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
         let overscaling = options.overscaling;
 
         let sharp_corner_offset: f64 = if overscaling == 0 {
-            SHARP_CORNER_OFFSET as f64 * (EXTENT as f64 / TILE_SIZE_D)
-        } else if overscaling as f64 <= 16.0 {
-            SHARP_CORNER_OFFSET as f64 * (EXTENT as f64 / (TILE_SIZE_D * overscaling as f64))
+            f64::from(SHARP_CORNER_OFFSET) * (f64::from(EXTENT) / TILE_SIZE_D)
+        } else if f64::from(overscaling) <= 16.0 {
+            f64::from(SHARP_CORNER_OFFSET) * (f64::from(EXTENT) / (TILE_SIZE_D * f64::from(overscaling)))
         } else {
             0.0
         };
@@ -274,11 +279,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
         }
 
         let start_vertex = self.vertices.len();
-        let mut triangle_store: Vec<TriangleElement> = Vec::new();
-
-        // Pre-allocate for triangles based on measuring benchmark execution
-        const APPROX_TRIANGLES_PER_SEGMENT: usize = 6;
-        triangle_store.reserve((len - first) * APPROX_TRIANGLES_PER_SEGMENT);
+        let mut triangle_store: Vec<TriangleElement> = Vec::with_capacity((len - first) * APPROX_TRIANGLES_PER_SEGMENT);
 
         let cos_half_sharp_corner = cos_half_sharp_corner();
 
@@ -295,10 +296,10 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
             };
 
             // if two consecutive vertices exist, skip the current one
-            if let Some(next) = next_coordinate {
-                if coordinates[i] == next {
-                    continue;
-                }
+            if let Some(next) = next_coordinate
+                && coordinates[i] == next
+            {
+                continue;
             }
 
             if let Some(n) = next_normal {
@@ -349,13 +350,14 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
             // Calculate the length of the miter (the ratio of the miter to
             // the width) as the inverse of cosine of the angle between next
             // and join normals.
-            let miter_length = if cos_half_angle != 0.0 { 1.0 / cos_half_angle } else { f64::INFINITY };
+            let miter_length = if cos_half_angle == 0.0 { f64::INFINITY } else { 1.0 / cos_half_angle };
 
             // Approximate angle from cosine.
             let approx_angle = 2.0 * (2.0 - 2.0 * cos_half_angle).sqrt();
 
-            let is_sharp_corner =
-                cos_half_angle < cos_half_sharp_corner as f64 && prev_coordinate.is_some() && next_coordinate.is_some();
+            let is_sharp_corner = cos_half_angle < f64::from(cos_half_sharp_corner)
+                && prev_coordinate.is_some()
+                && next_coordinate.is_some();
 
             if is_sharp_corner && i > first {
                 let prev = prev_coordinate.expect("prevCoordinate");
@@ -388,14 +390,14 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
 
             if middle_vertex {
                 if current_join == LineJoinType::Round {
-                    if miter_length < options.round_limit as f64 {
+                    if miter_length < f64::from(options.round_limit) {
                         current_join = LineJoinType::Miter;
                     } else if miter_length <= 2.0 {
                         current_join = LineJoinType::FakeRound;
                     }
                 }
 
-                if current_join == LineJoinType::Miter && miter_length > miter_limit as f64 {
+                if current_join == LineJoinType::Miter && miter_length > f64::from(miter_limit) {
                     current_join = LineJoinType::Bevel;
                 }
 
@@ -410,7 +412,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
                     // If the miterLength is really small and the line bevel
                     // wouldn't be visible, just draw a miter join to save a
                     // triangle.
-                    if miter_length < miter_limit as f64 {
+                    if miter_length < f64::from(miter_limit) {
                         current_join = LineJoinType::Miter;
                     }
                 }
@@ -490,8 +492,8 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
                         current,
                         &mut distance,
                         prev_n,
-                        offset_a as f64,
-                        offset_b as f64,
+                        f64::from(offset_a),
+                        f64::from(offset_b),
                         false,
                         start_vertex,
                         &mut triangle_store,
@@ -509,16 +511,16 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
 
                     // Pick the number of triangles for approximating round
                     // join by based on the angle between normals.
-                    let n = ((approx_angle * 180.0 / PI) / DEG_PER_TRIANGLE as f64).round() as u32;
+                    let n = ((approx_angle * 180.0 / PI) / f64::from(DEG_PER_TRIANGLE)).round() as u32;
 
                     for m in 1..n {
-                        let mut t = m as f64 / n as f64;
+                        let mut t = f64::from(m) / f64::from(n);
                         if t != 0.5 {
                             // approximate spherical interpolation
                             // https://observablehq.com/@mourner/approximating-geometric-slerp
                             let t2 = t - 0.5;
                             let a = 1.0904 + cos_angle * (-3.2452 + cos_angle * (3.55645 - cos_angle * 1.43519));
-                            let b = 0.848013 + cos_angle * (-1.06021 + cos_angle * 0.215638);
+                            let b = 0.848_013 + cos_angle * (-1.06021 + cos_angle * 0.215_638);
                             t = t + t * t2 * (t - 1.0) * (a * t2 * t2 + b);
                         }
                         let approx_fractional_normal = unit(add(mul(prev_n, 1.0 - t), mul(next_n, t)));
@@ -540,8 +542,8 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
                         current,
                         &mut distance,
                         next_n,
-                        -offset_a as f64,
-                        -offset_b as f64,
+                        f64::from(-offset_a),
+                        f64::from(-offset_b),
                         false,
                         start_vertex,
                         &mut triangle_store,
@@ -720,7 +722,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
         }
 
         let segment = (self.get_segment)(self.segments.last_mut().expect("segment"));
-        debug_assert!(segment.vertex_length <= u16::MAX as usize);
+        debug_assert!(u16::try_from(segment.vertex_length).is_ok());
         let index = segment.vertex_length as u16;
 
         if self.indexes.is_empty() {
@@ -729,9 +731,9 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
         for triangle in &triangle_store {
             // IndexVector<Triangles>::emplace_back(uint16_t...): the sums are
             // `int`, narrowed to uint16_t.
-            self.indexes.push((index as i32 + triangle.a as i32) as u16);
-            self.indexes.push((index as i32 + triangle.b as i32) as u16);
-            self.indexes.push((index as i32 + triangle.c as i32) as u16);
+            self.indexes.push((i32::from(index) + i32::from(triangle.a)) as u16);
+            self.indexes.push((i32::from(index) + i32::from(triangle.b)) as u16);
+            self.indexes.push((i32::from(index) + i32::from(triangle.c)) as u16);
         }
 
         segment.vertex_length += vertex_count;
@@ -766,7 +768,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
             round,
             false,
             end_left as i8,
-            (scaled_distance * LINE_DISTANCE_SCALE as f64) as i32,
+            (scaled_distance * f64::from(LINE_DISTANCE_SCALE)) as i32,
         ));
         self.e3 = (self.vertices.len() - 1 - start_vertex) as isize;
         if self.e1 >= 0 && self.e2 >= 0 {
@@ -785,7 +787,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
             round,
             true,
             -end_right as i8,
-            (scaled_distance * LINE_DISTANCE_SCALE as f64) as i32,
+            (scaled_distance * f64::from(LINE_DISTANCE_SCALE)) as i32,
         ));
         self.e3 = (self.vertices.len() - 1 - start_vertex) as isize;
         if self.e1 >= 0 && self.e2 >= 0 {
@@ -798,7 +800,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
         // the buffers. When we get close to the distance, reset it to zero
         // and add the vertex again with a distance of zero. The max distance
         // is determined by the number of bits we allocate to `linesofar`.
-        if *distance > (MAX_LINE_DISTANCE / 2.0) as f64 && line_distances.is_none() {
+        if *distance > f64::from(MAX_LINE_DISTANCE / 2.0) && line_distances.is_none() {
             *distance = 0.0;
             self.add_current_vertex(
                 current_coordinate,
@@ -836,7 +838,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
             false,
             line_turns_left,
             0,
-            (distance * LINE_DISTANCE_SCALE as f64) as i32,
+            (distance * f64::from(LINE_DISTANCE_SCALE)) as i32,
         ));
         self.e3 = (self.vertices.len() - 1 - start_vertex) as isize;
         if self.e1 >= 0 && self.e2 >= 0 {

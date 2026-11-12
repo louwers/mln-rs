@@ -36,7 +36,7 @@ fn evaluate(property: &Transitioning<PropertyValue<f32>>, delta: Duration) -> f3
 
 /// gtest `ASSERT_FLOAT_EQ`: within 4 ULPs.
 fn assert_float_eq(expected: f32, actual: f32) {
-    let diff = (expected.to_bits() as i64 - actual.to_bits() as i64).abs();
+    let diff = (i64::from(expected.to_bits()) - i64::from(actual.to_bits())).abs();
     assert!(diff <= 4, "expected {expected}, got {actual}");
 }
 
@@ -63,8 +63,7 @@ fn evaluate_untransitioned_constant() {
 // gtest: TransitioningPropertyValue.EvaluateTransitionedConstantWithoutDelay
 #[test]
 fn evaluate_transitioned_constant_without_delay() {
-    let mut transition = TransitionOptions::default();
-    transition.duration = Some(milliseconds(1000));
+    let transition = TransitionOptions { duration: Some(milliseconds(1000)), ..TransitionOptions::default() };
 
     let t0 = Transitioning::with_prior(
         PropertyValue::Constant(0.0_f32),
@@ -76,16 +75,18 @@ fn evaluate_transitioned_constant_without_delay() {
     let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, TimePoint::min());
 
     assert_float_eq(0.0, evaluate(&t1, milliseconds(0)));
-    assert_float_eq(0.823099, evaluate(&t1, milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate(&t1, milliseconds(500)));
     assert_float_eq(1.0, evaluate(&t1, milliseconds(1500)));
 }
 
 // gtest: TransitioningPropertyValue.EvaluateTransitionedConstantWithDelay
 #[test]
 fn evaluate_transitioned_constant_with_delay() {
-    let mut transition = TransitionOptions::default();
-    transition.delay = Some(milliseconds(1000));
-    transition.duration = Some(milliseconds(1000));
+    let transition = TransitionOptions {
+        delay: Some(milliseconds(1000)),
+        duration: Some(milliseconds(1000)),
+        ..TransitionOptions::default()
+    };
 
     let t0 = Transitioning::with_prior(
         PropertyValue::Constant(0.0_f32),
@@ -99,7 +100,7 @@ fn evaluate_transitioned_constant_with_delay() {
     assert_float_eq(0.0, evaluate(&t1, milliseconds(0)));
     assert_float_eq(0.0, evaluate(&t1, milliseconds(500)));
     assert_float_eq(0.0, evaluate(&t1, milliseconds(612)));
-    assert_float_eq(0.823099, evaluate(&t1, milliseconds(1500)));
+    assert_float_eq(0.823_099, evaluate(&t1, milliseconds(1500)));
     assert_float_eq(1.0, evaluate(&t1, milliseconds(2500)));
 }
 
@@ -121,9 +122,11 @@ fn evaluate_data_expression(
 // gtest: TransitioningDataDrivenPropertyValue.Evaluate
 #[test]
 fn transitioning_data_driven_property_value_evaluate() {
-    let mut transition = TransitionOptions::default();
-    transition.delay = Some(milliseconds(1000));
-    transition.duration = Some(milliseconds(1000));
+    let transition = TransitionOptions {
+        delay: Some(milliseconds(1000)),
+        duration: Some(milliseconds(1000)),
+        ..TransitionOptions::default()
+    };
 
     let t0 = Transitioning::with_prior(
         PropertyValue::Constant(0.0_f32),
@@ -149,12 +152,11 @@ fn transitioning_data_driven_property_value_evaluate() {
 fn transition_completes_and_drops_prior() {
     // Not a C++ test: checks the `mutable prior` reset that hasTransition()
     // observes (properties.hpp).
-    let mut transition = TransitionOptions::default();
-    transition.duration = Some(milliseconds(1000));
+    let transition = TransitionOptions { duration: Some(milliseconds(1000)), ..TransitionOptions::default() };
     let t0 = Transitioning::new(PropertyValue::Constant(0.0_f32));
     let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, TimePoint::min());
     assert!(t1.has_transition());
-    assert_float_eq(0.823099, evaluate(&t1, milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate(&t1, milliseconds(500)));
     assert!(t1.has_transition());
     assert_eq!(1.0, evaluate(&t1, milliseconds(1000)));
     assert!(!t1.has_transition());
@@ -177,9 +179,11 @@ fn possibly_evaluated_evaluate_per_feature() {
 
     let feature = StubGeometryTileFeature::new(property_map(&[("r", feature::Value::Double(7.5))]));
 
-    let mut paint = CirclePaintProperties::PossiblyEvaluated::default();
     // A constant.
-    paint.circle_radius = PossiblyEvaluatedPropertyValue::Constant(3.0);
+    let mut paint = CirclePaintProperties::PossiblyEvaluated {
+        circle_radius: PossiblyEvaluatedPropertyValue::Constant(3.0),
+        ..CirclePaintProperties::PossiblyEvaluated::default()
+    };
     assert_eq!(3.0, paint.evaluate::<CircleRadius>(10.0, &feature));
     // A feature expression, with the property's default for a missing value.
     paint.circle_radius =
@@ -232,8 +236,7 @@ fn global_state_change(
     delta: Duration,
     state_only: bool,
 ) -> TransitionParameters {
-    let mut transition = TransitionOptions::default();
-    transition.duration = Some(milliseconds(1000));
+    let transition = TransitionOptions { duration: Some(milliseconds(1000)), ..TransitionOptions::default() };
     TransitionParameters {
         now: TimePoint::min() + delta,
         transition,
@@ -263,7 +266,7 @@ fn global_state_change_transitions_from_prior_state() {
     property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
 
     assert_float_eq(0.0, evaluate_with_state(&property, width_state(1.0), milliseconds(0)));
-    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
     assert_float_eq(1.0, evaluate_with_state(&property, width_state(1.0), milliseconds(1500)));
 }
 
@@ -273,12 +276,12 @@ fn global_state_change_continues_running_transition() {
     let width = width_transitionable();
     let mut property = width.transition(&untransitioned(), Transitioning::default());
     property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
-    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
 
     // Changing the state back halfway starts from the value shown, not from the state now read.
     property = width.transition(&global_state_change(width_state(1.0), "width", milliseconds(500), true), property);
 
-    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
     assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(2500)));
 }
 
@@ -288,12 +291,12 @@ fn global_state_change_with_layer_change_transitions_from_prior_state() {
     let width = width_transitionable();
     let mut property = width.transition(&untransitioned(), Transitioning::default());
     property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
-    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
 
     // A layer change in the same frame as the state change restarts the transition from the value shown.
     property = width.transition(&global_state_change(width_state(1.0), "width", milliseconds(500), false), property);
 
-    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
     assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(2500)));
 }
 
@@ -341,6 +344,6 @@ fn global_state_change_transitions_light_property() {
     assert!(!transitioning.get::<LightColor>().has_transition());
     let intensity = transitioning.get::<LightIntensity>();
     assert_float_eq(0.0, evaluate_with_state(intensity, width_state(1.0), milliseconds(0)));
-    assert_float_eq(0.823099, evaluate_with_state(intensity, width_state(1.0), milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate_with_state(intensity, width_state(1.0), milliseconds(500)));
     assert_float_eq(1.0, evaluate_with_state(intensity, width_state(1.0), milliseconds(1500)));
 }

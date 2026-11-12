@@ -29,7 +29,7 @@ pub fn parse_glyph_pbf(glyph_range: &GlyphRange, data: &[u8]) -> Result<Vec<Glyp
             let mut has_top = false;
             let mut has_advance = false;
 
-            while glyph_pbf.next()? {
+            while glyph_pbf.next_field()? {
                 match glyph_pbf.tag() {
                     1 => {
                         // id: `GlyphID(uint32_t)` keeps the low 16 bits.
@@ -83,8 +83,8 @@ pub fn parse_glyph_pbf(glyph_range: &GlyphRange, data: &[u8]) -> Result<Vec<Glyp
                 || m.top < -128.0
                 || m.top >= 128.0
                 || m.advance >= 256
-                || glyph.id.hash() < glyph_range.first as u32
-                || glyph.id.hash() > glyph_range.second as u32
+                || glyph.id.hash() < u32::from(glyph_range.first)
+                || glyph.id.hash() > u32::from(glyph_range.second)
             {
                 continue;
             }
@@ -93,7 +93,7 @@ pub fn parse_glyph_pbf(glyph_range: &GlyphRange, data: &[u8]) -> Result<Vec<Glyp
             // expected size with the implicit border size, otherwise we
             // expect there to be no bitmap at all.
             if m.width != 0 && m.height != 0 {
-                let border = Glyph::BORDER_SIZE as u32;
+                let border = u32::from(Glyph::BORDER_SIZE);
                 let size = Size::new(m.width + 2 * border, m.height + 2 * border);
                 if size.area() as usize != glyph_data.len() {
                     continue;
@@ -108,9 +108,9 @@ pub fn parse_glyph_pbf(glyph_range: &GlyphRange, data: &[u8]) -> Result<Vec<Glyp
     Ok(result)
 }
 
-/// Ports test/text/glyph_pbf.test.cpp.
+/// Ports `test/text/glyph_pbf.test.cpp`.
 #[cfg(test)]
-mod glyph_pbf {
+mod tests {
     use super::*;
     use crate::glyph::GlyphIDType;
 
@@ -129,7 +129,7 @@ mod glyph_pbf {
             &fixture("test/fixtures/resources/fake_glyphs-0-255.pbf"),
         )
         .unwrap();
-        assert!(sdfs.len() == 1);
+        assert_eq!(sdfs.len(), 1);
 
         let sdf = &sdfs[0];
         assert_eq!(69, sdf.id.code);

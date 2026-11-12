@@ -10,7 +10,10 @@ use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::fill_layer_properties::*;
+use mln_style::layers::fill_layer_properties::{
+    FillColor, FillLayerProperties, FillLayoutProperties, FillOpacity, FillOutlineColor, FillPaintProperties,
+    FillPattern, FillTranslate,
+};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -83,6 +86,7 @@ static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl FillBucket {
     /// `FillBucket(layout, layerPaintProperties, zoom, overscaling)`.
+    #[must_use]
     pub fn new(
         _layout: &FillLayoutProperties::PossiblyEvaluated,
         layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
@@ -117,6 +121,7 @@ impl FillBucket {
     }
 
     /// `layoutVertex(Point<int16_t> p)`.
+    #[must_use]
     pub fn layout_vertex(p: GeometryCoordinate) -> FillLayoutVertex {
         FillLayoutVertex { a1: [p.x, p.y] }
     }
@@ -146,7 +151,7 @@ impl FillBucket {
         canonical: &CanonicalTileID,
     ) {
         let length = self.vertices.len();
-        for (id, binders) in self.paint_property_binders.iter_mut() {
+        for (id, binders) in &mut self.paint_property_binders {
             binders.get_mut_unpoisoned().populate_vertex_vectors(
                 feature,
                 length,

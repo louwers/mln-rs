@@ -6,11 +6,6 @@ use crate::sky::Sky;
 
 impl Converter for Sky {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Sky> {
-        if !value.is_object() {
-            error.message = "sky must be an object".to_owned();
-            return None;
-        }
-
         const PROPERTIES: [&str; 14] = [
             "atmosphere-blend",
             "atmosphere-blend-transition",
@@ -27,6 +22,11 @@ impl Converter for Sky {
             "sky-horizon-blend",
             "sky-horizon-blend-transition",
         ];
+
+        if !value.is_object() {
+            error.message = "sky must be an object".to_owned();
+            return None;
+        }
 
         let mut sky = Sky::new();
         for name in PROPERTIES {

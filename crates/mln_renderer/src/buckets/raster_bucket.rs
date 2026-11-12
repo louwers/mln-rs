@@ -58,6 +58,7 @@ impl RasterBucketGeometry {
     }
 
     /// `vertices.isModifiedAfter(t)`.
+    #[must_use]
     pub fn is_modified_after(&self, t: Instant) -> bool {
         t < self.last_modified
     }
@@ -73,7 +74,7 @@ fn full_mask() -> TileMask {
 /// `RasterBucket`.
 ///
 /// Port-only: serde writes the image, which is what a worker sets
-/// (tile/worker_codec); the geometry is the tile's (`setMask`).
+/// (`tile/worker_codec`); the geometry is the tile's (`setMask`).
 #[derive(Serialize, Deserialize)]
 pub struct RasterBucket {
     pub base: BucketBase,
@@ -88,16 +89,19 @@ fn unmasked() -> Mutex<RasterBucketGeometry> {
 
 impl RasterBucket {
     /// `RasterBucket(PremultipliedImage&&)`.
+    #[must_use]
     pub fn new(image: PremultipliedImage) -> Self {
         Self::with_shared_image(Some(Arc::new(image)))
     }
 
     /// `RasterBucket(std::shared_ptr<PremultipliedImage>)`.
+    #[must_use]
     pub fn with_shared_image(image: Option<Arc<PremultipliedImage>>) -> Self {
         RasterBucket { base: BucketBase::default(), image, geometry: unmasked() }
     }
 
     /// `layoutVertex(Point<int16_t> p, Point<uint16_t> t)`.
+    #[must_use]
     pub fn layout_vertex(p: Point<i16>, t: Point<u16>) -> RasterLayoutVertex {
         RasterLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
     }
@@ -133,6 +137,8 @@ impl RasterBucket {
 
     /// `setMask(TileMask&&)`.
     pub fn set_mask(&self, mask: TileMask) {
+        const VERTEX_LENGTH: usize = 4;
+
         let mut geometry = self.geometry();
         if geometry.mask == mask {
             return;
@@ -152,8 +158,6 @@ impl RasterBucket {
         // Create a new segment so that we will upload (empty) buffers even
         // when there is nothing to draw for this tile.
         geometry.segments.push(SegmentBase::new(0, 0));
-
-        const VERTEX_LENGTH: usize = 4;
 
         // Create the vertex buffer for the specified tile mask.
         let ids: Vec<CanonicalTileID> = geometry.mask.iter().copied().collect();
@@ -196,7 +200,7 @@ impl RasterBucket {
             ));
 
             let segment = geometry.segments.last().expect("segment");
-            debug_assert!(segment.vertex_length <= usize::from(u16::MAX));
+            debug_assert!(u16::try_from(segment.vertex_length).is_ok());
             let offset = segment.vertex_length as u16;
 
             // 0, 1, 2

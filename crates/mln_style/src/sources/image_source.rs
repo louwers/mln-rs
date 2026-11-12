@@ -33,24 +33,29 @@ pub struct Impl {
 
 impl Impl {
     /// `Impl(std::string id, std::array<LatLng, 4> coords)`.
+    #[must_use]
     pub fn new(id: String, coords: [LatLng; 4]) -> Self {
         Impl { base: ImplBase::new(SourceType::Image, id), coords, image: None }
     }
 
     /// `Impl(const Impl& other, std::array<LatLng, 4> coords)`.
+    #[must_use]
     pub fn with_coordinates(other: &Impl, coords: [LatLng; 4]) -> Self {
         Impl { base: other.base.clone(), coords, image: other.image.clone() }
     }
 
     /// `Impl(const Impl& rhs, PremultipliedImage&& image)`.
+    #[must_use]
     pub fn with_image(rhs: &Impl, image: PremultipliedImage) -> Self {
         Impl { base: rhs.base.clone(), coords: rhs.coords, image: Some(Arc::new(image)) }
     }
 
+    #[must_use]
     pub fn get_image(&self) -> Option<Arc<PremultipliedImage>> {
         self.image.clone()
     }
 
+    #[must_use]
     pub fn get_coordinates(&self) -> [LatLng; 4] {
         self.coords
     }
@@ -110,6 +115,7 @@ impl ImageSource {
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         static_immutable_cast::<Impl>(&self.inner.base.base_impl())
     }
@@ -121,6 +127,7 @@ impl ImageSource {
         self.inner.base.observer().on_source_changed(self);
     }
 
+    #[must_use]
     pub fn get_coordinates(&self) -> [LatLng; 4] {
         self.impl_().get_coordinates()
     }
@@ -148,16 +155,17 @@ impl ImageSource {
         self.inner.base.observer().on_source_changed(self);
     }
 
+    #[must_use]
     pub fn get_url(&self) -> Option<String> {
         self.inner.url.borrow().clone()
     }
 }
 
 /// `loadDescription`'s response handler. The image decodes through
-/// mln_image's `decoder`, whose answer may come after this
+/// `mln_image`'s `decoder`, whose answer may come after this
 /// returns (the browser's); it's dropped if the source is gone or got
 /// another URL or image by then.
-fn on_image_response(weak: &Weak<Inner>, res: Response) {
+fn on_image_response(weak: &Weak<Inner>, res: &Response) {
     let Some(inner) = weak.upgrade() else {
         return;
     };
@@ -215,7 +223,7 @@ impl Source for ImageSource {
 
         let weak = Rc::downgrade(&self.inner);
         let req =
-            file_source.request(&Resource::image(&url), Box::new(move |res: Response| on_image_response(&weak, res)));
+            file_source.request(&Resource::image(&url), Box::new(move |res: Response| on_image_response(&weak, &res)));
         *self.inner.req.borrow_mut() = Some(req);
     }
 

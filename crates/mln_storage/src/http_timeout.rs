@@ -17,6 +17,7 @@ fn timestamp_diff(a: Timestamp, b: Timestamp) -> Duration {
 }
 
 /// `errorRetryTimeout(failedRequestReason, failedRequests, retryAfter)`
+#[must_use]
 pub fn error_retry_timeout(
     failed_request_reason: Reason,
     failed_requests: u32,
@@ -43,6 +44,7 @@ pub fn error_retry_timeout(
 }
 
 /// `expirationTimeout(expires, expiredRequests)`
+#[must_use]
 pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Duration {
     if expired_requests > 0 {
         return seconds(1i64 << (expired_requests - 1).min(31));

@@ -8,6 +8,8 @@
 // tashkeel handling, near/begin/end lam-alef spaces, aggregation, digits)
 // are not ported.
 
+use std::cmp::Ordering;
+
 use super::UErrorCode;
 
 const IRRELEVANT: u16 = 4;
@@ -220,7 +222,7 @@ static SHAPE_TABLE: [[[u8; 4]; 4]; 4] = [
 ];
 
 /// `invertBuffer`: inverts the buffer, it's used in case the user specifies
-/// the buffer to be U_SHAPE_TEXT_DIRECTION_LOGICAL.
+/// the buffer to be `U_SHAPE_TEXT_DIRECTION_LOGICAL`.
 fn invert_buffer(buffer: &mut [u16], size: i32, lowlimit: i32, highlimit: i32) {
     let mut i = lowlimit;
     let mut j = size - highlimit - 1;
@@ -255,9 +257,9 @@ fn get_link(ch: u16) -> u16 {
     } else if (0x206D..=0x206F).contains(&ch) {
         4
     } else if (0xFB50..=0xFC62).contains(&ch) {
-        PRES_A_LINK[(ch - 0xFB50) as usize] as u16
+        u16::from(PRES_A_LINK[(ch - 0xFB50) as usize])
     } else if (0xFE70..=0xFEFC).contains(&ch) {
-        PRES_B_LINK[(ch - 0xFE70) as usize] as u16
+        u16::from(PRES_B_LINK[(ch - 0xFE70) as usize])
     } else {
         0
     }
@@ -304,7 +306,7 @@ fn is_seen_family_char(ch: u16) -> bool {
     (0x633..=0x636).contains(&ch)
 }
 
-/// `calculateSize` (LETTERS_SHAPE, LAMALEF_RESIZE, logical): the
+/// `calculateSize` (`LETTERS_SHAPE`, `LAMALEF_RESIZE`, logical): the
 /// destination size after merging lam+alef; FE-range tashkeel also
 /// decrements it (ICU's condition for the resize options).
 fn calculate_size(source: &[u16], source_length: i32) -> i32 {
@@ -326,8 +328,8 @@ fn u_strlen(s: &[u16]) -> i32 {
     s.iter().position(|&c| c == 0).expect("NUL-terminated") as i32
 }
 
-/// `handleGeneratedSpaces` (LAMALEF_RESIZE, no tashkeel option): removes
-/// the LAMALEF_SPACE_SUB placeholders; the result length is the `u_strlen`
+/// `handleGeneratedSpaces` (`LAMALEF_RESIZE`, no tashkeel option): removes
+/// the `LAMALEF_SPACE_SUB` placeholders; the result length is the `u_strlen`
 /// of the buffer (an earlier NUL in the text shortens it).
 fn handle_generated_spaces(dest: &mut [u16], source_length: i32) -> i32 {
     let mut tempbuffer = vec![0u16; (source_length + 1) as usize];
@@ -363,7 +365,7 @@ fn handle_generated_spaces(dest: &mut [u16], source_length: i32) -> i32 {
 
 /// `shapeUnicode(dest, sourceLength, destSize, options, pErrorCode, 1,
 /// shapeVars)`: Converts an Arabic Unicode buffer in 06xx Range into a
-/// shaped arabic Unicode buffer in FExx Range.
+/// shaped arabic Unicode buffer in `FExx` Range.
 fn shape_unicode(dest: &mut [u16], source_length: i32) -> i32 {
     let tashkeel_flag = 1;
     let mut lamalef_found = false;
@@ -375,17 +377,17 @@ fn shape_unicode(dest: &mut [u16], source_length: i32) -> i32 {
     sure that all characters are in the 06xx range even the lamalef is
     converted to the special region in the 06xx range */
     // (U_SHAPE_PRESERVE_PRESENTATION_NOOP)
-    for i in 0..source_length as usize {
-        let input_char = dest[i];
+    for unit in &mut dest[..source_length as usize] {
+        let input_char = *unit;
         if (0xFB50..=0xFBFF).contains(&input_char) {
             let c = CONVERT_FB_TO_06[(input_char - 0xFB50) as usize];
             if c != 0 {
-                dest[i] = c;
+                *unit = c;
             }
         } else if (0xFE70..=0xFEFC).contains(&input_char) {
-            dest[i] = CONVERT_FE_TO_06[(input_char - 0xFE70) as usize];
+            *unit = CONVERT_FE_TO_06[(input_char - 0xFE70) as usize];
         } else {
-            dest[i] = input_char;
+            *unit = input_char;
         }
     }
 
@@ -441,8 +443,10 @@ fn shape_unicode(dest: &mut [u16], source_length: i32) -> i32 {
             /* get the proper shape according to link ability of neighbors
             and of character; depends on the order of the shapes (isolated,
             initial, middle, final) in the compatibility area */
-            let mut shape = SHAPE_TABLE[(next_link & (LINKR + LINKL)) as usize][(last_link & (LINKR + LINKL)) as usize]
-                [(curr_link & (LINKR + LINKL)) as usize] as u32;
+            let mut shape = u32::from(
+                SHAPE_TABLE[(next_link & (LINKR + LINKL)) as usize][(last_link & (LINKR + LINKL)) as usize]
+                    [(curr_link & (LINKR + LINKL)) as usize],
+            );
 
             if (curr_link & (LINKR + LINKL)) == 1 {
                 shape &= 1;
@@ -466,11 +470,11 @@ fn shape_unicode(dest: &mut [u16], source_length: i32) -> i32 {
                 if is_tashkeel_char(dest[i as usize]) {
                     // (tashkeelFlag == 1: the tashkeel is kept)
                     dest[i as usize] =
-                        0xFE70 + IRRELEVANT_POS[(dest[i as usize] - 0x064B) as usize] as u16 + shape as u16;
+                        0xFE70 + u16::from(IRRELEVANT_POS[(dest[i as usize] - 0x064B) as usize]) + shape as u16;
                 } else if (curr_link & APRESENT) > 0 {
-                    dest[i as usize] = (0xFB50u32 + (curr_link >> 8) as u32 + shape) as u16;
+                    dest[i as usize] = (0xFB50u32 + u32::from(curr_link >> 8) + shape) as u16;
                 } else if (curr_link >> 8) > 0 && (curr_link & IRRELEVANT) == 0 {
-                    dest[i as usize] = (0xFE70u32 + (curr_link >> 8) as u32 + shape) as u16;
+                    dest[i as usize] = (0xFE70u32 + u32::from(curr_link >> 8) + shape) as u16;
                 }
             }
         }
@@ -506,6 +510,7 @@ fn shape_unicode(dest: &mut [u16], source_length: i32) -> i32 {
 /// with `dest` of `dest_capacity` code units (`None`: ICU's NULL dest for
 /// preflighting): (the code units written to dest, the returned length,
 /// the error code).
+#[must_use]
 pub fn u_shape_arabic(source: &[u16], dest_capacity: i32) -> (Vec<u16>, i32, UErrorCode) {
     let mut error = UErrorCode::U_ZERO_ERROR;
     let source_length = source.len() as i32;
@@ -569,14 +574,14 @@ pub fn u_shape_arabic(source: &[u16], dest_capacity: i32) -> (Vec<u16>, i32, UEr
 
 /// `u_terminateUChars` for the error code.
 fn terminate(dest_capacity: i32, length: i32, error: &mut UErrorCode) -> i32 {
-    if length < dest_capacity {
-        if *error == UErrorCode::U_STRING_NOT_TERMINATED_WARNING {
-            *error = UErrorCode::U_ZERO_ERROR;
+    match length.cmp(&dest_capacity) {
+        Ordering::Less => {
+            if *error == UErrorCode::U_STRING_NOT_TERMINATED_WARNING {
+                *error = UErrorCode::U_ZERO_ERROR;
+            }
         }
-    } else if length == dest_capacity {
-        *error = UErrorCode::U_STRING_NOT_TERMINATED_WARNING;
-    } else {
-        *error = UErrorCode::U_BUFFER_OVERFLOW_ERROR;
+        Ordering::Equal => *error = UErrorCode::U_STRING_NOT_TERMINATED_WARNING,
+        Ordering::Greater => *error = UErrorCode::U_BUFFER_OVERFLOW_ERROR,
     }
     length
 }
