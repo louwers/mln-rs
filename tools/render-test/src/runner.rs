@@ -35,6 +35,33 @@ use crate::parser::{
 };
 use crate::test_runner_common::{deep_equal, tokenize};
 
+/// The first `size.area()` pixels of `data` as an opaque image of that size,
+/// each color blended with white by its alpha.
+///
+/// C++ compares with `mapbox::pixelmatch`, which blends every pixel so (its
+/// `blend`, truncating alike) before it measures a color difference: a
+/// transparent pixel is a white one to it. blazediff blends with a
+/// checkerboard instead, which tells the two apart.
+fn blended_with_white(data: &[u8], size: Size) -> blazediff::Image {
+    let mut blended = data[..size.width as usize * size.height as usize * 4].to_vec();
+    // The runner is built unoptimized for the tests, where indexing a slice
+    // is several times as fast as indexing a `Vec` or iterating over pixels.
+    let pixels = blended.as_mut_slice();
+    let blend = |channel: u8, alpha: f64| (255.0 + f64::from(i32::from(channel) - 255) * alpha) as u8;
+    let mut i = 0;
+    while i < pixels.len() {
+        if pixels[i + 3] != 255 {
+            let alpha = f64::from(pixels[i + 3]) / 255.0;
+            pixels[i] = blend(pixels[i], alpha);
+            pixels[i + 1] = blend(pixels[i + 1], alpha);
+            pixels[i + 2] = blend(pixels[i + 2], alpha);
+            pixels[i + 3] = 255;
+        }
+        i += 4;
+    }
+    blazediff::Image { data: blended, width: size.width, height: size.height }
+}
+
 /// `mln::CameraOptions` (include/mln/map/camera.hpp): the fields the
 /// operations set.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -565,15 +592,21 @@ impl TestRunner {
                 // writes out of bounds (undefined behaviour); the port counts
                 // every pixel as different instead.
                 if width * height * 4 <= actual_image.data.len() {
-                    pixels = pixelmatch::pixelmatch(
-                        &actual_image.data,
-                        &expected_image.data,
-                        width,
-                        height,
-                        Some(&mut image_diff.data),
-                        0.1285, // Defined in GL JS
-                        false,
-                    ) as f64;
+                    let size = expected_image.size;
+                    let actual = blended_with_white(&actual_image.data, size);
+                    let expected = blended_with_white(&expected_image.data, size);
+                    let mut output = blazediff::Image::new(size.width, size.height);
+                    let options = blazediff::DiffOptions {
+                        threshold: 0.1285, // Defined in GL JS
+                        ..Default::default()
+                    };
+                    // The images are of one size and fill it, which is all
+                    // that `diff` can refuse.
+                    pixels = blazediff::diff(&actual, &expected, Some(&mut output), &options)
+                        .ok()
+                        .and_then(|result| result.count())
+                        .map_or(f64::from(size.area()), f64::from);
+                    image_diff.data[..output.data.len()].copy_from_slice(&output.data);
                 } else {
                     log::warning(
                         Event::General,

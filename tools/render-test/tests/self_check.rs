@@ -1,5 +1,5 @@
 // Runs the whole shared render suite with each test's expected image as the
-// rendered one: manifest, metadata and operation parsing, the pixelmatch
+// rendered one: manifest, metadata and operation parsing, the image
 // comparison and the reports. Every test that runs must pass.
 
 mod suite;

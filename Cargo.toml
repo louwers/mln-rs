@@ -92,6 +92,9 @@ wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.11" }
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
 # add a crate when nothing in the C++ core has to be ported for it.
 #
+# tools/render-test: the image comparison of the render tests. Without its
+# default features, the image codecs (vendored C) and the command line.
+blazediff = { version = "7.0.0", default-features = false }
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
 # Evaluated as a replacement for vendor/earcut and rejected: on polygons with
@@ -368,4 +371,12 @@ codegen-units = 1
 # offline database and PNGs through zlib-rs, which is many times slower
 # unoptimized.
 [profile.dev.package.zlib-rs]
+opt-level = 3
+
+# The render tests compare every image they render through blazediff, whose
+# SIMD kernels are calls into core::arch unoptimized.
+[profile.dev.package.blazediff]
+opt-level = 3
+
+[profile.dev.package.blazediff-shared]
 opt-level = 3
