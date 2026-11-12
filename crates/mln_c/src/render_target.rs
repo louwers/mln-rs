@@ -241,6 +241,72 @@ fn win32_window(size: Size, window: NonNull<c_void>) -> Target {
     Target::Surface { size, kind: SurfaceType::Win32, surface: Surface::window(window) }
 }
 
+/// An OpenHarmony window that the session holds a reference to, which it
+/// drops once it lets go of the window.
+#[cfg(target_env = "ohos")]
+struct OhosWindow(NonNull<c_void>);
+
+#[cfg(target_env = "ohos")]
+#[link(name = "native_window")]
+unsafe extern "C" {
+    fn OH_NativeWindow_NativeObjectReference(object: *mut c_void) -> i32;
+    fn OH_NativeWindow_NativeObjectUnreference(object: *mut c_void) -> i32;
+}
+
+// SAFETY: an `OHNativeWindow` is reference counted, and the backends use it
+// from the session's thread, as OpenHarmony allows.
+#[cfg(target_env = "ohos")]
+unsafe impl Send for OhosWindow {}
+// SAFETY: as for `Send`; nothing here changes the window.
+#[cfg(target_env = "ohos")]
+unsafe impl Sync for OhosWindow {}
+
+#[cfg(target_env = "ohos")]
+impl HasWindowHandle for OhosWindow {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+        let handle = RawWindowHandle::OhosNdk(raw_window_handle::OhosNdkWindowHandle::new(self.0));
+        // SAFETY: the reference keeps the window alive.
+        Ok(unsafe { WindowHandle::borrow_raw(handle) })
+    }
+}
+
+#[cfg(target_env = "ohos")]
+impl HasDisplayHandle for OhosWindow {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        // SAFETY: OpenHarmony's display handle names nothing.
+        Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Ohos(raw_window_handle::OhosDisplayHandle::new())) })
+    }
+}
+
+#[cfg(target_env = "ohos")]
+impl Drop for OhosWindow {
+    fn drop(&mut self) {
+        // SAFETY: the reference that `ohos_window` took.
+        unsafe { OH_NativeWindow_NativeObjectUnreference(self.0.as_ptr()) };
+    }
+}
+
+/// An OpenHarmony window's target, which takes its own reference to the
+/// window, as the header says.
+///
+/// Fails with an invalid argument for a pointer that is no `OHNativeWindow`.
+#[cfg(target_env = "ohos")]
+fn ohos_window(size: Size, window: NonNull<c_void>) -> Result<Target, Error> {
+    // SAFETY: the host's window, which OpenHarmony checks is a native object.
+    if unsafe { OH_NativeWindow_NativeObjectReference(window.as_ptr()) } != 0 {
+        return Err(Error::invalid_argument("mln_ohos_window_target.window is no OHNativeWindow"));
+    }
+    let window = OhosWindow(window);
+    Ok(Target::Surface { size, kind: SurfaceType::OhosNdk, surface: Surface::window(window) })
+}
+
+#[cfg(not(target_env = "ohos"))]
+#[allow(clippy::unnecessary_wraps, reason = "OpenHarmony's checks the window")]
+fn ohos_window(size: Size, window: NonNull<c_void>) -> Result<Target, Error> {
+    let _ = (size, window);
+    Ok(Target::Unsupported("this platform has no OpenHarmony windows"))
+}
+
 /// Checks a caller's target, whose size `scale_factor` scales, and makes the
 /// runtime's surface of a window that the library presents to.
 ///
@@ -349,8 +415,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 Target::Unsupported("this library presents to no Android window")
             }
             MLN_RENDER_TARGET_KIND_OHOS_WINDOW => {
-                required(target.data.ohos_window.window, &field("window"))?;
-                Target::Unsupported("this library presents to no OpenHarmony window")
+                ohos_window(size, required(target.data.ohos_window.window, &field("window"))?)?
             }
             MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE => {
                 let surface = target.data.web_gpu_surface;
@@ -831,6 +896,115 @@ mod tests {
         };
         assert!(matches!(read(&android(fake), None), Ok(Target::Unsupported(_))));
         assert_eq!(read(&android(core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+
+        // OpenHarmony takes only its own windows: see the OpenHarmony test.
+        #[cfg(not(target_env = "ohos"))]
+        assert!(matches!(read(&ohos(8, fake), None), Ok(Target::Unsupported(_))));
+        assert_eq!(read(&ohos(8, core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+    }
+
+    /// An OpenHarmony target of `window`, `size` logical pixels square.
+    fn ohos(size: u32, window: *mut c_void) -> mln_render_target {
+        use crate::generated::types::{mln_ohos_window_target, mln_render_target_data};
+        let logical_size = mln_logical_size { width: size, height: size };
+        let data = mln_render_target_data { ohos_window: mln_ohos_window_target { logical_size, window } };
+        target(MLN_RENDER_TARGET_KIND_OHOS_WINDOW, data)
+    }
+
+    // An OpenHarmony window, of a consumer surface that nothing shows: the
+    // target takes a reference of its own, which outlives the host's, and
+    // presents on each backend that a device of the library's has, through
+    // the C API.
+    #[cfg(target_env = "ohos")]
+    #[test]
+    fn an_ohos_window_target_holds_its_window_and_presents_on_each_backend() {
+        use crate::generated::types::{
+            MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_RENDER_RESULT_RENDERED,
+            MLN_RENDER_SESSION_CAPABILITY_PRESENTATION, MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW,
+            mln_gpu_device_capabilities, mln_gpu_device_options, mln_render_session_capabilities,
+        };
+        use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_get_capabilities};
+        use crate::map::mln_map_set_style_json;
+        use crate::map::tests::{create_map, options, release_map, view};
+        use crate::render_session::mln_render_session_get_capabilities;
+        use crate::render_session::tests::{attach_options, demand, release_session, sized, wait_for_result};
+        use crate::runtime::tests::{Waiter, create, release};
+
+        #[link(name = "native_image")]
+        unsafe extern "C" {
+            fn OH_ConsumerSurface_Create() -> *mut c_void;
+            fn OH_NativeImage_AcquireNativeWindow(image: *mut c_void) -> *mut c_void;
+            fn OH_NativeImage_Destroy(image: *mut *mut c_void);
+        }
+        #[link(name = "native_window")]
+        unsafe extern "C" {
+            fn OH_NativeWindow_NativeWindowHandleOpt(window: *mut c_void, code: i32, ...) -> i32;
+        }
+        const SET_BUFFER_GEOMETRY: i32 = 0;
+
+        // Memory that is no native object, which the target turns down.
+        let mut not_a_window = [0u64; 8];
+        let not_a_window = not_a_window.as_mut_ptr().cast::<c_void>();
+        assert_eq!(read(&ohos(8, not_a_window), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let styled = Waiter::new();
+        let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
+        // SAFETY: local arguments.
+        unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, core::ptr::null_mut()) };
+        assert_eq!(styled.status(), MLN_STATUS_OK);
+
+        let mut presented = 0;
+        for (index, (backend, value, _)) in gpu_device::BACKENDS.iter().enumerate() {
+            let mut device_options = sized::<mln_gpu_device_options>();
+            device_options.fields = MLN_GPU_DEVICE_OPTION_BACKEND;
+            device_options.backend = *value;
+            let mut device = 0;
+            // SAFETY: local arguments.
+            if unsafe { mln_gpu_device_create(&device_options, &mut device, core::ptr::null_mut()) } != MLN_STATUS_OK {
+                continue;
+            }
+            let mut capabilities = sized::<mln_gpu_device_capabilities>();
+            // SAFETY: local arguments.
+            unsafe { mln_gpu_device_get_capabilities(device, &mut capabilities, core::ptr::null_mut()) };
+            if capabilities.target_kinds & MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW == 0 {
+                gpu_device::mln_gpu_device_release(device);
+                continue;
+            }
+            // SAFETY: OpenHarmony's calls, whose image the test destroys.
+            let mut image = unsafe { OH_ConsumerSurface_Create() };
+            assert!(!image.is_null(), "a consumer surface");
+            // SAFETY: as above, of the live image.
+            let window = unsafe { OH_NativeImage_AcquireNativeWindow(image) };
+            assert!(!window.is_null(), "the consumer surface's window");
+            // SAFETY: the live window, and the operation's arguments.
+            unsafe { OH_NativeWindow_NativeWindowHandleOpt(window, SET_BUFFER_GEOMETRY, 64i32, 64i32) };
+
+            let (target, attach) = (ohos(64, window), attach_options());
+            let (mut session, attached) = (0, Waiter::new());
+            // SAFETY: local arguments.
+            let status = unsafe {
+                mln_map_attach(map, &target, device, &attach, &mut session, &attached.descriptor, core::ptr::null_mut())
+            };
+            gpu_device::mln_gpu_device_release(device);
+            assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK), "{backend:?}");
+            let mut session_capabilities = sized::<mln_render_session_capabilities>();
+            // SAFETY: local capabilities.
+            unsafe { mln_render_session_get_capabilities(session, &mut session_capabilities, core::ptr::null_mut()) };
+            assert_eq!(session_capabilities.flags, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION);
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, index as u64 + 1), MLN_STATUS_OK);
+            assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED, "{backend:?}");
+            release_session(session);
+            // SAFETY: the image is the test's, and the session let go of its
+            // window.
+            unsafe { OH_NativeImage_Destroy(&mut image) };
+            presented += 1;
+        }
+        assert!(presented > 0, "no backend presents to an OpenHarmony window");
+
+        release_map(map);
+        release(runtime);
     }
 
     /// An Xlib target of `window`, a winit window on X11, at `width` by
