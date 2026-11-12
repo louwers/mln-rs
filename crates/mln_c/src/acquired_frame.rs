@@ -171,7 +171,18 @@ pub unsafe extern "C" fn mln_acquired_frame_get_producer_sync(
     })
 }
 
-/// The host's consumer sync, which takes the sync file it names.
+/// The descriptor of a sync file that `handle` names: an `int`, widened
+/// with or without its sign.
+fn sync_file_descriptor(handle: u64) -> Result<i32, Error> {
+    i32::try_from(handle as i64)
+        .ok()
+        .or_else(|| u32::try_from(handle).ok().map(|fd| fd as i32))
+        .ok_or_else(|| Error::invalid_argument("a sync file's handle must be a file descriptor"))
+}
+
+/// The host's consumer sync, which takes the sync file it names. A sync
+/// file of -1, as Vulkan exports for a semaphore that is already signaled,
+/// is a finished read.
 ///
 /// # Safety
 ///
@@ -180,12 +191,14 @@ unsafe fn consumer_sync(sync: GpuSync) -> ConsumerSync {
     #[cfg(unix)]
     if sync.kind == SyncKind::SyncFd {
         use std::os::fd::FromRawFd as _;
-        let file = i32::try_from(sync.handle)
-            .ok()
-            .filter(|fd| *fd >= 0)
-            // SAFETY: the caller's contract.
-            .map(|fd| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) });
-        return ConsumerSync { sync, sync_file: file };
+        return match sync_file_descriptor(sync.handle) {
+            Ok(fd) if fd >= 0 => ConsumerSync {
+                sync,
+                // SAFETY: the caller's contract.
+                sync_file: Some(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) }),
+            },
+            _ => ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete)),
+        };
     }
     ConsumerSync::of(sync)
 }
@@ -213,6 +226,9 @@ pub unsafe extern "C" fn mln_acquired_frame_release(
         let kind = crate::gpu_device::sync_kind_of(sync.kind);
         if kind.is_some_and(|kind| kind.names_object() && kind != SyncKind::SyncFd) && sync.handle == 0 {
             return Err(Error::invalid_argument("consumer synchronization must have a nonzero handle"));
+        }
+        if kind == Some(SyncKind::SyncFd) {
+            sync_file_descriptor(sync.handle)?;
         }
         let object = FRAMES.get(frame)?;
         let mut held = object.frame.lock_unpoisoned();
@@ -462,4 +478,32 @@ pub unsafe extern "C" fn mln_acquired_frame_get_web_gpu_texture(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, non_null(out_frame), { other_backend(frame, out_frame) })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::fd::{AsRawFd as _, IntoRawFd as _, OwnedFd};
+
+    use super::*;
+
+    fn sync_file(handle: u64) -> GpuSync {
+        GpuSync { kind: SyncKind::SyncFd, handle, value: 0 }
+    }
+
+    #[test]
+    fn a_sync_file_of_minus_one_is_a_finished_read() {
+        for handle in [u64::MAX, u64::from(u32::MAX)] {
+            // SAFETY: the handle names no descriptor.
+            let consumer = unsafe { consumer_sync(sync_file(handle)) };
+            assert_eq!(SyncKind::CpuComplete, consumer.sync.kind);
+            assert!(consumer.sync_file.is_none());
+        }
+        let (reader, _writer) = std::io::pipe().unwrap();
+        let fd = OwnedFd::from(reader).into_raw_fd();
+        // SAFETY: the descriptor is the test's to hand over.
+        let consumer = unsafe { consumer_sync(sync_file(fd as u64)) };
+        assert_eq!(SyncKind::SyncFd, consumer.sync.kind);
+        assert_eq!(Some(fd), consumer.sync_file.as_ref().map(|file| file.as_raw_fd()));
+        assert!(sync_file_descriptor(1 << 40).is_err());
+    }
 }
