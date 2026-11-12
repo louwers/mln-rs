@@ -1,18 +1,22 @@
 // Ports src/mln/tile/vector_mvt_tile_data.hpp and
-// src/mln/tile/vector_mvt_tile_data.cpp, reading the tiles with fast-mvt
-// where the C++ uses mapbox::vector_tile.
+// src/mln/tile/vector_mvt_tile_data.cpp, reading the tiles with fast-mvt's
+// lazy reader where the C++ uses mapbox::vector_tile. Like it, the lazy
+// reader decodes a layer when it is asked for and a feature when it is
+// read, and reads tags and geometry from the tile's bytes.
 //
-// Errors: fast-mvt decodes a whole tile at once, so a tile it can't decode
-// is a `get_layer` error. A feature's tags can still be malformed:
+// Errors: a tile whose layers can't be found, or a layer that fast-mvt
+// can't decode, is a `get_layer` error, and a feature it can't decode a
+// `get_feature` error. A feature's tags can still be malformed:
 // `try_get_value` and `try_get_properties` return the error, and the
 // trait's `get_value` and `get_properties` return null or empty and keep it
 // for `GeometryTileFeature::error` (the trait has no other channel).
 
 use std::cell::OnceCell;
 use std::collections::{BTreeSet, HashMap};
+use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
-use fast_mvt::{MvtFeatureRef, MvtLayerRef, MvtReaderRef, MvtValueRef};
+use fast_mvt::{MvtLazyFeature, MvtLazyLayer, MvtLazyReader, MvtResult, MvtValueRef};
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_tile_id::{
@@ -22,7 +26,6 @@ use mln_util::constants::EXTENT;
 use mln_util::error::Error as MlnError;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
-use yoke::{Yoke, Yokeable};
 
 use crate::Error;
 use crate::geometry_tile_data::fixup_polygons;
@@ -37,8 +40,8 @@ const POLYGON: i32 = 3;
 
 /// `VectorMVTTileFeature`.
 pub struct VectorMVTTileFeature<'l> {
-    layer: MvtLayerRef<'l>,
-    feature: MvtFeatureRef<'l>,
+    layer: &'l MvtLazyLayer<'l>,
+    feature: MvtLazyFeature<'l, 'l>,
     lines: OnceCell<GeometryCollection>,
     properties: OnceCell<PropertyMap>,
     /// The first error of an accessor (`GeometryTileFeature::error`).
@@ -46,7 +49,7 @@ pub struct VectorMVTTileFeature<'l> {
 }
 
 impl<'l> VectorMVTTileFeature<'l> {
-    fn new(layer: MvtLayerRef<'l>, feature: MvtFeatureRef<'l>) -> Self {
+    fn new(layer: &'l MvtLazyLayer<'l>, feature: MvtLazyFeature<'l, 'l>) -> Self {
         VectorMVTTileFeature {
             layer,
             feature,
@@ -186,34 +189,37 @@ fn to_value(value: MvtValueRef<'_>) -> Value {
 /// Decodes a feature's geometry commands into rings, scaling each
 /// coordinate by `scale` and rounding it, as `mapbox::vector_tile`'s
 /// `feature::getGeometries` does. A `MoveTo` starts a new ring (each point
-/// of a multipoint is a ring of its own), a `ClosePath` repeats the ring's first
-/// point, and no commands give one empty ring. The error is C++'s
-/// `std::runtime_error` text.
-fn decode_geometry(commands: &[u32], scale: f32) -> Result<Vec<Vec<Point<i16>>>, &'static str> {
+/// of a multipoint is a ring of its own), a `ClosePath` repeats the ring's
+/// first point, and no commands give one empty ring. The errors are C++'s
+/// `std::runtime_error` texts, or fast-mvt's for malformed commands.
+fn decode_geometry(
+    mut commands: impl Iterator<Item = MvtResult<u32>>,
+    scale: f32,
+) -> Result<Vec<Vec<Point<i16>>>, String> {
     const MOVE_TO: u32 = 1;
     const LINE_TO: u32 = 2;
     const CLOSE_PATH: u32 = 7;
+    /// The most points a command reserves room for: its count comes from
+    /// the tile, unchecked (C++ caps it the same way).
+    const MAX_RESERVE: usize = 1024 * 1024 / 16;
 
+    let mut next = || commands.next().transpose().map_err(|e| e.to_string());
     let (min, max) = (f32::from(i16::MIN), f32::from(i16::MAX));
     let mut rings = Vec::new();
     let mut ring: Vec<Point<i16>> = Vec::new();
     let (mut x, mut y) = (0i64, 0i64);
-    let mut rest = commands;
-    while let Some((&command, after)) = rest.split_first() {
-        rest = after;
+    while let Some(command) = next()? {
         let count = (command >> 3) as usize;
         match command & 0x7 {
             id @ (MOVE_TO | LINE_TO) => {
-                // At most 2^30 parameters: no overflow, even with a 32-bit usize.
-                let Some((parameters, after)) = rest.split_at_checked(count * 2) else {
-                    return Err("geometry command parameters past the end");
-                };
-                rest = after;
                 if id == LINE_TO {
                     // Room for the ClosePath of a polygon ring.
-                    ring.reserve(count + 1);
+                    ring.reserve(count.min(MAX_RESERVE) + 1);
                 }
-                for &[dx, dy] in parameters.as_chunks::<2>().0 {
+                for _ in 0..count {
+                    let (Some(dx), Some(dy)) = (next()?, next()?) else {
+                        return Err("geometry command parameters past the end".to_owned());
+                    };
                     if id == MOVE_TO && !ring.is_empty() {
                         rings.push(std::mem::take(&mut ring));
                     }
@@ -222,7 +228,7 @@ fn decode_geometry(commands: &[u32], scale: f32) -> Result<Vec<Vec<Point<i16>>>,
                     let px = (x as f32 * scale).round();
                     let py = (y as f32 * scale).round();
                     if px > max || px < min || py > max || py < min {
-                        return Err("paths outside valid range of coordinate_type");
+                        return Err("paths outside valid range of coordinate_type".to_owned());
                     }
                     // A NaN scale passes the range check and becomes 0.
                     ring.push(Point::new(px as i16, py as i16));
@@ -233,7 +239,7 @@ fn decode_geometry(commands: &[u32], scale: f32) -> Result<Vec<Vec<Point<i16>>>,
                     ring.push(first);
                 }
             }
-            _ => return Err("unknown command"),
+            _ => return Err("unknown command".to_owned()),
         }
     }
     rings.push(ring);
@@ -244,28 +250,25 @@ fn zigzag(value: u32) -> i32 {
     (value >> 1) as i32 ^ -((value & 1) as i32)
 }
 
-/// `VectorMVTTileLayer`: a layer of a [`VectorMVTTileData`]'s decoded tile.
+/// `VectorMVTTileLayer`: a layer of a [`VectorMVTTileData`], decoded.
 pub struct VectorMVTTileLayer<'d> {
-    layer: MvtLayerRef<'d>,
-    /// fast-mvt iterates a layer's features; the trait indexes them.
-    features: Vec<MvtFeatureRef<'d>>,
+    layer: MvtLazyLayer<'d>,
 }
 
-impl<'d> VectorMVTTileLayer<'d> {
-    fn new(layer: MvtLayerRef<'d>) -> Self {
-        VectorMVTTileLayer { layer, features: layer.features().collect() }
-    }
-
-    /// `getFeature(i)`: `std::out_of_range` past the end.
-    pub fn try_get_feature(&self, i: usize) -> Result<VectorMVTTileFeature<'d>, Error> {
-        let feature = self.features.get(i).ok_or_else(|| Error::vector_range_check(i, self.features.len()))?;
-        Ok(VectorMVTTileFeature::new(self.layer, *feature))
+impl VectorMVTTileLayer<'_> {
+    /// `getFeature(i)`: `std::out_of_range` past the end, fast-mvt's
+    /// error for a feature it can't decode.
+    pub fn try_get_feature(&self, i: usize) -> Result<VectorMVTTileFeature<'_>, Error> {
+        match self.layer.feature(i) {
+            Some(feature) => Ok(VectorMVTTileFeature::new(&self.layer, feature?)),
+            None => Err(Error::vector_range_check(i, self.layer.feature_count())),
+        }
     }
 }
 
 impl GeometryTileLayer for VectorMVTTileLayer<'_> {
     fn feature_count(&self) -> usize {
-        self.features.len()
+        self.layer.feature_count()
     }
 
     fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, MlnError> {
@@ -286,7 +289,7 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
     fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
         /// A key the feature has no tag for.
         const ABSENT: u32 = u32::MAX;
-        let count = self.features.len();
+        let count = self.layer.feature_count();
         // Grouping costs about as much as evaluating each feature once.
         let limit = count / 4 + 8;
         let value_count = self.layer.values().len();
@@ -295,14 +298,13 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
         let mut index: HashMap<Box<[u32]>, u32> = HashMap::new();
         let mut codes = vec![ABSENT; keys.len() + 1];
         let mut groups = FeatureGroups { of_feature: Vec::with_capacity(count), first: Vec::new() };
-        for (i, feature) in self.features.iter().enumerate() {
+        for (i, feature) in self.layer.features().enumerate() {
+            let feature = feature.ok()?;
             codes.fill(ABSENT);
             codes[keys.len()] = feature.geom_type_value().unwrap_or(0) as u32;
-            let tags = feature.tags();
-            if tags.len() % 2 != 0 {
-                return None;
-            }
-            for &[key, value] in tags.as_chunks::<2>().0 {
+            let mut tags = feature.tags();
+            while let Some(key) = tags.next() {
+                let (key, value) = (key.ok()?, tags.next()?.ok()?);
                 let slot = *slots.get(key as usize)?;
                 if value as usize >= value_count {
                     return None;
@@ -330,59 +332,72 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
     }
 }
 
-/// A tile as fast-mvt decodes it, borrowing the tile's bytes.
-#[derive(Yokeable)]
-struct DecodedTile<'a>(MvtReaderRef<'a>);
+/// A layer of the tile: its name and its message, as ranges of the tile's
+/// bytes.
+struct LayerEntry {
+    name: Range<usize>,
+    data: Range<usize>,
+}
 
-/// `VectorMVTTileData`: the tile is decoded lazily, on the first
+/// `VectorMVTTileData`: the layers are found lazily, on the first
 /// `getLayer`, so the object can be made on the main thread cheaply.
 pub struct VectorMVTTileData {
     /// C++ `std::shared_ptr<const std::string>`.
     data: Arc<Vec<u8>>,
-    /// The decoded tile, which borrows `data`: the yoke holds its own
-    /// reference to it. `OnceLock` (not `OnceCell`): the tile data is shared
-    /// with the tile worker thread (`mln_renderer`'s
+    /// The tile's layers in tile order. `OnceLock` (not `OnceCell`): the
+    /// tile data is shared with the tile worker thread (`mln_renderer`'s
     /// `Arc<dyn GeometryTileData + Send + Sync>`).
-    tile: OnceLock<Yoke<DecodedTile<'static>, Arc<Vec<u8>>>>,
+    layers: OnceLock<Vec<LayerEntry>>,
 }
 
 impl VectorMVTTileData {
     #[must_use]
     pub fn new(data: Arc<Vec<u8>>) -> Self {
-        VectorMVTTileData { data, tile: OnceLock::new() }
+        VectorMVTTileData { data, layers: OnceLock::new() }
     }
 
     pub fn data(&self) -> &Arc<Vec<u8>> {
         &self.data
     }
 
-    /// The decoded tile. Only a successful decode is kept, as C++ sets
-    /// `parsed` after it: a tile that fails is decoded again next time.
-    fn tile(&self) -> Result<&MvtReaderRef<'_>, Error> {
-        if let Some(tile) = self.tile.get() {
-            return Ok(&tile.get().0);
+    /// The tile's layers. Only a successful search is kept, as C++ sets
+    /// `parsed` after it: a tile that fails is searched again next time.
+    fn layers(&self) -> Result<&[LayerEntry], Error> {
+        if let Some(layers) = self.layers.get() {
+            return Ok(layers);
         }
-        let tile =
-            Yoke::try_attach_to_cart(self.data.clone(), |data: &Vec<u8>| MvtReaderRef::new(data).map(DecodedTile))?;
-        Ok(&self.tile.get_or_init(|| tile).get().0)
+        let range = |bytes: &[u8]| {
+            let start = bytes.as_ptr() as usize - self.data.as_ptr() as usize;
+            start..start + bytes.len()
+        };
+        let layers = MvtLazyReader::new(&self.data)?
+            .layers()
+            .map(|layer| LayerEntry { name: range(layer.name().as_bytes()), data: range(layer.data()) })
+            .collect();
+        Ok(self.layers.get_or_init(|| layers))
     }
 
-    /// `getLayer`: the first layer named `name`, `None` for none. Errors:
-    /// the tile's decoding.
+    /// `getLayer`: the first layer named `name`, decoded, `None` for none.
+    /// Errors: finding the tile's layers, and decoding the layer.
     pub fn try_get_layer(&self, name: &str) -> Result<Option<VectorMVTTileLayer<'_>>, Error> {
-        Ok(self.tile()?.layers().find(|layer| layer.name() == name).map(VectorMVTTileLayer::new))
+        let entry = self.layers()?.iter().find(|entry| self.data.get(entry.name.clone()) == Some(name.as_bytes()));
+        let Some(data) = entry.and_then(|entry| self.data.get(entry.data.clone())) else {
+            return Ok(None);
+        };
+        Ok(Some(VectorMVTTileLayer { layer: MvtLazyLayer::decode(data)? }))
     }
 
     /// `layerNames()`: each name once, in byte order (C++ lists the keys of
     /// a `std::map`).
     pub fn layer_names(&self) -> Result<Vec<String>, Error> {
-        let names: BTreeSet<&str> = self.tile()?.layers().map(MvtLayerRef::name).collect();
-        Ok(names.into_iter().map(str::to_owned).collect())
+        let names: BTreeSet<&[u8]> =
+            self.layers()?.iter().filter_map(|entry| self.data.get(entry.name.clone())).collect();
+        Ok(names.into_iter().map(|name| String::from_utf8_lossy(name).into_owned()).collect())
     }
 }
 
 impl GeometryTileData for VectorMVTTileData {
-    /// `clone()`: shares the data, not the decoded tile.
+    /// `clone()`: shares the data, not the layers found in it.
     fn clone_data(&self) -> Box<dyn GeometryTileData> {
         Box::new(VectorMVTTileData::new(self.data.clone()))
     }
@@ -406,7 +421,7 @@ mod tests {
     use super::decode_geometry;
 
     fn rings(commands: &[u32], scale: f32) -> Vec<Vec<(i16, i16)>> {
-        let rings = decode_geometry(commands, scale).unwrap();
+        let rings = decode_geometry(commands.iter().copied().map(Ok), scale).unwrap();
         rings.iter().map(|ring| ring.iter().map(|p: &Point<i16>| (p.x, p.y)).collect()).collect()
     }
 
@@ -427,8 +442,9 @@ mod tests {
 
     #[test]
     fn rejects_malformed_commands() {
-        assert_eq!(decode_geometry(&[3], 1.0), Err("unknown command"));
-        assert_eq!(decode_geometry(&[17, 2, 4, 2], 1.0), Err("geometry command parameters past the end"));
-        assert_eq!(decode_geometry(&[9, 2, 0], 40000.0), Err("paths outside valid range of coordinate_type"));
+        let error = |commands: &[u32], scale| decode_geometry(commands.iter().copied().map(Ok), scale).unwrap_err();
+        assert_eq!(error(&[3], 1.0), "unknown command");
+        assert_eq!(error(&[17, 2, 4, 2], 1.0), "geometry command parameters past the end");
+        assert_eq!(error(&[9, 2, 0], 40000.0), "paths outside valid range of coordinate_type");
     }
 }

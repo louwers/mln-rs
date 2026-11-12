@@ -132,8 +132,6 @@ fast-mvt = { version = "0.7.1", default-features = false, features = ["reader"] 
 buffa = { version = "0.9.2", default-features = false }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
-# mln_tile: a decoded MVT tile kept with the bytes it borrows.
-yoke = { version = "0.8.4", features = ["derive"] }
 # The messages between a tile and its worker in another wasm instance
 # (mln_renderer's tile/worker_codec), and the tests of the types they carry:
 # a compact serde format.
@@ -370,3 +368,8 @@ codegen-units = 1
 # unoptimized.
 [profile.dev.package.zlib-rs]
 opt-level = 3
+
+# fast-mvt's lazy reader (MvtLazyReader), until a fast-mvt release has it:
+# https://github.com/nyurik/fast-mvt/pull/68.
+[patch.crates-io]
+fast-mvt = { git = "https://github.com/louwers-bot/fast-mvt", rev = "43f181d19d9d01ac27c5fa95a51c4bca12eb93f2" }

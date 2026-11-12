@@ -978,9 +978,8 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fast-mvt"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dd28eb5048f310a33f947a615fbbca7ea47fc92e3a0820fc2a5925b475a8531"
+version = "0.7.2"
+source = "git+https://github.com/louwers-bot/fast-mvt?rev=43f181d19d9d01ac27c5fa95a51c4bca12eb93f2#43f181d19d9d01ac27c5fa95a51c4bca12eb93f2"
 dependencies = [
  "buffa",
  "foldhash 0.2.0",
@@ -2725,7 +2724,6 @@ dependencies = [
  "mln-rs-wagyu",
  "mlt-core",
  "proptest",
- "yoke",
 ]
 
 [[package]]

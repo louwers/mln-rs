@@ -3,7 +3,8 @@ use std::fmt;
 /// An error reading a vector tile or converting its features.
 #[derive(Debug)]
 pub enum Error {
-    /// A tile fast-mvt can't decode, or a feature's malformed tags.
+    /// A tile, layer or feature fast-mvt can't decode, or a feature's
+    /// malformed tags.
     Mvt(fast_mvt::MvtError),
     /// A C++ `std::runtime_error`.
     Runtime(String),
