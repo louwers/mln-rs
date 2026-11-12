@@ -78,7 +78,7 @@ pub trait ImageRequestor {
 pub type RequestorKey = usize;
 
 pub fn requestor_key<T: ?Sized>(requestor: &Rc<T>) -> RequestorKey {
-    Rc::as_ptr(requestor) as *const () as usize
+    Rc::as_ptr(requestor).cast::<()>() as usize
 }
 
 type RequestorEntry = (Weak<dyn ImageRequestor>, ImageRequestPair);
@@ -111,6 +111,7 @@ pub struct ImageManager {
 
 impl ImageManager {
     /// `ImageManager::create()`.
+    #[must_use]
     pub fn create() -> Rc<ImageManager> {
         Rc::new_cyclic(|self_weak| ImageManager {
             self_weak: self_weak.clone(),
@@ -264,7 +265,9 @@ impl ImageManager {
         // any are missing, call `onStyleImageMissing` to give the user a
         // chance to provide the icon. If they are not provided by the next
         // frame we'll assume they are permanently missing.
-        if !self.is_loaded() {
+        if self.is_loaded() {
+            self.check_missing_and_notify(key, &weak, &pair, &mut notifications);
+        } else {
             let mut state = self.state.borrow_mut();
             let has_all_dependencies = pair.0.keys().all(|id| state.images.contains_key(id));
 
@@ -273,8 +276,6 @@ impl ImageManager {
             } else {
                 state.requestors.entry(key).or_insert((weak, pair));
             }
-        } else {
-            self.check_missing_and_notify(key, &weak, &pair, &mut notifications);
         }
         Self::deliver(notifications);
     }
@@ -356,7 +357,7 @@ impl ImageManager {
         self.state.borrow().available_images.clone()
     }
 
-    /// `updatedImageVersions` (read by GeometryTileRenderData::prepare).
+    /// `updatedImageVersions` (read by `GeometryTileRenderData::prepare`).
     pub fn updated_image_versions(&self) -> ImageVersionMap {
         self.state.borrow().updated_image_versions.clone()
     }
@@ -416,7 +417,7 @@ impl ImageManager {
                 let first_pending = existing_requestors
                     .values()
                     .next()
-                    .and_then(|r| r.upgrade())
+                    .and_then(Weak::upgrade)
                     .is_some_and(|r| r.has_pending_request(missing_image));
                 if first_pending {
                     // Still waiting for the client response for this image.
@@ -513,7 +514,7 @@ fn bind_once_local(f: impl FnOnce() + 'static) -> Box<dyn FnOnce()> {
                     if let Some(slot) = object.get() {
                         run(&slot);
                     }
-                }))
+                }));
             })
         }
         None => Box::new(move || run(&slot)),

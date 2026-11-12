@@ -17,7 +17,7 @@ use mln_util::time::Instant;
 
 use crate::run_loop::RunLoop;
 
-/// The state of a `uv_timer_t`, shared with the RunLoop.
+/// The state of a `uv_timer_t`, shared with the `RunLoop`.
 pub(crate) struct TimerHandle {
     /// When the timer fires next; `None` when stopped or never.
     pub(crate) due: Cell<Option<Instant>>,
@@ -45,7 +45,7 @@ fn add_millis(now: Instant, ms: u64) -> Option<Instant> {
 }
 
 impl TimerHandle {
-    /// Called by the RunLoop when the timer is due: reschedules a repeating
+    /// Called by the `RunLoop` when the timer is due: reschedules a repeating
     /// timer (`uv_timer_again`, before the callback as libuv does), then
     /// runs the callback.
     pub(crate) fn fire(&self, now: Instant) {
@@ -69,7 +69,8 @@ pub struct Timer {
 }
 
 impl Timer {
-    /// `Timer()`: a timer on the current thread's RunLoop.
+    /// `Timer()`: a timer on the current thread's `RunLoop`.
+    #[must_use]
     pub fn new() -> Self {
         let handle = Rc::new(TimerHandle {
             due: Cell::new(None),

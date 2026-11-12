@@ -1,4 +1,4 @@
-//! Ports test/src/mln/test/http_server.cpp (`mln::test::HttpServer`, the
+//! Ports `test/src/mln/test/http_server.cpp` (`mln::test::HttpServer`, the
 //! cpp-httplib server the C++ unit tests start on 127.0.0.1:3000) on an
 //! [httpmock](https://github.com/httpmock/httpmock) `MockServer`: each C++
 //! `server->Get(path, handler)` is a mock, in the same order.
@@ -80,7 +80,7 @@ impl Reply {
 }
 
 /// `req.get_param_value(name)` (`None`: `!req.has_param(name)`), parsed as
-/// httplib's parse_query_text does: it splits a pair on every '=', the first
+/// httplib's `parse_query_text` does: it splits a pair on every '=', the first
 /// piece is the key and the last one the value ("cachecontrol=max-age=120"
 /// -> "120"), and the first pair with a key wins.
 fn param(req: &HttpMockRequest, name: &str) -> Option<String> {
@@ -141,6 +141,7 @@ pub struct HttpServer {
 
 impl HttpServer {
     /// `HttpServer()`: starts the server with `runServer`'s routes.
+    #[must_use]
     pub fn new() -> Self {
         let server = MockServer::start();
 
@@ -177,7 +178,7 @@ impl HttpServer {
         server.mock(|when, then| {
             when.method("GET").path("/stale");
             // Never respond.
-            then.delay(Duration::from_secs(24 * 60 * 60));
+            then.delay(Duration::from_hours(24));
         });
 
         let cache_counter = Arc::new(AtomicI32::new(0));
@@ -366,19 +367,28 @@ impl HttpServer {
         HttpServer { server }
     }
 
+    #[must_use]
     pub fn port(&self) -> u16 {
         self.server.port()
     }
 
     /// `http://127.0.0.1:<port><path>` (C++: `http://127.0.0.1:3000<path>`).
+    #[must_use]
     pub fn url(&self, path: &str) -> String {
         format!("http://127.0.0.1:{}{path}", self.port())
     }
 
     /// `util::read_file("test/fixtures/map/online/" + file)` as `/online/`
     /// serves it (with this server's address in the JSON files).
+    #[must_use]
     pub fn online_fixture(&self, file: &str) -> Vec<u8> {
         online_fixture(&base_url(self.port()), file)
+    }
+}
+
+impl Default for HttpServer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -388,8 +398,12 @@ fn base_url(port: u16) -> String {
 }
 
 /// `test/fixtures/map/online/<file>`, with `base` for the C++ server's
-/// address in the JSON files. C++'s util::read_file throws when the file is
+/// address in the JSON files. C++'s `util::read_file` throws when the file is
 /// missing; the route then answers with no content.
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "the JSON fixtures end in a lower-case `.json`; other names are served as they are"
+)]
 fn online_fixture(base: &str, file: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/map/online").join(file);
     let content = std::fs::read(path).unwrap_or_default();
@@ -401,6 +415,7 @@ fn online_fixture(base: &str, file: &str) -> Vec<u8> {
 }
 
 /// A URL on a port nothing listens on (C++ uses 127.0.0.1:3001).
+#[must_use]
 pub fn closed_port_url(path: &str) -> String {
     let port = {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");

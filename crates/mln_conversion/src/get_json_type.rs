@@ -5,6 +5,7 @@ use feature::Value;
 
 use crate::conversion::Convertible;
 
+#[must_use]
 pub fn get_json_type(value: &Convertible<'_>) -> String {
     if value.is_undefined() {
         return "null".to_owned();

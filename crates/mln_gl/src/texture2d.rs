@@ -37,6 +37,7 @@ pub struct Texture2D {
 }
 
 impl Texture2D {
+    #[must_use]
     pub fn new(context: Weak<Context>) -> Self {
         Texture2D {
             context,
@@ -53,6 +54,7 @@ impl Texture2D {
     }
 
     /// `getTextureID()`
+    #[must_use]
     pub fn get_texture_id(&self) -> Option<TextureID> {
         self.texture
     }

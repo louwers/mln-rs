@@ -21,7 +21,7 @@
 //   lat, lon, zoom, bearing, pitch
 //                          the camera, unless the hash has one
 //   workers=<n>            Web Workers for the tiles (default: up to 4)
-//   width, height, ratio   a fixed canvas size in CSS pixels and pixel ratio
+//   width, height, ratio   a fixed map size in CSS pixels and pixel ratio
 //                          (default: the window and devicePixelRatio)
 //   localIdeographFontFamily=<CSS font-family list>
 //                          the font CJK glyphs are drawn in rather than
@@ -48,7 +48,7 @@
 // to pan, right- or Ctrl-drag to rotate and tilt, Shift-drag to zoom to a
 // box, the wheel or a trackpad to zoom, double-click or double-tap to zoom
 // in (Shift: out), two fingers to pinch, twist and tilt, and the arrow,
-// +/= and - keys. The canvas follows its size (ResizeObserver). The zoom
+// +/= and - keys. The map follows its box's size (ResizeObserver). The zoom
 // buttons send the + and - keys; the compass eases the bearing and pitch
 // back to zero.
 //
@@ -105,15 +105,30 @@ const params = new URLSearchParams(location.search);
 const number = (name: string, fallback: number) => (params.has(name) ? Number(params.get(name)) : fallback);
 const status = element('status', HTMLElement);
 const banner = element('error', HTMLElement);
+const mapBox = element('map-box', HTMLElement);
 const canvas = element('map', HTMLCanvasElement);
 
 if (params.has('width') && params.has('height')) {
-  canvas.style.width = `${number('width', 0)}px`;
-  canvas.style.height = `${number('height', 0)}px`;
+  mapBox.style.width = `${number('width', 0)}px`;
+  mapBox.style.height = `${number('height', 0)}px`;
 }
-const ratio = number('ratio', window.devicePixelRatio || 1);
-canvas.width = Math.round(canvas.clientWidth * ratio);
-canvas.height = Math.round(canvas.clientHeight * ratio);
+let ratio = number('ratio', window.devicePixelRatio || 1);
+// The map's size in CSS pixels, its box's; the worker resizes the map and
+// its surface. Its first report is the size the map started at.
+let size: [number, number] = [mapBox.clientWidth, mapBox.clientHeight];
+// The map draws its size times the pixel ratio, rounded, in device pixels
+// (map.rs). The canvas's box covers exactly those, as GL JS's does: at a
+// fractional pixel ratio, a box of whole CSS pixels covers a fractional
+// number of device pixels, and a browser that resamples the canvas into it
+// blurs the map.
+const devicePixels = (length: number) => Math.round(length * ratio);
+function fitCanvas() {
+  canvas.style.width = `${devicePixels(size[0]) / ratio}px`;
+  canvas.style.height = `${devicePixels(size[1]) / ratio}px`;
+}
+canvas.width = devicePixels(size[0]);
+canvas.height = devicePixels(size[1]);
+fitCanvas();
 
 const localFamily = params.get('localIdeographFontFamily') ?? 'sans-serif';
 
@@ -174,8 +189,8 @@ compiling.then((module) => {
     module,
     canvas: offscreen,
     ports,
-    width: canvas.clientWidth,
-    height: canvas.clientHeight,
+    width: size[0],
+    height: size[1],
     ratio,
     style,
     fallbackFontFaces: params.get('fallbackFontFaces'),
@@ -390,25 +405,24 @@ function showBox(corners: Box | null) {
   });
 }
 
-// The canvas's size in CSS pixels; the worker resizes the map and its
-// surface. Its first report is the size the map started at.
-let size = [canvas.clientWidth, canvas.clientHeight];
 new ResizeObserver(() => {
   origin = canvas.getBoundingClientRect();
-  const next = [canvas.clientWidth, canvas.clientHeight];
+  const next: [number, number] = [mapBox.clientWidth, mapBox.clientHeight];
   if (next[0] === size[0] && next[1] === size[1]) return;
   size = next;
-  toMap({ type: 'resize', width: canvas.clientWidth, height: canvas.clientHeight });
-}).observe(canvas);
+  fitCanvas();
+  toMap({ type: 'resize', width: size[0], height: size[1] });
+}).observe(mapBox);
 
 // A window that moves to a display of another density draws at its pixel
 // ratio, unless the page's parameters fix the ratio.
 if (!params.has('ratio')) {
   const watchRatio = (current: number) => {
     matchMedia(`(resolution: ${current}dppx)`).addEventListener('change', () => {
-      const next = window.devicePixelRatio || 1;
-      toMap({ type: 'pixelRatio', ratio: next });
-      watchRatio(next);
+      ratio = window.devicePixelRatio || 1;
+      fitCanvas();
+      toMap({ type: 'pixelRatio', ratio });
+      watchRatio(ratio);
     }, { once: true });
   };
   watchRatio(ratio);

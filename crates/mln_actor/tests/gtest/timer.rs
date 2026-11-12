@@ -66,7 +66,7 @@ fn repeat() {
     };
 
     let interval = 50.0;
-    let expected_total_time = interval * count.get() as f64;
+    let expected_total_time = interval * f64::from(count.get());
 
     let first = Instant::now();
     timer.start(milliseconds(50), milliseconds(50), callback);

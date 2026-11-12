@@ -11,6 +11,7 @@ use mln_gfx::types::{
     TextureWrapType,
 };
 
+#[must_use]
 pub fn draw_mode(value: DrawModeType) -> u32 {
     match value {
         DrawModeType::Points => glow::POINTS,
@@ -23,6 +24,7 @@ pub fn draw_mode(value: DrawModeType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn color_blend_equation(value: ColorBlendEquationType) -> u32 {
     match value {
         ColorBlendEquationType::Add => glow::FUNC_ADD,
@@ -31,6 +33,7 @@ pub fn color_blend_equation(value: ColorBlendEquationType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn color_blend_factor(value: ColorBlendFactorType) -> u32 {
     match value {
         ColorBlendFactorType::Zero => glow::ZERO,
@@ -51,6 +54,7 @@ pub fn color_blend_factor(value: ColorBlendFactorType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn depth_function(value: DepthFunctionType) -> u32 {
     match value {
         DepthFunctionType::Never => glow::NEVER,
@@ -64,6 +68,7 @@ pub fn depth_function(value: DepthFunctionType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn stencil_function(value: StencilFunctionType) -> u32 {
     match value {
         StencilFunctionType::Never => glow::NEVER,
@@ -77,6 +82,7 @@ pub fn stencil_function(value: StencilFunctionType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn stencil_op(value: StencilOpType) -> u32 {
     match value {
         StencilOpType::Zero => glow::ZERO,
@@ -90,6 +96,7 @@ pub fn stencil_op(value: StencilOpType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn cull_face_side(value: CullFaceSideType) -> u32 {
     match value {
         CullFaceSideType::Front => glow::FRONT,
@@ -98,6 +105,7 @@ pub fn cull_face_side(value: CullFaceSideType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn cull_face_winding(value: CullFaceWindingType) -> u32 {
     match value {
         CullFaceWindingType::Clockwise => glow::CW,
@@ -105,6 +113,7 @@ pub fn cull_face_winding(value: CullFaceWindingType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn buffer_usage(value: BufferUsageType) -> u32 {
     match value {
         BufferUsageType::StreamDraw => glow::STREAM_DRAW,
@@ -113,6 +122,7 @@ pub fn buffer_usage(value: BufferUsageType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn texture_pixel(value: TexturePixelType) -> u32 {
     match value {
         TexturePixelType::RGBA => glow::RGBA,
@@ -125,6 +135,7 @@ pub fn texture_pixel(value: TexturePixelType) -> u32 {
 
 /// `Enum<gfx::TexturePixelType>::sizedFor`: the internal format of a texture
 /// of `value` pixels with `type_` channels.
+#[must_use]
 pub fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDataType) -> u32 {
     match (type_, value) {
         (TextureChannelDataType::UnsignedByte, _) => texture_pixel(value),
@@ -137,6 +148,7 @@ pub fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDat
     }
 }
 
+#[must_use]
 pub fn texture_channel_data(value: TextureChannelDataType) -> u32 {
     match value {
         TextureChannelDataType::UnsignedByte => glow::UNSIGNED_BYTE,
@@ -145,6 +157,7 @@ pub fn texture_channel_data(value: TextureChannelDataType) -> u32 {
     }
 }
 
+#[must_use]
 pub fn texture_filter(value: TextureFilterType) -> i32 {
     match value {
         TextureFilterType::Nearest => glow::NEAREST as i32,
@@ -152,6 +165,7 @@ pub fn texture_filter(value: TextureFilterType) -> i32 {
     }
 }
 
+#[must_use]
 pub fn texture_wrap(value: TextureWrapType) -> i32 {
     match value {
         TextureWrapType::Clamp => glow::CLAMP_TO_EDGE as i32,
@@ -168,6 +182,7 @@ pub struct AttributeFormat {
 }
 
 /// `components(dataType)` and `Enum<gfx::AttributeDataType>::to`.
+#[must_use]
 pub fn attribute_format(value: AttributeDataType) -> Option<AttributeFormat> {
     use AttributeDataType as A;
     let (components, type_, normalized) = match value {

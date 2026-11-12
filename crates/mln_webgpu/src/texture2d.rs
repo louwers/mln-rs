@@ -27,7 +27,7 @@ fn prepare_copy_data(pixel_data: &[u8], region_size: Size, pixel_stride: usize) 
     }
     let row_stride = region_size.width as usize * pixel_stride;
     let data_size = row_stride * region_size.height as usize;
-    if region_size.height > 1 && row_stride % BYTES_PER_ROW_ALIGNMENT != 0 {
+    if region_size.height > 1 && !row_stride.is_multiple_of(BYTES_PER_ROW_ALIGNMENT) {
         let aligned = row_stride.div_ceil(BYTES_PER_ROW_ALIGNMENT) * BYTES_PER_ROW_ALIGNMENT;
         let mut staging = vec![0u8; aligned * region_size.height as usize];
         for row in 0..region_size.height as usize {
@@ -97,18 +97,23 @@ impl Texture2D {
         self.size_changed_callback = callback;
     }
 
+    #[must_use]
     pub fn get_native_format(&self) -> Option<wgpu::TextureFormat> {
         self.native_format
     }
+    #[must_use]
     pub fn get_texture(&self) -> Option<&wgpu::Texture> {
         self.texture.as_ref()
     }
+    #[must_use]
     pub fn get_texture_view(&self) -> Option<&wgpu::TextureView> {
         self.texture_view.as_ref()
     }
+    #[must_use]
     pub fn get_sampler(&self) -> Option<&wgpu::Sampler> {
         self.sampler.as_ref()
     }
+    #[must_use]
     pub fn get_sampler_state(&self) -> &SamplerState {
         &self.sampler_state
     }

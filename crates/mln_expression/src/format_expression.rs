@@ -31,6 +31,7 @@ pub struct FormatExpressionSection {
 }
 
 impl FormatExpressionSection {
+    #[must_use]
     pub fn new(content: Box<dyn Expression>) -> Self {
         FormatExpressionSection { content: Arc::from(content), font_scale: None, text_font: None, text_color: None }
     }
@@ -63,20 +64,22 @@ pub struct FormatExpression {
     sections: Vec<FormatExpressionSection>,
 }
 
-fn opt_equal(l: &Option<Arc<dyn Expression>>, r: &Option<Arc<dyn Expression>>) -> bool {
+fn opt_equal(l: Option<&dyn Expression>, r: Option<&dyn Expression>) -> bool {
     match (l, r) {
-        (Some(l), Some(r)) => l.equals(&**r),
+        (Some(l), Some(r)) => l.equals(r),
         (None, None) => true,
         _ => false,
     }
 }
 
 impl FormatExpression {
+    #[must_use]
     pub fn new(sections: Vec<FormatExpressionSection>) -> Self {
         let deps = sections.iter().fold(Dependency::NONE, |a, s| a | s.deps());
         FormatExpression { base: ExpressionBase::new(Kind::FormatExpression, Type::Formatted, deps), sections }
     }
 
+    #[must_use]
     pub fn get_sections(&self) -> &[FormatExpressionSection] {
         &self.sections
     }
@@ -145,7 +148,6 @@ impl Expression for FormatExpression {
         for section in &self.sections {
             let content_result = section.content.evaluate(params)?;
 
-            let evaluated_text;
             if type_of(&content_result) == Type::Image {
                 let Value::Image(image) = &content_result else { unreachable!() };
                 // Omit sections with empty image ids.
@@ -155,10 +157,9 @@ impl Expression for FormatExpression {
                 // Continue evaluation of a next section, as the image section
                 // does not have section options.
                 continue;
-            } else {
-                // `toString(Value)` always produces a string.
-                evaluated_text = to_string(&content_result);
             }
+            // `toString(Value)` always produces a string.
+            let evaluated_text = to_string(&content_result);
 
             let mut evaluated_font_scale = None;
             if let Some(font_scale) = &section.font_scale {
@@ -219,9 +220,9 @@ impl Expression for FormatExpression {
                 if !lhs_section.content.equals(&*rhs_section.content) {
                     return false;
                 }
-                if !opt_equal(&lhs_section.font_scale, &rhs_section.font_scale)
-                    || !opt_equal(&lhs_section.text_font, &rhs_section.text_font)
-                    || !opt_equal(&lhs_section.text_color, &rhs_section.text_color)
+                if !opt_equal(lhs_section.font_scale.as_deref(), rhs_section.font_scale.as_deref())
+                    || !opt_equal(lhs_section.text_font.as_deref(), rhs_section.text_font.as_deref())
+                    || !opt_equal(lhs_section.text_color.as_deref(), rhs_section.text_color.as_deref())
                 {
                     return false;
                 }

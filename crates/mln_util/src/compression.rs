@@ -18,6 +18,7 @@ pub fn compress(raw: &[u8]) -> Result<Vec<u8>, String> {
 /// `util::is_compressed(v)`: a gzip or zlib header (with one of the four
 /// usual zlib compression levels) on more than two bytes. (Added by
 /// gtests-storage for the MBTiles and PMTiles file sources.)
+#[must_use]
 pub fn is_compressed(v: &[u8]) -> bool {
     if v.len() > 2 {
         let (byte0, byte1) = (v[0], v[1]);

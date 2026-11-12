@@ -77,7 +77,7 @@ const EXTENT: i16 = 8192;
 
 /// A headless backend, or none where there is no EGL to make an OpenGL ES 3.0
 /// context with, as on macOS: the test is skipped there, unless
-/// MLN_RENDER_BACKEND asks for this backend.
+/// `MLN_RENDER_BACKEND` asks for this backend.
 fn headless_backend(size: Size) -> Option<Headless> {
     match Headless::new(size) {
         Ok(backend) => Some(backend),
@@ -97,7 +97,7 @@ const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
 /// `1 - (numLayerGroups() + 2) * numSublayers * depthEpsilon` for one layer group.
 const DEPTH_RANGE_SIZE: f32 = 1.0 - ((1 + 2) * NUM_SUBLAYERS) as f32 * DEPTH_EPSILON;
 
-/// The gfx-facing part of the renderer's PaintParameters, with the values
+/// The gfx-facing part of the renderer's `PaintParameters`, with the values
 /// `renderer_impl.cpp` uses for a plain 2D frame.
 struct TestPaintParameters<'a> {
     context: &'a dyn Context,
@@ -127,7 +127,7 @@ impl PaintParameters for TestPaintParameters<'_> {
     fn scissor_rect(&self) -> ScissorRect {
         self.scissor_rect
     }
-    /// paint_parameters.cpp, with renderer_impl.cpp's `depthRangeSize` for
+    /// `paint_parameters.cpp`, with `renderer_impl.cpp`'s `depthRangeSize` for
     /// one layer group
     fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
         if self.current_layer < self.opaque_pass_cutoff {
@@ -159,7 +159,7 @@ struct Background {
     opacity: f32,
 }
 
-/// render_background_layer.cpp `update` for one tile: the tile layer group
+/// `render_background_layer.cpp` `update` for one tile: the tile layer group
 /// with one background drawable.
 fn build_layer_group(context: &dyn Context, registry: &ShaderRegistry, passes: RenderPass) -> LayerGroupBasePtr {
     let layer_group = context.create_tile_layer_group(0, 64, "background".to_owned()).expect("layer group");
@@ -200,7 +200,7 @@ fn build_layer_group(context: &dyn Context, registry: &ShaderRegistry, passes: R
     layer_group
 }
 
-/// background_layer_tweaker.cpp `execute` (non-pattern, UBO consolidation).
+/// `background_layer_tweaker.cpp` `execute` (non-pattern, UBO consolidation).
 fn tweak(context: &dyn Context, layer_group: &LayerGroupBasePtr, bg: &Background, matrix: [f32; 16]) {
     let mut group = layer_group.borrow_mut();
     let props_ubo = BackgroundPropsUBO {
@@ -256,7 +256,7 @@ fn left_half_matrix() -> [f32; 16] {
     ]
 }
 
-/// One frame as renderer_impl.cpp runs it; returns the readback.
+/// One frame as `renderer_impl.cpp` runs it; returns the readback.
 fn render_frame(
     backend: &Headless,
     registry: &ShaderRegistry,
@@ -405,8 +405,8 @@ fn clear_only_frame_reads_back_clear_color() {
     context.end_frame();
     let img = backend.read_still_image();
     assert_eq!(img.data.len(), 16 * 8 * 4);
-    for px in img.data.chunks_exact(4) {
-        assert_near(px.try_into().unwrap(), [64, 128, 191, 255], "clear");
+    for px in img.data.as_chunks::<4>().0 {
+        assert_near(*px, [64, 128, 191, 255], "clear");
     }
 }
 

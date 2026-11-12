@@ -34,12 +34,12 @@ fn fixture(name: &str) -> PathBuf {
     cpp_path(&format!("test/fixtures/offline_database/{name}"))
 }
 
-/// `filename` ("test/fixtures/offline_database/offline.db"): a fresh path.
+/// `filename` ("`test/fixtures/offline_database/offline.db")`: a fresh path.
 fn filename() -> TempPath {
     temp_path("offline.db")
 }
 
-/// `filename_sideload` ("test/fixtures/offline_database/offline_sideload.db").
+/// `filename_sideload` ("`test/fixtures/offline_database/offline_sideload.db`").
 fn filename_sideload() -> TempPath {
     temp_path("offline_sideload.db")
 }
@@ -120,8 +120,8 @@ mod fixture {
     }
 }
 
-fn data(s: &str) -> Option<crate::response::Data> {
-    Some(Arc::new(s.as_bytes().to_vec()))
+fn data(s: &str) -> crate::response::Data {
+    Arc::new(s.as_bytes().to_vec())
 }
 
 fn removing() -> Message {
@@ -295,7 +295,7 @@ fn tile_resource_without_tile_data() {
 
     let resource = Resource::new(Kind::Tile, "http://example.com/0/0/0.pbf");
     let mut response = Response::new();
-    response.data = data("tile");
+    response.data = Some(data("tile"));
     assert!(db.put(&resource, &response).0);
     assert_eq!(b"tile", db.get(&resource).expect("response").data.unwrap().as_slice());
 
@@ -311,7 +311,7 @@ fn put_resource() {
     let resource = Resource::new(Kind::Style, "http://example.com/");
     let mut response = Response::new();
 
-    response.data = data("first");
+    response.data = Some(data("first"));
     let insert_put_result = db.put(&resource, &response);
     assert!(insert_put_result.0);
     assert_eq!(5, insert_put_result.1);
@@ -320,7 +320,7 @@ fn put_resource() {
     assert!(insert_get_result.error.is_none());
     assert_eq!(b"first", insert_get_result.data.unwrap().as_slice());
 
-    response.data = data("second");
+    response.data = Some(data("second"));
     let update_put_result = db.put(&resource, &response);
     assert!(!update_put_result.0);
     assert_eq!(6, update_put_result.1);
@@ -355,7 +355,7 @@ fn put_and_get_resource() {
     let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
 
     let mut response1 = Response::new();
-    response1.data = data("foobar");
+    response1.data = Some(data("foobar"));
 
     let resource = Resource::style("maptiler://example.com/style");
 
@@ -386,7 +386,7 @@ fn put_tile() {
     let resource = example_tile();
     let mut response = Response::new();
 
-    response.data = data("first");
+    response.data = Some(data("first"));
     let insert_put_result = db.put(&resource, &response);
     assert!(insert_put_result.0);
     assert_eq!(5, insert_put_result.1);
@@ -395,7 +395,7 @@ fn put_tile() {
     assert!(insert_get_result.error.is_none());
     assert_eq!(b"first", insert_get_result.data.unwrap().as_slice());
 
-    response.data = data("second");
+    response.data = Some(data("second"));
     let update_put_result = db.put(&resource, &response);
     assert!(!update_put_result.0);
     assert_eq!(6, update_put_result.1);
@@ -622,7 +622,7 @@ fn disabled_maximum_ambient_cache_size() {
         let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
         db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
         let region = db.list_regions().unwrap().remove(0);
-        db.delete_region(region);
+        db.delete_region(&region);
     }
 
     // After deleting the offline region, the data will migrate to the
@@ -742,7 +742,7 @@ fn delete_region() {
         let size_with_two_regions = file_size(&filename);
 
         db.run_pack_database_automatically(false);
-        db.delete_region(region1);
+        db.delete_region(&region1);
 
         assert_eq!(1, db.list_regions().unwrap().len());
         // Region is removed but the size of the database is the same.
@@ -753,7 +753,7 @@ fn delete_region() {
         let size_with_one_region = file_size(&filename);
         assert!(size_with_one_region < size_with_two_regions);
         db.run_pack_database_automatically(true);
-        db.delete_region(region2);
+        db.delete_region(&region2);
 
         // After clearing the cache, the size of the database should get back
         // to the original size.
@@ -884,7 +884,7 @@ fn mapbox_tile_limit_exceeded() {
     assert_eq!(db.get_offline_mapbox_tile_count(), limit);
 
     // The tile 1 belongs to two regions and will still count as resource.
-    db.delete_region(region2);
+    db.delete_region(&region2);
 
     assert_eq!(db.get_offline_mapbox_tile_count(), 51);
 
@@ -898,7 +898,7 @@ fn mapbox_tile_limit_exceeded() {
     // Full again.
     assert_eq!(Err(TileCountLimitExceeded), insert_region_tile(&mut db, region1.get_id(), 202));
 
-    db.delete_region(region1);
+    db.delete_region(&region1);
 
     assert_eq!(0, db.list_regions().unwrap().len());
     check_log_empty(&log);
@@ -1260,7 +1260,7 @@ fn get_region_completed_status() {
     assert_eq!(0, status1.completed_tile_size);
 
     let mut response = Response::new();
-    response.data = data("data");
+    response.data = Some(data("data"));
 
     let style_size = db.put_region_resource(region.get_id(), &style("http://example.com/"), &response).unwrap();
 
@@ -1322,7 +1322,7 @@ fn has_region_resource_tile() {
     let resource = example_tile();
     let mut response = Response::new();
 
-    response.data = data("first");
+    response.data = Some(data("first"));
 
     assert!(db.has_region_resource(&resource).is_none());
     db.put_region_resource(region.get_id(), &resource, &response).unwrap();
@@ -1349,7 +1349,7 @@ fn check_region_resource_and_not_modified_size() {
 
     for resource in [style("http://example.com/style.json"), example_tile()] {
         let mut response = Response::new();
-        response.data = data("first");
+        response.data = Some(data("first"));
         assert_eq!(None, db.check_region_resource(&resource));
         assert_eq!(Ok(5), db.put_region_resource(region.get_id(), &resource, &response));
         assert_eq!(Some((5, true)), db.check_region_resource(&resource));
@@ -1384,7 +1384,7 @@ fn offline_mapbox_tile_count() {
     let mapbox_tile2 = tile("maptiler://tiles/tiles/2", 1.0, 0, 0, 1);
 
     let mut response = Response::new();
-    response.data = data("data");
+    response.data = Some(data("data"));
 
     // Count is initially zero.
     assert_eq!(0, db.get_offline_mapbox_tile_count());
@@ -1413,7 +1413,7 @@ fn offline_mapbox_tile_count() {
 
     // Count stays the same after deleting a region when the tile is still
     // used by another region.
-    db.delete_region(region2);
+    db.delete_region(&region2);
     assert_eq!(1, db.get_offline_mapbox_tile_count());
 
     // Count stays the same after the putting a non-offline Mapbox tile.
@@ -1427,7 +1427,7 @@ fn offline_mapbox_tile_count() {
 
     // Count decreases after deleting a region when the tiles are not used by
     // other regions.
-    db.delete_region(region1);
+    db.delete_region(&region1);
     assert_eq!(0, db.get_offline_mapbox_tile_count());
 
     check_log_empty(&log);
@@ -1481,12 +1481,10 @@ fn batch_insertion_mapbox_tile_count_exceeded() {
     ];
 
     let mut status = OfflineRegionStatus::default();
-    match db.put_region_resources(region.get_id(), &resources, &mut status) {
-        Ok(()) => panic!("expected TileCountLimitExceeded"),
-        Err(TileCountLimitExceeded) => {
-            // Expected
-        }
-    }
+    assert!(
+        db.put_region_resources(region.get_id(), &resources, &mut status).is_err(),
+        "expected TileCountLimitExceeded"
+    );
 
     assert_eq!(0, status.completed_tile_count);
     assert_eq!(0, status.completed_resource_count);
@@ -1505,7 +1503,7 @@ fn open_and_delete_regions(filename: &str) {
 
     let regions = db.list_regions().expect("regions");
     for region in regions {
-        db.delete_region(region);
+        db.delete_region(&region);
     }
 }
 
@@ -2045,7 +2043,7 @@ fn put_resource_read_only_mode() {
 
     let resource = Resource::new(Kind::Style, "http://example.com/");
     let mut response = Response::new();
-    response.data = data("success");
+    response.data = Some(data("success"));
 
     // In read-only mode put() is a no-op
     db.reopen_database_read_only(true);
@@ -2197,7 +2195,7 @@ fn batched_read_touches_preserve_newer_timestamp_and_flush_read_only() {
     assert!(db.get(&fixture::resource()).is_some());
     cache_sql(&filename, "UPDATE resources SET accessed = 4102444800");
     assert!(db.flush_accessed());
-    assert_eq!(4102444800, cached_accessed(&filename, "resources"));
+    assert_eq!(4_102_444_800, cached_accessed(&filename, "resources"));
     cache_sql(&filename, "UPDATE resources SET accessed = 100");
     assert!(db.get(&fixture::resource()).is_some());
     db.reopen_database_read_only(true);
@@ -2285,7 +2283,7 @@ fn batched_read_touches_participate_in_eviction_transaction() {
         "WITH RECURSIVE sequence(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM sequence WHERE n<60) \
          INSERT INTO resources(url,kind,accessed,data) SELECT 'evict-'||n,2,n,randomblob(1024) FROM sequence",
     );
-    assert!(db.set_maximum_ambient_cache_size(100000).is_none());
+    assert!(db.set_maximum_ambient_cache_size(100_000).is_none());
     let recent = Resource::new(Kind::Source, "evict-1");
     assert!(db.get(&recent).is_some());
     assert_eq!(1, db.pending_accessed_count());
@@ -2355,12 +2353,12 @@ fn batched_read_touch_failure_does_not_prevent_region_deletion() {
         "CREATE TRIGGER fail_touch BEFORE UPDATE OF accessed ON tiles \
          BEGIN SELECT RAISE(ABORT,'injected delete touch failure'); END",
     );
-    assert!(db.delete_region(region).is_none());
+    assert!(db.delete_region(&region).is_none());
     assert_eq!(
         1,
         log.count(&constraint_warning("Can't flush accessed timestamps: injected delete touch failure"), false)
     );
-    assert!(db.list_regions().unwrap().is_empty());
+    assert_eq!(db.list_regions().unwrap(), Vec::new());
     assert!(db.get(&fixture::tile()).is_none());
     assert_eq!(1, db.pending_accessed_count());
     cache_sql(&filename, "DROP TRIGGER fail_touch");

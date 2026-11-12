@@ -90,6 +90,7 @@ impl<T: Send + 'static> Completion<T> {
     }
 
     /// Whether the result has arrived.
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         !matches!(*self.shared.state.lock_unpoisoned(), State::Pending { .. })
     }

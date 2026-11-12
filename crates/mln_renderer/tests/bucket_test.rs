@@ -199,7 +199,7 @@ fn with_webgpu_upload_pass(f: impl FnOnce(&WebGpuUploadPass)) {
 
 /// A fill bucket whose "fill-color" is the given data-driven expression, with
 /// one polygon.
-fn data_driven_fill_bucket(fill_color: serde_json::Value) -> FillBucket {
+fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let json = serde_json::json!({"type": "fill", "id": "fill", "source": "s", "paint": {"fill-color": fill_color}});
     let mut error = ConversionError::default();
     let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
@@ -238,7 +238,7 @@ fn data_driven_fill_bucket(fill_color: serde_json::Value) -> FillBucket {
 // gtest: Buckets.FillBucketFreesCpuGeometryAfterUpload
 #[test]
 fn fill_bucket_frees_cpu_geometry_after_upload() {
-    let bucket = data_driven_fill_bucket(serde_json::json!(["to-color", ["get", "c"]]));
+    let bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
     let vertex_count = bucket.vertices.len();
     let index_count = bucket.triangles.len();
     assert!(vertex_count > 0);
@@ -293,7 +293,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
 // gtest: Buckets.FillBucketKeepsPaintDataThatFeatureStateRewrites
 #[test]
 fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
-    let bucket = data_driven_fill_bucket(serde_json::json!([
+    let bucket = data_driven_fill_bucket(&serde_json::json!([
         "to-color",
         ["case", ["boolean", ["feature-state", "hover"], false], "red", "blue"]
     ]));
@@ -315,7 +315,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
 // gtest: Buckets.FillBucketKeepsCpuGeometryWhenRenderedFeaturesAreRetained
 #[test]
 fn fill_bucket_keeps_cpu_geometry_when_rendered_features_are_retained() {
-    let mut bucket = data_driven_fill_bucket(serde_json::json!(["to-color", ["get", "c"]]));
+    let mut bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
     bucket.set_retain_features_by_id(true);
     let vertex_count = bucket.vertices.len();
 
@@ -404,7 +404,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     let triangles = geometry.indexes(&bucket, &bucket.triangles);
     triangles.borrow_mut().set_buffer(Some(Box::new(StubIndexBuffer)));
     triangles.borrow_mut().set_dirty(false);
-    assert!(triangles.borrow().vector().is_empty());
+    assert_eq!(*triangles.borrow().vector(), Vec::<u16>::new());
 
     // A layer that rebuilds its drawables for the tile builds the segments
     // from the counts.
@@ -655,7 +655,7 @@ struct FixtureLog(Records);
 impl FixtureLog {
     fn new() -> Self {
         let records: Records = Arc::new(Mutex::new(Vec::new()));
-        Log::set_thread_observer(Some(Box::new(Recorder(records.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(records.clone()))));
         FixtureLog(records)
     }
     fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
@@ -668,7 +668,7 @@ impl FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        Log::set_thread_observer(None);
+        let _ = Log::set_thread_observer(None);
     }
 }
 

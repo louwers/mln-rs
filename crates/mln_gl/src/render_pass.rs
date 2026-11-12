@@ -20,6 +20,7 @@ pub struct RenderPass;
 impl RenderPass {
     /// `RenderPass(commandEncoder, name, descriptor)`: binds the draw
     /// target and clears what the descriptor has values for.
+    #[must_use]
     pub fn new(command_encoder: &CommandEncoder, _name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
         if let Some(target) = as_gl(descriptor.target) {
             target.resource().bind();

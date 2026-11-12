@@ -235,7 +235,7 @@ pub(crate) struct Waiters {
 impl Waiters {
     /// Completes the releases, and the detaches with `detached`. The attach
     /// and the work that never ran fail with `lost`.
-    pub(crate) fn settle(self, detached: Result<(), Error>, lost: impl Fn() -> Error) {
+    pub(crate) fn settle(self, detached: &Result<(), Error>, lost: impl Fn() -> Error) {
         if let Some(attach) = self.attach {
             attach.resolve(Err(lost()));
         }
@@ -306,7 +306,7 @@ impl SessionShared {
     /// The state is locked, and the session usable or failed.
     fn start_detach(&self, state: &mut SessionState) {
         state.lifecycle = RenderSessionState::Detaching;
-        worker::post(&self.run_loop, |worker, outbox| worker.detach(outbox));
+        worker::post(&self.run_loop, worker::Worker::detach);
     }
 
     /// Releases the session without waiting: it detaches, unless it is
@@ -426,10 +426,10 @@ impl SessionShared {
         match &map {
             // The map unbinds the session before another can attach.
             Some(map) => {
-                map.unbind_session_then(self.id, self.run_loop.clone(), |worker, outbox| worker.finish(outbox));
+                map.unbind_session_then(self.id, self.run_loop.clone(), super::worker::Worker::finish);
                 map.release_session_claim(self.id);
             }
-            None => worker::post(&self.run_loop, |worker, outbox| worker.finish(outbox)),
+            None => worker::post(&self.run_loop, worker::Worker::finish),
         }
         // A core worker lets go of its graphics objects at its next task,
         // which runs before this returns: the host may destroy what they were
@@ -447,7 +447,7 @@ impl SessionShared {
             let _ = receiver.recv();
         }
         let lost = || Error::target_lost("the render session was abandoned");
-        waiters.settle(Err(lost()), lost);
+        waiters.settle(&Err(lost()), lost);
         drop(map);
         Ok(kept)
     }
@@ -929,7 +929,7 @@ impl RenderSession {
         // resize drops it.
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
             let _guard = guard;
-            worker.set_ring(size, scale_factor, ring, outbox)
+            worker.set_ring(size, scale_factor, &ring, outbox)
         })
     }
 
@@ -1144,7 +1144,7 @@ impl RenderSession {
     /// Clears what the renderer holds, such as loaded tiles, so that the
     /// next frame loads and draws the map again.
     pub fn clear_data(&self) -> Result<Completion<()>, Error> {
-        self.operation(|worker, outbox| worker.clear_data(outbox))
+        self.operation(worker::Worker::clear_data)
     }
 
     /// Logs the renderer's sources and tiles.
@@ -1365,17 +1365,19 @@ pub struct AcquiredFrame {
 
 impl std::fmt::Debug for AcquiredFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AcquiredFrame").field("slot", &self.slot).field("frame", &self.frame).finish()
+        f.debug_struct("AcquiredFrame").field("slot", &self.slot).field("frame", &self.frame).finish_non_exhaustive()
     }
 }
 
 impl AcquiredFrame {
     /// The index of the frame's texture in the ring.
+    #[must_use]
     pub fn slot(&self) -> usize {
         self.slot
     }
 
     /// The result of the demand that rendered the frame.
+    #[must_use]
     pub fn result(&self) -> &FrameResult {
         &self.frame.result
     }
@@ -1383,16 +1385,19 @@ impl AcquiredFrame {
     /// What to wait for before reading the frame's texture. The object it
     /// names is the session's, and stays valid until the frame is given
     /// back.
+    #[must_use]
     pub fn producer_sync(&self) -> GpuSync {
         self.frame.sync
     }
 
     /// The host's texture that holds the frame.
+    #[must_use]
     pub fn texture(&self) -> Option<&FrameTexture> {
         self.frame.texture.as_ref()
     }
 
     /// Whether [`release`](Self::release) takes a sync of `kind`.
+    #[must_use]
     pub fn accepts(&self, kind: SyncKind) -> bool {
         self.shared.capabilities.consumer_sync_kinds.contains(kind)
     }
@@ -1419,6 +1424,7 @@ impl AcquiredFrame {
 
     /// Whether the session can still render: the frame's objects stay valid
     /// until it ends.
+    #[must_use]
     pub fn session_live(&self) -> bool {
         matches!(
             self.shared.state.lock_unpoisoned().lifecycle,
@@ -1509,18 +1515,15 @@ fn give_back(shared: &Arc<SessionShared>, slot: usize, consumer: Option<Consumer
             // A sync file that no backend waits on closes with `consumer`.
             return;
         }
-        match consumer {
-            Some(sync) => {
-                worker::post(&shared.run_loop, move |worker, outbox| worker.release_slot(slot, sync, outbox));
+        if let Some(sync) = consumer {
+            worker::post(&shared.run_loop, move |worker, outbox| worker.release_slot(slot, sync, outbox));
+        } else {
+            if let Some(entry) = state.ring.get_mut(slot) {
+                entry.acquired = false;
+                entry.quarantined = !entry.retired;
+                entry.retired = false;
             }
-            None => {
-                if let Some(entry) = state.ring.get_mut(slot) {
-                    entry.acquired = false;
-                    entry.quarantined = !entry.retired;
-                    entry.retired = false;
-                }
-                worker::post(&shared.run_loop, move |worker, outbox| worker.discard_slot(slot, outbox));
-            }
+            worker::post(&shared.run_loop, move |worker, outbox| worker.discard_slot(slot, outbox));
         }
     });
 }

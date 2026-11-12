@@ -177,7 +177,7 @@ mod tests {
     fn arrays_may_be_null_only_when_empty() {
         // SAFETY: null pointers, and a local array of the count passed.
         unsafe {
-            assert!(lat_lngs(core::ptr::null(), 0).unwrap().is_empty());
+            assert_eq!(lat_lngs(core::ptr::null(), 0).unwrap(), Vec::<LatLng>::new());
             assert_eq!(lat_lngs(core::ptr::null(), 1).unwrap_err().message(), "coordinates must not be null");
             let points = [mln_screen_point { x: 1.0, y: 2.0 }, mln_screen_point { x: f64::NAN, y: 0.0 }];
             assert_eq!(screen_points(points.as_ptr(), 1).unwrap(), vec![ScreenCoordinate::new(1.0, 2.0)]);

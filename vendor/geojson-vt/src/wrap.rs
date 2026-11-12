@@ -11,6 +11,7 @@ pub fn shift_coords(features: &mut VtFeatures, offset: f64) {
     }
 }
 
+#[must_use]
 pub fn wrap(features: &VtFeatures, buffer: f64, line_metrics: bool) -> VtFeatures {
     // left world copy
     let mut left = clip::<0>(features, -1.0 - buffer, buffer, -1.0, 2.0, line_metrics);

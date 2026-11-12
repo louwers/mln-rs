@@ -99,15 +99,15 @@ fn resource_offline_usage_unset() {
 
     let s = size.clone();
     file_source.set_response(Kind::Style, move |resource: &Resource| {
-        assert!(resource.priority == Priority::Low);
-        assert!(resource.usage == Usage::Offline);
+        assert_eq!(resource.priority, Priority::Low);
+        assert_eq!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "inline_source.style.json"))
     });
 
     let s = size.clone();
     file_source.set_response(Kind::Tile, move |resource: &Resource| {
-        assert!(resource.priority == Priority::Low);
-        assert!(resource.usage == Usage::Offline);
+        assert_eq!(resource.priority, Priority::Low);
+        assert_eq!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
@@ -126,13 +126,13 @@ fn resource_offline_usage_unset() {
     let stubfile_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
     let s = size.clone();
     stubfile_source.set_response(Kind::Style, move |resource: &Resource| {
-        assert!(resource.usage != Usage::Offline);
+        assert_ne!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "inline_source.style.json"))
     });
 
     let s = size.clone();
     stubfile_source.set_response(Kind::Tile, move |resource: &Resource| {
-        assert!(resource.usage != Usage::Offline);
+        assert_ne!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 

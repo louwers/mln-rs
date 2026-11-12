@@ -39,12 +39,14 @@ pub struct GeometryCollection {
 }
 
 impl GeometryCollection {
+    #[must_use]
     pub const fn new() -> Self {
         GeometryCollection { rings: Vec::new(), triangles: None }
     }
 
     /// `getTriangles()`: three indices per triangle, counted from the
     /// feature's first vertex; empty unless the tile carried triangles.
+    #[must_use]
     pub fn get_triangles(&self) -> &[u32] {
         match &self.triangles {
             Some((owner, range)) => &owner[range.clone()],
@@ -170,8 +172,8 @@ pub trait GeometryTileData {
     fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error>;
 
     /// Port-only: what the data is made from, for a tile worker in another
-    /// wasm instance, which makes the data again (mln_renderer's
-    /// tile/worker_codec): a vector tile's bytes or a GeoJSON tile's
+    /// wasm instance, which makes the data again (`mln_renderer`'s
+    /// `tile/worker_codec)`: a vector tile's bytes or a GeoJSON tile's
     /// features. `None` for data that no longer has its bytes.
     fn encoded(&self) -> Option<EncodedTileData> {
         None
@@ -179,7 +181,7 @@ pub trait GeometryTileData {
 }
 
 /// Port-only: what tile data is made from (`GeometryTileData::encoded`).
-/// The bytes travel beside a message (mln_util::serialization::payload).
+/// The bytes travel beside a message (`mln_util::serialization::payload`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EncodedTileData {
     Mvt(#[serde(with = "shared_bytes")] Arc<Vec<u8>>),
@@ -222,7 +224,7 @@ mod tests {
     #[test]
     fn triangles() {
         let mut c = GeometryCollection::from(vec![vec![Point::new(0, 0), Point::new(1, 0), Point::new(0, 1)]]);
-        assert!(c.get_triangles().is_empty());
+        assert_eq!(c.get_triangles(), []);
         let owner: Arc<[u32]> = Arc::from(vec![9, 9, 0, 1, 2, 9]);
         c.set_triangles(owner, 2..5);
         assert_eq!(c.get_triangles(), &[0, 1, 2]);

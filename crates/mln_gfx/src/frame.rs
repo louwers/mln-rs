@@ -53,6 +53,7 @@ impl SyncKind {
     ];
 
     /// Whether a sync of this kind names an object to wait on.
+    #[must_use]
     pub fn names_object(self) -> bool {
         !matches!(self, SyncKind::CpuComplete | SyncKind::QueueOrder)
     }
@@ -69,14 +70,17 @@ pub struct SyncKinds(u8);
 impl SyncKinds {
     pub const NONE: SyncKinds = SyncKinds(0);
 
+    #[must_use]
     pub fn of(kinds: &[SyncKind]) -> SyncKinds {
         SyncKinds(kinds.iter().fold(0, |bits, kind| bits | kind.bit()))
     }
 
+    #[must_use]
     pub fn contains(self, kind: SyncKind) -> bool {
         self.0 & kind.bit() != 0
     }
 
+    #[must_use]
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
@@ -98,6 +102,7 @@ impl SyncKinds {
     /// The kind of `self`, the ones a host accepts, that `supported` has and
     /// that waits least. A host that names none accepts a finished frame
     /// where `supported` has one, and queue order otherwise.
+    #[must_use]
     pub fn pick(self, supported: SyncKinds) -> Option<SyncKind> {
         let accepted = if !self.is_empty() {
             self
@@ -122,6 +127,7 @@ pub struct GpuSync {
 
 impl GpuSync {
     /// A sync of a kind that names no object.
+    #[must_use]
     pub fn of(kind: SyncKind) -> GpuSync {
         GpuSync { kind, handle: 0, value: 0 }
     }
@@ -143,6 +149,7 @@ pub struct ConsumerSync {
 impl ConsumerSync {
     /// A sync of a kind that names no object, or names one that the host
     /// keeps.
+    #[must_use]
     pub fn of(sync: GpuSync) -> ConsumerSync {
         ConsumerSync {
             sync,

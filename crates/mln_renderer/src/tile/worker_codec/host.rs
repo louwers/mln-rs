@@ -21,7 +21,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
@@ -74,17 +74,21 @@ enum Hosted {
     RasterDEM(Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>>),
 }
 
+/// The layers, global state, available images, subdivision granularity and
+/// pixel ratio a geometry tile's worker got with its layers.
+type SentLayers = (
+    Vec<Immutable<dyn LayerProperties>>,
+    Option<Arc<GlobalStateMap>>,
+    Immutable<VecSet<String>>,
+    SubdivisionGranularitySetting,
+    f32,
+);
+
 /// What a geometry tile's worker has of its tile's data and of its layers.
 #[derive(Default)]
 struct Sent {
     data: Kept<(Option<SharedTileData>, Immutable<VecSet<String>>)>,
-    layers: Kept<(
-        Vec<Immutable<dyn LayerProperties>>,
-        Option<Arc<GlobalStateMap>>,
-        Immutable<VecSet<String>>,
-        SubdivisionGranularitySetting,
-        f32,
-    )>,
+    layers: Kept<SentLayers>,
 }
 
 /// The tile's data or its layers, as the worker last got them, with the
@@ -202,7 +206,7 @@ impl TileWorkerHost {
 
     /// Handles a request from the map side.
     pub fn handle(&self, request: &[u8]) {
-        let action = self.codec.lock().unwrap_or_else(|e| e.into_inner()).decode(request);
+        let action = self.codec.lock().unwrap_or_else(PoisonError::into_inner).decode(request);
         match action {
             Ok(WorkerAction::Create { tile, parameters }) => {
                 let obsolete = parameters.obsolete.clone();
@@ -234,7 +238,7 @@ impl TileWorkerHost {
     fn message(&self, tile: u64, about: About, message: &[u8]) {
         let correlation_id = about.correlation_id;
         let decoded = {
-            let mut codec = self.codec.lock().unwrap_or_else(|e| e.into_inner());
+            let mut codec = self.codec.lock().unwrap_or_else(PoisonError::into_inner);
             match self.hosted.borrow().get(&tile) {
                 Some(Hosted::Geometry { .. }) => codec.decode_message(message).map(Decoded::Geometry),
                 Some(Hosted::Raster(_)) => codec.decode_message(message).map(Decoded::Raster),
@@ -304,21 +308,21 @@ struct EncodingTile {
 
 impl TileEndpoint for EncodingTile {
     fn send(&self, message: TileMessage) {
-        let reply = self.codec.lock().unwrap_or_else(|e| e.into_inner()).encode(self.tile, message);
+        let reply = self.codec.lock().unwrap_or_else(PoisonError::into_inner).encode(self.tile, message);
         (self.replies)(reply);
     }
 }
 
 impl TileEndpoint<RasterTileMessage> for EncodingTile {
     fn send(&self, message: RasterTileMessage) {
-        let reply = self.codec.lock().unwrap_or_else(|e| e.into_inner()).encode_raster(self.tile, message);
+        let reply = self.codec.lock().unwrap_or_else(PoisonError::into_inner).encode_raster(self.tile, &message);
         (self.replies)(reply);
     }
 }
 
 impl TileEndpoint<RasterDEMTileMessage> for EncodingTile {
     fn send(&self, message: RasterDEMTileMessage) {
-        let reply = self.codec.lock().unwrap_or_else(|e| e.into_inner()).encode_raster_dem(self.tile, message);
+        let reply = self.codec.lock().unwrap_or_else(PoisonError::into_inner).encode_raster_dem(self.tile, &message);
         (self.replies)(reply);
     }
 }

@@ -43,6 +43,7 @@ impl Stage {
 /// The source glslang is given for a stage: the version, the program's
 /// defines (`#define` lines), the stage's prelude, and the shader's own
 /// prelude and source.
+#[must_use]
 pub fn compose(stage: Stage, defines: &str, shader_prelude: &str, source: &str) -> String {
     format!("#version {GLSL_VERSION}\n{defines}\n{}\n{shader_prelude}\n{source}", stage.prelude())
 }

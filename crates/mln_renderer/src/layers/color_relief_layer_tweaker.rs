@@ -13,7 +13,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::color_relief_layer_properties::*;
+use mln_style::layers::color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefOpacity};
 use mln_util::immutable::Immutable;
 
 use super::cast_matrix;

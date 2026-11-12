@@ -308,7 +308,7 @@ void applySurfaceTransform() {
 
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::Vulkan>::fragment`
 /// (common.hpp): the start of every fragment stage.
-pub const PRELUDE_FRAGMENT: &str = r#"
+pub const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
 #define SDF_PX 8.0
@@ -357,22 +357,22 @@ vec2 atlas_pos(const vec2 origin, const vec2 offset) {
     return origin + roundEven(offset * 16777216.0) / 16777216.0;
 }
 
-"#;
+";
 
 /// `backgroundShaderPrelude` (background.hpp).
-pub const BACKGROUND_SHADER_PRELUDE: &str = r#"
+pub const BACKGROUND_SHADER_PRELUDE: &str = r"
 
 #define idBackgroundDrawableUBO     idDrawableReservedVertexOnlyUBO
 #define idBackgroundPropsUBO        layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::Vulkan>`
 pub const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundShader",
     name: "BackgroundShader",
     prelude: BACKGROUND_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -400,8 +400,8 @@ void main() {
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
     applySurfaceTransform();
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 layout(location = 0) out vec4 out_color;
 
 layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPropsUBO {
@@ -421,7 +421,7 @@ void main() {
 
     out_color = props.color * props.opacity;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::Vulkan>`
@@ -429,7 +429,7 @@ pub const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundPatternShader",
     name: "BackgroundPatternShader",
     prelude: BACKGROUND_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 layout(location = 0) in ivec2 in_position;
 
 layout(push_constant) uniform Constants {
@@ -487,8 +487,8 @@ void main() {
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
     applySurfaceTransform();
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
 
@@ -530,23 +530,23 @@ void main() {
     out_color = mix(color1, color2, props.mix) * props.opacity;
 #endif
 }
-"#,
+",
 };
 
 /// `circleShaderPrelude` (circle.hpp).
-pub const CIRCLE_SHADER_PRELUDE: &str = r#"
+pub const CIRCLE_SHADER_PRELUDE: &str = r"
 
 #define idCircleDrawableUBO         idDrawableReservedVertexOnlyUBO
 #define idCircleEvaluatedPropsUBO   layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::Vulkan>`
 pub const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CircleShader",
     name: "CircleShader",
     prelude: CIRCLE_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -757,8 +757,8 @@ void main() {
     frag_stroke_opacity = unpack_mix_float(in_stroke_opacity, drawable.stroke_opacity_t);
 #endif
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_extrude;
 layout(location = 1) in float frag_antialiasblur;
@@ -857,7 +857,7 @@ void main() {
 
     out_color = opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::Vulkan>`
@@ -865,7 +865,7 @@ pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     built_in: "ClippingMaskProgram",
     name: "ClippingMaskProgram",
     prelude: "",
-    vertex: r#"
+    vertex: r"
         layout(location = 0) in ivec2 position;
 
 #ifdef PROJECTION_GLOBE
@@ -901,31 +901,31 @@ pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
             gl_Position.y *= -1.0;
         }
 #endif
-    "#,
-    fragment: r#"
+    ",
+    fragment: r"
         layout(location = 0) out vec4 outColor;
 
         void main() {
             outColor = vec4(0.0f);
         }
-    "#,
+    ",
 };
 
 /// `collisionShaderPrelude` (collision.hpp).
-pub const COLLISION_SHADER_PRELUDE: &str = r#"
+pub const COLLISION_SHADER_PRELUDE: &str = r"
 
 #define idCollisionDrawableUBO      drawableUBOStartId
 #define idCollisionTilePropsUBO     drawableUBOStartId + 3
 #define idCollisionProjectionUBO    drawableUBOStartId + 2
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::Vulkan>`
 pub const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionBoxShader",
     name: "CollisionBoxShader",
     prelude: COLLISION_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_anchor_position;
@@ -978,8 +978,8 @@ void main() {
     frag_placed = in_placed.x;
     frag_notUsed = in_placed.y;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in float frag_placed;
 layout(location = 1) in float frag_notUsed;
@@ -1005,7 +1005,7 @@ void main() {
 
     out_color = color;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::Vulkan>`
@@ -1013,7 +1013,7 @@ pub const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionCircleShader",
     name: "CollisionCircleShader",
     prelude: COLLISION_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_anchor_position;
@@ -1072,8 +1072,8 @@ void main() {
     frag_extrude = in_extrude * padding_factor;
     frag_extrude_scale = tileProps.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in float frag_placed;
 layout(location = 1) in float frag_notUsed;
@@ -1116,24 +1116,24 @@ void main() {
 
     out_color = color * opacity_t;
 }
-"#,
+",
 };
 
-/// `colorReliefShaderPrelude` (color_relief.hpp).
-pub const COLOR_RELIEF_SHADER_PRELUDE: &str = r#"
+/// `colorReliefShaderPrelude` (`color_relief.hpp`).
+pub const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
 
 #define idColorReliefDrawableUBO        idDrawableReservedVertexOnlyUBO
 #define idColorReliefTilePropsUBO       drawableReservedUBOCount
 #define idColorReliefEvaluatedPropsUBO  layerUBOStartId + 1
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::Vulkan>`
 pub const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "ColorReliefShader",
     name: "ColorReliefShader",
     prelude: COLOR_RELIEF_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -1181,8 +1181,8 @@ void main() {
     if (float(in_position.y) < -32767.5) frag_position.y = 0.0;
     if (float(in_position.y) > 32766.5) frag_position.y = 1.0;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
@@ -1276,18 +1276,18 @@ void main() {
     out_color = props.opacity * mix(color_l, color_r, t);
 #endif
 }
-"#,
+",
 };
 
 /// `debugShaderPrelude` (debug.hpp).
-pub const DEBUG_SHADER_PRELUDE: &str = r#"#define idDebugUBO  drawableUBOStartId + 3"#;
+pub const DEBUG_SHADER_PRELUDE: &str = r"#define idDebugUBO  drawableUBOStartId + 3";
 
 /// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::Vulkan>`
 pub const DEBUG_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "DebugShader",
     name: "DebugShader",
     prelude: DEBUG_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -1319,8 +1319,8 @@ void main() {
     // The UV coordinates for the overlay texture can be calculated using that knowledge
     frag_uv = in_position / 8192.0;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 layout(location = 0) in vec2 frag_uv;
 layout(location = 0) out vec4 out_color;
 
@@ -1340,24 +1340,24 @@ void main() {
     vec4 overlay_color = texture(sampler2D(image_texture, image_sampler), frag_uv);
     out_color = mix(debug.color, overlay_color, overlay_color.a);
 }
-"#,
+",
 };
 
 /// `fillShaderPrelude` (fill.hpp).
-pub const FILL_SHADER_PRELUDE: &str = r#"
+pub const FILL_SHADER_PRELUDE: &str = r"
 
 #define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
 #define idFillTilePropsUBO          drawableReservedUBOCount
 #define idFillEvaluatedPropsUBO     layerUBOStartId + 1
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillShader",
     name: "FillShader",
     prelude: FILL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -1414,8 +1414,8 @@ void main() {
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
     applySurfaceTransform();
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 #if !defined(HAS_UNIFORM_u_color)
 layout(location = 0) in vec4 frag_color;
@@ -1452,7 +1452,7 @@ void main() {
 
     out_color = color * opacity;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Vulkan>`
@@ -1460,7 +1460,7 @@ pub const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineShader",
     name: "FillOutlineShader",
     prelude: FILL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -1521,8 +1521,8 @@ void main() {
 
     frag_position = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 #if !defined(HAS_UNIFORM_u_outline_color)
 layout(location = 0) in vec4 frag_color;
@@ -1568,7 +1568,7 @@ void main() {
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     out_color = color * opacity * alpha;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Vulkan>`
@@ -1576,7 +1576,7 @@ pub const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillPatternShader",
     name: "FillPatternShader",
     prelude: FILL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -1706,8 +1706,8 @@ void main() {
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
     applySurfaceTransform();
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
@@ -1816,7 +1816,7 @@ void main() {
     }
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::Vulkan>`
@@ -1824,7 +1824,7 @@ pub const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlinePatternShader",
     name: "FillOutlinePatternShader",
     prelude: FILL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -1957,8 +1957,8 @@ void main() {
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, position2),
     frag_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
@@ -2071,7 +2071,7 @@ void main() {
     }
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::Vulkan>`
@@ -2079,7 +2079,7 @@ pub const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource 
     built_in: "FillOutlineTriangulatedShader",
     name: "FillOutlineTriangulatedShader",
     prelude: FILL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -2148,8 +2148,8 @@ void main() {
     frag_width2 = outset;
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in float frag_width2;
 layout(location = 1) in vec2 frag_normal;
@@ -2183,24 +2183,24 @@ void main() {
 
     out_color = props.outline_color * alpha * props.opacity;
 }
-"#,
+",
 };
 
-/// `fillExtrusionShaderPrelude` (fill_extrusion.hpp).
-pub const FILL_EXTRUSION_SHADER_PRELUDE: &str = r#"
+/// `fillExtrusionShaderPrelude` (`fill_extrusion.hpp`).
+pub const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 #define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
 #define idFillExtrusionTilePropsUBO             drawableReservedUBOCount
 #define idFillExtrusionPropsUBO                 layerUBOStartId + 1
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionShader",
     name: "FillExtrusionShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in uvec2 in_decimals_ed;
@@ -2331,8 +2331,8 @@ void main() {
 
     frag_color = vcolor * props.opacity;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec4 frag_color;
 layout(location = 0) out vec4 out_color;
@@ -2340,7 +2340,7 @@ layout(location = 0) out vec4 out_color;
 void main() {
     out_color = frag_color;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionInstancedShader, gfx::Backend::Type::Vulkan>`
@@ -2348,7 +2348,7 @@ pub const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionInstancedShader",
     name: "FillExtrusionInstancedShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -2501,8 +2501,8 @@ void main() {
 
     frag_color = vcolor * props.opacity;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec4 frag_color;
 layout(location = 0) out vec4 out_color;
@@ -2510,7 +2510,7 @@ layout(location = 0) out vec4 out_color;
 void main() {
     out_color = frag_color;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::Vulkan>`
@@ -2518,7 +2518,7 @@ pub const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternShader",
     name: "FillExtrusionPatternShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in uvec2 in_decimals_ed;
@@ -2699,8 +2699,8 @@ void main() {
 #endif
 #endif
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec4 frag_lighting;
 layout(location = 1) in vec2 frag_pos_a;
@@ -2785,7 +2785,7 @@ void main() {
     out_color = mix(color1, color2, props.fade) * frag_lighting;
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionPatternInstancedShader, gfx::Backend::Type::Vulkan>`
@@ -2793,7 +2793,7 @@ pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShader
     built_in: "FillExtrusionPatternInstancedShader",
     name: "FillExtrusionPatternInstancedShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -2996,8 +2996,8 @@ void main() {
 #endif
 #endif
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec4 frag_lighting;
 layout(location = 1) in vec2 frag_pos_a;
@@ -3082,7 +3082,7 @@ void main() {
     out_color = mix(color1, color2, props.fade) * frag_lighting;
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::Vulkan>`
@@ -3090,7 +3090,7 @@ pub const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "GlobeDepthShader",
     name: "GlobeDepthShader",
     prelude: "",
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -3106,23 +3106,23 @@ void main() {
     gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector.projection_ubo[constant.ubo_index]);
     applySurfaceTransform();
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 layout(location = 0) out vec4 out_color;
 
 void main() {
     out_color = vec4(0.0);
 }
-"#,
+",
 };
 
 /// `heatmapShaderPrelude` (heatmap.hpp).
-pub const HEATMAP_SHADER_PRELUDE: &str = r#"
+pub const HEATMAP_SHADER_PRELUDE: &str = r"
 
 #define idHeatmapDrawableUBO        idDrawableReservedVertexOnlyUBO
 #define idHeatmapEvaluatedPropsUBO  layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::Vulkan>`
 pub const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
@@ -3234,7 +3234,7 @@ void main() {
     frag_extrude = extrude;
 }
 "#,
-    fragment: r#"
+    fragment: r"
 
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
@@ -3264,18 +3264,18 @@ void main() {
 
     out_color = vec4(val, 1.0, 1.0, 1.0);
 }
-"#,
+",
 };
 
-/// `heatmapTextureShaderPrelude` (heatmap_texture.hpp).
-pub const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r#"#define idHeatmapTexturePropsUBO    layerUBOStartId"#;
+/// `heatmapTextureShaderPrelude` (`heatmap_texture.hpp`).
+pub const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r"#define idHeatmapTexturePropsUBO    layerUBOStartId";
 
 /// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::Vulkan>`
 pub const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapTextureShader",
     name: "HeatmapTextureShader",
     prelude: HEATMAP_TEXTURE_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -3296,8 +3296,8 @@ void main() {
 
     frag_position = in_position;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
@@ -3326,24 +3326,24 @@ void main() {
     const vec4 color = texture(sampler2D(color_ramp_texture, color_ramp_sampler), vec2(t, 0.5));
     out_color = color * props.opacity;
 }
-"#,
+",
 };
 
 /// `hillshadeShaderPrelude` (hillshade.hpp).
-pub const HILLSHADE_SHADER_PRELUDE: &str = r#"
+pub const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
 #define idHillshadeTilePropsUBO         idDrawableReservedFragmentOnlyUBO
 #define idHillshadeEvaluatedPropsUBO    layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::Vulkan>`
 pub const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadeShader",
     name: "HillshadeShader",
     prelude: HILLSHADE_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_texture_position;
@@ -3375,8 +3375,8 @@ void main() {
     frag_position = vec2(in_texture_position) / 8192.0;
     frag_position.y = 1.0 - frag_position.y;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 #define PI 3.141592653589793
 #define STANDARD 0
@@ -3574,23 +3574,23 @@ void main() {
         standard_hillshade(deriv, tileProps);
     }
 }
-"#,
+",
 };
 
-/// `hillshadePrepareShaderPrelude` (hillshade_prepare.hpp).
-pub const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r#"
+/// `hillshadePrepareShaderPrelude` (`hillshade_prepare.hpp`).
+pub const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadePrepareDrawableUBO       drawableUBOStartId
 #define idHillshadePrepareTilePropsUBO      drawableUBOStartId + 3
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::Vulkan>`
 pub const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadePrepareShader",
     name: "HillshadePrepareShader",
     prelude: HILLSHADE_PREPARE_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_texture_position;
@@ -3617,8 +3617,8 @@ void main() {
     const float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
     frag_position = in_texture_position / 8192.0 * scale + epsilon;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
@@ -3697,24 +3697,24 @@ void main() {
         1.0), 0.0, 1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `lineShadePrelude` (line.hpp).
-pub const LINE_SHADE_PRELUDE: &str = r#"
+pub const LINE_SHADE_PRELUDE: &str = r"
 
 #define idLineDrawableUBO           idDrawableReservedVertexOnlyUBO
 #define idLineTilePropsUBO          idDrawableReservedFragmentOnlyUBO
 #define idLineEvaluatedPropsUBO     layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::Vulkan>`
 pub const LINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineShader",
     name: "LineShader",
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -3888,8 +3888,8 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -3966,7 +3966,7 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::Vulkan>`
@@ -3974,7 +3974,7 @@ pub const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientShader",
     name: "LineGradientShader",
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -4138,8 +4138,8 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -4214,7 +4214,7 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::Vulkan>`
@@ -4222,7 +4222,7 @@ pub const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LinePatternShader",
     name: "LinePatternShader",
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -4420,8 +4420,8 @@ void main() {
     frag_width2 = vec2(outset, inset);
     frag_linesofar = (floor(in_data.z / 4.0) + in_data.w * 64.0) * LINE_DISTANCE_SCALE;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -4566,7 +4566,7 @@ void main() {
     out_color = color * (alpha * opacity);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::Vulkan>`
@@ -4574,7 +4574,7 @@ pub const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineSDFShader",
     name: "LineSDFShader",
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -4774,8 +4774,8 @@ void main() {
     frag_tex_a = vec2(linesofar * drawable.patternscale_a.x / floorwidth, frag_normal.y * drawable.patternscale_a.y + drawable.tex_y_a);
     frag_tex_b = vec2(linesofar * drawable.patternscale_b.x / floorwidth, frag_normal.y * drawable.patternscale_b.y + drawable.tex_y_b);
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -4891,7 +4891,7 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::Vulkan>`
@@ -4899,7 +4899,7 @@ pub const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientSDFShader",
     name: "LineGradientSDFShader",
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -5089,8 +5089,8 @@ void main() {
     frag_tex_a = vec2(linesofar * drawable.patternscale_a.x / floorwidth, frag_normal.y * drawable.patternscale_a.y + drawable.tex_y_a);
     frag_tex_b = vec2(linesofar * drawable.patternscale_b.x / floorwidth, frag_normal.y * drawable.patternscale_b.y + drawable.tex_y_b);
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -5202,23 +5202,23 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-"#,
+",
 };
 
 /// `rasterShaderPrelude` (raster.hpp).
-pub const RASTER_SHADER_PRELUDE: &str = r#"
+pub const RASTER_SHADER_PRELUDE: &str = r"
 
 #define idRasterDrawableUBO         idDrawableReservedVertexOnlyUBO
 #define idRasterEvaluatedPropsUBO   layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::Vulkan>`
 pub const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "RasterShader",
     name: "RasterShader",
     prelude: RASTER_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_texture_position;
@@ -5271,8 +5271,8 @@ void main() {
     frag_position0 = (((in_texture_position / 8192.0) - 0.5) / props.buffer_scale ) + 0.5;
     frag_position1 = (frag_position0 * props.scale_parent) + props.tl_parent;
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_position0;
 layout(location = 1) in vec2 frag_position1;
@@ -5338,23 +5338,23 @@ void main() {
 
     out_color = vec4(vec3(mix(high_vec, low_vec, rgb) * color.a), color.a);
 }
-"#,
+",
 };
 
 /// `skyShaderPrelude` (sky.hpp).
-pub const SKY_SHADER_PRELUDE: &str = r#"
+pub const SKY_SHADER_PRELUDE: &str = r"
 
 #define idSkyPropsUBO layerUBOStartId
 #define idAtmospherePropsUBO layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::Vulkan>`
 pub const SKY_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SkyShader",
     name: "SkyShader",
     prelude: SKY_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec2 frag_pos;
 
@@ -5363,8 +5363,8 @@ void main() {
     gl_Position = vec4(frag_pos, 1.0, 1.0);
     applySurfaceTransform();
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 layout(location = 0) in vec2 frag_pos;
 layout(location = 0) out vec4 out_color;
 
@@ -5392,7 +5392,7 @@ void main() {
     }
     out_color = color * (1.0 - sky.sky_blend);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::Vulkan>`
@@ -5400,7 +5400,7 @@ pub const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "AtmosphereShader",
     name: "AtmosphereShader",
     prelude: SKY_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec3 frag_view_direction;
 
@@ -5419,8 +5419,8 @@ void main() {
     gl_Position = vec4(pos, 0.5, 1.0);
     applySurfaceTransform();
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 layout(location = 0) in vec3 frag_view_direction;
 layout(location = 0) out vec4 out_color;
 
@@ -5514,24 +5514,24 @@ void main() {
     color = pow(color, vec4(1.0 / 2.2));
     out_color = vec4(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w;
 }
-"#,
+",
 };
 
 /// `symbolShaderPrelude` (symbol.hpp).
-pub const SYMBOL_SHADER_PRELUDE: &str = r#"
+pub const SYMBOL_SHADER_PRELUDE: &str = r"
 
 #define idSymbolDrawableUBO         idDrawableReservedVertexOnlyUBO
 #define idSymbolTilePropsUBO        idDrawableReservedFragmentOnlyUBO
 #define idSymbolEvaluatedPropsUBO   layerUBOStartId
 
-"#;
+";
 
 /// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::Vulkan>`
 pub const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolIconShader",
     name: "SymbolIconShader",
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
@@ -5704,8 +5704,8 @@ void main() {
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t) * fade_opacity;
 #endif
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
 layout(location = 1) in float frag_opacity;
@@ -5766,7 +5766,7 @@ void main() {
     out_color = texture(sampler2D(image0_texture, image0_sampler), atlas_pos(frag_tex_origin, frag_tex)) * opacity;
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::Vulkan>`
@@ -5774,7 +5774,7 @@ pub const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolSDFShader",
     name: "SymbolSDFShader",
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
@@ -6002,8 +6002,8 @@ void main() {
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
 #endif
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
 layout(location = 1) in float frag_fade_opacity;
@@ -6126,7 +6126,7 @@ void main() {
     out_color = color * (alpha * opacity * frag_fade_opacity);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::Vulkan>`
@@ -6134,7 +6134,7 @@ pub const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolTextAndIconShader",
     name: "SymbolTextAndIconShader",
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: r"
 
 #define SDF 1.0
 #define ICON 0.0
@@ -6370,8 +6370,8 @@ void main() {
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
 #endif
 }
-"#,
-    fragment: r#"
+",
+    fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
 layout(location = 1) in float frag_fade_opacity;
@@ -6505,7 +6505,7 @@ void main() {
     out_color = color * (alpha * opacity * frag_fade_opacity);
 #endif
 }
-"#,
+",
 };
 
 /// Every specialisation, in the order of the C++ headers.

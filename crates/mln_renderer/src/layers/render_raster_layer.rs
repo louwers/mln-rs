@@ -20,7 +20,10 @@ use std::sync::Arc;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
@@ -33,9 +36,11 @@ use mln_map_types::TransformState;
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
-use mln_style::layers::raster_layer_properties::*;
+use mln_style::layers::raster_layer_properties::{
+    RasterLayerProperties, RasterOpacity, RasterPaintProperties, RasterResampling, Resampling,
+};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
-use mln_style_types::RasterResamplingType;
+use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
@@ -119,19 +124,25 @@ impl RenderRasterLayer {
             })
             .clone();
 
-        let evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties);
-        let nearest = *evaluated.get::<RasterResampling>() == RasterResamplingType::Nearest;
-        let filter = if nearest { TextureFilterType::Nearest } else { TextureFilterType::Linear };
-
-        texture.borrow_mut().set_sampler_configuration(SamplerState {
-            filter,
-            wrap_u: TextureWrapType::Clamp,
-            wrap_v: TextureWrapType::Clamp,
-            ..Default::default()
-        });
+        texture.borrow_mut().set_sampler_configuration(self.sampler_state());
 
         builder.set_texture(Some(texture.clone()), ID_RASTER_IMAGE0_TEXTURE);
         builder.set_texture(Some(texture), ID_RASTER_IMAGE1_TEXTURE);
+    }
+
+    /// The sampler of the layer's tile textures for the evaluated
+    /// properties.
+    fn sampler_state(&self) -> SamplerState {
+        let evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties);
+        // GL JS draws Nearest when either property asks for it.
+        let nearest = *evaluated.get::<RasterResampling>() == RasterResamplingType::Nearest
+            || *evaluated.get::<Resampling>() == ResamplingType::Nearest;
+        SamplerState {
+            filter: if nearest { TextureFilterType::Nearest } else { TextureFilterType::Linear },
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        }
     }
 }
 
@@ -142,7 +153,7 @@ impl RenderRasterLayer {
     fn update_image(
         &mut self,
         context: &dyn Context,
-        raster_shader: Option<ShaderProgramBasePtr>,
+        raster_shader: Option<&ShaderProgramBasePtr>,
         image_data: &ImageSourceRenderData,
         changes: &mut UniqueChangeRequestVec,
     ) {
@@ -182,7 +193,7 @@ impl RenderRasterLayer {
         // TODO: Share textures
         for tile_id in &image_data.tile_ids {
             let mut builder = context.create_drawable_builder("raster".to_owned());
-            builder.set_shader(raster_shader.clone());
+            builder.set_shader(raster_shader.cloned());
             builder.set_render_pass(RenderPass::Translucent);
             builder.set_sub_layer_index(0);
             builder.set_depth_type(DepthMaskType::ReadOnly);
@@ -301,7 +312,7 @@ impl RenderLayer for RenderRasterLayer {
                 self.base.render_tiles = None;
             }
         }
-        self.image_data = params.source.and_then(|source| source.get_image_render_data());
+        self.image_data = params.source.and_then(crate::render_source::RenderSource::get_image_render_data);
         // It is possible image data is not available until the source loads it.
         self.update_render_tile_ids();
     }
@@ -394,7 +405,7 @@ impl RenderLayer for RenderRasterLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
 
         if let Some(image_data) = image_data {
-            self.update_image(context, raster_shader, &image_data, changes);
+            self.update_image(context, raster_shader.as_ref(), &image_data, changes);
             return;
         }
         let Some(render_tiles) = render_tiles else {
@@ -447,6 +458,12 @@ impl RenderLayer for RenderRasterLayer {
         let live_buckets: std::collections::HashSet<SimpleIdentity> =
             render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
         self.textures.retain(|id, _| live_buckets.contains(id));
+        // Existing drawables keep their textures, so a changed filter is
+        // applied to the textures themselves.
+        let sampler = self.sampler_state();
+        for texture in self.textures.values() {
+            texture.borrow_mut().set_sampler_configuration(sampler);
+        }
 
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();

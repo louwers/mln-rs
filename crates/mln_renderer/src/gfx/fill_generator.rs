@@ -47,7 +47,7 @@ fn add_fill_indices(
     total_vertices: usize,
 ) {
     let n_indices = indices.len();
-    debug_assert!(n_indices % 3 == 0);
+    debug_assert!(n_indices.is_multiple_of(3));
 
     let needs_segment = match fill_segments.last() {
         None => true,
@@ -58,15 +58,15 @@ fn add_fill_indices(
     }
 
     let triangle_segment = fill_segments.last_mut().expect("segment");
-    debug_assert!(triangle_segment.vertex_length + total_vertices <= u16::MAX as usize);
+    debug_assert!(u16::try_from(triangle_segment.vertex_length + total_vertices).is_ok());
     let triangle_index = triangle_segment.vertex_length as u16;
 
     let mut i = 0;
     while i < n_indices {
         // `triangleIndex + indices[i]` is a uint32_t, narrowed to uint16_t.
-        fill_indexes.push((triangle_index as u32).wrapping_add(indices[i]) as u16);
-        fill_indexes.push((triangle_index as u32).wrapping_add(indices[i + 1]) as u16);
-        fill_indexes.push((triangle_index as u32).wrapping_add(indices[i + 2]) as u16);
+        fill_indexes.push(u32::from(triangle_index).wrapping_add(indices[i]) as u16);
+        fill_indexes.push(u32::from(triangle_index).wrapping_add(indices[i + 1]) as u16);
+        fill_indexes.push(u32::from(triangle_index).wrapping_add(indices[i + 2]) as u16);
         i += 3;
     }
 
@@ -93,7 +93,7 @@ fn add_outline_indices(
     }
 
     let line_segment = line_segments.last_mut().expect("segment");
-    debug_assert!(line_segment.vertex_length <= u16::MAX as usize);
+    debug_assert!(u16::try_from(line_segment.vertex_length).is_ok());
     let line_index = line_segment.vertex_length as u16;
 
     line_indexes.push((line_index as usize + n_vertices - 1) as u16);
@@ -107,7 +107,7 @@ fn add_outline_indices(
     line_segment.index_length += n_vertices * 2;
 }
 
-fn inside_tile_x(point: &GeometryCoordinate) -> bool {
+fn inside_tile_x(point: GeometryCoordinate) -> bool {
     point.x >= 0 && i32::from(point.x) <= EXTENT
 }
 
@@ -121,7 +121,7 @@ fn generate_outline(
     canonical: &CanonicalTileID,
     ring_options: &PolylineGeneratorOptions,
 ) {
-    if canonical.z != 0 || ring.iter().all(inside_tile_x) {
+    if canonical.z != 0 || ring.iter().copied().all(inside_tile_x) {
         generate(ring, ring_options);
         return;
     }
@@ -129,7 +129,7 @@ fn generate_outline(
     run_options.type_ = FeatureType::LineString;
     let mut run = GeometryCoordinates::new();
     for point in ring {
-        if inside_tile_x(point) {
+        if inside_tile_x(*point) {
             run.push(*point);
             continue;
         }

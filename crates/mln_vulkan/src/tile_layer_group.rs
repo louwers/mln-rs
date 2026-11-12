@@ -21,6 +21,7 @@ pub struct TileLayerGroup {
 }
 
 impl TileLayerGroup {
+    #[must_use]
     pub fn new(layer_index: i32, initial_capacity: usize, name: String) -> Self {
         TileLayerGroup {
             inner: layer_group::TileLayerGroup::new(layer_index, initial_capacity, name),

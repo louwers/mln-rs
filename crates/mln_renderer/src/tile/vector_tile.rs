@@ -30,6 +30,7 @@ pub struct VectorTile {
 impl VectorTile {
     /// `VectorMVTTile(id, sourceID, parameters, tileset, observer)` /
     /// `VectorMLTTile(..., fastPFOREnabled)`.
+    #[must_use]
     pub fn new(
         id: OverscaledTileID,
         source_id: String,
@@ -44,6 +45,7 @@ impl VectorTile {
         VectorTile { tile, loader: Some(loader) }
     }
 
+    #[must_use]
     pub fn geometry_tile(&self) -> &GeometryTile {
         &self.tile
     }

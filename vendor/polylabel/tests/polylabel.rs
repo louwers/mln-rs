@@ -27,10 +27,10 @@ fn polylabel_test() {
     let water2 = fixture("water2.json");
 
     // finds pole of inaccessibility for water1 and precision 1
-    assert_eq!(polylabel(&water1, 1.0).unwrap(), Point::new(3865.85009765625, 2124.87841796875));
+    assert_eq!(polylabel(&water1, 1.0).unwrap(), Point::new(3_865.850_097_656_25, 2_124.878_417_968_75));
 
     // finds pole of inaccessibility for water1 and precision 50
-    assert_eq!(polylabel(&water1, 50.0).unwrap(), Point::new(3854.296875, 2123.828125));
+    assert_eq!(polylabel(&water1, 50.0).unwrap(), Point::new(3_854.296_875, 2_123.828_125));
 
     // finds pole of inaccessibility for water2 and default precision 1
     assert_eq!(polylabel(&water2, 1.0).unwrap(), Point::new(3263.5, 3263.5));

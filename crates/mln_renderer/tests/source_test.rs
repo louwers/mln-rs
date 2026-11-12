@@ -128,11 +128,15 @@ impl Drop for SourceTest {
     }
 }
 
-/// `StubRenderSourceObserver` (test/src/mln/test/stub_render_source_observer.hpp).
+type OnTileChanged = Box<dyn Fn(&str, &OverscaledTileID)>;
+type OnTileError = Box<dyn Fn(&str, &OverscaledTileID, Error)>;
+type OnSourceChanged = Box<dyn Fn(&dyn Source)>;
+
+/// `StubRenderSourceObserver` (`test/src/mln/test/stub_render_source_observer.hpp`).
 #[derive(Default)]
 struct StubRenderSourceObserver {
-    tile_changed: RefCell<Option<Box<dyn Fn(&str, &OverscaledTileID)>>>,
-    tile_error: RefCell<Option<Box<dyn Fn(&str, &OverscaledTileID, Error)>>>,
+    tile_changed: RefCell<Option<OnTileChanged>>,
+    tile_error: RefCell<Option<OnTileError>>,
 }
 
 impl RenderSourceObserver for StubRenderSourceObserver {
@@ -149,11 +153,11 @@ impl RenderSourceObserver for StubRenderSourceObserver {
     }
 }
 
-/// `StubStyleObserver` (test/src/mln/test/stub_style_observer.hpp), the
-/// SourceObserver half.
+/// `StubStyleObserver` (`test/src/mln/test/stub_style_observer.hpp`), the
+/// `SourceObserver` half.
 #[derive(Default)]
 struct StubStyleObserver {
-    source_changed: RefCell<Option<Box<dyn Fn(&dyn Source)>>>,
+    source_changed: RefCell<Option<OnSourceChanged>>,
 }
 
 impl SourceObserver for StubStyleObserver {
@@ -324,7 +328,7 @@ fn tile_corrupt(kind: Tiled) {
                 assert_eq!(error.to_string(), "unknown pbf field type exception");
             } else {
                 // Not asserting on platform-specific error text.
-                assert!(!error.to_string().is_empty());
+                assert_ne!(error.to_string(), "");
             }
             *failed.borrow_mut() = true;
             end();
@@ -962,7 +966,7 @@ impl LogObserver for Recorder {
     }
 }
 
-/// `FixtureLog` (test/src/mln/test/fixture_log_observer.cpp) for this
+/// `FixtureLog` (`test/src/mln/test/fixture_log_observer.cpp`) for this
 /// thread.
 struct FixtureLog {
     messages: Records,
@@ -971,7 +975,7 @@ struct FixtureLog {
 impl FixtureLog {
     fn new() -> Self {
         let messages: Records = Arc::new(Mutex::new(Vec::new()));
-        Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
@@ -994,7 +998,7 @@ impl FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        Log::set_thread_observer(None);
+        let _ = Log::set_thread_observer(None);
     }
 }
 

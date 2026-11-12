@@ -16,7 +16,7 @@ use mln_util::Padding;
 use mln_util::geometry::FeatureType;
 
 /// `StubGeometryTileFeature{{}, FeatureType::Unknown, {}, properties}`
-/// (test/src/mln/test/stub_geometry_tile_feature.hpp).
+/// (`test/src/mln/test/stub_geometry_tile_feature.hpp`).
 struct StubGeometryTileFeature {
     properties: PropertyMap,
 }
@@ -134,12 +134,12 @@ fn operator_bool() {
 fn operator_equal() {
     let mut a = Padding::from_values(&[3.5, 9.0]).unwrap();
     let b = Padding::new(3.5, 9.0, 3.5, 9.0);
-    assert!(a == b);
+    assert_eq!(a, b);
     assert!(!(a != b));
 
     a.left = 7.0;
     assert!(!(a == b));
-    assert!(a != b);
+    assert_ne!(a, b);
 }
 
 // gtest: Padding.OperatorMultiply

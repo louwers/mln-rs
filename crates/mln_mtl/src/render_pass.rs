@@ -29,7 +29,7 @@ use objc2_metal::{
 use crate::buffer_resource::{BufferResource, VersionType};
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::draw_target::as_mtl;
+use crate::draw_target::{DrawTarget, as_mtl};
 use crate::mtl_fwd::{
     MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLRenderCommandEncoderPtr, MTLRenderPipelineStatePtr,
     MTLSamplerStatePtr, MTLTexturePtr,
@@ -111,7 +111,7 @@ impl RenderPass {
         let mut formats = AttachmentFormats { color: MTLPixelFormat::BGRA8Unorm, depth: None, stencil: None };
         let (mut width, mut height) = (0, 0);
 
-        if let Some(resource) = as_mtl(descriptor.target).map(|target| target.resource()) {
+        if let Some(resource) = as_mtl(descriptor.target).map(DrawTarget::resource) {
             resource.bind();
             if let (Some(buffer), Some(rpd)) = (resource.get_command_buffer(), resource.get_render_pass_descriptor()) {
                 let rpd = rpd.copy();

@@ -18,10 +18,10 @@ use mln_util::size::Size;
 
 /// `mln::decodePNG(const uint8_t*, size_t)`.
 pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, Error> {
+    const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
     if data.len() < 8 {
         return Err(Error::invalid_argument("PNG reader: Could not read image"));
     }
-    const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
     if data[..8] != SIGNATURE {
         return Err(Error::invalid_argument("File or stream is not a png"));
     }
@@ -53,20 +53,20 @@ pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, Error> {
         match output.color_type {
             // png_set_gray_to_rgb + png_set_add_alpha(0xff)
             png::ColorType::Grayscale => {
-                for (s, d) in src.iter().zip(dst.chunks_exact_mut(4)) {
-                    d.copy_from_slice(&[*s, *s, *s, 0xff]);
+                for (s, d) in src.iter().zip(dst.as_chunks_mut::<4>().0) {
+                    *d = [*s, *s, *s, 0xff];
                 }
             }
             // png_set_gray_to_rgb
             png::ColorType::GrayscaleAlpha => {
-                for (s, d) in src.chunks_exact(2).zip(dst.chunks_exact_mut(4)) {
-                    d.copy_from_slice(&[s[0], s[0], s[0], s[1]]);
+                for (s, d) in src.as_chunks::<2>().0.iter().zip(dst.as_chunks_mut::<4>().0) {
+                    *d = [s[0], s[0], s[0], s[1]];
                 }
             }
             // png_set_add_alpha(0xff)
             png::ColorType::Rgb => {
-                for (s, d) in src.chunks_exact(3).zip(dst.chunks_exact_mut(4)) {
-                    d.copy_from_slice(&[s[0], s[1], s[2], 0xff]);
+                for (s, d) in src.as_chunks::<3>().0.iter().zip(dst.as_chunks_mut::<4>().0) {
+                    *d = [s[0], s[1], s[2], 0xff];
                 }
             }
             png::ColorType::Rgba => {

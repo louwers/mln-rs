@@ -1,6 +1,6 @@
-//! Ports `vendor/wagyu` (mapbox::geometry::wagyu 0.5.0, commit 9c87e553),
+//! Ports `vendor/wagyu` (`mapbox::geometry::wagyu` 0.5.0, commit 9c87e553),
 //! the polygon clipper the C++ core uses in `fixupPolygons`
-//! (tile/geometry_tile_data.cpp), for the one instantiation the core uses,
+//! (`tile/geometry_tile_data.cpp`), for the one instantiation the core uses,
 //! `wagyu<int32_t>`. One module per header:
 //!
 //! - `config.hpp` → [`config`] ([`ClipType`], [`PolygonType`], [`FillType`])
@@ -17,7 +17,7 @@
 //! except for the ULP-tolerant intersection order, which is not a strict
 //! weak ordering. The `std::unordered_multimap` of the topology correction
 //! keeps libstdc++'s order of equal keys. Exceptions (`std::runtime_error`)
-//! are `Err(message)`. `interrupt.hpp` (USE_WAGYU_INTERRUPT) and
+//! are `Err(message)`. `interrupt.hpp` (`USE_WAGYU_INTERRUPT`) and
 //! `quick_clip.hpp` are not used by the core and not ported.
 
 mod active_bound_list;

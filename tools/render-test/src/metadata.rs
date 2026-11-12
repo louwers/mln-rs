@@ -76,17 +76,20 @@ pub struct TestPaths {
 }
 
 impl TestPaths {
+    #[must_use]
     pub fn new(style_path: String, expectations: Vec<String>, expected_metrics: Vec<String>) -> Self {
         TestPaths { style_path, expectations, expected_metrics }
     }
 
+    #[must_use]
     pub fn default_expectations(&self) -> &str {
-        assert!(!self.expectations.is_empty());
+        assert_ne!(self.expectations, Vec::<String>::new());
         &self.expectations[0]
     }
 }
 
 /// `checkValue(float expected, float actual, float tolerance)`.
+#[must_use]
 pub fn check_value(expected: f32, actual: f32, tolerance: f32) -> (bool, f32) {
     let delta = expected * tolerance;
     debug_assert!(delta >= 0.0);
@@ -101,6 +104,7 @@ pub struct FileSizeProbe {
 }
 
 impl FileSizeProbe {
+    #[must_use]
     pub fn new(path: String, size: u64, tolerance: f32) -> Self {
         FileSizeProbe { path, size, tolerance }
     }
@@ -114,14 +118,17 @@ pub struct MemoryProbe {
 }
 
 impl MemoryProbe {
+    #[must_use]
     pub fn new(peak: usize, allocations: usize) -> Self {
         MemoryProbe { peak, allocations, tolerance: 0.0 }
     }
 
+    #[must_use]
     pub fn check_peak(expected: &MemoryProbe, actual: &MemoryProbe) -> (bool, f32) {
         check_value(expected.peak as f32, actual.peak as f32, actual.tolerance)
     }
 
+    #[must_use]
     pub fn check_allocations(expected: &MemoryProbe, actual: &MemoryProbe) -> (bool, f32) {
         check_value(expected.allocations as f32, actual.allocations as f32, actual.tolerance)
     }
@@ -141,6 +148,7 @@ pub struct NetworkProbe {
 }
 
 impl NetworkProbe {
+    #[must_use]
     pub fn new(requests: usize, transferred: usize) -> Self {
         NetworkProbe { requests, transferred }
     }
@@ -176,6 +184,7 @@ pub struct TestMetrics {
 }
 
 impl TestMetrics {
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.file_size.is_empty()
             && self.memory.is_empty()
@@ -304,6 +313,7 @@ impl Default for TestMetadata {
 impl TestMetadata {
     /// `metadata.document.ObjectEmpty()`; a document that did not parse is
     /// `Null` in the port (a zero-member value in rapidjson).
+    #[must_use]
     pub fn document_object_empty(&self) -> bool {
         match &self.document {
             serde_json::Value::Object(map) => map.is_empty(),
@@ -312,6 +322,7 @@ impl TestMetadata {
     }
 
     /// `document["metadata"]["test"]`, if present.
+    #[must_use]
     pub fn test_value(&self) -> Option<&serde_json::Value> {
         self.document.get("metadata")?.get("test")
     }

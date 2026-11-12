@@ -145,6 +145,7 @@ pub enum FrameTextureKind {
 impl BorrowedRing {
     /// A ring of the host's Vulkan images.
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    #[must_use]
     pub fn vulkan(images: mln_vulkan::BorrowedImages) -> BorrowedRing {
         BorrowedRing { kind: RingKind::Vulkan(images) }
     }
@@ -158,6 +159,7 @@ impl BorrowedRing {
     /// A ring of the host's OpenGL textures, in the share group of a device
     /// that wraps the host's context.
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+    #[must_use]
     pub fn gl(textures: mln_gl::BorrowedTextures) -> BorrowedRing {
         BorrowedRing { kind: RingKind::Gl(textures) }
     }
@@ -165,11 +167,13 @@ impl BorrowedRing {
     /// A ring of the host's WebGPU textures, of the WebGPU device that
     /// renders into them.
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+    #[must_use]
     pub fn webgpu(textures: mln_webgpu::BorrowedTextures) -> BorrowedRing {
         BorrowedRing { kind: RingKind::WebGpu(textures) }
     }
 
     /// The backend whose device renders into the ring.
+    #[must_use]
     pub fn backend(&self) -> BackendType {
         match self.kind {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -187,6 +191,7 @@ impl BorrowedRing {
     }
 
     /// How many textures the ring has.
+    #[must_use]
     pub fn depth(&self) -> usize {
         match &self.kind {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -203,6 +208,7 @@ impl BorrowedRing {
     }
 
     /// The textures' size in pixels.
+    #[must_use]
     pub fn physical_size(&self) -> Size {
         match &self.kind {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -252,6 +258,7 @@ impl BorrowedRing {
 
     /// The texture at `slot`, which sessions on `device` render into.
     #[cfg_attr(target_family = "wasm", allow(unused_variables))]
+    #[must_use]
     pub fn texture(&self, slot: usize, device: &Device) -> Option<FrameTexture> {
         #[allow(unreachable_patterns)]
         match (&self.kind, device) {
@@ -329,6 +336,7 @@ impl Surface {
     /// A `CAMetalLayer`, which a session on Metal presents to. It must
     /// outlive the session's use of it, as a window must.
     #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    #[must_use]
     pub fn metal_layer(layer: mln_mtl::Layer) -> Surface {
         Surface { kind: SurfaceKind::MetalLayer(layer) }
     }
@@ -343,6 +351,7 @@ impl Surface {
     /// The host's `VkSurfaceKHR`, which a session on the Vulkan device
     /// whose instance made it presents to. The surface stays the host's.
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    #[must_use]
     pub fn vulkan(surface: mln_vulkan::HostSurface) -> Surface {
         Surface { kind: SurfaceKind::Vulkan(surface) }
     }
@@ -350,12 +359,14 @@ impl Surface {
     /// The host's `EGLSurface`, which a session on the OpenGL device that
     /// wraps the host's context presents to. The surface stays the host's.
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+    #[must_use]
     pub fn gl(surface: mln_gl::HostSurface) -> Surface {
         Surface { kind: SurfaceKind::Gl(surface) }
     }
 
     /// The backend of the device whose instance or share group a host's
     /// surface is of, or `None` for a window or layer.
+    #[must_use]
     pub fn host_backend(&self) -> Option<BackendType> {
         match self.kind {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -464,6 +475,7 @@ pub enum SurfaceType {
 impl SurfaceType {
     /// Whether a device of `backend` presents to the surfaces of this type
     /// on this platform, in this build.
+    #[must_use]
     pub fn presents_with(self, backend: BackendType) -> bool {
         let windowing = match self {
             SurfaceType::MetalLayer => false,
@@ -492,6 +504,7 @@ impl SurfaceType {
 
     /// Whether a device of any backend of this build presents to the
     /// surfaces of this type.
+    #[must_use]
     pub fn presents_with_any(self) -> bool {
         [BackendType::Metal, BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
             .into_iter()
@@ -501,6 +514,7 @@ impl SurfaceType {
     /// Whether a session of this build presents to the surfaces of this
     /// type without the host's device: on the device that a surface session
     /// makes when it gets none.
+    #[must_use]
     pub fn presents_without_device(self) -> bool {
         match self {
             SurfaceType::MetalLayer => self.presents_with(BackendType::Metal),
@@ -732,6 +746,7 @@ impl Device {
     /// Whether sessions on the device present to the host's own surfaces:
     /// a Vulkan device's `VkSurfaceKHR`s, or the `EGLSurface`s of an OpenGL
     /// device that wraps the host's context.
+    #[must_use]
     pub fn presents_to_host_surfaces(&self) -> bool {
         match self {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -745,6 +760,7 @@ impl Device {
 
     /// Whether sessions on the device present to the surfaces of
     /// `surface`'s type.
+    #[must_use]
     pub fn presents_to(&self, surface: SurfaceType) -> bool {
         surface.presents_with(self.backend())
     }
@@ -763,6 +779,7 @@ impl Device {
     /// session configures its surfaces with `format`, which each surface
     /// must support.
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+    #[must_use]
     pub fn webgpu(
         instance: wgpu::Instance,
         device: wgpu::Device,
@@ -773,6 +790,7 @@ impl Device {
     }
 
     /// The backend the device is of.
+    #[must_use]
     pub fn backend(&self) -> BackendType {
         match *self {
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]

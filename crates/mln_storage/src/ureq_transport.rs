@@ -7,7 +7,7 @@
 //! Eyeballs), so the agent's TCP step does too: see `HappyEyeballsConnector`.
 //!
 //! TLS checks certificates against the system's trust store (rustls with
-//! rustls-platform-verifier; SChannel through native-tls on Windows), as curl
+//! rustls-platform-verifier; `SChannel` through native-tls on Windows), as curl
 //! does with the system's CA bundle. A proxy comes from the environment
 //! (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, ...), as for curl.
 //!
@@ -42,7 +42,7 @@ const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(200);
 /// with the resolver's first, and each attempt gets a head start of
 /// `HAPPY_EYEBALLS_DELAY` (or until it fails) before the next one starts
 /// alongside it. The first connection wins; the others are closed when
-/// they finish. Each attempt is `per_address` (ureq's own TcpConnector,
+/// they finish. Each attempt is `per_address` (ureq's own `TcpConnector`,
 /// or a test's) on one address, on its own thread.
 #[derive(Debug)]
 struct HappyEyeballsConnector<A> {
@@ -205,10 +205,10 @@ fn is_connection_error(error: &ureq::Error) -> bool {
     )
 }
 
-fn error(error: ureq::Error) -> Box<ResourceError> {
+fn error(error: &ureq::Error) -> ResourceError {
     // Add human-readable error code
-    let reason = if is_connection_error(&error) { Reason::Connection } else { Reason::Other };
-    Box::new(ResourceError::new(reason, error.to_string()))
+    let reason = if is_connection_error(error) { Reason::Connection } else { Reason::Other };
+    ResourceError::new(reason, error.to_string())
 }
 
 /// The system's trust store, through native-tls (SChannel).
@@ -272,7 +272,7 @@ impl Client {
                     .and_then(|location| redirect_url(&url, location))
             {
                 if redirects == self.agent.config().max_redirects() {
-                    return Err(error(ureq::Error::TooManyRedirects));
+                    return Err(Box::new(error(&ureq::Error::TooManyRedirects)));
                 }
                 redirects += 1;
                 if !same_origin(&url, &next) {
@@ -288,7 +288,7 @@ impl Client {
                 .collect();
             let status = i64::from(status);
             let body = if status == 200 || status == 206 {
-                http_response.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(error)
+                http_response.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(|e| Box::new(error(&e)))
             } else {
                 Ok(Vec::new())
             };
@@ -322,9 +322,9 @@ impl Client {
             request = request.header(name.as_str(), value.as_str());
         }
         if headers.is_empty() {
-            request.call().map_err(error)
+            request.call().map_err(|e| Box::new(error(&e)))
         } else {
-            request.config().max_redirects(0).build().call().map_err(error)
+            request.config().max_redirects(0).build().call().map_err(|e| Box::new(error(&e)))
         }
     }
 }
@@ -443,7 +443,7 @@ mod tests {
         }
     }
 
-    /// TcpConnector, except that a connect to one of `dropped` hangs as
+    /// `TcpConnector`, except that a connect to one of `dropped` hangs as
     /// for a host that drops the SYN. Records the addresses tried.
     #[derive(Debug)]
     struct DroppingConnector {

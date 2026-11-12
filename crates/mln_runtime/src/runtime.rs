@@ -373,8 +373,8 @@ impl Runtime {
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when the
     /// cache database file can't be opened or created.
-    pub fn new(options: RuntimeOptions) -> Result<Runtime, Error> {
-        let resource_options = resource_options(&options)?;
+    pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
+        let resource_options = resource_options(options)?;
         let (started, start) = mpsc::channel();
         let queued = Arc::new(AtomicUsize::new(0));
         let core_queued = Arc::clone(&queued);
@@ -457,7 +457,7 @@ impl Runtime {
         let published = Arc::new(Published::new(options.event_mask));
         let map = Map::new(MapShared::new(id, self.shared.clone(), &options, published.clone()));
         let (completion, resolver) = self.shared.completion();
-        self.shared.post(move |core, outbox| crate::map::create(core, id, options, published, resolver, outbox));
+        self.shared.post(move |core, outbox| crate::map::create(core, id, &options, published, resolver, outbox));
         Ok((map, completion))
     }
 
@@ -589,6 +589,7 @@ impl Runtime {
     }
 
     /// The offline regions in the runtime's cache database.
+    #[must_use]
     pub fn offline(&self) -> Offline<'_> {
         Offline::new(self)
     }

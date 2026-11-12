@@ -60,7 +60,7 @@ fn backend_type_to_string(backend: wgpu::Backend) -> &'static str {
     }
 }
 
-/// The usages and vsync'ed present mode to configure a surface with: COPY_SRC
+/// The usages and vsync'ed present mode to configure a surface with: `COPY_SRC`
 /// for readback where the surface has it, and MAILBOX where it has it (see
 /// `SurfaceState::vsync_present_mode`).
 fn surface_options(capabilities: &wgpu::SurfaceCapabilities) -> (wgpu::TextureUsages, wgpu::PresentMode) {
@@ -442,7 +442,7 @@ impl SurfaceState {
                 let dst = &mut image.data[y * width as usize * 4..][..width as usize * 4];
                 dst.copy_from_slice(src);
                 if bgra {
-                    for px in dst.chunks_exact_mut(4) {
+                    for px in dst.as_chunks_mut::<4>().0 {
                         px.swap(0, 2);
                     }
                 }
@@ -489,7 +489,7 @@ pub struct SurfaceOptions {
     /// The usages the surface supports, where the host knows them better
     /// than the device's adapter does, as for a browser's canvas, or where
     /// the device has no adapter. Frames can be read back when they have
-    /// COPY_SRC.
+    /// `COPY_SRC`.
     pub usages: Option<wgpu::TextureUsages>,
 }
 
@@ -525,38 +525,33 @@ impl SurfaceTarget {
         options: SurfaceOptions,
     ) -> Result<SurfaceTarget, Error> {
         let device = backend.device();
-        let (swap_chain_format, mut surface_usage, present_mode) = match device.adapter() {
-            Some(adapter) => {
-                let capabilities = surface.get_capabilities(adapter);
-                if capabilities.formats.is_empty() {
-                    return Err(Error::unsupported("The WebGPU adapter can't present to the surface"));
+        let (swap_chain_format, mut surface_usage, present_mode) = if let Some(adapter) = device.adapter() {
+            let capabilities = surface.get_capabilities(adapter);
+            if capabilities.formats.is_empty() {
+                return Err(Error::unsupported("The WebGPU adapter can't present to the surface"));
+            }
+            let format = match device.surface_format() {
+                Some(format) if capabilities.formats.contains(&format) => format,
+                Some(format) => {
+                    return Err(Error::unsupported(format!("The surface does not take the {format:?} format")));
                 }
-                let format = match device.surface_format() {
-                    Some(format) if capabilities.formats.contains(&format) => format,
-                    Some(format) => {
-                        return Err(Error::unsupported(format!("The surface does not take the {format:?} format")));
-                    }
-                    None => [
-                        wgpu::TextureFormat::Bgra8Unorm,
-                        wgpu::TextureFormat::Bgra8UnormSrgb,
-                        wgpu::TextureFormat::Rgba8Unorm,
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
-                    ]
-                    .into_iter()
-                    .find(|f| capabilities.formats.contains(f))
-                    .ok_or_else(|| Error::unsupported("The surface takes none of the formats the map renders in"))?,
-                };
-                let (usage, present_mode) = surface_options(&capabilities);
-                (format, usage, present_mode)
-            }
-            None => {
-                let format = device.surface_format().ok_or_else(|| {
-                    Error::invalid_argument(
-                        "A surface on a device without an adapter needs the device's surface format",
-                    )
-                })?;
-                (format, wgpu::TextureUsages::RENDER_ATTACHMENT, wgpu::PresentMode::Fifo)
-            }
+                None => [
+                    wgpu::TextureFormat::Bgra8Unorm,
+                    wgpu::TextureFormat::Bgra8UnormSrgb,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                ]
+                .into_iter()
+                .find(|f| capabilities.formats.contains(f))
+                .ok_or_else(|| Error::unsupported("The surface takes none of the formats the map renders in"))?,
+            };
+            let (usage, present_mode) = surface_options(&capabilities);
+            (format, usage, present_mode)
+        } else {
+            let format = device.surface_format().ok_or_else(|| {
+                Error::invalid_argument("A surface on a device without an adapter needs the device's surface format")
+            })?;
+            (format, wgpu::TextureUsages::RENDER_ATTACHMENT, wgpu::PresentMode::Fifo)
         };
         if let Some(usages) = options.usages {
             surface_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | (usages & wgpu::TextureUsages::COPY_SRC);
@@ -606,16 +601,19 @@ impl SurfaceTarget {
     }
 
     /// The backend the target draws on.
+    #[must_use]
     pub fn backend(&self) -> &Rc<RendererBackend> {
         &self.backend
     }
 
     /// The format the surface is configured with.
+    #[must_use]
     pub fn format(&self) -> wgpu::TextureFormat {
         self.state.swap_chain_format
     }
 
     /// The size of the frames, in physical pixels.
+    #[must_use]
     pub fn size(&self) -> Size {
         self.state.framebuffer_size.get()
     }
@@ -642,6 +640,7 @@ impl SurfaceTarget {
     /// Port-only: the frame copied after `request_readback`, once presented
     /// and mapped (natively at once; in the browser on a later turn of the
     /// event loop).
+    #[must_use]
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
         self.state.finish_readback();
         self.state.readback.borrow_mut().take()

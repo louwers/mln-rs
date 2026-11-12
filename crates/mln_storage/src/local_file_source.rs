@@ -66,6 +66,7 @@ pub struct LocalFileSource {
 }
 
 impl LocalFileSource {
+    #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         LocalFileSource {
             thread: Thread::new("LocalFileSource", |_| LocalFileSourceThread),

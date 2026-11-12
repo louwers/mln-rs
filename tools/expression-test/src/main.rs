@@ -27,7 +27,7 @@ fn main() {
 
     if let Some(path) = write_expected {
         let mut ids: Vec<&str> = stats.failed.iter().chain(&stats.errored).map(|t| t.id.as_str()).collect();
-        ids.sort();
+        ids.sort_unstable();
         let mut text = String::new();
         for id in ids {
             text.push_str(id);
@@ -36,5 +36,5 @@ fn main() {
         std::fs::write(&path, text).expect("write expected failures");
     }
 
-    std::process::exit(if stats.errored.len() + stats.failed.len() == 0 { 0 } else { 1 });
+    std::process::exit(i32::from(stats.errored.len() + stats.failed.len() != 0));
 }

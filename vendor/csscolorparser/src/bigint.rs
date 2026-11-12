@@ -29,15 +29,15 @@ impl Big {
     pub fn bit_len(&self) -> u64 {
         match self.limbs.last() {
             None => 0,
-            Some(&top) => (self.limbs.len() as u64 - 1) * 32 + (32 - top.leading_zeros() as u64),
+            Some(&top) => (self.limbs.len() as u64 - 1) * 32 + (32 - u64::from(top.leading_zeros())),
         }
     }
 
     /// self = self * m + a
     pub fn mul_add_small(&mut self, m: u32, a: u32) {
-        let mut carry = a as u64;
+        let mut carry = u64::from(a);
         for limb in &mut self.limbs {
-            let v = (*limb as u64) * (m as u64) + carry;
+            let v = u64::from(*limb) * u64::from(m) + carry;
             *limb = v as u32;
             carry = v >> 32;
         }
@@ -96,8 +96,8 @@ impl Big {
     pub fn sub_assign(&mut self, other: &Big) {
         let mut borrow = 0i64;
         for i in 0..self.limbs.len() {
-            let b = *other.limbs.get(i).unwrap_or(&0) as i64;
-            let mut v = self.limbs[i] as i64 - b - borrow;
+            let b = i64::from(*other.limbs.get(i).unwrap_or(&0));
+            let mut v = i64::from(self.limbs[i]) - b - borrow;
             if v < 0 {
                 v += 1 << 32;
                 borrow = 1;

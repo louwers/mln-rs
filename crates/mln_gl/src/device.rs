@@ -24,7 +24,7 @@ use crate::egl::{Egl, library};
 use crate::renderer_backend::PlatformContext;
 use crate::types::Gl;
 
-/// `EGL_PLATFORM_SURFACELESS_MESA` (EGL_MESA_platform_surfaceless).
+/// `EGL_PLATFORM_SURFACELESS_MESA` (`EGL_MESA_platform_surfaceless`).
 const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
 
 /// The EGL library and its display (`EGLDisplayConfig`), which every
@@ -243,6 +243,7 @@ impl Device {
     }
 
     /// Whether the group's root is the host's context.
+    #[must_use]
     pub fn is_host(&self) -> bool {
         matches!(*self.kind, Kind::Host(_))
     }
@@ -254,7 +255,7 @@ impl Device {
             Kind::Library(group) => EglContext::new(self.clone(), group).map_err(Error::native)?,
             Kind::Host(group) => EglContext::in_host_group(self.clone(), group, None).map_err(Error::native)?,
         };
-        Self::functions(context)
+        Ok(Self::functions(context))
     }
 
     /// A context in the host's share group, current on the host's `surface`
@@ -268,12 +269,12 @@ impl Device {
         };
         let context = EglContext::in_host_group(self.clone(), group, Some(surface)).map_err(Error::native)?;
         let swap = SurfaceSwap { egl: group.egl, display: group.display, surface };
-        let (gl, platform) = Self::functions(context)?;
+        let (gl, platform) = Self::functions(context);
         Ok((gl, platform, swap))
     }
 
     /// The GL functions of `context`, made current to look them up.
-    fn functions(context: EglContext) -> Result<(Gl, Box<dyn PlatformContext>), Error> {
+    fn functions(context: EglContext) -> (Gl, Box<dyn PlatformContext>) {
         context.make_current();
         let egl = context.egl;
         // SAFETY: the context is current, and EGL gives the functions of its
@@ -284,7 +285,7 @@ impl Device {
             })
         };
         context.done_current();
-        Ok((gl, Box::new(context)))
+        (gl, Box::new(context))
     }
 }
 

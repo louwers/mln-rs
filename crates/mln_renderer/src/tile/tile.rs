@@ -102,6 +102,7 @@ pub struct TileBase {
 
 impl TileBase {
     /// `Tile(Kind, OverscaledTileID, std::string, TileObserver*)`.
+    #[must_use]
     pub fn new(kind: Kind, id: OverscaledTileID, source_id: String, observer: Option<Rc<dyn TileObserver>>) -> Self {
         TileBase {
             kind,
@@ -158,7 +159,7 @@ impl TileBase {
     }
 
     /// A tile is "Loaded" when we have received a response from a
-    /// FileSource, and have attempted to parse the tile (if applicable).
+    /// `FileSource`, and have attempted to parse the tile (if applicable).
     /// Tile implementations should set this to true when a load error
     /// occurred, or after the tile was parsed successfully.
     pub fn is_loaded(&self) -> bool {
@@ -190,7 +191,7 @@ impl TileBase {
         Log::info(Event::General, format!("Tile::loaded: {}", if self.is_loaded() { "yes" } else { "no" }));
     }
 
-    /// `onTileAction(TileOperation)` (TileLoaderObserver).
+    /// `onTileAction(TileOperation)` (`TileLoaderObserver`).
     pub fn on_tile_action(&self, op: TileOperation) {
         self.observer().on_tile_action(&self.id(), &self.source_id, op);
     }

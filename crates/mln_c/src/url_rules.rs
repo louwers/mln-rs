@@ -256,19 +256,20 @@ unsafe fn sized_elements<T: SizedElement>(
         return Err(Error::invalid_argument(format!("{plural} must not be null with a nonzero {count_name}")));
     }
     let mut copied = Vec::with_capacity(count.min(1024));
-    let mut cursor = elements.cast::<u8>();
+    let mut cursor = elements;
     for index in 0..count {
-        // SAFETY: the caller's contract makes the element readable, and the
-        // checks on the sizes before keep it aligned.
+        // SAFETY: the caller's contract makes the element readable, the
+        // checks on the sizes before keep it aligned, and it starts with its
+        // `size: u32`.
         let size = unsafe { cursor.cast::<u32>().read() } as usize;
-        if size < size_of::<T>() || size % align_of::<T>() != 0 {
+        if size < size_of::<T>() || !size.is_multiple_of(align_of::<T>()) {
             return Err(Error::invalid_argument(format!("{what} {index} has an invalid size")));
         }
         // SAFETY: as above, and the element holds at least a `T`.
-        copied.push(unsafe { cursor.cast::<T>().read() });
+        copied.push(unsafe { cursor.read() });
         // SAFETY: the next element starts `size` bytes on, within the
         // caller's array, or just past its end after the last.
-        cursor = unsafe { cursor.add(size) };
+        cursor = unsafe { cursor.byte_add(size) };
     }
     Ok(copied)
 }

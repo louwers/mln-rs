@@ -164,7 +164,7 @@ impl FeatureTrackingTest {
     }
 
     /// `run(images, imageThreshold, pixelThreshold = 0.1)`: renders, and
-    /// compares with test/fixtures/feature_tracking/<image>/expected.png.
+    /// compares with `test/fixtures/feature_tracking`/<image>/expected.png.
     fn run(&mut self, image: Option<&str>, image_threshold: f64) -> RenderResult {
         let result = self.frontend.render(&mut self.map).expect("render");
         if let Some(image) = image {
@@ -649,7 +649,7 @@ impl FeatureTrackingTest {
 fn green_bound(image: &PremultipliedImage) -> Option<NDCBound> {
     let (width, height) = (image.size.width as usize, image.size.height as usize);
     let mut result: Option<NDCBound> = None;
-    for (i, pixel) in image.data.chunks_exact(4).enumerate() {
+    for (i, pixel) in image.data.as_chunks::<4>().0.iter().enumerate() {
         let [r, g, b] = [i32::from(pixel[0]), i32::from(pixel[1]), i32::from(pixel[2])];
         if g > 100 && g > r + 50 && g > b + 50 {
             let (x, y) = (i % width, i / width);
@@ -708,7 +708,7 @@ fn globe_ndc_bound_fill_extrusion() {
     let mut test = globe_test();
     test.show(FILL_LAYER_NAME);
     let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
-    extrusion_layer.set_fill_extrusion_height(&constant(500000.0));
+    extrusion_layer.set_fill_extrusion_height(&constant(500_000.0));
     test.map.style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");
     test.run(None, 0.0);
 
@@ -727,7 +727,7 @@ fn globe_ndc_bound_fill_extrusion() {
 fn globe_fill_extrusion_above_horizon() {
     let mut test = globe_test();
     let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
-    extrusion_layer.set_fill_extrusion_height(&constant(500000.0));
+    extrusion_layer.set_fill_extrusion_height(&constant(500_000.0));
     extrusion_layer.set_fill_extrusion_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
     extrusion_layer.set_filter(&name_filter("5"));
     test.map.style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");

@@ -57,7 +57,7 @@ fn find_viewport_padding(transform_state: &TransformState, map_mode: MapMode) ->
     if map_mode == MapMode::Tile {
         return VIEWPORT_PADDING_FOR_STATIC_TILES;
     }
-    if transform_state.get_pitch() != 0.0 { VIEWPORT_PADDING_DEFAULT * 2.0 } else { VIEWPORT_PADDING_DEFAULT }
+    if transform_state.get_pitch() == 0.0 { VIEWPORT_PADDING_DEFAULT } else { VIEWPORT_PADDING_DEFAULT * 2.0 }
 }
 
 /// `IndexedSubfeature(const RefIndexedSubfeature&, bucketInstanceId, collisionGroupId)`.
@@ -127,8 +127,8 @@ impl CollisionIndex {
             screen_bottom_boundary: height + viewport_padding,
             grid_right_boundary: width + 2.0 * viewport_padding,
             grid_bottom_boundary: height + 2.0 * viewport_padding,
-            pitch_factor: (transform_state.get_pitch().cos() * transform_state.get_camera_to_center_distance() as f64)
-                as f32,
+            pitch_factor: (transform_state.get_pitch().cos()
+                * f64::from(transform_state.get_camera_to_center_distance())) as f32,
         }
     }
 
@@ -142,7 +142,7 @@ impl CollisionIndex {
 
     fn approximate_tile_distance(
         &self,
-        tile_distance: &TileDistance,
+        tile_distance: TileDistance,
         last_segment_angle: f32,
         pixels_to_tile_units: f32,
         camera_to_anchor_distance: f32,
@@ -279,8 +279,25 @@ impl CollisionIndex {
         collision_group_predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
         projected_boxes: &mut Vec<ProjectedCollisionBox>,
     ) -> PlacedFeatureResult {
-        debug_assert!(projected_boxes.is_empty());
-        if !feature.along_line {
+        debug_assert_eq!(projected_boxes.as_slice(), []);
+        if feature.along_line {
+            self.place_line_feature(
+                feature,
+                translation,
+                tile_projector,
+                label_plane,
+                text_pixel_ratio,
+                symbol,
+                scale,
+                font_size,
+                allow_overlap,
+                pitch_with_map,
+                collision_debug,
+                avoid_edges.as_ref(),
+                collision_group_predicate,
+                projected_boxes,
+            )
+        } else {
             let box_ = &feature.boxes[0];
             let projected_point = self.project_and_get_perspective_ratio(tile_projector, add(box_.anchor, translation));
             let tile_to_viewport = text_pixel_ratio * projected_point.perspective_ratio;
@@ -301,7 +318,7 @@ impl CollisionIndex {
                 collision_boundaries = projected_box.boundaries;
                 occluded = if pitch_with_map { projected_box.all_points_occluded } else { projected_point.occluded };
             } else {
-                collision_boundaries = self.get_projected_collision_boundaries_for_anchor(
+                collision_boundaries = Self::get_projected_collision_boundaries_for_anchor(
                     &projected_point,
                     shift.unwrap_or(Point::new(0.0, 0.0)),
                     text_pixel_ratio,
@@ -326,23 +343,6 @@ impl CollisionIndex {
             }
 
             PlacedFeatureResult { placed: true, offscreen: self.is_offscreen(&collision_boundaries), occluded: false }
-        } else {
-            self.place_line_feature(
-                feature,
-                translation,
-                tile_projector,
-                label_plane,
-                text_pixel_ratio,
-                symbol,
-                scale,
-                font_size,
-                allow_overlap,
-                pitch_with_map,
-                collision_debug,
-                avoid_edges,
-                collision_group_predicate,
-                projected_boxes,
-            )
         }
     }
 
@@ -360,12 +360,12 @@ impl CollisionIndex {
         allow_overlap: bool,
         pitch_with_map: bool,
         collision_debug: bool,
-        avoid_edges: &Option<CollisionBoundaries>,
+        avoid_edges: Option<&CollisionBoundaries>,
         collision_group_predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
         projected_boxes: &mut Vec<ProjectedCollisionBox>,
     ) -> PlacedFeatureResult {
         debug_assert!(feature.along_line);
-        debug_assert!(projected_boxes.is_empty());
+        debug_assert_eq!(projected_boxes.as_slice(), []);
         let tile_unit_anchor_point = symbol.anchor_point;
         let anchor = self.project_and_get_perspective_ratio(tile_projector, tile_unit_anchor_point);
         if anchor.occluded {
@@ -419,14 +419,14 @@ impl CollisionIndex {
         let mut last_tile_distance: f32 = 0.0;
         if let Some((first, last)) = &first_and_last_glyph {
             first_tile_distance = self.approximate_tile_distance(
-                first.tile_distance.as_ref().expect("returnTileDistance"),
+                first.tile_distance.expect("returnTileDistance"),
                 first.angle,
                 pixels_to_tile_units,
                 projected_anchor.1,
                 pitch_with_map,
             );
             last_tile_distance = self.approximate_tile_distance(
-                last.tile_distance.as_ref().expect("returnTileDistance"),
+                last.tile_distance.expect("returnTileDistance"),
                 last.angle,
                 pixels_to_tile_units,
                 projected_anchor.1,
@@ -502,17 +502,16 @@ impl CollisionIndex {
             entirely_offscreen &= self.is_offscreen(&collision_boundaries);
             in_grid |= self.is_inside_grid(&collision_boundaries);
 
-            if avoid_edges.as_ref().is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
+            if avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
                 || (!allow_overlap
                     && self.collision_grid.hit_test_circle(projected_boxes[i].circle(), collision_group_predicate))
             {
                 if !collision_debug {
                     return PlacedFeatureResult { placed: false, offscreen: false, occluded: false };
-                } else {
-                    // Don't early exit if we're showing the debug circles because
-                    // we still want to calculate which circles are in use
-                    collision_detected = true;
                 }
+                // Don't early exit if we're showing the debug circles because
+                // we still want to calculate which circles are in use
+                collision_detected = true;
             }
         }
 
@@ -547,7 +546,7 @@ impl CollisionIndex {
                 }
             }
         } else if !projected_boxes.is_empty() {
-            debug_assert!(projected_boxes.len() == 1);
+            debug_assert_eq!(projected_boxes.len(), 1);
             let box_ = &projected_boxes[0];
             debug_assert!(box_.is_box());
             let subfeature = indexed_subfeature(&feature.indexed_feature, bucket_instance_id, collision_group_id);
@@ -615,12 +614,12 @@ impl CollisionIndex {
     /// `toViewport(projected)`.
     fn to_viewport(&self, projected: &ProjectedTilePoint) -> ProjectedAnchor {
         let size = self.transform_state.get_size();
-        let viewport_padding = self.viewport_padding as f64;
+        let viewport_padding = f64::from(self.viewport_padding);
         let distance = projected.signed_distance_from_camera as f32;
         ProjectedAnchor {
             point: Point::new(
-                (((projected.point.x + 1.0) / 2.0) * size.width as f64 + viewport_padding) as f32,
-                (((-projected.point.y + 1.0) / 2.0) * size.height as f64 + viewport_padding) as f32,
+                (f64::midpoint(projected.point.x, 1.0) * f64::from(size.width) + viewport_padding) as f32,
+                (f64::midpoint(-projected.point.y, 1.0) * f64::from(size.height) + viewport_padding) as f32,
             ),
             // See perspective ratio comment in symbol_sdf.vertex
             // We're doing collision detection in viewport space so we need
@@ -635,10 +634,10 @@ impl CollisionIndex {
     fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Point<f32>) -> Point<f32> {
         let projected = tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
         let size = self.transform_state.get_size();
-        let viewport_padding = self.viewport_padding as f64;
+        let viewport_padding = f64::from(self.viewport_padding);
         Point::new(
-            ((((projected.point.x + 1.0) / 2.0) * size.width as f64) + viewport_padding) as f32,
-            ((((-projected.point.y + 1.0) / 2.0) * size.height as f64) + viewport_padding) as f32,
+            ((f64::midpoint(projected.point.x, 1.0) * f64::from(size.width)) + viewport_padding) as f32,
+            ((f64::midpoint(-projected.point.y, 1.0) * f64::from(size.height)) + viewport_padding) as f32,
         )
     }
 
@@ -646,10 +645,10 @@ impl CollisionIndex {
     fn project_point(&self, pos_matrix: &Mat4, point: Point<f32>) -> Point<f32> {
         let p = transform(pos_matrix, point);
         let size = self.transform_state.get_size();
-        let viewport_padding = self.viewport_padding as f64;
+        let viewport_padding = f64::from(self.viewport_padding);
         Point::new(
-            ((((p[0] / p[3] + 1.0) / 2.0) * size.width as f64) + viewport_padding) as f32,
-            ((((-p[1] / p[3] + 1.0) / 2.0) * size.height as f64) + viewport_padding) as f32,
+            ((f64::midpoint(p[0] / p[3], 1.0) * f64::from(size.width)) + viewport_padding) as f32,
+            ((f64::midpoint(-p[1] / p[3], 1.0) * f64::from(size.height)) + viewport_padding) as f32,
         )
     }
 
@@ -667,13 +666,17 @@ impl CollisionIndex {
             signed_distance_from_camera: p[3],
             occluded: false,
         };
-        self.get_projected_collision_boundaries_for_anchor(&self.to_viewport(&projected), shift, text_pixel_ratio, box_)
+        Self::get_projected_collision_boundaries_for_anchor(
+            &self.to_viewport(&projected),
+            shift,
+            text_pixel_ratio,
+            box_,
+        )
     }
 
     /// `getProjectedCollisionBoundaries(projectedPoint, shift, textPixelRatio,
     /// box)`.
     fn get_projected_collision_boundaries_for_anchor(
-        &self,
         projected_point: &ProjectedAnchor,
         shift: Point<f32>,
         text_pixel_ratio: f32,
@@ -740,15 +743,8 @@ impl CollisionIndex {
             if shift.is_none() {
                 let distance_ratio =
                     projected_point.signed_distance_from_camera / self.transform_state.get_camera_to_center_distance();
-                // std::clamp(0.5f + 0.5f * distanceRatio, 0.0f, 4.0f)
                 let ratio = 0.5 + 0.5 * distance_ratio;
-                distance_multiplier *= if ratio < 0.0 {
-                    0.0
-                } else if 4.0 < ratio {
-                    4.0
-                } else {
-                    ratio
-                };
+                distance_multiplier *= ratio.clamp(0.0, 4.0);
             }
         }
 
@@ -761,10 +757,10 @@ impl CollisionIndex {
 
         let x_min = box_.x1 * distance_multiplier;
         let x_max = box_.x2 * distance_multiplier;
-        let x_half = (x_min + x_max) / 2.0;
+        let x_half = f32::midpoint(x_min, x_max);
         let y_min = box_.y1 * distance_multiplier;
         let y_max = box_.y2 * distance_multiplier;
-        let y_half = (y_min + y_max) / 2.0;
+        let y_half = f32::midpoint(y_min, y_max);
 
         // 0--1--2
         // |     |
@@ -823,7 +819,7 @@ fn std_max(a: f32, b: f32) -> f32 {
 
 /// `vec4 p = {{point.x, point.y, 0, 1}}; matrix::transformMat4(p, p, posMatrix)`.
 fn transform(pos_matrix: &Mat4, point: Point<f32>) -> Vec4 {
-    let a: Vec4 = [point.x as f64, point.y as f64, 0.0, 1.0];
+    let a: Vec4 = [f64::from(point.x), f64::from(point.y), 0.0, 1.0];
     matrix::transform_mat4_value(&a, pos_matrix)
 }
 

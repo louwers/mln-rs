@@ -81,7 +81,7 @@ fn test_empty() {
     // test no crash when using empty index
     let mut result: Vec<usize> = Vec::new();
     index.within(50, 50, 20, &mut |id| result.push(id));
-    assert!(result.is_empty());
+    assert_eq!(result, [] as [usize; 0]);
     index.range(20, 30, 50, 70, &mut |id| result.push(id));
-    assert!(result.is_empty());
+    assert_eq!(result, [] as [usize; 0]);
 }

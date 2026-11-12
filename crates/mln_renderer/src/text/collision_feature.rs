@@ -20,9 +20,9 @@ use crate::geometry::feature_index::IndexedSubfeature;
 
 /// `util::dist<float>(a, b)` on `Point<int16_t>` (util/math.hpp): a double
 /// sqrt of the `int` sum, narrowed to float.
-fn dist(a: &GeometryCoordinate, b: &GeometryCoordinate) -> f32 {
-    let dx = (b.x as i32 - a.x as i32) as f64;
-    let dy = (b.y as i32 - a.y as i32) as f64;
+fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
+    let dx = f64::from(i32::from(b.x) - i32::from(a.x));
+    let dy = f64::from(i32::from(b.y) - i32::from(a.y));
     (dx * dx + dy * dy).sqrt() as f32
 }
 
@@ -83,6 +83,7 @@ enum ProjectedCollisionBoxGeometry {
 
 impl ProjectedCollisionBox {
     /// `ProjectedCollisionBox(float x1, float y1, float x2, float y2)`.
+    #[must_use]
     pub fn new_box(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         ProjectedCollisionBox {
             geometry: ProjectedCollisionBoxGeometry::Box(BBox::new(Point::new(x1, y1), Point::new(x2, y2))),
@@ -90,11 +91,13 @@ impl ProjectedCollisionBox {
     }
 
     /// `ProjectedCollisionBox(float x, float y, float r)`.
+    #[must_use]
     pub fn new_circle(x: f32, y: f32, r: f32) -> Self {
         ProjectedCollisionBox { geometry: ProjectedCollisionBoxGeometry::Circle(BCircle::new(Point::new(x, y), r)) }
     }
 
     /// `box()`. C++ asserts `isBox()`.
+    #[must_use]
     pub fn box_(&self) -> &BBox {
         match &self.geometry {
             ProjectedCollisionBoxGeometry::Box(b) => b,
@@ -103,6 +106,7 @@ impl ProjectedCollisionBox {
     }
 
     /// `circle()`. C++ asserts `isCircle()`.
+    #[must_use]
     pub fn circle(&self) -> &BCircle {
         match &self.geometry {
             ProjectedCollisionBoxGeometry::Circle(c) => c,
@@ -111,6 +115,7 @@ impl ProjectedCollisionBox {
     }
 
     /// The `type` member.
+    #[must_use]
     pub fn type_(&self) -> ProjectedCollisionBoxType {
         match self.geometry {
             ProjectedCollisionBoxGeometry::Unknown => ProjectedCollisionBoxType::Unknown,
@@ -119,10 +124,12 @@ impl ProjectedCollisionBox {
         }
     }
 
+    #[must_use]
     pub fn is_circle(&self) -> bool {
         self.type_() == ProjectedCollisionBoxType::Circle
     }
 
+    #[must_use]
     pub fn is_box(&self) -> bool {
         self.type_() == ProjectedCollisionBoxType::Box
     }
@@ -149,6 +156,7 @@ pub struct CollisionBox {
 
 impl CollisionBox {
     /// `CollisionBox(anchor, x1, y1, x2, y2, signedDistanceFromAnchor = 0)`.
+    #[must_use]
     pub fn new(anchor: Point<f32>, x1: f32, y1: f32, x2: f32, y2: f32, signed_distance_from_anchor: f32) -> Self {
         CollisionBox { anchor, x1, y1, x2, y2, signed_distance_from_anchor }
     }
@@ -165,6 +173,7 @@ pub struct CollisionFeature {
 impl CollisionFeature {
     /// The constructor for text.
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new_text(
         line: &GeometryCoordinates,
         anchor: &Anchor,
@@ -199,13 +208,14 @@ impl CollisionFeature {
 
     /// The constructor for icons.
     ///
-    /// Icons collision features are always SymbolPlacementType::Point, which
+    /// Icons collision features are always `SymbolPlacementType::Point`, which
     /// means the collision feature will be viewport-rotation-aligned even if the
     /// icon is map-rotation-aligned (e.g. `icon-rotation-alignment: map` _or_
     /// `symbol-placement: line`). We're relying on most icons being "close
     /// enough" to square that having incorrect rotation alignment doesn't throw
     /// off collision detection too much. See:
     /// <https://github.com/mapbox/mapbox-gl-js/issues/4861>
+    #[must_use]
     pub fn new_icon(
         line: &GeometryCoordinates,
         anchor: &Anchor,
@@ -332,8 +342,8 @@ impl CollisionFeature {
         // overscaled tiles where the pitch 0-based symbol spacing will put labels
         // very close together in a pitched map. To reduce the cost of adding extra
         // collision circles, we slowly increase them for overscaled tiles.
-        let overscaling_padding_factor: f64 = 1.0 + 0.4 * mln_math::log2(overscaling as f64);
-        let n_pitch_padding_boxes = (n_boxes as f64 * overscaling_padding_factor / 2.0).floor() as i32;
+        let overscaling_padding_factor: f64 = 1.0 + 0.4 * mln_math::log2(f64::from(overscaling));
+        let n_pitch_padding_boxes = (f64::from(n_boxes) * overscaling_padding_factor / 2.0).floor() as i32;
 
         // offset the center of the first box by half a box so that the edge of the
         // box is at the edge of the label.
@@ -352,16 +362,15 @@ impl CollisionFeature {
                     // there isn't enough room for the label after the beginning of
                     // the line checkMaxAngle should have already caught this
                     return;
-                } else {
-                    // The line doesn't extend far enough back for all of our padding,
-                    // but we got far enough to show the label under most conditions.
-                    index = 0;
-                    break;
                 }
+                // The line doesn't extend far enough back for all of our padding,
+                // but we got far enough to show the label under most conditions.
+                index = 0;
+                break;
             }
 
             index -= 1;
-            anchor_distance -= dist(&line[index], p);
+            anchor_distance -= dist(line[index], *p);
             *p = line[index];
 
             if anchor_distance <= padding_start_distance {
@@ -369,7 +378,7 @@ impl CollisionFeature {
             }
         }
 
-        let mut segment_length = dist(&line[index], &line[index + 1]);
+        let mut segment_length = dist(line[index], line[index + 1]);
 
         for i in -n_pitch_padding_boxes..n_boxes + n_pitch_padding_boxes {
             // the distance the box will be from the anchor
@@ -400,7 +409,7 @@ impl CollisionFeature {
                     return;
                 }
 
-                segment_length = dist(&line[index], &line[index + 1]);
+                segment_length = dist(line[index], line[index + 1]);
             }
 
             // the distance the box will be from the beginning of the segment
@@ -410,8 +419,8 @@ impl CollisionFeature {
             let p1 = &line[index + 1];
 
             let box_anchor = Point::new(
-                p0.x as f32 + segment_box_distance / segment_length * (p1.x as i32 - p0.x as i32) as f32,
-                p0.y as f32 + segment_box_distance / segment_length * (p1.y as i32 - p0.y as i32) as f32,
+                f32::from(p0.x) + segment_box_distance / segment_length * (i32::from(p1.x) - i32::from(p0.x)) as f32,
+                f32::from(p0.y) + segment_box_distance / segment_length * (i32::from(p1.y) - i32::from(p0.y)) as f32,
             );
 
             // If the box is within boxSize of the anchor, force the box to be used

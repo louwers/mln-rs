@@ -123,8 +123,8 @@ pub enum IntersectionResult {
     Contains,
 }
 
-/// The derived PartialEq is the C++ operator==: `min == aabb.min && max ==
-/// aabb.max` (std::array element-wise ==).
+/// The derived `PartialEq` is the C++ operator==: `min == aabb.min && max ==
+/// aabb.max` (`std::array` element-wise ==).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AABB {
     pub min: Vec3,
@@ -132,10 +132,12 @@ pub struct AABB {
 }
 
 impl AABB {
+    #[must_use]
     pub fn new(min: Vec3, max: Vec3) -> Self {
         AABB { min, max }
     }
 
+    #[must_use]
     pub fn closest_point(&self, point: &Vec3) -> Vec3 {
         [
             std_max(std_min(self.max[0], point[0]), self.min[0]),
@@ -145,6 +147,7 @@ impl AABB {
     }
 
     /// Computes the shortest manhattan distance to the provided point
+    #[must_use]
     pub fn distance_xyz(&self, point: &Vec3) -> Vec3 {
         let mut vec = vec3_sub(&self.closest_point(point), point);
 
@@ -156,12 +159,13 @@ impl AABB {
     }
 
     /// Creates an aabb covering one quadrant of the aabb on XZ-plane.
+    #[must_use]
     pub fn quadrant(&self, idx: i32) -> AABB {
         debug_assert!((0..4).contains(&idx));
         let mut quadrant_min = self.min;
         let mut quadrant_max = self.max;
-        let x_center = 0.5 * (self.max[0] + self.min[0]);
-        let y_center = 0.5 * (self.max[1] + self.min[1]);
+        let x_center = f64::midpoint(self.max[0], self.min[0]);
+        let y_center = f64::midpoint(self.max[1], self.min[1]);
 
         // This aabb is split into 4 quadrants. For each axis define in which side
         // of the split "idx" is The result for indices 0, 1, 2, 3 is: { 0, 0 }, {
@@ -179,6 +183,7 @@ impl AABB {
         AABB::new(quadrant_min, quadrant_max)
     }
 
+    #[must_use]
     pub fn intersects(&self, aabb: &AABB) -> bool {
         if self.min[0] > aabb.max[0] || aabb.min[0] > self.max[0] {
             return false;
@@ -219,6 +224,7 @@ pub struct Frustum {
 }
 
 impl Frustum {
+    #[must_use]
     pub fn new(points: &[Vec3; 8], planes: &[Vec4; 6]) -> Self {
         let points = *points;
         let planes = *planes;
@@ -261,6 +267,7 @@ impl Frustum {
     /// C++ defaults: `flippedY = false`, `horizonPlane = std::nullopt`. With
     /// `horizon_plane`, the far plane is pulled in to the horizon so nothing
     /// behind it counts as visible.
+    #[must_use]
     pub fn from_inv_proj_matrix(
         inv_proj: &Mat4,
         world_size: f64,
@@ -283,7 +290,7 @@ impl Frustum {
         let scale = 2.0f64.powf(zoom);
 
         // Transform points to tile space
-        for coord in corner_coords.iter_mut() {
+        for coord in &mut corner_coords {
             let a = *coord;
             matrix::transform_mat4(coord, &a, inv_proj);
             // `component *= 1.0 / coord[3] / worldSize * scale` for each
@@ -303,7 +310,7 @@ impl Frustum {
         ];
 
         if flipped_y {
-            for tri in frustum_plane_point_indices.iter_mut() {
+            for tri in &mut frustum_plane_point_indices {
                 tri.swap(1, 2);
             }
         }
@@ -333,6 +340,7 @@ impl Frustum {
 
     /// Performs conservative intersection test using separating axis theorem.
     /// Some accuracy is traded for better performance. False positive rate is < 1%
+    #[must_use]
     pub fn intersects(&self, aabb: &AABB) -> IntersectionResult {
         // Execute separating axis test between two convex objects to find intersections
         // Each frustum plane together with 3 major axes define the separating axes
@@ -359,10 +367,10 @@ impl Frustum {
         for plane in &self.planes {
             let mut points_inside: usize = 0;
 
-            points_inside += (vec4_dot(plane, &aabb_points[0]) >= -epsilon) as usize;
-            points_inside += (vec4_dot(plane, &aabb_points[1]) >= -epsilon) as usize;
-            points_inside += (vec4_dot(plane, &aabb_points[2]) >= -epsilon) as usize;
-            points_inside += (vec4_dot(plane, &aabb_points[3]) >= -epsilon) as usize;
+            points_inside += usize::from(vec4_dot(plane, &aabb_points[0]) >= -epsilon);
+            points_inside += usize::from(vec4_dot(plane, &aabb_points[1]) >= -epsilon);
+            points_inside += usize::from(vec4_dot(plane, &aabb_points[2]) >= -epsilon);
+            points_inside += usize::from(vec4_dot(plane, &aabb_points[3]) >= -epsilon);
 
             if points_inside == 0 {
                 // Separating axis found, no intersection
@@ -378,8 +386,9 @@ impl Frustum {
     }
 
     /// Performs precise intersection test using separating axis theorem.
-    /// It is possible run only edge cases that were not covered in intersects()
+    /// It is possible run only edge cases that were not covered in `intersects()`
     /// (C++ default: `edgeCasesOnly = false`).
+    #[must_use]
     pub fn intersects_precise(&self, aabb: &AABB, edge_cases_only: bool) -> IntersectionResult {
         if !edge_cases_only {
             let result = self.intersects(aabb);
@@ -410,10 +419,12 @@ impl Frustum {
         IntersectionResult::Intersects
     }
 
+    #[must_use]
     pub fn get_points(&self) -> &[Vec3; 8] {
         &self.points
     }
 
+    #[must_use]
     pub fn get_planes(&self) -> &[Vec4; 6] {
         &self.planes
     }

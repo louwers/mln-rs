@@ -14,6 +14,7 @@ pub struct ShaderRegistry {
 }
 
 impl ShaderRegistry {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }

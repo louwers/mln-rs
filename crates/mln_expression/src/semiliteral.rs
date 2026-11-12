@@ -25,6 +25,7 @@ pub struct Semiliteral {
 }
 
 impl Semiliteral {
+    #[must_use]
     pub fn new(elements: Vec<Box<dyn Expression>>) -> Self {
         Semiliteral {
             base: ExpressionBase::new(Kind::Semiliteral, array_type(&elements).into(), collect_dependencies(&elements)),

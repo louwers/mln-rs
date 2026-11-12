@@ -2,8 +2,8 @@
 //
 // C++ wraps each piece of GL state in a `State<value::T>` that remembers the
 // value it last set, and the context has one member per piece. The port
-// keeps them in one struct: a `None` is C++'s dirty state, whose next set
-// always reaches GL. Only the states the drawable path sets are here.
+// keeps them in one struct of `Cached` values. Only the states the drawable
+// path sets are here.
 
 use std::cell::Cell;
 
@@ -26,99 +26,109 @@ use crate::types::{BufferID, FramebufferID, Gl, ProgramID, TextureID, VertexArra
 /// A scissor box or a viewport: x, y, width, height, from the bottom left.
 pub type Rect = (i32, i32, i32, i32);
 
+/// What GL was last told about one piece of state.
+#[derive(Clone, Copy, Default, PartialEq)]
+enum Cached<T> {
+    /// Not known: C++'s dirty state, whose next set always reaches GL.
+    #[default]
+    Dirty,
+    /// GL holds this value.
+    Known(T),
+}
+
 /// Sets `cell` to `value`; true if GL has to be told.
-fn changed<T: Copy + PartialEq>(cell: &Cell<Option<T>>, value: T) -> bool {
-    if cell.get() == Some(value) {
+fn changed<T: Copy + PartialEq>(cell: &Cell<Cached<T>>, value: T) -> bool {
+    if cell.get() == Cached::Known(value) {
         return false;
     }
-    cell.set(Some(value));
+    cell.set(Cached::Known(value));
     true
 }
 
 #[derive(Default)]
 pub struct State {
-    program: Cell<Option<Option<ProgramID>>>,
-    vertex_array: Cell<Option<Option<VertexArrayID>>>,
-    framebuffer: Cell<Option<Option<FramebufferID>>>,
-    active_texture_unit: Cell<Option<u32>>,
-    textures: [Cell<Option<Option<TextureID>>>; MAX_ACTIVE_TEXTURE_UNITS as usize],
+    program: Cell<Cached<Option<ProgramID>>>,
+    vertex_array: Cell<Cached<Option<VertexArrayID>>>,
+    framebuffer: Cell<Cached<Option<FramebufferID>>>,
+    active_texture_unit: Cell<Cached<u32>>,
+    textures: [Cell<Cached<Option<TextureID>>>; MAX_ACTIVE_TEXTURE_UNITS as usize],
     /// The buffer range bound to each uniform buffer binding point.
-    uniform_buffers: [Cell<Option<(BufferID, i32, i32)>>; MAX_UBO_COUNT_PER_SHADER],
+    uniform_buffers: [Cell<Cached<(BufferID, i32, i32)>>; MAX_UBO_COUNT_PER_SHADER],
 
-    depth_test: Cell<Option<bool>>,
-    depth_func: Cell<Option<DepthFunctionType>>,
-    depth_mask: Cell<Option<bool>>,
-    depth_range: Cell<Option<(f32, f32)>>,
+    depth_test: Cell<Cached<bool>>,
+    depth_func: Cell<Cached<DepthFunctionType>>,
+    depth_mask: Cell<Cached<bool>>,
+    depth_range: Cell<Cached<(f32, f32)>>,
 
-    stencil_test: Cell<Option<bool>>,
-    stencil_func: Cell<Option<(StencilFunctionType, i32, u32)>>,
-    stencil_mask: Cell<Option<u32>>,
-    stencil_op: Cell<Option<(StencilOpType, StencilOpType, StencilOpType)>>,
+    stencil_test: Cell<Cached<bool>>,
+    stencil_func: Cell<Cached<(StencilFunctionType, i32, u32)>>,
+    stencil_mask: Cell<Cached<u32>>,
+    stencil_op: Cell<Cached<(StencilOpType, StencilOpType, StencilOpType)>>,
 
-    blend: Cell<Option<bool>>,
-    blend_equation: Cell<Option<ColorBlendEquationType>>,
-    blend_func: Cell<Option<(ColorBlendFactorType, ColorBlendFactorType)>>,
-    blend_color: Cell<Option<Color>>,
-    color_mask: Cell<Option<Mask>>,
+    blend: Cell<Cached<bool>>,
+    blend_equation: Cell<Cached<ColorBlendEquationType>>,
+    blend_func: Cell<Cached<(ColorBlendFactorType, ColorBlendFactorType)>>,
+    blend_color: Cell<Cached<Color>>,
+    color_mask: Cell<Cached<Mask>>,
 
-    cull_face: Cell<Option<bool>>,
-    cull_face_side: Cell<Option<CullFaceSideType>>,
-    cull_face_winding: Cell<Option<CullFaceWindingType>>,
+    cull_face: Cell<Cached<bool>>,
+    cull_face_side: Cell<Cached<CullFaceSideType>>,
+    cull_face_winding: Cell<Cached<CullFaceWindingType>>,
 
-    /// `Some(None)`: the scissor test is off.
-    scissor: Cell<Option<Option<Rect>>>,
-    viewport: Cell<Option<Rect>>,
+    /// `Known(None)`: the scissor test is off.
+    scissor: Cell<Cached<Option<Rect>>>,
+    viewport: Cell<Cached<Rect>>,
 
-    clear_color: Cell<Option<Color>>,
-    clear_depth: Cell<Option<f32>>,
-    clear_stencil: Cell<Option<i32>>,
+    clear_color: Cell<Cached<Color>>,
+    clear_depth: Cell<Cached<f32>>,
+    clear_stencil: Cell<Cached<i32>>,
 
-    line_width: Cell<Option<f32>>,
-    pixel_store_pack_alignment: Cell<Option<i32>>,
-    pixel_store_unpack_alignment: Cell<Option<i32>>,
+    line_width: Cell<Cached<f32>>,
+    pixel_store_pack_alignment: Cell<Cached<i32>>,
+    pixel_store_unpack_alignment: Cell<Cached<i32>>,
 }
 
 impl State {
     /// `Context::setDirtyState`: forgets what GL was last told, after code
     /// outside the backend has used the context.
     pub fn set_dirty(&self) {
-        self.program.set(None);
-        self.vertex_array.set(None);
-        self.framebuffer.set(None);
-        self.active_texture_unit.set(None);
+        self.program.set(Cached::Dirty);
+        self.vertex_array.set(Cached::Dirty);
+        self.framebuffer.set(Cached::Dirty);
+        self.active_texture_unit.set(Cached::Dirty);
         for texture in &self.textures {
-            texture.set(None);
+            texture.set(Cached::Dirty);
         }
         for buffer in &self.uniform_buffers {
-            buffer.set(None);
+            buffer.set(Cached::Dirty);
         }
-        self.depth_test.set(None);
-        self.depth_func.set(None);
-        self.depth_mask.set(None);
-        self.depth_range.set(None);
-        self.stencil_test.set(None);
-        self.stencil_func.set(None);
-        self.stencil_mask.set(None);
-        self.stencil_op.set(None);
-        self.blend.set(None);
-        self.blend_equation.set(None);
-        self.blend_func.set(None);
-        self.blend_color.set(None);
-        self.color_mask.set(None);
-        self.cull_face.set(None);
-        self.cull_face_side.set(None);
-        self.cull_face_winding.set(None);
-        self.scissor.set(None);
-        self.viewport.set(None);
-        self.clear_color.set(None);
-        self.clear_depth.set(None);
-        self.clear_stencil.set(None);
-        self.line_width.set(None);
-        self.pixel_store_pack_alignment.set(None);
-        self.pixel_store_unpack_alignment.set(None);
+        self.depth_test.set(Cached::Dirty);
+        self.depth_func.set(Cached::Dirty);
+        self.depth_mask.set(Cached::Dirty);
+        self.depth_range.set(Cached::Dirty);
+        self.stencil_test.set(Cached::Dirty);
+        self.stencil_func.set(Cached::Dirty);
+        self.stencil_mask.set(Cached::Dirty);
+        self.stencil_op.set(Cached::Dirty);
+        self.blend.set(Cached::Dirty);
+        self.blend_equation.set(Cached::Dirty);
+        self.blend_func.set(Cached::Dirty);
+        self.blend_color.set(Cached::Dirty);
+        self.color_mask.set(Cached::Dirty);
+        self.cull_face.set(Cached::Dirty);
+        self.cull_face_side.set(Cached::Dirty);
+        self.cull_face_winding.set(Cached::Dirty);
+        self.scissor.set(Cached::Dirty);
+        self.viewport.set(Cached::Dirty);
+        self.clear_color.set(Cached::Dirty);
+        self.clear_depth.set(Cached::Dirty);
+        self.clear_stencil.set(Cached::Dirty);
+        self.line_width.set(Cached::Dirty);
+        self.pixel_store_pack_alignment.set(Cached::Dirty);
+        self.pixel_store_unpack_alignment.set(Cached::Dirty);
     }
 
-    fn capability(gl: &Gl, cell: &Cell<Option<bool>>, capability: u32, enabled: bool) {
+    fn capability(gl: &Gl, cell: &Cell<Cached<bool>>, capability: u32, enabled: bool) {
         if changed(cell, enabled) {
             // SAFETY: `capability` is one GL ES 3.0 defines.
             unsafe {
@@ -140,7 +150,10 @@ impl State {
     }
 
     pub fn current_program(&self) -> Option<ProgramID> {
-        self.program.get().flatten()
+        match self.program.get() {
+            Cached::Known(program) => program,
+            Cached::Dirty => None,
+        }
     }
 
     /// `value::BindVertexArray`
@@ -166,11 +179,11 @@ impl State {
             debug_assert!(false, "texture unit out of range");
             return;
         };
-        if cell.get() == Some(texture) {
+        if cell.get() == Cached::Known(texture) {
             return;
         }
         self.active_texture(gl, unit);
-        cell.set(Some(texture));
+        cell.set(Cached::Known(texture));
         // SAFETY: the texture is alive, or none.
         unsafe { gl.bind_texture(glow::TEXTURE_2D, texture) };
     }
@@ -198,7 +211,7 @@ impl State {
     /// from the units it is bound to.
     pub fn unbind_texture(&self, gl: &Gl, texture: TextureID) {
         for unit in 0..self.textures.len() {
-            if self.textures[unit].get() == Some(Some(texture)) {
+            if self.textures[unit].get() == Cached::Known(Some(texture)) {
                 self.bind_texture(gl, unit as u32, None);
             }
         }
@@ -220,8 +233,8 @@ impl State {
     /// Forgets `buffer`, which is being deleted or has new storage.
     pub fn forget_uniform_buffer(&self, buffer: BufferID) {
         for cell in &self.uniform_buffers {
-            if cell.get().is_some_and(|(bound, _, _)| bound == buffer) {
-                cell.set(None);
+            if matches!(cell.get(), Cached::Known((bound, _, _)) if bound == buffer) {
+                cell.set(Cached::Dirty);
             }
         }
     }
@@ -426,27 +439,27 @@ impl State {
 
     /// Forgets the objects in `f`'s lists, which are being deleted.
     pub fn forget_program(&self, program: ProgramID) {
-        if self.program.get() == Some(Some(program)) {
-            self.program.set(None);
+        if self.program.get() == Cached::Known(Some(program)) {
+            self.program.set(Cached::Dirty);
         }
     }
 
     pub fn forget_vertex_array(&self, vertex_array: VertexArrayID) {
-        if self.vertex_array.get() == Some(Some(vertex_array)) {
-            self.vertex_array.set(None);
+        if self.vertex_array.get() == Cached::Known(Some(vertex_array)) {
+            self.vertex_array.set(Cached::Dirty);
         }
     }
 
     pub fn forget_framebuffer(&self, framebuffer: FramebufferID) {
-        if self.framebuffer.get() == Some(Some(framebuffer)) {
-            self.framebuffer.set(None);
+        if self.framebuffer.get() == Cached::Known(Some(framebuffer)) {
+            self.framebuffer.set(Cached::Dirty);
         }
     }
 
     pub fn forget_texture(&self, texture: TextureID) {
         for cell in &self.textures {
-            if cell.get() == Some(Some(texture)) {
-                cell.set(None);
+            if cell.get() == Cached::Known(Some(texture)) {
+                cell.set(Cached::Dirty);
             }
         }
     }

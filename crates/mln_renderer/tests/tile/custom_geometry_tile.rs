@@ -14,6 +14,7 @@ use feature::Feature;
 use geometry::{Geometry, Point};
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
+use mln_renderer::query::SourceQueryOptions;
 use mln_renderer::tile::custom_tile::CustomGeometryTile;
 use mln_renderer::tile::tile::{Tile, TileBase, TileNecessity};
 use mln_renderer::tile::tile_observer::TileObserver;
@@ -62,11 +63,14 @@ fn tile(
     CustomGeometryTile::new(id, "source".to_owned(), &test.tile_parameters(), loader, observer)
 }
 
-/// `StubTileObserver` (test/src/mln/test/stub_tile_observer.hpp).
+type OnTileChanged = Box<dyn Fn(&TileBase)>;
+type OnTileError = Box<dyn Fn(&TileBase, Error)>;
+
+/// `StubTileObserver` (`test/src/mln/test/stub_tile_observer.hpp`).
 #[derive(Default)]
 struct StubTileObserver {
-    tile_changed: RefCell<Option<Box<dyn Fn(&TileBase)>>>,
-    tile_error: RefCell<Option<Box<dyn Fn(&TileBase, Error)>>>,
+    tile_changed: RefCell<Option<OnTileChanged>>,
+    tile_error: RefCell<Option<OnTileError>>,
 }
 
 impl TileObserver for StubTileObserver {
@@ -157,7 +161,7 @@ fn invalidate_failed_tile() {
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, Error::native("failed")));
+    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, &Error::native("failed")));
     test.run_loop.wait_for_empty();
     assert!(failed.get());
 
@@ -194,8 +198,8 @@ fn invoke_tile_changed() {
     tile.set_layers(&[layer_properties], None);
     tile.set_observer(observer);
     let mut result = Vec::new();
-    tile.query_source_features(&mut result, &Default::default(), None).unwrap();
-    assert!(result.is_empty());
+    tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
+    assert_eq!(result, [] as [mln_util::feature::Feature; 0]);
 
     tile.set_tile_data(Arc::new(vec![Feature::new(Geometry::Point(Point::new(0i16, 0)))]));
 
@@ -203,7 +207,7 @@ fn invoke_tile_changed() {
         test.run_loop.run_once();
     }
 
-    tile.query_source_features(&mut result, &Default::default(), None).unwrap();
+    tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
     assert_eq!(result.len(), 1);
 }
 

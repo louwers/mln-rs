@@ -17,11 +17,13 @@ pub struct VtPoint {
 }
 
 impl VtPoint {
+    #[must_use]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
         VtPoint { x, y, z }
     }
 
     /// `vt_point(x, y)`
+    #[must_use]
     pub const fn xy(x: f64, y: f64) -> Self {
         VtPoint { x, y, z: 0.0 }
     }
@@ -35,24 +37,28 @@ impl PartialEq for VtPoint {
 
 /// `get<I>(p)`: the coordinate on axis `I` (0 = x, 1 = y).
 #[inline]
+#[must_use]
 pub fn get<const I: u8>(p: &VtPoint) -> f64 {
     if I == 0 { p.x } else { p.y }
 }
 
 /// `get<I>(const point<double>&)`
 #[inline]
+#[must_use]
 pub fn get_point<const I: u8>(p: &Point<f64>) -> f64 {
     if I == 0 { p.x } else { p.y }
 }
 
 /// `calc_progress<I>(a, b, k)`
 #[inline]
+#[must_use]
 pub fn calc_progress<const I: u8>(a: &VtPoint, b: &VtPoint, k: f64) -> f64 {
     if I == 0 { (k - a.x) / (b.x - a.x) } else { (k - a.y) / (b.y - a.y) }
 }
 
 /// `intersect<I>(a, b, k, t)`
 #[inline]
+#[must_use]
 pub fn intersect<const I: u8>(a: &VtPoint, b: &VtPoint, k: f64, t: f64) -> VtPoint {
     if I == 0 {
         let y = (b.y - a.y) * t + a.y;
@@ -77,6 +83,7 @@ pub struct VtLineString {
 }
 
 impl VtLineString {
+    #[must_use]
     pub fn new(points: Vec<VtPoint>) -> Self {
         VtLineString { points, ..Default::default() }
     }
@@ -110,6 +117,7 @@ pub struct VtLinearRing {
 }
 
 impl VtLinearRing {
+    #[must_use]
     pub fn new(points: Vec<VtPoint>) -> Self {
         VtLinearRing { points, area: 0.0 }
     }
@@ -164,7 +172,7 @@ impl VtGeometry {
             VtGeometry::MultiPoint(points) => points.iter().for_each(&mut *f),
             VtGeometry::MultiLineString(lines) => lines.iter().flat_map(|l| l.iter()).for_each(&mut *f),
             VtGeometry::MultiPolygon(polygons) => {
-                polygons.iter().flat_map(|p| p.iter()).flat_map(|r| r.iter()).for_each(&mut *f)
+                polygons.iter().flat_map(|p| p.iter()).flat_map(|r| r.iter()).for_each(&mut *f);
             }
             VtGeometry::GeometryCollection(geometries) => {
                 for g in geometries {
@@ -184,7 +192,7 @@ impl VtGeometry {
             VtGeometry::MultiPoint(points) => points.iter_mut().for_each(&mut *f),
             VtGeometry::MultiLineString(lines) => lines.iter_mut().flat_map(|l| l.iter_mut()).for_each(&mut *f),
             VtGeometry::MultiPolygon(polygons) => {
-                polygons.iter_mut().flat_map(|p| p.iter_mut()).flat_map(|r| r.iter_mut()).for_each(&mut *f)
+                polygons.iter_mut().flat_map(|p| p.iter_mut()).flat_map(|r| r.iter_mut()).for_each(&mut *f);
             }
             VtGeometry::GeometryCollection(geometries) => {
                 for g in geometries {
@@ -233,6 +241,7 @@ pub struct VtFeature {
 
 impl VtFeature {
     /// `vt_feature(geom, shared_ptr<const property_map>, id)`
+    #[must_use]
     pub fn new(geometry: VtGeometry, properties: Arc<PropertyMap>, id: Identifier) -> Self {
         let mut feature = VtFeature { geometry, properties, id, bbox: BoxD::INITIAL, num_points: 0 };
         feature.process_geometry();
@@ -240,6 +249,7 @@ impl VtFeature {
     }
 
     /// `vt_feature(geom, const property_map&, id)`
+    #[must_use]
     pub fn with_properties(geometry: VtGeometry, properties: &PropertyMap, id: Identifier) -> Self {
         Self::new(geometry, Arc::new(properties.clone()), id)
     }

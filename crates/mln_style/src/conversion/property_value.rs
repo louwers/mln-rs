@@ -4,9 +4,9 @@
 use mln_expression::formatted::Formatted;
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
-    LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType, Rotation,
-    SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
-    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType, ResamplingType,
+    Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType,
+    TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::{Color, Padding};
 
@@ -58,6 +58,7 @@ no_tokens!(
     LineCapType,
     LineJoinType,
     RasterResamplingType,
+    ResamplingType,
     SymbolAnchorType,
     SymbolPlacementType,
     SymbolZOrderType,
@@ -122,21 +123,19 @@ where
         return Some(PropertyValue::Undefined);
     }
 
-    let expression: Option<PropertyExpression<T>>;
-
-    if is_expression(value) {
+    let expression: Option<PropertyExpression<T>> = if is_expression(value) {
         let mut ctx = ParsingContext::with_expected(T::expression_type());
         let Some(parsed) = ctx.parse_layer_property_expression(value) else {
             error.message = ctx.get_combined_errors();
             return None;
         };
-        expression = Some(PropertyExpression::from_box(parsed, None));
+        Some(PropertyExpression::from_box(parsed, None))
     } else if value.is_object() {
-        expression = convert_function_to_expression::<T>(value, error, convert_tokens);
+        convert_function_to_expression::<T>(value, error, convert_tokens)
     } else {
         let constant = convert::<T>(value, error)?;
         return Some(if convert_tokens { constant.maybe_convert_tokens() } else { PropertyValue::Constant(constant) });
-    }
+    };
 
     let expression = expression?;
     if !allow_data_expressions && !expression.is_feature_constant() {

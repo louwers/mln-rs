@@ -181,7 +181,7 @@ fn feature_json(feature: &mln_util::feature::Feature) -> LentText {
 struct RenderedFeatures(Vec<[LentText; 5]>);
 
 impl RenderedFeatures {
-    fn new(features: Vec<mln_util::feature::Feature>) -> Self {
+    fn new(features: &[mln_util::feature::Feature]) -> Self {
         Self(
             features
                 .iter()
@@ -243,8 +243,8 @@ impl CompletionValue for SourceFeatures {
     }
 }
 
-fn feature_collection(features: Vec<feature::Feature<f64>>) -> LentText {
-    LentText::new(&geojson::stringify_feature_collection(&features))
+fn feature_collection(features: &[feature::Feature<f64>]) -> LentText {
+    LentText::new(&geojson::stringify_feature_collection(features))
 }
 
 /// `mln_render_session_query_rendered_features()`.
@@ -269,7 +269,7 @@ pub unsafe extern "C" fn mln_render_session_query_rendered_features(
                 session,
                 completion,
                 |session| session.query_rendered_features(geometry, options),
-                RenderedFeatures::new,
+                |features| RenderedFeatures::new(&features),
             )
         }
     })
@@ -332,7 +332,7 @@ pub unsafe extern "C" fn mln_render_session_get_cluster_children(
                 session,
                 completion,
                 |session| session.cluster_children(source_id, cluster_id),
-                feature_collection,
+                |features| feature_collection(&features),
             )
         }
     })
@@ -362,7 +362,7 @@ pub unsafe extern "C" fn mln_render_session_get_cluster_leaves(
                 session,
                 completion,
                 |session| session.cluster_leaves(source_id, cluster_id, limit, offset),
-                feature_collection,
+                |features| feature_collection(&features),
             )
         }
     })
@@ -428,23 +428,29 @@ mod tests {
                 MLN_RENDERED_QUERY_GEOMETRY_TYPE_BOX,
                 mln_rendered_query_geometry_data { box_: mln_screen_box { min, max } },
             );
-            assert_eq!(geometry(&screen_box).unwrap(), RenderedQueryGeometry::Box { min: point(min), max: point(max) });
+            assert_eq!(
+                geometry(&raw const screen_box).unwrap(),
+                RenderedQueryGeometry::Box { min: point(min), max: point(max) }
+            );
             let line = query_geometry(
                 MLN_RENDERED_QUERY_GEOMETRY_TYPE_LINE_STRING,
                 mln_rendered_query_geometry_data {
                     line_string: mln_screen_line_string { points: points.as_ptr(), point_count: 2 },
                 },
             );
-            assert_eq!(geometry(&line).unwrap(), RenderedQueryGeometry::LineString(vec![point(min), point(max)]));
+            assert_eq!(
+                geometry(&raw const line).unwrap(),
+                RenderedQueryGeometry::LineString(vec![point(min), point(max)])
+            );
             let empty = query_geometry(
                 MLN_RENDERED_QUERY_GEOMETRY_TYPE_LINE_STRING,
                 mln_rendered_query_geometry_data {
                     line_string: mln_screen_line_string { points: points.as_ptr(), point_count: 0 },
                 },
             );
-            assert!(message(geometry(&empty)).contains("must contain points"));
+            assert!(message(geometry(&raw const empty)).contains("must contain points"));
             let unknown = query_geometry(9, mln_rendered_query_geometry_data { point: min });
-            assert!(message(geometry(&unknown)).contains("geometry type is invalid"));
+            assert!(message(geometry(&raw const unknown)).contains("geometry type is invalid"));
         }
     }
 
@@ -460,19 +466,19 @@ mod tests {
         };
         // SAFETY: local options, whose views outlive the calls.
         unsafe {
-            let parsed = rendered_options(&options).unwrap();
+            let parsed = rendered_options(&raw const options).unwrap();
             assert_eq!(parsed.layer_ids, Some(vec!["circles".to_owned()]));
             assert!(parsed.filter.is_some());
             options.filter = view("");
-            assert!(rendered_options(&options).unwrap().filter.is_none());
+            assert!(rendered_options(&raw const options).unwrap().filter.is_none());
             options.filter = view(r#"["=="#);
-            assert!(message(rendered_options(&options)).contains("query filter"));
+            assert!(message(rendered_options(&raw const options)).contains("query filter"));
             options.filter = view("");
             options.layer_ids = core::ptr::null();
-            message(rendered_options(&options));
+            message(rendered_options(&raw const options));
             let no_bytes = [mln_buffer_view { data: core::ptr::null(), size: 1 }];
             options.layer_ids = no_bytes.as_ptr();
-            message(rendered_options(&options));
+            message(rendered_options(&raw const options));
             assert!(rendered_options(core::ptr::null()).unwrap().layer_ids.is_none());
             assert_eq!(message(source_id(view(""))), "source_id must not be empty");
         }

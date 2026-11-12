@@ -4,7 +4,7 @@
 //! onto the `ash` bindings.
 //!
 //! The C++ backend calls Vulkan through vulkan-hpp, allocates with
-//! VulkanMemoryAllocator and compiles its GLSL with glslang; this port makes
+//! `VulkanMemoryAllocator` and compiles its GLSL with glslang; this port makes
 //! the same calls through ash, allocates with gpu-allocator and compiles
 //! with naga. `vk::Unique*` handles become owners that destroy their object
 //! when dropped, and the `Context&` members of resources become

@@ -69,10 +69,10 @@ use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 
 /// The atlases of a `LayoutResult`; dropping the last reference releases
 /// their bins (C++ `~LayoutResult`). Shared, so that copies of a
-/// LayoutResult release them once.
+/// `LayoutResult` release them once.
 ///
 /// Port-only: serde writes the atlases without the atlas they release their
-/// bins to, which is the side's that gets them (tile/worker_codec).
+/// bins to, which is the side's that gets them (`tile/worker_codec`).
 #[derive(Default, Serialize, Deserialize)]
 pub struct LayoutAtlases {
     pub glyph_atlas: GlyphAtlas,
@@ -99,6 +99,7 @@ pub struct LayoutResult {
 }
 
 impl LayoutResult {
+    #[must_use]
     pub fn new(
         layer_render_data: HashMap<String, LayerRenderData>,
         feature_index: Arc<FeatureIndex>,
@@ -113,10 +114,12 @@ impl LayoutResult {
         }
     }
 
+    #[must_use]
     pub fn glyph_atlas(&self) -> &GlyphAtlas {
         &self.atlases.glyph_atlas
     }
 
+    #[must_use]
     pub fn image_atlas(&self) -> &ImageAtlas {
         &self.atlases.image_atlas
     }
@@ -232,6 +235,9 @@ pub struct GeometryTileInner {
     mailbox: Arc<Mailbox>,
 
     correlation_id: Cell<u64>,
+    /// The tileset has no tile here (`emptyResponse: "missing"`): the tile
+    /// lays out without data but isn't renderable.
+    pub(crate) missing: Cell<bool>,
 
     layout_result: RefCell<Option<Rc<LayoutResult>>>,
     /// The render thread's copies of the layout result's bucket geometry.
@@ -313,7 +319,7 @@ impl GeometryTileInner {
     /// `onLayout(std::shared_ptr<LayoutResult>, correlationID)`.
     pub fn on_layout(&self, result: LayoutResult, result_correlation_id: u64) {
         self.base.loaded.set(true);
-        self.base.renderable.set(true);
+        self.base.renderable.set(!self.missing.get());
         if result_correlation_id == self.correlation_id.get() {
             self.base.pending.set(false);
             self.base.on_tile_action(TileOperation::EndParse);
@@ -489,6 +495,7 @@ pub struct GeometryTile {
 impl GeometryTile {
     /// `GeometryTile(const OverscaledTileID&, std::string sourceID, const
     /// TileParameters&, TileObserver*)`.
+    #[must_use]
     pub fn new(
         id: OverscaledTileID,
         source_id: String,
@@ -530,6 +537,7 @@ impl GeometryTile {
                 worker: parameters.tile_worker_transport.create(worker_parameters, tile),
                 mailbox: mailbox.clone(),
                 correlation_id: Cell::new(0),
+                missing: Cell::new(false),
                 layout_result: RefCell::new(None),
                 bucket_geometry: RefCell::default(),
                 atlas_textures: RefCell::new(None),
@@ -545,6 +553,7 @@ impl GeometryTile {
         GeometryTile { inner }
     }
 
+    #[must_use]
     pub fn inner(&self) -> &Rc<GeometryTileInner> {
         &self.inner
     }
@@ -561,6 +570,7 @@ impl GeometryTile {
         self.inner.reset();
     }
 
+    #[must_use]
     pub fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
         self.inner.get_feature_index()
     }
@@ -629,9 +639,9 @@ impl Tile for GeometryTile {
         for layer in layers {
             // Skip irrelevant layers.
             let layer_impl = &layer.base_impl;
-            debug_assert!(layer_impl.get_type_info().source != layer_type_info::Source::NotRequired);
-            debug_assert!(layer_impl.source == inner.base.source_id);
-            debug_assert!(layer_impl.visibility != VisibilityType::None);
+            debug_assert_ne!(layer_impl.get_type_info().source, layer_type_info::Source::NotRequired);
+            debug_assert_eq!(layer_impl.source, inner.base.source_id);
+            debug_assert_ne!(layer_impl.visibility, VisibilityType::None);
             let overscaled_z = f32::from(id.overscaled_z);
             if overscaled_z < layer_impl.min_zoom.floor() || overscaled_z >= layer_impl.max_zoom.ceil() {
                 continue;
@@ -914,6 +924,7 @@ pub fn query_layer_source_features(
 
 impl GeometryTile {
     /// `getData()`: the tile data of the latest layout, if any.
+    #[must_use]
     pub fn has_data(&self) -> bool {
         self.inner.layout_result.borrow().as_ref().is_some_and(|result| result.feature_index.get_data().is_some())
     }

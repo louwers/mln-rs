@@ -18,6 +18,7 @@ pub struct Let {
 }
 
 impl Let {
+    #[must_use]
     pub fn new(bindings: Bindings, result: Box<dyn Expression>) -> Self {
         let deps = bindings.values().fold(Dependency::NONE, |a, e| a | e.dependencies())
             | result.dependencies()
@@ -25,6 +26,7 @@ impl Let {
         Let { base: ExpressionBase::new(Kind::Let, result.get_type().clone(), deps), bindings, result }
     }
 
+    #[must_use]
     pub fn get_result(&self) -> &dyn Expression {
         &*self.result
     }
@@ -128,6 +130,7 @@ impl Var {
         }
     }
 
+    #[must_use]
     pub fn get_bound_expression(&self) -> &Arc<dyn Expression> {
         &self.value
     }

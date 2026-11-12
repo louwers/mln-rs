@@ -38,11 +38,13 @@ impl FeatureStateSelector {
         }
     }
 
+    #[must_use]
     pub fn with_source_layer(mut self, source_layer_id: impl Into<String>) -> Self {
         self.source_layer_id = Some(source_layer_id.into());
         self
     }
 
+    #[must_use]
     pub fn with_state_key(mut self, state_key: impl Into<String>) -> Self {
         self.state_key = Some(state_key.into());
         self
@@ -245,9 +247,8 @@ mod tests {
 
     #[test]
     fn selectors_check_what_each_use_needs() {
-        let message = |selector: FeatureStateSelector, needs_feature| {
-            selector.key(needs_feature).unwrap_err().message.to_string()
-        };
+        let message =
+            |selector: FeatureStateSelector, needs_feature| selector.key(needs_feature).unwrap_err().message.clone();
         let feature = FeatureStateSelector::feature("points", text("a"));
         assert_eq!(
             "feature state source_id must not be empty",

@@ -54,8 +54,9 @@ impl Kind for SharedTileDataKind {
 
 /// `#[serde(with)]` for an `Option<SharedTileData>`.
 pub mod tile_data {
-    use super::*;
+    use super::{Deserializer, Serializer, SharedTileData, SharedTileDataKind, shared};
 
+    #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
     pub fn serialize<S: Serializer>(data: &Option<SharedTileData>, serializer: S) -> Result<S::Ok, S::Error> {
         shared::serialize_option::<SharedTileDataKind, S>(data, serializer)
     }
@@ -67,7 +68,7 @@ pub mod tile_data {
 
 /// The `shared::Kind` of the textures of a worker instance's atlas, which
 /// come from the instance: the map side keeps a copy of each
-/// (map_side.rs, `AtlasMirror`), made from its size and pixel type.
+/// (`map_side.rs`, `AtlasMirror`), made from its size and pixel type.
 pub struct SharedTexture;
 
 impl Kind for SharedTexture {
@@ -86,8 +87,9 @@ impl Kind for SharedTexture {
 
 /// `#[serde(with)]` for an `Option<DynamicTexturePtr>`.
 pub mod texture {
-    use super::*;
+    use super::{Arc, Deserializer, DynamicTexture, Serializer, SharedTexture, shared};
 
+    #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
     pub fn serialize<S: Serializer>(texture: &Option<Arc<DynamicTexture>>, serializer: S) -> Result<S::Ok, S::Error> {
         shared::serialize_option::<SharedTexture, S>(texture, serializer)
     }
@@ -99,7 +101,7 @@ pub mod texture {
 
 /// `#[serde(with)]` for the layers of a `setLayers`.
 pub mod layers {
-    use super::*;
+    use super::{Arc, Deserialize, Deserializer, LayerProperties, Serialize, Serializer, shared_layer_properties};
 
     #[derive(Serialize, Deserialize)]
     struct Layer(#[serde(with = "shared_layer_properties")] Arc<dyn LayerProperties>);

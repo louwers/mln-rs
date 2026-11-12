@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Compiles and links every GLSL program `shader_source()` returns on an
-//! OpenGL ES 3.0 context, the way gl::ShaderGroup does: in both projection
+//! OpenGL ES 3.0 context, the way `gl::ShaderGroup` does: in both projection
 //! variants, with every data-driven property as a vertex attribute and with
 //! every one as a uniform. Also checks each program against its tables:
 //! every uniform block is as large as the UBO the renderer writes for it,
@@ -21,7 +21,7 @@ use mln_gl::shaders::shader_source::{REGISTERED_SHADERS, ShaderSource, shader_so
 use mln_gl::{Device, RendererBackend};
 
 /// A backend, or none where there is no EGL to make an OpenGL ES 3.0 context
-/// with, as on macOS: the test is skipped there, unless MLN_RENDER_BACKEND
+/// with, as on macOS: the test is skipped there, unless `MLN_RENDER_BACKEND`
 /// asks for this backend.
 fn headless_backend() -> Option<RendererBackend> {
     match Device::new().and_then(|device| RendererBackend::new(&device)) {

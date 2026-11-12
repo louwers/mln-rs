@@ -50,6 +50,7 @@ pub struct ThreadedScheduler {
 }
 
 impl ThreadedScheduler {
+    #[must_use]
     pub fn new(n: usize) -> Self {
         let shared = Arc::new(Shared {
             unique_id: SimpleIdentity::new(),
@@ -64,7 +65,7 @@ impl ThreadedScheduler {
     }
 
     fn this_thread_is_owned(&self) -> bool {
-        OWNING_THREAD_POOL.with(|p| p.get()) == Arc::as_ptr(&self.shared) as usize
+        OWNING_THREAD_POOL.with(std::cell::Cell::get) == Arc::as_ptr(&self.shared) as usize
     }
 }
 
@@ -223,6 +224,7 @@ impl Default for ThreadPool {
 }
 
 impl ThreadPool {
+    #[must_use]
     pub fn new() -> Self {
         ThreadPool { scheduler: ThreadedScheduler::new(1 + 3) }
     }
@@ -258,6 +260,7 @@ impl Default for SequencedScheduler {
 }
 
 impl SequencedScheduler {
+    #[must_use]
     pub fn new() -> Self {
         SequencedScheduler { scheduler: ThreadedScheduler::new(1) }
     }

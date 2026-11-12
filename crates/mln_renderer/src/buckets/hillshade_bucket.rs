@@ -59,7 +59,7 @@ fn full_mask() -> TileMask {
 /// `HillshadeBucket`.
 ///
 /// Port-only: serde writes the DEM, border included, which is what a worker
-/// sets (tile/worker_codec) and the tile backfills from its neighbours; the
+/// sets (`tile/worker_codec`) and the tile backfills from its neighbours; the
 /// geometry is the tile's (`setMask`) and the render state this side's.
 #[derive(Serialize, Deserialize)]
 pub struct HillshadeBucket {
@@ -86,12 +86,13 @@ fn unmasked() -> Mutex<HillshadeBucketGeometry> {
 
 impl HillshadeBucket {
     /// `HillshadeBucket(PremultipliedImage&&, Tileset::RasterEncoding)`;
-    /// the DEMData constructor's exception is the `Err`.
-    pub fn new(image: PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
-        Ok(Self::with_dem_data(DEMData::new(&image, encoding)?))
+    /// the `DEMData` constructor's exception is the `Err`.
+    pub fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
+        Ok(Self::with_dem_data(DEMData::new(image, encoding)?))
     }
 
     /// `HillshadeBucket(DEMData&&)`.
+    #[must_use]
     pub fn with_dem_data(demdata: DEMData) -> Self {
         HillshadeBucket {
             base: BucketBase::default(),
@@ -103,6 +104,7 @@ impl HillshadeBucket {
     }
 
     /// `layoutVertex(Point<int16_t> p, Point<uint16_t> t)`.
+    #[must_use]
     pub fn layout_vertex(p: Point<i16>, t: Point<u16>) -> HillshadeLayoutVertex {
         HillshadeLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
     }
@@ -157,6 +159,8 @@ impl HillshadeBucket {
 
     /// `setMask(TileMask&&)`.
     pub fn set_mask(&self, mask: TileMask) {
+        const VERTEX_LENGTH: usize = 4;
+
         let mut geometry = self.geometry();
         if geometry.mask == mask {
             return;
@@ -176,8 +180,6 @@ impl HillshadeBucket {
         // Create a new segment so that we will upload (empty) buffers even
         // when there is nothing to draw for this tile.
         geometry.segments.push(SegmentBase::new(0, 0));
-
-        const VERTEX_LENGTH: usize = 4;
 
         // Create the vertex buffer for the specified tile mask.
         let ids: Vec<CanonicalTileID> = geometry.mask.iter().copied().collect();
@@ -220,7 +222,7 @@ impl HillshadeBucket {
             ));
 
             let segment = geometry.segments.last().expect("segment");
-            debug_assert!(segment.vertex_length <= usize::from(u16::MAX));
+            debug_assert!(u16::try_from(segment.vertex_length).is_ok());
             let offset = segment.vertex_length as u16;
 
             // 0, 1, 2

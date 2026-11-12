@@ -6,6 +6,7 @@ use feature::{Identifier, Value};
 use crate::string::{to_string_double, to_string_i64, to_string_u64};
 
 /// `numericValue<double>(const Value&)`.
+#[must_use]
 pub fn numeric_value_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Uint(t) => Some(*t as f64),
@@ -16,6 +17,7 @@ pub fn numeric_value_f64(value: &Value) -> Option<f64> {
 }
 
 /// `featureIDtoString(const FeatureIdentifier&)`.
+#[must_use]
 pub fn feature_id_to_string(id: &Identifier) -> Option<String> {
     match id {
         Identifier::Null => None,
@@ -54,6 +56,7 @@ impl From<feature::Feature<f64>> for Feature {
 
 impl Feature {
     /// The `GeoJSONFeature` base.
+    #[must_use]
     pub fn to_geojson_feature(&self) -> feature::Feature<f64> {
         feature::Feature { geometry: self.geometry.clone(), properties: self.properties.clone(), id: self.id.clone() }
     }

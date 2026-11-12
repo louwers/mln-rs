@@ -18,6 +18,7 @@ pub struct VertexBufferResource {
 }
 
 impl VertexBufferResource {
+    #[must_use]
     pub fn new(buffer: BufferResource) -> Self {
         if buffer.is_valid() {
             let mut stats = buffer.get_context().rendering_stats_mut();
@@ -76,6 +77,7 @@ pub struct IndexBufferResource {
 }
 
 impl IndexBufferResource {
+    #[must_use]
     pub fn new(buffer: BufferResource) -> Self {
         if buffer.is_valid() {
             let mut stats = buffer.get_context().rendering_stats_mut();

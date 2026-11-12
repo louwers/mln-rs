@@ -27,31 +27,37 @@ use crate::vectors::Vec3;
 pub type Mat3 = [f64; 9];
 
 /// `vec3Cross`.
+#[must_use]
 pub const fn vec3_cross(a: &Vec3, b: &Vec3) -> Vec3 {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 
 /// `vec3Dot`.
+#[must_use]
 pub const fn vec3_dot(a: &Vec3, b: &Vec3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 /// `vec3LengthSq`.
+#[must_use]
 pub const fn vec3_length_sq(a: &Vec3) -> f64 {
     vec3_dot(a, a)
 }
 
 /// `vec3Length`.
+#[must_use]
 pub fn vec3_length(a: &Vec3) -> f64 {
     vec3_length_sq(a).sqrt()
 }
 
 /// `vec3Scale`.
+#[must_use]
 pub const fn vec3_scale(a: &Vec3, s: f64) -> Vec3 {
     [a[0] * s, a[1] * s, a[2] * s]
 }
 
 /// `vec3Normalize`. The C++ `assert(length != 0)` becomes a debug assertion.
+#[must_use]
 pub fn vec3_normalize(a: &Vec3) -> Vec3 {
     let length = vec3_length(a);
     debug_assert!(length != 0.0);
@@ -59,11 +65,13 @@ pub fn vec3_normalize(a: &Vec3) -> Vec3 {
 }
 
 /// `vec3Sub`.
+#[must_use]
 pub const fn vec3_sub(a: &Vec3, b: &Vec3) -> Vec3 {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
 /// `vec3Add`.
+#[must_use]
 pub const fn vec3_add(a: &Vec3, b: &Vec3) -> Vec3 {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }

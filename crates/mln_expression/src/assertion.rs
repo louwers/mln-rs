@@ -20,8 +20,8 @@ pub struct Assertion {
 
 fn assertion_type(name: &str) -> Option<Type> {
     match name {
-        "string" => Some(Type::String),
-        "image" => Some(Type::String), // TODO: replace once we implement image expressions
+        // TODO: give "image" its own type once we implement image expressions
+        "string" | "image" => Some(Type::String),
         "number" => Some(Type::Number),
         "boolean" => Some(Type::Boolean),
         "object" => Some(Type::Object),
@@ -30,8 +30,9 @@ fn assertion_type(name: &str) -> Option<Type> {
 }
 
 impl Assertion {
+    #[must_use]
     pub fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
-        assert!(!inputs.is_empty());
+        assert_ne!(inputs, Vec::<Box<dyn Expression>>::new());
         Assertion { base: ExpressionBase::new(Kind::Assertion, type_, collect_dependencies(&inputs)), inputs }
     }
 
@@ -44,10 +45,9 @@ impl Assertion {
         }
 
         let mut i = 1;
-        let type_;
 
         let name = value.array_member(0).to_string().expect("operator name");
-        if name == "array" {
+        let type_ = if name == "array" {
             let item_type;
             if length > 2 {
                 let item_type_name = value.array_member(1).to_string();
@@ -81,10 +81,10 @@ impl Assertion {
                 i += 1;
             }
 
-            type_ = type_::Array::with_n(item_type, n).into();
+            type_::Array::with_n(item_type, n).into()
         } else {
-            type_ = assertion_type(&name).expect("assertion type");
-        }
+            assertion_type(&name).expect("assertion type")
+        };
 
         let mut parsed = Vec::with_capacity(length - 1);
         while i < length {
@@ -144,14 +144,14 @@ impl Expression for Assertion {
     fn serialize(&self) -> MbglValue {
         let mut serialized = vec![MbglValue::String(self.get_operator())];
 
-        if let Type::Array(array) = self.get_type() {
-            if matches!(array.item_type, Type::String | Type::Number | Type::Boolean) {
-                serialized.push(MbglValue::String(type_::to_string(&array.item_type)));
-                if let Some(n) = array.n {
-                    serialized.push(MbglValue::Uint(n as u64));
-                } else if self.inputs.len() > 1 {
-                    serialized.push(MbglValue::Null);
-                }
+        if let Type::Array(array) = self.get_type()
+            && matches!(array.item_type, Type::String | Type::Number | Type::Boolean)
+        {
+            serialized.push(MbglValue::String(type_::to_string(&array.item_type)));
+            if let Some(n) = array.n {
+                serialized.push(MbglValue::Uint(n as u64));
+            } else if self.inputs.len() > 1 {
+                serialized.push(MbglValue::Null);
             }
         }
 

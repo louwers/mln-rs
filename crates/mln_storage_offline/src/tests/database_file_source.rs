@@ -106,7 +106,7 @@ fn a_region_lives_from_creation_to_deletion() {
 
     wait(|done| source.invalidate_offline_region(region.get_id(), done)).unwrap();
     wait(|done| source.delete_offline_region(region.get_id(), done)).unwrap();
-    assert!(wait(|done| source.list_offline_regions(done)).unwrap().is_empty());
+    assert_eq!(wait(|done| source.list_offline_regions(done)).unwrap(), [] as [mln_storage::offline::OfflineRegion; 0]);
     let id = region.get_id();
     let not_found =
         |result: Result<(), DatabaseError>| matches!(result, Err(DatabaseError::RegionNotFound(i)) if i == id);

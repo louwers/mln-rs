@@ -8,6 +8,7 @@ fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
 }
 
+#[must_use]
 pub fn is_directive(line: &str, directive: &str) -> bool {
     let b = line.as_bytes();
     let mut pos = 0;
@@ -28,6 +29,7 @@ pub fn is_directive(line: &str, directive: &str) -> bool {
     pos == b.len() || is_space(b[pos])
 }
 
+#[must_use]
 pub fn get_directive_argument(line: &str) -> String {
     let Some(hash) = line.find('#') else {
         return String::new();
@@ -58,6 +60,7 @@ struct ConditionalFrame {
 
 /// `preprocessWGSL`: strips `#ifdef`/`#ifndef`/`#else`/`#endif` blocks
 /// according to `defines` (only key presence matters).
+#[must_use]
 pub fn preprocess_wgsl(source: &str, defines: &HashMap<String, bool>) -> String {
     let mut output = String::with_capacity(source.len());
     let mut stack: Vec<ConditionalFrame> = Vec::new();
@@ -86,11 +89,11 @@ pub fn preprocess_wgsl(source: &str, defines: &HashMap<String, bool>) -> String 
             let Some(frame) = stack.last_mut() else {
                 continue;
             };
-            if !frame.else_seen {
+            if frame.else_seen {
+                current_active = false;
+            } else {
                 frame.else_seen = true;
                 current_active = frame.parent_active && !frame.condition;
-            } else {
-                current_active = false;
             }
             continue;
         }

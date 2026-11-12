@@ -95,8 +95,9 @@ pub struct LayerTypeInfo {
     pub tile_kind: layer_type_info::TileKind,
 }
 
-/// Added this to support plugins and that their LayerTypeInfo isn't the same
+/// Added this to support plugins and that their `LayerTypeInfo` isn't the same
 /// pointer across the board.
+#[must_use]
 pub fn layer_type_info_equals(one: &LayerTypeInfo, other: &LayerTypeInfo) -> bool {
     one.type_ == other.type_
         && one.source == other.source
@@ -263,12 +264,11 @@ impl dyn Layer {
 
 fn evaluate_visibility_expression(expression: &dyn Expression, global_state: &GlobalStateMap) -> VisibilityType {
     let result = expression.evaluate(&EvaluationContext::default().with_global_state(Some(global_state)));
-    if let Ok(result) = result {
-        if let Some(string) = from_expression_value::<String>(&result) {
-            if let Some(visibility) = VisibilityType::to_enum(&string) {
-                return visibility;
-            }
-        }
+    if let Ok(result) = result
+        && let Some(string) = from_expression_value::<String>(&result)
+        && let Some(visibility) = VisibilityType::to_enum(&string)
+    {
+        return visibility;
     }
     Log::warning(
         Event::ParseStyle,
@@ -299,11 +299,11 @@ pub fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
 
     if layer.get_min_zoom() != f32::NEG_INFINITY {
         // mapbox::base::Value from float: double.
-        result.insert("minzoom".to_owned(), Value::Double(layer.get_min_zoom() as f64));
+        result.insert("minzoom".to_owned(), Value::Double(f64::from(layer.get_min_zoom())));
     }
 
     if layer.get_max_zoom() != f32::INFINITY {
-        result.insert("maxzoom".to_owned(), Value::Double(layer.get_max_zoom() as f64));
+        result.insert("maxzoom".to_owned(), Value::Double(f64::from(layer.get_max_zoom())));
     }
 
     let base_impl = layer.base_impl();
@@ -327,16 +327,13 @@ pub fn serialize_property(out: &mut Value, property: &StyleProperty, property_na
         return;
     };
     let property_type = if is_paint { "paint" } else { "layout" };
-    match object.get_mut(property_type) {
-        Some(Value::Object(existing)) => {
-            // emplace: does not overwrite an existing key.
-            existing.entry(property_name.to_owned()).or_insert_with(|| property.get_value().clone());
-        }
-        _ => {
-            let mut inner = ValueObject::new();
-            inner.insert(property_name.to_owned(), property.get_value().clone());
-            object.insert(property_type.to_owned(), Value::Object(inner));
-        }
+    if let Some(Value::Object(existing)) = object.get_mut(property_type) {
+        // emplace: does not overwrite an existing key.
+        existing.entry(property_name.to_owned()).or_insert_with(|| property.get_value().clone());
+    } else {
+        let mut inner = ValueObject::new();
+        inner.insert(property_name.to_owned(), property.get_value().clone());
+        object.insert(property_type.to_owned(), Value::Object(inner));
     }
 }
 
@@ -381,18 +378,18 @@ pub fn set_property_base(
             layer.set_source_layer(&source_layer);
             return None;
         }
-    } else if name == "source" {
-        if let Some(source_id) = convert::<String>(value, &mut error) {
-            if layer.get_type_info().source != layer_type_info::Source::Required {
-                Log::warning(
-                    Event::General,
-                    format!("'source' property cannot be set tothe layer {}", layer.base_impl().id),
-                );
-                return None;
-            }
-            layer.set_source_id(&source_id);
+    } else if name == "source"
+        && let Some(source_id) = convert::<String>(value, &mut error)
+    {
+        if layer.get_type_info().source != layer_type_info::Source::Required {
+            Log::warning(
+                Event::General,
+                format!("'source' property cannot be set tothe layer {}", layer.base_impl().id),
+            );
             return None;
         }
+        layer.set_source_id(&source_id);
+        return None;
     }
     Some(error)
 }

@@ -58,11 +58,11 @@ fn hash_pipeline_state(
     let mut h = 0u64;
     // Hash vertex layouts
     for layout in vertex_layouts {
-        h = hash(&[h, layout.array_stride as u32 as u64]);
+        h = hash(&[h, u64::from(layout.array_stride as u32)]);
         h = hash(&[h, layout.step_mode as u64]);
         h = hash(&[h, layout.attributes.len() as u64]);
         for attr in layout.attributes.iter().take(16) {
-            h = hash(&[h, attr.format as u64, u64::from(attr.shader_location), attr.offset as u32 as u64]);
+            h = hash(&[h, attr.format as u64, u64::from(attr.shader_location), u64::from(attr.offset as u32)]);
         }
     }
     // Hash color mode
@@ -195,6 +195,7 @@ thread_local! {
 }
 
 impl Drawable {
+    #[must_use]
     pub fn new(name: String) -> Self {
         Drawable {
             base: DrawableBase::new(name),
@@ -794,12 +795,13 @@ impl drawable::Drawable for Drawable {
         self.impl_.previous_stencil_mode = stencil_mode;
 
         let unique_bindings = self.impl_.vertex_slots.get_or_insert_with(|| {
+            const MAX_VERTEX_BUFFER_SLOTS: usize = 8;
+
             let mut unique_bindings =
                 Vec::with_capacity(self.impl_.attribute_bindings.len() + self.impl_.instance_bindings.len());
             accumulate_bindings(&self.impl_.attribute_bindings, wgpu::VertexStepMode::Vertex, &mut unique_bindings);
             accumulate_bindings(&self.impl_.instance_bindings, wgpu::VertexStepMode::Instance, &mut unique_bindings);
 
-            const MAX_VERTEX_BUFFER_SLOTS: usize = 8;
             if unique_bindings.len() > MAX_VERTEX_BUFFER_SLOTS {
                 eprintln!(
                     "WebGPU: reducing vertex buffer bindings from {} to {MAX_VERTEX_BUFFER_SLOTS}",
@@ -966,8 +968,8 @@ impl drawable::Drawable for Drawable {
                 {
                     let expected_depth =
                         parameters.depth_mode_for_sublayer(self.base.sub_layer_index as u8, self.base.depth_type);
-                    debug_assert!(expected_depth.func == self.impl_.depth_mode.func);
-                    debug_assert!(expected_depth.mask == self.impl_.depth_mode.mask);
+                    debug_assert_eq!(expected_depth.func, self.impl_.depth_mode.func);
+                    debug_assert_eq!(expected_depth.mask, self.impl_.depth_mode.mask);
                 }
             }
         }

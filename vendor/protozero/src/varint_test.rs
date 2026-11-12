@@ -15,13 +15,13 @@ fn varint() {
         let mut w = Writer::default();
         w.add_int32(1, 17);
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         if skip {
             item.skip().unwrap();
         } else {
             assert_eq!(item.get_int32(), Ok(17));
         }
-        assert_eq!(item.next(), Ok(false));
+        assert_eq!(item.next_field(), Ok(false));
     }
 
     // encode/decode uint32
@@ -29,13 +29,13 @@ fn varint() {
         let mut w = Writer::default();
         w.add_uint32(1, 17);
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         if skip {
             item.skip().unwrap();
         } else {
             assert_eq!(item.get_uint32(), Ok(17));
         }
-        assert_eq!(item.next(), Ok(false));
+        assert_eq!(item.next_field(), Ok(false));
     }
 
     // encode/decode uint64
@@ -43,13 +43,13 @@ fn varint() {
         let mut w = Writer::default();
         w.add_uint64(1, 1 << 40);
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         if skip {
             item.skip().unwrap();
         } else {
             assert_eq!(item.get_uint64(), Ok(1 << 40));
         }
-        assert_eq!(item.next(), Ok(false));
+        assert_eq!(item.next_field(), Ok(false));
     }
 
     // short buffer while parsing varint
@@ -58,10 +58,10 @@ fn varint() {
         w.add_uint64(1, 1 << 40);
         w.buffer.pop(); // "remove" last byte from buffer
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.get_uint64(), Err(Exception::EndOfBuffer));
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.skip(), Err(Exception::EndOfBuffer));
     }
 
@@ -72,10 +72,10 @@ fn varint() {
         let last = w.buffer.len() - 1;
         w.buffer[last] = w.buffer[last].wrapping_add(0x80); // pretend the varint goes on
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.get_uint64(), Err(Exception::EndOfBuffer));
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.skip(), Err(Exception::EndOfBuffer));
     }
 
@@ -86,10 +86,10 @@ fn varint() {
         let last = w.buffer.len() - 1;
         w.buffer[last] = w.buffer[last].wrapping_add(0x80); // pretend the varint goes on
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.get_uint64(), Err(Exception::VarintTooLong));
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.skip(), Err(Exception::VarintTooLong));
     }
 }
@@ -105,7 +105,7 @@ fn ten_byte_varint() {
     w.buffer.push(0x02);
 
     let mut item = PbfReader::new(&w.buffer);
-    assert!(item.next().unwrap());
+    assert!(item.next_field().unwrap());
     assert_eq!(item.get_uint64(), Err(Exception::VarintTooLong));
 }
 
@@ -115,27 +115,27 @@ fn lots_of_varints_back_and_forth() {
         let mut w = Writer::default();
         w.add_uint32(1, n);
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.get_uint32(), Ok(n));
-        assert_eq!(item.next(), Ok(false));
+        assert_eq!(item.next_field(), Ok(false));
     }
 
     for n in -70000..70000i32 {
         let mut w = Writer::default();
         w.add_int32(1, n);
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.get_int32(), Ok(n));
-        assert_eq!(item.next(), Ok(false));
+        assert_eq!(item.next_field(), Ok(false));
     }
 
     for n in -70000..70000i32 {
         let mut w = Writer::default();
         w.add_sint32(1, n);
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.get_sint32(), Ok(n));
-        assert_eq!(item.next(), Ok(false));
+        assert_eq!(item.next_field(), Ok(false));
     }
 
     for i in 0..63 {
@@ -143,9 +143,9 @@ fn lots_of_varints_back_and_forth() {
             let mut w = Writer::default();
             w.add_int64(1, n);
             let mut item = PbfReader::new(&w.buffer);
-            assert!(item.next().unwrap());
+            assert!(item.next_field().unwrap());
             assert_eq!(item.get_int64(), Ok(n));
-            assert_eq!(item.next(), Ok(false));
+            assert_eq!(item.next_field(), Ok(false));
         }
     }
 
@@ -154,9 +154,9 @@ fn lots_of_varints_back_and_forth() {
         let mut w = Writer::default();
         w.add_uint64(1, n);
         let mut item = PbfReader::new(&w.buffer);
-        assert!(item.next().unwrap());
+        assert!(item.next_field().unwrap());
         assert_eq!(item.get_uint64(), Ok(n));
-        assert_eq!(item.next(), Ok(false));
+        assert_eq!(item.next_field(), Ok(false));
     }
 }
 
@@ -172,7 +172,7 @@ fn call_skip_varint_with_every_possible_value_for_single_byte_in_buffer() {
         let data = [i];
         let mut b: &[u8] = &data;
         skip_varint(&mut b).unwrap();
-        assert!(b.is_empty());
+        assert_eq!(b, []);
     }
     for i in 128..=255u8 {
         let data = [i];
@@ -195,7 +195,7 @@ fn call_decode_varint_with_every_possible_value_for_single_byte_in_buffer() {
         let data = [i];
         let mut b: &[u8] = &data;
         assert_eq!(decode_varint(&mut b), Ok(u64::from(i)));
-        assert!(b.is_empty());
+        assert_eq!(b, []);
     }
     for i in 128..=255u8 {
         assert_eq!(length_of_varint(u64::from(i)), 2);
@@ -212,10 +212,10 @@ fn check_lengths_of_varint() {
     assert_eq!(length_of_varint(128), 2);
     assert_eq!(length_of_varint(16383), 2);
     assert_eq!(length_of_varint(16384), 3);
-    assert_eq!(length_of_varint(2097151), 3);
-    assert_eq!(length_of_varint(2097152), 4);
-    assert_eq!(length_of_varint(0xffffffff), 5);
-    assert_eq!(length_of_varint(0xffffffffffffffff), 10);
+    assert_eq!(length_of_varint(2_097_151), 3);
+    assert_eq!(length_of_varint(2_097_152), 4);
+    assert_eq!(length_of_varint(0xffff_ffff), 5);
+    assert_eq!(length_of_varint(0xffff_ffff_ffff_ffff), 10);
 }
 
 #[test]
@@ -268,16 +268,16 @@ fn zigzag_decode_some_values() {
     assert_eq!(decode_zigzag32(2), 1);
     assert_eq!(decode_zigzag32(3), -2);
     assert_eq!(decode_zigzag32(4), 2);
-    assert_eq!(decode_zigzag32(0xfffffffe), 0x7fffffff);
-    assert_eq!(decode_zigzag32(0xfffffffd), -0x7fffffff);
+    assert_eq!(decode_zigzag32(0xffff_fffe), 0x7fff_ffff);
+    assert_eq!(decode_zigzag32(0xffff_fffd), -0x7fff_ffff);
     assert_eq!(decode_zigzag32(2 * i32::MAX as u32), i32::MAX);
     assert_eq!(decode_zigzag64(0), 0);
     assert_eq!(decode_zigzag64(1), -1);
     assert_eq!(decode_zigzag64(2), 1);
     assert_eq!(decode_zigzag64(3), -2);
     assert_eq!(decode_zigzag64(4), 2);
-    assert_eq!(decode_zigzag64(0xfffffffffffffffe), 0x7fffffffffffffff);
-    assert_eq!(decode_zigzag64(0xfffffffffffffffd), -0x7fffffffffffffff);
+    assert_eq!(decode_zigzag64(0xffff_ffff_ffff_fffe), 0x7fff_ffff_ffff_ffff);
+    assert_eq!(decode_zigzag64(0xffff_ffff_ffff_fffd), -0x7fff_ffff_ffff_ffff);
     assert_eq!(decode_zigzag64(2 * i64::MAX as u64), i64::MAX);
     assert_eq!(decode_zigzag64(2 * i64::MAX as u64 - 1), -i64::MAX);
 }

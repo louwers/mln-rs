@@ -79,15 +79,8 @@ fn lab2xyz(t: f64) -> f64 {
 
 fn xyz2rgb(x: f64) -> f64 {
     let x = if x <= 0.00304 { 12.92 * x } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
-    // std::clamp(x, 0.0, 1.0): `x < lo ? lo : hi < x ? hi : x` (NaN and -0.0
-    // pass through).
-    if x < 0.0 {
-        0.0
-    } else if 1.0 < x {
-        1.0
-    } else {
-        x
-    }
+    // std::clamp(x, 0.0, 1.0); both pass NaN and -0.0 through.
+    x.clamp(0.0, 1.0)
 }
 
 fn constrain_angle(angle: f64) -> f64 {
@@ -99,12 +92,12 @@ fn rgb_to_lab(c: Rgb) -> Lab {
     let r = rgb2xyz(c.r);
     let g = rgb2xyz(c.g);
     let b = rgb2xyz(c.b);
-    let y = xyz2lab((0.2225045 * r + 0.7168786 * g + 0.0606169 * b) / YN);
+    let y = xyz2lab((0.222_504_5 * r + 0.716_878_6 * g + 0.060_616_9 * b) / YN);
     let mut x = y;
     let mut z = y;
     if r != g || g != b {
-        x = xyz2lab((0.4360747 * r + 0.3850649 * g + 0.1430804 * b) / XN);
-        z = xyz2lab((0.0139322 * r + 0.0971045 * g + 0.7141733 * b) / ZN);
+        x = xyz2lab((0.436_074_7 * r + 0.385_064_9 * g + 0.143_080_4 * b) / XN);
+        z = xyz2lab((0.013_932_2 * r + 0.097_104_5 * g + 0.714_173_3 * b) / ZN);
     }
     let l = 116.0 * y - 16.0;
     Lab { l: if l < 0.0 { 0.0 } else { l }, a: 500.0 * (x - y), b: 200.0 * (y - z), alpha: c.a }
@@ -118,9 +111,9 @@ fn lab_to_rgb(c: Lab) -> Rgb {
     x = XN * lab2xyz(x);
     z = ZN * lab2xyz(z);
     Rgb {
-        r: xyz2rgb(3.1338561 * x - 1.6168667 * y - 0.4906146 * z),
-        g: xyz2rgb(-0.9787684 * x + 1.9161415 * y + 0.033454 * z),
-        b: xyz2rgb(0.0719453 * x - 0.2289914 * y + 1.4052427 * z),
+        r: xyz2rgb(3.133_856_1 * x - 1.616_866_7 * y - 0.490_614_6 * z),
+        g: xyz2rgb(-0.978_768_4 * x + 1.916_141_5 * y + 0.033_454 * z),
+        b: xyz2rgb(0.071_945_3 * x - 0.228_991_4 * y + 1.405_242_7 * z),
         a: c.alpha,
     }
 }
@@ -128,10 +121,10 @@ fn lab_to_rgb(c: Lab) -> Rgb {
 fn rgb_to_hcl(rgb: Rgb) -> Hcl {
     let lab = rgb_to_lab(rgb);
     let c = (lab.a * lab.a + lab.b * lab.b).sqrt();
-    let h = if (c * 10000.0).round() != 0.0 {
-        constrain_angle(lab.b.atan2(lab.a) * 180.0 / std::f64::consts::PI)
-    } else {
+    let h = if (c * 10000.0).round() == 0.0 {
         f64::NAN
+    } else {
+        constrain_angle(lab.b.atan2(lab.a) * 180.0 / std::f64::consts::PI)
     };
     Hcl { h, c, l: lab.l, alpha: lab.alpha }
 }
@@ -146,10 +139,10 @@ fn straight(color: &Color) -> Rgb {
         return Rgb { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
     }
     Rgb {
-        r: (color.r / color.a) as f64,
-        g: (color.g / color.a) as f64,
-        b: (color.b / color.a) as f64,
-        a: color.a as f64,
+        r: f64::from(color.r / color.a),
+        g: f64::from(color.g / color.a),
+        b: f64::from(color.b / color.a),
+        a: f64::from(color.a),
     }
 }
 
@@ -162,6 +155,7 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
 }
 
 impl Color {
+    #[must_use]
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         debug_assert!((0.0..=1.0).contains(&r));
         debug_assert!((0.0..=1.0).contains(&g));
@@ -172,22 +166,28 @@ impl Color {
 
     /// Internal constructor without range asserts (interpolation can
     /// transiently leave 0..1 in the same way the C++ aggregate init does).
+    #[must_use]
     pub const fn new_unchecked(r: f32, g: f32, b: f32, a: f32) -> Self {
         Color { r, g, b, a }
     }
 
+    #[must_use]
     pub const fn black() -> Self {
         Color::new_unchecked(0.0, 0.0, 0.0, 1.0)
     }
+    #[must_use]
     pub const fn white() -> Self {
         Color::new_unchecked(1.0, 1.0, 1.0, 1.0)
     }
+    #[must_use]
     pub const fn red() -> Self {
         Color::new_unchecked(1.0, 0.0, 0.0, 1.0)
     }
+    #[must_use]
     pub const fn green() -> Self {
         Color::new_unchecked(0.0, 1.0, 0.0, 1.0)
     }
+    #[must_use]
     pub const fn blue() -> Self {
         Color::new_unchecked(0.0, 0.0, 1.0, 1.0)
     }
@@ -196,6 +196,7 @@ impl Color {
     /// premultiplied Color. Like the C++ constructor, this asserts (in debug
     /// builds) that the alpha is in 0..1, which a NaN alpha (`rgba(0,0,0,nan)`)
     /// is not.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Color> {
         let css_color = csscolorparser::parse(s)?;
 
@@ -203,13 +204,14 @@ impl Color {
         // `css_color->a / 255` is float / int; `r * factor` is int * float.
         let factor: f32 = css_color.a / 255.0f32;
         Some(Color::new(
-            css_color.r as f32 * factor,
-            css_color.g as f32 * factor,
-            css_color.b as f32 * factor,
+            f32::from(css_color.r) * factor,
+            f32::from(css_color.g) * factor,
+            f32::from(css_color.b) * factor,
             css_color.a,
         ))
     }
 
+    #[must_use]
     pub fn interpolate(from: &Color, to: &Color, t: f64, space: ColorSpace) -> Color {
         match space {
             ColorSpace::Rgb => util_interpolate(from, to, t),
@@ -258,16 +260,17 @@ impl Color {
     }
 
     /// Un-premultiplied `[r*255, g*255, b*255, a]`.
+    #[must_use]
     pub fn to_array(&self) -> [f64; 4] {
         if self.a == 0.0 {
             [0.0, 0.0, 0.0, 0.0]
         } else {
             [
                 // r * 255 / a: float arithmetic, promoted afterwards.
-                (self.r * 255.0f32 / self.a) as f64,
-                (self.g * 255.0f32 / self.a) as f64,
-                (self.b * 255.0f32 / self.a) as f64,
-                self.a as f64,
+                f64::from(self.r * 255.0f32 / self.a),
+                f64::from(self.g * 255.0f32 / self.a),
+                f64::from(self.b * 255.0f32 / self.a),
+                f64::from(self.a),
             ]
         }
     }
@@ -280,22 +283,25 @@ impl Color {
     }
 
     /// Whether the "rgba" expression of these values makes this color: the
-    /// premultiplication of mln_expression's `rgba`.
+    /// premultiplication of `mln_expression`'s `rgba`.
     fn is_made_by(&self, [r, g, b, a]: [f64; 4]) -> bool {
         let premultiplied = |c: f64| (c / 255.0 * a) as f32;
         premultiplied(r) == self.r && premultiplied(g) == self.g && premultiplied(b) == self.b && a as f32 == self.a
     }
 
     /// `operator std::array<float, 4>`.
+    #[must_use]
     pub fn to_float_array(&self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }
 
     /// `Color(const float rgba[4])`.
+    #[must_use]
     pub fn from_array(rgba: [f32; 4]) -> Self {
         Color::new(rgba[0], rgba[1], rgba[2], rgba[3])
     }
 
+    #[must_use]
     pub fn stringify(&self) -> String {
         // Match GL JS's Color.toString: whole channels, alpha as is.
         let array = self.to_array();
@@ -318,6 +324,7 @@ impl Color {
     /// could parse back to slightly other colors, and a tile worker in
     /// another wasm instance, which gets its layers that way, would write
     /// other colors into its buckets.
+    #[must_use]
     pub fn serialize(&self) -> Value {
         let mut array = self.to_array();
         if !self.is_made_by(array) {
@@ -336,12 +343,13 @@ impl Color {
     }
 
     /// Object format for evaluation output: the raw premultiplied channels.
+    #[must_use]
     pub fn to_object(&self) -> Value {
         let mut object = ValueObject::new();
-        object.insert("r".to_owned(), Value::Double(self.r as f64));
-        object.insert("g".to_owned(), Value::Double(self.g as f64));
-        object.insert("b".to_owned(), Value::Double(self.b as f64));
-        object.insert("a".to_owned(), Value::Double(self.a as f64));
+        object.insert("r".to_owned(), Value::Double(f64::from(self.r)));
+        object.insert("g".to_owned(), Value::Double(f64::from(self.g)));
+        object.insert("b".to_owned(), Value::Double(f64::from(self.b)));
+        object.insert("a".to_owned(), Value::Double(f64::from(self.a)));
         Value::Object(object)
     }
 }

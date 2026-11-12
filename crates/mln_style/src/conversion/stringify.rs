@@ -122,7 +122,7 @@ impl Stringify for VariableAnchorOffsetCollection {
     fn stringify(&self, writer: &mut Writer) {
         writer.start_array();
 
-        for pair in self.iter() {
+        for pair in self {
             writer.string(Enum::to_string(pair.anchor_type));
             writer.start_array();
             writer.double(f64::from(pair.offset[0]));

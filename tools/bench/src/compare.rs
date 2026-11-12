@@ -41,7 +41,7 @@ const ALPHA: f64 = 0.05;
 
 /// Runs the comparison and returns its Markdown report.
 pub fn compare(options: &Options) -> Result<String, String> {
-    if options.rounds < 2 || options.rounds % 2 != 0 {
+    if options.rounds < 2 || !options.rounds.is_multiple_of(2) {
         return Err("--rounds must be even, and at least 2".into());
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().map_err(|e| e.to_string())?;
@@ -310,6 +310,10 @@ fn number(value: f64) -> String {
 /// render tests' pixelmatch threshold; the differences go to `diff/`.
 fn write_frames(out: &mut String, frames: &Path) {
     let (base, candidate, diff) = (frames.join("base"), frames.join("candidate"), frames.join("diff"));
+    #[expect(
+        clippy::case_sensitive_file_extension_comparisons,
+        reason = "a frame is a file the benchmark wrote as `<name>.png`; other names, in any case, are not frames"
+    )]
     let mut names: Vec<String> = std::fs::read_dir(&base)
         .into_iter()
         .flatten()

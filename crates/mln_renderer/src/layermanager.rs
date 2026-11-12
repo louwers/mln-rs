@@ -114,7 +114,7 @@ pub fn create_bucket(
     layers: &[Immutable<dyn LayerProperties>],
 ) -> Option<Box<dyn Bucket>> {
     debug_assert!(!layers.is_empty());
-    debug_assert!(parameters.layer_type.layout == layer_type_info::Layout::NotRequired);
+    debug_assert_eq!(parameters.layer_type.layout, layer_type_info::Layout::NotRequired);
     // dem-heatmap: HeatmapLayerFactory::createBucket
     if std::ptr::eq(parameters.layer_type, mln_style::layers::heatmap_layer_impl::Impl::static_type_info()) {
         return Some(Box::new(crate::buckets::heatmap_bucket::HeatmapBucket::new(parameters, layers)));
@@ -130,7 +130,7 @@ pub fn create_layout(
     layers: &[Immutable<dyn LayerProperties>],
 ) -> Result<Option<Box<dyn Layout>>, Error> {
     debug_assert!(!layers.is_empty());
-    debug_assert!(parameters.bucket_parameters.layer_type.layout == layer_type_info::Layout::Required);
+    debug_assert_eq!(parameters.bucket_parameters.layer_type.layout, layer_type_info::Layout::Required);
     let type_info = parameters.bucket_parameters.layer_type;
     if std::ptr::eq(type_info, CircleLayerImpl::static_type_info()) {
         // CircleLayerFactory::createLayout

@@ -47,6 +47,7 @@ fn get_string() {
 // gtest: StringIndexer.Reallocate
 #[test]
 fn reallocate() {
+    const N: usize = 1000;
     let str_indexer = StringIndexer::new();
     assert_eq!(str_indexer.size(), 0);
 
@@ -56,7 +57,6 @@ fn reallocate() {
     assert_eq!(str_indexer.size(), 1);
 
     // force reallocation. assume capacity: 100 strings, 100 * 32 bytes buffer space
-    const N: usize = 1000;
     let string_for_i = |i: usize| format!("{0}{0}{0}---{i}", "1234567890");
     for i in 1..N {
         str_indexer.get(&string_for_i(i));
@@ -94,6 +94,6 @@ fn get_oob_identity() {
         } else {
             s = result.unwrap();
         }
-        assert!(s.is_empty());
+        assert_eq!(s, "");
     }
 }

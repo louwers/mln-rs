@@ -23,7 +23,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
 
 /// The fixture shared by `RasterTileTest` and `RasterDEMTileTest`
-/// (test/tile/raster_tile.test.cpp, raster_dem_tile.test.cpp).
+/// (`test/tile/raster_tile.test.cpp`, `raster_dem_tile.test.cpp`).
 pub struct RasterTileTest {
     // C++ uses a FakeFileSource whose requests never answer; the
     // asynchronous stub answers only when the run loop runs, and these tests
@@ -36,6 +36,7 @@ pub struct RasterTileTest {
 }
 
 impl RasterTileTest {
+    #[must_use]
     pub fn new() -> Self {
         RasterTileTest {
             file_source: Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
@@ -81,17 +82,25 @@ impl RasterTileTest {
     }
 }
 
+impl Default for RasterTileTest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Port-only: a transport whose workers are in `count` worker instances on
 /// threads, reached only through the worker codec.
+#[must_use]
 pub fn serializing_transport(count: usize) -> std::rc::Rc<mln_renderer::tile::worker_codec::SerializingTransport> {
     use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
-    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)))
+    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
 }
 
 /// Port-only: an opaque PNG whose pixels differ from their neighbours.
+#[must_use]
 pub fn png(width: u32, height: u32) -> mln_storage::Data {
     let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(width, height));
-    for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         pixel.copy_from_slice(&[(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255]);
     }
     Arc::new(mln_image::encode_png(&image))

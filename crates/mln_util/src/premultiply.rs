@@ -1,13 +1,16 @@
 // Ports src/mln/util/premultiply.cpp and include/mln/util/premultiply.hpp
 
+use std::num::NonZeroU32;
+
 use crate::image::{PremultipliedImage, UnassociatedImage};
 
 /// `util::premultiply(UnassociatedImage&&)`: `c = (c * a + 127) / 255` in
 /// `int` arithmetic.
+#[must_use]
 pub fn premultiply(src: UnassociatedImage) -> PremultipliedImage {
     let (size, mut data) = src.into_parts();
     let bytes = PremultipliedImage::CHANNELS * size.width as usize * size.height as usize;
-    for px in data.chunks_exact_mut(4).take(bytes / 4) {
+    for px in data.as_chunks_mut::<4>().0.iter_mut().take(bytes / 4) {
         let a = u32::from(px[3]);
         px[0] = ((u32::from(px[0]) * a + 127) / 255) as u8;
         px[1] = ((u32::from(px[1]) * a + 127) / 255) as u8;
@@ -20,15 +23,16 @@ pub fn premultiply(src: UnassociatedImage) -> PremultipliedImage {
 /// `c = static_cast<uint8_t>((255 * c + (a / 2)) / a)`. The cast wraps
 /// modulo 256 when `c > a` (not a valid premultiplied pixel); `as u8` does
 /// the same.
+#[must_use]
 pub fn unpremultiply(src: PremultipliedImage) -> UnassociatedImage {
     let (size, mut data) = src.into_parts();
     let bytes = UnassociatedImage::CHANNELS * size.width as usize * size.height as usize;
-    for px in data.chunks_exact_mut(4).take(bytes / 4) {
-        let a = u32::from(px[3]);
-        if a != 0 {
-            px[0] = ((255 * u32::from(px[0]) + (a / 2)) / a) as u8;
-            px[1] = ((255 * u32::from(px[1]) + (a / 2)) / a) as u8;
-            px[2] = ((255 * u32::from(px[2]) + (a / 2)) / a) as u8;
+    for px in data.as_chunks_mut::<4>().0.iter_mut().take(bytes / 4) {
+        if let Some(a) = NonZeroU32::new(u32::from(px[3])) {
+            let half = a.get() / 2;
+            px[0] = ((255 * u32::from(px[0]) + half) / a) as u8;
+            px[1] = ((255 * u32::from(px[1]) + half) / a) as u8;
+            px[2] = ((255 * u32::from(px[2]) + half) / a) as u8;
         }
     }
     UnassociatedImage::from_vec(size, data)
@@ -84,11 +88,11 @@ mod tests {
         let pre = premultiply(UnassociatedImage::from_vec(Size::new(256, 256), data));
         for (i, px) in pre.data.chunks(4).enumerate() {
             let (a, c) = ((i / 256) as i32, (i % 256) as i32);
-            assert_eq!(px[0] as i32, (c * a + 127) / 255);
+            assert_eq!(i32::from(px[0]), (c * a + 127) / 255);
         }
         let un = unpremultiply(pre.clone());
         for (px, pre_px) in un.data.chunks(4).zip(pre.data.chunks(4)) {
-            let (a, c) = (pre_px[3] as i32, pre_px[0] as i32);
+            let (a, c) = (i32::from(pre_px[3]), i32::from(pre_px[0]));
             let expected = if a != 0 { ((255 * c + a / 2) / a) as u8 } else { c as u8 };
             assert_eq!(px[0], expected);
         }

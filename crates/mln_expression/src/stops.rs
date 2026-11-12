@@ -4,6 +4,8 @@
 // Keys are ordered with `<` like std::map<double>: equivalent keys (e.g. -0
 // and +0) are one key.
 
+use std::cmp::Ordering;
+
 use crate::expression::Expression;
 use crate::range::Range;
 
@@ -13,26 +15,29 @@ pub struct Stops {
 }
 
 impl Stops {
+    #[must_use]
     pub fn new() -> Self {
         Stops { stops: Vec::new() }
     }
 
     /// `std::map::lower_bound`: the first index whose key is not less than
     /// `key`.
+    #[must_use]
     pub fn lower_bound(&self, key: f64) -> usize {
         self.stops.partition_point(|(k, _)| *k < key)
     }
 
     /// `std::map::upper_bound`: the first index whose key is greater than
     /// `key`.
+    #[must_use]
     pub fn upper_bound(&self, key: f64) -> usize {
-        self.stops.partition_point(|(k, _)| !(key < *k))
+        self.stops.partition_point(|(k, _)| key.partial_cmp(k) != Some(Ordering::Less))
     }
 
     /// `std::map::emplace`: inserts unless an equivalent key exists.
     pub fn emplace(&mut self, key: f64, value: Box<dyn Expression>) -> bool {
         let i = self.lower_bound(key);
-        if i < self.stops.len() && !(key < self.stops[i].0) {
+        if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
             return false;
         }
         self.stops.insert(i, (key, value));
@@ -42,21 +47,24 @@ impl Stops {
     /// `stops[key] = value`: inserts or replaces.
     pub fn insert_or_assign(&mut self, key: f64, value: Box<dyn Expression>) {
         let i = self.lower_bound(key);
-        if i < self.stops.len() && !(key < self.stops[i].0) {
+        if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
             self.stops[i].1 = value;
         } else {
             self.stops.insert(i, (key, value));
         }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.stops.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.stops.is_empty()
     }
 
+    #[must_use]
     pub fn get(&self, i: usize) -> (f64, &dyn Expression) {
         let (k, v) = &self.stops[i];
         (*k, &**v)
@@ -71,6 +79,7 @@ impl Stops {
     }
 
     /// `Expression::childrenEqual` over two stop maps.
+    #[must_use]
     pub fn children_equal(&self, rhs: &Stops) -> bool {
         if self.stops.len() != rhs.stops.len() {
             return false;
@@ -81,6 +90,7 @@ impl Stops {
 
 /// `getCoveringStops`: the smallest range of stops that covers the interval
 /// [lower, upper].
+#[must_use]
 pub fn get_covering_stops(stops: &Stops, lower: f64, upper: f64) -> Range<f32> {
     debug_assert!(!stops.is_empty());
     if stops.is_empty() {

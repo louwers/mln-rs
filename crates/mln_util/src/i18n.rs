@@ -22,7 +22,7 @@ macro_rules! define_is_in_unicode_block {
         $(
             #[inline]
             fn $name(codepoint: u16) -> bool {
-                codepoint >= $first && codepoint <= $last
+                ($first..=$last).contains(&codepoint)
             }
         )*
     };
@@ -176,6 +176,7 @@ fn vertical_punctuation_contains(chr: u16) -> bool {
 
 /// Returns whether a line break can be inserted after the character
 /// indicated by the given Unicode codepoint due to word breaking.
+#[must_use]
 pub fn allows_word_breaking(chr: u16) -> bool {
     chr == 0x0a /* newline */
         || chr == 0x20 /* space */
@@ -193,11 +194,13 @@ pub fn allows_word_breaking(chr: u16) -> bool {
 
 /// Returns whether a line break can be inserted before the character
 /// indicated by the given Unicode codepoint due to word breaking.
+#[must_use]
 pub fn allows_word_breaking_before(chr: u16) -> bool {
     chr == 0x28 /* open parenthesis */
 }
 
 /// `charAllowsLetterSpacing` (not in the header).
+#[must_use]
 pub fn char_allows_letter_spacing(chr: u16) -> bool {
     !(is_in_arabic(chr)
         || is_in_arabic_supplement(chr)
@@ -208,6 +211,7 @@ pub fn char_allows_letter_spacing(chr: u16) -> bool {
 
 /// Returns whether the given string can be displayed with letter-spacing.
 /// False for Arabic scripts, where letter-spacing will break ligatures.
+#[must_use]
 pub fn allows_letter_spacing(string: &[u16]) -> bool {
     string.iter().all(|&c| char_allows_letter_spacing(c))
 }
@@ -215,12 +219,14 @@ pub fn allows_letter_spacing(string: &[u16]) -> bool {
 /// Returns whether a line break can be inserted after any character in the
 /// given string. If false, line breaking should occur on word boundaries
 /// instead.
+#[must_use]
 pub fn allows_ideographic_breaking_str(string: &[u16]) -> bool {
     string.iter().all(|&c| allows_ideographic_breaking(c))
 }
 
 /// Returns whether a line break can be inserted after the character
 /// indicated by the given Unicode codepoint due to ideographic breaking.
+#[must_use]
 pub fn allows_ideographic_breaking(chr: u16) -> bool {
     // Allow U+2027 "Interpunct" for hyphenation of Chinese words
     if chr == 0x2027 {
@@ -260,6 +266,7 @@ pub fn allows_ideographic_breaking(chr: u16) -> bool {
 
 /// Conservative set of characters expected to have relatively fixed sizes
 /// and advances.
+#[must_use]
 pub fn allows_fixed_width_glyph_generation(chr: u16) -> bool {
     // Mirrors the BMP ranges in GL JS's codePointUsesLocalIdeographFontFamily.
     // Astral-plane ranges are not included because GlyphID only carries BMP
@@ -313,6 +320,7 @@ pub fn allows_fixed_width_glyph_generation(chr: u16) -> bool {
 /// Returns whether the whole 256-codepoint glyph range can be generated
 /// locally. Use this for range-level decisions because some ranges are
 /// mixed.
+#[must_use]
 pub fn glyph_range_is_entirely_locally_generated(range_start: u16) -> bool {
     // Some ranges (notably 0xFF00, where Halfwidth/Fullwidth Forms ends at
     // 0xFFEF and the Specials block continues to 0xFFFD) mix locally-rendered
@@ -321,7 +329,7 @@ pub fn glyph_range_is_entirely_locally_generated(range_start: u16) -> bool {
     const GLYPHS_PER_RANGE: u32 = 256;
     for offset in 0..GLYPHS_PER_RANGE {
         // static_cast<char16_t>(rangeStart + offset): wraps past 0xFFFF.
-        if !allows_fixed_width_glyph_generation((range_start as u32 + offset) as u16) {
+        if !allows_fixed_width_glyph_generation((u32::from(range_start) + offset) as u16) {
             return false;
         }
     }
@@ -330,6 +338,7 @@ pub fn glyph_range_is_entirely_locally_generated(range_start: u16) -> bool {
 
 /// Returns whether any substring of the given string can be drawn as
 /// vertical text with upright glyphs.
+#[must_use]
 pub fn allows_vertical_writing_mode(string: &[u16]) -> bool {
     string.iter().any(|&c| has_upright_vertical_orientation(c))
 }
@@ -350,6 +359,7 @@ pub fn allows_vertical_writing_mode(string: &[u16]) -> bool {
 /// adjacent characters can be rotated. For example, a Chinese character is
 /// always drawn upright. An uprightly oriented character causes an adjacent
 /// “neutral” character to be drawn upright as well.
+#[must_use]
 pub fn has_upright_vertical_orientation(chr: u16) -> bool {
     if chr == 0x02EA /* ˪ */ || chr == 0x02EB
     /* ˫ */
@@ -366,7 +376,7 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
     if is_in_bopomofo(chr) || is_in_bopomofo_extended(chr) {
         return true;
     }
-    if is_in_cjk_compatibility_forms(chr) && (chr < 0xFE49 /* ﹉ */ || chr > 0xFE4F/* ﹏ */) {
+    if is_in_cjk_compatibility_forms(chr) && !(0xFE49..=0xFE4F).contains(&chr) {
         return true;
     }
     if is_in_cjk_compatibility(chr)
@@ -377,8 +387,8 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
         return true;
     }
     if is_in_cjk_symbols_and_punctuation(chr)
-        && (chr < 0x3008 /* 〈 */ || chr > 0x3011/* 】 */)
-        && (chr < 0x3014 /* 〔 */ || chr > 0x301F/* 〟 */)
+        && !(0x3008..=0x3011).contains(&chr)
+        && !(0x3014..=0x301F).contains(&chr)
         && chr != 0x3030
     /* 〰 */
     {
@@ -411,20 +421,17 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
         && chr != 0xFF08 /* （ */
         && chr != 0xFF09 /* ） */
         && chr != 0xFF0D /* － */
-        && (chr < 0xFF1A /* ： */ || chr > 0xFF1E /* ＞ */)
+        && !(0xFF1A..=0xFF1E).contains(&chr)
         && chr != 0xFF3B /* ［ */
         && chr != 0xFF3D /* ］ */
         && chr != 0xFF3F /* ＿ */
-        && (chr < 0xFF5B /* ｛ */ || chr > 0xFFDF)
+        && !(0xFF5B..=0xFFDF).contains(&chr)
         && chr != 0xFFE3 /* ￣ */
-        && (chr < 0xFFE8 /* ￨ */ || chr > 0xFFEF)
+        && !(0xFFE8..=0xFFEF).contains(&chr)
     {
         return true;
     }
-    if is_in_small_form_variants(chr)
-        && (chr < 0xFE58 /* ﹘ */ || chr > 0xFE5E/* ﹞ */)
-        && (chr < 0xFE63 /* ﹣ */ || chr > 0xFE66/* ﹦ */)
-    {
+    if is_in_small_form_variants(chr) && !(0xFE58..=0xFE5E).contains(&chr) && !(0xFE63..=0xFE66).contains(&chr) {
         return true;
     }
     if is_in_unified_canadian_aboriginal_syllabics(chr)
@@ -453,6 +460,7 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
 /// characters but rotated among Latin letters. A neutrally oriented character
 /// does not influence whether an adjacent character is drawn upright or
 /// rotated.
+#[must_use]
 pub fn has_neutral_vertical_orientation(chr: u16) -> bool {
     if is_in_latin1_supplement(chr)
         && (chr == 0x00A7 /* § */
@@ -487,15 +495,15 @@ pub fn has_neutral_vertical_orientation(chr: u16) -> bool {
         return true;
     }
     if is_in_miscellaneous_technical(chr)
-        && ((chr >= 0x2300 /* ⌀ */ && chr <= 0x2307 /* ⌇ */)
-            || (chr >= 0x230C /* ⌌ */ && chr <= 0x231F /* ⌟ */)
-            || (chr >= 0x2324 /* ⌤ */ && chr <= 0x2328 /* ⌨ */)
+        && ((0x2300..=0x2307).contains(&chr)
+            || (0x230C..=0x231F).contains(&chr)
+            || (0x2324..=0x2328).contains(&chr)
             || chr == 0x232B /* ⌫ */
-            || (chr >= 0x237D /* ⍽ */ && chr <= 0x239A /* ⎚ */)
-            || (chr >= 0x23BE /* ⎾ */ && chr <= 0x23CD /* ⏍ */)
+            || (0x237D..=0x239A).contains(&chr)
+            || (0x23BE..=0x23CD).contains(&chr)
             || chr == 0x23CF /* ⏏ */
-            || (chr >= 0x23D1 /* ⏑ */ && chr <= 0x23DB /* ⏛ */)
-            || (chr >= 0x23E2 /* ⏢ */ && chr <= 0x23FF))
+            || (0x23D1..=0x23DB).contains(&chr)
+            || (0x23E2..=0x23FF).contains(&chr))
     {
         return true;
     }
@@ -509,9 +517,7 @@ pub fn has_neutral_vertical_orientation(chr: u16) -> bool {
     // Quirk kept: these ranges (⬒..⬯ etc.) lie outside the Miscellaneous
     // Symbols block they are tested in, so this branch is never taken.
     if is_in_miscellaneous_symbols(chr)
-        && ((chr >= 0x2B12 /* ⬒ */ && chr <= 0x2B2F/* ⬯ */)
-            || (chr >= 0x2B50 /* ⭐ */ && chr <= 0x2B59/* heavy circled saltire */)
-            || (chr >= 0x2BB8 /* upwards white arrow from bar with horizontal bar */ && chr <= 0x2BEB))
+        && ((0x2B12..=0x2B2F).contains(&chr) || (0x2B50..=0x2B59).contains(&chr) || (0x2BB8..=0x2BEB).contains(&chr))
     {
         return true;
     }
@@ -527,8 +533,8 @@ pub fn has_neutral_vertical_orientation(chr: u16) -> bool {
     if chr == 0x221E /* ∞ */
         || chr == 0x2234 /* ∴ */
         || chr == 0x2235 /* ∵ */
-        || (chr >= 0x2700 /* black safety scissors */ && chr <= 0x2767 /* ❧ */)
-        || (chr >= 0x2776 /* ❶ */ && chr <= 0x2793 /* ➓ */)
+        || (0x2700..=0x2767).contains(&chr)
+        || (0x2776..=0x2793).contains(&chr)
         || chr == 0xFFFC /* object replacement character */
         || chr == 0xFFFD
     /* replacement character */
@@ -546,6 +552,7 @@ pub fn has_neutral_vertical_orientation(chr: u16) -> bool {
 /// example, a Latin letter is drawn rotated along a vertical line. A rotated
 /// character causes an adjacent “neutral” character to be drawn rotated as
 /// well.
+#[must_use]
 pub fn has_rotated_vertical_orientation(chr: u16) -> bool {
     !(has_upright_vertical_orientation(chr) || has_neutral_vertical_orientation(chr))
 }
@@ -554,8 +561,9 @@ pub fn has_rotated_vertical_orientation(chr: u16) -> bool {
 /// with their vertical forms wherever applicable.
 ///
 /// Replaces "horizontal" with "vertical" punctuation in place. Does not
-/// re-order or change length of string (TaggedString::verticalizePunctuation
+/// re-order or change length of string (`TaggedString::verticalizePunctuation`
 /// depends on this behavior).
+#[must_use]
 pub fn verticalize_punctuation_str(input: &[u16]) -> Vec<u16> {
     let mut output = Vec::with_capacity(input.len());
 
@@ -585,11 +593,13 @@ pub fn verticalize_punctuation_str(input: &[u16]) -> Vec<u16> {
 
 /// Returns the form of the given character appropriate for vertical text:
 /// the character’s specialized vertical form; 0 if not applicable.
+#[must_use]
 pub fn verticalize_punctuation(chr: u16) -> u16 {
     vertical_punctuation_get(chr).unwrap_or(0)
 }
 
 /// `charInSupportedScript` (not in the header).
+#[must_use]
 pub fn char_in_supported_script(chr: u16) -> bool {
     // This is a rough heuristic: whether we "can render" a script
     // actually depends on the properties of the font being used
@@ -600,9 +610,9 @@ pub fn char_in_supported_script(chr: u16) -> bool {
     // complex text shaping, based on unicode script metadata:
     // http://www.unicode.org/repos/cldr/trunk/common/properties/scriptMetadata.txt
     // where "Web Rank <= 32" "Shaping Required = YES"
-    !((chr >= 0x0900 && chr <= 0x0DFF)
+    !((0x0900..=0x0DFF).contains(&chr)
         // Main blocks for Indic scripts and Sinhala
-        || (chr >= 0x0F00 && chr <= 0x109F)
+        || (0x0F00..=0x109F).contains(&chr)
         // Main blocks for Tibetan and Myanmar
         || is_in_khmer(chr))
 }
@@ -614,6 +624,7 @@ pub fn is_string_in_supported_script(input: &str) -> bool {
     input.encode_utf16().all(char_in_supported_script)
 }
 
+#[must_use]
 pub fn is_char_in_complex_shaping_script(chr: u16) -> bool {
     is_in_arabic(chr)
         || is_in_arabic_supplement(chr)
@@ -622,6 +633,7 @@ pub fn is_char_in_complex_shaping_script(chr: u16) -> bool {
         || is_in_arabic_presentation_forms_b(chr)
 }
 
+#[must_use]
 pub fn is_whitespace(chr: u16) -> bool {
     chr == 0x20 || chr == 0x09 || chr == 0x0A || chr == 0x0B || chr == 0x0C || chr == 0x0D
 }
@@ -633,21 +645,25 @@ fn in_ranges(table: &[(u16, u16)], chr: u16) -> bool {
 }
 
 /// `u_charType(chr) == U_DECIMAL_DIGIT_NUMBER` (platform/default).
+#[must_use]
 pub fn is_digit(chr: u16) -> bool {
     in_ranges(&uchar_props::DECIMAL_DIGIT_NUMBER, chr)
 }
 
 /// `u_charType(chr) == U_UPPERCASE_LETTER` (platform/default).
+#[must_use]
 pub fn is_uppercase(chr: u16) -> bool {
     in_ranges(&uchar_props::UPPERCASE_LETTER, chr)
 }
 
 /// `(U_GET_GC_MASK(chr) & (U_GC_P_MASK | U_GC_S_MASK)) != 0`
 /// (platform/default).
+#[must_use]
 pub fn is_punctuation_or_symbol(chr: u16) -> bool {
     in_ranges(&uchar_props::PUNCTUATION_OR_SYMBOL, chr)
 }
 
+#[must_use]
 pub fn is_variation_selector1(chr: u16) -> bool {
     chr == 0xFE00
 }

@@ -48,12 +48,12 @@ struct Queues {
     high_priority_queue: VecDeque<Task>,
 }
 
-/// The thread-safe part of a RunLoop: the task queues (`defaultQueue`,
+/// The thread-safe part of a `RunLoop`: the task queues (`defaultQueue`,
 /// `highPriorityQueue` and their mutex in C++), the pending flag of the
 /// loop's own async handle, and the wake-up a blocking `run()` waits on.
 pub(crate) struct Core {
     queues: Mutex<Queues>,
-    /// The RunLoop's own async handle (`impl->async`), which runs `process`.
+    /// The `RunLoop`'s own async handle (`impl->async`), which runs `process`.
     queue_pending: AtomicBool,
     /// Set by every wake-up; `run()` sleeps until it is set.
     signal: Mutex<bool>,
@@ -153,9 +153,9 @@ impl Core {
 /// callback that runs on the loop's thread.
 pub(crate) struct AsyncHandle {
     pub(crate) pending: Arc<AtomicBool>,
-    /// gtests-core: set when the AsyncTask is destroyed (`uv_close`): a
+    /// gtests-core: set when the `AsyncTask` is destroyed (`uv_close`): a
     /// signalled task that another callback of the same `run_once` destroys
-    /// must not fire (test/util/async_task.test.cpp DestroyAfterSignaling).
+    /// must not fire (`test/util/async_task.test.cpp` `DestroyAfterSignaling`).
     pub(crate) closed: Cell<bool>,
     pub(crate) task: RefCell<Box<dyn FnMut()>>,
     pub(crate) core: Arc<Core>,
@@ -192,7 +192,7 @@ pub struct RunLoop {
     inner: Rc<Inner>,
 }
 
-/// A `Send + Sync` reference to a RunLoop's task queue (what other threads
+/// A `Send + Sync` reference to a `RunLoop`'s task queue (what other threads
 /// hold as a `RunLoop*` in C++): `invoke`, `stop`, and the loop's
 /// `Scheduler`.
 #[derive(Clone)]
@@ -204,6 +204,7 @@ impl RunLoop {
     /// `RunLoop(Type::Default)` / `RunLoop(Type::New)`: creates a loop and
     /// makes it the current scheduler of this thread
     /// (`Scheduler::SetCurrent(this)`).
+    #[must_use]
     pub fn new() -> Self {
         let core = Arc::new(Core::new());
         core.adopted.store(true, Ordering::SeqCst);
@@ -226,6 +227,7 @@ impl RunLoop {
     /// far. `None` when a loop runs that queue already. Unlike `new`, it
     /// leaves this thread's current loop as it is: [`enter`](Self::enter)
     /// makes the loop current while it runs.
+    #[must_use]
     pub fn adopt(handle: &RunLoopHandle) -> Option<RunLoop> {
         if handle.core.adopted.swap(true, Ordering::SeqCst) {
             return None;
@@ -244,10 +246,11 @@ impl RunLoop {
         EnteredRunLoop { previous, previous_scheduler }
     }
 
-    /// `RunLoop::Get()`. C++ asserts that the thread has a current RunLoop;
+    /// `RunLoop::Get()`. C++ asserts that the thread has a current `RunLoop`;
     /// the port creates one on first use instead, which is what the test
     /// harnesses do first thing in C++ (and what `Scheduler::GetCurrent()`
     /// does).
+    #[must_use]
     pub fn get() -> RunLoop {
         let existing = CURRENT.with(|c| c.borrow().clone());
         match existing {
@@ -257,16 +260,18 @@ impl RunLoop {
     }
 
     /// The current thread's loop, if it has one.
+    #[must_use]
     pub fn try_get() -> Option<RunLoop> {
         CURRENT.with(|c| c.borrow().clone()).map(|inner| RunLoop { inner })
     }
 
     /// A handle other threads can post to.
+    #[must_use]
     pub fn handle(&self) -> RunLoopHandle {
         RunLoopHandle { core: self.inner.core.clone() }
     }
 
-    /// Invoke `task` on this RunLoop.
+    /// Invoke `task` on this `RunLoop`.
     pub fn invoke(&self, task: impl FnOnce() + Send + 'static) {
         self.invoke_with_priority(Priority::Default, task);
     }
@@ -276,7 +281,7 @@ impl RunLoop {
     }
 
     /// Calls `waker`, from the waking thread, whenever this loop
-    /// gets work (a task or an AsyncTask send), so that a host that drives
+    /// gets work (a task or an `AsyncTask` send), so that a host that drives
     /// the loop with `run_once` on its own thread knows to run it. Timers
     /// don't wake: such a host runs the loop at least once a frame.
     pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
@@ -406,10 +411,17 @@ impl Scheduler for RunLoop {
     }
 }
 
+impl Default for RunLoopHandle {
+    fn default() -> Self {
+        RunLoopHandle::new()
+    }
+}
+
 impl RunLoopHandle {
     /// The task queue of a loop that no thread runs yet. Tasks
     /// sent to it wait until a thread makes the loop with
     /// [`RunLoop::adopt`] and runs it.
+    #[must_use]
     pub fn new() -> RunLoopHandle {
         RunLoopHandle { core: Arc::new(Core::new()) }
     }
@@ -447,11 +459,11 @@ impl Scheduler for RunLoopHandle {
     /// Must be called on the loop's own thread (as in C++, where it calls
     /// `runOnce`); elsewhere it waits for the queue to drain.
     fn wait_for_empty(&self) {
-        if let Some(run_loop) = RunLoop::try_get() {
-            if Arc::ptr_eq(&run_loop.inner.core, &self.core) {
-                run_loop.wait_for_empty();
-                return;
-            }
+        if let Some(run_loop) = RunLoop::try_get()
+            && Arc::ptr_eq(&run_loop.inner.core, &self.core)
+        {
+            run_loop.wait_for_empty();
+            return;
         }
         while self.core.remaining() != 0 {
             std::thread::yield_now();

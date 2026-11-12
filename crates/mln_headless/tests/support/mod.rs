@@ -154,8 +154,8 @@ pub fn answer_with(
 #[track_caller]
 pub fn assert_double_eq(actual: f64, expected: f64) {
     fn biased(x: f64) -> u64 {
-        let bits = x.to_bits();
         const SIGN: u64 = 1 << 63;
+        let bits = x.to_bits();
         if bits & SIGN != 0 { (!bits).wrapping_add(1) } else { bits | SIGN }
     }
     let ok = if actual.is_nan() || expected.is_nan() {
@@ -179,10 +179,13 @@ pub fn assert_near(actual: f64, expected: f64, tolerance: f64) {
 
 // MARK: - StubMapObserver (test/include/mln/test/stub_map_observer.hpp)
 
-/// A `std::function` member of StubMapObserver. A callback may replace or
+/// A callback in a `CallbackSlot`.
+type SlotCallback<A> = Box<dyn FnMut(A)>;
+
+/// A `std::function` member of `StubMapObserver`. A callback may replace or
 /// clear any slot, including its own, while it runs.
 pub struct CallbackSlot<A> {
-    callback: RefCell<Option<Box<dyn FnMut(A)>>>,
+    callback: RefCell<Option<SlotCallback<A>>>,
     generation: Cell<u64>,
 }
 
@@ -426,7 +429,7 @@ pub struct FixtureLog {
 impl FixtureLog {
     pub fn new() -> Self {
         let messages: LogRecords = Arc::new(Mutex::new(Vec::new()));
-        Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
@@ -456,7 +459,7 @@ impl Default for FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        Log::set_thread_observer(None);
+        let _ = Log::set_thread_observer(None);
     }
 }
 

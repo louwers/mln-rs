@@ -5,7 +5,10 @@
 // `coalesce_changes` takes the tiles of the render source's pyramid (the same
 // tiles).
 
+use std::collections::HashMap;
+
 use mln_style::expression::expression::FeatureState;
+use mln_vec_map::VecMap;
 
 use crate::bucket::{FeatureStates, LayerFeatureStates};
 use crate::tile::tile::Tile;
@@ -21,6 +24,7 @@ pub struct SourceFeatureState {
 }
 
 impl SourceFeatureState {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -52,7 +56,7 @@ impl SourceFeatureState {
                 .into_iter()
                 .flat_map(|current| current.keys())
                 .filter(|key| !new_state.contains_key(*key))
-                .map(|key| (key.clone(), Default::default()))
+                .map(|key| (key.clone(), feature::Value::default()))
                 .collect()
         };
         if feature_deletions.is_empty() {
@@ -83,6 +87,7 @@ impl SourceFeatureState {
     }
 
     /// `getState(result, sourceLayerID, featureID)`.
+    #[must_use]
     pub fn get_state(&self, source_layer_id: Option<&str>, feature_id: &str) -> FeatureState {
         let source_layer = source_layer_id.unwrap_or("");
         let current = self
@@ -102,8 +107,7 @@ impl SourceFeatureState {
         let mut result = changes;
         let layer_deletions = self.deleted_states.get(source_layer);
         let deleted_keys = layer_deletions.and_then(|layer_deletions| layer_deletions.get(feature_id));
-        let all_removed = layer_deletions.is_some_and(|layer_deletions| layer_deletions.is_empty())
-            || deleted_keys.is_some_and(|deleted_keys| deleted_keys.is_empty());
+        let all_removed = layer_deletions.is_some_and(HashMap::is_empty) || deleted_keys.is_some_and(VecMap::is_empty);
         if !all_removed {
             for (key, value) in current {
                 if !deleted_keys.is_some_and(|deleted_keys| deleted_keys.contains_key(&key)) {
@@ -179,7 +183,7 @@ impl SourceFeatureState {
         let source_layer = source_layer_id.unwrap_or("");
 
         let layer_deletions = self.deleted_states.get(source_layer);
-        if layer_deletions.is_some_and(|layer_deletions| layer_deletions.is_empty()) {
+        if layer_deletions.is_some_and(HashMap::is_empty) {
             return;
         }
 
@@ -187,7 +191,7 @@ impl SourceFeatureState {
             (Some(feature_id), Some(state_key)) => {
                 let feature_deleted = layer_deletions
                     .and_then(|layer_deletions| layer_deletions.get(feature_id))
-                    .is_some_and(|deleted_keys| deleted_keys.is_empty());
+                    .is_some_and(VecMap::is_empty);
                 if feature_deleted {
                     return;
                 }
@@ -196,7 +200,7 @@ impl SourceFeatureState {
                     .or_default()
                     .entry(feature_id.to_owned())
                     .or_default()
-                    .insert(state_key.to_owned(), Default::default());
+                    .insert(state_key.to_owned(), feature::Value::default());
             }
             (Some(feature_id), None) => {
                 self.deleted_states

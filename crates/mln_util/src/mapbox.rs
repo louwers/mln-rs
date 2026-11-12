@@ -11,6 +11,7 @@ use crate::tile_server_options::TileServerOptions;
 use crate::url::{URL, transform_url_with};
 
 /// `isCanonicalURL`
+#[must_use]
 pub fn is_canonical_url(tile_server_options: &TileServerOptions, url: &str) -> bool {
     if tile_server_options.uri_scheme_alias().is_empty() || tile_server_options.base_url().is_empty() {
         return false;
@@ -20,6 +21,7 @@ pub fn is_canonical_url(tile_server_options: &TileServerOptions, url: &str) -> b
 }
 
 /// `makeQueryString`
+#[must_use]
 pub fn make_query_string(tile_server_options: &TileServerOptions, api_key: &str) -> String {
     if !tile_server_options.requires_api_key()
         || tile_server_options.api_key_parameter_name().is_empty()
@@ -43,7 +45,7 @@ fn normalize(
     s: &str,
     api_key: &str,
     domain_name: &str,
-    version_prefix: &Option<String>,
+    version_prefix: Option<&str>,
     template: &str,
     invalid: &str,
 ) -> String {
@@ -55,7 +57,7 @@ fn normalize(
     let tpl = format!(
         "{}{}{}{}",
         tile_server_options.base_url(),
-        version_prefix.as_deref().unwrap_or(""),
+        version_prefix.unwrap_or(""),
         template,
         make_query_string(tile_server_options, api_key)
     );
@@ -93,6 +95,7 @@ pub fn normalize_source_url(tile_server_options: &TileServerOptions, s: &str, ap
 }
 
 /// `normalizeStyleURL`
+#[must_use]
 pub fn normalize_style_url(tile_server_options: &TileServerOptions, s: &str, api_key: &str) -> String {
     if !is_canonical_url(tile_server_options, s) {
         return s.to_owned();
@@ -102,13 +105,14 @@ pub fn normalize_style_url(tile_server_options: &TileServerOptions, s: &str, api
         s,
         api_key,
         tile_server_options.style_domain_name(),
-        tile_server_options.style_version_prefix(),
+        tile_server_options.style_version_prefix().as_deref(),
         tile_server_options.style_template(),
         "Invalid style URL",
     )
 }
 
 /// `normalizeSpriteURL`
+#[must_use]
 pub fn normalize_sprite_url(tile_server_options: &TileServerOptions, s: &str, api_key: &str) -> String {
     if !is_canonical_url(tile_server_options, s) {
         return s.to_owned();
@@ -118,13 +122,14 @@ pub fn normalize_sprite_url(tile_server_options: &TileServerOptions, s: &str, ap
         s,
         api_key,
         tile_server_options.sprites_domain_name(),
-        tile_server_options.sprites_version_prefix(),
+        tile_server_options.sprites_version_prefix().as_deref(),
         tile_server_options.sprites_template(),
         "Invalid sprite URL",
     )
 }
 
 /// `normalizeGlyphsURL`
+#[must_use]
 pub fn normalize_glyphs_url(tile_server_options: &TileServerOptions, s: &str, api_key: &str) -> String {
     if !is_canonical_url(tile_server_options, s) {
         return s.to_owned();
@@ -134,13 +139,14 @@ pub fn normalize_glyphs_url(tile_server_options: &TileServerOptions, s: &str, ap
         s,
         api_key,
         tile_server_options.glyphs_domain_name(),
-        tile_server_options.glyphs_version_prefix(),
+        tile_server_options.glyphs_version_prefix().as_deref(),
         tile_server_options.glyphs_template(),
         "Invalid glyph URL",
     )
 }
 
 /// `normalizeTileURL`
+#[must_use]
 pub fn normalize_tile_url(tile_server_options: &TileServerOptions, s: &str, api_key: &str) -> String {
     if !is_canonical_url(tile_server_options, s) {
         return s.to_owned();
@@ -150,7 +156,7 @@ pub fn normalize_tile_url(tile_server_options: &TileServerOptions, s: &str, api_
         s,
         api_key,
         tile_server_options.tile_domain_name(),
-        tile_server_options.tile_version_prefix(),
+        tile_server_options.tile_version_prefix().as_deref(),
         tile_server_options.tile_template(),
         "Invalid tile URL",
     )
