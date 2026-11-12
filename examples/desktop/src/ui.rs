@@ -35,6 +35,8 @@ pub(crate) enum Action {
     SetDebug(MapDebugOptions),
     /// Draw the map on the globe, or on Mercator.
     SetGlobe(bool),
+    /// Let drags and zooms on the globe turn the bearing with the planet.
+    SetFreeBearing(bool),
     /// Empty the cache database.
     ResetCache,
     /// Render with this backend from the next frame on.
@@ -55,6 +57,8 @@ pub(crate) struct Shown<'a> {
     pub debug: MapDebugOptions,
     /// Whether the style's projection is the globe.
     pub globe: bool,
+    /// Whether drags and zooms on the globe turn the bearing.
+    pub free_bearing: bool,
     /// The backend the map renders with.
     pub backend: Kind,
     /// Lines about the renderer: its adapter, its frame time.
@@ -337,6 +341,12 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
             let mut globe = shown.globe;
             if ui.checkbox(&mut globe, "Globe").on_hover_text("Draw the map on the globe").changed() {
                 actions.push(Action::SetGlobe(globe));
+            }
+            let mut free_bearing = shown.free_bearing;
+            let free_bearing_hint =
+                "Drags and zooms on the globe turn the bearing with the planet, and a drag carries on over a pole";
+            if ui.checkbox(&mut free_bearing, "Free bearing on the globe").on_hover_text(free_bearing_hint).changed() {
+                actions.push(Action::SetFreeBearing(free_bearing));
             }
             let reset = egui::Button::new("Reset the cache").stroke(Stroke::new(1.0, palette.line));
             if ui.add(reset).on_hover_text("Empty the cache database").clicked() {

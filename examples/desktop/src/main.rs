@@ -69,7 +69,8 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       --readback=[file.png]             Write the frame once the map is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit
-      --no-system-fonts                 Don't fall back to system fonts for complex scripts and CJK
+      --free-bearing                    Let drags and zooms on the globe turn the bearing
+      --no-system-fonts                Don't fall back to system fonts for complex scripts and CJK
 ";
 
 /// The command line.
@@ -93,6 +94,7 @@ pub(crate) struct Args {
     pub(crate) readback: Option<String>,
     pub(crate) quit_after: Option<f64>,
     pub(crate) gesture_test: bool,
+    pub(crate) free_bearing: bool,
     pub(crate) no_system_fonts: bool,
     pub(crate) backend: backend::Kind,
 }
@@ -144,6 +146,7 @@ fn parse_args() -> Result<Args, String> {
             "readback" => args.readback = Some(value(&name)?),
             "quit-after" => args.quit_after = Some(number(value(&name)?, &name)?),
             "gesture-test" => args.gesture_test = true,
+            "free-bearing" => args.free_bearing = true,
             "no-system-fonts" => args.no_system_fonts = true,
             "backend" => args.backend = backend::Kind::parse(&value(&name)?)?,
             _ => return Err(format!("Flag could not be matched: {name}")),
@@ -162,7 +165,7 @@ fn main() {
         }
     };
 
-    let mut settings = Settings { online: !args.offline, ..Default::default() };
+    let mut settings = Settings { online: !args.offline, free_bearing: args.free_bearing, ..Default::default() };
     for (value, field) in [
         (args.lon, &mut settings.longitude),
         (args.lat, &mut settings.latitude),

@@ -164,9 +164,7 @@ pub(crate) fn run(launch: Launch) {
             .with_fov(Some(settings.fov)),
     );
     map.set_debug(MapDebugOptions(settings.debug));
-    // The window always rotates (right drag), so drags and zooms on the
-    // globe turn the bearing with the planet.
-    map.set_globe_free_bearing(true);
+    map.set_globe_free_bearing(settings.free_bearing);
 
     let style_url = match &args.style {
         Some(style) if !style.contains("://") => format!("file://{style}"),
@@ -586,6 +584,7 @@ impl View {
                 let type_ = style.get_projection().get_type();
                 type_.is_constant() && type_.as_constant().from == ProjectionType::Globe
             },
+            free_bearing: self.map.is_globe_free_bearing(),
             backend: self.backend.kind(),
             status: &status,
         };
@@ -640,6 +639,7 @@ impl View {
                 projection.set_type(PropertyValue::Constant(ProjectionDefinition::new(type_)));
                 self.map.style_mut().set_projection(projection);
             }
+            Action::SetFreeBearing(free_bearing) => self.map.set_globe_free_bearing(free_bearing),
             Action::ResetCache => self.reset_cache(),
             Action::SetBackend(kind) => {
                 self.next_backend = Some(kind);
