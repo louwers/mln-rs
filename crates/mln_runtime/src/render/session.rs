@@ -787,7 +787,7 @@ impl RenderSession {
                         Err(error) => outbox.resolve(resolver, Err(error)),
                     }
                 });
-                worker.after_resizes(resizes, task, outbox);
+                worker.after_earlier_work(resizes, task, outbox);
             });
             drop(state);
             Ok(completion)

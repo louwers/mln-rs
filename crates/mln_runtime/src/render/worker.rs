@@ -202,6 +202,18 @@ impl Gfx {
 struct PendingDemand {
     demand: FrameDemand,
     sequence: u64,
+    /// The demand's place among the demands that reached the session.
+    serial: u64,
+}
+
+/// Work that waits for the work sent before it: resizes that haven't
+/// landed, and demands that wait for the map's commands.
+struct Behind {
+    /// How many of the session's resizes must land first.
+    resizes: u64,
+    /// How many demands reached the session before the work.
+    demands: u64,
+    task: Task,
 }
 
 /// The texture of a borrowed ring that the next frame renders into.
@@ -266,8 +278,10 @@ pub(crate) struct Worker {
     pub(crate) finished: bool,
     /// Counts the resizes that landed, of those that the session sent.
     resizes_landed: u64,
-    /// The work that waits for resizes to land, each with how many.
-    behind_resizes: VecDeque<(u64, Task)>,
+    /// Counts the host's demands that reached the session.
+    demands_received: u64,
+    /// The work that waits for the work sent before it, in the order sent.
+    behind: VecDeque<Behind>,
     /// The target and backend that a teardown keeps while views name their
     /// sync objects, until the last view ends.
     viewed: Option<(LocalTarget, Rc<dyn RendererBackend>)>,
@@ -386,7 +400,8 @@ impl Worker {
             unbound: false,
             finished: false,
             resizes_landed: 0,
-            behind_resizes: VecDeque::new(),
+            demands_received: 0,
+            behind: VecDeque::new(),
             viewed: None,
             settling: Vec::new(),
             ticker: None,
@@ -448,6 +463,7 @@ impl Worker {
             outbox.resolve(attach, Err(error));
         }
         self.end_demands(FrameDisposition::Failed, outbox);
+        self.run_queued(outbox);
     }
 
     /// The map ran its command `sequence`, and published what it changed.
@@ -524,7 +540,8 @@ impl Worker {
                 self.publish(&result, outbox);
             }
         }
-        self.queue.push_back(PendingDemand { demand, sequence });
+        self.demands_received += 1;
+        self.queue.push_back(PendingDemand { demand, sequence, serial: self.demands_received });
         self.pump(outbox);
     }
 
@@ -539,21 +556,15 @@ impl Worker {
             if self.unbound {
                 self.end_demands(FrameDisposition::Failed, outbox);
             }
-            return;
+            return self.run_queued(outbox);
         }
         while let Some(pending) = self.parked.pop_front() {
             if let Some(pending) = self.evaluate(pending, outbox) {
                 self.parked.push_front(pending);
-                return;
+                return self.run_queued(outbox);
             }
         }
-        while self.parked.is_empty() && self.queue.front().is_some_and(|pending| pending.sequence <= self.map_applied) {
-            if let Some(pending) = self.queue.pop_front()
-                && let Some(pending) = self.evaluate(pending, outbox)
-            {
-                self.parked.push_back(pending);
-            }
-        }
+        self.run_queued(outbox);
         let latest = self.latest_generation();
         // A ring replacement on its way gives the demands that wait a new
         // target, which they render to once it lands.
@@ -567,6 +578,44 @@ impl Worker {
             }
         }
         self.render_still_image(outbox);
+    }
+
+    /// Runs the demands whose map commands ran and the work that waits
+    /// behind earlier work, in the order they came, until each has to wait:
+    /// a demand for the map's commands or for a parked demand, and other
+    /// work for a resize to land or a demand sent before it that waits for
+    /// the map's commands. Work doesn't wait for a ring to free a texture,
+    /// as a parked demand and those behind it do.
+    fn run_queued(&mut self, outbox: &mut Outbox) {
+        loop {
+            let front = self.queue.front().map(|pending| (pending.serial, pending.sequence <= self.map_applied));
+            let work_first =
+                self.behind.front().is_some_and(|behind| front.is_none_or(|(serial, _)| behind.demands < serial));
+            let evaluable = !self.torn_down && self.reader.is_some() && self.parked.is_empty();
+            if !work_first && evaluable && front.is_some_and(|(_, ready)| ready) {
+                if let Some(pending) = self.queue.pop_front()
+                    && let Some(pending) = self.evaluate(pending, outbox)
+                {
+                    self.parked.push_back(pending);
+                }
+                continue;
+            }
+            let waits = |behind: &Behind| {
+                behind.resizes > self.resizes_landed
+                    || self
+                        .queue
+                        .iter()
+                        .any(|pending| pending.serial <= behind.demands && pending.sequence > self.map_applied)
+            };
+            match self.behind.front() {
+                Some(behind) if !waits(behind) => {
+                    if let Some(behind) = self.behind.pop_front() {
+                        (behind.task)(self, outbox);
+                    }
+                }
+                _ => return,
+            }
+        }
     }
 
     /// Renders the demand, or ends it, or has it wait for an update. Returns
@@ -823,7 +872,7 @@ impl Worker {
         if failure {
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
-            return;
+            return self.run_queued(outbox);
         }
         self.pump(outbox);
     }
@@ -900,23 +949,17 @@ impl Worker {
 
     // MARK: - Work
 
-    /// Runs `task` once `resizes` of the session's resizes have landed, in
-    /// the order of the work that waits.
-    pub(crate) fn after_resizes(&mut self, resizes: u64, task: Task, outbox: &mut Outbox) {
-        if resizes <= self.resizes_landed && self.behind_resizes.is_empty() {
-            task(self, outbox);
-        } else {
-            self.behind_resizes.push_back((resizes, task));
-        }
+    /// Runs `task` after the work sent before it: once `resizes` of the
+    /// session's resizes have landed, and the demands that came before it
+    /// and wait for the map's commands have rendered or ended.
+    pub(crate) fn after_earlier_work(&mut self, resizes: u64, task: Task, outbox: &mut Outbox) {
+        self.behind.push_back(Behind { resizes, demands: self.demands_received, task });
+        self.run_queued(outbox);
     }
 
     fn resize_landed(&mut self, outbox: &mut Outbox) {
         self.resizes_landed += 1;
-        while self.behind_resizes.front().is_some_and(|(resizes, _)| *resizes <= self.resizes_landed) {
-            if let Some((_, task)) = self.behind_resizes.pop_front() {
-                task(self, outbox);
-            }
-        }
+        self.run_queued(outbox);
     }
 
     /// The target's size in logical pixels.
@@ -998,6 +1041,7 @@ impl Worker {
         if failed {
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
+            self.run_queued(outbox);
         }
     }
 

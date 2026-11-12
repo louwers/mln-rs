@@ -679,6 +679,30 @@ fn maintenance_work_runs_in_order_with_frames() {
 }
 
 #[test]
+fn maintenance_work_waits_behind_a_demand_for_map_commands() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+    let open = hold_runtime(&map);
+    let zoomed = zoom(&map, 2.0);
+    demand(&session, DemandMode::Force, 1);
+    // The work completes once the demand rendered, which waits for the zoom
+    // that the held runtime hasn't applied yet.
+    let (sender, receiver) = channel();
+    let drained = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, drained.drain_frame_results().unwrap()));
+    });
+    drop(open);
+    zoomed.wait().unwrap();
+    let (result, results) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(1, results.len(), "{results:?}");
+    assert_eq!((1, FrameDisposition::Rendered), (results[0].token.unwrap(), results[0].disposition));
+}
+
+#[test]
 fn sessions_on_two_maps_share_one_device() {
     let device = Device::new(DeviceOptions::default()).unwrap();
     let runtime = runtime();
