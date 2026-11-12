@@ -2711,7 +2711,7 @@ fn stencil_overflow() {
 fn invalid_utf8_in_tile() {
     let _log = FixtureLog::new();
 
-    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    let test = MapTest::new();
 
     test.file_source
         .set_response(Kind::Tile, |_| Some(file_response("test/fixtures/map/invalid_utf8/invalidutf8feature.mvt")));
@@ -2739,37 +2739,11 @@ fn invalid_utf8_in_tile() {
     }"#,
     );
 
-    // The map reports that it finished loading after the frame that
-    // finished it. When that frame already needs no repaint (the symbol
-    // fade ended before the last tile's placement, as on a slow or loaded
-    // machine), no frame follows, so the C++ test, which stops only on a
-    // later frame, waits forever: stop on that frame's status instead.
-    let last_needs_repaint = Rc::new(Cell::new(true));
-    {
-        let last_needs_repaint = last_needs_repaint.clone();
-        test.observer
-            .did_finish_rendering_frame_callback
-            .set(move |status| last_needs_repaint.set(status.needs_repaint));
-    }
-    let observer = Rc::downgrade(&test.observer);
-    let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |()| {
-        if !last_needs_repaint.get() {
-            run_loop.stop();
-            return;
-        }
-        let Some(observer) = observer.upgrade() else {
-            return;
-        };
-        let run_loop = run_loop.clone();
-        observer.did_finish_rendering_frame_callback.set(move |status| {
-            if !status.needs_repaint {
-                run_loop.stop();
-            }
-        });
-    });
-
-    run_with_timeout(&test.run_loop, 60);
+    // The still image finishes once every tile has loaded or failed. The
+    // tile's invalid UTF-8 fails that tile, and the map reports it instead of
+    // crashing.
+    let Err(error) = test.try_render() else { panic!("the tile with invalid UTF-8 should fail") };
+    assert!(error.to_string().contains("invalid UTF-8"), "{error}");
 }
 
 // gtest: Map.ObserveTileLifecycle
