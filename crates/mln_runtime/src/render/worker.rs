@@ -260,6 +260,9 @@ pub(crate) struct Worker {
     resizes_landed: u64,
     /// The work that waits for resizes to land, each with how many.
     behind_resizes: VecDeque<(u64, Task)>,
+    /// The target and backend that a teardown keeps while views name their
+    /// sync objects, until the last view ends.
+    viewed: Option<(LocalTarget, Rc<dyn RendererBackend>)>,
 }
 
 impl Drop for Worker {
@@ -334,6 +337,7 @@ impl Worker {
             finished: false,
             resizes_landed: 0,
             behind_resizes: VecDeque::new(),
+            viewed: None,
         }
     }
 
@@ -1038,18 +1042,40 @@ impl Worker {
     }
 
     /// Lets go of the renderer and its target: frees them, unless the
-    /// session keeps them until the process exits.
+    /// session keeps them until the process exits. While a view is open on
+    /// one of the ring's frames, the target and its backend stay until the
+    /// last view ends.
     fn drop_gfx(&mut self) {
         let Some(gfx) = self.gfx.take() else { return };
-        let keep = {
+        let (keep, viewed) = {
             let mut state = self.shared.state.lock_unpoisoned();
             state.graphics_objects = 0;
-            state.keep_graphics
+            let viewed = state.views != 0 && !state.keep_graphics;
+            state.viewed_teardown |= viewed;
+            (state.keep_graphics, viewed)
         };
         if keep {
             // The host's graphics objects behind them may be gone already.
             std::mem::forget(gfx);
+        } else if viewed {
+            let Gfx { renderer, target, backend, .. } = gfx;
+            drop(renderer);
+            self.viewed = Some((target, backend));
         }
+    }
+
+    /// The last view of the session's frames ended: lets go of the target
+    /// that a teardown kept for it, and ends a session that waited for that.
+    pub(crate) fn release_viewed(&mut self) {
+        if self.viewed.take().is_some() && self.finished && self.shared.driver == Driver::CoreWorker {
+            self.shared.run_loop.stop();
+        }
+    }
+
+    /// Whether the session's thread is done with it: the session ended, and
+    /// no view keeps its target.
+    pub(crate) fn is_done(&self) -> bool {
+        self.finished && self.viewed.is_none()
     }
 
     /// Lets go of the session on its thread, which runs no more of its work.
@@ -1088,7 +1114,8 @@ impl Worker {
         outbox.push(move || waiters.settle(Ok(()), target_lost));
         outbox.push(move || drop(map));
         self.finished = true;
-        if self.shared.driver == Driver::CoreWorker {
+        // A target that views keep stops the loop once they end.
+        if self.shared.driver == Driver::CoreWorker && self.viewed.is_none() {
             self.shared.run_loop.stop();
         }
     }

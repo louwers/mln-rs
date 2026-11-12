@@ -43,7 +43,7 @@ pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
     AcquiredFrame, Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions,
-    Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, FrameTexture, FrameTextureKind, GpuSync,
+    Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, FrameTexture, FrameTextureKind, FrameView, GpuSync,
     LocalTarget, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget,
     RenderedQueryGeometry, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
 };

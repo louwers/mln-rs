@@ -189,6 +189,11 @@ pub(crate) struct SessionState {
     /// acquired until they ran, since the frames published before one name
     /// textures it replaces or lets go of.
     pub(crate) pending_retargets: u32,
+    /// How many views are open on the session's acquired frames.
+    pub(crate) views: u32,
+    /// Whether the session's thread keeps graphics objects that the open
+    /// views name, which it lets go of once the last view ends.
+    pub(crate) viewed_teardown: bool,
 }
 
 impl SessionState {
@@ -399,8 +404,15 @@ impl SessionShared {
                     return Err(Error::invalid_state("the render session was detached or abandoned"));
                 }
             }
+            // The views keep the frames' sync objects in place, which the
+            // abandon would let go of. A library's abandon, of a session
+            // that the host released, keeps them until the views end.
+            if by == Abandoner::Host && state.views != 0 {
+                return Err(Error::busy("a view is open on one of the render session's acquired frames"));
+            }
             state.lifecycle = RenderSessionState::Abandoned;
             state.keep_graphics |= keep_graphics;
+
             let kept = if state.keep_graphics { state.graphics_objects } else { 0 };
             (state.take_waiters(), state.map.take(), kept)
         };
@@ -638,6 +650,8 @@ pub(crate) fn attach(
             ring: vec![RingSlot::default(); ring.map_or(0, |(depth, _, _)| depth)],
             acquired_frames: 0,
             pending_retargets: 0,
+            views: 0,
+            viewed_teardown: false,
         }),
         gate: Mutex::new(()),
         frame_wake: options.frame_wake,
@@ -1315,6 +1329,26 @@ impl AcquiredFrame {
         self.shared.capabilities.consumer_sync_kinds.contains(kind)
     }
 
+    /// Opens a view of the frame, which keeps the frame's texture and sync
+    /// objects in place until the view drops: an
+    /// [`abandon`](RenderSession::abandon) fails while one is open, and a
+    /// dispose of the session keeps them until the last view ends. Keep the
+    /// frame until its views end.
+    ///
+    /// Fails with [`ErrorKind::TargetLost`](mln_util::ErrorKind) once the
+    /// session can no longer render.
+    pub fn view(&self) -> Result<FrameView, Error> {
+        let mut state = self.shared.state.lock_unpoisoned();
+        if !matches!(
+            state.lifecycle,
+            RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Detaching
+        ) {
+            return Err(Error::target_lost("the render session failed, or was detached, abandoned, or disposed"));
+        }
+        state.views += 1;
+        Ok(FrameView { shared: self.shared.clone() })
+    }
+
     /// Whether the session can still render: the frame's objects stay valid
     /// until it ends.
     pub fn session_live(&self) -> bool {
@@ -1349,6 +1383,31 @@ impl AcquiredFrame {
     pub fn discard(mut self) {
         self.done = true;
         give_back(&self.shared, self.slot, None);
+    }
+}
+
+/// A view of an acquired frame, which [`AcquiredFrame::view`] opens, until
+/// it drops.
+pub struct FrameView {
+    shared: Arc<SessionShared>,
+}
+
+impl std::fmt::Debug for FrameView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameView").finish_non_exhaustive()
+    }
+}
+
+impl Drop for FrameView {
+    fn drop(&mut self) {
+        let release = {
+            let mut state = self.shared.state.lock_unpoisoned();
+            state.views = state.views.saturating_sub(1);
+            state.views == 0 && std::mem::take(&mut state.viewed_teardown)
+        };
+        if release {
+            worker::post(&self.shared.run_loop, |worker, _| worker.release_viewed());
+        }
     }
 }
 

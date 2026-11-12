@@ -1032,6 +1032,46 @@ mod gl {
         }
     }
 
+    // A view keeps its frame's fence through a dispose of the session, which
+    // deletes it once the view ends.
+    #[test]
+    fn a_view_keeps_its_frames_fence_through_a_dispose() {
+        let Some(host) = Host::new() else {
+            eprintln!("skipped: no EGL context of OpenGL ES 3 with pbuffers");
+            return;
+        };
+        let textures = [host.texture(), host.texture()];
+        let ring = BorrowedRing::gl(mln_gl::BorrowedTextures {
+            textures: textures.iter().map(|texture| texture.0.get()).collect(),
+            size: SIZE,
+        });
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring, device: host.device() };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::OpenGlFence]));
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let sync = frame.producer_sync();
+        assert_eq!(SyncKind::OpenGlFence, sync.kind);
+        let is_fence = || {
+            host.current();
+            // SAFETY: the host's context is current; a name that is no
+            // longer a fence's is no error.
+            let fence = unsafe { host.gl.is_sync(glow::NativeFence(sync.handle as usize as *mut _)) };
+            host.done();
+            fence
+        };
+        let view = frame.view().unwrap();
+        session.dispose().unwrap();
+        drop(session);
+        // The session ends once its thread let go of what it could.
+        assert!(eventually(|| !frame.session_live()));
+        assert!(is_fence(), "the dispose deleted the fence of a frame that a view holds");
+        drop(view);
+        assert!(eventually(|| !is_fence()));
+        drop(frame);
+    }
+
     #[test]
     fn a_ring_of_the_hosts_textures_hands_frames_back_with_fences() {
         let Some(host) = Host::new() else {

@@ -5,7 +5,7 @@ use core::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ::mln_runtime::{AcquiredFrame, ConsumerSync, FrameTexture, FrameTextureKind, GpuSync, SyncKind};
+use ::mln_runtime::{AcquiredFrame, ConsumerSync, FrameTexture, FrameTextureKind, FrameView, GpuSync, SyncKind};
 use mln_util::ErrorKind;
 use mln_util::sync::MutexExt;
 
@@ -31,8 +31,6 @@ struct FrameObject {
     frame: Mutex<Held>,
     /// The views that keep the frame in place.
     views: AtomicU32,
-    /// How many views are open on the session's frames.
-    session_views: Arc<Mutex<u32>>,
     /// The scale factor that the session's map was created with, which the
     /// frame's view reports exactly.
     initial_scale_factor: f64,
@@ -114,7 +112,6 @@ pub unsafe extern "C" fn mln_render_session_acquire_frame(
         let frame = FrameObject {
             frame: Mutex::new(Held { frame: Some(frame), discarded: None }),
             views: AtomicU32::new(0),
-            session_views: object.views.clone(),
             initial_scale_factor: object.initial_scale_factor,
         };
         // A frame that gets no handle drops, which gives it back.
@@ -275,8 +272,9 @@ pub unsafe extern "C" fn mln_acquired_frame_discard(
     })
 }
 
-/// A view's scope: the frame it holds in place.
-struct ViewScope(Arc<FrameObject>);
+/// A view's scope: the frame it holds in place, and the session's count of
+/// it.
+struct ViewScope(Arc<FrameObject>, FrameView);
 
 /// `mln_acquired_frame_view_begin()`.
 ///
@@ -294,18 +292,16 @@ pub unsafe extern "C" fn mln_acquired_frame_view_begin(
             return Err(Error::invalid_argument("out_scope must not be null"));
         }
         let object = FRAMES.get(frame)?;
-        {
+        let view = {
             let held = object.frame.lock_unpoisoned();
             let acquired = held.as_ref().ok_or_else(|| Error::invalid_state("acquired frame was already released"))?;
-            // No abandon runs while the session's views are counted.
-            let mut session_views = object.session_views.lock_unpoisoned();
-            if !acquired.session_live() {
-                return Err(target_lost());
-            }
-            *session_views += 1;
+            // The session counts the view, and checks that it can still
+            // render, in one step with an abandon's check of the count.
+            let view = acquired.view()?;
             object.views.fetch_add(1, Ordering::AcqRel);
-        }
-        let scope = Box::into_raw(Box::new(ViewScope(object)));
+            view
+        };
+        let scope = Box::into_raw(Box::new(ViewScope(object, view)));
         // SAFETY: non-null, and the caller's contract.
         unsafe { out_scope.write(scope.cast()) };
         Ok(())
@@ -324,13 +320,9 @@ pub unsafe extern "C" fn mln_acquired_frame_view_end(scope: *mut c_void) {
         return;
     }
     // SAFETY: the caller's contract: a scope of `view_begin`, ended once.
-    let scope = unsafe { Box::from_raw(scope.cast::<ViewScope>()) };
-    let object = &scope.0;
+    let ViewScope(object, view) = *unsafe { Box::from_raw(scope.cast::<ViewScope>()) };
     let mut held = object.frame.lock_unpoisoned();
-    {
-        let mut session_views = object.session_views.lock_unpoisoned();
-        *session_views = session_views.saturating_sub(1);
-    }
+    drop(view);
     let discarded = (object.views.fetch_sub(1, Ordering::AcqRel) == 1).then(|| held.discarded.take()).flatten();
     drop(held);
     if let Some(frame) = discarded {
