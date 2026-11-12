@@ -47,7 +47,7 @@ pub mod vertex_buffer_resource;
 mod window;
 
 pub use context::Context;
-pub use device::Device;
+pub use device::{AdapterId, Device};
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
 pub use surface_target::SurfaceTarget;

@@ -10,7 +10,7 @@ use crate::error::Error;
 use crate::generated::types::{mln_diagnostic, mln_render_abandon_result, mln_render_session, mln_status, mln_wake};
 use crate::handles::{self, HandleKind};
 use crate::{
-    abi, delivery, map, offscreen, projection, render_session, resources, runtime, style_expression, transforms,
+    abi, delivery, gpu_device, map, projection, render_session, resources, runtime, style_expression, transforms,
 };
 
 /// A finalizer token: the owned handle that a host's finalizer disposes of.
@@ -87,10 +87,11 @@ fn dispose_owner(handle: u64) -> Result<(), Error> {
         HandleKind::RenderFrameBatch => render_session::release_batch(handle),
         HandleKind::DeliveryQueue => delivery::release(handle),
         HandleKind::StyleExpression => style_expression::release(handle),
-        HandleKind::OffscreenDevice => offscreen::release_device(handle),
-        HandleKind::AcquiredFrame | HandleKind::VulkanDevice | HandleKind::FramePacer => Err(Error::invalid_argument(
-            format!("{} handle {handle:#x} was never created by this process", kind.name()),
-        )),
+        HandleKind::GpuDevice => gpu_device::release(handle),
+        HandleKind::AcquiredFrame | HandleKind::FramePacer => Err(Error::invalid_argument(format!(
+            "{} handle {handle:#x} was never created by this process",
+            kind.name()
+        ))),
     }
 }
 

@@ -32,9 +32,16 @@ pub(crate) struct MapObject {
     /// The handles of the runtime's maps, which this map's entry leaves once
     /// it is released.
     handles: Arc<MapHandles>,
-    /// The scale factor as the caller gave it, which the map's views report
-    /// rather than the map's single-precision pixel ratio.
+    /// The scale factor as the caller created the map with, which the map's
+    /// views report rather than its single-precision pixel ratio.
     pub(crate) scale_factor: f64,
+}
+
+/// The scale factor that the caller gave for one that the runtime reports:
+/// the map's first, `initial`, which the runtime keeps at single precision,
+/// or one that a session's resize gave the runtime as it is.
+pub(crate) fn exact_scale_factor(initial: f64, reported: f64) -> f64 {
+    if reported == f64::from(initial as f32) { initial } else { reported }
 }
 
 static MAPS: HandleTable<MapObject> = HandleTable::new(HandleKind::Map);
@@ -336,7 +343,7 @@ pub unsafe extern "C" fn mln_map_get_snapshot(
         let object = resolve(map)?;
         let snapshot = object.map.snapshot()?;
         let mut snapshot = from_snapshot(&snapshot, object.map.event_mask().bits());
-        snapshot.view.extent.scale_factor = object.scale_factor;
+        snapshot.view.extent.scale_factor = exact_scale_factor(object.scale_factor, object.map.scale_factor());
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_snapshot, &snapshot) }
     })

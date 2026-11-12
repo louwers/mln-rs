@@ -43,13 +43,12 @@ pub(crate) enum HandleKind {
     RenderFrameBatch = 21,
     DeliveryQueue = 23,
     StyleExpression = 25,
-    OffscreenDevice = 26,
-    VulkanDevice = 27,
+    GpuDevice = 26,
     FramePacer = 28,
 }
 
 impl HandleKind {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 12] = [
         Self::Runtime,
         Self::Map,
         Self::MapProjection,
@@ -60,8 +59,7 @@ impl HandleKind {
         Self::RenderFrameBatch,
         Self::DeliveryQueue,
         Self::StyleExpression,
-        Self::OffscreenDevice,
-        Self::VulkanDevice,
+        Self::GpuDevice,
         Self::FramePacer,
     ];
 
@@ -83,8 +81,7 @@ impl HandleKind {
             Self::RenderFrameBatch => "mln_render_frame_batch",
             Self::DeliveryQueue => "mln_delivery_queue",
             Self::StyleExpression => "mln_style_expression",
-            Self::OffscreenDevice => "mln_offscreen_device",
-            Self::VulkanDevice => "mln_vulkan_device",
+            Self::GpuDevice => "mln_gpu_device",
             Self::FramePacer => "mln_frame_pacer",
         }
     }

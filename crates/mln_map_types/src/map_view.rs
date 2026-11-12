@@ -58,6 +58,12 @@ pub struct LogicalExtent {
     pub scale_factor: f64,
 }
 
+impl LogicalExtent {
+    pub fn new(size: Size, scale_factor: f64) -> LogicalExtent {
+        LogicalExtent { size, scale_factor }
+    }
+}
+
 /// How a map orients and constrains its view.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Viewport {

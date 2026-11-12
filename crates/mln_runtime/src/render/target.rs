@@ -102,6 +102,19 @@ impl Surface {
         Surface { kind: SurfaceKind::MetalLayer(layer) }
     }
 
+    /// [`metal_layer`](Self::metal_layer) for the `CAMetalLayer` that
+    /// `layer` points to, which the surface retains, or `None` for a null
+    /// pointer.
+    ///
+    /// # Safety
+    ///
+    /// `layer` is null or points to a live `CAMetalLayer`.
+    #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    pub unsafe fn metal_layer_from_raw(layer: *mut std::ffi::c_void) -> Option<Surface> {
+        // SAFETY: the caller's contract.
+        unsafe { mln_mtl::Layer::from_raw(layer) }.map(Surface::metal_layer)
+    }
+
     /// A surface that the host made with the instance of the WebGPU
     /// [`Device`] that the session renders on.
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
@@ -160,9 +173,91 @@ pub enum Device {
 /// How to create a [`Device`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct DeviceOptions {
-    /// The GPU to use, as an index into the backend's list of GPUs. `None`
-    /// picks the default one.
-    pub adapter_index: Option<usize>,
+    /// The GPU to use. `None` picks the default one.
+    pub adapter: Option<Adapter>,
+}
+
+/// A GPU, by what names it to a backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Adapter {
+    /// An index into the backend's list of GPUs.
+    Index(usize),
+    /// The GPU's 16-byte UUID, as Vulkan's
+    /// `VkPhysicalDeviceIDProperties.deviceUUID` reports it.
+    Uuid([u8; 16]),
+    /// The GPU's 8-byte LUID, as Vulkan's
+    /// `VkPhysicalDeviceIDProperties.deviceLUID` reports it: on Windows, its
+    /// DXGI adapter's.
+    Luid([u8; 8]),
+}
+
+/// A kind of window or layer that a session presents to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SurfaceType {
+    /// A `CAMetalLayer`.
+    MetalLayer,
+    /// A Win32 window.
+    Win32,
+    /// An X11 window, through Xlib.
+    Xlib,
+    /// An X11 window, through XCB.
+    Xcb,
+    /// A Wayland surface.
+    Wayland,
+    /// An Android `ANativeWindow`.
+    AndroidNdk,
+}
+
+impl SurfaceType {
+    /// Whether a device of `backend` presents to the surfaces of this type
+    /// on this platform, in this build.
+    pub fn presents_with(self, backend: BackendType) -> bool {
+        let windowing = match self {
+            SurfaceType::MetalLayer => false,
+            SurfaceType::Win32 => cfg!(windows),
+            SurfaceType::Xlib | SurfaceType::Xcb | SurfaceType::Wayland => {
+                cfg!(all(unix, not(target_vendor = "apple"), not(target_os = "android")))
+            }
+            SurfaceType::AndroidNdk => cfg!(target_os = "android"),
+        };
+        match backend {
+            BackendType::Metal => {
+                cfg!(all(feature = "metal", target_vendor = "apple")) && self == SurfaceType::MetalLayer
+            }
+            BackendType::Vulkan => {
+                cfg!(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm")))) && windowing
+            }
+            BackendType::OpenGL => {
+                cfg!(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))
+                    && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland)
+            }
+            BackendType::WebGPU => cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing,
+            #[allow(unreachable_patterns)]
+            _ => false,
+        }
+    }
+
+    /// Whether a device of any backend of this build presents to the
+    /// surfaces of this type.
+    pub fn presents_with_any(self) -> bool {
+        [BackendType::Metal, BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
+            .into_iter()
+            .any(|backend| self.presents_with(backend))
+    }
+
+    /// Whether a session of this build presents to the surfaces of this
+    /// type without the host's device: on the device that a surface session
+    /// makes when it gets none.
+    pub fn presents_without_device(self) -> bool {
+        match self {
+            SurfaceType::MetalLayer => self.presents_with(BackendType::Metal),
+            _ if cfg!(target_vendor = "apple") => self.presents_with(BackendType::WebGPU),
+            _ => [BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
+                .into_iter()
+                .any(|backend| self.presents_with(backend)),
+        }
+    }
 }
 
 /// Whether a backend that failed with `error` is missing, so the next one
@@ -176,11 +271,12 @@ impl Device {
     /// The library's device, on the platform's native backend: Metal on
     /// Apple's platforms, and Vulkan elsewhere, or OpenGL ES where there is
     /// no Vulkan. WebGPU (wgpu) takes the place of a native backend that
-    /// isn't there. OpenGL ES picks no GPU, so with an `adapter_index` it is
-    /// skipped.
+    /// isn't there. A backend that can't name the GPU that `options` names
+    /// is skipped: OpenGL ES names none, and only Vulkan names one by UUID or
+    /// LUID.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
-    /// `adapter_index` names no GPU, with
+    /// the options name no GPU, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no backend has a
     /// GPU or in the browser, where a session renders on the page's device,
     /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when the GPU
@@ -211,25 +307,42 @@ impl Device {
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a backend that
     /// isn't in this build or on this platform.
     pub fn with_backend(backend: BackendType, options: DeviceOptions) -> Result<Device, Error> {
-        let DeviceOptions { adapter_index } = options;
+        let DeviceOptions { adapter } = options;
+        // Only Vulkan names its GPUs by ID here.
+        let index = |adapter: Option<Adapter>| match adapter {
+            None => Ok(None),
+            Some(Adapter::Index(index)) => Ok(Some(index)),
+            Some(_) => Err(Error::unsupported(format!("{backend:?} names no GPU by UUID or LUID"))),
+        };
         match backend {
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            BackendType::WebGPU => mln_webgpu::Device::new(adapter_index).map(Device::WebGpu),
+            BackendType::WebGPU => mln_webgpu::Device::new(index(adapter)?).map(Device::WebGpu),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            BackendType::Metal => mln_mtl::Device::new(adapter_index).map(Device::Metal),
+            BackendType::Metal => mln_mtl::Device::new(index(adapter)?).map(Device::Metal),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            BackendType::Vulkan => mln_vulkan::Device::new(adapter_index).map(Device::Vulkan),
+            BackendType::Vulkan => match adapter {
+                Some(Adapter::Uuid(uuid)) => mln_vulkan::Device::with_adapter_id(mln_vulkan::AdapterId::Uuid(uuid)),
+                Some(Adapter::Luid(luid)) => mln_vulkan::Device::with_adapter_id(mln_vulkan::AdapterId::Luid(luid)),
+                _ => mln_vulkan::Device::new(index(adapter)?),
+            }
+            .map(Device::Vulkan),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            BackendType::OpenGL => match adapter_index {
+            BackendType::OpenGL => match adapter {
                 Some(_) => Err(Error::unsupported("OpenGL ES picks no GPU")),
                 None => mln_gl::Device::new().map(Device::Gl),
             },
             #[allow(unreachable_patterns)]
             _ => {
-                let _ = adapter_index;
+                let _ = (index, adapter);
                 Err(Error::unsupported(format!("this build has no {backend:?} backend")))
             }
         }
+    }
+
+    /// Whether sessions on the device present to the surfaces of
+    /// `surface`'s type.
+    pub fn presents_to(&self, surface: SurfaceType) -> bool {
+        surface.presents_with(self.backend())
     }
 
     /// The backends [`new`](Self::new) tries, in order.

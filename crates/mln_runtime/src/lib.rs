@@ -37,14 +37,14 @@ pub use completion::Completion;
 pub use event::{EventHandler, EventMask, EventSource, EventType, RuntimeEvent, RuntimeEventKind};
 pub use feature_state::{FeatureState, FeatureStateSelector};
 pub use map::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
-pub use mln_map::MapSnapshot;
+pub use mln_map::{LogicalExtent, MapSnapshot};
 pub use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
-    AttachOptions, BackendType, DemandMode, Device, DeviceOptions, Driver, DriverWork, FrameDemand, FrameDisposition,
-    FrameResult, LocalTarget, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState,
-    RenderTarget, RenderedQueryGeometry, Surface, Wake,
+    Adapter, AttachOptions, BackendType, DemandMode, Device, DeviceOptions, Driver, DriverWork, FrameDemand,
+    FrameDisposition, FrameResult, LocalTarget, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot,
+    RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface, SurfaceType, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};

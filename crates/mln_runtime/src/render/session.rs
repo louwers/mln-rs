@@ -103,6 +103,11 @@ pub(crate) struct SessionState {
     pub(crate) lifecycle: RenderSessionState,
     pub(crate) released: bool,
     pub(crate) size: Size,
+    /// The scale factor that the target has, as `size` does.
+    pub(crate) scale_factor: f64,
+    /// The scale factor of the last resize sent, which a later resize that
+    /// names none keeps.
+    pub(crate) sent_scale_factor: f64,
     pub(crate) generation: u64,
     pub(crate) frame_generation: u64,
     pub(crate) failure: Option<Error>,
@@ -215,7 +220,6 @@ pub(crate) struct SessionShared {
     pub(crate) gate: Mutex<()>,
     pub(crate) frame_wake: Option<Wake>,
     pub(crate) redraw_wake: Option<Wake>,
-    pub(crate) scale_factor: f64,
     capabilities: RenderSessionCapabilities,
     driver_work_taken: AtomicBool,
     /// Whether the driver-work wake may run: from the start of the last
@@ -524,7 +528,7 @@ pub(crate) fn attach(
         })));
     }
     let id = SessionId(NEXT_ID.fetch_add(1, Ordering::Relaxed));
-    let pixel_ratio = map.pixel_ratio();
+    let scale_factor = map.scale_factor();
     let shared = Arc::new(SessionShared {
         id,
         driver: options.driver,
@@ -535,6 +539,8 @@ pub(crate) fn attach(
             lifecycle: RenderSessionState::Attaching,
             released: false,
             size,
+            scale_factor,
+            sent_scale_factor: scale_factor,
             generation: 1,
             frame_generation: 0,
             failure: None,
@@ -551,7 +557,7 @@ pub(crate) fn attach(
             init: Some(Box::new(Init {
                 target,
                 size,
-                pixel_ratio,
+                scale_factor,
                 glyph_cache: map.glyph_cache(),
                 tile_cache_enabled: map.tile_cache_enabled(),
             })),
@@ -562,7 +568,6 @@ pub(crate) fn attach(
         gate: Mutex::new(()),
         frame_wake: options.frame_wake,
         redraw_wake: options.redraw_wake,
-        scale_factor: f64::from(pixel_ratio),
         capabilities: RenderSessionCapabilities {
             driver: options.driver,
             texture_ring_depth: 1,
@@ -697,7 +702,7 @@ impl RenderSession {
         }
         Ok(RenderSessionSnapshot {
             state: state.lifecycle,
-            extent: LogicalExtent { size: state.size, scale_factor: self.shared().scale_factor },
+            extent: LogicalExtent { size: state.size, scale_factor: state.scale_factor },
             generation: state.generation,
             frame_generation: state.frame_generation,
             failure: state.failure.clone(),
@@ -740,23 +745,32 @@ impl RenderSession {
         Ok(std::mem::take(&mut state.results))
     }
 
-    /// Resizes the target, and the map with it. The session renders at the
-    /// map's pixel ratio. A later demand shows the new size, and one sent
-    /// before shows the old.
+    /// Resizes the target, and the map with it, to `extent`'s size in
+    /// logical pixels, and sets the map's scale factor to `extent`'s, such
+    /// as when a window moves to a display of another density. The map keeps
+    /// its tiles, and the renderer draws the next frame at the new scale
+    /// factor. A later demand shows the new extent, and one sent before
+    /// shows the old.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size.
-    pub fn resize(&self, size: Size) -> Result<Completion<Applied>, Error> {
-        self.resize_then(size, |worker, size, _| worker.resize(size))
+    /// empty size, or a scale factor that isn't finite and positive.
+    pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
+        let LogicalExtent { size, scale_factor } = extent;
+        if !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return Err(Error::invalid_argument(format!("scale factor {scale_factor} isn't finite and positive")));
+        }
+        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, _| worker.resize(size, scale_factor))
     }
 
-    /// Sends a map command that resizes the map to `size`, then runs
+    /// Sends a map command that resizes the map to `size`, at
+    /// `scale_factor` or the session's when that is `None`, then runs
     /// `change` on the session's thread, which resizes or replaces the
     /// target.
     fn resize_then(
         &self,
         size: Size,
-        change: impl FnOnce(&mut Worker, Size, &mut Outbox) -> Result<(), Error> + Send + 'static,
+        scale_factor: Option<f64>,
+        change: impl FnOnce(&mut Worker, Size, f64, &mut Outbox) -> Result<(), Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         if size.is_empty() {
             return Err(Error::invalid_argument("the target's size must not be empty"));
@@ -766,19 +780,23 @@ impl RenderSession {
             let mut state = shared.state.lock_unpoisoned();
             check_usable(&state)?;
             let map = state.map.clone().ok_or_else(|| Error::invalid_state("the render session has no map"))?;
+            let scale_factor = scale_factor.unwrap_or(state.sent_scale_factor);
+            state.sent_scale_factor = scale_factor;
             let (completion, resolver) = shared.completion();
             let work = state.register(resolver);
             // The work sent after waits for the resize to land, which it
             // does even when the map drops it.
             state.resizes_sent += 1;
             let landing = worker::ResizeLanding::new(shared.run_loop.clone());
-            let sent = map.resize_for_session(size, shared.run_loop.clone(), move |worker, result, outbox| {
-                if let Some(resolver) = worker.take_work::<Applied>(work) {
-                    let result = result.and_then(|applied| change(worker, size, outbox).map(|()| applied));
-                    outbox.resolve(resolver, result);
-                }
-                landing.land(worker, outbox);
-            });
+            let sent =
+                map.resize_for_session(size, scale_factor, shared.run_loop.clone(), move |worker, result, outbox| {
+                    if let Some(resolver) = worker.take_work::<Applied>(work) {
+                        let result =
+                            result.and_then(|applied| change(worker, size, scale_factor, outbox).map(|()| applied));
+                        outbox.resolve(resolver, result);
+                    }
+                    landing.land(worker, outbox);
+                });
             if let Err(error) = sent {
                 state.pending.remove(&work);
                 return Err(error);
@@ -828,7 +846,9 @@ impl RenderSession {
         if !self.shared().capabilities.presentation {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
-        self.resize_then(size, move |worker, size, outbox| worker.set_surface(size, surface, outbox))
+        self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
+            worker.set_surface(size, scale_factor, surface, outbox)
+        })
     }
 
     /// Ends the frame demands on their way, including those that wait for a

@@ -71,6 +71,43 @@ fn gpu_count() -> Result<usize, Error> {
         .clone()
 }
 
+/// A GPU's ID, as `VkPhysicalDeviceIDProperties` reports it: its
+/// `deviceUUID`, or its `deviceLUID`, which on Windows is its DXGI adapter's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AdapterId {
+    Uuid([u8; vk::UUID_SIZE]),
+    Luid([u8; vk::LUID_SIZE]),
+}
+
+/// The UUID and LUID, where it has one, of each GPU, in
+/// `vkEnumeratePhysicalDevices` order.
+fn adapter_ids() -> Result<Vec<([u8; vk::UUID_SIZE], Option<[u8; vk::LUID_SIZE]>)>, Error> {
+    // SAFETY: the Vulkan library's initializers have no preconditions.
+    let entry = unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?;
+    // Vulkan 1.1 reports the IDs.
+    let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_1);
+    let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+    // SAFETY: the create info is valid, with no layers or extensions.
+    let instance = unsafe { entry.create_instance(&create_info, None) }
+        .map_err(|e| Error::unsupported(format!("Failed to create a Vulkan instance: {e}")))?;
+    // SAFETY: plain queries of the live instance and its GPUs, which is
+    // destroyed after them with nothing made from it.
+    unsafe {
+        let ids = instance.enumerate_physical_devices().map(|gpus| {
+            gpus.into_iter()
+                .map(|gpu| {
+                    let mut ids = vk::PhysicalDeviceIDProperties::default();
+                    let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut ids);
+                    instance.get_physical_device_properties2(gpu, &mut properties);
+                    (ids.device_uuid, (ids.device_luid_valid == vk::TRUE).then_some(ids.device_luid))
+                })
+                .collect()
+        });
+        instance.destroy_instance(None);
+        ids.map_err(|e| Error::native(format!("Vulkan physical devices: {e}")))
+    }
+}
+
 impl Device {
     /// The library's device: the GPU at `adapter_index` in
     /// `vkEnumeratePhysicalDevices` order, or the first that can render
@@ -89,6 +126,22 @@ impl Device {
             return Err(Error::not_found(format!("adapter_index {index} is past the {count} GPUs")));
         }
         Ok(Device { kind: Arc::new(Kind::Library { adapter_index }) })
+    }
+
+    /// The library's device on the GPU that `id` names, by the IDs that
+    /// `VkPhysicalDeviceIDProperties` reports.
+    ///
+    /// Fails as [`new`](Self::new) does, and with
+    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when no GPU has `id`.
+    pub fn with_adapter_id(id: AdapterId) -> Result<Device, Error> {
+        let index = adapter_ids()?
+            .iter()
+            .position(|(uuid, luid)| match id {
+                AdapterId::Uuid(wanted) => *uuid == wanted,
+                AdapterId::Luid(wanted) => *luid == Some(wanted),
+            })
+            .ok_or_else(|| Error::not_found(format!("no Vulkan GPU has the {id:?}")))?;
+        Device::new(Some(index))
     }
 
     /// The host's instance and device, and the queue renderers would submit

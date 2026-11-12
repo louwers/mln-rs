@@ -14,5 +14,7 @@ pub use local::LocalTarget;
 pub use query::RenderedQueryGeometry;
 pub(crate) use session::{Abandoner, SessionId, SessionShared, attach};
 pub use session::{RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState};
-pub use target::{AttachOptions, BackendType, Device, DeviceOptions, Driver, RenderTarget, Surface, Wake};
+pub use target::{
+    Adapter, AttachOptions, BackendType, Device, DeviceOptions, Driver, RenderTarget, Surface, SurfaceType, Wake,
+};
 pub(crate) use worker::{Worker, post as worker_post};

@@ -108,7 +108,7 @@ impl Drop for ResizeLanding {
 pub(crate) struct Init {
     pub(crate) target: TargetInit,
     pub(crate) size: Size,
-    pub(crate) pixel_ratio: f32,
+    pub(crate) scale_factor: f64,
     pub(crate) glyph_cache: Arc<GlyphCache>,
     /// Whether the renderer keeps tiles that left the view.
     pub(crate) tile_cache_enabled: bool,
@@ -148,7 +148,8 @@ impl Gfx {
     const OBJECTS: u32 = 2;
 
     fn new(init: Init) -> Result<Gfx, Error> {
-        let Init { target, size, pixel_ratio, glyph_cache, tile_cache_enabled } = init;
+        let Init { target, size, scale_factor, glyph_cache, tile_cache_enabled } = init;
+        let pixel_ratio = scale_factor as f32;
         let size = physical_size(size, pixel_ratio);
         let target = match target {
             TargetInit::Offscreen(device) => LocalTarget::offscreen(device, size)?,
@@ -201,7 +202,8 @@ pub(crate) struct Worker {
     shared: Arc<SessionShared>,
     /// `None` once the session failed to build it, or let go of it.
     gfx: Option<Gfx>,
-    pixel_ratio: f32,
+    /// The scale factor that the renderer draws at.
+    scale_factor: f64,
     reader: Option<UpdateReader>,
     /// The map's queue for the renderer's events.
     map_events: Option<RendererEvents>,
@@ -258,7 +260,7 @@ impl Worker {
         })));
         // A session that a detach or abandon reached first needs no renderer.
         let attaching = shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Attaching;
-        let pixel_ratio = init.pixel_ratio;
+        let scale_factor = init.scale_factor;
         let built = attaching.then(|| Gfx::new(init));
         let gfx = match built {
             Some(Ok(mut gfx)) => {
@@ -285,7 +287,7 @@ impl Worker {
         Worker {
             shared,
             gfx,
-            pixel_ratio,
+            scale_factor,
             reader: None,
             map_events: None,
             renderer_events,
@@ -546,7 +548,7 @@ impl Worker {
                     generation,
                     frame_generation,
                     needs_repaint: report.needs_repaint,
-                    view: Some(MapView::from_state(&update.parameters.transform_state, f64::from(self.pixel_ratio))),
+                    view: Some(MapView::from_state(&update.parameters.transform_state, self.scale_factor)),
                     mode: report.mode,
                 }
             }
@@ -612,11 +614,23 @@ impl Worker {
         self.gfx.as_mut().map(|gfx| &mut gfx.renderer).ok_or_else(target_lost)
     }
 
-    /// Resizes the target, after the map resized.
-    pub(crate) fn resize(&mut self, size: Size) -> Result<(), Error> {
+    /// Resizes the target, and draws at `scale_factor`, after the map
+    /// resized.
+    pub(crate) fn resize(&mut self, size: Size, scale_factor: f64) -> Result<(), Error> {
+        self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
-        gfx.target.resize(physical_size(size, self.pixel_ratio));
+        gfx.target.resize(physical_size(size, scale_factor as f32));
         self.target_changed(size, None);
+        Ok(())
+    }
+
+    /// Draws at `scale_factor` from the next frame on, which the map took
+    /// too: the renderer lays out the tiles it has again.
+    fn set_scale_factor(&mut self, scale_factor: f64) -> Result<(), Error> {
+        if scale_factor != self.scale_factor {
+            self.renderer()?.set_pixel_ratio(scale_factor as f32);
+            self.scale_factor = scale_factor;
+        }
         Ok(())
     }
 
@@ -626,6 +640,7 @@ impl Worker {
         self.has_frame = false;
         let mut state = self.shared.state.lock_unpoisoned();
         state.size = size;
+        state.scale_factor = self.scale_factor;
         state.generation += 1;
         if let Some(has_target) = has_target {
             state.has_target = has_target;
@@ -648,12 +663,19 @@ impl Worker {
     /// Presents to `surface` from now on, at `size` logical pixels, after
     /// the map resized. On failure the session keeps the surface that it
     /// had, if any, at the new size.
-    pub(crate) fn set_surface(&mut self, size: Size, surface: Surface, outbox: &mut Outbox) -> Result<(), Error> {
-        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
-        if gfx.target.is_offscreen() {
+    pub(crate) fn set_surface(
+        &mut self,
+        size: Size,
+        scale_factor: f64,
+        surface: Surface,
+        outbox: &mut Outbox,
+    ) -> Result<(), Error> {
+        if self.gfx.as_ref().ok_or_else(target_lost)?.target.is_offscreen() {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
-        let physical = physical_size(size, self.pixel_ratio);
+        self.set_scale_factor(scale_factor)?;
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
+        let physical = physical_size(size, scale_factor as f32);
         let backend = gfx.backend.clone();
         let replaced = {
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
