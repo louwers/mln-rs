@@ -4,8 +4,9 @@
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
     IconTextFitType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition, RasterResamplingType,
-    SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
-    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType, projection_type_from_name,
+    ResamplingType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType,
+    TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    projection_type_from_name,
 };
 use mln_util::enum_::Enum;
 use mln_util::{Color, Padding};
@@ -99,6 +100,7 @@ enum_converters!(
     LineCapType,
     LineJoinType,
     RasterResamplingType,
+    ResamplingType,
     SymbolAnchorType,
     SymbolPlacementType,
     SymbolZOrderType,

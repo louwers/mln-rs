@@ -8,6 +8,7 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
+use mln_style_types::ResamplingType;
 use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
 
@@ -22,12 +23,19 @@ crate::paint_property!(
     pub struct ColorReliefOpacity: f32 = 1.0_f32
 );
 
+crate::paint_property!(
+    /// `struct Resampling : PaintProperty<ResamplingType>`:
+    /// `static ResamplingType defaultValue() { return ResamplingType::Linear; }`.
+    pub struct Resampling: ResamplingType = ResamplingType::Linear
+);
+
 crate::paint_properties!(
     /// `class ColorReliefPaintProperties : public Properties<...>`, the properties in field order.
     #[allow(non_snake_case)]
     pub mod ColorReliefPaintProperties {
         color_relief_color: ColorReliefColor,
         color_relief_opacity: ColorReliefOpacity,
+        resampling: Resampling,
     }
 );
 

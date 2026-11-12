@@ -10,7 +10,7 @@ use crate::conversion_impl::{make_style_property, make_transition_style_property
 use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serialize_base, serialize_property};
 use crate::layers::raster_layer_properties::{
     RasterBrightnessMax, RasterBrightnessMin, RasterContrast, RasterFadeDuration, RasterHueRotate, RasterOpacity,
-    RasterPaintProperties, RasterResampling, RasterSaturation,
+    RasterPaintProperties, RasterResampling, RasterSaturation, Resampling,
 };
 use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
@@ -18,7 +18,7 @@ use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
-use mln_style_types::RasterResamplingType;
+use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
@@ -291,9 +291,36 @@ impl RasterLayer {
     pub fn get_raster_saturation_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterSaturation>().options
     }
+
+    pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
+        PropertyValue::Constant(Resampling::default_value())
+    }
+
+    pub fn get_resampling(&self) -> &PropertyValue<ResamplingType> {
+        &self.impl_().paint.get::<Resampling>().value
+    }
+
+    pub fn set_resampling(&mut self, value: &PropertyValue<ResamplingType>) {
+        if *value == *self.get_resampling() {
+            return;
+        }
+        let mut impl_ = self.mutable_impl();
+        impl_.paint.get_mut::<Resampling>().value = value.clone();
+        self.set_impl(impl_);
+    }
+
+    pub fn set_resampling_transition(&mut self, options: &TransitionOptions) {
+        let mut impl_ = self.mutable_impl();
+        impl_.paint.get_mut::<Resampling>().options = *options;
+        self.set_impl(impl_);
+    }
+
+    pub fn get_resampling_transition(&self) -> TransitionOptions {
+        self.impl_().paint.get::<Resampling>().options
+    }
 }
 
-const K_PAINT_PROPERTY_COUNT: u8 = 16;
+const K_PAINT_PROPERTY_COUNT: u8 = 18;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -306,6 +333,7 @@ enum Property {
     RasterOpacity,
     RasterResampling,
     RasterSaturation,
+    Resampling,
     RasterBrightnessMaxTransition,
     RasterBrightnessMinTransition,
     RasterContrastTransition,
@@ -314,6 +342,7 @@ enum Property {
     RasterOpacityTransition,
     RasterResamplingTransition,
     RasterSaturationTransition,
+    ResamplingTransition,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
@@ -326,6 +355,7 @@ const LAYER_PROPERTIES: &[(&str, Property)] = &[
     ("raster-opacity", Property::RasterOpacity),
     ("raster-resampling", Property::RasterResampling),
     ("raster-saturation", Property::RasterSaturation),
+    ("resampling", Property::Resampling),
     ("raster-brightness-max-transition", Property::RasterBrightnessMaxTransition),
     ("raster-brightness-min-transition", Property::RasterBrightnessMinTransition),
     ("raster-contrast-transition", Property::RasterContrastTransition),
@@ -334,6 +364,7 @@ const LAYER_PROPERTIES: &[(&str, Property)] = &[
     ("raster-opacity-transition", Property::RasterOpacityTransition),
     ("raster-resampling-transition", Property::RasterResamplingTransition),
     ("raster-saturation-transition", Property::RasterSaturationTransition),
+    ("resampling-transition", Property::ResamplingTransition),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -350,6 +381,7 @@ fn get_layer_property(layer: &RasterLayer, property: Property) -> StyleProperty 
         Property::RasterOpacity => make_style_property(layer.get_raster_opacity()),
         Property::RasterResampling => make_style_property(layer.get_raster_resampling()),
         Property::RasterSaturation => make_style_property(layer.get_raster_saturation()),
+        Property::Resampling => make_style_property(layer.get_resampling()),
         Property::RasterBrightnessMaxTransition => {
             make_transition_style_property(&layer.get_raster_brightness_max_transition())
         }
@@ -370,6 +402,7 @@ fn get_layer_property(layer: &RasterLayer, property: Property) -> StyleProperty 
         Property::RasterSaturationTransition => {
             make_transition_style_property(&layer.get_raster_saturation_transition())
         }
+        Property::ResamplingTransition => make_transition_style_property(&layer.get_resampling_transition()),
     }
 }
 
@@ -478,6 +511,16 @@ impl Layer for RasterLayer {
             return None;
         }
 
+        if property == Property::Resampling {
+            let mut error = Error::default();
+            let Some(typed_value) = convert_property_value::<ResamplingType>(value, &mut error, false, false) else {
+                return Some(error);
+            };
+
+            self.set_resampling(&typed_value);
+            return None;
+        }
+
         let mut error = Error::default();
         let Some(transition) = <TransitionOptions as Converter>::convert(value, &mut error) else {
             return Some(error);
@@ -520,6 +563,11 @@ impl Layer for RasterLayer {
 
         if property == Property::RasterSaturationTransition {
             self.set_raster_saturation_transition(&transition);
+            return None;
+        }
+
+        if property == Property::ResamplingTransition {
+            self.set_resampling_transition(&transition);
             return None;
         }
 

@@ -37,6 +37,7 @@ use mln_style::layers::ColorReliefLayer;
 use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
 use mln_style::layers::color_relief_layer_properties::*;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
@@ -461,6 +462,17 @@ impl RenderLayer for RenderColorReliefLayer {
             render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
+        let evaluated = get_evaluated::<ColorReliefLayerProperties>(&self.base.evaluated_properties);
+        let dem_sampler = SamplerState {
+            filter: match *evaluated.get::<Resampling>() {
+                ResamplingType::Linear => TextureFilterType::Linear,
+                ResamplingType::Nearest => TextureFilterType::Nearest,
+            },
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        };
+
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
@@ -547,20 +559,12 @@ impl RenderLayer for RenderColorReliefLayer {
                 Some((texture, made_at)) if *made_at == generation => texture.clone(),
                 _ => {
                     let texture = context.create_texture_2d();
-                    {
-                        let mut t = texture.borrow_mut();
-                        t.set_image(Some(Rc::new(dem_image)));
-                        t.set_sampler_configuration(SamplerState {
-                            filter: TextureFilterType::Linear,
-                            wrap_u: TextureWrapType::Clamp,
-                            wrap_v: TextureWrapType::Clamp,
-                            ..Default::default()
-                        });
-                    }
+                    texture.borrow_mut().set_image(Some(Rc::new(dem_image)));
                     self.dem_textures.insert(bucket_id, (texture.clone(), generation));
                     texture
                 }
             };
+            dem_texture.borrow_mut().set_sampler_configuration(dem_sampler);
 
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
                 if !drawable_has_layer_tweaker(drawable, &layer_tweaker) {

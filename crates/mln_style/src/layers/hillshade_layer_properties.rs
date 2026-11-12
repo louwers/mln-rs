@@ -8,7 +8,7 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
-use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType};
+use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
@@ -61,6 +61,12 @@ crate::paint_property!(
     pub struct HillshadeShadowColor: Vec<Color> = vec![Color::black()]
 );
 
+crate::paint_property!(
+    /// `struct Resampling : PaintProperty<ResamplingType>`:
+    /// `static ResamplingType defaultValue() { return ResamplingType::Linear; }`.
+    pub struct Resampling: ResamplingType = ResamplingType::Linear
+);
+
 crate::paint_properties!(
     /// `class HillshadePaintProperties : public Properties<...>`, the properties in field order.
     #[allow(non_snake_case)]
@@ -73,6 +79,7 @@ crate::paint_properties!(
         hillshade_illumination_direction: HillshadeIlluminationDirection,
         hillshade_method: HillshadeMethod,
         hillshade_shadow_color: HillshadeShadowColor,
+        resampling: Resampling,
     }
 );
 

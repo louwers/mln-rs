@@ -8,7 +8,7 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::raster_layer_impl::Impl as RasterLayerImpl;
-use mln_style_types::RasterResamplingType;
+use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
 
@@ -60,6 +60,12 @@ crate::paint_property!(
     pub struct RasterSaturation: f32 = 0.0_f32
 );
 
+crate::paint_property!(
+    /// `struct Resampling : PaintProperty<ResamplingType>`:
+    /// `static ResamplingType defaultValue() { return ResamplingType::Linear; }`.
+    pub struct Resampling: ResamplingType = ResamplingType::Linear
+);
+
 crate::paint_properties!(
     /// `class RasterPaintProperties : public Properties<...>`, the properties in field order.
     #[allow(non_snake_case)]
@@ -72,6 +78,7 @@ crate::paint_properties!(
         raster_opacity: RasterOpacity,
         raster_resampling: RasterResampling,
         raster_saturation: RasterSaturation,
+        resampling: Resampling,
     }
 );
 

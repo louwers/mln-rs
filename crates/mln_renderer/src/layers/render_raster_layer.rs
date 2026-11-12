@@ -35,7 +35,7 @@ use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style::layers::raster_layer_properties::*;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
-use mln_style_types::RasterResamplingType;
+use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
@@ -119,19 +119,25 @@ impl RenderRasterLayer {
             })
             .clone();
 
-        let evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties);
-        let nearest = *evaluated.get::<RasterResampling>() == RasterResamplingType::Nearest;
-        let filter = if nearest { TextureFilterType::Nearest } else { TextureFilterType::Linear };
-
-        texture.borrow_mut().set_sampler_configuration(SamplerState {
-            filter,
-            wrap_u: TextureWrapType::Clamp,
-            wrap_v: TextureWrapType::Clamp,
-            ..Default::default()
-        });
+        texture.borrow_mut().set_sampler_configuration(self.sampler_state());
 
         builder.set_texture(Some(texture.clone()), ID_RASTER_IMAGE0_TEXTURE);
         builder.set_texture(Some(texture), ID_RASTER_IMAGE1_TEXTURE);
+    }
+
+    /// The sampler of the layer's tile textures for the evaluated
+    /// properties.
+    fn sampler_state(&self) -> SamplerState {
+        let evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties);
+        // GL JS draws Nearest when either property asks for it.
+        let nearest = *evaluated.get::<RasterResampling>() == RasterResamplingType::Nearest
+            || *evaluated.get::<Resampling>() == ResamplingType::Nearest;
+        SamplerState {
+            filter: if nearest { TextureFilterType::Nearest } else { TextureFilterType::Linear },
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        }
     }
 }
 
@@ -447,6 +453,12 @@ impl RenderLayer for RenderRasterLayer {
         let live_buckets: std::collections::HashSet<SimpleIdentity> =
             render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
         self.textures.retain(|id, _| live_buckets.contains(id));
+        // Existing drawables keep their textures, so a changed filter is
+        // applied to the textures themselves.
+        let sampler = self.sampler_state();
+        for texture in self.textures.values() {
+            texture.borrow_mut().set_sampler_configuration(sampler);
+        }
 
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();

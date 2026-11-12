@@ -9,13 +9,16 @@ use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::conversion::{Converter, convert_color_ramp_property_value, convert_property_value};
 use crate::conversion_impl::{make_color_ramp_style_property, make_style_property, make_transition_style_property};
 use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serialize_base, serialize_property};
-use crate::layers::color_relief_layer_properties::{ColorReliefColor, ColorReliefOpacity, ColorReliefPaintProperties};
+use crate::layers::color_relief_layer_properties::{
+    ColorReliefColor, ColorReliefOpacity, ColorReliefPaintProperties, Resampling,
+};
 use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
+use mln_style_types::ResamplingType;
 use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
@@ -126,25 +129,56 @@ impl ColorReliefLayer {
     pub fn get_color_relief_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<ColorReliefOpacity>().options
     }
+
+    pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
+        PropertyValue::Constant(Resampling::default_value())
+    }
+
+    pub fn get_resampling(&self) -> &PropertyValue<ResamplingType> {
+        &self.impl_().paint.get::<Resampling>().value
+    }
+
+    pub fn set_resampling(&mut self, value: &PropertyValue<ResamplingType>) {
+        if *value == *self.get_resampling() {
+            return;
+        }
+        let mut impl_ = self.mutable_impl();
+        impl_.paint.get_mut::<Resampling>().value = value.clone();
+        self.set_impl(impl_);
+    }
+
+    pub fn set_resampling_transition(&mut self, options: &TransitionOptions) {
+        let mut impl_ = self.mutable_impl();
+        impl_.paint.get_mut::<Resampling>().options = *options;
+        self.set_impl(impl_);
+    }
+
+    pub fn get_resampling_transition(&self) -> TransitionOptions {
+        self.impl_().paint.get::<Resampling>().options
+    }
 }
 
-const K_PAINT_PROPERTY_COUNT: u8 = 4;
+const K_PAINT_PROPERTY_COUNT: u8 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Property {
     ColorReliefColor,
     ColorReliefOpacity,
+    Resampling,
     ColorReliefColorTransition,
     ColorReliefOpacityTransition,
+    ResamplingTransition,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
 const LAYER_PROPERTIES: &[(&str, Property)] = &[
     ("color-relief-color", Property::ColorReliefColor),
     ("color-relief-opacity", Property::ColorReliefOpacity),
+    ("resampling", Property::Resampling),
     ("color-relief-color-transition", Property::ColorReliefColorTransition),
     ("color-relief-opacity-transition", Property::ColorReliefOpacityTransition),
+    ("resampling-transition", Property::ResamplingTransition),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -155,12 +189,14 @@ fn get_layer_property(layer: &ColorReliefLayer, property: Property) -> StyleProp
     match property {
         Property::ColorReliefColor => make_color_ramp_style_property(layer.get_color_relief_color()),
         Property::ColorReliefOpacity => make_style_property(layer.get_color_relief_opacity()),
+        Property::Resampling => make_style_property(layer.get_resampling()),
         Property::ColorReliefColorTransition => {
             make_transition_style_property(&layer.get_color_relief_color_transition())
         }
         Property::ColorReliefOpacityTransition => {
             make_transition_style_property(&layer.get_color_relief_opacity_transition())
         }
+        Property::ResamplingTransition => make_transition_style_property(&layer.get_resampling_transition()),
     }
 }
 
@@ -232,6 +268,16 @@ impl Layer for ColorReliefLayer {
             return None;
         }
 
+        if property == Property::Resampling {
+            let mut error = Error::default();
+            let Some(typed_value) = convert_property_value::<ResamplingType>(value, &mut error, false, false) else {
+                return Some(error);
+            };
+
+            self.set_resampling(&typed_value);
+            return None;
+        }
+
         let mut error = Error::default();
         let Some(transition) = <TransitionOptions as Converter>::convert(value, &mut error) else {
             return Some(error);
@@ -244,6 +290,11 @@ impl Layer for ColorReliefLayer {
 
         if property == Property::ColorReliefOpacityTransition {
             self.set_color_relief_opacity_transition(&transition);
+            return None;
+        }
+
+        if property == Property::ResamplingTransition {
+            self.set_resampling_transition(&transition);
             return None;
         }
 

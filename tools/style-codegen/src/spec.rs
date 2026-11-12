@@ -96,11 +96,6 @@ pub fn load(text: &str) -> Result<Value, String> {
     remove(&mut spec, &["paint_line"], "line-layer-blend")?;
     remove(&mut spec, &["paint_raster"], "raster-layer-blend")?;
 
-    // https://github.com/maplibre/maplibre-native/issues/4117
-    remove(&mut spec, &["paint_raster"], "resampling")?;
-    remove(&mut spec, &["paint_hillshade"], "resampling")?;
-    remove(&mut spec, &["paint_color-relief"], "resampling")?;
-
     // https://github.com/maplibre/maplibre-native/issues/4194
     zoom_only(&mut spec, "layout_line", "line-cap", "data-constant")?;
     zoom_only(&mut spec, "layout_line", "line-miter-limit", "data-constant")?;

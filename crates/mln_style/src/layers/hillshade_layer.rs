@@ -11,7 +11,7 @@ use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serial
 use crate::layers::hillshade_layer_properties::{
     HillshadeAccentColor, HillshadeExaggeration, HillshadeHighlightColor, HillshadeIlluminationAltitude,
     HillshadeIlluminationAnchor, HillshadeIlluminationDirection, HillshadeMethod, HillshadePaintProperties,
-    HillshadeShadowColor,
+    HillshadeShadowColor, Resampling,
 };
 use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
@@ -19,7 +19,7 @@ use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
-use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType};
+use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
 use std::sync::Arc;
@@ -293,9 +293,36 @@ impl HillshadeLayer {
     pub fn get_hillshade_shadow_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeShadowColor>().options
     }
+
+    pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
+        PropertyValue::Constant(Resampling::default_value())
+    }
+
+    pub fn get_resampling(&self) -> &PropertyValue<ResamplingType> {
+        &self.impl_().paint.get::<Resampling>().value
+    }
+
+    pub fn set_resampling(&mut self, value: &PropertyValue<ResamplingType>) {
+        if *value == *self.get_resampling() {
+            return;
+        }
+        let mut impl_ = self.mutable_impl();
+        impl_.paint.get_mut::<Resampling>().value = value.clone();
+        self.set_impl(impl_);
+    }
+
+    pub fn set_resampling_transition(&mut self, options: &TransitionOptions) {
+        let mut impl_ = self.mutable_impl();
+        impl_.paint.get_mut::<Resampling>().options = *options;
+        self.set_impl(impl_);
+    }
+
+    pub fn get_resampling_transition(&self) -> TransitionOptions {
+        self.impl_().paint.get::<Resampling>().options
+    }
 }
 
-const K_PAINT_PROPERTY_COUNT: u8 = 16;
+const K_PAINT_PROPERTY_COUNT: u8 = 18;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -308,6 +335,7 @@ enum Property {
     HillshadeIlluminationDirection,
     HillshadeMethod,
     HillshadeShadowColor,
+    Resampling,
     HillshadeAccentColorTransition,
     HillshadeExaggerationTransition,
     HillshadeHighlightColorTransition,
@@ -316,6 +344,7 @@ enum Property {
     HillshadeIlluminationDirectionTransition,
     HillshadeMethodTransition,
     HillshadeShadowColorTransition,
+    ResamplingTransition,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
@@ -328,6 +357,7 @@ const LAYER_PROPERTIES: &[(&str, Property)] = &[
     ("hillshade-illumination-direction", Property::HillshadeIlluminationDirection),
     ("hillshade-method", Property::HillshadeMethod),
     ("hillshade-shadow-color", Property::HillshadeShadowColor),
+    ("resampling", Property::Resampling),
     ("hillshade-accent-color-transition", Property::HillshadeAccentColorTransition),
     ("hillshade-exaggeration-transition", Property::HillshadeExaggerationTransition),
     ("hillshade-highlight-color-transition", Property::HillshadeHighlightColorTransition),
@@ -336,6 +366,7 @@ const LAYER_PROPERTIES: &[(&str, Property)] = &[
     ("hillshade-illumination-direction-transition", Property::HillshadeIlluminationDirectionTransition),
     ("hillshade-method-transition", Property::HillshadeMethodTransition),
     ("hillshade-shadow-color-transition", Property::HillshadeShadowColorTransition),
+    ("resampling-transition", Property::ResamplingTransition),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -352,6 +383,7 @@ fn get_layer_property(layer: &HillshadeLayer, property: Property) -> StyleProper
         Property::HillshadeIlluminationDirection => make_style_property(layer.get_hillshade_illumination_direction()),
         Property::HillshadeMethod => make_style_property(layer.get_hillshade_method()),
         Property::HillshadeShadowColor => make_style_property(layer.get_hillshade_shadow_color()),
+        Property::Resampling => make_style_property(layer.get_resampling()),
         Property::HillshadeAccentColorTransition => {
             make_transition_style_property(&layer.get_hillshade_accent_color_transition())
         }
@@ -374,6 +406,7 @@ fn get_layer_property(layer: &HillshadeLayer, property: Property) -> StyleProper
         Property::HillshadeShadowColorTransition => {
             make_transition_style_property(&layer.get_hillshade_shadow_color_transition())
         }
+        Property::ResamplingTransition => make_transition_style_property(&layer.get_resampling_transition()),
     }
 }
 
@@ -503,6 +536,16 @@ impl Layer for HillshadeLayer {
             return None;
         }
 
+        if property == Property::Resampling {
+            let mut error = Error::default();
+            let Some(typed_value) = convert_property_value::<ResamplingType>(value, &mut error, false, false) else {
+                return Some(error);
+            };
+
+            self.set_resampling(&typed_value);
+            return None;
+        }
+
         let mut error = Error::default();
         let Some(transition) = <TransitionOptions as Converter>::convert(value, &mut error) else {
             return Some(error);
@@ -545,6 +588,11 @@ impl Layer for HillshadeLayer {
 
         if property == Property::HillshadeShadowColorTransition {
             self.set_hillshade_shadow_color_transition(&transition);
+            return None;
+        }
+
+        if property == Property::ResamplingTransition {
+            self.set_resampling_transition(&transition);
             return None;
         }
 
