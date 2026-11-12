@@ -21,7 +21,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn mbtiles_file_source() -> MBTilesFileSource {
-    MBTilesFileSource::new(&ResourceOptions::default_options())
+    MBTilesFileSource::new(&ResourceOptions::default())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.

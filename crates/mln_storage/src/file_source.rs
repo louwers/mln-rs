@@ -88,14 +88,6 @@ pub trait FileSource: Send + Sync {
 
 // Properties that may be supported by online file sources:
 
-/// Property name to set / get an access token.
-/// type: `std::string`
-pub const API_KEY_KEY: &str = "api-tkey";
-
-/// Property name to set / get base url.
-/// type: `std::string`
-pub const API_BASE_URL_KEY: &str = "api-base-url";
-
 /// Property name to set / get maximum number of concurrent requests.
 /// type: unsigned
 pub const MAX_CONCURRENT_REQUESTS_KEY: &str = "max-concurrent-requests";

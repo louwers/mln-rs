@@ -2,8 +2,7 @@
 // platform/default/src/mln/storage/offline_database.cpp.
 //
 // Failures are `DatabaseError`s, returned through `Result` and handled by
-// `handle_error`. `put_region_resource(s)` report only the tile count limit,
-// as `TileCountLimitExceeded`, and handle every other error themselves.
+// `handle_error`. `put_region_resource(s)` handle their errors themselves.
 //
 // Prepared statements are rusqlite's per-connection statement cache
 // (`prepare_cached`) instead of the `statements` map; both are dropped with
@@ -24,8 +23,6 @@ use mln_util::compression::{compress, decompress};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::logging::{Event, EventSeverity, Log};
-use mln_util::mapbox::is_canonical_url;
-use mln_util::tile_server_options::TileServerOptions;
 use rusqlite::params;
 
 use crate::merge_sideloaded::MERGE_SIDELOADED_DATABASE_SQL;
@@ -41,18 +38,9 @@ use crate::sqlite3::{
     get_i64, get_optional_bytes, get_optional_i64, get_optional_string, result_code,
 };
 
-/// `util::mapbox::DEFAULT_OFFLINE_TILE_COUNT_LIMIT`.
-pub const DEFAULT_OFFLINE_TILE_COUNT_LIMIT: u64 = 6000;
-
 /// The most rows whose `accessed` timestamp waits to be written. Reads of
 /// other rows while the queue is full don't update their timestamps.
 pub const MAX_PENDING_ACCESSED: usize = 4096;
-
-/// The offline regions would hold more tiles from MapLibre's demo tile server
-/// than the database's limit allows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("Mapbox tile limit exceeded")]
-pub struct TileCountLimitExceeded;
 
 /// Why a database operation failed.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -62,9 +50,6 @@ pub enum DatabaseError {
     /// A file operation failed with the OS error `code`.
     #[error("{message}")]
     Io { code: i32, message: String },
-    /// See [`TileCountLimitExceeded`].
-    #[error("{}", TileCountLimitExceeded)]
-    TileCountLimitExceeded,
     /// The operation failed, such as on a malformed region definition in the
     /// database.
     #[error("{0}")]
@@ -176,11 +161,6 @@ pub struct OfflineDatabase {
     db: Option<Database>,
 
     maximum_ambient_cache_size: u64,
-    offline_mapbox_tile_count_limit: u64,
-    offline_mapbox_tile_count: Option<u64>,
-
-    tile_server_options: TileServerOptions,
-
     current_ambient_cache_size: Option<u64>,
 
     autopack: bool,
@@ -219,15 +199,12 @@ impl OfflineDatabase {
         format!("{}{}_mlnRange={}-{}", resource.url, sep, first, second)
     }
 
-    /// `OfflineDatabase(std::string path, const TileServerOptions&)`.
-    pub fn new(path: impl Into<String>, options: &TileServerOptions) -> Self {
+    /// `OfflineDatabase(std::string path)`.
+    pub fn new(path: impl Into<String>) -> Self {
         let mut db = OfflineDatabase {
             path: path.into(),
             db: None,
             maximum_ambient_cache_size: DEFAULT_MAX_CACHE_SIZE,
-            offline_mapbox_tile_count_limit: DEFAULT_OFFLINE_TILE_COUNT_LIMIT,
-            offline_mapbox_tile_count: None,
-            tile_server_options: options.clone(),
             current_ambient_cache_size: None,
             autopack: true,
             read_only: false,
@@ -452,10 +429,8 @@ impl OfflineDatabase {
                 // C++: assert(false) in debug builds.
                 Log::error(Event::Database, format!("Can't {action}"));
             }
-            // `TileCountLimitExceeded` is ours and must be handled on client
-            // side (C++ rethrows; the callers that can see it return it).
             // `RegionNotFound` is the caller's to report.
-            DatabaseError::TileCountLimitExceeded | DatabaseError::RegionNotFound(_) => {}
+            DatabaseError::RegionNotFound(_) => {}
         }
     }
 
@@ -1207,31 +1182,6 @@ impl OfflineDatabase {
                 return Err(DatabaseError::Runtime("Merge database has incorrect user_version".to_owned()));
             }
 
-            let current_tile_count = self.get_offline_mapbox_tile_count();
-            let alias = format!("{}://", self.tile_server_options.uri_scheme_alias());
-            let count_of_tiles_to_merge = self
-                .query_row(
-                    "SELECT COUNT(DISTINCT st.id) \
-                     FROM side.tiles st \
-                     JOIN side.region_tiles srt ON srt.tile_id = st.id \
-                     LEFT JOIN tiles t ON st.url_template = t.url_template AND \
-                     st.pixel_ratio = t.pixel_ratio AND \
-                     st.z = t.z AND \
-                     st.x = t.x AND \
-                     st.y = t.y \
-                     WHERE t.id IS NULL \
-                     AND st.url_template LIKE ?1 || '%'",
-                    params![alias],
-                    |row| Ok(get_i64(row, 0)?),
-                )?
-                .unwrap_or(0);
-            // `(countOfTilesToMerge + currentTileCount) > offlineMapboxTileCountLimit`
-            // (int64_t + uint64_t: uint64_t arithmetic).
-            if (count_of_tiles_to_merge as u64).wrapping_add(current_tile_count) > self.offline_mapbox_tile_count_limit
-            {
-                return Err(DatabaseError::TileCountLimitExceeded);
-            }
-
             self.with_transaction(TransactionMode::Deferred, |this| {
                 this.get_db()?.exec(MERGE_SIDELOADED_DATABASE_SQL)?;
                 Ok(())
@@ -1306,9 +1256,6 @@ impl OfflineDatabase {
                 self.vacuum()?;
             }
             self.update_ambient_cache_size(&stats)?;
-
-            // Ensure that the cached offlineTileCount value is recalculated.
-            self.offline_mapbox_tile_count = None;
             Ok(())
         })();
         self.exception_ptr(result, "delete region")
@@ -1344,12 +1291,7 @@ impl OfflineDatabase {
     }
 
     /// `putRegionResource(int64_t, const Resource&, const Response&)`.
-    pub fn put_region_resource(
-        &mut self,
-        region_id: i64,
-        resource: &Resource,
-        response: &Response,
-    ) -> Result<u64, TileCountLimitExceeded> {
+    pub fn put_region_resource(&mut self, region_id: i64, resource: &Resource, response: &Response) -> u64 {
         let result = (|| -> DbResult<u64> {
             self.check_flags()?;
 
@@ -1360,14 +1302,10 @@ impl OfflineDatabase {
                 this.put_region_resource_internal(region_id, resource, response)
             })
         })();
-        match result {
-            Ok(size) => Ok(size),
-            Err(DatabaseError::TileCountLimitExceeded) => Err(TileCountLimitExceeded),
-            Err(e) => {
-                self.handle_error(&e, "write region resource");
-                Ok(0)
-            }
-        }
+        result.unwrap_or_else(|e| {
+            self.handle_error(&e, "write region resource");
+            0
+        })
     }
 
     /// `putRegionResources(int64_t, const std::list<std::tuple<Resource,
@@ -1377,7 +1315,7 @@ impl OfflineDatabase {
         region_id: i64,
         resources: &[(Resource, Response)],
         status: &mut OfflineRegionStatus,
-    ) -> Result<(), TileCountLimitExceeded> {
+    ) {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
 
@@ -1395,21 +1333,12 @@ impl OfflineDatabase {
             let mut completed_tile_size = 0u64;
 
             for (resource, response) in resources {
-                match self.put_region_resource_internal(region_id, resource, response) {
-                    Ok(resource_size) => {
-                        completed_resource_count += 1;
-                        completed_resource_size += resource_size;
-                        if resource.kind == Kind::Tile {
-                            completed_tile_count += 1;
-                            completed_tile_size += resource_size;
-                        }
-                    }
-                    Err(DatabaseError::TileCountLimitExceeded) => {
-                        // Commit the rest of the batch and rethrow
-                        transaction.commit()?;
-                        return Err(DatabaseError::TileCountLimitExceeded);
-                    }
-                    Err(e) => return Err(e),
+                let resource_size = self.put_region_resource_internal(region_id, resource, response)?;
+                completed_resource_count += 1;
+                completed_resource_size += resource_size;
+                if resource.kind == Kind::Tile {
+                    completed_tile_count += 1;
+                    completed_tile_size += resource_size;
                 }
             }
 
@@ -1422,13 +1351,8 @@ impl OfflineDatabase {
             status.completed_tile_size += completed_tile_size;
             Ok(())
         })();
-        match result {
-            Ok(()) => Ok(()),
-            Err(DatabaseError::TileCountLimitExceeded) => Err(TileCountLimitExceeded),
-            Err(e) => {
-                self.handle_error(&e, "write region resources");
-                Ok(())
-            }
+        if let Err(e) = result {
+            self.handle_error(&e, "write region resources");
         }
     }
 
@@ -1445,30 +1369,16 @@ impl OfflineDatabase {
             // A 304 keeps the stored data, so report the size it takes up.
             size = self.has_internal(resource)?.map_or(0, |(stored, _)| stored as u64);
         }
-        let previously_unused = self.mark_used(region_id, resource)?;
-
-        if previously_unused && self.exceeds_offline_mapbox_tile_count_limit(resource) {
-            return Err(DatabaseError::TileCountLimitExceeded);
-        }
-
-        if let Some(count) = self.offline_mapbox_tile_count.as_mut()
-            && resource.kind == Kind::Tile
-            && is_canonical_url(&self.tile_server_options, &resource.url)
-            && previously_unused
-        {
-            *count += 1;
-        }
-
+        self.mark_used(region_id, resource)?;
         Ok(size)
     }
 
-    /// Return value is true iff the resource was previously unused by any
-    /// other regions.
-    fn mark_used(&mut self, region_id: i64, resource: &Resource) -> DbResult<bool> {
+    /// Adds `resource`, which the database holds, to the region.
+    fn mark_used(&mut self, region_id: i64, resource: &Resource) -> DbResult<()> {
         self.check_flags()?;
 
         if let Some(tile) = tile_data(resource) {
-            let changes = self.execute(
+            self.execute(
                 "INSERT OR IGNORE INTO region_tiles (region_id, tile_id) \
                  SELECT                              ?1,        tiles.id \
                  FROM tiles \
@@ -1479,52 +1389,16 @@ impl OfflineDatabase {
                    AND z            = ?6 ",
                 params![region_id, tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
             )?;
-
-            let not_on_this_region = changes != 0;
-
-            let not_on_other_region = self
-                .query_row(
-                    "SELECT region_id \
-                     FROM region_tiles, tiles \
-                     WHERE region_id   != ?1 \
-                       AND tile_id      = id \
-                       AND url_template = ?2 \
-                       AND pixel_ratio  = ?3 \
-                       AND x            = ?4 \
-                       AND y            = ?5 \
-                       AND z            = ?6 \
-                     LIMIT 1 ",
-                    params![region_id, tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
-                    |_| Ok(()),
-                )?
-                .is_none();
-
-            Ok(not_on_this_region && not_on_other_region)
         } else {
-            let key = Self::cache_key(resource);
-            let changes = self.execute(
+            self.execute(
                 "INSERT OR IGNORE INTO region_resources (region_id, resource_id) \
                  SELECT                                  ?1,        resources.id \
                  FROM resources \
                  WHERE resources.url = ?2 ",
-                params![region_id, key],
+                params![region_id, Self::cache_key(resource)],
             )?;
-
-            if changes == 0 {
-                return Ok(false);
-            }
-
-            let found = self.query_row(
-                "SELECT region_id \
-                 FROM region_resources, resources \
-                 WHERE region_id    !=  ?1 \
-                   AND resources.url = ?2 \
-                 LIMIT 1 ",
-                params![region_id, key],
-                |_| Ok(()),
-            )?;
-            Ok(found.is_none())
         }
+        Ok(())
     }
 
     /// `getRegionDefinition(int64_t)`.
@@ -1785,62 +1659,6 @@ impl OfflineDatabase {
         }
     }
 
-    /// `setOfflineMapboxTileCountLimit`.
-    pub fn set_offline_mapbox_tile_count_limit(&mut self, limit: u64) {
-        self.offline_mapbox_tile_count_limit = limit;
-    }
-
-    /// `getOfflineMapboxTileCountLimit`.
-    #[must_use]
-    pub fn get_offline_mapbox_tile_count_limit(&self) -> u64 {
-        self.offline_mapbox_tile_count_limit
-    }
-
-    /// `offlineMapboxTileCountLimitExceeded`.
-    pub fn offline_mapbox_tile_count_limit_exceeded(&mut self) -> bool {
-        self.get_offline_mapbox_tile_count() >= self.offline_mapbox_tile_count_limit
-    }
-
-    /// `getOfflineMapboxTileCount`.
-    pub fn get_offline_mapbox_tile_count(&mut self) -> u64 {
-        // Calculating this on every call would be much simpler than caching
-        // and manually updating the value, but it would make offline
-        // downloads an O(n²) operation, because the database query below
-        // involves an index scan of region_tiles.
-
-        if let Some(count) = self.offline_mapbox_tile_count {
-            return count;
-        }
-
-        let alias = format!("{}://", self.tile_server_options.uri_scheme_alias());
-        let result = self.query_row(
-            "SELECT COUNT(DISTINCT id) \
-             FROM region_tiles, tiles \
-             WHERE tile_id = tiles.id \
-             AND url_template LIKE ?1 || '%'",
-            params![alias],
-            |row| Ok(get_i64(row, 0)?),
-        );
-        match result {
-            Ok(count) => {
-                let count = count.unwrap_or(0) as u64;
-                self.offline_mapbox_tile_count = Some(count);
-                count
-            }
-            Err(e) => {
-                self.handle_error(&e, "get offline Mapbox tile count");
-                u64::MAX
-            }
-        }
-    }
-
-    /// `exceedsOfflineMapboxTileCountLimit(const Resource&)`.
-    pub fn exceeds_offline_mapbox_tile_count_limit(&mut self, resource: &Resource) -> bool {
-        resource.kind == Kind::Tile
-            && is_canonical_url(&self.tile_server_options, &resource.url)
-            && self.offline_mapbox_tile_count_limit_exceeded()
-    }
-
     /// `markUsedResources(int64_t, const std::list<Resource>&)`.
     pub fn mark_used_resources(&mut self, region_id: i64, resources: &[Resource]) {
         let result = (|| -> DbResult<()> {
@@ -1873,11 +1691,6 @@ impl OfflineDatabase {
     /// `runPackDatabaseAutomatically`.
     pub fn run_pack_database_automatically(&mut self, autopack: bool) {
         self.autopack = autopack;
-    }
-
-    #[must_use]
-    pub fn tile_server_options(&self) -> &TileServerOptions {
-        &self.tile_server_options
     }
 
     /// `reopenDatabaseReadOnly(bool)`.

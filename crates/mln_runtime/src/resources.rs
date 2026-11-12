@@ -14,19 +14,18 @@ use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
 use mln_storage::{AsyncRequest, FileSource, OnlineFileSource, Resource, ResourceError, ResourceOptions, Response};
 use mln_util::error::Error;
-use mln_util::mapbox;
 use mln_util::sync::{MutexExt, RwLockExt};
 
 /// Serves a runtime's network requests in place of the library.
 ///
 /// A closure `Fn(ResourceRequest)` is a provider that serves every request.
-/// The library loads only `http`, `https` and the tile server's alias
-/// scheme, so without a resource transform, a request for another scheme
-/// that no provider serves fails at once.
+/// The library loads only `http` and `https`, so without a resource
+/// transform, a request for another scheme that no provider serves fails at
+/// once.
 pub trait ResourceProvider: Send + Sync + 'static {
     /// Whether the provider serves a request for a resource of `kind` at
-    /// `url`, the URL after the library expands any shorthand in the style's
-    /// URL. The library loads the requests that the provider doesn't serve.
+    /// `url`. The library loads the requests that the provider doesn't
+    /// serve.
     fn serves(&self, _kind: Kind, _url: &str) -> bool {
         true
     }
@@ -97,8 +96,8 @@ pub(crate) struct ProviderFileSource {
 
 /// Who loads a request.
 enum Route<'a> {
-    /// The provider, with the resolved URL.
-    Provider(&'a dyn ResourceProvider, String),
+    /// The provider.
+    Provider(&'a dyn ResourceProvider),
     /// The library. `declined` says whether a provider is set, which the
     /// message of a request that the library can't load names.
     Native { declined: bool },
@@ -110,16 +109,15 @@ impl ProviderFileSource {
     }
 
     /// Who loads `resource`, when `provider` is the runtime's provider.
-    fn route<'a>(&self, resource: &Resource, provider: Option<&'a dyn ResourceProvider>) -> Route<'a> {
+    fn route<'a>(resource: &Resource, provider: Option<&'a dyn ResourceProvider>) -> Route<'a> {
         if !resource.has_loading_method(mln_storage::LoadingMethod::Network) {
             return Route::Native { declined: false };
         }
         let Some(provider) = provider else {
             return Route::Native { declined: false };
         };
-        let url = resolved_url(&self.online.get_resource_options(), resource);
-        if provider.serves(resource.kind, &url) {
-            Route::Provider(provider, url)
+        if provider.serves(resource.kind, &resource.url) {
+            Route::Provider(provider)
         } else {
             Route::Native { declined: true }
         }
@@ -152,10 +150,7 @@ impl Native {
             return None;
         }
         let scheme = url_scheme(url)?;
-        let tile_server = self.online.get_resource_options().tile_server_options();
-        let loadable = ["http", "https", tile_server.uri_scheme_alias()]
-            .iter()
-            .any(|known| !known.is_empty() && known.eq_ignore_ascii_case(scheme));
+        let loadable = ["http", "https"].iter().any(|known| known.eq_ignore_ascii_case(scheme));
         (!loadable).then_some(scheme)
     }
 }
@@ -225,27 +220,11 @@ impl Drop for ImmediateRequest {
     }
 }
 
-/// The URL that the online file source would load for `resource`, or the
-/// resource's own URL when it has no other form.
-fn resolved_url(options: &ResourceOptions, resource: &Resource) -> String {
-    let tile_server = options.tile_server_options();
-    let api_key = options.api_key();
-    let url = &resource.url;
-    match resource.kind {
-        Kind::Unknown | Kind::Image => url.clone(),
-        Kind::Style => mapbox::normalize_style_url(&tile_server, url, api_key),
-        Kind::Source => mapbox::normalize_source_url(&tile_server, url, api_key).unwrap_or_else(|_| url.clone()),
-        Kind::Glyphs => mapbox::normalize_glyphs_url(&tile_server, url, api_key),
-        Kind::SpriteImage | Kind::SpriteJSON => mapbox::normalize_sprite_url(&tile_server, url, api_key),
-        Kind::Tile => mapbox::normalize_tile_url(&tile_server, url, api_key),
-    }
-}
-
 impl FileSource for ProviderFileSource {
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let hooked = self.hooks.provider.read_unpoisoned();
-        let (provider, resolved_url) = match self.route(resource, hooked.as_deref()) {
-            Route::Provider(provider, resolved_url) => (provider, resolved_url),
+        let provider = match Self::route(resource, hooked.as_deref()) {
+            Route::Provider(provider) => provider,
             Route::Native { declined } => {
                 drop(hooked);
                 return self.native().request(resource, callback, declined);
@@ -260,7 +239,7 @@ impl FileSource for ProviderFileSource {
         let mailbox = Mailbox::with_target(&scheduler::get_current(), target as Rc<dyn Any>);
         let shared =
             Arc::new(RequestShared { state: Mutex::new(RequestState::default()), target: ActorRef::new(&mailbox) });
-        let request = ResourceRequest { resource: resource.clone(), resolved_url, shared: Some(shared.clone()) };
+        let request = ResourceRequest { resource: resource.clone(), shared: Some(shared.clone()) };
         provider.request(request);
         drop(hooked);
         Box::new(ProviderRequest { mailbox, shared })
@@ -276,7 +255,7 @@ impl FileSource for ProviderFileSource {
 
     fn can_request(&self, resource: &Resource) -> bool {
         let hooked = self.hooks.provider.read_unpoisoned();
-        matches!(self.route(resource, hooked.as_deref()), Route::Provider(..)) || self.online.can_request(resource)
+        matches!(Self::route(resource, hooked.as_deref()), Route::Provider(..)) || self.online.can_request(resource)
     }
 
     fn set_resource_transform(&self, transform: mln_storage::resource_transform::ResourceTransform) {
@@ -386,7 +365,6 @@ impl Drop for ProviderRequest {
 /// request.
 pub struct ResourceRequest {
     resource: Resource,
-    resolved_url: String,
     shared: Option<Arc<RequestShared>>,
 }
 
@@ -396,13 +374,6 @@ impl ResourceRequest {
     #[must_use]
     pub fn resource(&self) -> &Resource {
         &self.resource
-    }
-
-    /// The URL to load: the resource's after the library expands any
-    /// shorthand in it, and before any resource transform.
-    #[must_use]
-    pub fn resolved_url(&self) -> &str {
-        &self.resolved_url
     }
 
     /// Whether the library no longer needs the request.
@@ -481,7 +452,6 @@ impl std::fmt::Debug for ResourceRequest {
         f.debug_struct("ResourceRequest")
             .field("kind", &self.resource.kind)
             .field("url", &self.resource.url)
-            .field("resolved_url", &self.resolved_url)
             .finish_non_exhaustive()
     }
 }

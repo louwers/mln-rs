@@ -46,7 +46,6 @@ use mln_util::chrono::{Clock, Duration};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_util::tile_server_options::TileServerOptions;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
@@ -110,13 +109,8 @@ pub(crate) fn run(launch: Launch) {
         Log::info(Event::General, "BENCHMARK MODE: Some optimizations are disabled.");
     }
 
-    // Set access token if present
-    let apikey = args.apikey.clone().or_else(|| std::env::var("MLN_API_KEY").ok()).unwrap_or_default();
     let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
-    let resource_options = ResourceOptions::default()
-        .with_cache_path(cache_db)
-        .with_api_key(apikey)
-        .with_tile_server_options(TileServerOptions::map_tiler_configuration());
+    let resource_options = ResourceOptions::default().with_cache_path(cache_db);
 
     let file_sources = FileSourceManager::new();
     let database_file_source = file_sources.get_file_source(FileSourceType::Database, &resource_options);

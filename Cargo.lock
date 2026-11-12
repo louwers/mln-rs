@@ -2641,7 +2641,6 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
- "regex",
 ]
 
 [[package]]

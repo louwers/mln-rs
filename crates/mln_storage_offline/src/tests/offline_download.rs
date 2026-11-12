@@ -23,7 +23,6 @@ use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::Scheme;
 
 use super::cpp_path;
@@ -34,7 +33,6 @@ use crate::offline_download::{OfflineDownload, WeakOfflineDownload};
 struct MockObserver {
     status_changed_fn: Option<Box<dyn Fn(OfflineRegionStatus)>>,
     response_error_fn: Option<Box<dyn Fn(ResourceError)>>,
-    mapbox_tile_count_limit_exceeded_fn: Option<Box<dyn Fn(u64)>>,
 }
 
 impl OfflineRegionObserver for MockObserver {
@@ -47,12 +45,6 @@ impl OfflineRegionObserver for MockObserver {
     fn response_error(&self, error: ResourceError) {
         if let Some(f) = &self.response_error_fn {
             f(error);
-        }
-    }
-
-    fn mapbox_tile_count_limit_exceeded(&self, limit: u64) {
-        if let Some(f) = &self.mapbox_tile_count_limit_exceeded_fn {
-            f(limit);
         }
     }
 }
@@ -87,7 +79,7 @@ impl OfflineTest {
         OfflineTest {
             run_loop,
             file_source: Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
-            db: Rc::new(RefCell::new(OfflineDatabase::new(path, &TileServerOptions::map_tiler_configuration()))),
+            db: Rc::new(RefCell::new(OfflineDatabase::new(path))),
             size: Rc::new(Cell::new(0)),
         }
     }
@@ -427,8 +419,8 @@ impl FakeOnlineFileSource {
         FakeOnlineFileSource {
             requests: LocalObject::new(RefCell::new(Vec::new())),
             next_id: std::sync::atomic::AtomicU64::new(0),
-            online_fs: OnlineFileSource::new(&ResourceOptions::default_options()),
-            resource_options: Mutex::new(ResourceOptions::default_options()),
+            online_fs: OnlineFileSource::new(&ResourceOptions::default()),
+            resource_options: Mutex::new(ResourceOptions::default()),
         }
     }
 
@@ -535,7 +527,7 @@ fn get_status_style_complete() {
     let download = test.download(region.get_id(), STYLE_URL, true);
 
     let response = test.response("style.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response).unwrap();
+    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
 
     let status = download.get_status();
 
@@ -557,13 +549,10 @@ fn get_status_style_and_source_complete() {
     let download = test.download(region.get_id(), STYLE_URL, true);
 
     let response = test.response("style.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response).unwrap();
+    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
 
     let response = test.response("streets.json");
-    test.db
-        .borrow_mut()
-        .put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response)
-        .unwrap();
+    test.db.borrow_mut().put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response);
 
     let status = download.get_status();
 
@@ -599,12 +588,9 @@ fn get_status_infinite_max_zoom() {
     );
 
     let response = test.response("style.json");
-    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response).unwrap();
+    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
     let response = test.response("streets.json");
-    test.db
-        .borrow_mut()
-        .put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response)
-        .unwrap();
+    test.db.borrow_mut().put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response);
 
     let status = download.get_status();
 
@@ -665,97 +651,6 @@ fn request_errors_are_retried() {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
                 assert_eq!(1, status.completed_resource_count);
-                stop.stop();
-            }
-        })),
-        ..Default::default()
-    };
-
-    download.set_observer(Some(Rc::new(observer)));
-    download.set_state(OfflineRegionDownloadState::Active);
-
-    test.run_loop.run();
-}
-
-// gtest: OfflineDownload.TileCountLimitExceededNoTileResponse
-#[test]
-fn tile_count_limit_exceeded_no_tile_response() {
-    let test = OfflineTest::new();
-    let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
-
-    let tile_limit: u64 = 0;
-
-    test.db.borrow_mut().set_offline_mapbox_tile_count_limit(tile_limit);
-
-    test.respond_with(Kind::Style, "mapbox_source.style.json", expect_style_url);
-
-    let mapbox_tile_count_limit_exceeded_called = Rc::new(Cell::new(false));
-
-    let (called, called2, stop) = (
-        mapbox_tile_count_limit_exceeded_called.clone(),
-        mapbox_tile_count_limit_exceeded_called.clone(),
-        test.run_loop.clone(),
-    );
-    let observer = MockObserver {
-        mapbox_tile_count_limit_exceeded_fn: Some(Box::new(move |limit: u64| {
-            assert!(!called.get());
-            assert_eq!(tile_limit, limit);
-            called.set(true);
-        })),
-        status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
-            if called2.get() {
-                assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
-                stop.stop();
-            } else {
-                assert!(!status.complete());
-                assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
-            }
-        })),
-        ..Default::default()
-    };
-
-    download.set_observer(Some(Rc::new(observer)));
-    download.set_state(OfflineRegionDownloadState::Active);
-
-    test.run_loop.run();
-}
-
-// gtest: OfflineDownload.TileCountLimitExceededWithTileResponse
-#[test]
-fn tile_count_limit_exceeded_with_tile_response() {
-    let test = OfflineTest::new();
-    let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
-
-    let tile_limit: u64 = 1;
-
-    test.db.borrow_mut().set_offline_mapbox_tile_count_limit(tile_limit);
-
-    test.respond_with(Kind::Style, "mapbox_source.style.json", expect_style_url);
-    test.respond_with(Kind::Tile, "0-0-0.vector.pbf", expect_tile_0_0_0("maptiler://{z}-{x}-{y}.vector.pbf"));
-
-    let mapbox_tile_count_limit_exceeded_called = Rc::new(Cell::new(false));
-
-    let (called, called2, stop) = (
-        mapbox_tile_count_limit_exceeded_called.clone(),
-        mapbox_tile_count_limit_exceeded_called.clone(),
-        test.run_loop.clone(),
-    );
-    let observer = MockObserver {
-        mapbox_tile_count_limit_exceeded_fn: Some(Box::new(move |limit: u64| {
-            assert!(!called.get());
-            assert_eq!(tile_limit, limit);
-            called.set(true);
-        })),
-        status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
-            if called2.get() {
-                assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
-                stop.stop();
-            } else {
-                assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
-            }
-            if status.completed_resource_count > tile_limit {
                 stop.stop();
             }
         })),
@@ -1049,7 +944,6 @@ fn no_freezing_on_not_found_error() {
                 stop.stop();
             }
         })),
-        ..Default::default()
     };
 
     download.set_observer(Some(Rc::new(observer)));
@@ -1121,7 +1015,6 @@ fn run_until_inactive(
                 stop.stop();
             }
         })),
-        ..Default::default()
     };
     download.set_observer(Some(Rc::new(observer)));
     download.set_state(OfflineRegionDownloadState::Active);
@@ -1420,49 +1313,6 @@ fn reports_a_style_with_no_content() {
     let stored = stored_status(&test, region.get_id());
     assert_eq!(1, stored.required_resource_count);
     assert!(!stored.required_resource_count_is_precise);
-}
-
-// gtest: OfflineDownload.RestartingFromTheTileLimitKeepsTheDownloadActive
-#[test]
-fn restarting_from_the_tile_limit_keeps_the_download_active() {
-    let test = OfflineTest::new();
-    let region = test.create_region().expect("region");
-    test.db.borrow_mut().set_offline_mapbox_tile_count_limit(0);
-    test.respond_with(Kind::Style, "mapbox_source.style.json", |_| {});
-    test.respond_with(Kind::Tile, "0-0-0.vector.pbf", |_| {});
-
-    // The observer raises the limit and restarts the download.
-    let download = OfflineDownload::new(region.get_id(), world_at_zoom(0.0), test.db.clone(), test.file_source.clone());
-    let limits_exceeded = Rc::new(Cell::new(0));
-    let restarting = Rc::new(Cell::new(false));
-    let last = Rc::new(Cell::new(OfflineRegionStatus::default()));
-    let (exceeded, restart, db, weak) =
-        (limits_exceeded.clone(), restarting.clone(), test.db.clone(), download.downgrade());
-    let (restarting_now, last_status, stop) = (restarting.clone(), last.clone(), test.run_loop.clone());
-    let observer = MockObserver {
-        mapbox_tile_count_limit_exceeded_fn: Some(Box::new(move |_| {
-            exceeded.set(exceeded.get() + 1);
-            db.borrow_mut().set_offline_mapbox_tile_count_limit(10);
-            restart.set(true);
-            weak.set_state(OfflineRegionDownloadState::Inactive);
-            weak.set_state(OfflineRegionDownloadState::Active);
-            restart.set(false);
-        })),
-        status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
-            if status.download_state == OfflineRegionDownloadState::Inactive && !restarting_now.get() {
-                last_status.set(status);
-                stop.stop();
-            }
-        })),
-        ..Default::default()
-    };
-    download.set_observer(Some(Rc::new(observer)));
-    download.set_state(OfflineRegionDownloadState::Active);
-    test.run_loop.run();
-
-    assert_eq!(1, limits_exceeded.get());
-    assert!(last.get().complete());
-    assert_eq!(1, last.get().completed_tile_count);
 }
 
 /// `RefreshedRegion`: downloads a region of a style, a TileJSON, and one

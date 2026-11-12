@@ -19,7 +19,7 @@ use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 fn http_file_source() -> HTTPFileSource {
-    HTTPFileSource::new(&ResourceOptions::default_options())
+    HTTPFileSource::new(&ResourceOptions::default())
 }
 
 fn data(res: &Response) -> &[u8] {

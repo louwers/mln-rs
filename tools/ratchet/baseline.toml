@@ -104,7 +104,6 @@
 "crates/mln_storage/src/sqlite3.rs" = 4
 "crates/mln_storage/src/stub_file_source.rs" = 2
 "crates/mln_storage/src/ureq_transport.rs" = 1
-"crates/mln_storage_offline/src/mapbox.rs" = 2
 "crates/mln_style/src/color_ramp_property_value.rs" = 2
 "crates/mln_style/src/conversion/function.rs" = 3
 "crates/mln_style/src/conversion/property_value.rs" = 1
@@ -197,7 +196,6 @@
 "crates/mln_gl/src/context.rs" = 1
 "crates/mln_headless/src/headless_frontend.rs" = 1
 "crates/mln_headless/tests/gtest_map.rs" = 3
-"crates/mln_headless/tests/gtest_query.rs" = 1
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
 "crates/mln_map/src/map.rs" = 4
@@ -244,7 +242,7 @@
 "crates/mln_style/src/property_expression.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1
 "crates/mln_style/src/sources/geojson_source_impl.rs" = 1
-"crates/mln_style/src/sources/tile_source.rs" = 3
+"crates/mln_style/src/sources/tile_source.rs" = 1
 "crates/mln_style/src/style_impl.rs" = 1
 "crates/mln_style/src/tests/property_expression.rs" = 1
 "crates/mln_style_types/src/position.rs" = 1

@@ -46,8 +46,6 @@ use mln_util::range::Range;
 use mln_util::tileset::Tileset;
 use mln_vec_map::VecMap;
 
-use crate::mapbox::{canonicalize_glyph_url, canonicalize_source_url, canonicalize_sprite_url, canonicalize_tileset};
-
 const K_RESOURCES_BATCH_SIZE: usize = 64;
 const K_MARK_BATCH_SIZE: usize = 200;
 
@@ -467,16 +465,13 @@ impl Inner {
         parser.parse(&String::from_utf8_lossy(style_data)).map_err(|error| error.to_string())?;
         self.status.borrow_mut().required_resource_count_is_precise = true;
 
-        let tile_server_options = self.online_file_source.get_resource_options().tile_server_options();
-        parser.glyph_url = canonicalize_glyph_url(&tile_server_options, &parser.glyph_url);
-
         for source in &parser.sources {
             let type_ = source.get_type();
 
             let handle_tiled_source = |url_or_tileset: &UrlOrTileset, tile_size: u16| match url_or_tileset {
                 UrlOrTileset::Tileset(tileset) => self.queue_tiles(type_, tile_size, tileset),
                 UrlOrTileset::Url(raw_url) => {
-                    let url = canonicalize_source_url(&tile_server_options, raw_url);
+                    let url = raw_url.clone();
 
                     {
                         let mut status = self.status.borrow_mut();
@@ -500,21 +495,12 @@ impl Inner {
                                 return Err("the TileJSON has no content".to_owned());
                             };
                             let mut error = ConversionError::default();
-                            let Some(mut tileset) = convert_json_tileset(data, &mut error) else {
+                            let Some(tileset) = convert_json_tileset(data, &mut error) else {
                                 return Err(error.message);
                             };
                             if tileset.tiles.is_empty() {
                                 return Err("the TileJSON has no tile URLs".to_owned());
                             }
-
-                            let resource_options = this.online_file_source.get_resource_options();
-                            canonicalize_tileset(
-                                &resource_options.tile_server_options(),
-                                &mut tileset,
-                                &url,
-                                type_,
-                                tile_size,
-                            );
                             this.queue_tiles(type_, tile_size, &tileset);
 
                             this.required_source_urls.borrow_mut().remove(&url);
@@ -596,11 +582,11 @@ impl Inner {
         if !parser.sprites.is_empty() {
             // Always request 1x and @2x sprite images for portability.
             for sprite in &parser.sprites {
-                let sprite_url = canonicalize_sprite_url(&tile_server_options, &sprite.sprite_url);
-                self.queue_resource(Resource::sprite_image(&sprite_url, 1.0));
-                self.queue_resource(Resource::sprite_image(&sprite_url, 2.0));
-                self.queue_resource(Resource::sprite_json(&sprite_url, 1.0));
-                self.queue_resource(Resource::sprite_json(&sprite_url, 2.0));
+                let sprite_url = &sprite.sprite_url;
+                self.queue_resource(Resource::sprite_image(sprite_url, 1.0));
+                self.queue_resource(Resource::sprite_image(sprite_url, 2.0));
+                self.queue_resource(Resource::sprite_json(sprite_url, 1.0));
+                self.queue_resource(Resource::sprite_json(sprite_url, 2.0));
             }
         }
 
@@ -635,9 +621,7 @@ impl Inner {
 
         if self.resources_remaining.borrow().is_empty() {
             // Flush pending buffers.
-            if !self.flush_resources_buffer() {
-                return;
-            }
+            self.flush_resources_buffer();
             if self.interrupted(current) {
                 return;
             }
@@ -687,22 +671,16 @@ impl Inner {
         self.traversal.get() != current || !self.is_active()
     }
 
-    fn flush_resources_buffer(self: &Rc<Self>) -> bool {
+    fn flush_resources_buffer(self: &Rc<Self>) {
         if self.buffer.borrow().is_empty() {
-            return true;
+            return;
         }
         let buffer = self.buffer.borrow().clone();
         let mut status = *self.status.borrow();
-        let result = self.offline_database.borrow_mut().put_region_resources(self.id, &buffer, &mut status);
+        self.offline_database.borrow_mut().put_region_resources(self.id, &buffer, &mut status);
         *self.status.borrow_mut() = status;
-        if let Ok(()) = result {
-            self.buffer.borrow_mut().clear();
-            self.notify_status_changed();
-            true
-        } else {
-            self.on_mapbox_tile_count_limit_exceeded();
-            false
-        }
+        self.buffer.borrow_mut().clear();
+        self.notify_status_changed();
     }
 
     fn queue_resource(&self, mut resource: Resource) {
@@ -814,14 +792,6 @@ impl Inner {
             }
         };
 
-        // A stale tile is already stored, so refreshing it isn't a new
-        // download. If it isn't in this region yet, put_region_resources
-        // reports the limit when the refresh adds it.
-        if stale.is_none() && self.offline_database.borrow_mut().exceeds_offline_mapbox_tile_count_limit(&resource) {
-            self.on_mapbox_tile_count_limit_exceeded();
-            return;
-        }
-
         let mut online_resource = resource.clone();
         if let Some((stored, _)) = &stale {
             // Lets the server answer 304 Not Modified.
@@ -921,18 +891,12 @@ impl Inner {
         // Flush buffer periodically.
         // Have to keep `resourcesRemaining.empty()` as the following
         // condition would fail otherwise.
-        // TODO: Simplify the tile count limit check code path!
         let flush =
             self.buffer.borrow().len() == K_RESOURCES_BATCH_SIZE || self.resources_remaining.borrow().is_empty();
-        if flush && !self.flush_resources_buffer() {
-            return;
+        if flush {
+            self.flush_resources_buffer();
         }
         if self.interrupted(current) {
-            return;
-        }
-
-        if stale.is_none() && self.offline_database.borrow_mut().exceeds_offline_mapbox_tile_count_limit(resource) {
-            self.on_mapbox_tile_count_limit_exceeded();
             return;
         }
 
@@ -982,17 +946,5 @@ impl Inner {
     fn report_unparsable(&self, resource: &Resource, error: &str) {
         let message = format!("Can't parse {}: {error}", resource.url);
         self.observer().response_error(ResourceError::new(Reason::Other, message));
-    }
-
-    fn on_mapbox_tile_count_limit_exceeded(self: &Rc<Self>) {
-        // The observer can raise the limit and restart the download, which
-        // this traversal must leave running.
-        let current = self.traversal.get();
-        let limit = self.offline_database.borrow().get_offline_mapbox_tile_count_limit();
-        self.observer().mapbox_tile_count_limit_exceeded(limit);
-        if self.traversal.get() != current {
-            return;
-        }
-        self.set_state(OfflineRegionDownloadState::Inactive);
     }
 }

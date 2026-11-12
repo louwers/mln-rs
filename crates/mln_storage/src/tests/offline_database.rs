@@ -14,7 +14,6 @@ use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::geometry::{Geometry, Point};
 use mln_util::logging::{Event, EventSeverity};
-use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::Scheme;
 
 use super::{
@@ -25,7 +24,7 @@ use crate::offline::{
     OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineRegionMetadata, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
 };
-use crate::offline_database::{DatabaseError, OfflineDatabase, TileCountLimitExceeded};
+use crate::offline_database::OfflineDatabase;
 use crate::resource::{Kind, LoadingMethod, Resource, TileData};
 use crate::response::{Reason, ResourceError, Response};
 use crate::sqlite3::{Database, OpenFlag, Query, Statement, result_code};
@@ -102,21 +101,17 @@ mod fixture {
     use super::*;
 
     pub fn resource() -> Resource {
-        Resource::new(Kind::Style, "maptiler://test")
+        Resource::new(Kind::Style, "https://example.com/test")
     }
 
     pub fn tile() -> Resource {
-        Resource::tile("maptiler://test", 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::All)
+        Resource::tile("https://example.com/test", 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::All)
     }
 
     pub fn response() -> Response {
         let mut res = Response::new();
         res.data = Some(Arc::new(b"first".to_vec()));
         res
-    }
-
-    pub fn tile_server_options() -> TileServerOptions {
-        TileServerOptions::map_tiler_configuration()
     }
 }
 
@@ -179,8 +174,8 @@ fn create() {
     let log = FixtureLog::new();
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
-    assert!(db.get(&Resource::new(Kind::Unknown, "maptiler://test")).is_none());
+    let mut db = OfflineDatabase::new(&filename);
+    assert!(db.get(&Resource::new(Kind::Unknown, "https://example.com/test")).is_none());
 
     check_log_empty(&log);
 }
@@ -199,12 +194,12 @@ fn schema_version() {
     }
 
     {
-        let _db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let _db = OfflineDatabase::new(&filename);
     }
 
     assert_eq!(6, database_user_version(&filename));
 
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     // Now try inserting and reading back to make sure we have a valid
     // database.
     for res in [fixture::resource(), fixture::tile()] {
@@ -227,7 +222,7 @@ fn invalid() {
     delete_database_files(&filename);
     std::fs::write(&filename, "this is an invalid file").unwrap();
 
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     // Checking two possibilities for the error string because it apparently
     // changes between SQLite versions.
     assert_eq!(
@@ -253,7 +248,7 @@ fn invalid() {
 #[test]
 fn put_does_not_store_connection_errors() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = Resource::new(Kind::Unknown, "http://example.com/");
     let mut response = Response::new();
@@ -269,7 +264,7 @@ fn put_does_not_store_connection_errors() {
 #[test]
 fn put_does_not_store_server_errors() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = Resource::new(Kind::Unknown, "http://example.com/");
     let mut response = Response::new();
@@ -286,7 +281,7 @@ fn put_does_not_store_server_errors() {
 #[test]
 fn tile_resource_without_tile_data() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = Resource::new(Kind::Tile, "http://example.com/0/0/0.pbf");
     let mut response = Response::new();
@@ -301,7 +296,7 @@ fn tile_resource_without_tile_data() {
 #[test]
 fn put_resource() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = Resource::new(Kind::Style, "http://example.com/");
     let mut response = Response::new();
@@ -335,7 +330,7 @@ fn get_resource_from_offline_region() {
     delete_database_files(&filename);
     copy_file(&filename, &fixture("satellite_test.db"));
 
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
 
     let resource = Resource::style("maptiler://maps/hybrid");
     assert!(db.get(&resource).is_some());
@@ -347,12 +342,12 @@ fn get_resource_from_offline_region() {
 #[test]
 fn put_and_get_resource() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let mut response1 = Response::new();
     response1.data = Some(data("foobar"));
 
-    let resource = Resource::style("maptiler://example.com/style");
+    let resource = Resource::style("https://example.com/style");
 
     db.put(&resource, &response1);
 
@@ -376,7 +371,7 @@ fn example_tile() -> Resource {
 #[test]
 fn put_tile() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = example_tile();
     let mut response = Response::new();
@@ -427,7 +422,7 @@ fn cache_key() {
 #[test]
 fn put_resource_no_content() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = Resource::new(Kind::Style, "http://example.com/");
     let mut response = Response::new();
@@ -446,7 +441,7 @@ fn put_resource_no_content() {
 #[test]
 fn put_tile_not_found() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = example_tile();
     let mut response = Response::new();
@@ -465,7 +460,7 @@ fn put_tile_not_found() {
 #[test]
 fn create_region() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("http://example.com/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
     let metadata: OfflineRegionMetadata = vec![1, 2, 3];
     let region = db.create_region(&definition.clone().into(), &metadata);
@@ -481,7 +476,7 @@ fn create_region() {
 #[test]
 fn update_metadata() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("http://example.com/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
     let metadata: OfflineRegionMetadata = vec![1, 2, 3];
     let region = db.create_region(&definition.into(), &metadata).expect("region");
@@ -498,7 +493,7 @@ fn update_metadata() {
 #[test]
 fn list_regions() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("http://example.com/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, false);
     let metadata: OfflineRegionMetadata = vec![1, 2, 3];
 
@@ -518,7 +513,7 @@ fn list_regions() {
 #[test]
 fn get_region() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("http://example.com/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, false);
     let metadata: OfflineRegionMetadata = vec![1, 2, 3];
 
@@ -537,7 +532,7 @@ fn get_region() {
 #[test]
 fn get_region_definition() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("http://example.com/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, false);
     let metadata: OfflineRegionMetadata = vec![1, 2, 3];
 
@@ -561,7 +556,7 @@ fn disabled_maximum_ambient_cache_size() {
     let database_size = || file_size(&filename);
 
     {
-        let _db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let _db = OfflineDatabase::new(&filename);
     }
 
     let initial_size = file_size(&filename);
@@ -571,26 +566,27 @@ fn disabled_maximum_ambient_cache_size() {
     response.data = Some(random_string(100 * 1024));
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(maximum_size as u64); // 50 MB
 
-        let definition = tile_pyramid("maptiler://masp/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
+        let definition =
+            tile_pyramid("https://example.com/masp/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
         let metadata: OfflineRegionMetadata = vec![1, 2, 3];
 
         let region = db.create_region(&definition.into(), &metadata).unwrap();
 
         // Add 100 MB of resources (50/50 ambient/region)
         for i in 0..250 {
-            let ambient_tile = tile(&format!("maptiler://tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
+            let ambient_tile = tile(&format!("https://example.com/tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
             db.put(&ambient_tile, &response);
 
-            let ambient_style = style(&format!("maptiler://maps/ambient_style_{i}"));
+            let ambient_style = style(&format!("https://example.com/maps/ambient_style_{i}"));
             db.put(&ambient_style, &response);
 
-            let region_tile = tile(&format!("maptiler://tiles/tiles/region_tile_{i}"), 1.0, 0, 0, 0);
+            let region_tile = tile(&format!("https://example.com/tiles/tiles/region_tile_{i}"), 1.0, 0, 0, 0);
             let _ = db.put_region_resource(region.get_id(), &region_tile, &response);
 
-            let region_style = style(&format!("maptiler://maps/region_style_{i}"));
+            let region_style = style(&format!("https://example.com/maps/region_style_{i}"));
             let _ = db.put_region_resource(region.get_id(), &region_style, &response);
         }
     }
@@ -604,7 +600,7 @@ fn disabled_maximum_ambient_cache_size() {
     maximum_size = 30 * 1024 * 1024;
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
     }
 
@@ -614,7 +610,7 @@ fn disabled_maximum_ambient_cache_size() {
     assert!(database_size() <= 60 * 1024 * 1024);
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
         let region = db.list_regions().unwrap().remove(0);
         db.delete_region(&region);
@@ -626,7 +622,7 @@ fn disabled_maximum_ambient_cache_size() {
     assert!(database_size() >= maximum_size / 2);
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(maximum_size as u64 * 2); // 60 MB
     }
 
@@ -636,15 +632,15 @@ fn disabled_maximum_ambient_cache_size() {
     assert!(database_size() >= maximum_size / 2);
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
 
         // Add ~50 MB in ambient cache data.
         for i in 0..250 {
-            let ambient_tile = tile(&format!("maptiler://tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
+            let ambient_tile = tile(&format!("https://example.com/tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
             db.put(&ambient_tile, &response);
 
-            let ambient_style = style(&format!("maptiler://mas/ambient_style_{i}"));
+            let ambient_style = style(&format!("https://example.com/mas/ambient_style_{i}"));
             db.put(&ambient_style, &response);
         }
     }
@@ -656,7 +652,7 @@ fn disabled_maximum_ambient_cache_size() {
     maximum_size = 20 * 1024 * 1024;
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(maximum_size as u64); // 20 MB
     }
 
@@ -665,15 +661,15 @@ fn disabled_maximum_ambient_cache_size() {
     assert!(database_size() >= initial_size);
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(0);
 
         for i in 0..5 {
-            let ambient_tile = tile(&format!("maptiler://tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
+            let ambient_tile = tile(&format!("https://example.com/tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
             db.put(&ambient_tile, &response);
             assert!(db.get(&ambient_tile).is_none());
 
-            let ambient_style = style(&format!("maptiler://maps/ambient_style_{i}"));
+            let ambient_style = style(&format!("https://example.com/maps/ambient_style_{i}"));
             db.put(&ambient_style, &response);
             assert!(db.get(&ambient_style).is_none());
         }
@@ -703,7 +699,7 @@ fn delete_region() {
     delete_database_files(&filename);
 
     {
-        let _db_create = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let _db_create = OfflineDatabase::new(&filename);
     }
 
     let initial_size = file_size(&filename);
@@ -713,9 +709,10 @@ fn delete_region() {
         response.data = Some(random_string(512 * 1024));
         let _ = response;
 
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
 
-        let definition = tile_pyramid("maptiler://maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
+        let definition =
+            tile_pyramid("https://example.com/maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
         let metadata: OfflineRegionMetadata = vec![1, 2, 3];
 
         let region1 = db.create_region(&definition.clone().into(), &metadata).unwrap();
@@ -724,16 +721,14 @@ fn delete_region() {
         let mut status = OfflineRegionStatus::default();
         db.put_region_resources(
             region1.get_id(),
-            &generate_resources("maptiler://tiles/tiles/tile_1", "maptiler://maps/style_1"),
+            &generate_resources("https://example.com/tiles/tiles/tile_1", "https://example.com/maps/style_1"),
             &mut status,
-        )
-        .unwrap();
+        );
         db.put_region_resources(
             region2.get_id(),
-            &generate_resources("maptiler://tiles/tiles/tile_2", "maptiler://maps/style_2"),
+            &generate_resources("https://example.com/tiles/tiles/tile_2", "https://example.com/maps/style_2"),
             &mut status,
-        )
-        .unwrap();
+        );
         let size_with_two_regions = file_size(&filename);
 
         db.run_pack_database_automatically(false);
@@ -777,7 +772,7 @@ fn pack() {
     let filename = filename();
     delete_database_files(&filename);
 
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     let initial_size = file_size(&filename);
     db.run_pack_database_automatically(false);
 
@@ -785,10 +780,10 @@ fn pack() {
     response.data = Some(random_string(512 * 1024));
 
     for i in 0..50 {
-        let t = tile(&format!("maptiler://tiles/tiles/tile_{i}"), 1.0, 0, 0, 0);
+        let t = tile(&format!("https://example.com/tiles/tiles/tile_{i}"), 1.0, 0, 0, 0);
         db.put(&t, &response);
 
-        let s = style(&format!("maptiler://maps/style_{i}"));
+        let s = style(&format!("https://example.com/maps/style_{i}"));
         db.put(&s, &response);
     }
     let populated_size = file_size(&filename);
@@ -803,135 +798,39 @@ fn pack() {
     check_log_empty(&log);
 }
 
-// gtest: OfflineDatabase.MapboxTileLimitExceeded
-#[test]
-fn mapbox_tile_limit_exceeded() {
-    let log = FixtureLog::new();
-
-    let limit: u64 = 60;
-
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
-    db.set_offline_mapbox_tile_count_limit(limit);
-
-    let mut response = Response::new();
-    response.data = Some(random_string(4096));
-
-    let insert_ambient_tile = |db: &mut OfflineDatabase, i: u64| {
-        let ambient_tile = tile(&format!("maptiler://tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
-        db.put(&ambient_tile, &response);
-    };
-
-    let insert_region_tile = |db: &mut OfflineDatabase, region_id: i64, i: u64| {
-        let t = tile(&format!("maptiler://tiles/tiles/region_tile_{i}"), 1.0, 0, 0, 0);
-        db.put_region_resource(region_id, &t, &response)
-    };
-
-    let definition1 = tile_pyramid("maptiler://maps/style1", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
-    let metadata1: OfflineRegionMetadata = vec![1, 2, 3];
-
-    let definition2 = tile_pyramid("maptiler://maps/style2", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
-    let metadata2: OfflineRegionMetadata = vec![1, 2, 3];
-
-    let region1 = db.create_region(&definition1.into(), &metadata1).unwrap();
-    let region2 = db.create_region(&definition2.into(), &metadata2).unwrap();
-
-    // Fine because tile limit only affects offline region.
-    for i in 0..limit * 2 {
-        insert_ambient_tile(&mut db, i);
-    }
-
-    assert_eq!(db.get_offline_mapbox_tile_count(), 0);
-
-    // Fine because this region is under the tile limit.
-    for i in 0..limit - 10 {
-        insert_region_tile(&mut db, region1.get_id(), i).unwrap();
-    }
-
-    assert_eq!(db.get_offline_mapbox_tile_count(), limit - 10);
-
-    // Fine because this region + the previous is at the limit.
-    for i in limit..limit + 10 {
-        insert_region_tile(&mut db, region2.get_id(), i).unwrap();
-    }
-
-    assert_eq!(db.get_offline_mapbox_tile_count(), limit);
-
-    // Full.
-    assert_eq!(Err(TileCountLimitExceeded), insert_region_tile(&mut db, region1.get_id(), 200));
-    assert_eq!(Err(TileCountLimitExceeded), insert_region_tile(&mut db, region2.get_id(), 201));
-
-    // These tiles are already on respective regions.
-    insert_region_tile(&mut db, region1.get_id(), 0).unwrap();
-    insert_region_tile(&mut db, region2.get_id(), 60).unwrap();
-
-    // Should be fine, ambient tile.
-    insert_ambient_tile(&mut db, 333);
-
-    // Also fine, not Mapbox.
-    let not_mapbox_tile = tile("foobar://region_tile", 1.0, 0, 0, 0);
-    db.put_region_resource(region1.get_id(), &not_mapbox_tile, &response).unwrap();
-
-    // These tiles are not on the region they are being added to, but exist
-    // on another region, so they do not add to the total size.
-    insert_region_tile(&mut db, region2.get_id(), 0).unwrap();
-    insert_region_tile(&mut db, region1.get_id(), 60).unwrap();
-
-    assert_eq!(db.get_offline_mapbox_tile_count(), limit);
-
-    // The tile 1 belongs to two regions and will still count as resource.
-    db.delete_region(&region2);
-
-    assert_eq!(db.get_offline_mapbox_tile_count(), 51);
-
-    // Add new tiles to the region 1. We are adding 10, which would blow up
-    // the limit if it wasn't for the fact that tile 60 is already on the
-    // database and will not count.
-    for i in limit..limit + 10 {
-        insert_region_tile(&mut db, region1.get_id(), i).unwrap();
-    }
-
-    // Full again.
-    assert_eq!(Err(TileCountLimitExceeded), insert_region_tile(&mut db, region1.get_id(), 202));
-
-    db.delete_region(&region1);
-
-    assert_eq!(0, db.list_regions().unwrap().len());
-    check_log_empty(&log);
-}
-
 // gtest: OfflineDatabase.Invalidate
 #[test]
 fn invalidate() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let mut response = Response::new();
     response.no_content = true;
     response.must_revalidate = false;
     response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
 
-    let ambient_tile = tile("maptiler://tiles/tiles/tile_ambient", 1.0, 0, 0, 0);
+    let ambient_tile = tile("https://example.com/tiles/tiles/tile_ambient", 1.0, 0, 0, 0);
     db.put(&ambient_tile, &response);
 
-    let ambient_style = style("maptiler://maps/style_ambient");
+    let ambient_style = style("https://example.com/maps/style_ambient");
     db.put(&ambient_style, &response);
 
-    let definition = tile_pyramid("maptiler://maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
+    let definition = tile_pyramid("https://example.com/maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
     let metadata: OfflineRegionMetadata = vec![1, 2, 3];
 
     let region1 = db.create_region(&definition.clone().into(), &metadata).unwrap();
-    let region1_tile = tile("maptiler://tiles/tiles/tile_offline_region1", 1.0, 0, 0, 0);
-    db.put_region_resource(region1.get_id(), &region1_tile, &response).unwrap();
+    let region1_tile = tile("https://example.com/tiles/tiles/tile_offline_region1", 1.0, 0, 0, 0);
+    db.put_region_resource(region1.get_id(), &region1_tile, &response);
 
-    let region1_style = style("maptiler://maps/style_offline_region1");
-    db.put_region_resource(region1.get_id(), &region1_style, &response).unwrap();
+    let region1_style = style("https://example.com/maps/style_offline_region1");
+    db.put_region_resource(region1.get_id(), &region1_style, &response);
 
     let region2 = db.create_region(&definition.into(), &metadata).unwrap();
-    let region2_tile = tile("maptiler://tiles/tiles/tile_offline_region2", 1.0, 0, 0, 0);
-    db.put_region_resource(region2.get_id(), &region2_tile, &response).unwrap();
+    let region2_tile = tile("https://example.com/tiles/tiles/tile_offline_region2", 1.0, 0, 0, 0);
+    db.put_region_resource(region2.get_id(), &region2_tile, &response);
 
-    let region2_style = style("maptiler://maps/style_offline_region2");
-    db.put_region_resource(region2.get_id(), &region2_style, &response).unwrap();
+    let region2_style = style("https://example.com/maps/style_offline_region2");
+    db.put_region_resource(region2.get_id(), &region2_style, &response);
 
     let mut get = |r: &Resource| db.get(r).expect("response");
 
@@ -1002,7 +901,7 @@ fn clear_ambient_cache() {
     delete_database_files(&filename);
 
     {
-        let _db_create = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let _db_create = OfflineDatabase::new(&filename);
     }
 
     let initial_size = file_size(&filename);
@@ -1011,13 +910,13 @@ fn clear_ambient_cache() {
         let mut response = Response::new();
         response.data = Some(random_string(512 * 1024));
 
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
 
         for i in 0..50 {
-            let t = tile(&format!("maptiler://tiles/tiles/tile_{i}"), 1.0, 0, 0, 0);
+            let t = tile(&format!("https://example.com/tiles/tiles/tile_{i}"), 1.0, 0, 0, 0);
             db.put(&t, &response);
 
-            let s = style(&format!("maptiler://maps/style_{i}"));
+            let s = style(&format!("https://example.com/maps/style_{i}"));
             db.put(&s, &response);
         }
 
@@ -1032,7 +931,7 @@ fn clear_ambient_cache() {
 #[test]
 fn create_region_infinite_max_zoom() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, false);
     let metadata = OfflineRegionMetadata::new();
     let region = db.create_region(&definition.into(), &metadata).expect("region");
@@ -1050,10 +949,10 @@ fn concurrent_use() {
     let filename = filename();
     delete_database_files(&filename);
 
-    let mut db1 = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db1 = OfflineDatabase::new(&filename);
     check_log_empty(&log);
 
-    let mut db2 = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db2 = OfflineDatabase::new(&filename);
 
     // C++'s FixtureLog observes every thread; the port's observes its own,
     // so each thread checks its log.
@@ -1091,7 +990,7 @@ fn concurrent_use() {
 #[test]
 fn put_returns_size() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let mut compressible = Response::new();
     compressible.data = Some(Arc::new(vec![0u8; 1024]));
@@ -1117,7 +1016,7 @@ fn put_returns_size() {
 #[test]
 fn put_evicts_least_recently_used_resources() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.set_maximum_ambient_cache_size(1024 * 100);
 
     let mut response = Response::new();
@@ -1139,7 +1038,7 @@ fn put_evicts_least_recently_used_resources() {
 #[test]
 fn offline_region_does_not_affect_ambient_cache_size() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let data_size: u32 = 1024 * 100;
     let number_of_cached_resources: u32 = 2;
     let database_page: u32 = 4096;
@@ -1159,11 +1058,11 @@ fn offline_region_does_not_affect_ambient_cache_size() {
 
     // 1MB of offline region data.
     for i in 0..5 {
-        let t = tile(&format!("maptiler://tiles/tiles/tile_{i}"), 1.0, 0, 0, 0);
-        db.put_region_resource(region.get_id(), &t, &response).unwrap();
+        let t = tile(&format!("https://example.com/tiles/tiles/tile_{i}"), 1.0, 0, 0, 0);
+        db.put_region_resource(region.get_id(), &t, &response);
 
-        let s = style(&format!("maptiler://maps/style_{i}"));
-        db.put_region_resource(region.get_id(), &s, &response).unwrap();
+        let s = style(&format!("https://example.com/maps/style_{i}"));
+        db.put_region_resource(region.get_id(), &s, &response);
     }
 
     // Second 100KB ambient cache resource.
@@ -1179,7 +1078,7 @@ fn offline_region_does_not_affect_ambient_cache_size() {
 #[test]
 fn put_region_resource_does_not_evict() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
@@ -1189,7 +1088,7 @@ fn put_region_resource_does_not_evict() {
     response.data = Some(random_string(1024));
 
     for i in 1..=100u32 {
-        db.put_region_resource(region.get_id(), &style(&format!("http://example.com/{i}")), &response).unwrap();
+        db.put_region_resource(region.get_id(), &style(&format!("http://example.com/{i}")), &response);
     }
 
     assert!(db.get(&style("http://example.com/1")).is_some());
@@ -1202,7 +1101,7 @@ fn put_region_resource_does_not_evict() {
 #[test]
 fn put_fails_when_eviction_insuffices() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.set_maximum_ambient_cache_size(1024 * 100);
 
     let mut big = Response::new();
@@ -1223,7 +1122,7 @@ fn put_fails_when_eviction_insuffices() {
 #[test]
 fn put_skips_zero_size_ambient_cache() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.set_maximum_ambient_cache_size(0);
 
     // A region keeps the database enabled, so put() reaches the ambient cache.
@@ -1243,7 +1142,7 @@ fn put_skips_zero_size_ambient_cache() {
 #[test]
 fn get_region_completed_status() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("http://example.com/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, false);
     let metadata = OfflineRegionMetadata::new();
     let region = db.create_region(&definition.into(), &metadata).expect("region");
@@ -1257,7 +1156,7 @@ fn get_region_completed_status() {
     let mut response = Response::new();
     response.data = Some(data("data"));
 
-    let style_size = db.put_region_resource(region.get_id(), &style("http://example.com/"), &response).unwrap();
+    let style_size = db.put_region_resource(region.get_id(), &style("http://example.com/"), &response);
 
     let status2 = db.get_region_completed_status(region.get_id()).expect("status");
     assert_eq!(1, status2.completed_resource_count);
@@ -1265,8 +1164,7 @@ fn get_region_completed_status() {
     assert_eq!(0, status2.completed_tile_count);
     assert_eq!(0, status2.completed_tile_size);
 
-    let tile_size =
-        db.put_region_resource(region.get_id(), &tile("http://example.com/", 1.0, 0, 0, 0), &response).unwrap();
+    let tile_size = db.put_region_resource(region.get_id(), &tile("http://example.com/", 1.0, 0, 0, 0), &response);
 
     let status3 = db.get_region_completed_status(region.get_id()).expect("status");
     assert_eq!(2, status3.completed_resource_count);
@@ -1281,7 +1179,7 @@ fn get_region_completed_status() {
 #[test]
 fn has_region_resource() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
@@ -1294,7 +1192,7 @@ fn has_region_resource() {
     response.data = Some(random_string(1024));
 
     for i in 1..=100u32 {
-        db.put_region_resource(region.get_id(), &style(&format!("http://example.com/{i}")), &response).unwrap();
+        db.put_region_resource(region.get_id(), &style(&format!("http://example.com/{i}")), &response);
     }
 
     assert!(db.has_region_resource(&style("http://example.com/1")).is_some());
@@ -1308,7 +1206,7 @@ fn has_region_resource() {
 #[test]
 fn has_region_resource_tile() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, false);
@@ -1320,7 +1218,7 @@ fn has_region_resource_tile() {
     response.data = Some(data("first"));
 
     assert!(db.has_region_resource(&resource).is_none());
-    db.put_region_resource(region.get_id(), &resource, &response).unwrap();
+    db.put_region_resource(region.get_id(), &resource, &response);
     assert!(db.has_region_resource(&resource).is_some());
     assert_eq!(Some(5), db.has_region_resource(&resource));
 
@@ -1338,7 +1236,7 @@ fn has_region_resource_tile() {
 #[test]
 fn check_region_resource_and_not_modified_size() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, false);
     let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
 
@@ -1346,7 +1244,7 @@ fn check_region_resource_and_not_modified_size() {
         let mut response = Response::new();
         response.data = Some(data("first"));
         assert_eq!(None, db.check_region_resource(&resource));
-        assert_eq!(Ok(5), db.put_region_resource(region.get_id(), &resource, &response));
+        assert_eq!(5, db.put_region_resource(region.get_id(), &resource, &response));
         assert_eq!(Some((5, true)), db.check_region_resource(&resource));
 
         assert!(db.invalidate_region(region.get_id()).is_none());
@@ -1356,74 +1254,9 @@ fn check_region_resource_and_not_modified_size() {
         let mut not_modified = Response::new();
         not_modified.not_modified = true;
         not_modified.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
-        assert_eq!(Ok(5), db.put_region_resource(region.get_id(), &resource, &not_modified));
+        assert_eq!(5, db.put_region_resource(region.get_id(), &resource, &not_modified));
         assert_eq!(Some((5, true)), db.check_region_resource(&resource));
     }
-
-    check_log_empty(&log);
-}
-
-// gtest: OfflineDatabase.OfflineMapboxTileCount
-#[test]
-fn offline_mapbox_tile_count() {
-    let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
-    let definition = tile_pyramid("http://example.com/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
-    let metadata = OfflineRegionMetadata::new();
-
-    let region1 = db.create_region(&definition.clone().into(), &metadata).expect("region");
-    let region2 = db.create_region(&definition.into(), &metadata).expect("region");
-
-    let non_mapbox_tile = tile("http://example.com/", 1.0, 0, 0, 0);
-    let mapbox_tile1 = tile("maptiler://tiles/tiles/1", 1.0, 0, 0, 0);
-    let mapbox_tile2 = tile("maptiler://tiles/tiles/2", 1.0, 0, 0, 1);
-
-    let mut response = Response::new();
-    response.data = Some(data("data"));
-
-    // Count is initially zero.
-    assert_eq!(0, db.get_offline_mapbox_tile_count());
-
-    // Count stays the same after putting a non-tile resource.
-    db.put_region_resource(region1.get_id(), &style("http://example.com/"), &response).unwrap();
-    assert_eq!(0, db.get_offline_mapbox_tile_count());
-
-    // Count stays the same after putting a non-Mapbox tile.
-    db.put_region_resource(region1.get_id(), &non_mapbox_tile, &response).unwrap();
-    assert_eq!(0, db.get_offline_mapbox_tile_count());
-
-    // Count increases after putting a Mapbox tile not used by another region.
-    db.put_region_resource(region1.get_id(), &mapbox_tile1, &response).unwrap();
-    assert_eq!(1, db.get_offline_mapbox_tile_count());
-
-    // Count stays the same after putting a Mapbox tile used by another
-    // region.
-    db.put_region_resource(region2.get_id(), &mapbox_tile1, &response).unwrap();
-    assert_eq!(1, db.get_offline_mapbox_tile_count());
-
-    // Count stays the same after putting a Mapbox tile used by the same
-    // region.
-    db.put_region_resource(region2.get_id(), &mapbox_tile1, &response).unwrap();
-    assert_eq!(1, db.get_offline_mapbox_tile_count());
-
-    // Count stays the same after deleting a region when the tile is still
-    // used by another region.
-    db.delete_region(&region2);
-    assert_eq!(1, db.get_offline_mapbox_tile_count());
-
-    // Count stays the same after the putting a non-offline Mapbox tile.
-    db.put(&mapbox_tile2, &response);
-    assert_eq!(1, db.get_offline_mapbox_tile_count());
-
-    // Count increases after putting a pre-existing, but non-offline Mapbox
-    // tile.
-    db.put_region_resource(region1.get_id(), &mapbox_tile2, &response).unwrap();
-    assert_eq!(2, db.get_offline_mapbox_tile_count());
-
-    // Count decreases after deleting a region when the tiles are not used by
-    // other regions.
-    db.delete_region(&region1);
-    assert_eq!(0, db.get_offline_mapbox_tile_count());
 
     check_log_empty(&log);
 }
@@ -1432,7 +1265,7 @@ fn offline_mapbox_tile_count() {
 #[test]
 fn batch_insertion() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
@@ -1447,7 +1280,7 @@ fn batch_insertion() {
     }
 
     let mut status = OfflineRegionStatus::default();
-    db.put_region_resources(region.get_id(), &resources, &mut status).unwrap();
+    db.put_region_resources(region.get_id(), &resources, &mut status);
 
     for i in 1..=100u32 {
         assert!(db.get(&style(&format!("http://example.com/{i}"))).is_some());
@@ -1456,44 +1289,10 @@ fn batch_insertion() {
     check_log_empty(&log);
 }
 
-// gtest: OfflineDatabase.BatchInsertionMapboxTileCountExceeded
-#[test]
-fn batch_insertion_mapbox_tile_count_exceeded() {
-    let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
-    db.set_offline_mapbox_tile_count_limit(1);
-    db.set_maximum_ambient_cache_size(1024 * 100);
-
-    let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, false);
-    let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
-
-    let mut response = Response::new();
-    response.data = Some(random_string(1024));
-    let resources = vec![
-        (style("http://example.com/"), response.clone()),
-        (tile("maptiler://tiles/1", 1.0, 0, 0, 0), response.clone()),
-        (tile("maptiler://tiles/2", 1.0, 0, 0, 0), response.clone()),
-    ];
-
-    let mut status = OfflineRegionStatus::default();
-    assert!(
-        db.put_region_resources(region.get_id(), &resources, &mut status).is_err(),
-        "expected TileCountLimitExceeded"
-    );
-
-    assert_eq!(0, status.completed_tile_count);
-    assert_eq!(0, status.completed_resource_count);
-    let completed_status = db.get_region_completed_status(region.get_id()).unwrap();
-    assert_eq!(1, completed_status.completed_tile_count);
-    assert_eq!(2, completed_status.completed_resource_count);
-
-    check_log_empty(&log);
-}
-
 /// The migration tests' block: open, `setMaximumAmbientCacheSize(0)`,
 /// delete every region.
 fn open_and_delete_regions(filename: &str) {
-    let mut db = OfflineDatabase::new(filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(filename);
     db.set_maximum_ambient_cache_size(0);
 
     let regions = db.list_regions().expect("regions");
@@ -1623,7 +1422,7 @@ fn downgrade_schema() {
     copy_file(&filename, &fixture("v999.db"));
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.set_maximum_ambient_cache_size(0);
     }
 
@@ -1646,7 +1445,7 @@ fn corrupt_database_on_open() {
 
     // This database is corrupt in a way that will prevent opening the
     // database.
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     assert_eq!(
         1,
         log.count(&error(result_code::CORRUPT, "Can't open database: database disk image is malformed"), true)
@@ -1676,7 +1475,7 @@ fn corrupt_database_on_query() {
 
     // This database is corrupt in a way that won't manifest itself until we
     // start querying it, so just opening it will not cause an error.
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
 
     // Just opening this corrupt database should not have produced an error
     // yet, since PRAGMA user_version still succeeds with this database.
@@ -1711,10 +1510,10 @@ fn merge_database_with_single_region_new() {
     delete_file(&filename_sideload);
     copy_file(&filename_sideload, &fixture("sideload_sat.db"));
 
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     assert_eq!(0, db.list_regions().unwrap().len());
 
-    let mut db_sideload = OfflineDatabase::new(&filename_sideload, &fixture::tile_server_options());
+    let mut db_sideload = OfflineDatabase::new(&filename_sideload);
     let new_regions_count = db_sideload.list_regions().unwrap().len();
 
     let result = db.merge_database(&filename_sideload);
@@ -1739,11 +1538,11 @@ fn merge_database_with_single_region_update() {
     copy_file(&filename_sideload, &fixture("sideload_sat.db"));
 
     {
-        let mut db1 = OfflineDatabase::new(&filename_sideload, &fixture::tile_server_options());
+        let mut db1 = OfflineDatabase::new(&filename_sideload);
         let original_tile = db1.get_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 0, 0, 1));
         let original_stamp = original_tile.expect("tile").0.modified;
 
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         let regions = db.list_regions();
         assert_eq!(1, db.list_regions().unwrap().len());
         let region_id = regions.unwrap()[0].get_id();
@@ -1776,7 +1575,7 @@ fn merge_database_with_single_region_no_update() {
     copy_file(&filename_sideload, &fixture("satellite_test.db"));
     copy_file(&filename, &fixture("sideload_sat.db"));
 
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
 
     let original_tile = db.get_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 0, 0, 1));
     let original_stamp = original_tile.expect("tile").0.modified;
@@ -1798,7 +1597,7 @@ fn merge_database_with_single_region_ambient_tiles() {
     delete_file(&filename_sideload);
     copy_file(&filename_sideload, &fixture("sideload_ambient.db"));
 
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let _result = db.merge_database(&filename_sideload);
 
     assert!(db.has_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 0, 0, 1)).is_some());
@@ -1816,7 +1615,7 @@ fn merge_database_with_multiple_regions_new() {
     delete_file(&filename_sideload);
     copy_file(&filename_sideload, &fixture("sideload_sat_multiple.db"));
 
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     assert_eq!(0, db.list_regions().unwrap().len());
 
     let result = db.merge_database(&filename_sideload).unwrap();
@@ -1845,7 +1644,7 @@ fn merge_database_with_multiple_regions_with_overlap() {
     copy_file(&filename_sideload, &fixture("sideload_sat_multiple.db"));
 
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         assert_eq!(1, db.list_regions().unwrap().len());
 
         let result = db.merge_database(&filename_sideload);
@@ -1885,45 +1684,6 @@ fn merge_database_with_multiple_regions_with_overlap() {
     }
 }
 
-// gtest: OfflineDatabase.MergeDatabaseWithSingleRegionTooManyNewTiles
-#[test]
-fn merge_database_with_single_region_too_many_new_tiles() {
-    let log = FixtureLog::new();
-    let filename_sideload = filename_sideload();
-    delete_file(&filename_sideload);
-    copy_file(&filename_sideload, &fixture("sideload_sat_multiple.db"));
-
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
-    db.set_offline_mapbox_tile_count_limit(1);
-
-    let result = db.merge_database(&filename_sideload);
-    assert!(result.is_err());
-    assert_eq!(1, log.count(&message(EventSeverity::Error, -1, "Mapbox tile limit exceeded"), false));
-    check_log_empty(&log);
-}
-
-// gtest: OfflineDatabase.MergeDatabaseWithSingleRegionTooManyExistingTiles
-#[test]
-fn merge_database_with_single_region_too_many_existing_tiles() {
-    let log = FixtureLog::new();
-    let filename = filename();
-    let filename_sideload = filename_sideload();
-    delete_database_files(&filename);
-    delete_file(&filename_sideload);
-    copy_file(&filename, &fixture("sideload_sat_multiple.db"));
-    copy_file(&filename_sideload, &fixture("satellite_test.db"));
-
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
-    db.set_offline_mapbox_tile_count_limit(2);
-
-    let result = db.merge_database(&filename_sideload);
-    // EXPECT_THROW(std::rethrow_exception(result.error()), MapboxTileLimitExceededException)
-    assert!(matches!(result, Err(DatabaseError::TileCountLimitExceeded)));
-
-    assert_eq!(1, log.count(&message(EventSeverity::Error, -1, "Mapbox tile limit exceeded"), false));
-    check_log_empty(&log);
-}
-
 // C++ skips this one on Windows (`#ifndef WIN32`), which can't open a folder
 // to copy it as a file.
 // gtest: OfflineDatabase.MergeDatabaseWithInvalidPath
@@ -1936,7 +1696,7 @@ fn merge_database_with_invalid_path() {
     delete_file(&filename_sideload);
     copy_file(&filename_sideload, &cpp_path("test/fixtures/offline_database"));
 
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let result = db.merge_database(&filename_sideload);
     assert!(result.is_err());
@@ -1954,7 +1714,7 @@ fn merge_database_with_invalid_db() {
     delete_file(&filename_sideload);
     copy_file(&filename_sideload, &fixture("corrupt-immediate.db"));
 
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let result = db.merge_database(&filename_sideload);
     assert!(result.is_err());
@@ -1976,7 +1736,7 @@ fn merge_database_with_invalid_db() {
 #[test]
 fn change_path() {
     let new_path = temp_path("test.db");
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     db.change_path(&new_path);
     Database::open(&new_path, OpenFlag::ReadOnly).unwrap();
     delete_file(&new_path);
@@ -1990,7 +1750,7 @@ fn reset_database() {
     delete_database_files(&filename);
     copy_file(&filename, &fixture("satellite_test.db"));
 
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     let result = db.reset_database();
     assert!(result.is_none());
 
@@ -2009,7 +1769,7 @@ fn reset_in_memory_database() {
         // not delete. Skipped where the working directory is read-only.
         let decoy = std::fs::write(path, "unrelated file").is_ok();
 
-        let mut db = OfflineDatabase::new(path, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(path);
         assert!(db.reset_database().is_none(), "{path}");
         if decoy {
             assert_eq!("unrelated file", std::fs::read_to_string(path).unwrap(), "{path}");
@@ -2024,7 +1784,7 @@ fn reset_in_memory_database() {
 #[test]
 fn put_resource_read_only_mode() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = Resource::new(Kind::Style, "http://example.com/");
     let mut response = Response::new();
@@ -2056,7 +1816,7 @@ fn update_database_read_only_mode() {
     let filename = filename();
     delete_database_files(&filename);
 
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     db.reopen_database_read_only(true);
     db.clear_ambient_cache();
     assert_eq!(
@@ -2074,9 +1834,9 @@ fn update_database_read_only_mode() {
 // test; covers OfflineGeometryRegionDefinition storage).
 #[test]
 fn geometry_region_round_trip() {
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
     let definition = OfflineGeometryRegionDefinition::new(
-        "maptiler://style",
+        "https://example.com/style",
         Geometry::Point(Point::new(-122.5744, 37.6609)),
         0.0,
         2.0,
@@ -2114,7 +1874,7 @@ fn constraint_warning(msg: &str) -> Message {
 fn batched_read_touches_deduplicate_and_skip_misses() {
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     db.put(&fixture::resource(), &fixture::response());
     db.put(&fixture::tile(), &fixture::response());
     cache_sql(&filename, "UPDATE resources SET accessed = 100; UPDATE tiles SET accessed = 100");
@@ -2145,7 +1905,7 @@ fn batched_read_touches_rollback_and_retry() {
     let log = FixtureLog::new();
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     db.put(&fixture::resource(), &fixture::response());
     db.put(&fixture::tile(), &fixture::response());
     cache_sql(
@@ -2175,7 +1935,7 @@ fn batched_read_touches_rollback_and_retry() {
 fn batched_read_touches_preserve_newer_timestamp_and_flush_read_only() {
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     db.put(&fixture::resource(), &fixture::response());
     assert!(db.get(&fixture::resource()).is_some());
     cache_sql(&filename, "UPDATE resources SET accessed = 4102444800");
@@ -2195,7 +1955,7 @@ fn batched_read_touches_preserve_newer_timestamp_and_flush_read_only() {
 fn batched_read_touches_discard_after_clear() {
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     db.put(&fixture::resource(), &fixture::response());
     assert!(db.get(&fixture::resource()).is_some());
     assert_eq!(1, db.pending_accessed_count());
@@ -2211,7 +1971,7 @@ fn batched_read_touches_flush_on_path_change_and_close() {
     let filename = filename();
     delete_database_files(&filename);
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         db.put(&fixture::resource(), &fixture::response());
         cache_sql(&filename, "UPDATE resources SET accessed = 100");
         assert!(db.get(&fixture::resource()).is_some());
@@ -2222,7 +1982,7 @@ fn batched_read_touches_flush_on_path_change_and_close() {
     }
     cache_sql(&filename, "UPDATE resources SET accessed = 100");
     {
-        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        let mut db = OfflineDatabase::new(&filename);
         assert!(db.get(&fixture::resource()).is_some());
     }
     assert!(cached_accessed(&filename, "resources") > 100);
@@ -2234,7 +1994,7 @@ fn batched_read_touches_bound_persistent_failures() {
     let log = FixtureLog::new();
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     cache_sql(
         &filename,
         "WITH RECURSIVE sequence(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM sequence WHERE n<4100) \
@@ -2262,7 +2022,7 @@ fn batched_read_touches_participate_in_eviction_transaction() {
     let log = FixtureLog::new();
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     cache_sql(
         &filename,
         "WITH RECURSIVE sequence(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM sequence WHERE n<60) \
@@ -2300,7 +2060,7 @@ fn batched_read_touch_failure_does_not_prevent_cache_resize() {
     let log = FixtureLog::new();
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     db.put(&fixture::resource(), &fixture::response());
     assert!(db.get(&fixture::resource()).is_some());
     cache_sql(
@@ -2327,11 +2087,11 @@ fn batched_read_touch_failure_does_not_prevent_region_deletion() {
     let log = FixtureLog::new();
     let filename = filename();
     delete_database_files(&filename);
-    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(&filename);
     assert!(db.set_maximum_ambient_cache_size(0).is_none());
-    let definition = tile_pyramid("maptiler://maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
+    let definition = tile_pyramid("https://example.com/maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
     let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).unwrap();
-    db.put_region_resource(region.get_id(), &fixture::tile(), &fixture::response()).unwrap();
+    db.put_region_resource(region.get_id(), &fixture::tile(), &fixture::response());
     assert!(db.get_region_resource(&fixture::tile()).is_some());
     cache_sql(
         &filename,

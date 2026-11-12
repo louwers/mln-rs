@@ -366,10 +366,6 @@ pub trait OfflineRegionObserver {
 
     /// Notified of errors encountered while downloading regional resources.
     fn response_error(&self, _error: ResourceError) {}
-
-    /// Notified when the limit on the number of Mapbox tiles stored for
-    /// offline regions has been reached.
-    fn mapbox_tile_count_limit_exceeded(&self, _limit: u64) {}
 }
 
 /// `OfflineRegion`.

@@ -842,7 +842,7 @@ fn set_style_invalid_url() {
     let run_loop = test.run_loop.clone();
     test.observer.did_fail_loading_map_callback.set(move |()| run_loop.stop());
 
-    test.map().style_mut().load_url("maptiler://bar");
+    test.map().style_mut().load_url("https://example.com/bar");
 
     run_with_timeout(&test.run_loop, 60);
 }
@@ -873,7 +873,7 @@ fn style_fresh() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     // Timestamp::max()
@@ -890,7 +890,7 @@ fn style_expired() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let mut response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -925,7 +925,7 @@ fn style_expired_with_render() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -949,7 +949,7 @@ fn style_expired_with_projection() {
     for in_place in [false, true] {
         let test = MapTest::fake();
 
-        test.map().style_mut().load_url("maptiler://maps/test");
+        test.map().style_mut().load_url("https://example.com/maps/test");
 
         let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
         test.file_source.respond(Kind::Style, &response);
@@ -980,7 +980,7 @@ fn style_early_mutation() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     test.map().style_mut().add_layer(Box::new(BackgroundLayer::new("bg")), None).unwrap();
 
     let response = file_response("test/fixtures/api/water.json");
@@ -1039,7 +1039,7 @@ fn style_loaded_signal() {
 /// `MapTest<OnlineFileSource> test(ResourceOptions::Default())`.
 fn online_file_source_test() -> MapTest<OnlineFileSource> {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(OnlineFileSource::new(&ResourceOptions::default_options()));
+    let file_source = Arc::new(OnlineFileSource::new(&ResourceOptions::default()));
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
@@ -2339,7 +2339,7 @@ fn keep_render_data() {
     test.file_source.set_response(Kind::SpriteImage, make_response("sprite.png", None));
 
     test.map().jump_to(&cam().with_zoom(Some(10.0)));
-    test.map().style_mut().load_url("maptiler://maps/streets");
+    test.map().style_mut().load_url("https://example.com/maps/streets");
     let iterations = 3;
     let resources_count = 4; /*tiles*/
 
@@ -2395,7 +2395,7 @@ fn disabled_placed_symbol_data() {
     // Camera options will give exactly one tile (12/1171/1566)
     test.map().jump_to(&cam().with_zoom(Some(16.0)).with_center(Some(ll(50.072_317, 14.444_827))));
 
-    test.map().style_mut().load_url("maptiler://maps/streets");
+    test.map().style_mut().load_url("https://example.com/maps/streets");
     let viewport_size = test.frontend.get_size();
     test.frontend.with_renderer(|renderer| renderer.collect_placed_symbol_data(true));
     test.render();
