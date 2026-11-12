@@ -274,8 +274,8 @@ ratchet *args:
 release:
     gh workflow run release.yml --repo louwers/mln-rs --ref main
 
-# The tests' headless frontends render with WebGPU, or with the backend MLN_RENDER_BACKEND names: webgpu, metal, vulkan
-# or gl.
+# The tests' headless frontends render with WebGPU, or with the backend MLN_RENDER_BACKEND names: webgpu, metal, vulkan,
+# gl (OpenGL ES) or gl-desktop (desktop OpenGL).
 [doc("Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`")]
 [positional-arguments]
 test *args:  _dev-shell

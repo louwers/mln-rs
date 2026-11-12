@@ -341,10 +341,11 @@ impl SingleContext {
         lost
     }
 
-    /// Ends a stretch of work: the last one on the thread releases the
-    /// context, which flushes it, and hands the turn on. `user` ends a
-    /// stretch nested in another renderer's, which then finds the context
-    /// as `user` left it.
+    /// Ends `user`'s stretch of work: the last one on the thread releases
+    /// the context, which flushes it, and hands the turn on. After a stretch
+    /// nested in another, no renderer is known to have had the context last,
+    /// so every renderer's next turn finds its state lost. The outer stretch
+    /// goes on with the state that the nested one left.
     fn give(&self, user: u64) {
         let mut turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if turn.depth == 0 {
