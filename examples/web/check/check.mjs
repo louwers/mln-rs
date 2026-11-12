@@ -883,6 +883,13 @@ async function compare() {
     const error = /<strong>Error:<\/strong> ([^<]*)/.exec(item)?.[1];
     results.set(id, { status, diff, error });
   }
+  // The report has an entry only for a failed or errored test. Every other
+  // test in its sequence passed, under its view's threshold.
+  const sequence = /<strong>Test sequence:<\/strong>([^<]*)<\/p>/.exec(page)?.[1].trim().split(/\s+/) ?? [];
+  for (const id of sequence) {
+    const name = id.replace(/^render-tests\//, '');
+    if (!results.has(name)) results.set(name, { status: 'passed' });
+  }
   for (const view of views) {
     if (!existsSync(path.join(out, 'tests/render-tests', view.name))) continue;
     const result = results.get(view.name);
@@ -892,6 +899,8 @@ async function compare() {
     } else if (result.error) {
       console.log(`  ${view.name}: error: ${result.error}`);
       failures.push(`${view.name}: the native runner: ${result.error}`);
+    } else if (result.diff === undefined) {
+      console.log(`  ${view.name}: passed (at most ${(view.allowed * 100).toFixed(1)}% of the pixels differ)`);
     } else {
       console.log(`  ${view.name}: ${(result.diff * 100).toFixed(3)}% of the pixels differ ` +
         `(at most ${(view.allowed * 100).toFixed(1)}%)`);

@@ -414,8 +414,16 @@ impl Device {
             .enabled_extension_names(&extension_pointers);
         // SAFETY: the create info points at live names, and the layers and
         // extensions are available.
-        let instance = unsafe { entry.create_instance(&create_info, None) }
-            .map_err(|e| Error::native(format!("Failed to create a Vulkan instance: {e}")))?;
+        let instance = unsafe { entry.create_instance(&create_info, None) }.map_err(|e| {
+            let message = format!("Failed to create a Vulkan instance: {e}");
+            // A loader that finds no driver offers no Vulkan, as a missing
+            // loader doesn't, so the next backend may take its place.
+            if e == vk::Result::ERROR_INCOMPATIBLE_DRIVER {
+                Error::unsupported(message)
+            } else {
+                Error::native(message)
+            }
+        })?;
 
         // From here on, an error destroys what was made.
         let mut messenger = None;
