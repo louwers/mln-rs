@@ -2248,7 +2248,12 @@ pub type mln_queue_lock_callback = ::core::option::Option<
  A session holds the lock only while it submits or presents to the queue, or
  submits the empty batch that drains its work from the queue. It never holds
  the lock while it waits. Set both `lock` and `unlock`, or neither when you
- don't submit to the queue yourself.*/
+ don't submit to the queue yourself.
+
+ Don't hold the lock while you call the library. A call such as
+ mln_render_session_abandon(), mln_render_session_release(),
+ mln_render_session_dispose(), or mln_render_session_service_driver_work()
+ can wait for a session's work, which takes the lock.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_queue_lock {
@@ -2266,7 +2271,9 @@ pub const MLN_GPU_SYNC_OPEN_GL_FENCE: mln_gpu_sync_kind = 1;
 pub const MLN_GPU_SYNC_QUEUE_ORDER: mln_gpu_sync_kind = 2;
 /// `handle` is a `VkSemaphore`. Wait until it reaches `value`.
 pub const MLN_GPU_SYNC_VULKAN_TIMELINE_SEMAPHORE: mln_gpu_sync_kind = 3;
-/// `handle` is a sync file descriptor.
+/** `handle` is a sync file descriptor. A descriptor of -1, as Vulkan exports
+ for a semaphore that has already signaled, counts as
+ MLN_GPU_SYNC_CPU_COMPLETE.*/
 pub const MLN_GPU_SYNC_SYNC_FD: mln_gpu_sync_kind = 4;
 /// `handle` is an `MTLSharedEvent`. Wait until it reaches `value`.
 pub const MLN_GPU_SYNC_METAL_SHARED_EVENT: mln_gpu_sync_kind = 5;
@@ -2306,7 +2313,9 @@ pub struct mln_render_session_attach_options {
    canvas, or a ring of Android hardware buffers, dmabufs, DXGI shared
    textures, or IOSurfaces.
  - Either one for a Metal layer, a Vulkan surface, an OpenGL surface, or a
-   borrowed ring of Metal, Vulkan, or OpenGL textures.
+   borrowed ring of Metal, Vulkan, or OpenGL textures. A build may drive
+   these on MLN_RENDER_DRIVER_CORE_WORKER only, and fails an attach with
+   MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD then.
 
  An attach with another driver fails with MLN_STATUS_UNSUPPORTED.*/
     pub driver: mln_render_driver_kind,
@@ -2895,9 +2904,11 @@ pub struct mln_gpu_device_capabilities {
 /** Your Vulkan device and queue, for mln_gpu_device_wrap_vulkan().
 
  The device must have the extensions that its sessions use enabled:
- `VK_KHR_swapchain` for windows and Vulkan surfaces, Vulkan 1.2 or
- `VK_KHR_timeline_semaphore` for MLN_GPU_SYNC_VULKAN_TIMELINE_SEMAPHORE, and
- `VK_KHR_external_semaphore_fd` for MLN_GPU_SYNC_SYNC_FD.*/
+ `VK_KHR_swapchain` for windows and Vulkan surfaces, and
+ `VK_KHR_external_semaphore_fd` for MLN_GPU_SYNC_SYNC_FD. When the GPU
+ supports timeline semaphores, also enable the `timelineSemaphore` feature,
+ of Vulkan 1.2 or `VK_KHR_timeline_semaphore`: the device offers
+ MLN_GPU_SYNC_VULKAN_TIMELINE_SEMAPHORE wherever the GPU supports it.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_vulkan_device_descriptor {
