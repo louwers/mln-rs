@@ -174,16 +174,10 @@ impl IndexTable {
 
 #[cfg(test)]
 mod tests {
-    use mln_gfx::backend_scope::{BackendScope, ScopeType};
-    use mln_gfx::renderer_backend::RendererBackend as _;
-    use mln_util::size::Size;
-
     use super::*;
-    use crate::HeadlessBackend;
 
-    fn device(backend: &HeadlessBackend) -> wgpu::Device {
-        let context = backend.get_context().as_any().downcast_ref::<crate::Context>().unwrap();
-        context.get_backend().get_device().expect("a device")
+    fn device() -> wgpu::Device {
+        crate::Device::new(None).expect("a WebGPU device").device().clone()
     }
 
     fn uniform_buffer(device: &wgpu::Device) -> wgpu::Buffer {
@@ -197,9 +191,7 @@ mod tests {
 
     #[test]
     fn bind_groups_are_shared_while_held() {
-        let backend = HeadlessBackend::create(Size { width: 4, height: 4 });
-        let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-        let device = device(&backend);
+        let device = device();
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -245,9 +237,7 @@ mod tests {
 
     #[test]
     fn index_table_grows_to_hold_an_index() {
-        let backend = HeadlessBackend::create(Size { width: 4, height: 4 });
-        let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-        let device = device(&backend);
+        let device = device();
         let mut table = IndexTable::new(&device);
         assert!(table.get(0).is_none());
 

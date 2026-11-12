@@ -5,7 +5,7 @@
 // TODO(port): route them through mln::Log once a logging port exists.
 
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 
 use mln_gfx::attribute::AttributeBindingArray;
@@ -20,7 +20,7 @@ use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_program_base::{ShaderProgramBasePtr, same_shader};
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::texture2d::Texture2D as _;
+use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{BufferUsageType, DepthMaskType};
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::upload_pass::UploadPass as _;
@@ -32,7 +32,7 @@ use mln_util::time::Instant;
 use crate::bind_groups::{BindGroupKey, EntryResource, SharedBindGroup};
 use crate::context::Context;
 use crate::render_pass::RenderPass;
-use crate::shaders::shader_program::{BindingType, ShaderProgram, VertexLayout, as_webgpu_shader};
+use crate::shaders::shader_program::{BindingInfo, BindingType, ShaderProgram, VertexLayout, as_webgpu_shader};
 use crate::texture2d::Texture2D;
 use crate::uniform_buffer::UniformBuffer;
 use crate::upload_pass::UploadPass;
@@ -151,6 +151,13 @@ struct DrawableImpl {
     vertex_type: AttributeDataType,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
+    /// The vertex buffer slots of [`attribute_bindings`] and
+    /// [`instance_bindings`], `None` until a draw after either changes
+    /// computes them.
+    ///
+    /// [`attribute_bindings`]: Self::attribute_bindings
+    /// [`instance_bindings`]: Self::instance_bindings
+    vertex_slots: Option<Vec<UniqueBinding>>,
     /// Store dummy vertex buffers to keep them alive
     dummy_vertex_buffers: Vec<UniqueVertexBufferResource>,
     uniform_buffers: UniformBufferArray,
@@ -170,6 +177,12 @@ struct DrawableImpl {
     ///
     /// [`bind_groups`]: Self::bind_groups
     index_slot: Option<u32>,
+    /// The shader whose groups [`bind_groups`] holds, `None` until a draw
+    /// builds all of them. Holding it keeps another shader from taking its
+    /// address.
+    ///
+    /// [`bind_groups`]: Self::bind_groups
+    bind_groups_shader: Option<ShaderProgramBasePtr>,
 }
 
 pub struct Drawable {
@@ -193,6 +206,7 @@ impl Drawable {
                 vertex_type: AttributeDataType::Invalid,
                 attribute_bindings: Vec::new(),
                 instance_bindings: Vec::new(),
+                vertex_slots: None,
                 dummy_vertex_buffers: Vec::new(),
                 uniform_buffers: UniformBufferArray::new(),
                 depth_mode: DepthMode::disabled(),
@@ -205,6 +219,7 @@ impl Drawable {
                 previous_stencil_mode: StencilMode::default(),
                 bind_groups: Vec::new(),
                 index_slot: None,
+                bind_groups_shader: None,
             },
         }
     }
@@ -294,6 +309,7 @@ impl Drawable {
             );
             if self.impl_.attribute_bindings != attribute_bindings {
                 self.impl_.attribute_bindings = attribute_bindings;
+                self.impl_.vertex_slots = None;
                 self.impl_.vertex_desc_hash = 0; // Reset hash when bindings change
                 self.impl_.pipeline_state = None; // Reset pipeline state when attribute bindings change
                 // Store the dummy vertex buffers to keep them alive
@@ -324,6 +340,7 @@ impl Drawable {
             );
             if self.impl_.instance_bindings != instance_bindings {
                 self.impl_.instance_bindings = instance_bindings;
+                self.impl_.vertex_slots = None;
                 self.impl_.pipeline_state = None; // Reset pipeline state when instance bindings change
                 // Store the dummy instance buffers to keep them alive
                 self.impl_.dummy_vertex_buffers.extend(instance_buffers);
@@ -360,12 +377,23 @@ impl Drawable {
     ///
     /// C++ creates every bind group on every draw, with a `GlobalUBOIndex`
     /// buffer of the drawable's. The port keeps the previous draw's bind
-    /// groups and reuses each one whose layout and bound buffers, samplers
+    /// groups as they are while they bind what this draw would, and
+    /// otherwise reuses each one whose layout and bound buffers, samplers
     /// and texture views (compared by identity) are unchanged, takes the
     /// others from the bind groups drawables share, and leaves the index
     /// group to the draw. A replaced resource stays alive until the
     /// drawable's next draw or its drop.
-    fn build_bind_groups(&mut self, context: &Context, render_pass: &RenderPass, shader: &ShaderProgram) -> bool {
+    fn build_bind_groups(
+        &mut self,
+        context: &Context,
+        render_pass: &RenderPass,
+        shader_ptr: &ShaderProgramBasePtr,
+        shader: &ShaderProgram,
+    ) -> bool {
+        if self.bind_groups_current(render_pass, shader_ptr, shader) {
+            return true;
+        }
+        self.impl_.bind_groups_shader = None;
         let mut previous = std::mem::take(&mut self.impl_.bind_groups);
         self.impl_.index_slot = None;
         let Some(device) = context.get_backend().get_device() else {
@@ -374,24 +402,8 @@ impl Drawable {
         let draw_call_count = DRAW_CALL_COUNT.with(Cell::get);
         let global_buffers = render_pass.get_global_uniform_buffers();
         let textures = &self.base.textures;
-        let find_texture_for_binding =
-            |binding: u32, sampler_binding: bool| -> Option<Rc<RefCell<dyn mln_gfx::texture2d::Texture2D>>> {
-                for (tex_index, texture) in textures.iter().enumerate() {
-                    let Some(texture) = texture else { continue };
-                    if let Some(location) = shader.get_sampler_location_of(tex_index) {
-                        let location = location as u32;
-                        if (sampler_binding && location == binding)
-                            || (!sampler_binding && (location == binding || location + 1 == binding))
-                        {
-                            return Some(texture.clone());
-                        }
-                    }
-                }
-                None
-            };
 
-        let group_order = shader.get_bind_group_order().to_vec();
-        for (slot, &group) in group_order.iter().enumerate() {
+        for (slot, &group) in shader.get_bind_group_order().iter().enumerate() {
             let Some(layout) = shader.get_bind_group_layout(group) else {
                 eprintln!(
                     "WebGPU: missing bind group layout for group {group} in shader '{}'",
@@ -446,7 +458,7 @@ impl Drawable {
                         resources.push((binding_info.binding, EntryResource::Buffer(gpu_buffer, offset, size)));
                     }
                     BindingType::Sampler => {
-                        let Some(texture) = find_texture_for_binding(binding_info.binding, true) else {
+                        let Some(texture) = texture_for_binding(textures, shader, binding_info.binding, true) else {
                             valid_bindings = false;
                             break;
                         };
@@ -466,7 +478,7 @@ impl Drawable {
                         resources.push((binding_info.binding, EntryResource::Sampler(sampler)));
                     }
                     BindingType::Texture | BindingType::UnfilterableTexture => {
-                        let Some(texture) = find_texture_for_binding(binding_info.binding, false) else {
+                        let Some(texture) = texture_for_binding(textures, shader, binding_info.binding, false) else {
                             valid_bindings = false;
                             break;
                         };
@@ -531,8 +543,93 @@ impl Drawable {
             });
             self.impl_.bind_groups.push(BindGroupRecord { slot: slot as u32, group, bind_group });
         }
+        self.impl_.bind_groups_shader = Some(shader_ptr.clone());
         true
     }
+
+    /// Whether the bind groups the last draw built for `shader` bind what
+    /// this draw would: the same buffers, samplers and texture views, which
+    /// a buffer or texture the drawable or the pass replaced, or a texture
+    /// that recreated its view, doesn't.
+    fn bind_groups_current(
+        &self,
+        render_pass: &RenderPass,
+        shader_ptr: &ShaderProgramBasePtr,
+        shader: &ShaderProgram,
+    ) -> bool {
+        let Some(built_for) = &self.impl_.bind_groups_shader else {
+            return false;
+        };
+        if !std::ptr::addr_eq(Rc::as_ptr(built_for), Rc::as_ptr(shader_ptr)) {
+            return false;
+        }
+        let global_buffers = render_pass.get_global_uniform_buffers();
+        self.impl_.bind_groups.iter().all(|record| {
+            let resources = &record.bind_group.key.resources;
+            let binding_infos = shader.get_binding_infos_for_group(record.group);
+            binding_infos.len() == resources.len()
+                && binding_infos.iter().zip(resources).all(|(info, (binding, resource))| {
+                    info.binding == *binding && self.binds(info, resource, global_buffers.as_deref(), shader)
+                })
+        })
+    }
+
+    /// Whether `resource` is what a draw with `shader` binds at `info`.
+    fn binds(
+        &self,
+        info: &BindingInfo,
+        resource: &EntryResource,
+        global_buffers: Option<&UniformBufferArray>,
+        shader: &ShaderProgram,
+    ) -> bool {
+        let texture = |sampler_binding| {
+            texture_for_binding(&self.base.textures, shader, info.binding, sampler_binding).map(|t| t.borrow())
+        };
+        match (info.type_, resource) {
+            (
+                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer,
+                EntryResource::Buffer(bound, bound_offset, bound_size),
+            ) => self
+                .impl_
+                .uniform_buffers
+                .get(info.binding as usize)
+                .or_else(|| global_buffers?.get(info.binding as usize))
+                .and_then(|buffer| buffer.as_any().downcast_ref::<UniformBuffer>())
+                .is_some_and(|buffer| {
+                    buffer.get_buffer() == Some(bound)
+                        && buffer.get_offset() == *bound_offset
+                        && buffer.get_aligned_size() == *bound_size
+                }),
+            (BindingType::Sampler, EntryResource::Sampler(bound)) => texture(true).is_some_and(|texture| {
+                texture.as_any().downcast_ref::<Texture2D>().and_then(Texture2D::get_sampler) == Some(bound)
+            }),
+            (BindingType::Texture | BindingType::UnfilterableTexture, EntryResource::TextureView(bound)) => {
+                texture(false).is_some_and(|texture| {
+                    texture.as_any().downcast_ref::<Texture2D>().is_some_and(|texture| {
+                        texture.get_texture().is_some() && texture.get_texture_view() == Some(bound)
+                    })
+                })
+            }
+            _ => false,
+        }
+    }
+}
+
+/// The texture of `textures` that `shader` samples at `binding`: the one
+/// whose sampler is at `binding` if `sampler_binding`, else the one whose
+/// texture is, at its sampler's binding or the next.
+fn texture_for_binding<'a>(
+    textures: &'a [Option<Texture2DPtr>],
+    shader: &ShaderProgram,
+    binding: u32,
+    sampler_binding: bool,
+) -> Option<&'a Texture2DPtr> {
+    textures.iter().enumerate().find_map(|(tex_index, texture)| {
+        let texture = texture.as_ref()?;
+        let location = shader.get_sampler_location_of(tex_index)? as u32;
+        let matches = location == binding || (!sampler_binding && location + 1 == binding);
+        matches.then_some(texture)
+    })
 }
 
 impl ShaderProgram {
@@ -541,11 +638,10 @@ impl ShaderProgram {
     }
 }
 
-/// `UniqueBinding` in `Drawable::draw`
+/// `UniqueBinding` in `Drawable::draw`: a vertex buffer slot. A draw reads
+/// the buffer from `vertex_resource`, so the slot holds no handle of it.
 struct UniqueBinding {
     vertex_resource: Rc<dyn mln_gfx::vertex_buffer::VertexBufferResource>,
-    buffer: Option<wgpu::Buffer>,
-    buffer_size: u64,
     stride: u32,
     base_offset: u64,
     step_mode: wgpu::VertexStepMode,
@@ -559,11 +655,7 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
         let Some(vertex_buffer_res) = resource.as_any().downcast_ref::<VertexBufferResource>() else {
             continue;
         };
-        let (buffer, buffer_size) = {
-            let b = vertex_buffer_res.get_buffer();
-            (b.get_buffer().cloned(), b.get_size_in_bytes() as u64)
-        };
-        if buffer.is_none() {
+        if !vertex_buffer_res.get_buffer().is_valid() {
             continue;
         }
         let binding_byte_offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
@@ -581,8 +673,6 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
             None => {
                 out.push(UniqueBinding {
                     vertex_resource: resource.clone(),
-                    buffer,
-                    buffer_size,
                     stride: binding.vertex_stride,
                     base_offset: binding_byte_offset,
                     step_mode,
@@ -668,7 +758,7 @@ impl drawable::Drawable for Drawable {
         let Some(shader) = as_webgpu_shader(&shader_ptr) else {
             return;
         };
-        if !self.build_bind_groups(context, render_pass, shader) {
+        if !self.build_bind_groups(context, render_pass, &shader_ptr, shader) {
             return;
         }
 
@@ -703,19 +793,22 @@ impl drawable::Drawable for Drawable {
         self.impl_.stencil_mode_hash = new_stencil_hash;
         self.impl_.previous_stencil_mode = stencil_mode;
 
-        let mut unique_bindings: Vec<UniqueBinding> =
-            Vec::with_capacity(self.impl_.attribute_bindings.len() + self.impl_.instance_bindings.len());
-        accumulate_bindings(&self.impl_.attribute_bindings, wgpu::VertexStepMode::Vertex, &mut unique_bindings);
-        accumulate_bindings(&self.impl_.instance_bindings, wgpu::VertexStepMode::Instance, &mut unique_bindings);
+        let unique_bindings = self.impl_.vertex_slots.get_or_insert_with(|| {
+            let mut unique_bindings =
+                Vec::with_capacity(self.impl_.attribute_bindings.len() + self.impl_.instance_bindings.len());
+            accumulate_bindings(&self.impl_.attribute_bindings, wgpu::VertexStepMode::Vertex, &mut unique_bindings);
+            accumulate_bindings(&self.impl_.instance_bindings, wgpu::VertexStepMode::Instance, &mut unique_bindings);
 
-        const MAX_VERTEX_BUFFER_SLOTS: usize = 8;
-        if unique_bindings.len() > MAX_VERTEX_BUFFER_SLOTS {
-            eprintln!(
-                "WebGPU: reducing vertex buffer bindings from {} to {MAX_VERTEX_BUFFER_SLOTS}",
-                unique_bindings.len()
-            );
-            unique_bindings.truncate(MAX_VERTEX_BUFFER_SLOTS);
-        }
+            const MAX_VERTEX_BUFFER_SLOTS: usize = 8;
+            if unique_bindings.len() > MAX_VERTEX_BUFFER_SLOTS {
+                eprintln!(
+                    "WebGPU: reducing vertex buffer bindings from {} to {MAX_VERTEX_BUFFER_SLOTS}",
+                    unique_bindings.len()
+                );
+                unique_bindings.truncate(MAX_VERTEX_BUFFER_SLOTS);
+            }
+            unique_bindings
+        });
 
         if self.impl_.pipeline_state.is_none() {
             // Create vertex layout from attribute bindings
@@ -805,9 +898,13 @@ impl drawable::Drawable for Drawable {
         }
 
         let mut buffer_slot = 0u32;
-        for binding in &unique_bindings {
-            let Some(buffer) = &binding.buffer else { continue };
-            let buffer_size = binding.buffer_size;
+        for binding in unique_bindings.iter() {
+            let Some(resource) = binding.vertex_resource.as_any().downcast_ref::<VertexBufferResource>() else {
+                continue;
+            };
+            let buffer_resource = resource.get_buffer();
+            let Some(buffer) = buffer_resource.get_buffer() else { continue };
+            let buffer_size = buffer_resource.get_size_in_bytes() as u64;
             if binding.base_offset >= buffer_size {
                 eprintln!(
                     "Skipping vertex buffer slot {buffer_slot} due to base offset {} >= size {buffer_size}",

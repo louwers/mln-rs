@@ -245,8 +245,19 @@ fn render_frame(
     bg: &Background,
     clear: Color,
 ) -> mln_util::image::PremultipliedImage {
+    let layer_group = build_layer_group(backend.get_context(), registry, passes);
+    render_layer_group(backend, &layer_group, bg, left_half_matrix(), clear)
+}
+
+/// One frame of `layer_group`, tweaked with `matrix`; returns the readback.
+fn render_layer_group(
+    backend: &Headless,
+    layer_group: &LayerGroupBasePtr,
+    bg: &Background,
+    matrix: [f32; 16],
+    clear: Color,
+) -> mln_util::image::PremultipliedImage {
     let context = backend.get_context();
-    let layer_group = build_layer_group(context, registry, passes);
     let image = backend.target.begin_frame().expect("a frame");
     let renderable = &*image;
     context.begin_frame();
@@ -265,7 +276,7 @@ fn render_frame(
 
     {
         let upload_pass = parameters.encoder.create_upload_pass("layerGroup-upload", renderable);
-        tweak(context, &layer_group, bg, left_half_matrix());
+        tweak(context, layer_group, bg, matrix);
         layer_group.borrow_mut().upload(&*upload_pass);
     }
 
@@ -357,6 +368,25 @@ fn background_shader_opaque_and_translucent() {
     let a = context.get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator).unwrap();
     let b = context.get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator).unwrap();
     assert!(std::rc::Rc::ptr_eq(&a, &b));
+}
+
+#[test]
+fn a_drawable_binds_the_layer_buffers_of_each_frame() {
+    // Each frame's tweak replaces the layer's drawable and projection UBOs,
+    // so the second frame draws with the new matrix only if the drawable
+    // binds the new buffers.
+    let backend = Headless::new(Size { width: 32, height: 16 });
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
+    let registry = ShaderRegistry::new();
+    backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
+    let layer_group = build_layer_group(backend.get_context(), &registry, RenderPass::Opaque | RenderPass::Translucent);
+    let bg = Background { color: Color::new(0.0, 0.5, 0.0, 1.0), opacity: 1.0 };
+    let blue = Color::new(0.0, 0.0, 1.0, 1.0);
+
+    let img = render_layer_group(&backend, &layer_group, &bg, left_half_matrix(), blue);
+    check_halves(&img, [0, 128, 0, 255], [0, 0, 255, 255]);
+    let img = render_layer_group(&backend, &layer_group, &bg, full_matrix(), blue);
+    check_halves(&img, [0, 128, 0, 255], [0, 128, 0, 255]);
 }
 
 #[test]
