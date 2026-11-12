@@ -1,6 +1,0 @@
-{
-  "base_test_path": "@WORK_DIR@/tests",
-  "cache_path": "@WORK_DIR@/cache.db",
-  "expectation_paths": [],
-  "ignore_paths": []
-}

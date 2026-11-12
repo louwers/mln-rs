@@ -9,8 +9,8 @@ binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-tele
 # Where `just ci-coverage` writes the LCOV report that CI uploads to Codecov
 coverage_lcov := 'target/llvm-cov/lcov.info'
 
-# The C++ core the port is ported from, for the recipes that read its sources (update-testdata, vendor-shaders, the
-# generate-* and the analysis recipes).
+# The C++ core the port is ported from, for the recipes that read its sources (update-testdata, the generate-* and the
+# analysis recipes).
 cpp := justfile_directory() / '..' / 'maplibre-native'
 # maplibre-native-ffi, whose C headers and ABI suite crates/mln_c and tools/c-abi-test copy (update-ffi-abi).
 ffi := justfile_directory() / '..' / 'maplibre-native-ffi'
@@ -22,9 +22,6 @@ profile := 'dev'
 # libraries they load (the Vulkan loader, Wayland, X11, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
 nixos := path_exists('/etc/NIXOS')
 dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
-
-# The tests' headless frontends render with WebGPU, or with the backend MLN_RENDER_BACKEND names: webgpu, metal, vulkan
-# or gl.
 
 # if running in CI, treat warnings as errors by setting CARGO_BUILD_WARNINGS to 'deny' unless it is already set
 # Use `CI=true just ci-lint` to run the same checks as in GitHub CI.
@@ -258,90 +255,6 @@ include-back-edges:
 include-graph:
     python3 -I tools/cycles/include_graph.py {{quote(cpp)}}
 
-# The views prepared by liberty-references are rendered offline from the C++ cache database and compared with the C++ references
-# (tools/liberty-compare/README.md). `filter` is matched against the test id, e.g. 'liberty/' or 'positron/ams13'. Results:
-# $LIBERTY_COMPARE_DIR/results/manifest.html (+ actual/diff PNGs).
-#
-# Environment:
-#   RENDER_TEST          Rust render-test binary (default: the one this recipe builds, target/debug/render-test)
-#   LIBERTY_COMPARE_DIR  work directory (default ~/.cache/mln-liberty-compare)
-#   VK_DRIVER_FILES      Vulkan ICD (default: lavapipe on NixOS)
-[doc('Render the OpenFreeMap views with the Rust render-test runner and compare them with the C++ references')]
-liberty-compare filter='.':  _dev-shell
-    #!/usr/bin/env bash
-    set -euo pipefail
-    here=tools/liberty-compare
-    work="${LIBERTY_COMPARE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mln-liberty-compare}"
-    icd="${VK_DRIVER_FILES:-/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json}"
-    cargo build -p mln-rs-render-test --bin render-test
-    binary="${RENDER_TEST:-target/debug/render-test}"
-    if [ ! -f "$work/cache.db" ] || [ ! -d "$work/tests/render-tests" ]; then
-        echo "no references in $work: run just liberty-references first" >&2
-        exit 1
-    fi
-    # A private copy, so a concurrent build can't replace it mid-run.
-    mkdir -p "$work/bin" "$work/results"
-    install -m 755 "$binary" "$work/bin/render-test"
-    sed "s#@WORK_DIR@#$work#g" "$here/manifest.template.json" >"$work/manifest.json"
-    cd "$work"
-    exec {{dev_shell}} env VK_DRIVER_FILES="$icd" \
-        "$work/bin/render-test" -p "$work/manifest.json" -f {{quote(filter)}} --output "$work/results"
-
-# For every view in views.txt whose "style/name" matches `filter`, run the C++ mbgl-render against https://tiles.openfreemap.org/styles/<style>, write the PNG as the view's expected.png and
-# create the matching style.json (the OpenFreeMap style with the view's camera and test metadata) for the Rust render-test runner. Every
-# resource mbgl-render downloads lands in the C++ cache database $LIBERTY_COMPARE_DIR/cache.db, which liberty-compare then reads offline.
-#
-# Environment:
-#   MBGL_RENDER            path to a C++ mbgl-render binary (required; see README.md)
-#   LIBERTY_COMPARE_DIR    work directory (default ~/.cache/mln-liberty-compare)
-#   VK_DRIVER_FILES        Vulkan ICD (default: lavapipe on NixOS)
-#   LIBERTY_COMPARE_VIEWS  view list (default: tools/liberty-compare/views.txt)
-[doc('Render the C++ reference images of tools/liberty-compare with mbgl-render (needs MBGL_RENDER and the network)')]
-liberty-references filter='.':  _dev-shell
-    #!/usr/bin/env bash
-    set -euo pipefail
-    work="${LIBERTY_COMPARE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mln-liberty-compare}"
-    icd="${VK_DRIVER_FILES:-/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json}"
-    views="${LIBERTY_COMPARE_VIEWS:-tools/liberty-compare/views.txt}"
-    if [ -z "${MBGL_RENDER:-}" ] || [ ! -x "$MBGL_RENDER" ]; then
-        echo "MBGL_RENDER must point to a C++ mbgl-render binary (see tools/liberty-compare/README.md)" >&2
-        exit 1
-    fi
-    mkdir -p "$work/styles" "$work/tests/render-tests"
-    grep -v '^#' "$views" | while read -r style name lon lat zoom bearing pitch ratio width height; do
-        [ -n "$style" ] || continue
-        echo "$style/$name" | grep -Eq -- {{quote(filter)}} || continue
-
-        if [ ! -s "$work/styles/$style.json" ]; then
-            curl -sSf -m 60 -o "$work/styles/$style.json" "https://tiles.openfreemap.org/styles/$style"
-        fi
-
-        dir="$work/tests/render-tests/$style/$name"
-        mkdir -p "$dir"
-        if {{dev_shell}} env VK_DRIVER_FILES="$icd" \
-            "$MBGL_RENDER" -s "https://tiles.openfreemap.org/styles/$style" \
-            -x "$lon" -y "$lat" -z "$zoom" -b "$bearing" -p "$pitch" -r "$ratio" \
-            -w "$width" -h "$height" -o "$dir/expected.png" -c "$work/cache.db" \
-            >"$dir/cpp.log" 2>&1; then
-            echo "rendered $style/$name"
-        else
-            echo "mbgl-render failed for $style/$name (see $dir/cpp.log)" >&2
-        fi
-
-        python3 -I - "$work/styles/$style.json" "$dir/style.json" \
-            "$lon" "$lat" "$zoom" "$bearing" "$pitch" "$ratio" "$width" "$height" <<'EOF'
-    import json, sys
-    src, dst, lon, lat, zoom, bearing, pitch, ratio, width, height = sys.argv[1:]
-    style = json.load(open(src))
-    style["center"] = [float(lon), float(lat)]
-    style["zoom"] = float(zoom)
-    style["bearing"] = float(bearing)
-    style["pitch"] = float(pitch)
-    style["metadata"] = {"test": {"width": int(width), "height": int(height), "pixelRatio": float(ratio)}}
-    json.dump(style, open(dst, "w"), indent=1)
-    EOF
-    done
-
 # The desktop app is never released.
 # The verify step serves the packaged crates to each other from a local registry, and Cargo
 # treats a registry crate's name and version as immutable: it keeps the source it unpacked
@@ -361,7 +274,9 @@ ratchet *args:
 release:
     gh workflow run release.yml --repo louwers/mln-rs --ref main
 
-# Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`.
+# The tests' headless frontends render with WebGPU, or with the backend MLN_RENDER_BACKEND names: webgpu, metal, vulkan
+# or gl.
+[doc("Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`")]
 [positional-arguments]
 test *args:  _dev-shell
     {{dev_shell}} cargo test --workspace "$@"
@@ -434,23 +349,6 @@ update-ffi-abi checkout=ffi:
     done
     {{just}} generate-c-abi
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
-
-# Rerun it when the C++ shaders change, and commit the result.
-[doc("Vendor the C++ core's WGSL shaders, unchanged, into crates/mln_webgpu/src/shaders/wgsl_sources.rs")]
-vendor-shaders checkout=cpp:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    shopt -s nullglob
-    headers=({{quote(checkout)}}/include/mln/shaders/webgpu/*.hpp)
-    if [[ ${#headers[@]} -eq 0 ]]; then
-        echo "no WGSL headers in {{checkout}}/include/mln/shaders/webgpu" >&2
-        exit 1
-    fi
-    tool_dir="$(mktemp -d)"
-    trap 'rm -rf "$tool_dir"' EXIT
-    rustc --edition 2024 -O -o "$tool_dir/extract_wgsl" crates/mln_webgpu/tools/extract_wgsl.rs
-    "$tool_dir/extract_wgsl" crates/mln_webgpu/src/shaders/wgsl_sources.rs "${headers[@]}"
-    echo "vendored ${#headers[@]} headers from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
 # Measure the coverage of the tests (`just test`) from a clean start, then report it with the given arguments
 _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')

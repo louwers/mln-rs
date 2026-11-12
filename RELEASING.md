@@ -44,11 +44,7 @@ first.
 
 `.github/workflows/release.yml`:
 
-1. Checks out this repository. It needs no C++ checkout: the WGSL, MSL and
-   GLSL shaders are vendored in `crates/mln_webgpu/src/shaders/wgsl_sources.rs`,
-   `crates/mln_mtl/src/shaders/msl_sources.rs` and
-   `crates/mln_vulkan/src/shaders/glsl_sources.rs` and
-   `crates/mln_gl/src/shaders/glsl_sources.rs` (see below).
+1. Checks out this repository. It needs no C++ checkout.
 2. Installs stable Rust and runs `cargo package --workspace --locked`
    (without the desktop app). It packages every crate and builds each one from
    its packaged sources. The
@@ -111,20 +107,3 @@ mln-rs dependency. A new third-party crate goes into
 - **Tag rules**: a ruleset or tag protection that covers `v*` must let GitHub
   Actions create tags.
 - The workflow refuses to run on any branch other than the default branch.
-
-## Shaders
-
-The WGSL shaders come from the C++ core's `include/mln/shaders/webgpu/*.hpp`.
-`just vendor-shaders [maplibre-native checkout]` extracts them, unchanged,
-into `crates/mln_webgpu/src/shaders/wgsl_sources.rs` (default checkout:
-`../maplibre-native`). Rerun it when the C++ shaders change, and commit the
-result. mln-rs's copy also has edits of its own, which a rerun reverts: keep
-them when you review the diff. The MSL in
-`crates/mln_mtl/src/shaders/msl_sources.rs` and the GLSL in
-`crates/mln_vulkan/src/shaders/glsl_sources.rs` come from the same core's
-`include/mln/shaders/mtl/*.hpp` and `include/mln/shaders/vulkan/*.hpp`, with
-the port's changes, and are updated by hand. So is the GLSL in
-`crates/mln_gl/src/shaders/glsl_sources.rs`, from
-`include/mln/shaders/gl/*.hpp`: `crates/mln_gl/tools/extract_glsl.rs` extracts
-it unchanged, to compare with or to start again from, and the file's first
-lines list the port's changes.

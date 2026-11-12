@@ -1,5 +1,4 @@
-// The C++ core's GLSL, extracted by crates/mln_gl/tools/extract_glsl.rs from the
-// raw string literals of
+// The C++ core's GLSL, copied from the raw string literals of
 //   include/mln/shaders/gl/atmosphere.hpp
 //   include/mln/shaders/gl/background.hpp
 //   include/mln/shaders/gl/background_pattern.hpp

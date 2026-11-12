@@ -10,9 +10,8 @@
 //! become wgpu objects (reference counted, so "release" is a drop), and the
 //! `Context&` members of resources become `Rc<Context>`.
 //!
-//! The WGSL comes unchanged from the C++ headers: `//crates/mln_webgpu:wgsl_sources`
-//! runs `tools/extract_wgsl.rs` over them at build time and generates
-//! `shaders::wgsl_sources`.
+//! The WGSL comes from the C++ headers, with the port's changes
+//! (`shaders::wgsl_sources`).
 
 mod bind_groups;
 pub mod buffer_resource;

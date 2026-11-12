@@ -1,9 +1,9 @@
-// Compiles every WGSL source extracted from include/mln/shaders/webgpu/*.hpp
-// the way webgpu::ShaderGroup + ShaderProgram do (Prelude, then the struct
-// prelude if any, through the preprocessor with the default ProgramParameters
-// defines, in both projection variants) and reports which ones wgpu's WGSL
-// front end (naga) rejects. C++ compiles them with Dawn's Tint, so a failure
-// here is a wgpu-vs-Dawn difference.
+// Compiles every WGSL source of `wgsl_sources` the way webgpu::ShaderGroup +
+// ShaderProgram do (Prelude, then the struct prelude if any, through the
+// preprocessor with the default ProgramParameters defines, in both projection
+// variants) and reports which ones wgpu's WGSL front end (naga) rejects. C++
+// compiles them with Dawn's Tint, so a failure here is a wgpu-vs-Dawn
+// difference.
 //
 // The shaders on the M1 path must compile; the rest are reported only.
 
