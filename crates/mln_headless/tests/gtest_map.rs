@@ -188,7 +188,7 @@ fn lat_lng_bounds_to_camera_with_bearing_pitch_and_padding() {
     let a = (width - padding.left() - padding.right()) / width;
     let b = (height - padding.top() - padding.bottom()) / height;
     let scale_change = if b < a { b } else { a };
-    assert_double_eq(virtual_camera_padded.zoom.unwrap(), virtual_camera.zoom.unwrap() + mln_math::log2(scale_change));
+    assert_double_eq(virtual_camera_padded.zoom.unwrap(), virtual_camera.zoom.unwrap() + scale_change.log2());
     assert_double_eq(virtual_camera_padded.pitch.unwrap(), virtual_camera.pitch.unwrap());
     assert_double_eq(virtual_camera_padded.bearing.unwrap(), virtual_camera.bearing.unwrap());
 }

@@ -1436,7 +1436,7 @@ impl TransformState {
         // range toward a pole as far as the zoom allows.
         if self.is_globe_rendering() {
             let max_latitude = VerticalPerspectiveProjection::max_latitude(self, self.scale_zoom(*scale));
-            let max_y = Projection::world_size(*scale) / M2PI * mln_math::asinh(mln_math::deg2rad(max_latitude).tan());
+            let max_y = Projection::world_size(*scale) / M2PI * mln_math::deg2rad(max_latitude).tan().asinh();
             *y = mln_math::clamp_f64(*y, -max_y, max_y);
             return;
         }
@@ -1448,7 +1448,7 @@ impl TransformState {
         // areas on the Y axis.
         let ratio_y = (if self.rotated_north() { width } else { height }) / TILE_SIZE_D;
         // util::max: fmax
-        *scale = mln_math::max_f64(*scale, ratio_y);
+        *scale = mln_math::fmax(*scale, ratio_y);
 
         // Constrain min/max pan to avoid showing off-world areas on the Y axis.
         let max_y = (*scale * TILE_SIZE_D - (if self.rotated_north() { width } else { height })) / 2.0;
@@ -1708,7 +1708,7 @@ impl TransformState {
         let point = ScreenCoordinate::new(
             -constrained.longitude() * self.bc,
             if self.is_globe_rendering() {
-                self.cc * mln_math::asinh(latitude.tan())
+                self.cc * latitude.tan().asinh()
             } else {
                 0.5 * self.cc * ((1.0 + f) / (1.0 - f)).ln()
             },
@@ -1765,5 +1765,25 @@ impl TransformState {
         let mut top_point: Vec4 = [0.0; 4];
         matrix::transform_mat4(&mut top_point, &p, &self.get_coord_matrix());
         top_point[3] as f32 / self.get_camera_to_center_distance()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::constants::LATITUDE_MAX;
+
+    /// The globe's `asinh(tan(φ))` and the Mercator branch's
+    /// `0.5 * ln((1 + sin φ) / (1 - sin φ))` give the same y inside the
+    /// Mercator range, so the center doesn't jump when the projection
+    /// changes.
+    #[test]
+    fn globe_and_mercator_latitude_to_y_agree() {
+        for latitude in [-LATITUDE_MAX, -60.0, -1e-9, 0.0, 30.0, 80.0, LATITUDE_MAX] {
+            let phi = mln_math::deg2rad(latitude);
+            let globe = phi.tan().asinh();
+            let f = phi.sin();
+            let mercator = 0.5 * ((1.0 + f) / (1.0 - f)).ln();
+            assert!((globe - mercator).abs() <= 1e-12, "{latitude}: {globe} vs {mercator}");
+        }
     }
 }

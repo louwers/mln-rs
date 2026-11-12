@@ -28,12 +28,6 @@ use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, tile_cover};
 
-/// `util::clamp<double>(value, min, max)`.
-fn clamp(value: f64, min: f64, max: f64) -> f64 {
-    let lower = if value < max { value } else { max };
-    if min < lower { lower } else { min }
-}
-
 /// `TilePyramid`.
 pub struct TilePyramid {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
@@ -245,7 +239,7 @@ impl TilePyramid {
         self.handle_wrap_jump(parameters.transform_state.get_lat_lng(WrapMode::Unwrapped).longitude() as f32);
 
         // Optionally shift the zoom level
-        let zoom = clamp(
+        let zoom = mln_math::clamp_f64(
             parameters.transform_state.get_zoom() + parameters.tile_lod_zoom_shift,
             parameters.transform_state.get_min_zoom(),
             parameters.transform_state.get_max_zoom(),
@@ -271,7 +265,7 @@ impl TilePyramid {
             tile_lod_scale: parameters.tile_lod_scale,
             tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
             tile_lod_mode: parameters.tile_lod_mode,
-            requested_zoom: Some(zoom + mln_math::log2(constants::TILE_SIZE_D / f64::from(tile_size))),
+            requested_zoom: Some(zoom + (constants::TILE_SIZE_D / f64::from(tile_size)).log2()),
             round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM,
         };
 

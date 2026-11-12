@@ -2670,6 +2670,7 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-image",
  "mln-rs-map-types",
+ "mln-rs-math",
  "mln-rs-rapidjson",
  "mln-rs-sprite",
  "mln-rs-storage",

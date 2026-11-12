@@ -956,7 +956,7 @@ mod tile_cover {
             let ideal_zoom = std::cmp::min(i32::from(c.max_zoom), covering_zoom) as u8;
             let raster = c.type_ == SourceType::Raster;
             let mut parameters = TileCoverParameters::new(transform.get_state().clone());
-            parameters.requested_zoom = Some(c.zoom + mln_math::log2(512.0 / f64::from(c.tile_size)));
+            parameters.requested_zoom = Some(c.zoom + (512.0 / f64::from(c.tile_size)).log2());
             parameters.round_zoom = raster;
             let tiles = tile_cover(
                 &parameters,

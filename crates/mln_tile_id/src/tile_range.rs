@@ -1,7 +1,7 @@
 // Ports src/mln/util/tile_range.hpp.
 
 use geometry::Point;
-use mln_math::wrap;
+use mln_math::{clamp_f64, wrap};
 use mln_util::constants;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::projection::Projection;
@@ -14,12 +14,6 @@ use crate::tile_id::CanonicalTileID;
 pub struct TileRange {
     pub range: Range<Point<u32>>,
     pub zoom_range: Range<u8>,
-}
-
-/// `util::clamp(value, min, max)`: `std::max(min, std::min(max, value))`.
-fn clamp(value: f64, min: f64, max: f64) -> f64 {
-    let lower = if value < max { value } else { max };
-    if min < lower { lower } else { min }
 }
 
 impl TileRange {
@@ -74,8 +68,8 @@ impl TileRange {
             min_x = west_column as u32;
             max_x = (if east_column < max_tile { east_column } else { east_column - max_tile }) as u32;
         }
-        let min_y = clamp(ne_proj.y.floor(), 0.0, max_tile) as u32;
-        let max_y = clamp(sw_proj.y.floor(), 0.0, max_tile) as u32;
+        let min_y = clamp_f64(ne_proj.y.floor(), 0.0, max_tile) as u32;
+        let max_y = clamp_f64(sw_proj.y.floor(), 0.0, max_tile) as u32;
 
         TileRange {
             range: Range::new(Point::new(min_x, min_y), Point::new(max_x, max_y)),

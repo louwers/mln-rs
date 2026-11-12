@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use mln_map_types::projection_base::ProjectionBase;
 use mln_map_types::util_camera::Camera as UtilCamera;
 use mln_map_types::{MercatorProjection, TileProjector, TransitionEndFn};
+use mln_math::deg2rad;
 use mln_style_types::ProjectionType;
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::UnitBezier;
@@ -52,10 +53,6 @@ fn sc(x: f64, y: f64) -> ScreenCoordinate {
 
 fn insets(top: f64, left: f64, bottom: f64, right: f64) -> EdgeInsets {
     EdgeInsets::new(top, left, bottom, right).unwrap()
-}
-
-fn deg2rad(deg: f64) -> f64 {
-    mln_math::deg2rad(deg)
 }
 
 /// gtest's `FloatingPoint<T>::AlmostEquals` distance: sign-and-magnitude

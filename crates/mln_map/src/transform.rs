@@ -1016,7 +1016,7 @@ impl Transform {
         } else if animation.min_zoom.is_some() || linear_zoom_interpolation {
             // util::min(a, b, c) = min(a, min(b, c)), fmin on doubles
             let mut min_zoom =
-                mln_math::min_f64(animation.min_zoom.unwrap_or(start_zoom), mln_math::min_f64(start_zoom, zoom));
+                mln_math::fmin(animation.min_zoom.unwrap_or(start_zoom), mln_math::fmin(start_zoom, zoom));
             min_zoom = mln_math::clamp_f64(
                 min_zoom,
                 self.state.get_min_zoom_at_latitude(lat_lng_end.latitude()),

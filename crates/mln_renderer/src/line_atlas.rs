@@ -223,7 +223,7 @@ impl DashPatternTexture {
         // The OpenGL ES 2.0 spec, section 3.8.2: non-power-of-two textures
         // need CLAMP_TO_EDGE; the dash patterns repeat horizontally, so the
         // texture is a power of two (15 -> 16, 30 -> 32).
-        let texture_height = 1u32 << mln_math::ceil_log2(u64::from(height));
+        let texture_height = height.next_power_of_two();
         let mut image = AlphaImage::new(Size::new(256, texture_height));
 
         let from_pos = add_dash_pattern(&mut image, 0, from, cap);

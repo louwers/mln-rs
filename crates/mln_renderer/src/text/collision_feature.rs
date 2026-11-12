@@ -342,7 +342,7 @@ impl CollisionFeature {
         // overscaled tiles where the pitch 0-based symbol spacing will put labels
         // very close together in a pitched map. To reduce the cost of adding extra
         // collision circles, we slowly increase them for overscaled tiles.
-        let overscaling_padding_factor: f64 = 1.0 + 0.4 * mln_math::log2(f64::from(overscaling));
+        let overscaling_padding_factor: f64 = 1.0 + 0.4 * f64::from(overscaling).log2();
         let n_pitch_padding_boxes = (f64::from(n_boxes) * overscaling_padding_factor / 2.0).floor() as i32;
 
         // offset the center of the first box by half a box so that the edge of the

@@ -281,7 +281,7 @@ impl TileCoverParameters {
 #[must_use]
 pub fn covering_zoom_level(zoom: f64, type_: SourceType, size: u16) -> i32 {
     let mut zoom = zoom;
-    zoom += mln_math::log2(constants::TILE_SIZE_D / f64::from(size));
+    zoom += (constants::TILE_SIZE_D / f64::from(size)).log2();
     if type_ == SourceType::Raster || type_ == SourceType::RasterDEM {
         zoom.round() as i32
     } else {
@@ -684,7 +684,7 @@ mod globe {
         let mut camera_coord = camera_position;
         let latitude = transform.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).latitude();
         if latitude.abs() > constants::LATITUDE_MAX {
-            camera_coord[1] += center.y - (0.5 - mln_math::asinh(mln_math::deg2rad(latitude).tan()) / constants::M2PI);
+            camera_coord[1] += center.y - (0.5 - mln_math::deg2rad(latitude).tan().asinh() / constants::M2PI);
         }
         let distance_to_center_2d = (center_coord[0] - camera_coord[0]).hypot(center_coord[1] - camera_coord[1]);
         let distance_z = (center_coord[2] - camera_coord[2]).abs();

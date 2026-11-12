@@ -1384,13 +1384,13 @@ fn camera_for_lat_lngs_on_screen(
         let mut scale_y = f64::from(size.height) / height;
         scale_x -= (padding.left() + padding.right()) / width;
         scale_y -= (padding.top() + padding.bottom()) / height;
-        min_scale = mln_math::min_f64(scale_x, scale_y);
+        min_scale = mln_math::fmin(scale_x, scale_y);
     }
 
     let mut zoom = transform.get_zoom();
     if min_scale > 0.0 {
         zoom = mln_math::clamp_f64(
-            zoom + mln_math::log2(min_scale),
+            zoom + min_scale.log2(),
             transform.get_state().get_min_zoom(),
             transform.get_state().get_max_zoom(),
         );

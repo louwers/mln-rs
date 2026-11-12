@@ -3,13 +3,9 @@
 // include/mln/util/interpolate.hpp (it has to live next to the type: orphan
 // rule).
 
+use mln_math::deg2radf;
 use mln_util::interpolate::Interpolate;
 use serde::{Deserialize, Serialize};
-
-// TODO(port): use mln_math's deg2radf (math/angles.hpp) once it exists.
-fn deg2radf(deg: f32) -> f32 {
-    deg * std::f32::consts::PI / 180.0_f32
-}
 
 /// `mln::style::Position`: a spherical position (radial, azimuthal, polar)
 /// with its cached cartesian form.

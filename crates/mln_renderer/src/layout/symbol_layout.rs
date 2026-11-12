@@ -209,7 +209,7 @@ fn shaping_for_text_justify_type(
 /// `evaluateRadialOffset(anchor, radialOffset)`.
 fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32; 2] {
     let mut result = [0.0_f32, 0.0_f32];
-    let radial_offset = mln_math::max_f32(radial_offset, 0.0); // Ignore negative offset.
+    let radial_offset = mln_math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
     // solve for r where r^2 + r^2 = radialOffset^2
     let hypotenuse = radial_offset / std::f32::consts::SQRT_2;
 
