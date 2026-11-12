@@ -21,7 +21,8 @@ pub enum Reason {
 }
 
 /// Why a resource request failed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct ResourceError {
     pub reason: Reason,
     /// An error message from the request handler, e.g. a server message or a
@@ -39,14 +40,6 @@ impl ResourceError {
         ResourceError { reason, message: message.into(), retry_after }
     }
 }
-
-impl std::fmt::Display for ResourceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ResourceError {}
 
 /// `Response`. `Clone` is the C++ copy constructor (the error is copied,
 /// the data shared).

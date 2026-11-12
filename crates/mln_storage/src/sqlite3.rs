@@ -72,7 +72,8 @@ pub enum OpenFlag {
 /// `mapbox::sqlite::SqliteError`. `code` is `static_cast<ResultCode>(err)`, the
 /// low byte of the (extended) result code (`ResultCode` is a `uint8_t`
 /// enum); `extended_code` is `err >> 8`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct SqliteError {
     pub code: i32,
     pub extended_code: i32,
@@ -82,12 +83,6 @@ pub struct SqliteError {
 impl SqliteError {
     pub fn new(err: i32, message: impl Into<String>) -> Self {
         SqliteError { code: err & 0xff, extended_code: (err >> 8) & 0xff, message: message.into() }
-    }
-}
-
-impl std::fmt::Display for SqliteError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
     }
 }
 

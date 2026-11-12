@@ -64,8 +64,10 @@ pub struct Face {
     pub needs_synthesized_charmap: bool,
 }
 
-/// Why `FT_New_Memory_Face` failed (only the fact matters to the C++).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why `FT_New_Memory_Face` failed (only the fact matters to the C++): the
+/// name of the FreeType error, such as `Unknown_File_Format`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("FT_New_Memory_Face failed: {0}")]
 pub struct OpenError(pub &'static str);
 
 impl Face {

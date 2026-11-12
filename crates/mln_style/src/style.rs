@@ -16,7 +16,8 @@ pub use crate::style_impl::{Impl, LayerRefMut, LightRefMut, ProjectionRefMut, Sk
 use crate::transition_options::TransitionOptions;
 
 /// Why a style failed to load.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
 pub enum StyleLoadError {
     /// The style document isn't a valid style.
     Parse(String),
@@ -33,14 +34,6 @@ impl StyleLoadError {
         }
     }
 }
-
-impl std::fmt::Display for StyleLoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.message())
-    }
-}
-
-impl std::error::Error for StyleLoadError {}
 
 #[derive(Debug)]
 pub struct Style {

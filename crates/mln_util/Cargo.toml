@@ -24,6 +24,7 @@ geometry.workspace = true
 mln_math.workspace = true
 rapidjson.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 web-time.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]

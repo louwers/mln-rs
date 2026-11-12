@@ -23,36 +23,27 @@ pub const COMPRESSION_BROTLI: u8 = 0x3;
 pub const COMPRESSION_ZSTD: u8 = 0x4;
 
 /// The exceptions of pmtiles.hpp; `Display` is `what()`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// `pmtiles_magic_number_exception`
+    #[error("pmtiles magic number exception")]
     MagicNumber,
     /// `pmtiles_version_exception`
+    #[error("pmtiles version: must be 3")]
     Version,
     /// `varint_too_long_exception`
+    #[error("varint too long exception")]
     VarintTooLong,
     /// `end_of_buffer_exception`
+    #[error("end of buffer exception")]
     EndOfBuffer,
     /// `malformed_directory_exception`
+    #[error("malformed directory exception")]
     MalformedDirectory,
     /// `std::overflow_error`
+    #[error("{0}")]
     Overflow(&'static str),
 }
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Error::MagicNumber => "pmtiles magic number exception",
-            Error::Version => "pmtiles version: must be 3",
-            Error::VarintTooLong => "varint too long exception",
-            Error::EndOfBuffer => "end of buffer exception",
-            Error::MalformedDirectory => "malformed directory exception",
-            Error::Overflow(message) => message,
-        })
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// `headerv3`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

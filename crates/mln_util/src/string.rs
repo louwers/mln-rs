@@ -64,7 +64,8 @@ pub fn to_string_f32(t: f32, decimal: bool) -> String {
 }
 
 /// The exceptions `std::stof` throws (libstdc++: `what()` is `"stof"`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("stof")]
 pub enum StofError {
     /// `std::invalid_argument`: nothing could be converted.
     InvalidArgument,

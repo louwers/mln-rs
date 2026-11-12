@@ -28,7 +28,8 @@ pub type FeatureState = ValueObject;
 pub type GlobalStateMap = ValueObject;
 
 /// `expression::EvaluationError`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct EvaluationError {
     pub message: String,
 }

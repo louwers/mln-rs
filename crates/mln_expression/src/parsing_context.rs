@@ -39,11 +39,21 @@ use crate::type_::Type;
 use crate::value::Value;
 use crate::within::Within;
 
-/// `expression::ParsingError`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// `expression::ParsingError`. `Display` writes `key: message`, or the
+/// message alone when the key is empty, as `getCombinedErrors` does.
+#[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
 pub struct ParsingError {
     pub message: String,
     pub key: String,
+}
+
+impl std::fmt::Display for ParsingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.key.is_empty() {
+            write!(f, "{}: ", self.key)?;
+        }
+        f.write_str(&self.message)
+    }
 }
 
 /// `expression::ParseResult` (`std::optional<std::unique_ptr<Expression>>`).
@@ -243,18 +253,7 @@ impl ParsingContext {
 
     #[must_use]
     pub fn get_combined_errors(&self) -> String {
-        let mut combined_error = String::new();
-        for parsing_error in self.errors.borrow().iter() {
-            if !combined_error.is_empty() {
-                combined_error.push('\n');
-            }
-            if !parsing_error.key.is_empty() {
-                combined_error += &parsing_error.key;
-                combined_error += ": ";
-            }
-            combined_error += &parsing_error.message;
-        }
-        combined_error
+        self.errors.borrow().iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
     }
 
     /// Parse the given style-spec JSON value as an expression.

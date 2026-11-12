@@ -13,7 +13,8 @@
 use feature::Value;
 
 /// `mln::style::conversion::Error`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct Error {
     pub message: String,
 }

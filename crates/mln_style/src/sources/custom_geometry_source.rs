@@ -84,24 +84,13 @@ impl std::fmt::Debug for Options {
 }
 
 /// Why a [`CustomGeometrySource`] can't be made.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CustomGeometrySourceError {
     /// The tile size isn't a power of two up to the tile extent, so tiles
     /// can't be scaled to the extent.
+    #[error("custom geometry source tile size {0} is not a power of two up to {extent}", extent = constants::EXTENT)]
     InvalidTileSize(u16),
 }
-
-impl std::fmt::Display for CustomGeometrySourceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CustomGeometrySourceError::InvalidTileSize(size) => {
-                write!(f, "custom geometry source tile size {size} is not a power of two up to {}", constants::EXTENT)
-            }
-        }
-    }
-}
-
-impl std::error::Error for CustomGeometrySourceError {}
 
 /// The loader of a custom geometry source: it hands tiles their features,
 /// cut from the host's GeoJSON.
