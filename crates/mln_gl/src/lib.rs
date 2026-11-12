@@ -26,10 +26,11 @@
 //! sRGB framebuffer are encoded, as OpenGL ES always encodes them. None of it
 //! is EGL's, so a desktop context of another platform draws through it too.
 //!
-//! A [`RendererBackend`] renders on a [`Device`], an EGL share group, into
-//! an `OffscreenTarget`'s framebuffer. A `SurfaceTarget` presents to a
-//! Wayland, X11 or Android window through EGL from a context of the window's
-//! display, and a `CanvasTarget` draws into the canvas of a WebGL2 context.
+//! A [`RendererBackend`] renders on a [`Device`], an EGL share group or one
+//! context that its backends take turns in, into an `OffscreenTarget`'s
+//! framebuffer. A `SurfaceTarget` presents to a Wayland, X11 or Android
+//! window through EGL from a context of the window's display, and a
+//! `CanvasTarget` draws into the canvas of a WebGL2 context.
 
 // OpenGL through glow is the FFI here.
 #![allow(unsafe_code)]
@@ -74,7 +75,7 @@ pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSur
 pub use canvas_target::CanvasTarget;
 pub use context::Context;
 #[cfg(not(target_arch = "wasm32"))]
-pub use device::Device;
+pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
 pub use exported_target::ExportedTarget;
 #[cfg(not(target_arch = "wasm32"))]

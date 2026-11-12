@@ -39,7 +39,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::{DepthMaskType, StencilOpType};
 use mln_gfx::uniform_buffer::UniformBufferPtr;
-use mln_gl::{Device, OffscreenTarget, RendererBackend};
+use mln_gl::{Api, Device, DeviceOptions, OffscreenTarget, RendererBackend};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::range::Range;
@@ -53,7 +53,7 @@ struct Headless {
 
 impl Headless {
     fn new(size: Size) -> Result<Headless, mln_util::error::Error> {
-        let device = Device::new()?;
+        let device = Device::with_options(DeviceOptions { api: api(), ..DeviceOptions::default() })?;
         let backend = std::rc::Rc::new(RendererBackend::new(&device)?);
         let headless = Headless { target: OffscreenTarget::new(backend.clone(), size), backend };
         Ok(headless)
@@ -75,13 +75,27 @@ impl std::ops::Deref for Headless {
 
 const EXTENT: i16 = 8192;
 
-/// A headless backend, or none where there is no EGL to make an OpenGL ES 3.0
-/// context with, as on macOS: the test is skipped there, unless
-/// `MLN_RENDER_BACKEND` asks for this backend.
+/// The API that `MLN_RENDER_BACKEND` asks for: desktop OpenGL for
+/// `gl-desktop`, and OpenGL ES otherwise.
+fn api() -> Api {
+    if knob().is_some_and(|backend| backend.eq_ignore_ascii_case("gl-desktop")) { Api::Gl } else { Api::Gles }
+}
+
+fn knob() -> Option<String> {
+    std::env::var("MLN_RENDER_BACKEND").ok()
+}
+
+/// A headless backend, or none where there is no EGL to make a context of
+/// [`api`] with, as on macOS: the test is skipped there, unless
+/// `MLN_RENDER_BACKEND` asks for this backend (`gl` or `gl-desktop`).
 fn headless_backend(size: Size) -> Option<Headless> {
     match Headless::new(size) {
         Ok(backend) => Some(backend),
-        Err(error) if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("gl")) => {
+        Err(error)
+            if knob().is_some_and(|backend| {
+                backend.eq_ignore_ascii_case("gl") || backend.eq_ignore_ascii_case("gl-desktop")
+            }) =>
+        {
             panic!("{error}")
         }
         Err(error) => {
