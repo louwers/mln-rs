@@ -38,6 +38,13 @@ fn tmp_dir(name: &str) -> PathBuf {
     dir
 }
 
+/// `path` in the generic format the runner returns paths in, `/` on Windows
+/// too, as C++'s `generic_string()`.
+fn generic(path: &Path) -> String {
+    let path = path.to_str().unwrap();
+    if cfg!(windows) { path.replace('\\', "/") } else { path.to_string() }
+}
+
 fn write(path: &Path, contents: impl AsRef<[u8]>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, contents).unwrap();
@@ -143,7 +150,8 @@ fn parses_the_cpp_linux_manifest() {
 #[test]
 fn manifest_errors() {
     let dir = tmp_dir("manifest_errors");
-    let integration = std::fs::canonicalize(INTEGRATION).unwrap();
+    // Absolute, without the `\\?\` prefix that canonicalize gives on Windows.
+    let integration = std::path::absolute(INTEGRATION).unwrap();
     // A JSON string, quotes included: Windows paths have backslashes to escape.
     let integration = serde_json::to_string(integration.to_str().unwrap()).unwrap();
     let parse = |name: &str, contents: &str| {
@@ -174,7 +182,7 @@ fn manifest_errors() {
     )
     .unwrap();
     assert_eq!(manifest.get_test_paths().len(), 1);
-    assert_eq!(manifest.get_result_path(), dir.to_str().unwrap());
+    assert_eq!(manifest.get_result_path(), generic(&dir));
     let path = dir.join("filter.json");
     let manifest = ManifestParser::parse_manifest(path.to_str().unwrap(), "background-color/".to_string()).unwrap();
     assert_eq!(manifest.get_test_paths().len(), 6);

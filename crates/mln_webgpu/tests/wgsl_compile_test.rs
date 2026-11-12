@@ -54,6 +54,12 @@ fn all_extracted_wgsl_compiles() {
             let vertex = preprocess_wgsl(&assemble(source, vertex), &defines);
             let fragment = preprocess_wgsl(&assemble(source, fragment), &defines);
             let program = ShaderProgram::new(context, &vertex, &fragment, &[], &[], source.name);
+            assert_eq!(
+                program.get_index_group().is_some(),
+                vertex.contains("globalIndex") || fragment.contains("globalIndex"),
+                "{} binds globalIndex in a group of its own",
+                source.built_in
+            );
             if program.has_shader_modules() {
                 compiled += 1;
             } else {

@@ -14,6 +14,7 @@
 //! runs `tools/extract_wgsl.rs` over them at build time and generates
 //! `shaders::wgsl_sources`.
 
+mod bind_groups;
 pub mod buffer_resource;
 pub mod command_encoder;
 pub mod context;

@@ -255,7 +255,8 @@ struct PassState {
     /// The buffer and byte range bound at each slot.
     vertex_buffers: [Option<(wgpu::Buffer, Range<u64>)>; TRACKED_SLOTS],
     index_buffer: Option<(wgpu::Buffer, Range<u64>, wgpu::IndexFormat)>,
-    bind_groups: [Option<wgpu::BindGroup>; TRACKED_SLOTS],
+    /// The bind group set at each index, with its dynamic offset if it has one.
+    bind_groups: [Option<(wgpu::BindGroup, Option<u32>)>; TRACKED_SLOTS],
 }
 
 /// Whether a command must set the state `is_set` accepts, which is when
@@ -327,11 +328,12 @@ impl StateFilter<'_> {
         }
     }
 
-    /// Binds `bind_group`, which has no dynamic offsets, at `index`.
-    pub fn set_bind_group(&mut self, index: u32, bind_group: &wgpu::BindGroup) {
+    /// Binds `bind_group` at `index`, with `dynamic_offset` if its layout
+    /// has one dynamic offset and `None` if it has none.
+    pub fn set_bind_group(&mut self, index: u32, bind_group: &wgpu::BindGroup, dynamic_offset: Option<u32>) {
         let tracked = self.state.bind_groups.get_mut(index as usize);
-        if changes(tracked, |set| set == bind_group, || bind_group.clone()) {
-            self.encoder.set_bind_group(index, bind_group, &[]);
+        if changes(tracked, |(g, o)| g == bind_group && *o == dynamic_offset, || (bind_group.clone(), dynamic_offset)) {
+            self.encoder.set_bind_group(index, bind_group, dynamic_offset.as_slice());
         }
     }
 

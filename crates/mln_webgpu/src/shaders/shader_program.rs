@@ -178,6 +178,9 @@ pub struct ShaderProgram {
     fragment_shader_module: Option<wgpu::ShaderModule>,
     bind_group_layouts: Vec<wgpu::BindGroupLayout>,
     bind_group_order: Vec<u32>,
+    /// The group that holds only `globalIndex` (see
+    /// [`get_index_group`](Self::get_index_group)).
+    index_group: Option<u32>,
     pipeline_layout: Option<wgpu::PipelineLayout>,
     render_pipeline_cache: RefCell<HashMap<u64, wgpu::RenderPipeline>>,
     vertex_attributes: VertexAttributeArray,
@@ -218,7 +221,16 @@ impl ShaderProgram {
 
     /// `ShaderProgram(Context&, vertexSource, fragmentSource)` (minimal
     /// constructor; name "ContextShader").
+    ///
+    /// A `globalIndex` the sources declare in group 0 moves to a group of its
+    /// own (see [`get_index_group`](Self::get_index_group)).
     pub fn from_sources(context: &Context, vertex_source: &str, fragment_source: &str) -> Self {
+        let index_group = index_group_of(&[vertex_source, fragment_source]);
+        let (vertex_source, fragment_source) = match index_group {
+            Some(group) => (move_global_index(vertex_source, group), move_global_index(fragment_source, group)),
+            None => (Cow::Borrowed(vertex_source), Cow::Borrowed(fragment_source)),
+        };
+        let (vertex_source, fragment_source) = (vertex_source.as_ref(), fragment_source.as_ref());
         let mut program = ShaderProgram {
             shader_program_id: SimpleIdentity::new(),
             shader_name: "ContextShader".to_owned(),
@@ -227,6 +239,7 @@ impl ShaderProgram {
             fragment_shader_module: None,
             bind_group_layouts: Vec::new(),
             bind_group_order: Vec::new(),
+            index_group,
             pipeline_layout: None,
             render_pipeline_cache: RefCell::new(HashMap::new()),
             vertex_attributes: VertexAttributeArray::new(),
@@ -329,6 +342,16 @@ impl ShaderProgram {
 
     pub fn get_bind_group_order(&self) -> &[u32] {
         &self.bind_group_order
+    }
+
+    /// The group that holds only `globalIndex`, the index of the draw's
+    /// entries in the layer's UBO vectors, at binding `ID_GLOBAL_UBO_INDEX`.
+    /// Its layout is the context's index group layout, and a draw binds it
+    /// with the dynamic offset of its index (`Context::index_bind_group`),
+    /// so its other groups bind only what it shares with the layer's other
+    /// draws.
+    pub fn get_index_group(&self) -> Option<u32> {
+        self.index_group
     }
 
     pub fn get_shader_name(&self) -> &str {
@@ -522,6 +545,14 @@ impl ShaderProgram {
 
         for (group, mut infos) in grouped {
             infos.sort_by_key(|info| info.binding);
+            if Some(group) == self.index_group
+                && let Some(layout) = self.context.index_bind_group_layout()
+            {
+                self.bind_group_order.push(group);
+                self.bindings_per_group.push(infos);
+                self.bind_group_layouts.push(layout);
+                continue;
+            }
             let layout_entries: Vec<wgpu::BindGroupLayoutEntry> = infos
                 .iter()
                 .map(|info| wgpu::BindGroupLayoutEntry {
@@ -782,4 +813,51 @@ impl ShaderProgramBase for ShaderProgram {
 /// Downcast a shader handle to the WebGPU program (C++ `static_cast`).
 pub fn as_webgpu_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
     shader.as_any().downcast_ref::<ShaderProgram>()
+}
+
+/// How the vendored sources declare `globalIndex`.
+const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> globalIndex:";
+
+/// The group after the last one `sources` use, if they declare `globalIndex`
+/// in group 0.
+fn index_group_of(sources: &[&str]) -> Option<u32> {
+    if !sources.iter().any(|source| source.contains(GLOBAL_INDEX_DECLARATION)) {
+        return None;
+    }
+    let last = sources
+        .iter()
+        .flat_map(|source| source.split("@group(").skip(1))
+        .filter_map(|rest| rest.split(')').next()?.trim().parse::<u32>().ok())
+        .max()?;
+    Some(last + 1)
+}
+
+/// `source` with its `globalIndex` declaration in `group`.
+fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
+    if source.contains(GLOBAL_INDEX_DECLARATION) {
+        let declaration = GLOBAL_INDEX_DECLARATION.replacen("@group(0)", &format!("@group({group})"), 1);
+        Cow::Owned(source.replacen(GLOBAL_INDEX_DECLARATION, &declaration, 1))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_index_moves_to_the_group_after_the_last() {
+        let vertex = "@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;\n\
+                      @group(0) @binding(2) var<storage, read> drawableVector: array<U>;";
+        let fragment = "@group(1) @binding(0) var image_sampler: sampler;";
+        assert_eq!(index_group_of(&[vertex, fragment]), Some(2));
+        assert_eq!(index_group_of(&[fragment]), None);
+        assert_eq!(
+            move_global_index(vertex, 2),
+            "@group(2) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;\n\
+             @group(0) @binding(2) var<storage, read> drawableVector: array<U>;"
+        );
+        assert!(matches!(move_global_index(fragment, 2), Cow::Borrowed(_)));
+    }
 }
