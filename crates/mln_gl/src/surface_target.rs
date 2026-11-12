@@ -40,7 +40,7 @@ enum WindowHandle {
     /// An Xlib `Display` and a window of it, with the ID of the window's
     /// visual, or 0 for one that isn't known.
     Xlib { display: *mut c_void, window: c_ulong, visual_id: c_ulong },
-    /// An OpenHarmony `OHNativeWindow`, which EGL's default display draws.
+    /// An `OpenHarmony` `OHNativeWindow`, which EGL's default display draws.
     Ohos { window: *mut c_void },
 }
 
@@ -124,7 +124,7 @@ struct EglWindow {
     surface: Cell<Option<egl::Surface>>,
     /// Whether the context is current on `surface`. It isn't when EGL can
     /// make no surface of the window, or when the window went away under
-    /// the surface, as an OpenHarmony window does with its consumer.
+    /// the surface, as an `OpenHarmony` window does with its consumer.
     on_surface: Cell<bool>,
     wl_egl_window: Cell<*mut c_void>,
     /// What `handle` names, which stays open until the context is gone.
@@ -421,7 +421,7 @@ pub struct SurfaceTarget {
 impl SurfaceTarget {
     /// A backend on a context of `window`'s display, and a target that
     /// presents frames of `framebuffer_size` pixels to `window`, a Wayland
-    /// surface, an Xlib window or an OpenHarmony window, which it keeps. It
+    /// surface, an Xlib window or an `OpenHarmony` window, which it keeps. It
     /// takes the window over
     /// with its first frame, not before: until then another target may
     /// present to it. With `cap_frame_rate`, presenting to an X11 window

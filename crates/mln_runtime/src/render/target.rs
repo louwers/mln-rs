@@ -470,7 +470,7 @@ pub enum SurfaceType {
     Wayland,
     /// An Android `ANativeWindow`.
     AndroidNdk,
-    /// An OpenHarmony `OHNativeWindow`.
+    /// An `OpenHarmony` `OHNativeWindow`.
     OhosNdk,
 }
 
@@ -786,7 +786,7 @@ impl Device {
     /// Whether sessions on the device present to the surfaces of
     /// `surface`'s type: a Vulkan device's instance needs the type's surface
     /// extension, which the loader may lack.
-#[must_use]
+    #[must_use]
     pub fn presents_to(&self, surface: SurfaceType) -> bool {
         if !surface.presents_with(self.backend()) {
             return false;

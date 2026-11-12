@@ -28,7 +28,7 @@ const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 /// storage buffers with, which Vulkan 1.0 doesn't have.
 const STORAGE_BUFFER_STORAGE_CLASS: &CStr = c"VK_KHR_storage_buffer_storage_class";
 
-/// `VK_OHOS_surface`, OpenHarmony's surface extension, which ash lacks.
+/// `VK_OHOS_surface`, `OpenHarmony`'s surface extension, which ash lacks.
 pub const OHOS_SURFACE: &CStr = c"VK_OHOS_surface";
 
 /// The instance extensions of the platforms' surfaces, which the library's
@@ -43,7 +43,7 @@ const SURFACE_EXTENSIONS: &[&CStr] = &[
     ash::ext::headless_surface::NAME,
 ];
 
-/// The system's Vulkan library. OpenHarmony names its loader `libvulkan.so`,
+/// The system's Vulkan library. `OpenHarmony` names its loader `libvulkan.so`,
 /// which ash looks for only on Android.
 fn load_entry() -> Result<ash::Entry, Error> {
     // SAFETY: the Vulkan library's initializers have no preconditions.
@@ -980,6 +980,7 @@ impl Device {
     /// the instance extension `name` makes, such as
     /// `VK_KHR_wayland_surface` or [`OHOS_SURFACE`]: the device presents,
     /// and its instance has the extension.
+    #[must_use]
     pub fn presents_through(&self, name: &CStr) -> bool {
         self.presents() && self.shared.has_instance_extension(name)
     }

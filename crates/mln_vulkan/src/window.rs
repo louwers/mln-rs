@@ -143,7 +143,7 @@ unsafe fn create_ohos_surface(
     };
     let mut surface = vk::SurfaceKHR::null();
     // SAFETY: the create info names the caller's live window.
-    match unsafe { create(instance.handle(), &info, std::ptr::null(), &mut surface) } {
+    match unsafe { create(instance.handle(), &raw const info, std::ptr::null(), &raw mut surface) } {
         vk::Result::SUCCESS => Ok(surface),
         error => Err(error),
     }

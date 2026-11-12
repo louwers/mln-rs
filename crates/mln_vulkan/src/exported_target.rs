@@ -428,6 +428,7 @@ impl ExportedMemory {
     }
 
     #[cfg(not(unix))]
+    #[expect(clippy::unused_self, reason = "the stand-in for a method of another platform")]
     fn export_fd(&mut self, _: &Device, _: &Layout, _: u64, _: u64, _: &[(u32, u32)]) -> Result<(), Error> {
         Err(Error::unsupported("this platform shares no memory as file descriptors"))
     }
@@ -481,6 +482,7 @@ impl ExportedMemory {
     }
 
     #[cfg(not(windows))]
+    #[expect(clippy::unused_self, reason = "the stand-in for a method of another platform")]
     fn import_dxgi(&mut self, _: &Device, _: vk::Extent2D, _: vk::MemoryRequirements) -> Result<(), Error> {
         Err(Error::unsupported("this platform has no D3D11 textures"))
     }

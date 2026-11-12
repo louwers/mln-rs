@@ -908,7 +908,7 @@ mod tests {
         assert_eq!(read(&ohos(8, 8, core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
     }
 
-    /// An OpenHarmony target of `window`, `width` by `height` logical pixels.
+    /// An `OpenHarmony` target of `window`, `width` by `height` logical pixels.
     fn ohos(width: u32, height: u32, window: *mut c_void) -> mln_render_target {
         use crate::generated::types::{mln_ohos_window_target, mln_render_target_data};
         let logical_size = mln_logical_size { width, height };
