@@ -2144,10 +2144,12 @@ dependencies = [
 name = "mln-rs-c"
 version = "0.0.11"
 dependencies = [
+ "libc",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geojson",
+ "mln-rs-gl",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-mtl",
@@ -2160,6 +2162,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-vulkan",
  "raw-window-handle",
  "serde_json",
  "thiserror 2.0.21",
@@ -2350,6 +2353,7 @@ dependencies = [
  "bytemuck",
  "glow",
  "khronos-egl",
+ "libc",
  "libloading",
  "mln-rs-gfx",
  "mln-rs-tile-id",
@@ -2448,6 +2452,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
+ "objc2-io-surface",
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
 ]
@@ -2550,7 +2555,10 @@ dependencies = [
 name = "mln-rs-runtime"
 version = "0.0.11"
 dependencies = [
+ "glow",
  "httpmock",
+ "khronos-egl",
+ "libc",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",
@@ -2574,6 +2582,7 @@ dependencies = [
  "pollster",
  "serde_json",
  "wgpu",
+ "windows",
  "winit",
 ]
 
@@ -2601,6 +2610,7 @@ version = "0.0.11"
 dependencies = [
  "block2 0.6.2",
  "httpmock",
+ "jni",
  "js-sys",
  "mln-rs-actor",
  "mln-rs-feature",
@@ -2616,6 +2626,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "rusqlite",
  "rustls",
+ "rustls-platform-verifier",
  "serde_json",
  "thiserror 2.0.21",
  "ureq",
@@ -2812,10 +2823,12 @@ dependencies = [
  "ash",
  "bytemuck",
  "gpu-allocator",
+ "libc",
  "mln-rs-gfx",
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",
+ "windows",
 ]
 
 [[package]]
@@ -3271,6 +3284,7 @@ dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+ "objc2-io-surface",
 ]
 
 [[package]]

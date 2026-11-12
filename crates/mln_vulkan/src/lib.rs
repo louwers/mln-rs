@@ -13,8 +13,9 @@
 //! The GLSL comes from the C++ headers, with the port's changes
 //! (`shaders::glsl_sources`).
 //!
-//! A `RendererBackend` renders on a `Device`, into an `OffscreenTarget`
-//! or a `SurfaceTarget` built on it.
+//! A `RendererBackend` renders on a `Device`, which backends on any thread
+//! share, into an `OffscreenTarget`, a `SurfaceTarget` or a `BorrowedTarget`
+//! built on it.
 //!
 //! The crate is empty on Apple platforms and in the browser build.
 
@@ -22,6 +23,9 @@
 // Vulkan through ash is the FFI here.
 #![allow(unsafe_code)]
 
+#[cfg(target_os = "android")]
+mod android_hardware_buffer;
+pub mod borrowed_target;
 pub mod buffer_resource;
 pub mod command_encoder;
 pub mod context;
@@ -30,6 +34,7 @@ pub mod device;
 pub mod draw_target;
 pub mod drawable;
 pub mod drawable_builder;
+pub mod exported_target;
 pub mod layer_group;
 pub mod offscreen_target;
 pub mod offscreen_texture;
@@ -44,10 +49,15 @@ pub mod tile_layer_group;
 pub mod uniform_buffer;
 pub mod upload_pass;
 pub mod vertex_buffer_resource;
+#[cfg(windows)]
+mod win32;
 mod window;
 
+pub use ash;
+pub use borrowed_target::{BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner, PendingReads};
 pub use context::Context;
-pub use device::{AdapterId, Device};
+pub use device::{AdapterId, Device, Features, HostDevice, QueueLock, RawDevice};
+pub use exported_target::ExportedTarget;
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
-pub use surface_target::SurfaceTarget;
+pub use surface_target::{HostSurface, SurfaceTarget};

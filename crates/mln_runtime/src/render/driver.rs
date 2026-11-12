@@ -9,7 +9,7 @@ use mln_util::error::Error;
 use mln_util::sync::MutexExt;
 
 use super::session::{Abandoner, RenderSessionState, SessionShared};
-use super::worker::{self, Slot};
+use super::worker::{self, Slot, Worker};
 use crate::runtime::Outbox;
 
 /// The graphics work of a render session that attached with
@@ -74,7 +74,7 @@ impl DriverWork {
             let _worker = worker::enter(&self.slot);
             worker::build(&self.shared, &self.slot);
             while self.run_loop.run_once() {}
-            if abandoned || self.slot.borrow().as_ref().is_some_and(|worker| worker.finished) {
+            if abandoned || self.slot.borrow().as_ref().is_some_and(Worker::is_done) {
                 self.end();
             }
         }

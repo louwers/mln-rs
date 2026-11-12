@@ -50,7 +50,7 @@ pub(crate) struct SessionObject {
     pub(crate) map: ::mln_runtime::Map,
     /// The scale factor that the caller created the map with, which the
     /// session's extents and views report exactly.
-    initial_scale_factor: f64,
+    pub(crate) initial_scale_factor: f64,
     has_redraw_wake: bool,
     /// Held so that its user data lives as long as the session's handle: a
     /// core worker never runs it.
@@ -95,7 +95,7 @@ pub(crate) struct AttachRequest {
     redraw_wake: Arc<Wake>,
     has_redraw_wake: bool,
     driver_work_wake: Arc<Wake>,
-    has_queue_lock: bool,
+    producer_sync_kinds: ::mln_runtime::SyncKinds,
 }
 
 /// Checks a caller's attach options.
@@ -111,10 +111,8 @@ pub(crate) unsafe fn attach_options(options: *const mln_render_session_attach_op
         MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD => Driver::CallerThread,
         _ => return Err(Error::invalid_argument("render driver kind is invalid")),
     };
-    Fields::new(options.producer_sync_kinds, KNOWN_SYNC_KINDS, "producer_sync_kinds")?;
-    let lock = options.queue_lock;
-    if lock.lock.is_some() != lock.unlock.is_some() {
-        return Err(Error::invalid_argument("a queue lock sets both lock and unlock, or neither"));
+    if options.producer_sync_kinds & !KNOWN_SYNC_KINDS != 0 {
+        return Err(Error::invalid_argument("producer synchronization kinds are invalid"));
     }
     Ok(AttachRequest {
         driver,
@@ -122,7 +120,7 @@ pub(crate) unsafe fn attach_options(options: *const mln_render_session_attach_op
         redraw_wake: Arc::new(Wake::new(&options.redraw_wake)?),
         has_redraw_wake: options.redraw_wake.callback.is_some(),
         driver_work_wake: Arc::new(Wake::new(&options.driver_work_wake)?),
-        has_queue_lock: lock.lock.is_some(),
+        producer_sync_kinds: crate::gpu_device::sync_kinds(options.producer_sync_kinds),
     })
 }
 
@@ -135,11 +133,6 @@ impl AttachRequest {
         } else {
             Err(Error::new(mln_util::ErrorKind::Unsupported, message))
         }
-    }
-
-    /// Fails with `MLN_STATUS_UNSUPPORTED` when the caller set a queue lock.
-    pub(crate) fn refuse_queue_lock(&self, message: &'static str) -> Result<(), Error> {
-        if self.has_queue_lock { Err(Error::new(mln_util::ErrorKind::Unsupported, message)) } else { Ok(()) }
     }
 
     fn wakes(&self) -> [&Wake; 3] {
@@ -164,6 +157,7 @@ pub(crate) fn attach(
         frame_wake: Some(runtime_wake(&request.frame_wake)),
         redraw_wake: request.has_redraw_wake.then(|| runtime_wake(&request.redraw_wake)),
         driver_work_wake: Some(runtime_wake(&request.driver_work_wake)),
+        producer_sync_kinds: request.producer_sync_kinds,
     };
     // Accepted first, so that a wake that the session runs as it starts
     // reaches the caller.
@@ -239,9 +233,14 @@ pub unsafe extern "C" fn mln_render_session_get_capabilities(
             flags: flag(capabilities.frame_acquisition, MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION)
                 | flag(capabilities.readback, MLN_RENDER_SESSION_CAPABILITY_READBACK)
                 | flag(capabilities.presentation, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION),
-            // No frame leaves the session, so there is nothing to wait on.
-            producer_sync_kind: MLN_GPU_SYNC_CPU_COMPLETE,
-            consumer_sync_kinds: 0,
+            // A session whose frames don't leave it has nothing to wait on.
+            producer_sync_kind: capabilities
+                .producer_sync_kind
+                .map_or(MLN_GPU_SYNC_CPU_COMPLETE, crate::gpu_device::sync_kind_value),
+            consumer_sync_kinds: crate::gpu_device::sync_flags(capabilities.consumer_sync_kinds),
+            export_kind: capabilities
+                .export_kind
+                .map_or(crate::generated::types::MLN_GPU_EXPORT_KIND_NONE, crate::render_target::export_kind_value),
         };
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_capabilities, &capabilities) }
@@ -272,7 +271,7 @@ pub unsafe extern "C" fn mln_render_session_get_snapshot(
             },
             generation: snapshot.generation,
             frame_generation: snapshot.frame_generation,
-            acquired_frame_count: 0,
+            acquired_frame_count: snapshot.acquired_frames,
             failure_status: failure_status(snapshot.failure.as_ref()),
             has_target: snapshot.has_target,
         };
@@ -386,7 +385,7 @@ fn disposition(disposition: FrameDisposition) -> u32 {
     }
 }
 
-fn frame_result(result: &FrameResult, initial_scale_factor: f64) -> mln_render_frame_result {
+pub(crate) fn frame_result(result: &FrameResult, initial_scale_factor: f64) -> mln_render_frame_result {
     let view = match &result.view {
         Some(view) => {
             let mut view = projection::from_map_view(view);
@@ -710,8 +709,11 @@ pub unsafe extern "C" fn mln_render_session_release(
         resolve(session)?;
         // SAFETY: the caller's contract.
         let pending = unsafe { PendingCompletion::new(completion) }?;
-        let object = SESSIONS.remove(session)?;
+        // A release that the session refuses, such as while the host holds
+        // one of its frames, keeps the handle.
+        let object = resolve(session)?;
         let released = object.session.release()?;
+        let _ = SESSIONS.remove(session);
         completion::forward(released, Some(pending.accept()), |result| {
             (result.map_err(Error::from), Generations::default())
         });
@@ -744,10 +746,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
-        MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE,
-        MLN_STATUS_UNSUPPORTED, mln_completion_result, mln_logical_size, mln_map, mln_map_snapshot,
-        mln_offscreen_target, mln_queue_lock, mln_render_target, mln_render_target_data, mln_runtime,
-        mln_texture_readback_result, mln_wake,
+        MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, mln_completion_result,
+        mln_logical_size, mln_map, mln_map_snapshot, mln_offscreen_target, mln_render_target, mln_render_target_data,
+        mln_runtime, mln_texture_readback_result, mln_wake,
     };
     use crate::map::tests::{create_map, options, release_map, view};
     use crate::map::{mln_map_dispose, mln_map_get_snapshot, mln_map_release, mln_map_set_style_json};
@@ -989,8 +990,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn attach_options_check_their_driver_sync_kinds_and_queue_lock() {
-        unsafe extern "C" fn lock(_: *mut c_void) {}
+    fn attach_options_check_their_driver_and_sync_kinds() {
         // SAFETY: each pointer is to a local.
         let check = |options: mln_render_session_attach_options| unsafe { super::attach_options(&raw const options) };
         assert!(check(attach_options()).is_ok());
@@ -998,26 +998,11 @@ pub(crate) mod tests {
         assert!(driver.err().unwrap().message().contains("driver"));
         let kinds = check(mln_render_session_attach_options { producer_sync_kinds: 1 << 20, ..attach_options() });
         assert_eq!(kinds.err().unwrap().status(), MLN_STATUS_INVALID_ARGUMENT);
-        let half = mln_queue_lock {
-            lock: Some(lock),
-            unlock: None,
-            user_data: core::ptr::null_mut(),
-            release_user_data: None,
-        };
-        let half_locked = check(mln_render_session_attach_options { queue_lock: half, ..attach_options() });
-        assert!(half_locked.err().unwrap().message().contains("queue lock"));
         let queued = mln_wake { callback: None, user_data: core::ptr::null_mut(), release_user_data: None, queue: 5 };
         let wake = check(mln_render_session_attach_options { frame_wake: queued, ..attach_options() });
         assert_eq!(wake.err().unwrap().status(), MLN_STATUS_INVALID_ARGUMENT);
         // SAFETY: null.
         assert!(unsafe { super::attach_options(core::ptr::null()) }.is_err());
-
-        let locked = check(mln_render_session_attach_options {
-            queue_lock: mln_queue_lock { unlock: Some(lock), ..half },
-            ..attach_options()
-        });
-        let refused = locked.ok().unwrap().refuse_queue_lock("no lock").unwrap_err();
-        assert_eq!(refused.status(), MLN_STATUS_UNSUPPORTED);
     }
 
     #[test]

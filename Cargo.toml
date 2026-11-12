@@ -170,6 +170,10 @@ ureq = { version = "3.5.1", default-features = false }
 # ureq's rustls, with ring's cryptography (ureq's own `rustls` feature would
 # also bring webpki-roots).
 rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
+# Android: the certificate verifier that ureq's `platform-verifier` feature
+# uses, which mln_android_init() points at the app's Java VM, through JNI.
+rustls-platform-verifier = { version = "0.7.1", default-features = false }
+jni = { version = "0.22.4", default-features = false }
 # Apple platforms: Foundation's NSURLSession for the online file source.
 block2 = { version = "0.6.2" }
 objc2 = { version = "0.6.5" }
@@ -202,6 +206,7 @@ objc2-metal = { version = "0.3.2", default-features = false, features = [
     "MTLDepthStencil",
     "MTLDevice",
     "MTLDrawable",
+    "MTLEvent",
     "MTLLibrary",
     "MTLPixelFormat",
     "MTLRenderCommandEncoder",
@@ -214,6 +219,14 @@ objc2-metal = { version = "0.3.2", default-features = false, features = [
     "MTLVertexDescriptor",
 ] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+# Apple platforms: the IOSurfaces of the Metal backend's exported rings.
+objc2-io-surface = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "bitflags",
+    "objc2-core-foundation",
+    "IOSurfaceRef",
+    "IOSurfaceTypes",
+] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
     "std",
     "objc2-core-foundation",
@@ -245,6 +258,17 @@ wgpu = { version = "30.0.1", default-features = false, features = ["std", "parki
 # end, at wgpu's versions. naga's GLSL front end needs a module that only
 # `wgsl-in` or `spv-in` builds.
 ash = { version = "0.38.0" }
+# The Vulkan backend on Windows: its D3D12 fences, and the D3D11 textures of
+# its exported rings on the DXGI adapter of the Vulkan GPU, at wgpu's version.
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+] }
 gpu-allocator = { version = "0.28.0", default-features = false, features = ["std", "vulkan"] }
 naga = { version = "30.0.1", features = ["glsl-in", "spv-out", "wgsl-in"] }
 # examples/desktop: the CAMetalLayer of the window's view on macOS.

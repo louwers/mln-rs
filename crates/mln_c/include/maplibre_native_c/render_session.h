@@ -189,28 +189,42 @@ MLN_API mln_status mln_map_attach(
 ) MLN_NOEXCEPT;
 
 /**
- * Replaces the window or surface that the session presents to, and resizes
- * the map to it.
+ * Replaces the window, surface, or borrowed ring that the session renders to,
+ * and resizes the map to it.
  *
  * Use it to give the session a target again after
- * mln_render_session_release_target(), or to move it to another window or
- * surface. The session presents to `target` with the device that it attached
- * with. Once the replacement completes, the session no longer uses the old
- * target.
+ * mln_render_session_release_target(), to move it to another window or
+ * surface, or to give a borrowed ring new textures, such as of a new size. The
+ * session renders to `target` with the device that it attached with. Once the
+ * replacement completes, the session no longer uses the old target. A
+ * borrowed ring takes only a ring of the kind it attached with, with as many
+ * textures, and with the same format, final layout, and owner. Release every
+ * acquired frame of a borrowed ring first. Once the replacement completes, the
+ * session has also stopped waiting on the consumer sync of the textures that
+ * the new ring doesn't have, as mln_render_session_release_target() says, so
+ * you can reuse or destroy them.
  *
  * Returns:
- * - MLN_STATUS_INVALID_STATE when a window is minimized or has no client area.
- * - MLN_STATUS_UNSUPPORTED when the session renders offscreen, when `target`
- *   is offscreen, or when no backend of this build presents to the target's
- *   kind.
+ * - MLN_STATUS_INVALID_ARGUMENT when a borrowed ring gets more or fewer
+ *   textures than it attached with.
+ * - MLN_STATUS_INVALID_STATE when a window is minimized or has no client
+ *   area, or while you hold one of a borrowed ring's acquired frames.
+ * - MLN_STATUS_UNSUPPORTED when the session renders offscreen or into an
+ *   exported ring, when `target` is offscreen or an exported ring, when a
+ *   session that presents gets a borrowed ring or a borrowed ring gets
+ *   anything else, or when no backend of this build renders to the target's
+ *   kind. An exported ring takes a new size from mln_render_session_resize()
+ *   instead.
  *
  * Completes with:
  * - MLN_STATUS_INVALID_STATE when a window was minimized or had no client
  *   area when the replacement ran.
- * - MLN_STATUS_UNSUPPORTED when the session's device can't present to
- *   `target`, or the new target needs a different color format or
- *   pre-rotation support than the old one. Attach a new session instead.
- * - MLN_STATUS_NATIVE_ERROR when the library can't present to the new target.
+ * - MLN_STATUS_UNSUPPORTED when the session's device can't render to
+ *   `target`, the new target needs a different color format or pre-rotation
+ *   support than the old one, or a borrowed ring's new textures differ from
+ *   the old ones in their format, final layout, or owner. Attach a new
+ *   session instead.
+ * - MLN_STATUS_NATIVE_ERROR when the library can't render to the new target.
  */
 MLN_BINDING("execution=operation")
 MLN_API mln_status mln_render_session_set_target(
@@ -401,7 +415,9 @@ MLN_API mln_status mln_acquired_frame_get_result(
  *
  * Lifetimes:
  * The object that `out_sync` names belongs to the session. It stays valid until
- * you release or discard the frame, or the session is abandoned or disposed.
+ * you release or discard the frame, or the session is abandoned or disposed. A
+ * view from mln_acquired_frame_view_begin() keeps it valid until
+ * mln_acquired_frame_view_end().
  */
 MLN_BINDING("view_owner=frame")
 MLN_API mln_status mln_acquired_frame_get_producer_sync(
@@ -463,16 +479,17 @@ MLN_API void mln_acquired_frame_view_end(
  *
  * Use it when the window changes size, or moves to a display with another
  * scale factor. The map keeps its loaded tiles, and draws its next frame at
- * the new size and scale factor. Release every acquired frame first. You can
- * call it once the attach call returns. While the attach runs, the resize
- * waits for it to complete.
+ * the new size and scale factor. You can call it once the attach call returns.
+ * While the attach runs, the resize waits for it to complete.
+ *
+ * An exported ring gets textures of the new size. The frames that you hold
+ * keep their textures, of the old size, until you release or discard them.
  *
  * Returns:
  * - MLN_STATUS_UNSUPPORTED when the session renders into a borrowed ring. Give
  *   it new textures of the new size instead.
- * - MLN_STATUS_INVALID_STATE while you hold one of the session's acquired
- *   frames, or when the session failed, or you detached, abandoned, released,
- *   or disposed it.
+ * - MLN_STATUS_INVALID_STATE when the session failed, or you detached,
+ *   abandoned, released, or disposed it.
  *
  * Completes with:
  * - MLN_STATUS_TARGET_LOST when the session loses its target before the resize
@@ -495,10 +512,18 @@ MLN_API mln_status mln_render_session_resize(
  * you can destroy the old target. An Android or OpenHarmony window can go away
  * sooner, as mln_android_window_target and mln_ohos_window_target say.
  *
+ * For a borrowed ring, a completed release also means that the session has
+ * stopped waiting on the consumer sync that you released its frames with, so
+ * you can reuse or destroy the textures. The session waits about a second at
+ * most for that sync, and logs a warning when the wait runs out. It checks the
+ * sync without blocking a thread: keep servicing a session driven by
+ * MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD until the release completes. The
+ * session keeps nothing of the released textures: a texture that a later target
+ * gives it again is a new one, even one that you discarded a frame of.
+ *
  * Returns:
- * - MLN_STATUS_UNSUPPORTED when the session renders offscreen or into Android
- *   hardware buffers, dmabufs, DXGI shared textures, or IOSurfaces that it
- *   allocates.
+ * - MLN_STATUS_UNSUPPORTED when the session renders offscreen or into an
+ *   exported ring.
  *
  * Completes with:
  * - MLN_STATUS_UNSUPPORTED when the target is an HTML canvas.
@@ -615,6 +640,12 @@ MLN_API mln_status mln_render_session_detach(
  * exits, and reports how many it kept. Detach the session instead to free
  * them.
  *
+ * A session lets go of your graphics objects later when you call this on the
+ * thread that runs its graphics work: from a callback that the session runs
+ * there, once the callback returns, and for a session driven by
+ * MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD, at your next
+ * mln_render_session_service_driver_work() for it.
+ *
  * Returns:
  * - MLN_STATUS_BUSY while mln_render_session_service_driver_work() runs for the
  *   session on another thread, or while a view that
@@ -666,7 +697,10 @@ MLN_API mln_status mln_render_session_dispose(
  * Gives up an acquired frame without saying when your GPU stops reading it.
  *
  * Because your GPU may still read the frame's texture, the session never
- * renders into that texture again.
+ * renders into that texture again, even when mln_render_session_set_target()
+ * gives it the texture again, until mln_render_session_release_target()
+ * releases the ring. A view that is open on the frame keeps the frame's sync
+ * objects in place until it ends.
  */
 MLN_API mln_status mln_acquired_frame_discard(
   mln_acquired_frame frame, mln_diagnostic* out_diagnostic

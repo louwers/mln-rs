@@ -305,10 +305,14 @@ fn a_detach_ends_a_demand_waiting_for_commands() {
     let moved = zoom(&map, 3.0);
     demand(&session, DemandMode::Force, 661);
     let detached = session.detach().unwrap();
-    drop(open);
+    // The detach completes while the map's thread stays held, before the
+    // command sent ahead of it runs.
+    assert!(eventually(|| detached.is_complete()));
+    assert!(!moved.is_complete());
     detached.wait().unwrap();
     let result = take_one(&session);
     assert_eq!((661, FrameDisposition::TargetNotReady), (result.token.unwrap(), result.disposition));
+    drop(open);
     moved.wait().unwrap();
 }
 
@@ -531,9 +535,18 @@ fn attach_rejects_an_empty_target() {
 fn a_demand_made_while_attaching_renders_after_the_attach() {
     let runtime = runtime();
     let map = red_map(&runtime);
+    // The held thread binds the session only after the demand reached it.
+    let open = hold_runtime(&map);
     let (session, attached) = map.attach(offscreen(SIZE), AttachOptions::default()).unwrap();
     demand(&session, DemandMode::Force, 5);
-    attached.wait().unwrap();
+    let (sender, completed) = channel();
+    let drained = session.clone();
+    attached.on_complete(move |result| {
+        let _ = sender.send(result.map(|()| drained.drain_frame_results().unwrap().len()));
+    });
+    drop(open);
+    // The attach completes before the demand renders.
+    assert_eq!(0, completed.recv_timeout(TIMEOUT).unwrap().unwrap());
     let result = take_one(&session);
     assert_eq!((5, FrameDisposition::Rendered), (result.token.unwrap(), result.disposition));
 }

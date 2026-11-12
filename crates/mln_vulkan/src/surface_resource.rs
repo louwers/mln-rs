@@ -83,6 +83,9 @@ pub struct SurfaceResource {
     backend: Rc<BackendImpl>,
     context: Weak<Context>,
     provider: Option<Rc<dyn SurfaceProvider>>,
+    /// Whether the resource destroys its surface: one that `provider` made,
+    /// and not a host's.
+    owns_surface: bool,
     /// Whether every frame is copied for `read_image` (the headless
     /// backend's `swap`).
     read_every_frame: bool,
@@ -91,9 +94,10 @@ pub struct SurfaceResource {
 }
 
 impl SurfaceResource {
-    /// A resource of `size`, on `surface` if there is one. `provider` makes
-    /// the surface again when it is lost, and `present_mode` is used when
-    /// the surface has it, FIFO otherwise.
+    /// A resource of `size`, on `surface` if there is one. `provider` made
+    /// the surface, which the resource then destroys, and makes it again when
+    /// it is lost; without one, the surface is the host's. `present_mode` is
+    /// used when the surface has it, FIFO otherwise.
     pub fn new(
         context: &Context,
         size: Size,
@@ -105,6 +109,7 @@ impl SurfaceResource {
         let resource = Rc::new(SurfaceResource {
             backend: context.get_backend().clone(),
             context: context.weak(),
+            owns_surface: provider.is_some(),
             provider,
             read_every_frame,
             state: RefCell::new(SurfaceState {
@@ -214,7 +219,7 @@ impl SurfaceResource {
     fn init_swapchain(&self, state: &mut SurfaceState, w: u32, h: u32) -> Result<(), String> {
         let physical_device = self.backend.get_physical_device();
         let device = self.backend.get_device();
-        let surface_loader = self.backend.get_surface_loader();
+        let surface_loader = self.backend.get_surface_loader().ok_or("The instance has no surfaces")?;
         let swapchain_loader = self.backend.get_swapchain_loader().ok_or("The device has no swapchains")?;
         let surface = state.surface;
 
@@ -277,15 +282,12 @@ impl SurfaceResource {
             swapchain_image_count = swapchain_image_count.min(capabilities.max_image_count);
         }
 
-        let graphics_queue_index = self.backend.get_graphics_queue_index();
-        let present_queue_index = self.backend.get_present_queue_index().unwrap_or(graphics_queue_index);
-        let queue_indices = [graphics_queue_index, present_queue_index];
         let composite_alpha = if capabilities.supported_composite_alpha.contains(vk::CompositeAlphaFlagsKHR::INHERIT) {
             vk::CompositeAlphaFlagsKHR::INHERIT
         } else {
             vk::CompositeAlphaFlagsKHR::OPAQUE
         };
-        let mut create_info = vk::SwapchainCreateInfoKHR::default()
+        let create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
             .min_image_count(swapchain_image_count)
             .image_format(format.format)
@@ -297,16 +299,10 @@ impl SurfaceResource {
             .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
             .clipped(true)
             .composite_alpha(composite_alpha)
+            // The device's one queue renders and presents.
+            .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             // update this when recreating
             .old_swapchain(state.swapchain);
-        create_info = if graphics_queue_index == present_queue_index {
-            create_info.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-        } else {
-            // TODO if this scenario is widespread and performance is a
-            // problem (shouldn't be the case on most hardware) rework to
-            // vk::SharingMode::eExclusive + queue ownership
-            create_info.image_sharing_mode(vk::SharingMode::CONCURRENT).queue_family_indices(&queue_indices)
-        };
 
         // SAFETY: the create info is valid for the surface, and the old
         // swapchain's images aren't in use (the device is idle when a
@@ -507,8 +503,11 @@ impl SurfaceResource {
             {
                 loader.destroy_swapchain(state.swapchain, None);
             }
-            if state.surface != vk::SurfaceKHR::null() {
-                self.backend.get_surface_loader().destroy_surface(state.surface, None);
+            if state.surface != vk::SurfaceKHR::null()
+                && self.owns_surface
+                && let Some(loader) = self.backend.get_surface_loader()
+            {
+                loader.destroy_surface(state.surface, None);
             }
         }
         state.swapchain = vk::SwapchainKHR::null();

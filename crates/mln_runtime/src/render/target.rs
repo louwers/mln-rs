@@ -4,6 +4,10 @@ use std::sync::Arc;
 
 use mln_gfx::Window;
 pub use mln_gfx::backend::Type as BackendType;
+pub use mln_gfx::{
+    ConsumerSync, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedImage, ExportedRing, GpuSync, SyncKind,
+    SyncKinds,
+};
 use mln_util::error::Error;
 use mln_util::size::Size;
 
@@ -37,6 +41,10 @@ pub struct AttachOptions {
     /// [`DriverWork::service`](crate::DriverWork::service), and not again
     /// until a service starts.
     pub driver_work_wake: Option<Wake>,
+    /// The kinds of sync that the host can wait for before it reads a
+    /// borrowed ring's frame. The session picks the one of them that its
+    /// target supports and that waits least: see [`SyncKinds::pick`].
+    pub producer_sync_kinds: SyncKinds,
 }
 
 impl std::fmt::Debug for AttachOptions {
@@ -46,6 +54,7 @@ impl std::fmt::Debug for AttachOptions {
             .field("frame_wake", &self.frame_wake.is_some())
             .field("redraw_wake", &self.redraw_wake.is_some())
             .field("driver_work_wake", &self.driver_work_wake.is_some())
+            .field("producer_sync_kinds", &self.producer_sync_kinds)
             .finish()
     }
 }
@@ -70,6 +79,229 @@ pub enum RenderTarget {
     /// the surface, and [`set_surface`](crate::RenderSession::set_surface)
     /// gives the session another one.
     Surface { size: Size, surface: Surface, device: Option<Device> },
+    /// A ring of the host's textures of `size` logical pixels, on `device`,
+    /// whose backend is the ring's. Each frame goes to the host, which
+    /// takes it with [`acquire_frame`](crate::RenderSession::acquire_frame)
+    /// and gives it back once it has read it. The ring's textures set the
+    /// size in pixels, and [`set_ring`](crate::RenderSession::set_ring)
+    /// gives the session new ones.
+    Borrowed { size: Size, ring: BorrowedRing, device: Device },
+    /// A ring of images of `size` logical pixels, rendered at the map's
+    /// pixel ratio, that the session allocates on `device` and shares with
+    /// the host in a kind of `ring.kinds`: the first, by
+    /// [`ExportKind::BY_PREFERENCE`], that the device exports. Without a
+    /// device, the session renders on the first of [`Device::new`]'s
+    /// backends whose device exports one. Each frame goes to the host, which
+    /// takes it with [`acquire_frame`](crate::RenderSession::acquire_frame)
+    /// and gives it back once it has read it.
+    /// [`resize`](crate::RenderSession::resize) gives the ring images of a
+    /// new size, and the frames that the host holds keep theirs.
+    Exported { size: Size, ring: ExportedRing, device: Option<Device> },
+}
+
+/// A ring of the host's textures, of one backend.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BorrowedRing {
+    pub(crate) kind: RingKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RingKind {
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    Vulkan(mln_vulkan::BorrowedImages),
+    #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    Metal(mln_mtl::BorrowedTextures),
+    #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+    Gl(mln_gl::BorrowedTextures),
+    #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+    WebGpu(mln_webgpu::BorrowedTextures),
+}
+
+/// The host's texture that an acquired frame was rendered into, of `size`
+/// pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameTexture {
+    pub size: Size,
+    pub kind: FrameTextureKind,
+}
+
+/// A [`FrameTexture`]'s backend objects.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FrameTextureKind {
+    /// A `VkImage` and its `VkImageView` of a `VkDevice`, in a `VkFormat`,
+    /// left in a `VkImageLayout`.
+    Vulkan { image: u64, view: u64, device: u64, format: i32, layout: i32 },
+    /// An `id<MTLTexture>` of an `id<MTLDevice>`, in an `MTLPixelFormat`.
+    Metal { texture: u64, device: u64, pixel_format: u64 },
+    /// An OpenGL texture name, of a texture target.
+    OpenGl { texture: u32, target: u32 },
+    /// A WebGPU texture: the host's at the frame's slot of its ring.
+    WebGpu,
+    /// An image of an exported ring, and its shared memory.
+    Exported(ExportedImage),
+}
+
+impl BorrowedRing {
+    /// A ring of the host's Vulkan images.
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    #[must_use]
+    pub fn vulkan(images: mln_vulkan::BorrowedImages) -> BorrowedRing {
+        BorrowedRing { kind: RingKind::Vulkan(images) }
+    }
+
+    /// A ring of the host's Metal textures.
+    #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    pub fn metal(textures: mln_mtl::BorrowedTextures) -> BorrowedRing {
+        BorrowedRing { kind: RingKind::Metal(textures) }
+    }
+
+    /// A ring of the host's OpenGL textures, in the share group of a device
+    /// that wraps the host's context.
+    #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+    #[must_use]
+    pub fn gl(textures: mln_gl::BorrowedTextures) -> BorrowedRing {
+        BorrowedRing { kind: RingKind::Gl(textures) }
+    }
+
+    /// A ring of the host's WebGPU textures, of the WebGPU device that
+    /// renders into them.
+    #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+    #[must_use]
+    pub fn webgpu(textures: mln_webgpu::BorrowedTextures) -> BorrowedRing {
+        BorrowedRing { kind: RingKind::WebGpu(textures) }
+    }
+
+    /// The backend whose device renders into the ring.
+    #[must_use]
+    pub fn backend(&self) -> BackendType {
+        match self.kind {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            RingKind::Vulkan(_) => BackendType::Vulkan,
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            RingKind::Metal(_) => BackendType::Metal,
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            RingKind::Gl(_) => BackendType::OpenGL,
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            RingKind::WebGpu(_) => BackendType::WebGPU,
+            // The browser build renders into no ring.
+            #[allow(unreachable_patterns)]
+            _ => BackendType::WebGPU,
+        }
+    }
+
+    /// How many textures the ring has.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        match &self.kind {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            RingKind::Vulkan(images) => images.images.len(),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            RingKind::Metal(textures) => textures.textures.len(),
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            RingKind::Gl(textures) => textures.textures.len(),
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            RingKind::WebGpu(textures) => textures.textures.len(),
+            #[allow(unreachable_patterns)]
+            _ => 0,
+        }
+    }
+
+    /// The textures' size in pixels.
+    #[must_use]
+    pub fn physical_size(&self) -> Size {
+        match &self.kind {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            RingKind::Vulkan(images) => images.size,
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            RingKind::Metal(textures) => textures.size,
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            RingKind::Gl(textures) => textures.size,
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            RingKind::WebGpu(textures) => textures.size,
+            #[allow(unreachable_patterns)]
+            _ => Size::default(),
+        }
+    }
+
+    /// Whether the texture at `slot` is the one at `other`'s `other_slot`.
+    #[cfg_attr(target_family = "wasm", allow(unused_variables))]
+    pub(crate) fn same_texture(&self, slot: usize, other: &BorrowedRing, other_slot: usize) -> bool {
+        #[allow(unreachable_patterns)]
+        match (&self.kind, &other.kind) {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            (RingKind::Vulkan(images), RingKind::Vulkan(others)) => images
+                .images
+                .get(slot)
+                .zip(others.images.get(other_slot))
+                .is_some_and(|(image, other)| image.image == other.image),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            (RingKind::Metal(textures), RingKind::Metal(others)) => {
+                textures.textures.get(slot).zip(others.textures.get(other_slot)).is_some_and(|(texture, other)| {
+                    std::ptr::eq(
+                        mln_mtl::objc2::rc::Retained::as_ptr(texture),
+                        mln_mtl::objc2::rc::Retained::as_ptr(other),
+                    )
+                })
+            }
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            (RingKind::Gl(textures), RingKind::Gl(others)) => {
+                textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
+            }
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            (RingKind::WebGpu(textures), RingKind::WebGpu(others)) => {
+                textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
+            }
+            _ => false,
+        }
+    }
+
+    /// The texture at `slot`, which sessions on `device` render into.
+    #[cfg_attr(target_family = "wasm", allow(unused_variables))]
+    #[must_use]
+    pub fn texture(&self, slot: usize, device: &Device) -> Option<FrameTexture> {
+        #[allow(unreachable_patterns)]
+        match (&self.kind, device) {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            (RingKind::Vulkan(images), Device::Vulkan(device)) => {
+                use mln_vulkan::ash::vk::Handle as _;
+                images.images.get(slot).map(|image| FrameTexture {
+                    size: images.size,
+                    kind: FrameTextureKind::Vulkan {
+                        image: image.image.as_raw(),
+                        view: image.view.as_raw(),
+                        device: device.raw().device.as_raw(),
+                        format: images.format.as_raw(),
+                        layout: images.final_layout.as_raw(),
+                    },
+                })
+            }
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            (RingKind::Metal(textures), Device::Metal(device)) => {
+                use mln_mtl::objc2::rc::Retained;
+                textures.textures.get(slot).map(|texture| FrameTexture {
+                    size: textures.size,
+                    kind: FrameTextureKind::Metal {
+                        texture: Retained::as_ptr(texture) as usize as u64,
+                        device: Retained::as_ptr(device.device()) as usize as u64,
+                        pixel_format: textures.pixel_format().0 as u64,
+                    },
+                })
+            }
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            (RingKind::Gl(textures), Device::Gl(_)) => textures.textures.get(slot).map(|&texture| FrameTexture {
+                size: textures.size,
+                // GL_TEXTURE_2D.
+                kind: FrameTextureKind::OpenGl { texture, target: 0x0DE1 },
+            }),
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            (RingKind::WebGpu(textures), Device::WebGpu(_)) => textures
+                .textures
+                .get(slot)
+                .map(|_| FrameTexture { size: textures.size, kind: FrameTextureKind::WebGpu }),
+            _ => None,
+        }
+    }
 }
 
 /// What a surface session presents to.
@@ -83,6 +315,12 @@ pub(crate) enum SurfaceKind {
     MetalLayer(mln_mtl::Layer),
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
     Wgpu(wgpu::Surface<'static>),
+    /// The host's `VkSurfaceKHR`, of the instance of the session's device.
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    Vulkan(mln_vulkan::HostSurface),
+    /// The host's `EGLSurface`, of the display of the session's device.
+    #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+    Gl(mln_gl::HostSurface),
 }
 
 impl Surface {
@@ -110,21 +348,45 @@ impl Surface {
         Surface { kind: SurfaceKind::Wgpu(surface) }
     }
 
-    /// The surface again, if it is a window.
-    #[cfg_attr(
-        not(any(
-            all(feature = "metal", target_vendor = "apple"),
-            all(feature = "webgpu", not(target_family = "wasm"))
-        )),
-        expect(clippy::unnecessary_wraps, reason = "a window is the only surface kind in this build")
-    )]
+    /// The host's `VkSurfaceKHR`, which a session on the Vulkan device
+    /// whose instance made it presents to. The surface stays the host's.
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    #[must_use]
+    pub fn vulkan(surface: mln_vulkan::HostSurface) -> Surface {
+        Surface { kind: SurfaceKind::Vulkan(surface) }
+    }
+
+    /// The host's `EGLSurface`, which a session on the OpenGL device that
+    /// wraps the host's context presents to. The surface stays the host's.
+    #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+    #[must_use]
+    pub fn gl(surface: mln_gl::HostSurface) -> Surface {
+        Surface { kind: SurfaceKind::Gl(surface) }
+    }
+
+    /// The backend of the device whose instance or share group a host's
+    /// surface is of, or `None` for a window or layer.
+    #[must_use]
+    pub fn host_backend(&self) -> Option<BackendType> {
+        match self.kind {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            SurfaceKind::Vulkan(_) => Some(BackendType::Vulkan),
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            SurfaceKind::Gl(_) => Some(BackendType::OpenGL),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
+    /// The surface again, if it is a window, or a surface that a new
+    /// backend presents to.
     pub(crate) fn clone_window(&self) -> Option<Surface> {
         match &self.kind {
             SurfaceKind::Window(window) => Some(Surface { kind: SurfaceKind::Window(window.clone()) }),
-            #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            SurfaceKind::MetalLayer(_) => None,
-            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            SurfaceKind::Wgpu(_) => None,
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            SurfaceKind::Gl(surface) => Some(Surface { kind: SurfaceKind::Gl(*surface) }),
+            #[allow(unreachable_patterns)]
+            _ => None,
         }
     }
 
@@ -136,6 +398,10 @@ impl Surface {
             SurfaceKind::MetalLayer(_) => true,
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             SurfaceKind::Wgpu(_) => false,
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            SurfaceKind::Vulkan(_) => false,
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            SurfaceKind::Gl(_) => false,
         }
     }
 }
@@ -204,6 +470,8 @@ pub enum SurfaceType {
     Wayland,
     /// An Android `ANativeWindow`.
     AndroidNdk,
+    /// An `OpenHarmony` `OHNativeWindow`.
+    OhosNdk,
 }
 
 impl SurfaceType {
@@ -215,9 +483,10 @@ impl SurfaceType {
             SurfaceType::MetalLayer => false,
             SurfaceType::Win32 => cfg!(windows),
             SurfaceType::Xlib | SurfaceType::Xcb | SurfaceType::Wayland => {
-                cfg!(all(unix, not(target_vendor = "apple"), not(target_os = "android")))
+                cfg!(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos")))
             }
             SurfaceType::AndroidNdk => cfg!(target_os = "android"),
+            SurfaceType::OhosNdk => cfg!(target_env = "ohos"),
         };
         match backend {
             BackendType::Metal => {
@@ -227,12 +496,35 @@ impl SurfaceType {
                 cfg!(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm")))) && windowing
             }
             BackendType::OpenGL => {
-                cfg!(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))
-                    && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland)
+                cfg!(all(feature = "gl", unix, not(target_vendor = "apple")))
+                    && windowing
+                    && matches!(
+                        self,
+                        SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::AndroidNdk | SurfaceType::OhosNdk
+                    )
             }
-            BackendType::WebGPU => cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing,
+            // wgpu's Vulkan backend makes no OpenHarmony surface, and this
+            // build has no wgpu GLES backend.
+            BackendType::WebGPU => {
+                cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing && self != SurfaceType::OhosNdk
+            }
             #[allow(unreachable_patterns)]
             _ => false,
+        }
+    }
+
+    /// The Vulkan instance extension that makes the surfaces of this type.
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    fn vulkan_extension(self) -> Option<&'static std::ffi::CStr> {
+        use mln_vulkan::ash::khr;
+        match self {
+            SurfaceType::MetalLayer => None,
+            SurfaceType::Win32 => Some(khr::win32_surface::NAME),
+            SurfaceType::Xlib => Some(khr::xlib_surface::NAME),
+            SurfaceType::Xcb => Some(khr::xcb_surface::NAME),
+            SurfaceType::Wayland => Some(khr::wayland_surface::NAME),
+            SurfaceType::AndroidNdk => Some(khr::android_surface::NAME),
+            SurfaceType::OhosNdk => Some(mln_vulkan::device::OHOS_SURFACE),
         }
     }
 
@@ -339,11 +631,175 @@ impl Device {
         }
     }
 
+    /// The kinds of sync with which the host can wait for a frame of `ring`
+    /// on the device (the producer's), and with which a session waits for
+    /// the host's reads (the consumer's).
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// device can't render into the ring: one of another backend, or one the
+    /// device lacks a feature for.
+    pub fn borrowed_sync_kinds(&self, ring: &BorrowedRing) -> Result<(SyncKinds, SyncKinds), Error> {
+        #[allow(unreachable_patterns)]
+        match (self, &ring.kind) {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            (Device::Vulkan(device), RingKind::Vulkan(images)) => {
+                images.check(device)?;
+                Ok(device.sync_kinds())
+            }
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            (Device::Metal(device), RingKind::Metal(textures)) => {
+                textures.check(device)?;
+                Ok(mln_mtl::BorrowedTextures::sync_kinds(device))
+            }
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            (Device::Gl(device), RingKind::Gl(_)) => {
+                if !device.is_host() {
+                    return Err(Error::unsupported(
+                        "an OpenGL ring renders on a device in the share group of the host's context",
+                    ));
+                }
+                Ok(mln_gl::BorrowedTextures::sync_kinds())
+            }
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            (Device::WebGpu(_), RingKind::WebGpu(textures)) => {
+                textures.check()?;
+                Ok(mln_webgpu::BorrowedTextures::sync_kinds())
+            }
+            _ => Err(Error::unsupported(format!(
+                "a {:?} device renders into no ring of {:?} textures",
+                self.backend(),
+                ring.backend()
+            ))),
+        }
+    }
+
+    /// The kinds of exported ring that sessions on the device share their
+    /// images in: those that the device has exported an image of.
+    #[must_use]
+    pub fn export_kinds(&self) -> ExportKinds {
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => device.export_kinds(),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(device) => mln_mtl::exported_target::export_kinds(device),
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            Device::Gl(device) => mln_gl::exported_target::export_kinds(device),
+            #[allow(unreachable_patterns)]
+            _ => ExportKinds::NONE,
+        }
+    }
+
+    /// The kind that a session on the device shares `ring`'s images in, and
+    /// the kinds of sync with which the host can wait for a frame (the
+    /// producer's) and a session for the host's reads (the consumer's).
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// device exports none of the ring's kinds.
+    pub fn export_plan(&self, ring: &ExportedRing) -> Result<(ExportKind, SyncKinds, SyncKinds), Error> {
+        #[allow(unreachable_patterns)]
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => {
+                let kind = mln_vulkan::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_vulkan::exported_target::sync_kinds(device);
+                Ok((kind, producer, consumer))
+            }
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(device) => {
+                let kind = mln_mtl::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_mtl::exported_target::sync_kinds(device);
+                Ok((kind, producer, consumer))
+            }
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            Device::Gl(device) => {
+                let kind = mln_gl::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_gl::exported_target::sync_kinds();
+                Ok((kind, producer, consumer))
+            }
+            _ => {
+                let _ = ring;
+                Err(Error::unsupported(format!("a {:?} device exports no ring", self.backend())))
+            }
+        }
+    }
+
+    /// The kinds of sync with which the host can wait for an exported
+    /// ring's frame (the producer's) and a session for the host's reads (the
+    /// consumer's), on a device that exports a ring.
+    #[must_use]
+    pub fn export_sync_kinds(&self) -> (SyncKinds, SyncKinds) {
+        if self.export_kinds().is_empty() {
+            return (SyncKinds::NONE, SyncKinds::NONE);
+        }
+        #[allow(unreachable_patterns)]
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => mln_vulkan::exported_target::sync_kinds(device),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(device) => mln_mtl::exported_target::sync_kinds(device),
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            Device::Gl(_) => mln_gl::exported_target::sync_kinds(),
+            _ => (SyncKinds::NONE, SyncKinds::NONE),
+        }
+    }
+
+    /// The library's device for `ring`: on the first of [`new`](Self::new)'s
+    /// backends whose device exports one of the ring's kinds.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no
+    /// backend's device does, and as [`new`](Self::new) does.
+    pub fn for_exported_ring(ring: &ExportedRing) -> Result<Device, Error> {
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = ring;
+            Err(Error::unsupported("the browser has no library devices"))
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let mut error = Error::unsupported("no backend of this build exports the ring's kinds of image");
+            for backend in Self::native_order() {
+                match Self::with_backend(*backend, DeviceOptions::default()) {
+                    Ok(device) => match device.export_plan(ring) {
+                        Ok(_) => return Ok(device),
+                        Err(e) => error = e,
+                    },
+                    Err(e) if missing(&e) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(error)
+        }
+    }
+
+    /// Whether sessions on the device present to the host's own surfaces:
+    /// a Vulkan device's `VkSurfaceKHR`s, or the `EGLSurface`s of an OpenGL
+    /// device that wraps the host's context.
+    #[must_use]
+    pub fn presents_to_host_surfaces(&self) -> bool {
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => device.presents(),
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            Device::Gl(device) => device.is_host(),
+            #[allow(unreachable_patterns)]
+            _ => false,
+        }
+    }
+
     /// Whether sessions on the device present to the surfaces of
-    /// `surface`'s type.
+    /// `surface`'s type: a Vulkan device's instance needs the type's surface
+    /// extension, which the loader may lack.
     #[must_use]
     pub fn presents_to(&self, surface: SurfaceType) -> bool {
-        surface.presents_with(self.backend())
+        if !surface.presents_with(self.backend()) {
+            return false;
+        }
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => surface.vulkan_extension().is_some_and(|name| device.presents_through(name)),
+            #[allow(unreachable_patterns)]
+            _ => true,
+        }
     }
 
     /// The backends [`new`](Self::new) tries, in order.

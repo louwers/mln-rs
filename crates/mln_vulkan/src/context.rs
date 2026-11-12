@@ -197,6 +197,22 @@ pub struct Context {
     clipping: RefCell<Clipping>,
     globe_clipping: RefCell<GlobeClipping>,
     destroyed: Cell<bool>,
+    /// What the next frame's submission waits on and signals, besides a
+    /// swapchain's semaphores.
+    frame_sync: RefCell<FrameSync>,
+    /// Whether the next frame waits for the work submitted to the queue
+    /// before it, at its start.
+    queue_wait: Cell<bool>,
+}
+
+/// Semaphores that a frame's submission waits on and signals, each with the
+/// value of a timeline, or zero for a binary semaphore.
+#[derive(Default)]
+struct FrameSync {
+    waits: Vec<(vk::Semaphore, u64)>,
+    signals: Vec<(vk::Semaphore, u64)>,
+    /// Whether one of them is a timeline.
+    timeline: bool,
 }
 
 /// `buildUniformDescriptorSetLayout` and `buildImageDescriptorSetLayout`
@@ -305,6 +321,8 @@ impl Context {
             clipping: RefCell::new(Clipping::default()),
             globe_clipping: RefCell::new(GlobeClipping::default()),
             destroyed: Cell::new(false),
+            frame_sync: RefCell::new(FrameSync::default()),
+            queue_wait: Cell::new(false),
         });
         // Dropping the context destroys what a failed step leaves.
         context.init_frame_resources()?;
@@ -500,8 +518,9 @@ impl Context {
                 let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
                 let submitted = device.end_command_buffer(command_buffers[0]).is_ok()
                     && device.create_fence(&vk::FenceCreateInfo::default(), None).is_ok_and(|fence| {
-                        let done = device
-                            .queue_submit(self.backend.get_graphics_queue(), &[submit_info], fence)
+                        let done = self
+                            .backend
+                            .submit(&[submit_info], fence)
                             .and_then(|()| device.wait_for_fences(&[fence], true, u64::MAX));
                         device.destroy_fence(fence, None);
                         done.is_ok()
@@ -586,9 +605,35 @@ impl Context {
             .is_some_and(|fence| unsafe { self.backend.get_device().wait_for_fences(&[fence], true, u64::MAX) }.is_ok())
     }
 
+    /// Has the frame being recorded wait for `semaphore` before its commands
+    /// run: for a timeline, until it reaches `value`, and for a binary
+    /// semaphore, whose `value` is `None`, until it is signaled.
+    pub fn wait_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
+        let mut sync = self.frame_sync.borrow_mut();
+        sync.timeline |= value.is_some();
+        sync.waits.push((semaphore, value.unwrap_or(0)));
+    }
+
+    /// Has the frame being recorded signal `semaphore` once its commands
+    /// finish: a timeline with `value`, or a binary semaphore, whose `value`
+    /// is `None`.
+    pub fn signal_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
+        let mut sync = self.frame_sync.borrow_mut();
+        sync.timeline |= value.is_some();
+        sync.signals.push((semaphore, value.unwrap_or(0)));
+    }
+
+    /// Has the next frame that begins wait, before its commands run, for
+    /// every command submitted to the queue before it, such as the host's
+    /// reads of an image that the frame draws into.
+    pub fn wait_for_queue_in_next_frame(&self) {
+        self.queue_wait.set(true);
+    }
+
     /// `submitFrame()`: ends the frame's command buffer, submits it and,
     /// with a platform surface, presents the image.
     pub fn submit_frame(&self) {
+        let frame_sync = std::mem::take(&mut *self.frame_sync.borrow_mut());
         if !self.frame_recording.replace(false) {
             return;
         }
@@ -611,14 +656,37 @@ impl Context {
 
         // Submit frame commands.
         let command_buffers = [command_buffer];
-        let wait_stage_mask = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let frame_index = self.frame_resource_index.get();
         let semaphores =
             surface.as_ref().map(|s| ([s.get_acquire_semaphore(frame_index)], [s.get_present_semaphore()]));
-        let mut submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
+        let mut waits: Vec<(vk::Semaphore, u64)> = Vec::new();
+        let mut wait_stages = Vec::new();
+        let mut signals: Vec<(vk::Semaphore, u64)> = Vec::new();
         if let Some((acquire, present)) = &semaphores {
-            submit_info =
-                submit_info.signal_semaphores(present).wait_semaphores(acquire).wait_dst_stage_mask(&wait_stage_mask);
+            waits.push((acquire[0], 0));
+            wait_stages.push(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
+            signals.push((present[0], 0));
+        }
+        for &wait in &frame_sync.waits {
+            waits.push(wait);
+            wait_stages.push(vk::PipelineStageFlags::ALL_COMMANDS);
+        }
+        signals.extend(frame_sync.signals.iter().copied());
+        let wait_semaphores: Vec<vk::Semaphore> = waits.iter().map(|(semaphore, _)| *semaphore).collect();
+        let wait_values: Vec<u64> = waits.iter().map(|(_, value)| *value).collect();
+        let signal_semaphores: Vec<vk::Semaphore> = signals.iter().map(|(semaphore, _)| *semaphore).collect();
+        let signal_values: Vec<u64> = signals.iter().map(|(_, value)| *value).collect();
+        let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
+            .wait_semaphore_values(&wait_values)
+            .signal_semaphore_values(&signal_values);
+        let mut submit_info = vk::SubmitInfo::default()
+            .command_buffers(&command_buffers)
+            .wait_semaphores(&wait_semaphores)
+            .wait_dst_stage_mask(&wait_stages)
+            .signal_semaphores(&signal_semaphores);
+        // A timeline semaphore needs its value, even zero.
+        if frame_sync.timeline {
+            submit_info = submit_info.push_next(&mut timeline_info);
         }
         // SAFETY: the command buffer is recording and complete, the fence
         // was waited for when the frame began, and the semaphores are the
@@ -630,24 +698,22 @@ impl Context {
             if device.reset_fences(&[fence]).is_err() {
                 Log::error(Event::Render, "Reset fence failed");
             }
-            if device.queue_submit(self.backend.get_graphics_queue(), &[submit_info], fence).is_err() {
+            if self.backend.submit(&[submit_info], fence).is_err() {
                 Log::error(Event::Render, "Submitting the frame failed");
             }
         }
 
         // Present rendered frame.
-        if let (Some(surface), Some((_, present))) = (&surface, &semaphores)
-            && let (Some(loader), Some(queue)) = (self.backend.get_swapchain_loader(), self.backend.get_present_queue())
-        {
+        if let (Some(surface), Some((_, present))) = (&surface, &semaphores) {
             let swapchains = [surface.get_swapchain()];
             let image_indices = [surface.get_acquired_image_index()];
             let present_info = vk::PresentInfoKHR::default()
                 .swapchains(&swapchains)
                 .wait_semaphores(present)
                 .image_indices(&image_indices);
-            // SAFETY: the image was acquired from the swapchain, and the
-            // submitted frame signals the semaphore.
-            match unsafe { loader.queue_present(queue, &present_info) } {
+            // The image was acquired from the swapchain, and the submitted
+            // frame signals the semaphore.
+            match self.backend.present(&present_info) {
                 Ok(true) => self.request_surface_update(true),
                 Ok(false) => {}
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => self.request_surface_update(false),
@@ -1367,6 +1433,22 @@ impl GfxContext for Context {
             {
                 Log::error(Event::Render, "Beginning the frame's command buffer failed");
                 return;
+            }
+        }
+        if self.queue_wait.replace(false) {
+            // SAFETY: the command buffer is recording, outside a render
+            // pass. An execution dependency is enough: the earlier work only
+            // reads what this frame writes.
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::ALL_COMMANDS,
+                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[],
+                );
             }
         }
         self.frame_serial.set(self.frame_serial.get() + 1);

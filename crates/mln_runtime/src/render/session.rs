@@ -19,8 +19,12 @@ use mln_util::sync::MutexExt;
 
 use super::driver::DriverWork;
 use super::frame::{FrameDemand, FrameResult};
+use super::local::Pending;
 use super::query::RenderedQueryGeometry;
-use super::target::{AttachOptions, Driver, RenderTarget, Surface, Wake};
+use super::target::{
+    AttachOptions, BorrowedRing, ConsumerSync, Device, Driver, ExportKind, FrameTexture, GpuSync, RenderTarget,
+    Surface, SyncKind, SyncKinds, Wake,
+};
 use super::worker::{self, Init, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
 use crate::map::{Applied, Map};
@@ -61,6 +65,8 @@ pub struct RenderSessionSnapshot {
     /// false from a [`release_target`](RenderSession::release_target) until
     /// a [`set_surface`](RenderSession::set_surface) gives it a new one.
     pub has_target: bool,
+    /// How many of a borrowed ring's frames the host holds.
+    pub acquired_frames: u32,
 }
 
 /// What a render session can do.
@@ -75,6 +81,45 @@ pub struct RenderSessionCapabilities {
     pub readback: bool,
     /// Whether it shows frames on a surface.
     pub presentation: bool,
+    /// The kind of sync that a borrowed ring's frames carry.
+    pub producer_sync_kind: Option<SyncKind>,
+    /// The kinds of sync that [`AcquiredFrame::release`] takes.
+    pub consumer_sync_kinds: SyncKinds,
+    /// How an exported ring shares its images, for an exported ring.
+    pub export_kind: Option<ExportKind>,
+}
+
+/// A frame of a borrowed ring that the session published, and what the
+/// host waits for before it reads it.
+#[derive(Clone, Debug)]
+pub(crate) struct Published {
+    pub(crate) result: FrameResult,
+    pub(crate) sync: GpuSync,
+    pub(crate) texture: Option<FrameTexture>,
+}
+
+/// One texture of a borrowed ring.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RingSlot {
+    /// The newest frame rendered into the texture, which the host hasn't
+    /// acquired.
+    pub(crate) frame: Option<Published>,
+    pub(crate) acquired: bool,
+    pub(crate) rendering: bool,
+    /// The host's GPU may still read the texture, so the session renders
+    /// into it no more, even when a new ring has it again, until a release
+    /// of the ring.
+    pub(crate) quarantined: bool,
+    /// The host holds an exported ring's image from before a resize, which
+    /// gave the slot a new one that never reached the host: giving the old
+    /// one up quarantines nothing.
+    pub(crate) retired: bool,
+}
+
+impl RingSlot {
+    pub(crate) fn busy(&self) -> bool {
+        self.acquired || self.rendering || self.quarantined
+    }
 }
 
 /// Work sent to a session's thread, whose completion an abandon can fail at
@@ -144,6 +189,19 @@ pub(crate) struct SessionState {
     /// Whether the session's thread keeps its graphics objects until the
     /// process exits, instead of freeing them, when the session ends.
     pub(crate) keep_graphics: bool,
+    /// The slots of a borrowed ring, and none for another target.
+    pub(crate) ring: Vec<RingSlot>,
+    /// How many of the ring's frames the host holds.
+    pub(crate) acquired_frames: u32,
+    /// The ring replacements and releases on their way: no frame is
+    /// acquired until they ran, since the frames published before one name
+    /// textures it replaces or lets go of.
+    pub(crate) pending_retargets: u32,
+    /// How many views are open on the session's acquired frames.
+    pub(crate) views: u32,
+    /// Whether the session's thread keeps graphics objects that the open
+    /// views name, which it lets go of once the last view ends.
+    pub(crate) viewed_teardown: bool,
 }
 
 impl SessionState {
@@ -354,6 +412,12 @@ impl SessionShared {
                     return Err(Error::invalid_state("the render session was detached or abandoned"));
                 }
             }
+            // The views keep the frames' sync objects in place, which the
+            // abandon would let go of. A library's abandon, of a session
+            // that the host released, keeps them until the views end.
+            if by == Abandoner::Host && state.views != 0 {
+                return Err(Error::busy("a view is open on one of the render session's acquired frames"));
+            }
             state.lifecycle = RenderSessionState::Abandoned;
             state.keep_graphics |= keep_graphics;
             let kept = if state.keep_graphics { state.graphics_objects } else { 0 };
@@ -362,12 +426,26 @@ impl SessionShared {
         match &map {
             // The map unbinds the session before another can attach.
             Some(map) => {
-                map.unbind_session(self.id, self.run_loop.clone(), worker::Worker::finish);
+                map.unbind_session_then(self.id, self.run_loop.clone(), super::worker::Worker::finish);
                 map.release_session_claim(self.id);
             }
             None => worker::post(&self.run_loop, worker::Worker::finish),
         }
+        // A core worker lets go of its graphics objects at its next task,
+        // which runs before this returns: the host may destroy what they were
+        // made on once it does.
+        let torn_down = (self.driver == Driver::CoreWorker && !on_driver).then(|| {
+            let (sender, receiver) = std::sync::mpsc::sync_channel::<()>(1);
+            worker::post(&self.run_loop, move |_, _| {
+                let _ = sender.send(());
+            });
+            receiver
+        });
         drop(gate);
+        if let Some(receiver) = torn_down {
+            // A worker that ended drops the task, and the sender with it.
+            let _ = receiver.recv();
+        }
         let lost = || Error::target_lost("the render session was abandoned");
         waiters.settle(&Err(lost()), lost);
         drop(map);
@@ -502,6 +580,8 @@ pub(crate) fn attach(
     options: AttachOptions,
 ) -> Result<(RenderSession, Completion<()>), Error> {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let mut ring = None;
+    let mut export_kind = None;
     let (size, target) = match target {
         RenderTarget::Offscreen { size, device } => (size, TargetInit::Offscreen(device)),
         RenderTarget::Surface { size, surface, device } => {
@@ -509,6 +589,39 @@ pub(crate) fn attach(
                 return Err(Error::invalid_argument("a surface that the host made needs the host's device"));
             }
             (size, TargetInit::Surface { surface, device })
+        }
+        RenderTarget::Borrowed { size, ring: borrowed, device } => {
+            let (producer, consumer) = device.borrowed_sync_kinds(&borrowed)?;
+            let picked = options.producer_sync_kinds.pick(producer).ok_or_else(|| {
+                Error::unsupported("render target supports none of the requested producer sync kinds")
+            })?;
+            if borrowed.depth() == 0 || borrowed.physical_size().is_empty() {
+                return Err(Error::invalid_argument("a borrowed ring needs textures of a size"));
+            }
+            ring = Some((borrowed.depth(), picked, consumer));
+            (size, TargetInit::Borrowed { ring: borrowed, device, producer: picked })
+        }
+        RenderTarget::Exported { size, ring: exported, device } => {
+            if exported.depth == 0 {
+                return Err(Error::invalid_argument("an exported ring needs at least one image"));
+            }
+            if exported.kinds.is_empty() {
+                return Err(Error::invalid_argument("an exported ring needs a kind of image to share"));
+            }
+            if size.is_empty() {
+                return Err(Error::invalid_argument("the target's size must not be empty"));
+            }
+            let device = match device {
+                Some(device) => device,
+                None => Device::for_exported_ring(&exported)?,
+            };
+            let (kind, producer, consumer) = device.export_plan(&exported)?;
+            let picked = options.producer_sync_kinds.pick(producer).ok_or_else(|| {
+                Error::unsupported("render target supports none of the requested producer sync kinds")
+            })?;
+            ring = Some((exported.depth, picked, consumer));
+            export_kind = Some(kind);
+            (size, TargetInit::Exported { ring: exported, device, kind, producer: picked })
         }
     };
     if size.is_empty() {
@@ -564,16 +677,24 @@ pub(crate) fn attach(
             resizes_sent: 0,
             graphics_objects: 0,
             keep_graphics: false,
+            ring: vec![RingSlot::default(); ring.map_or(0, |(depth, _, _)| depth)],
+            acquired_frames: 0,
+            pending_retargets: 0,
+            views: 0,
+            viewed_teardown: false,
         }),
         gate: Mutex::new(()),
         frame_wake: options.frame_wake,
         redraw_wake: options.redraw_wake,
         capabilities: RenderSessionCapabilities {
             driver: options.driver,
-            texture_ring_depth: 1,
-            frame_acquisition: false,
-            readback: !presentation,
+            texture_ring_depth: ring.map_or(1, |(depth, _, _)| depth as u32),
+            frame_acquisition: ring.is_some(),
+            readback: !presentation && ring.is_none(),
             presentation,
+            producer_sync_kind: ring.map(|(_, producer, _)| producer),
+            consumer_sync_kinds: ring.map_or(SyncKinds::NONE, |(_, _, consumer)| consumer),
+            export_kind,
         },
         driver_work_taken: AtomicBool::new(false),
         driver_armed,
@@ -638,6 +759,15 @@ impl RenderSession {
         &self,
         task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<T, Error> + Send + 'static,
     ) -> Result<Completion<T>, Error> {
+        self.settled_operation(|worker, outbox| task(worker, outbox).map(|value| (value, None)))
+    }
+
+    /// Sends `task` as [`operation`](Self::operation) does, and completes
+    /// once the host's reads that it returns end, or a second passes.
+    fn settled_operation<T: Send + 'static>(
+        &self,
+        task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<(T, Pending), Error> + Send + 'static,
+    ) -> Result<Completion<T>, Error> {
         let shared = self.shared();
         with_unlocked_wakes(|| {
             let mut state = shared.state.lock_unpoisoned();
@@ -648,8 +778,14 @@ impl RenderSession {
             worker::post(&shared.run_loop, move |worker, outbox| {
                 let task: worker::Task = Box::new(move |worker, outbox| {
                     let Some(resolver) = worker.take_work(work) else { return };
-                    let result = task(worker, outbox);
-                    outbox.resolve(resolver, result);
+                    match task(worker, outbox) {
+                        Ok((value, pending)) => worker.settle_then(
+                            pending,
+                            move |outbox, settled| outbox.resolve(resolver, settled.map(|()| value)),
+                            outbox,
+                        ),
+                        Err(error) => outbox.resolve(resolver, Err(error)),
+                    }
                 });
                 worker.after_resizes(resizes, task, outbox);
             });
@@ -707,6 +843,93 @@ impl RenderSession {
             frame_generation: state.frame_generation,
             failure: state.failure.clone(),
             has_target: state.lifecycle == RenderSessionState::Attached && state.has_target,
+            acquired_frames: state.acquired_frames,
+        })
+    }
+
+    /// Takes the newest frame that a borrowed ring rendered, if one waits:
+    /// the older frames that the host didn't acquire are dropped, and the
+    /// session may render into their textures again. While the host holds a
+    /// frame in every texture, demands wait for a release.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// session without a ring, and as a call that sends work does once the
+    /// session no longer takes work.
+    pub fn acquire_frame(&self) -> Result<Option<AcquiredFrame>, Error> {
+        let shared = self.shared();
+        let mut state = shared.state.lock_unpoisoned();
+        check_usable(&state)?;
+        if !shared.capabilities.frame_acquisition {
+            return Err(Error::unsupported("render session does not expose acquired texture frames"));
+        }
+        if state.pending_retargets != 0 {
+            return Ok(None);
+        }
+        let newest = state
+            .ring
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| !slot.acquired && slot.frame.is_some())
+            .max_by_key(|(_, slot)| slot.frame.as_ref().map_or(0, |frame| frame.result.frame_generation))
+            .map(|(index, _)| index);
+        let Some(index) = newest else { return Ok(None) };
+        for (other, slot) in state.ring.iter_mut().enumerate() {
+            if other != index && !slot.acquired {
+                slot.frame = None;
+            }
+        }
+        let slot = &mut state.ring[index];
+        let Some(frame) = slot.frame.take() else { return Ok(None) };
+        slot.acquired = true;
+        state.acquired_frames += 1;
+        Ok(Some(AcquiredFrame { shared: shared.clone(), slot: index, frame, done: false }))
+    }
+
+    /// Gives a borrowed ring new textures, of `size` logical pixels: as many
+    /// as it has, of its format. Once the completion reports success, the
+    /// session no longer uses the old textures, and no longer waits for the
+    /// consumer sync that they were given back with: the host may reuse or
+    /// destroy them. The session's thread polls that sync on its later turns,
+    /// for a second at most, and logs a wait that runs out. Frames wait for
+    /// it meanwhile.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// session without a borrowed ring, with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for another number
+    /// of textures, and with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// while the host holds one of the ring's frames. Completes with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for textures of
+    /// another format or kind.
+    pub fn set_ring(&self, size: Size, ring: BorrowedRing) -> Result<Completion<Applied>, Error> {
+        let shared = self.shared().clone();
+        {
+            let mut state = shared.state.lock_unpoisoned();
+            check_usable(&state)?;
+            if shared.capabilities.readback {
+                return Err(Error::unsupported("an offscreen session keeps its target"));
+            }
+            if !shared.capabilities.frame_acquisition {
+                return Err(Error::unsupported("a surface session takes no caller-owned texture"));
+            }
+            if shared.capabilities.export_kind.is_some() {
+                return Err(Error::unsupported("an exported ring resizes instead of taking new textures"));
+            }
+            if state.acquired_frames != 0 {
+                return Err(Error::invalid_state("cannot replace the render target while a texture frame is acquired"));
+            }
+            if ring.depth() != state.ring.len() {
+                return Err(Error::invalid_argument(
+                    "texture_count must equal the ring depth the session attached with",
+                ));
+            }
+            state.pending_retargets += 1;
+        }
+        let guard = RetargetGuard(shared.clone());
+        // The guard goes with the closure, whether the closure runs or the
+        // resize drops it.
+        self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
+            let _guard = guard;
+            worker.set_ring(size, scale_factor, &ring, outbox)
         })
     }
 
@@ -726,6 +949,11 @@ impl RenderSession {
         with_unlocked_wakes(|| {
             let mut state = shared.state.lock_unpoisoned();
             check_usable(&state)?;
+            if !state.ring.is_empty() && state.ring.iter().all(|slot| slot.quarantined) {
+                return Err(Error::invalid_state(
+                    "every texture of the ring is quarantined: give the session new textures",
+                ));
+            }
             let sequence = state.map.as_ref().map_or(0, Map::sent_sequence);
             state.redraw_armed = true;
             worker::post(&shared.run_loop, move |worker, outbox| worker.demand(demand, sequence, outbox));
@@ -750,16 +978,25 @@ impl RenderSession {
     /// as when a window moves to a display of another density. The map keeps
     /// its tiles, and the renderer draws the next frame at the new scale
     /// factor. A later demand shows the new extent, and one sent before
-    /// shows the old.
+    /// shows the old. An exported ring gets images of the new size, and the
+    /// frames that the host holds keep theirs until it gives them back.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size, or a scale factor that isn't finite and positive.
+    /// empty size, or a scale factor that isn't finite and positive, and
+    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a borrowed
+    /// ring, which [`set_ring`](Self::set_ring) resizes.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
+        let capabilities = self.shared().capabilities;
+        if capabilities.frame_acquisition && capabilities.export_kind.is_none() {
+            return Err(Error::unsupported("a borrowed ring is sized by its owner: give it new textures instead"));
+        }
         let LogicalExtent { size, scale_factor } = extent;
         if !scale_factor.is_finite() || scale_factor <= 0.0 {
             return Err(Error::invalid_argument(format!("scale factor {scale_factor} isn't finite and positive")));
         }
-        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, _| worker.resize(size, scale_factor))
+        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, outbox| {
+            worker.resize(size, scale_factor, outbox).map(|()| None)
+        })
     }
 
     /// Sends a map command that resizes the map to `size`, at
@@ -770,7 +1007,7 @@ impl RenderSession {
         &self,
         size: Size,
         scale_factor: Option<f64>,
-        change: impl FnOnce(&mut Worker, Size, f64, &mut Outbox) -> Result<(), Error> + Send + 'static,
+        change: impl FnOnce(&mut Worker, Size, f64, &mut Outbox) -> Result<Pending, Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         if size.is_empty() {
             return Err(Error::invalid_argument("the target's size must not be empty"));
@@ -791,9 +1028,16 @@ impl RenderSession {
             let sent =
                 map.resize_for_session(size, scale_factor, shared.run_loop.clone(), move |worker, result, outbox| {
                     if let Some(resolver) = worker.take_work::<Applied>(work) {
-                        let result =
-                            result.and_then(|applied| change(worker, size, scale_factor, outbox).map(|()| applied));
-                        outbox.resolve(resolver, result);
+                        match result.and_then(|applied| Ok((applied, change(worker, size, scale_factor, outbox)?))) {
+                            // A replacement of a ring's textures completes
+                            // once the host's reads of those it let go of end.
+                            Ok((applied, pending)) => worker.settle_then(
+                                pending,
+                                move |outbox, settled| outbox.resolve(resolver, settled.map(|()| applied)),
+                                outbox,
+                            ),
+                            Err(error) => outbox.resolve(resolver, Err(error)),
+                        }
                     }
                     landing.land(worker, outbox);
                 });
@@ -812,16 +1056,42 @@ impl RenderSession {
     /// [`set_surface`](Self::set_surface) gives the session a surface again,
     /// finish as [`FrameDisposition::TargetNotReady`](super::FrameDisposition).
     /// Once the release completes, the session no longer uses the surface or
-    /// the window it was made from.
+    /// the window it was made from, or a ring's textures, and no longer waits
+    /// for the consumer sync that the textures were given back with: the host
+    /// may reuse or destroy them. The session's thread polls that sync on its
+    /// later turns, for a second at most, and logs a wait that runs out. The
+    /// session keeps nothing of the released textures: one that a later ring
+    /// has again starts fresh, even one that the host gave up.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
-    /// offscreen session, whose target is its own.
+    /// offscreen session or an exported ring, whose targets are their own.
     pub fn release_target(&self) -> Result<Completion<()>, Error> {
-        check_usable(&self.shared().state.lock_unpoisoned())?;
-        if !self.shared().capabilities.presentation {
+        if self.shared().capabilities.export_kind.is_some() {
+            return Err(Error::unsupported("an exported ring keeps its images until the session ends"));
+        }
+        let shared = self.shared().clone();
+        let capabilities = shared.capabilities;
+        if !capabilities.presentation && !capabilities.frame_acquisition {
+            check_usable(&shared.state.lock_unpoisoned())?;
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
-        self.operation(worker::Worker::release_target)
+        let guard = {
+            let mut state = shared.state.lock_unpoisoned();
+            check_usable(&state)?;
+            if state.acquired_frames != 0 {
+                return Err(Error::invalid_state("release every acquired frame before the target"));
+            }
+            // No frame is acquired until the release runs: its textures go
+            // with it.
+            capabilities.frame_acquisition.then(|| {
+                state.pending_retargets += 1;
+                RetargetGuard(shared.clone())
+            })
+        };
+        self.settled_operation(move |worker, outbox| {
+            let _guard = guard;
+            worker.release_target(outbox).map(|pending| ((), pending))
+        })
     }
 
     /// Gives a surface session a new surface of `size` logical pixels, after
@@ -843,11 +1113,15 @@ impl RenderSession {
     /// surface it had, at the new size.
     pub fn set_surface(&self, size: Size, surface: Surface) -> Result<Completion<Applied>, Error> {
         check_usable(&self.shared().state.lock_unpoisoned())?;
-        if !self.shared().capabilities.presentation {
+        let capabilities = self.shared().capabilities;
+        if capabilities.frame_acquisition {
+            return Err(Error::unsupported("a borrowed texture session takes no native surface"));
+        }
+        if !capabilities.presentation {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
-            worker.set_surface(size, scale_factor, surface, outbox)
+            worker.set_surface(size, scale_factor, surface, outbox).map(|()| None)
         })
     }
 
@@ -992,6 +1266,9 @@ impl RenderSession {
             } else if state.released {
                 return Err(released());
             }
+            if state.acquired_frames != 0 {
+                return Err(Error::invalid_state("release every acquired frame before the session detaches"));
+            }
             let (completion, resolver) = shared.completion();
             state.detach_waiters.push(resolver);
             shared.start_detach(&mut state);
@@ -1038,6 +1315,13 @@ impl RenderSession {
     /// such as while it attaches or after it failed, is abandoned instead,
     /// and so is one whose map is released before that service.
     pub fn release(&self) -> Result<Completion<()>, Error> {
+        {
+            let state = self.shared().state.lock_unpoisoned();
+            let live = matches!(state.lifecycle, RenderSessionState::Attaching | RenderSessionState::Attached);
+            if live && !state.released && state.acquired_frames != 0 {
+                return Err(Error::invalid_state("release every acquired frame before the session is released"));
+            }
+        }
         let (completion, resolver) = self.shared().completion();
         self.shared().dispose(Some(resolver))?;
         Ok(completion)
@@ -1056,6 +1340,192 @@ impl RenderSession {
     pub fn dispose_keeping_graphics(&self) -> Result<(), Error> {
         self.shared().dispose_keeping_graphics()
     }
+}
+
+/// Counts a ring replacement or release on its way until it runs, or never
+/// will.
+struct RetargetGuard(Arc<SessionShared>);
+
+impl Drop for RetargetGuard {
+    fn drop(&mut self) {
+        let mut state = self.0.state.lock_unpoisoned();
+        state.pending_retargets = state.pending_retargets.saturating_sub(1);
+    }
+}
+
+/// A frame of a borrowed ring that the host acquired, until it gives it
+/// back. Dropping it gives it back as [`release`](Self::release) with
+/// [`SyncKind::CpuComplete`] does.
+pub struct AcquiredFrame {
+    shared: Arc<SessionShared>,
+    slot: usize,
+    frame: Published,
+    done: bool,
+}
+
+impl std::fmt::Debug for AcquiredFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AcquiredFrame").field("slot", &self.slot).field("frame", &self.frame).finish_non_exhaustive()
+    }
+}
+
+impl AcquiredFrame {
+    /// The index of the frame's texture in the ring.
+    #[must_use]
+    pub fn slot(&self) -> usize {
+        self.slot
+    }
+
+    /// The result of the demand that rendered the frame.
+    #[must_use]
+    pub fn result(&self) -> &FrameResult {
+        &self.frame.result
+    }
+
+    /// What to wait for before reading the frame's texture. The object it
+    /// names is the session's, and stays valid until the frame is given
+    /// back.
+    #[must_use]
+    pub fn producer_sync(&self) -> GpuSync {
+        self.frame.sync
+    }
+
+    /// The host's texture that holds the frame.
+    #[must_use]
+    pub fn texture(&self) -> Option<&FrameTexture> {
+        self.frame.texture.as_ref()
+    }
+
+    /// Whether [`release`](Self::release) takes a sync of `kind`.
+    #[must_use]
+    pub fn accepts(&self, kind: SyncKind) -> bool {
+        self.shared.capabilities.consumer_sync_kinds.contains(kind)
+    }
+
+    /// Opens a view of the frame, which keeps the frame's texture and sync
+    /// objects in place until the view drops: an
+    /// [`abandon`](RenderSession::abandon) fails while one is open, and a
+    /// dispose of the session keeps them until the last view ends. Keep the
+    /// frame until its views end.
+    ///
+    /// Fails with [`ErrorKind::TargetLost`](mln_util::ErrorKind) once the
+    /// session can no longer render.
+    pub fn view(&self) -> Result<FrameView, Error> {
+        let mut state = self.shared.state.lock_unpoisoned();
+        if !matches!(
+            state.lifecycle,
+            RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Detaching
+        ) {
+            return Err(Error::target_lost("the render session failed, or was detached, abandoned, or disposed"));
+        }
+        state.views += 1;
+        Ok(FrameView { shared: self.shared.clone() })
+    }
+
+    /// Whether the session can still render: the frame's objects stay valid
+    /// until it ends.
+    #[must_use]
+    pub fn session_live(&self) -> bool {
+        matches!(
+            self.shared.state.lock_unpoisoned().lifecycle,
+            RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Detaching
+        )
+    }
+
+    /// Gives the frame back once the host's reads of its texture reach
+    /// `consumer`: the session waits for it before it renders into the
+    /// texture again, and takes the sync file or GL fence that it names.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind), handing
+    /// back the frame and `consumer`, for a kind that the session's
+    /// [`consumer_sync_kinds`](RenderSessionCapabilities::consumer_sync_kinds)
+    /// lacks.
+    #[allow(clippy::result_large_err)]
+    pub fn release(mut self, consumer: ConsumerSync) -> Result<(), (AcquiredFrame, ConsumerSync, Error)> {
+        if !self.shared.capabilities.consumer_sync_kinds.contains(consumer.sync.kind) {
+            return Err((self, consumer, Error::unsupported("render backend does not support this gpu sync kind")));
+        }
+        self.done = true;
+        give_back(&self.shared, self.slot, Some(consumer));
+        Ok(())
+    }
+
+    /// Gives the frame up without saying when the host's reads end: the
+    /// session never renders into its texture again, even when
+    /// [`set_ring`](RenderSession::set_ring) gives the ring the texture
+    /// again, until a [`release_target`](RenderSession::release_target) of
+    /// the ring.
+    pub fn discard(mut self) {
+        self.done = true;
+        give_back(&self.shared, self.slot, None);
+    }
+}
+
+/// A view of an acquired frame, which [`AcquiredFrame::view`] opens, until
+/// it drops.
+pub struct FrameView {
+    shared: Arc<SessionShared>,
+}
+
+impl std::fmt::Debug for FrameView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameView").finish_non_exhaustive()
+    }
+}
+
+impl Drop for FrameView {
+    fn drop(&mut self) {
+        let release = {
+            let mut state = self.shared.state.lock_unpoisoned();
+            state.views = state.views.saturating_sub(1);
+            state.views == 0 && std::mem::take(&mut state.viewed_teardown)
+        };
+        if release {
+            worker::post(&self.shared.run_loop, |worker, _| worker.release_viewed());
+        }
+    }
+}
+
+impl Drop for AcquiredFrame {
+    fn drop(&mut self) {
+        if !self.done {
+            give_back(&self.shared, self.slot, Some(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))));
+        }
+    }
+}
+
+/// Gives the ring's `slot` back to the session, with the host's `consumer`
+/// sync, or discarded without one.
+fn give_back(shared: &Arc<SessionShared>, slot: usize, consumer: Option<ConsumerSync>) {
+    with_unlocked_wakes(|| {
+        let mut state = shared.state.lock_unpoisoned();
+        state.acquired_frames = state.acquired_frames.saturating_sub(1);
+        let live = matches!(
+            state.lifecycle,
+            RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Detaching
+        );
+        if !live {
+            if let Some(entry) = state.ring.get_mut(slot) {
+                entry.acquired = false;
+                // The host's GPU may still read a texture whose wait never
+                // ran.
+                entry.quarantined |=
+                    consumer.as_ref().is_none_or(|consumer| consumer.sync.kind != SyncKind::CpuComplete);
+            }
+            // A sync file that no backend waits on closes with `consumer`.
+            return;
+        }
+        if let Some(sync) = consumer {
+            worker::post(&shared.run_loop, move |worker, outbox| worker.release_slot(slot, sync, outbox));
+        } else {
+            if let Some(entry) = state.ring.get_mut(slot) {
+                entry.acquired = false;
+                entry.quarantined = !entry.retired;
+                entry.retired = false;
+            }
+            worker::post(&shared.run_loop, move |worker, outbox| worker.discard_slot(slot, outbox));
+        }
+    });
 }
 
 fn source_id_of(source_id: impl Into<String>) -> Result<String, Error> {

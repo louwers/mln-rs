@@ -37,6 +37,22 @@ use crate::renderer_backend::{RendererBackend, SurfaceProvider};
 use crate::surface_resource::SurfaceResource;
 use crate::window::WindowSurface;
 
+/// The host's `VkSurfaceKHR`, which stays the host's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct HostSurface(vk::SurfaceKHR);
+
+impl HostSurface {
+    /// # Safety
+    ///
+    /// `surface` is a live surface of the instance of the device that the
+    /// targets on it render on, and it outlives them.
+    #[must_use]
+    pub unsafe fn from_raw(surface: u64) -> HostSurface {
+        use ash::vk::Handle as _;
+        HostSurface(vk::SurfaceKHR::from_raw(surface))
+    }
+}
+
 /// Port-only: what an overlay draws with (`SurfaceTarget::set_overlay`):
 /// the frame's command buffer, inside a render pass over the frame's image
 /// that keeps what the map drew.
@@ -93,16 +109,13 @@ pub struct SurfaceTarget {
 }
 
 impl SurfaceTarget {
-    /// `GLFWVulkanBackend(window, capFrameRate)`: a backend of its own on
-    /// `device`, which can present to `window`, and a target that presents
-    /// to `window` through a swapchain of `framebuffer_size` physical
-    /// pixels. With `cap_frame_rate` off, frames are presented without
-    /// waiting for the display where the surface can (`present_mode`).
+    /// `GLFWVulkanBackend(window, capFrameRate)`: a presenting backend on
+    /// `device` and a target that presents to `window` through a swapchain
+    /// of `framebuffer_size` physical pixels. With `cap_frame_rate` off,
+    /// frames are presented without waiting for the display where the
+    /// surface can (`present_mode`).
     ///
-    /// Fails as [`RendererBackend::new`] does, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a window Vulkan
-    /// has no surface for, and with [`ErrorKind::Native`](mln_util::ErrorKind)
-    /// when the window gets no swapchain.
+    /// Fails as [`RendererBackend::presenting`] and [`new`](Self::new) do.
     pub fn with_backend(
         device: &Device,
         window: Arc<dyn Window>,
@@ -121,19 +134,18 @@ impl SurfaceTarget {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<(Rc<RendererBackend>, SurfaceTarget), Error> {
-        let (backend, surface) = RendererBackend::with_surface(device, Some(&*provider))?;
-        let backend = Rc::new(backend);
-        let surface = surface.ok_or_else(|| Error::native("The window has no Vulkan surface"))?;
-        let target = Self::on_surface(backend.clone(), surface, provider, framebuffer_size, cap_frame_rate)?;
+        let backend = Rc::new(RendererBackend::presenting(device)?);
+        let target = Self::from_provider(backend.clone(), provider, framebuffer_size, cap_frame_rate)?;
         Ok((backend, target))
     }
 
-    /// A target on `backend`, which a window target was made with, that
-    /// presents to `window`.
+    /// A target on `backend`, a presenting backend, that presents to
+    /// `window`.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
-    /// backend can't present to the window, and as
-    /// [`with_backend`](Self::with_backend) does.
+    /// backend can't present to the window, or Vulkan has no surface for it,
+    /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when the window
+    /// gets no surface or swapchain.
     pub fn new(
         backend: Rc<RendererBackend>,
         window: Arc<dyn Window>,
@@ -152,44 +164,71 @@ impl SurfaceTarget {
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
         let backend_impl = backend.backend_impl();
-        let present_queue_index = backend_impl
-            .get_present_queue_index()
-            .filter(|_| backend_impl.get_swapchain_loader().is_some())
-            .ok_or_else(|| Error::unsupported("The Vulkan backend presents to no windows"))?;
+        let shared = &backend_impl.device().shared;
+        let missing = provider.instance_extensions().into_iter().find(|name| !shared.has_instance_extension(name));
+        if let Some(name) = missing {
+            return Err(Error::unsupported(format!("The Vulkan instance lacks {}", name.to_string_lossy())));
+        }
         let surface = provider.create_surface(backend_impl.entry(), backend_impl.get_instance())?;
+        Self::on_surface(backend, surface, Some(provider), framebuffer_size, cap_frame_rate)
+    }
+
+    /// A target on `backend`, a presenting backend, that presents to the
+    /// host's `surface`, which stays the host's: the target destroys the
+    /// swapchain it makes, but not the surface, and can't make the surface
+    /// again when it is lost.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// device's queue can't present to the surface, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the surface gets no
+    /// swapchain.
+    pub fn on_host_surface(
+        backend: Rc<RendererBackend>,
+        surface: HostSurface,
+        framebuffer_size: Size,
+        cap_frame_rate: bool,
+    ) -> Result<SurfaceTarget, Error> {
+        Self::on_surface(backend, surface.0, None, framebuffer_size, cap_frame_rate)
+    }
+
+    /// A target that presents to `surface`, which the target owns when
+    /// `provider` made it, and which `provider` makes again when it is lost.
+    /// A surface the queue can't present to fails with `Unsupported`, and is
+    /// destroyed when the target would own it.
+    fn on_surface(
+        backend: Rc<RendererBackend>,
+        surface: vk::SurfaceKHR,
+        provider: Option<Rc<dyn SurfaceProvider>>,
+        framebuffer_size: Size,
+        cap_frame_rate: bool,
+    ) -> Result<SurfaceTarget, Error> {
+        let backend_impl = backend.backend_impl();
+        let (Some(surface_loader), Some(_)) = (backend_impl.get_surface_loader(), backend_impl.get_swapchain_loader())
+        else {
+            return Err(Error::unsupported("The Vulkan device presents to no windows"));
+        };
         // SAFETY: the surface is the instance's, and the queue family the
         // physical device's.
         let supported = unsafe {
-            backend_impl.get_surface_loader().get_physical_device_surface_support(
+            surface_loader.get_physical_device_surface_support(
                 backend_impl.get_physical_device(),
-                present_queue_index,
+                backend_impl.get_graphics_queue_index(),
                 surface,
             )
         };
         if supported != Ok(true) {
-            // SAFETY: nothing was made on the surface.
-            unsafe { backend_impl.get_surface_loader().destroy_surface(surface, None) };
-            return Err(Error::unsupported("The Vulkan device can't present to the window"));
+            if provider.is_some() {
+                // SAFETY: nothing was made on the surface, which is the
+                // target's.
+                unsafe { surface_loader.destroy_surface(surface, None) };
+            }
+            return Err(Error::unsupported("The Vulkan device's queue can't present to the surface"));
         }
-        Self::on_surface(backend, surface, provider, framebuffer_size, cap_frame_rate)
-    }
-
-    /// A target that presents to `surface`, which it owns from here on, and
-    /// which `provider` makes again when it is lost.
-    fn on_surface(
-        backend: Rc<RendererBackend>,
-        surface: vk::SurfaceKHR,
-        provider: Rc<dyn SurfaceProvider>,
-        framebuffer_size: Size,
-        cap_frame_rate: bool,
-    ) -> Result<SurfaceTarget, Error> {
         let context: &Rc<Context> = backend.vulkan_context();
-        let backend_impl = backend.backend_impl();
         // SAFETY: the surface is the instance's, and the device presents to
         // it.
         let present_modes = unsafe {
-            backend_impl
-                .get_surface_loader()
+            surface_loader
                 .get_physical_device_surface_present_modes(backend_impl.get_physical_device(), surface)
                 .unwrap_or_default()
         };
@@ -197,7 +236,7 @@ impl SurfaceTarget {
             context,
             framebuffer_size,
             Some(surface),
-            Some(provider),
+            provider,
             present_mode(cap_frame_rate, &present_modes),
             /*read_every_frame=*/ false,
         );

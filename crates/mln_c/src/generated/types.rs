@@ -2234,18 +2234,26 @@ pub const MLN_RENDER_SESSION_CAPABILITY_PRESENTATION: mln_render_session_capabil
 pub type mln_render_session_capability_flag = u32;
 /// A set of mln_render_session_capability_flag bits.
 pub type mln_render_session_capability_flags = u32;
-/** Locks or unlocks the Vulkan queue that you share with a render session.
+/** Locks or unlocks the Vulkan queue that you share with the render sessions of
+ a GPU device.
 
  Threads:
  It can run on a library thread, and it can't call the library.*/
 pub type mln_queue_lock_callback = ::core::option::Option<
     unsafe extern "C" fn(user_data: *mut ::core::ffi::c_void),
 >;
-/** Your lock on a Vulkan queue that you and a render session both submit to.
+/** Your lock on a Vulkan queue that you and the render sessions of a GPU device
+ all submit to.
 
- The session holds the lock only while it submits or presents to the queue.
- Set both `lock` and `unlock`, or neither when you don't submit to the queue
- yourself.*/
+ A session holds the lock only while it submits or presents to the queue, or
+ submits the empty batch that drains its work from the queue. It never holds
+ the lock while it waits. Set both `lock` and `unlock`, or neither when you
+ don't submit to the queue yourself.
+
+ Don't hold the lock while you call the library. A call such as
+ mln_render_session_abandon(), mln_render_session_release(),
+ mln_render_session_dispose(), or mln_render_session_service_driver_work()
+ can wait for a session's work, which takes the lock.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_queue_lock {
@@ -2263,7 +2271,9 @@ pub const MLN_GPU_SYNC_OPEN_GL_FENCE: mln_gpu_sync_kind = 1;
 pub const MLN_GPU_SYNC_QUEUE_ORDER: mln_gpu_sync_kind = 2;
 /// `handle` is a `VkSemaphore`. Wait until it reaches `value`.
 pub const MLN_GPU_SYNC_VULKAN_TIMELINE_SEMAPHORE: mln_gpu_sync_kind = 3;
-/// `handle` is a sync file descriptor.
+/** `handle` is a sync file descriptor. A descriptor of -1, as Vulkan exports
+ for a semaphore that has already signaled, counts as
+ MLN_GPU_SYNC_CPU_COMPLETE.*/
 pub const MLN_GPU_SYNC_SYNC_FD: mln_gpu_sync_kind = 4;
 /// `handle` is an `MTLSharedEvent`. Wait until it reaches `value`.
 pub const MLN_GPU_SYNC_METAL_SHARED_EVENT: mln_gpu_sync_kind = 5;
@@ -2289,6 +2299,29 @@ pub const MLN_GPU_SYNC_KIND_FLAG_D3D12_FENCE: mln_gpu_sync_kind_flag = 64;
 pub type mln_gpu_sync_kind_flag = u32;
 /// A set of mln_gpu_sync_kind_flag bits.
 pub type mln_gpu_sync_kind_flags = u32;
+/// The texture isn't shared.
+pub const MLN_GPU_EXPORT_KIND_NONE: mln_gpu_export_kind = 0;
+/// An `IOSurfaceRef`.
+pub const MLN_GPU_EXPORT_KIND_IO_SURFACE: mln_gpu_export_kind = 1;
+/// A Linux dmabuf, as file descriptors with a DRM format and modifier.
+pub const MLN_GPU_EXPORT_KIND_DMA_BUF: mln_gpu_export_kind = 2;
+/// An `AHardwareBuffer*`.
+pub const MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER: mln_gpu_export_kind = 3;
+/// A DXGI shared texture's NT handle.
+pub const MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE: mln_gpu_export_kind = 4;
+/// A Vulkan or OpenGL opaque memory file descriptor.
+pub const MLN_GPU_EXPORT_KIND_OPAQUE_FD: mln_gpu_export_kind = 5;
+/// A way to share a texture's memory with another API or process.
+pub type mln_gpu_export_kind = u32;
+pub const MLN_GPU_EXPORT_KIND_FLAG_IO_SURFACE: mln_gpu_export_kind_flag = 1;
+pub const MLN_GPU_EXPORT_KIND_FLAG_DMA_BUF: mln_gpu_export_kind_flag = 2;
+pub const MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER: mln_gpu_export_kind_flag = 4;
+pub const MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE: mln_gpu_export_kind_flag = 8;
+pub const MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD: mln_gpu_export_kind_flag = 16;
+/// A way to share a texture's memory, as a bit in a set.
+pub type mln_gpu_export_kind_flag = u32;
+/// A set of mln_gpu_export_kind_flag bits.
+pub type mln_gpu_export_kind_flags = u32;
 /// Options for attaching a render session to a map.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2298,12 +2331,13 @@ pub struct mln_render_session_attach_options {
  target:
 
  - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a WebGPU surface, or a
-   borrowed ring of OpenGL or WebGPU textures.
+   borrowed ring of WebGPU textures.
  - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, an HTML
-   canvas, or a ring of Android hardware buffers, dmabufs, DXGI shared
-   textures, or IOSurfaces.
- - Either one for a Metal layer, or a borrowed ring of Metal or Vulkan
-   textures.
+   canvas, or an exported ring.
+ - Either one for a Metal layer, a Vulkan surface, an OpenGL surface, or a
+   borrowed ring of Metal, Vulkan, or OpenGL textures. A build may drive
+   these on MLN_RENDER_DRIVER_CORE_WORKER only, and fails an attach with
+   MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD then.
 
  An attach with another driver fails with MLN_STATUS_UNSUPPORTED.*/
     pub driver: mln_render_driver_kind,
@@ -2323,8 +2357,6 @@ pub struct mln_render_session_attach_options {
  has work for mln_render_session_service_driver_work(). It isn't called
  again until a service runs.*/
     pub driver_work_wake: mln_wake,
-    /// Your lock on the Vulkan queue, when you submit to it yourself.
-    pub queue_lock: mln_queue_lock,
 }
 /// What an attached render session supports.
 #[repr(C)]
@@ -2341,6 +2373,9 @@ pub struct mln_render_session_capabilities {
     /** The kinds of mln_gpu_sync that mln_acquired_frame_release() accepts.
  They depend on the target and on what the device supports.*/
     pub consumer_sync_kinds: mln_gpu_sync_kind_flags,
+    /** How an exported ring shares its textures, which says which getter gets an
+ acquired frame's texture, or MLN_GPU_EXPORT_KIND_NONE for another target.*/
+    pub export_kind: mln_gpu_export_kind,
 }
 /// A point in GPU work that the other side waits for before using a texture.
 #[repr(C)]
@@ -2373,7 +2408,7 @@ pub struct mln_vulkan_context_descriptor {
     /// A `VkDevice`.
     pub device: *mut ::core::ffi::c_void,
     /** A `VkQueue` from `graphics_queue_family_index` that supports graphics. If
- you submit to it too, set mln_render_session_attach_options.queue_lock.*/
+ you submit to it too, give the device your mln_queue_lock.*/
     pub graphics_queue: *mut ::core::ffi::c_void,
     pub graphics_queue_family_index: u32,
     /// Your `vkGetInstanceProcAddr`, or null to use the Vulkan loader's.
@@ -2405,40 +2440,35 @@ pub const MLN_OPEN_GL_CONTEXT_PLATFORM_EGL: mln_open_gl_context_platform = 2;
 pub const MLN_OPEN_GL_CONTEXT_PLATFORM_WEB_GL: mln_open_gl_context_platform = 3;
 /// The platform API that provides an OpenGL context.
 pub type mln_open_gl_context_platform = u32;
-/// The session's context shares objects with your `share_context`.
-pub const MLN_OPEN_GL_CONTEXT_OWNERSHIP_SHARED: mln_open_gl_context_ownership = 0;
-/// The session's context shares objects with no other context.
-pub const MLN_OPEN_GL_CONTEXT_OWNERSHIP_DEDICATED: mln_open_gl_context_ownership = 1;
-/// Whether a render session's OpenGL context shares objects with yours.
-pub type mln_open_gl_context_ownership = u32;
 pub const MLN_OPEN_GL_CLIENT_API_UNSPECIFIED: mln_open_gl_client_api = 0;
 pub const MLN_OPEN_GL_CLIENT_API_GL: mln_open_gl_client_api = 1;
 pub const MLN_OPEN_GL_CLIENT_API_GLES: mln_open_gl_client_api = 2;
 /// The OpenGL API that a context renders with.
 pub type mln_open_gl_client_api = u32;
-/// The WGL objects that a render session makes its OpenGL context from.
+/// Your WGL context, which each session's context shares objects with.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_wgl_context_descriptor {
-    /// An `HDC`.
+    /// An `HDC` with the pixel format of `share_context`.
     pub device_context: *mut ::core::ffi::c_void,
-    /// Your `HGLRC`, for a shared context.
+    /// Your `HGLRC`.
     pub share_context: *mut ::core::ffi::c_void,
     /// Your `wglGetProcAddress`, or null to use the system's.
     pub get_proc_address: *mut ::core::ffi::c_void,
 }
-/// The EGL objects that a render session makes its OpenGL context from.
+/** Your EGL context, which each session's context shares objects with.
+
+ Each session makes its context on `display` with `config` and the client API
+ and version of `share_context`.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_egl_context_descriptor {
-    /// An `EGLDisplay`.
+    /// An `EGLDisplay`, which you initialized.
     pub display: *mut ::core::ffi::c_void,
-    /// An `EGLConfig`.
+    /// The `EGLConfig` of `share_context`.
     pub config: *mut ::core::ffi::c_void,
-    /// Your `EGLContext`, for a shared context.
+    /// Your `EGLContext`.
     pub share_context: *mut ::core::ffi::c_void,
-    /// The API of a dedicated context. A shared context uses the API of yours.
-    pub client_api: mln_open_gl_client_api,
     /// Your `eglGetProcAddress`, or null to use the system's.
     pub get_proc_address: *mut ::core::ffi::c_void,
 }
@@ -2468,15 +2498,12 @@ pub union mln_open_gl_context_descriptor_data {
     pub egl: mln_egl_context_descriptor,
     pub web_gl: mln_web_gl_context_descriptor,
 }
-/** How a render session gets the OpenGL context that it renders with.
-
- Keep the objects that it names alive until a detach or release of the
- session completes, or an abandon of it returns.*/
+/** Your OpenGL context, for mln_gpu_device_wrap_open_gl(): the root of the
+ share group that the device's sessions join.*/
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct mln_open_gl_context_descriptor {
     pub platform: mln_open_gl_context_platform,
-    pub ownership: mln_open_gl_context_ownership,
     pub data: mln_open_gl_context_descriptor_data,
 }
 /// An image that the session allocates, and that you read back.
@@ -2497,6 +2524,20 @@ pub const MLN_RENDER_TARGET_KIND_OHOS_WINDOW: mln_render_target_kind = 7;
 pub const MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE: mln_render_target_kind = 8;
 /// An HTML canvas in the page.
 pub const MLN_RENDER_TARGET_KIND_HTML_CANVAS: mln_render_target_kind = 9;
+/// A `VkSurfaceKHR` on the instance of a Vulkan device.
+pub const MLN_RENDER_TARGET_KIND_VULKAN_SURFACE: mln_render_target_kind = 10;
+/// An `EGLSurface` or `HDC` for the context that an OpenGL device wraps.
+pub const MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE: mln_render_target_kind = 11;
+/// A ring of your Metal textures.
+pub const MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES: mln_render_target_kind = 12;
+/// A ring of your Vulkan images.
+pub const MLN_RENDER_TARGET_KIND_VULKAN_BORROWED_TEXTURES: mln_render_target_kind = 13;
+/// A ring of your OpenGL textures.
+pub const MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES: mln_render_target_kind = 14;
+/// A ring of your WebGPU textures.
+pub const MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES: mln_render_target_kind = 15;
+/// A ring of textures that the session allocates and shares with you.
+pub const MLN_RENDER_TARGET_KIND_EXPORTED_RING: mln_render_target_kind = 16;
 /// The kind of a render target, which says what its descriptor holds.
 pub type mln_render_target_kind = u32;
 pub const MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN: mln_render_target_kind_flag = 1;
@@ -2508,6 +2549,13 @@ pub const MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW: mln_render_target_kind_fla
 pub const MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW: mln_render_target_kind_flag = 64;
 pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_GPU_SURFACE: mln_render_target_kind_flag = 128;
 pub const MLN_RENDER_TARGET_KIND_FLAG_HTML_CANVAS: mln_render_target_kind_flag = 256;
+pub const MLN_RENDER_TARGET_KIND_FLAG_VULKAN_SURFACE: mln_render_target_kind_flag = 512;
+pub const MLN_RENDER_TARGET_KIND_FLAG_OPEN_GL_SURFACE: mln_render_target_kind_flag = 1024;
+pub const MLN_RENDER_TARGET_KIND_FLAG_METAL_BORROWED_TEXTURES: mln_render_target_kind_flag = 2048;
+pub const MLN_RENDER_TARGET_KIND_FLAG_VULKAN_BORROWED_TEXTURES: mln_render_target_kind_flag = 4096;
+pub const MLN_RENDER_TARGET_KIND_FLAG_OPEN_GL_BORROWED_TEXTURES: mln_render_target_kind_flag = 8192;
+pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_GPU_BORROWED_TEXTURES: mln_render_target_kind_flag = 16384;
+pub const MLN_RENDER_TARGET_KIND_FLAG_EXPORTED_RING: mln_render_target_kind_flag = 32768;
 /// A render target kind, as a bit in a set.
 pub type mln_render_target_kind_flag = u32;
 /// A set of mln_render_target_kind_flag bits.
@@ -2621,6 +2669,232 @@ pub struct mln_html_canvas_target {
     /// The canvas's CSS selector, such as `#map`.
     pub selector: mln_buffer_view,
 }
+/** Your Vulkan surface to present to.
+
+ Make it with the instance of the Vulkan device that you attach on. The
+ device's queue family must support presenting to the surface. The session
+ creates the swapchain, and destroys it but not the surface.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vulkan_surface_target {
+    pub logical_size: mln_logical_size,
+    /// Your `VkSurfaceKHR`.
+    pub surface: mln_vulkan_non_dispatchable_handle,
+}
+/** Your OpenGL surface to present to, with the context that
+ mln_gpu_device_wrap_open_gl() wrapped.
+
+ The session makes its context current on the surface for each frame, and
+ swaps the surface's buffers to present.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_open_gl_surface_target {
+    pub logical_size: mln_logical_size,
+    /** Your `EGLSurface` on the context's display, with its config, or your `HDC`
+ with the context's pixel format.*/
+    pub surface: *mut ::core::ffi::c_void,
+}
+/// A Metal texture of a borrowed ring.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_metal_borrowed_texture {
+    /// Your `MTLTexture`.
+    pub texture: *mut ::core::ffi::c_void,
+}
+/** A ring of your Metal textures to render into, on the Metal device that you
+ attach on.
+
+ `physical_width` and `physical_height` give the textures' size in pixels,
+ which is usually `logical_size` times the map's scale factor. The textures
+ must all have that size, the device's `MTLDevice`, one pixel format, one
+ sample, and `MTLTextureUsageRenderTarget`. The ring holds up to
+ MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_metal_borrowed_textures_target {
+    pub logical_size: mln_logical_size,
+    pub physical_width: u32,
+    pub physical_height: u32,
+    pub textures: *const mln_metal_borrowed_texture,
+    pub texture_count: usize,
+}
+/// A Vulkan image of a borrowed ring.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vulkan_borrowed_texture {
+    /// Your `VkImage`.
+    pub image: mln_vulkan_non_dispatchable_handle,
+    /// A 2D `VkImageView` of `image` with one mip level and one layer.
+    pub image_view: mln_vulkan_non_dispatchable_handle,
+}
+/// The image stays with the queue family of the device's queue.
+pub const MLN_VULKAN_IMAGE_OWNER_GRAPHICS_QUEUE: mln_vulkan_image_owner = 0;
+/// Each frame releases the image to VK_QUEUE_FAMILY_EXTERNAL.
+pub const MLN_VULKAN_IMAGE_OWNER_EXTERNAL: mln_vulkan_image_owner = 1;
+/// Each frame releases the image to VK_QUEUE_FAMILY_FOREIGN_EXT.
+pub const MLN_VULKAN_IMAGE_OWNER_FOREIGN: mln_vulkan_image_owner = 2;
+/** The queue family that a borrowed image goes to after each frame.
+
+ With MLN_VULKAN_IMAGE_OWNER_EXTERNAL or MLN_VULKAN_IMAGE_OWNER_FOREIGN,
+ acquire the image on your side before you read it. You don't need to release
+ it back.*/
+pub type mln_vulkan_image_owner = u32;
+/** A ring of your Vulkan images to render into, on the Vulkan device that you
+ attach on.
+
+ `physical_width` and `physical_height` give the images' size in pixels,
+ which is usually `logical_size` times the map's scale factor. Each image must
+ have that size, `format`, and `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT`, and
+ belong to the device's `VkDevice`. The ring holds up to
+ MLN_TEXTURE_RING_MAX_DEPTH distinct images.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vulkan_borrowed_textures_target {
+    pub logical_size: mln_logical_size,
+    pub physical_width: u32,
+    pub physical_height: u32,
+    pub textures: *const mln_vulkan_borrowed_texture,
+    pub texture_count: usize,
+    /// The images' `VkFormat`.
+    pub format: u32,
+    /// The `VkImageLayout` that each frame leaves its image in.
+    pub final_layout: u32,
+    pub owner: mln_vulkan_image_owner,
+}
+/// An OpenGL texture of a borrowed ring.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_open_gl_borrowed_texture {
+    /// Your texture name.
+    pub texture: u32,
+}
+/** A ring of your OpenGL textures to render into, on an OpenGL device that
+ mln_gpu_device_wrap_open_gl() made from your context.
+
+ `physical_width` and `physical_height` give the textures' size in pixels,
+ which is usually `logical_size` times the map's scale factor. Each texture
+ must be in your context's share group, with RGBA8 storage of that size. The
+ ring holds up to MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_open_gl_borrowed_textures_target {
+    pub logical_size: mln_logical_size,
+    pub physical_width: u32,
+    pub physical_height: u32,
+    pub textures: *const mln_open_gl_borrowed_texture,
+    pub texture_count: usize,
+    /// The textures' target. It must be `GL_TEXTURE_2D`.
+    pub target: u32,
+}
+/// A WebGPU texture of a borrowed ring.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_web_gpu_borrowed_texture {
+    /// Your `WGPUTexture`.
+    pub texture: *mut ::core::ffi::c_void,
+    /// A `WGPUTextureView` of `texture`.
+    pub texture_view: *mut ::core::ffi::c_void,
+}
+/** A ring of your WebGPU textures to render into, on a WebGPU device that wraps
+ yours.
+
+ `physical_width` and `physical_height` give the textures' size in pixels,
+ which is usually `logical_size` times the map's scale factor. Each texture
+ must be 2D with that size, `format`, one layer, one mip level, one sample,
+ and `WGPUTextureUsage_RenderAttachment`. The ring holds up to
+ MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_web_gpu_borrowed_textures_target {
+    pub logical_size: mln_logical_size,
+    pub physical_width: u32,
+    pub physical_height: u32,
+    pub textures: *const mln_web_gpu_borrowed_texture,
+    pub texture_count: usize,
+    /// The textures' `WGPUTextureFormat`.
+    pub format: u32,
+}
+/// A DRM format and modifier that you can import.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_dma_buf_format {
+    /// A DRM fourcc code, such as DRM_FORMAT_ABGR8888.
+    pub fourcc: u32,
+    /// A DRM format modifier, such as DRM_FORMAT_MOD_LINEAR.
+    pub modifier: u64,
+}
+/** A ring of textures that the session allocates on its device and shares with
+ you, in one of the ways that you can import.
+
+ Each texture has the size in pixels of `logical_size` at the map's scale
+ factor. mln_render_session_resize() gives the ring textures of the new size,
+ and a frame that you hold keeps its texture of the old size until you
+ release or discard it.
+
+ The ring shares its textures in the first kind of `export_kinds` that the
+ device exports, in this order, and
+ mln_render_session_capabilities.export_kind reports it:
+
+ - MLN_GPU_EXPORT_KIND_IO_SURFACE: IOSurfaces of the pixel format
+   kCVPixelFormatType_32BGRA, which Metal names MTLPixelFormatBGRA8Unorm.
+   Get each frame's surface with mln_acquired_frame_get_io_surface().
+ - MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER: hardware buffers of the
+   format AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM, with the usage
+   AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT,
+   AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, and the bits of
+   `android_hardware_buffer_usage`. Get each frame's buffer with
+   mln_acquired_frame_get_android_hardware_buffer().
+ - MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE: D3D11 textures of the format
+   DXGI_FORMAT_B8G8R8A8_UNORM on the device's GPU, which bind as shader
+   resources and render targets. Open them on a D3D11 or D3D12 device of the
+   same adapter, which you pick with mln_gpu_device_options.adapter_luid.
+   Get each frame's texture with mln_acquired_frame_get_dxgi_shared_texture().
+ - MLN_GPU_EXPORT_KIND_DMA_BUF: dmabufs of a format and modifier from
+   `dma_buf_formats`. Get each frame's buffer with
+   mln_acquired_frame_get_dma_buf().
+ - MLN_GPU_EXPORT_KIND_OPAQUE_FD: the memory of Vulkan images, which only a
+   Vulkan device or an OpenGL context with GL_EXT_memory_object_fd on the
+   same GPU and driver imports. To pick the GPU, create the device with
+   mln_gpu_device_options.adapter_uuid set to your context's
+   GL_DEVICE_UUID_EXT. Get each frame's memory with
+   mln_acquired_frame_get_opaque_fd().
+
+ mln_gpu_device_capabilities.export_kinds reports the kinds that a device
+ exports. Attach with MLN_RENDER_DRIVER_CORE_WORKER. Without a device, the
+ session renders on the first of the platform's backends whose device exports
+ one of `export_kinds`.
+
+ Each frame hands over with MLN_GPU_SYNC_CPU_COMPLETE or with the sync kind
+ that crosses APIs on its platform: MLN_GPU_SYNC_METAL_SHARED_EVENT for an
+ IOSurface, and MLN_GPU_SYNC_SYNC_FD for the others, where the device has
+ them. For a reader that waits on neither, such as a Wayland compositor
+ without explicit synchronization or Flutter's `copyPixelBuffer`, leave them
+ out of mln_render_session_attach_options.producer_sync_kinds, so that each
+ frame finishes before you acquire it, and release each frame only once the
+ reader is done with its texture. Give the ring 3 textures, so the session
+ can render while you hold two frames.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_exported_ring_target {
+    pub logical_size: mln_logical_size,
+    /// How many textures the ring has, from 1 to MLN_TEXTURE_RING_MAX_DEPTH.
+    pub texture_count: u32,
+    /// The ways of sharing a texture that you can import.
+    pub export_kinds: mln_gpu_export_kind_flags,
+    /** The dmabuf formats and modifiers that you import, most preferred first,
+ such as those that eglQueryDmaBufModifiersEXT() reports. A ring exports
+ dmabufs only of one of them. The library renders only DRM_FORMAT_ABGR8888
+ and DRM_FORMAT_ARGB8888. A modifier can give a buffer more planes than its
+ format has, such as a plane of compression metadata, and the library takes
+ any such modifier that its GPU can render into and share. The library
+ takes no implicit modifier: it skips DRM_FORMAT_MOD_INVALID, so a list of
+ only that one gets no dmabuf.*/
+    pub dma_buf_formats: *const mln_dma_buf_format,
+    pub dma_buf_format_count: usize,
+    /** More `AHARDWAREBUFFER_USAGE_*` bits that your reads of a hardware buffer
+ need, such as AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, or zero.*/
+    pub android_hardware_buffer_usage: u64,
+}
 /// The descriptor of each kind of render target.
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -2634,12 +2908,21 @@ pub union mln_render_target_data {
     pub ohos_window: mln_ohos_window_target,
     pub web_gpu_surface: mln_web_gpu_surface_target,
     pub html_canvas: mln_html_canvas_target,
+    pub vulkan_surface: mln_vulkan_surface_target,
+    pub open_gl_surface: mln_open_gl_surface_target,
+    pub metal_borrowed_textures: mln_metal_borrowed_textures_target,
+    pub vulkan_borrowed_textures: mln_vulkan_borrowed_textures_target,
+    pub open_gl_borrowed_textures: mln_open_gl_borrowed_textures_target,
+    pub web_gpu_borrowed_textures: mln_web_gpu_borrowed_textures_target,
+    pub exported_ring: mln_exported_ring_target,
 }
 /** What a render session renders into: one kind of target, and its
  descriptor.
 
  Every target has a size in logical pixels, which sets the map's size. The
- session renders it at the map's scale factor.
+ session renders it at the map's scale factor. A borrowed or exported ring
+ hands each frame to you: acquire it with mln_render_session_acquire_frame(),
+ and release it with your GPU's synchronization once you have read it.
 
  The session uses the objects that the descriptor names until a replacement
  or release of the target completes, a detach or release of the session
@@ -2696,21 +2979,11 @@ pub struct mln_gpu_device_options {
     /** Whether the sessions of an EGL device take turns in one OpenGL context
  instead of having one each.*/
     pub open_gl_single_context: bool,
+    /** Your lock on a Vulkan device's queue, when you submit to the queue that
+ mln_gpu_device_get_vulkan_context() reports. Only a Vulkan device takes
+ one.*/
+    pub queue_lock: mln_queue_lock,
 }
-/// An `IOSurfaceRef`.
-pub const MLN_GPU_EXPORT_KIND_FLAG_IO_SURFACE: mln_gpu_export_kind_flag = 1;
-/// A Linux dmabuf, as file descriptors with a DRM format and modifier.
-pub const MLN_GPU_EXPORT_KIND_FLAG_DMA_BUF: mln_gpu_export_kind_flag = 2;
-/// An `AHardwareBuffer*`.
-pub const MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER: mln_gpu_export_kind_flag = 4;
-/// A DXGI shared texture's NT handle.
-pub const MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE: mln_gpu_export_kind_flag = 8;
-/// A Vulkan or OpenGL opaque memory file descriptor.
-pub const MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD: mln_gpu_export_kind_flag = 16;
-/// A way to share a texture's memory with another API or process.
-pub type mln_gpu_export_kind_flag = u32;
-/// A set of mln_gpu_export_kind_flag bits.
-pub type mln_gpu_export_kind_flags = u32;
 /// What a GPU device can do.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2719,10 +2992,52 @@ pub struct mln_gpu_device_capabilities {
     pub backend: mln_render_backend,
     /// The kinds of mln_render_target that sessions on the device render to.
     pub target_kinds: mln_render_target_kind_flags,
-    /// The ways that the device can share the textures it renders.
+    /** The ways that the device can share the textures of an exported ring. A
+ kind is here only once the device has exported a texture of it, so a
+ driver that offers an extension but can't allocate the memory reports no
+ kind of it.*/
     pub export_kinds: mln_gpu_export_kind_flags,
     /// The kinds of mln_gpu_sync that the device can signal and wait on.
     pub sync_kinds: mln_gpu_sync_kind_flags,
+}
+/** Your Vulkan device and queue, for mln_gpu_device_wrap_vulkan().
+
+ The device must have the extensions that its sessions use enabled:
+ `VK_KHR_swapchain` for windows and Vulkan surfaces,
+ `VK_KHR_external_semaphore_fd` for MLN_GPU_SYNC_SYNC_FD,
+ `VK_KHR_external_memory_fd` for MLN_GPU_EXPORT_KIND_OPAQUE_FD, and that with
+ `VK_EXT_external_memory_dma_buf` and `VK_EXT_image_drm_format_modifier` for
+ MLN_GPU_EXPORT_KIND_DMA_BUF. List the ones you enabled in
+ `enabled_extensions`. When the GPU supports timeline semaphores, also enable
+ the `timelineSemaphore` feature, of Vulkan 1.2 or
+ `VK_KHR_timeline_semaphore`: the device offers
+ MLN_GPU_SYNC_VULKAN_TIMELINE_SEMAPHORE wherever the GPU supports it.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vulkan_device_descriptor {
+    pub size: u32,
+    pub context: mln_vulkan_context_descriptor,
+    /** Your lock on `context.graphics_queue`, when you submit to it yourself.
+ Give every device that wraps the queue the same lock.*/
+    pub queue_lock: mln_queue_lock,
+    /** The names of the device extensions that you enabled on `context.device`,
+ such as "VK_KHR_external_semaphore_fd". Vulkan offers no way to ask a
+ device which extensions it has, so the device offers the export kinds and
+ MLN_GPU_SYNC_SYNC_FD only when the extensions that they need are listed
+ here, and none of them when the list is empty.*/
+    pub enabled_extensions: *const mln_buffer_view,
+    pub enabled_extension_count: usize,
+}
+/// Your Metal device and command queue, for mln_gpu_device_wrap_metal().
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_metal_device_descriptor {
+    pub size: u32,
+    /// Your `MTLDevice`.
+    pub device: *mut ::core::ffi::c_void,
+    /** Your `MTLCommandQueue` on `device`, or null for a queue of the library's.
+ With your queue, borrowed rings can use MLN_GPU_SYNC_QUEUE_ORDER.*/
+    pub command_queue: *mut ::core::ffi::c_void,
 }
 /** The Vulkan objects of a device, as mln_gpu_device_get_vulkan_context()
  reports them.*/
@@ -2924,154 +3239,6 @@ pub struct mln_frame_pacer_options {
  frames at every refresh.*/
     pub maximum_frames_per_second: u32,
 }
-/** A ring of Android hardware buffers that the library allocates, for
- mln_map_attach_android_hardware_buffer_ring().
-
- Each buffer has the map's size in pixels, `logical_size` times the map's
- scale factor, and the format AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM. Its usage
- is AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT,
- AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, and the bits of `usage`.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_android_hardware_buffer_ring_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// How many buffers the ring has, from 1 to 8.
-    pub buffer_count: u32,
-    /** More `AHARDWAREBUFFER_USAGE_*` bits that your reads need, such as
- AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, or zero.*/
-    pub usage: u64,
-}
-/// The Android hardware buffer of an acquired frame.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_android_hardware_buffer_frame {
-    pub size: u32,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor: f64,
-    /// The buffer's index in the ring.
-    pub slot: u32,
-    /// The `AHardwareBuffer*`.
-    pub buffer: *mut ::core::ffi::c_void,
-}
-/** A ring of IOSurfaces that the library allocates, for
- mln_map_attach_io_surface_ring().
-
- Each surface has the map's size in pixels, `logical_size` times the map's
- scale factor, and the pixel format kCVPixelFormatType_32BGRA, which Metal
- names MTLPixelFormatBGRA8Unorm.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_io_surface_ring_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// How many surfaces the ring has, from 1 to 8.
-    pub buffer_count: u32,
-    /// The MTLDevice to render with. A null device picks the system's default.
-    pub context: mln_metal_context_descriptor,
-}
-/// The IOSurface of an acquired frame.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_io_surface_frame {
-    pub size: u32,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor: f64,
-    /// The surface's index in the ring.
-    pub slot: u32,
-    /// The `IOSurfaceRef`.
-    pub surface: *mut ::core::ffi::c_void,
-}
-/// A DRM format and modifier that you can import.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_dma_buf_format {
-    /// A DRM fourcc code, such as DRM_FORMAT_ABGR8888.
-    pub fourcc: u32,
-    /// A DRM format modifier, such as DRM_FORMAT_MOD_LINEAR.
-    pub modifier: u64,
-}
-/** A ring of dmabufs that the library allocates, for
- mln_map_attach_dma_buf_ring().
-
- Each buffer has the map's size in pixels and a format and modifier from
- `formats`. The library renders only DRM_FORMAT_ABGR8888 and
- DRM_FORMAT_ARGB8888. A modifier can give a buffer more planes than its
- format has, such as a plane of compression metadata, and the library takes
- any such modifier that its GPU can render into and share.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_dma_buf_ring_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// How many buffers the ring has, from 1 to 8.
-    pub buffer_count: u32,
-    /** The formats and modifiers that your reader imports, most preferred first,
- such as those that eglQueryDmaBufModifiersEXT() reports.*/
-    pub formats: *const mln_dma_buf_format,
-    pub format_count: usize,
-}
-/// Where one plane of a dmabuf keeps its data.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_dma_buf_plane {
-    /** The file descriptor of the dmabuf that holds the plane. The planes of a
- buffer often share one.*/
-    pub fd: i32,
-    /// The bytes from the start of the dmabuf to the plane's first byte.
-    pub offset: u32,
-    /// The bytes from the start of one row to the start of the next.
-    pub stride: u32,
-}
-/// The dmabuf of an acquired frame.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_dma_buf_frame {
-    pub size: u32,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor: f64,
-    /// The buffer's index in the ring.
-    pub slot: u32,
-    pub fourcc: u32,
-    pub modifier: u64,
-    /** The buffer's planes, in the order that its fourcc and modifier define.
- Import all of them, as EGL_EXT_image_dma_buf_import_modifiers planes 0 and
- up, or with one `zwp_linux_buffer_params_v1.add` call each.*/
-    pub planes: *const mln_dma_buf_plane,
-    pub plane_count: usize,
-}
-/** A ring of DXGI shared textures that the library allocates, for
- mln_map_attach_dxgi_shared_texture_ring().
-
- Each texture is a D3D11 2D texture with the map's size in pixels and the
- format DXGI_FORMAT_B8G8R8A8_UNORM. It binds as a shader resource and a render
- target, and is shared through an NT handle.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_dxgi_shared_texture_ring_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// How many textures the ring has, from 1 to 8.
-    pub texture_count: u32,
-}
-/// The DXGI shared texture of an acquired frame.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_dxgi_shared_texture_frame {
-    pub size: u32,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor: f64,
-    /// The texture's index in the ring.
-    pub slot: u32,
-    /// The texture's `DXGI_FORMAT`.
-    pub format: u32,
-    /// The texture's shared NT `HANDLE`.
-    pub handle: *mut ::core::ffi::c_void,
-}
 /// A projection's camera, as mln_map_projection_get_camera() reports it.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3262,54 +3429,6 @@ pub struct mln_style_expression_info {
     /// True when the result doesn't depend on the zoom level.
     pub is_zoom_constant: bool,
 }
-/// A Metal texture of a borrowed ring.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_metal_borrowed_texture {
-    /// Your MTLTexture.
-    pub texture: *mut ::core::ffi::c_void,
-}
-/** A ring of your Metal textures, for mln_map_attach_metal_borrowed_texture().
-
- `logical_size` sets the map's size. `physical_width` and `physical_height`
- give the textures' size in pixels, which is usually `logical_size` times the
- map's scale factor. The textures must all have that size, one device, one
- pixel format, one sample, and MTLTextureUsageRenderTarget. The ring holds up
- to MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
-
- The session uses the textures until a replacement or release of the target
- completes, a detach or release of the session completes, or an abandon of it
- returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_metal_borrowed_texture_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub textures: *const mln_metal_borrowed_texture,
-    pub texture_count: usize,
-    /** Your MTLCommandQueue on the textures' device, or null for a queue of the
- session's own. With your queue, frames can use MLN_GPU_SYNC_QUEUE_ORDER.*/
-    pub command_queue: *mut ::core::ffi::c_void,
-}
-/** New Metal textures for a borrowed ring, for
- mln_render_session_set_metal_borrowed_texture_target().
-
- The members and the textures follow the rules of
- mln_metal_borrowed_texture_descriptor. The ring keeps its depth, device, and
- command queue, so give it as many textures as it attached with, on the same
- device.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_metal_borrowed_texture_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub textures: *const mln_metal_borrowed_texture,
-    pub texture_count: usize,
-}
 /// The Metal texture of an acquired frame.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3326,71 +3445,6 @@ pub struct mln_metal_texture_frame {
     pub device: *mut ::core::ffi::c_void,
     /// The texture's MTLPixelFormat.
     pub pixel_format: u64,
-}
-/// A Vulkan image of a borrowed ring.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_vulkan_borrowed_texture {
-    /// Your VkImage.
-    pub image: mln_vulkan_non_dispatchable_handle,
-    /// A 2D VkImageView of `image` with one mip level and one layer.
-    pub image_view: mln_vulkan_non_dispatchable_handle,
-}
-/// The image stays with the queue family of `graphics_queue_family_index`.
-pub const MLN_VULKAN_IMAGE_OWNER_GRAPHICS_QUEUE: mln_vulkan_image_owner = 0;
-/// Each frame releases the image to VK_QUEUE_FAMILY_EXTERNAL.
-pub const MLN_VULKAN_IMAGE_OWNER_EXTERNAL: mln_vulkan_image_owner = 1;
-/// Each frame releases the image to VK_QUEUE_FAMILY_FOREIGN_EXT.
-pub const MLN_VULKAN_IMAGE_OWNER_FOREIGN: mln_vulkan_image_owner = 2;
-/** The queue family that a borrowed image goes to after each frame.
-
- With MLN_VULKAN_IMAGE_OWNER_EXTERNAL or MLN_VULKAN_IMAGE_OWNER_FOREIGN,
- acquire the image on your side before you read it. You don't need to release
- it back.*/
-pub type mln_vulkan_image_owner = u32;
-/** A ring of your Vulkan images, for mln_map_attach_vulkan_borrowed_texture().
-
- `logical_size` sets the map's size. `physical_width` and `physical_height`
- give the images' size in pixels, which is usually `logical_size` times the
- map's scale factor. Each image must have that size, `format`, and
- VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, and belong to the context's device. The
- ring holds up to MLN_TEXTURE_RING_MAX_DEPTH distinct images.
-
- The session uses the images until a replacement or release of the target
- completes, a detach or release of the session completes, or an abandon of it
- returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_vulkan_borrowed_texture_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub context: mln_vulkan_context_descriptor,
-    pub textures: *const mln_vulkan_borrowed_texture,
-    pub texture_count: usize,
-    /// The images' VkFormat.
-    pub format: u32,
-    /// The VkImageLayout that each frame leaves its image in.
-    pub final_layout: u32,
-    pub owner: mln_vulkan_image_owner,
-}
-/** New Vulkan images for a borrowed ring, for
- mln_render_session_set_vulkan_borrowed_texture_target().
-
- The members and the images follow the rules of
- mln_vulkan_borrowed_texture_descriptor. The ring keeps its depth, context,
- `format`, `final_layout`, and `owner`, so give it as many images as it
- attached with, in that format, on the same device.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_vulkan_borrowed_texture_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub textures: *const mln_vulkan_borrowed_texture,
-    pub texture_count: usize,
 }
 /// The Vulkan image of an acquired frame.
 #[repr(C)]
@@ -3412,107 +3466,6 @@ pub struct mln_vulkan_texture_frame {
     pub format: u32,
     /// The VkImageLayout that the frame left the image in.
     pub layout: u32,
-}
-/// An OpenGL texture of a borrowed ring.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_open_gl_borrowed_texture {
-    /// Your texture name.
-    pub texture: u32,
-}
-/** A ring of your OpenGL textures, for
- mln_map_attach_open_gl_borrowed_texture().
-
- `logical_size` sets the map's size. `physical_width` and `physical_height`
- give the textures' size in pixels, which is usually `logical_size` times the
- map's scale factor. The context must use
- MLN_OPEN_GL_CONTEXT_OWNERSHIP_SHARED. Each texture must be in your context's
- share group, with storage of that size. The ring holds up to
- MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
-
- The session uses the textures until a replacement or release of the target
- completes, a detach or release of the session completes, or an abandon of it
- returns.*/
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct mln_open_gl_borrowed_texture_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub context: mln_open_gl_context_descriptor,
-    pub textures: *const mln_open_gl_borrowed_texture,
-    pub texture_count: usize,
-    /// The textures' target. It must be GL_TEXTURE_2D.
-    pub target: u32,
-}
-/** New OpenGL textures for a borrowed ring, for
- mln_render_session_set_open_gl_borrowed_texture_target().
-
- The members and the textures follow the rules of
- mln_open_gl_borrowed_texture_descriptor. The ring keeps its depth, context,
- and texture target, so give it as many textures as it attached with, in the
- same share group.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_open_gl_borrowed_texture_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub textures: *const mln_open_gl_borrowed_texture,
-    pub texture_count: usize,
-}
-/// A WebGPU texture of a borrowed ring.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_web_gpu_borrowed_texture {
-    /// Your WGPUTexture.
-    pub texture: *mut ::core::ffi::c_void,
-    /// A WGPUTextureView of `texture`.
-    pub texture_view: *mut ::core::ffi::c_void,
-}
-/** A ring of your WebGPU textures, for
- mln_map_attach_web_gpu_borrowed_texture().
-
- `logical_size` sets the map's size. `physical_width` and `physical_height`
- give the textures' size in pixels, which is usually `logical_size` times the
- map's scale factor. Each texture must be 2D with that size, `format`, one
- layer, one mip level, one sample, and WGPUTextureUsage_RenderAttachment. The
- ring holds up to MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
-
- The session uses the textures until a replacement or release of the target
- completes, a detach or release of the session completes, or an abandon of it
- returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_web_gpu_borrowed_texture_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub context: mln_web_gpu_context_descriptor,
-    pub textures: *const mln_web_gpu_borrowed_texture,
-    pub texture_count: usize,
-    /// The textures' WGPUTextureFormat.
-    pub format: u32,
-}
-/** New WebGPU textures for a borrowed ring, for
- mln_render_session_set_web_gpu_borrowed_texture_target().
-
- The members and the textures follow the rules of
- mln_web_gpu_borrowed_texture_descriptor. The ring keeps its depth, context,
- and `format`, so give it as many textures as it attached with, in that
- format, on the same device.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_web_gpu_borrowed_texture_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub textures: *const mln_web_gpu_borrowed_texture,
-    pub texture_count: usize,
 }
 /// The WebGPU texture of an acquired frame.
 #[repr(C)]
@@ -3545,6 +3498,107 @@ pub struct mln_open_gl_texture_frame {
     pub slot: u32,
     pub texture: u32,
     pub target: u32,
+}
+/// The IOSurface of an exported ring's acquired frame.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_io_surface_frame {
+    pub size: u32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    /// The surface's index in the ring.
+    pub slot: u32,
+    /// The `IOSurfaceRef`.
+    pub surface: *mut ::core::ffi::c_void,
+}
+/// Where one plane of a dmabuf keeps its data.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_dma_buf_plane {
+    /** The file descriptor of the dmabuf that holds the plane. The planes of a
+ buffer often share one.*/
+    pub fd: i32,
+    /// The bytes from the start of the dmabuf to the plane's first byte.
+    pub offset: u32,
+    /// The bytes from the start of one row to the start of the next.
+    pub stride: u32,
+}
+/// The dmabuf of an exported ring's acquired frame.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_dma_buf_frame {
+    pub size: u32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    /// The buffer's index in the ring.
+    pub slot: u32,
+    pub fourcc: u32,
+    pub modifier: u64,
+    /** The buffer's planes, in the order that its fourcc and modifier define.
+ Import all of them, as EGL_EXT_image_dma_buf_import_modifiers planes 0 and
+ up, or with one `zwp_linux_buffer_params_v1.add` call each.*/
+    pub planes: *const mln_dma_buf_plane,
+    pub plane_count: usize,
+}
+/// The Android hardware buffer of an exported ring's acquired frame.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_android_hardware_buffer_frame {
+    pub size: u32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    /// The buffer's index in the ring.
+    pub slot: u32,
+    /// The `AHardwareBuffer*`.
+    pub buffer: *mut ::core::ffi::c_void,
+}
+/// The DXGI shared texture of an exported ring's acquired frame.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_dxgi_shared_texture_frame {
+    pub size: u32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    /// The texture's index in the ring.
+    pub slot: u32,
+    /// The texture's `DXGI_FORMAT`.
+    pub format: u32,
+    /// The texture's shared NT `HANDLE`.
+    pub handle: *mut ::core::ffi::c_void,
+}
+/** The memory of an exported ring's acquired frame, as an opaque file
+ descriptor.
+
+ The memory holds a 2D Vulkan image of `format`, with one mip level, one
+ layer, optimal tiling, and the usage VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+ VK_IMAGE_USAGE_SAMPLED_BIT, and VK_IMAGE_USAGE_TRANSFER_SRC_BIT, which a
+ Vulkan image that imports it has too. In OpenGL, import it with
+ glImportMemoryFdEXT() and GL_HANDLE_TYPE_OPAQUE_FD_EXT, and make the texture
+ with GL_TEXTURE_TILING_EXT set to GL_OPTIMAL_TILING_EXT and
+ glTexStorageMem2DEXT() at offset 0. Each frame leaves the image in
+ VK_IMAGE_LAYOUT_GENERAL, released to VK_QUEUE_FAMILY_EXTERNAL.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_opaque_fd_frame {
+    pub size: u32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    /// The texture's index in the ring.
+    pub slot: u32,
+    /// The file descriptor of the image's memory.
+    pub fd: i32,
+    /// The size of the memory in bytes.
+    pub allocation_size: u64,
+    /** Whether the memory is the image's own, which an import says, such as with
+ GL_DEDICATED_MEMORY_OBJECT_EXT.*/
+    pub dedicated: bool,
+    /// The image's `VkFormat`: VK_FORMAT_R8G8B8A8_UNORM, OpenGL's GL_RGBA8.
+    pub format: u32,
 }
 /// The layout of the pixels that mln_render_session_read_texture() reads.
 #[repr(C)]

@@ -53,6 +53,20 @@ unsafe fn declared_size<T: Versioned>(pointer: *const T) -> Result<usize, Error>
     Ok(size)
 }
 
+/// Checks a caller's output struct: non-null, of a size that covers its
+/// first version.
+///
+/// # Safety
+///
+/// `pointer` is null, or points to a struct whose `size` is initialized.
+pub(crate) unsafe fn check_out_size<T: Versioned>(pointer: *const T) -> Result<(), Error> {
+    if pointer.is_null() {
+        return Err(Error::invalid_argument(format!("{} must not be null", T::NAME)));
+    }
+    // SAFETY: non-null, and the caller's contract.
+    unsafe { declared_size(pointer) }.map(drop)
+}
+
 /// Copies a caller's struct: the members its `size` covers, with every later
 /// member zero, as a caller compiled against older headers expects.
 ///

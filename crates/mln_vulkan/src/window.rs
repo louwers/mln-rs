@@ -18,6 +18,7 @@ fn platform_extension(display: RawDisplayHandle) -> Result<&'static CStr, Error>
         RawDisplayHandle::Xcb(_) => Ok(ash::khr::xcb_surface::NAME),
         RawDisplayHandle::Windows(_) => Ok(ash::khr::win32_surface::NAME),
         RawDisplayHandle::Android(_) => Ok(ash::khr::android_surface::NAME),
+        RawDisplayHandle::Ohos(_) => Ok(crate::device::OHOS_SURFACE),
         other => Err(Error::unsupported(format!("No Vulkan surface for this display: {other:?}"))),
     }
 }
@@ -85,6 +86,9 @@ impl SurfaceProvider for WindowSurface {
                         vk::AndroidSurfaceCreateInfoKHR::default().window(window.a_native_window.as_ptr().cast());
                     ash::khr::android_surface::Instance::new(entry, instance).create_android_surface(&create_info, None)
                 }
+                (RawDisplayHandle::Ohos(_), RawWindowHandle::OhosNdk(window)) => {
+                    create_ohos_surface(entry, instance, window.native_window.as_ptr())
+                }
                 (display, window) => {
                     return Err(Error::unsupported(format!(
                         "No Vulkan surface for this window: {window:?} on {display:?}"
@@ -93,5 +97,54 @@ impl SurfaceProvider for WindowSurface {
             }
         };
         surface.map_err(|e| Error::native(format!("Failed to create a surface for the window: {e}")))
+    }
+}
+
+/// `VkSurfaceCreateInfoOHOS`, of `VK_OHOS_surface`, which ash lacks.
+#[repr(C)]
+struct SurfaceCreateInfoOhos {
+    s_type: vk::StructureType,
+    p_next: *const std::ffi::c_void,
+    flags: vk::Flags,
+    window: *mut std::ffi::c_void,
+}
+
+/// `VK_STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS`.
+const STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS: vk::StructureType = vk::StructureType::from_raw(1_000_685_000);
+
+/// `PFN_vkCreateSurfaceOHOS`.
+type CreateSurfaceOhos = unsafe extern "system" fn(
+    vk::Instance,
+    *const SurfaceCreateInfoOhos,
+    *const vk::AllocationCallbacks<'_>,
+    *mut vk::SurfaceKHR,
+) -> vk::Result;
+
+/// A surface of `window`, an `OHNativeWindow*`, through `VK_OHOS_surface`.
+///
+/// # Safety
+///
+/// `window` is live, and `instance` was made with `VK_OHOS_surface`.
+unsafe fn create_ohos_surface(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+    window: *mut std::ffi::c_void,
+) -> Result<vk::SurfaceKHR, vk::Result> {
+    // SAFETY: the instance is live, and the name a function's name.
+    let function = unsafe { entry.get_instance_proc_addr(instance.handle(), c"vkCreateSurfaceOHOS".as_ptr()) }
+        .ok_or(vk::Result::ERROR_EXTENSION_NOT_PRESENT)?;
+    // SAFETY: the extension's function has this signature.
+    let create = unsafe { std::mem::transmute::<unsafe extern "system" fn(), CreateSurfaceOhos>(function) };
+    let info = SurfaceCreateInfoOhos {
+        s_type: STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS,
+        p_next: std::ptr::null(),
+        flags: vk::Flags::default(),
+        window,
+    };
+    let mut surface = vk::SurfaceKHR::null();
+    // SAFETY: the create info names the caller's live window.
+    match unsafe { create(instance.handle(), &raw const info, std::ptr::null(), &raw mut surface) } {
+        vk::Result::SUCCESS => Ok(surface),
+        error => Err(error),
     }
 }

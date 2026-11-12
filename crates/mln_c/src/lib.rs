@@ -23,6 +23,8 @@
 mod export;
 
 mod abi;
+mod acquired_frame;
+mod android;
 mod base;
 mod binding_support;
 mod buffer;
