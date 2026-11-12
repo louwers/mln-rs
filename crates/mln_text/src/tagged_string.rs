@@ -1,6 +1,7 @@
 // Ports src/mln/text/tagged_string.hpp and src/mln/text/tagged_string.cpp
 // (and `StyledText` from src/mln/text/bidi.hpp).
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use mln_util::font_stack::FontStack;
@@ -17,43 +18,14 @@ pub type StyledText = (Vec<u16>, Vec<u8>);
 /// `FontStackHash`.
 pub type FontStackHash = u64;
 
-/// libstdc++'s `std::_Hash_bytes` (`hash_bytes.cc`, 64-bit `size_t`), which
-/// `std::hash<std::string>` calls with seed 0xc70f6907.
-fn hash_bytes(data: &[u8], seed: u64) -> u64 {
-    const MUL: u64 = (0xc6a4_a793_u64 << 32) + 0x5bd1_e995;
-    let shift_mix = |v: u64| v ^ (v >> 47);
-    let len = data.len();
-    let len_aligned = len & !7;
-    let mut hash = seed ^ (len as u64).wrapping_mul(MUL);
-    for chunk in data[..len_aligned].as_chunks::<8>().0 {
-        let d = shift_mix(u64::from_le_bytes(*chunk).wrapping_mul(MUL)).wrapping_mul(MUL);
-        hash ^= d;
-        hash = hash.wrapping_mul(MUL);
-    }
-    if len & 7 != 0 {
-        // load_bytes: the remaining bytes, little-endian.
-        let mut d: u64 = 0;
-        for &b in data[len_aligned..].iter().rev() {
-            d = (d << 8) + u64::from(b);
-        }
-        hash ^= d;
-        hash = hash.wrapping_mul(MUL);
-    }
-    hash = shift_mix(hash).wrapping_mul(MUL);
-    shift_mix(hash)
-}
-
-/// `FontStackHasher` (`util/font_stack.cpp)`: `util::hash_combine` of
-/// `std::hash<std::string>` of each font name.
+/// A key for a font stack in the glyph maps: [`std::hash`] of its font
+/// names. Every thread and worker of one build computes the same key.
 // TODO(port): belongs in mln_util::font_stack.
 #[must_use]
 pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
-    let mut seed: u64 = 0;
-    for font in font_stack {
-        let h = hash_bytes(font.as_bytes(), 0xc70f_6907);
-        seed ^= h.wrapping_add(0x9e37_79b9).wrapping_add(seed << 6).wrapping_add(seed >> 2);
-    }
-    seed
+    let mut hasher = DefaultHasher::new();
+    font_stack.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// `SectionOptions`.
@@ -446,8 +418,11 @@ mod tests {
     }
 
     #[test]
-    fn font_stack_hash_of_libstdcxx() {
-        // std::hash<std::string>{}("") with libstdc++ (x86-64).
-        assert_eq!(hash_bytes(b"", 0xc70f_6907), 6_142_509_188_972_423_790);
+    fn font_stack_hash_tells_stacks_apart() {
+        let stack = |fonts: &[&str]| fonts.iter().map(|f| (*f).to_string()).collect::<FontStack>();
+        assert_eq!(font_stack_hash(&stack(&["Open Sans", "Arial"])), font_stack_hash(&stack(&["Open Sans", "Arial"])));
+        assert_ne!(font_stack_hash(&stack(&["Open Sans", "Arial"])), font_stack_hash(&stack(&["Arial", "Open Sans"])));
+        assert_ne!(font_stack_hash(&stack(&["a", "b"])), font_stack_hash(&stack(&["ab"])));
+        assert_ne!(font_stack_hash(&stack(&["a", "b"])), font_stack_hash(&stack(&["a", "b", ""])));
     }
 }

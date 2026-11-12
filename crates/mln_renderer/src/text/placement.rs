@@ -539,9 +539,8 @@ struct Intersection {
     ctx: Rc<PlacementContext>,
     /// Index of the symbol instance in the context's bucket.
     symbol_index: usize,
-    /// The symbol's anchor point and key, for sorting.
+    /// The symbol's anchor point, for sorting.
     anchor_point: Point<f32>,
-    key: Vec<u16>,
     status: IntersectStatus,
     /// less means more important
     priority: usize,
@@ -668,36 +667,6 @@ fn rotate_f32(a: Point<f32>, angle: f32) -> Point<f32> {
 
 fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
     Point::new(a.x + b.x, a.y + b.y)
-}
-
-/// libstdc++ `std::hash<std::u16string>`: `_Hash_bytes` (64-bit) over the
-/// UTF-16 code units' bytes with seed 0xc70f6907. `TilePlacement` uses it as
-/// its last sort tie-break, so it decides the placement order.
-fn hash_u16string(s: &[u16]) -> u64 {
-    let bytes: Vec<u8> = s.iter().flat_map(|c| c.to_le_bytes()).collect();
-    let len = bytes.len() as u64;
-    let seed: u64 = 0xc70f_6907;
-    let mul: u64 = (0xc6a4_a793_u64 << 32) + 0x5bd1_e995_u64;
-    let shift_mix = |v: u64| v ^ (v >> 47);
-    let len_aligned = bytes.len() & !0x7;
-    let mut hash = seed ^ len.wrapping_mul(mul);
-    for chunk in bytes[..len_aligned].as_chunks::<8>().0 {
-        let data = shift_mix(u64::from_le_bytes(*chunk).wrapping_mul(mul)).wrapping_mul(mul);
-        hash ^= data;
-        hash = hash.wrapping_mul(mul);
-    }
-    let rest = &bytes[len_aligned..];
-    if !rest.is_empty() {
-        // `load_bytes(end, len & 0x7)`: little-endian.
-        let mut data: u64 = 0;
-        for &b in rest.iter().rev() {
-            data = (data << 8) + u64::from(b);
-        }
-        hash ^= data;
-        hash = hash.wrapping_mul(mul);
-    }
-    hash = shift_mix(hash).wrapping_mul(mul);
-    shift_mix(hash)
 }
 
 /// `getBucketSymbols(bucket, sortKeyRange, bearing)`: indices into the
@@ -2466,6 +2435,8 @@ impl Placement {
 
         let intersections = std::mem::take(&mut self.tile_state().intersections);
         let mut order: Vec<usize> = (0..intersections.len()).collect();
+        // A stable sort: intersections that tie on every key keep the order
+        // the layers and their buckets collected them in.
         order.sort_by(|&ia, &ib| {
             let a = &intersections[ia];
             let b = &intersections[ib];
@@ -2479,8 +2450,6 @@ impl Placement {
                 // Look at the anchor coordinates
                 .then(a.anchor_point.y.total_cmp(&b.anchor_point.y))
                 .then(a.anchor_point.x.total_cmp(&b.anchor_point.x))
-                // Finally, looking at the key hashes.
-                .then_with(|| hash_u16string(&a.key).cmp(&hash_u16string(&b.key)))
         });
         // Place intersections.
         let transform_state = self.collision_index.get_transform_state().clone();
@@ -2699,7 +2668,6 @@ impl Placement {
                 ctx: ctx.clone(),
                 symbol_index,
                 anchor_point: symbol.get_anchor().point,
-                key: symbol.get_key().to_vec(),
                 status: intersect_status,
                 priority,
             });
@@ -2789,15 +2757,6 @@ impl SymbolBucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hash_u16string_matches_libstdcxx() {
-        // std::hash<std::u16string>{}(u"") and (u"Detroit") on x86-64
-        // libstdc++ (_Hash_bytes with seed 0xc70f6907).
-        assert_eq!(hash_u16string(&[]), 6_142_509_188_972_423_790);
-        let detroit: Vec<u16> = "Detroit".encode_utf16().collect();
-        assert_eq!(hash_u16string(&detroit), hash_u16string(&detroit));
-    }
 
     #[test]
     fn opacity_state() {
