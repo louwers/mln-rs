@@ -285,6 +285,25 @@ mod tile_cover {
         );
     }
 
+    /// Equally distant tiles keep the order the traversal found them in,
+    /// as GL JS's stable sort keeps them.
+    #[test]
+    fn equally_distant_tiles_keep_traversal_order() {
+        let mut transform = transform(2560, 2560);
+        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(3.0)));
+        // Each line lists tiles equally distant from the center.
+        #[rustfmt::skip]
+        let expected = [
+            (4, 4), (3, 4), (4, 3), (3, 3),
+            (4, 5), (5, 4), (3, 5), (2, 4), (5, 3), (4, 2), (2, 3), (3, 2),
+            (5, 5), (2, 5), (5, 2), (2, 2),
+            (4, 6), (6, 4), (3, 6), (1, 4), (6, 3), (4, 1), (1, 3), (3, 1),
+            (5, 6), (6, 5), (2, 6), (1, 5), (6, 2), (5, 1), (1, 2), (2, 1),
+            (6, 6), (1, 6), (6, 1), (1, 1),
+        ];
+        assert_eq!(expected.map(|(x, y)| os(3, x, y)).to_vec(), tile_cover(&params(&transform), 3, ZOOM_RANGE, None));
+    }
+
     // gtest: TileCover.WorldZ1
     #[test]
     fn world_z1() {

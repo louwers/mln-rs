@@ -224,7 +224,6 @@
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 1
 "crates/mln_renderer/src/tile_parameters.rs" = 1
 "crates/mln_renderer/src/update_parameters.rs" = 1
-"crates/mln_renderer/src/util/tile_cover.rs" = 1
 "crates/mln_storage/src/asset_file_source.rs" = 1
 "crates/mln_storage/src/database_file_source.rs" = 1
 "crates/mln_storage/src/local_file_source.rs" = 1
