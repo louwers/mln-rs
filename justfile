@@ -49,20 +49,24 @@ bench-compare base='main' *args:  bench-fixtures _dev-shell
 bench-fixtures:
     python3 -I tools/bench/fixtures.py target/bench-fixtures
 
-# Configures and builds tools/c-abi-test in target/c-abi-test, against crates/mln_c's shared library, then runs it with
-# tools/c-abi-test/run.py, whose arguments follow: `--update` rewrites expected-failures.txt, `-v` prints each failure. Needs
-# CMake, a C23 and C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as lavapipe (VK_DRIVER_FILES), and
-# libwayland-server and libwayland-client, which the Wayland cases load.
-[doc("Run maplibre-native-ffi's ABI suite against crates/mln_c, and compare its failures with tools/c-abi-test/expected-failures.txt")]
+# Configures and builds tools/c-abi-test in target/c-abi-test-<backend>, against crates/mln_c's shared library, then runs it
+# with tools/c-abi-test/run.py, whose arguments follow: `--update` rewrites the backend's list, `-v` prints each failure. The
+# backend is MLN_C_TEST_BACKEND's: vulkan by default, whose list is expected-failures.txt, or opengl, on EGL, whose list is
+# expected-failures-opengl.txt and which runs on llvmpipe as CI does with LIBGL_ALWAYS_SOFTWARE=1. Needs CMake, a C23 and
+# C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as lavapipe (VK_DRIVER_FILES), libwayland-server and
+# libwayland-client, which the Wayland cases load, and for opengl the EGL and OpenGL ES headers and libraries.
+[doc("Run maplibre-native-ffi's ABI suite against crates/mln_c, and compare its failures with the backend's list in tools/c-abi-test")]
 [positional-arguments]
 c-abi-test *args:  _dev-shell
     #!/usr/bin/env bash
     set -euo pipefail
     target="${CARGO_TARGET_DIR:-target}"
+    backend="${MLN_C_TEST_BACKEND:-vulkan}"
+    build="$target/c-abi-test-$backend"
     {{dev_shell}} cargo build -p mln-rs-c
-    {{dev_shell}} cmake -S tools/c-abi-test -B "$target/c-abi-test" -DMLN_C_LIBRARY="$PWD/$target/debug/libmaplibre_native_c.so"
-    {{dev_shell}} cmake --build "$target/c-abi-test" --parallel
-    {{dev_shell}} python3 -I tools/c-abi-test/run.py "$target/c-abi-test/mln_native_abi_tests" "$@"
+    {{dev_shell}} cmake -S tools/c-abi-test -B "$build" -DMLN_C_LIBRARY="$PWD/$target/debug/libmaplibre_native_c.so" -DMLN_C_TEST_BACKEND="$backend"
+    {{dev_shell}} cmake --build "$build" --parallel
+    {{dev_shell}} python3 -I tools/c-abi-test/run.py --backend "$backend" "$build/mln_native_abi_tests" "$@"
 
 # Build every package and test target
 build:  _dev-shell

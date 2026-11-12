@@ -1,0 +1,48 @@
+# The ABI suite's cases (tools/c-abi-test/testdata/tests/native, from
+# maplibre-native-ffi) that fail against crates/mln_c under its opengl
+# preset, as <file>:<case>, sorted, each optionally followed by `  # ` and
+# why it fails. This command fails when another case fails or a listed case
+# passes:
+#
+#     MLN_C_TEST_BACKEND=opengl just c-abi-test
+#
+# Implementing a function makes cases pass, and the command with `--update`
+# then shrinks this list, keeping the reasons of the cases that stay.
+abi/backend/retarget.c:a_released_surface_can_be_destroyed_before_the_next  # a window's EGL display outlives its Wayland connection, whose address a later one reuses
+abi/base/logging.c:a_failed_discarded_command_logs_one_warning
+abi/base/logging.c:a_log_callback_cannot_call_back_into_the_c_api
+abi/map/still_image.c:a_barrier_ends_a_still_image_demand_until_the_next
+abi/map/still_image.c:a_still_image_waits_for_the_next_session
+abi/map/still_image.c:host_demands_and_a_still_image_demand_never_replace_each_other
+abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default
+abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them
+abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api
+abi/projection/projection.c:creation_rejects_invalid_views
+abi/render/demands.c:a_detach_ends_a_demand_waiting_for_commands  # a service of a detached caller-driven session fails instead of finding no work
+abi/render/demands.c:a_waiting_demand_ends_by_supersession_barrier_or_detach  # a service of a detached caller-driven session fails instead of finding no work
+abi/render/driver.c:a_released_caller_driven_session_is_abandoned_when_its_map_releases  # an abandon on the driver's thread frees OpenGL objects, so it warns of none kept
+abi/render/driver.c:abandon_completes_pending_work_and_invalidates_accessors  # an abandon on the driver's thread frees OpenGL objects instead of keeping them
+abi/render/driver.c:parent_first_disposal_retires_a_native_render_attachment  # a caller-driven session released after its map waits for a service to detach
+abi/render/driver.c:wakes_may_call_back_into_the_session  # each map command wakes a caller's driver, which takes the wake the demand's work needs
+abi/render/frames.c:an_acquired_frame_still_releases_after_abandon  # an abandon on the driver's thread frees OpenGL objects instead of keeping them
+abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features
+abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_changes
+abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host
+abi/render/invalidation.c:feature_state_stays_with_the_update_held_by_a_command_group
+abi/render/queries.c:location_indicator_hits_name_only_their_layer
+abi/render/redraw.c:a_change_asks_for_one_redraw_until_the_next_demand
+abi/render/unused_images.c:only_images_set_with_keep_unused_survive_when_unused
+abi/render/window_wayland.c:a_session_presents_to_each_surface_that_it_gets  # a window's EGL display outlives its Wayland connection, whose address a later one reuses
+abi/resources/asset_paths.c:host_string_views_reject_nul_and_null_data_with_a_length
+abi/resources/offline.c:an_offline_operation_accepted_before_release_still_completes
+abi/runtime/event_payloads.c:a_failed_style_load_names_its_kind
+abi/style/commands.c:other_root_properties_read_back_as_loaded_and_reject_changes
+abi/style/feature_state.c:a_removed_source_takes_its_state_with_it
+abi/style/feature_state.c:a_style_load_clears_every_source_state
+abi/style/feature_state.c:rendered_features_carry_state_from_the_last_frame
+abi/style/feature_state.c:typed_ids_reach_the_features_that_carry_them
+abi/style/loading.c:a_style_url_answered_without_a_style_fails_once
+abi/style/locale_expressions_icu.c:collator_follows_locale_extensions_and_sensitivity
+abi/style/locale_expressions_icu.c:number_format_follows_locale_currency_and_fraction_limits
+abi/style/locale_expressions_icu.c:resolved_locale_reports_the_language_and_honored_extensions
+abi/style/rejected_inputs.c:style_commands_reject_invalid_inputs

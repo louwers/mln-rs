@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run maplibre-native-ffi's ABI suite against crates/mln_c and compare the
-failing cases with expected-failures.txt.
+failing cases with the backend's list: expected-failures.txt for Vulkan,
+expected-failures-opengl.txt for OpenGL.
 
 The suite binary is the one CMakeLists.txt builds. Each test file runs in a
 process of its own, in parallel, as maplibre-native-ffi's CTest entries do.
@@ -26,7 +27,8 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-EXPECTED = HERE / "expected-failures.txt"
+# Each backend's list of the cases that fail, which differ by backend.
+EXPECTED = {"vulkan": HERE / "expected-failures.txt", "opengl": HERE / "expected-failures-opengl.txt"}
 FIXTURES = HERE / "testdata" / "tests" / "native" / "fixtures"
 PREFIX = "tests/native/"
 # Unity's result line: <file>:<line>:<case>:<PASS|FAIL|IGNORE>[:<message>].
@@ -34,12 +36,19 @@ RESULT = re.compile(r"^(?P<file>tests/native/[^:]+):\d+:(?P<case>\w+):(?P<outcom
 # A process gets at least the watchdog's 30 s for each of its cases.
 PROCESS_TIMEOUT_SECONDS = 600
 
+# What `just c-abi-test` runs each backend's suite with.
+COMMAND = {"vulkan": "just c-abi-test", "opengl": "MLN_C_TEST_BACKEND=opengl just c-abi-test"}
+
 LIST_HEADER = """\
 # The ABI suite's cases (tools/c-abi-test/testdata/tests/native, from
-# maplibre-native-ffi) that fail against crates/mln_c, as <file>:<case>,
-# sorted, each optionally followed by `  # ` and why it fails. `just
-# c-abi-test` fails when another case fails or a listed case passes;
-# implementing a function makes cases pass, and `just c-abi-test --update`
+# maplibre-native-ffi) that fail against crates/mln_c under its {backend}
+# preset, as <file>:<case>, sorted, each optionally followed by `  # ` and
+# why it fails. This command fails when another case fails or a listed case
+# passes:
+#
+#     {command}
+#
+# Implementing a function makes cases pass, and the command with `--update`
 # then shrinks this list, keeping the reasons of the cases that stay.
 """
 
@@ -47,7 +56,8 @@ LIST_HEADER = """\
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", type=pathlib.Path, help="the suite binary (mln_native_abi_tests)")
-    parser.add_argument("--update", action="store_true", help="rewrite expected-failures.txt with this run's failures")
+    parser.add_argument("--backend", choices=EXPECTED, default="vulkan", help="the backend the binary was built for")
+    parser.add_argument("--update", action="store_true", help="rewrite the backend's list with this run's failures")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="test files to run at once")
     parser.add_argument("-v", "--verbose", action="store_true", help="print each failure's message")
     args = parser.parse_args()
@@ -76,11 +86,13 @@ def main() -> int:
         for key in sorted(failures):
             print(f"  {key}: {failures[key]}")
 
-    expected = read_expected()
+    path, command = EXPECTED[args.backend], COMMAND[args.backend]
+    expected = read_expected(path)
     if args.update:
         lines = (f"{key}  # {expected[key]}" if expected.get(key) else key for key in sorted(failures))
-        EXPECTED.write_text(LIST_HEADER + "".join(f"{line}\n" for line in lines))
-        print(f"wrote {len(failures)} cases to {EXPECTED.relative_to(HERE.parents[1])}")
+        header = LIST_HEADER.format(backend=args.backend, command=command)
+        path.write_text(header + "".join(f"{line}\n" for line in lines))
+        print(f"wrote {len(failures)} cases to {path.relative_to(HERE.parents[1])}")
         return 0
 
     unexpected = sorted(set(failures) - set(expected))
@@ -93,9 +105,9 @@ def main() -> int:
     for key in stale:
         print(f"in the list, but the suite has no such case: {key}")
     if unexpected or passing or stale:
-        print("the results differ from expected-failures.txt; `just c-abi-test --update` rewrites it")
+        print(f"the results differ from {path.name}; `{command} --update` rewrites it")
         return 1
-    print(f"as expected-failures.txt expects ({len(expected)} cases)")
+    print(f"as {path.name} expects ({len(expected)} cases)")
     return 0
 
 
@@ -161,11 +173,11 @@ def run(binary: pathlib.Path, env: dict[str, str], filter_args: list[str]) -> tu
     return results, died
 
 
-def read_expected() -> dict[str, str]:
+def read_expected(path: pathlib.Path) -> dict[str, str]:
     """The listed cases, each with its reason, or an empty one."""
-    if not EXPECTED.exists():
+    if not path.exists():
         return {}
-    lines = (line.strip() for line in EXPECTED.read_text().splitlines())
+    lines = (line.strip() for line in path.read_text().splitlines())
     entries = (line.partition("#") for line in lines if line and not line.startswith("#"))
     return {key.strip(): reason.strip() for key, _, reason in entries}
 
