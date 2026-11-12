@@ -8,10 +8,18 @@
 // else Vulkan on Linux, so tests run on lavapipe (VK_DRIVER_FILES) like
 // the C++ CI; other platforms use wgpu's defaults. A host that brings its
 // own WebGPU (a browser's) renders through `SurfaceBackend::from_host`.
+//
+// Deviation: C++ creates an instance for each backend. Here every device
+// `request_device` makes comes from one instance per set of backends, kept
+// for the life of the process: the Vulkan loader crashes when one thread
+// names an object (`vkSetDebugUtilsObjectNameEXT`, which wgpu calls for each
+// labeled object) while another thread destroys an instance, which renderers
+// on many threads did whenever one of them finished.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Mutex;
 
 use mln_gfx::context::Context as GfxContext;
 use mln_gfx::headless_backend;
@@ -25,6 +33,7 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use mln_util::sync::MutexExt;
 
 use crate::context::Context;
 use crate::offscreen_texture::OffscreenTextureResource;
@@ -110,6 +119,20 @@ pub(crate) fn create_instance(backends: wgpu::Backends) -> wgpu::Instance {
     wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_without_display_handle() })
 }
 
+/// The instance `request_device` takes adapters from: one per set of
+/// backends, created on first use and never destroyed (see the deviation
+/// above).
+fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
+    static INSTANCES: Mutex<Vec<(wgpu::Backends, wgpu::Instance)>> = Mutex::new(Vec::new());
+    let mut instances = INSTANCES.lock_unpoisoned();
+    if let Some((_, instance)) = instances.iter().find(|(made_for, _)| *made_for == backends) {
+        return instance.clone();
+    }
+    let instance = create_instance(backends);
+    instances.push((backends, instance.clone()));
+    instance
+}
+
 impl HeadlessBackend {
     /// `HeadlessBackend(size = {256, 256}, swapBehaviour = NoFlush,
     /// contextMode = Unique)`: on a device of its own, from
@@ -160,7 +183,7 @@ impl HeadlessBackend {
     /// when the adapter can't create the device.
     pub fn request_device(adapter_index: Option<usize>) -> Result<(wgpu::Device, wgpu::Queue), Error> {
         let backends = instance_backends();
-        let instance = create_instance(backends);
+        let instance = shared_instance(backends);
         let adapter = match adapter_index {
             Some(index) => {
                 let mut adapters = pollster::block_on(instance.enumerate_adapters(backends));
