@@ -48,6 +48,18 @@ pub(crate) struct Core {
     adopted: AtomicBool,
 }
 
+impl std::fmt::Debug for Core {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Core")
+            .field("queue_pending", &self.queue_pending)
+            .field("signal", &self.signal)
+            .field("condvar", &self.condvar)
+            .field("stopped", &self.stopped)
+            .field("adopted", &self.adopted)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Core {
     fn new() -> Self {
         Core {
@@ -128,6 +140,16 @@ pub(crate) struct AsyncHandle {
     pub(crate) core: Arc<Core>,
 }
 
+impl std::fmt::Debug for AsyncHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncHandle")
+            .field("pending", &self.pending)
+            .field("closed", &self.closed)
+            .field("core", &self.core)
+            .finish_non_exhaustive()
+    }
+}
+
 struct Inner {
     core: Arc<Core>,
     /// The loop's scheduler, one for its life: mailboxes and actors hold
@@ -136,6 +158,16 @@ struct Inner {
     scheduler: scheduler::SchedulerPtr,
     handles: RefCell<Vec<Weak<AsyncHandle>>>,
     timers: RefCell<Vec<Weak<TimerHandle>>>,
+}
+
+impl std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("core", &self.core)
+            .field("handles", &self.handles)
+            .field("timers", &self.timers)
+            .finish_non_exhaustive()
+    }
 }
 
 thread_local! {
@@ -150,6 +182,12 @@ pub struct EnteredRunLoop {
     previous_scheduler: Option<scheduler::SchedulerPtr>,
 }
 
+impl std::fmt::Debug for EnteredRunLoop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EnteredRunLoop").field("previous", &self.previous).finish_non_exhaustive()
+    }
+}
+
 impl Drop for EnteredRunLoop {
     fn drop(&mut self) {
         CURRENT.with(|c| *c.borrow_mut() = self.previous.take());
@@ -158,7 +196,7 @@ impl Drop for EnteredRunLoop {
 }
 
 /// A thread's event loop. Cheap to clone: clones refer to the same loop.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RunLoop {
     inner: Rc<Inner>,
 }
@@ -166,7 +204,7 @@ pub struct RunLoop {
 /// A `Send + Sync` reference to a `RunLoop`'s task queue (what other threads
 /// hold as a `RunLoop*` in C++): `invoke`, `stop`, and the loop's
 /// `Scheduler`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RunLoopHandle {
     core: Arc<Core>,
 }

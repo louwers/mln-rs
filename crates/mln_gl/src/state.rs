@@ -25,7 +25,7 @@ use crate::types::{BufferID, FramebufferID, Gl, ProgramID, TextureID, VertexArra
 pub(crate) type Rect = (i32, i32, i32, i32);
 
 /// What GL was last told about one piece of state.
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
 enum Cached<T> {
     /// Not known: C++'s dirty state, whose next set always reaches GL.
     #[default]
@@ -43,7 +43,7 @@ fn changed<T: Copy + PartialEq>(cell: &Cell<Cached<T>>, value: T) -> bool {
     true
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct State {
     program: Cell<Cached<Option<ProgramID>>>,
     vertex_array: Cell<Cached<Option<VertexArrayID>>>,

@@ -71,6 +71,7 @@ impl From<rusqlite::Error> for SqliteError {
     }
 }
 
+#[derive(Debug)]
 pub struct Database {
     connection: Arc<Mutex<Connection>>,
 }

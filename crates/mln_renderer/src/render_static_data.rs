@@ -4,6 +4,7 @@ use mln_util::constants;
 
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 
+#[derive(Debug)]
 pub(crate) struct RenderStaticData {
     pub(crate) has_3d: bool,
     pub(crate) uploaded: std::cell::Cell<bool>,

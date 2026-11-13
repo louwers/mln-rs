@@ -7,6 +7,7 @@ use crate::render_pass::AttachmentFormats;
 /// The frame's command buffer, with no encoder open, for a custom layer's
 /// prerender. End each encoder made on it before the call returns, and don't
 /// commit it.
+#[derive(Debug)]
 pub struct CustomLayerEncoder {
     pub command_buffer: MTLCommandBufferPtr,
 }
@@ -17,6 +18,7 @@ pub struct CustomLayerEncoder {
 /// samplers on `encoder`, and any other state your draws need: the map sets
 /// what its next draws need again. Don't end `encoder`, and don't commit
 /// `command_buffer`.
+#[derive(Debug)]
 pub struct CustomLayerPass {
     pub encoder: MTLRenderCommandEncoderPtr,
     pub command_buffer: MTLCommandBufferPtr,

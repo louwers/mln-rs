@@ -25,6 +25,12 @@ pub struct Case {
     run: Box<dyn Fn(&Context) -> Metrics>,
 }
 
+impl std::fmt::Debug for Case {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Case").field("name", &self.name).finish_non_exhaustive()
+    }
+}
+
 impl Case {
     fn new(name: impl Into<String>, run: impl Fn(&Context) -> Metrics + 'static) -> Case {
         Case { name: name.into(), run: Box::new(run) }

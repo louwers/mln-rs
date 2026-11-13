@@ -19,6 +19,7 @@ static ONLINE: AtomicBool = AtomicBool::new(true);
 static OBSERVERS: Mutex<VecMap<u64, AsyncTaskSender>> = Mutex::new(VecMap::new());
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Debug)]
 pub struct NetworkStatus;
 
 impl NetworkStatus {

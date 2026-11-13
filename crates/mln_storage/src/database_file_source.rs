@@ -46,6 +46,18 @@ pub struct DatabaseFileSourceThread {
     accessed_flush_scheduled: Arc<AtomicBool>,
 }
 
+impl std::fmt::Debug for DatabaseFileSourceThread {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseFileSourceThread")
+            .field("db", &self.db)
+            .field("extensions", &self.extensions)
+            .field("self_ref", &self.self_ref)
+            .field("accessed_flush_timer", &self.accessed_flush_timer)
+            .field("accessed_flush_scheduled", &self.accessed_flush_scheduled)
+            .finish_non_exhaustive()
+    }
+}
+
 impl DatabaseFileSourceThread {
     fn new(
         self_ref: ActorRef<DatabaseFileSourceThread>,
@@ -175,6 +187,7 @@ fn into_result(error: Option<DatabaseError>) -> Result<(), DatabaseError> {
     error.map_or(Ok(()), Err)
 }
 
+#[derive(Debug)]
 pub struct DatabaseFileSource {
     thread: Thread<DatabaseFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,

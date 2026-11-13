@@ -116,7 +116,7 @@ pub struct BiDiRun {
     pub rtl: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct BiDi {}
 
 /// The paragraph of `info` that holds the line `[start, end)`, or the

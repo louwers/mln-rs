@@ -253,7 +253,7 @@ impl Borrowed for mln_gl::BorrowedTarget {
 }
 
 /// A backend, by its type.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Backend {
     #[cfg(feature = "webgpu")]
     WebGpu(Rc<mln_webgpu::RendererBackend>),
@@ -530,6 +530,12 @@ enum Frames {
     Exported(Box<dyn Exported>),
 }
 
+impl std::fmt::Debug for Frames {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Frames").finish_non_exhaustive()
+    }
+}
+
 /// A render target built on this thread: the backend that a renderer draws
 /// with, on the target's device, and the frames it draws into.
 pub struct LocalTarget {
@@ -538,6 +544,16 @@ pub struct LocalTarget {
     frames: Frames,
     /// The window that a surface target presents to, if it presents to one.
     window: Option<Arc<dyn Window>>,
+}
+
+impl std::fmt::Debug for LocalTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalTarget")
+            .field("device", &self.device)
+            .field("backend", &self.backend)
+            .field("frames", &self.frames)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalTarget {

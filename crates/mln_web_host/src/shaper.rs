@@ -98,6 +98,7 @@ fn message(error: &JsValue) -> String {
 
 /// The `FontFaceEngine` on the shaper module. Its state is the instance's
 /// (`MODULE`): an instance has one thread.
+#[derive(Debug)]
 pub struct ShaperModuleEngine;
 
 impl FontFaceEngine for ShaperModuleEngine {

@@ -33,6 +33,7 @@ pub enum Type {
 }
 
 /// The data members of `LayerGroupBase` (and `util::SimpleIdentifiable`).
+#[derive(Debug)]
 pub struct LayerGroupBaseData {
     pub(crate) unique_id: SimpleIdentity,
     pub(crate) type_: Type,
@@ -138,6 +139,15 @@ pub struct TileLayerGroup {
     drawables: BTreeMap<SortKey, (TileLayerGroupTileKey, UniqueDrawable)>,
 }
 
+impl std::fmt::Debug for TileLayerGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileLayerGroup")
+            .field("base", &self.base)
+            .field("stencil_tiles", &self.stencil_tiles)
+            .finish_non_exhaustive()
+    }
+}
+
 impl TileLayerGroup {
     #[must_use]
     pub fn new(layer_index: i32, _initial_capacity: usize, name: String) -> Self {
@@ -228,6 +238,12 @@ impl TileLayerGroup {
 pub struct LayerGroup {
     pub base: LayerGroupBaseData,
     drawables: BTreeMap<SortKey, UniqueDrawable>,
+}
+
+impl std::fmt::Debug for LayerGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayerGroup").field("base", &self.base).finish_non_exhaustive()
+    }
 }
 
 impl LayerGroup {

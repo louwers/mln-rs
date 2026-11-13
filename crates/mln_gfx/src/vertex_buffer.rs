@@ -24,6 +24,12 @@ pub struct IndexBuffer {
     resource: Box<dyn IndexBufferResource>,
 }
 
+impl std::fmt::Debug for IndexBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IndexBuffer").finish_non_exhaustive()
+    }
+}
+
 impl IndexBuffer {
     #[must_use]
     pub fn new(resource: Box<dyn IndexBufferResource>) -> Self {

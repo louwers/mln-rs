@@ -95,7 +95,18 @@ struct GlyphRequest {
     glyphs: Option<Arc<GlyphCacheRange>>,
 }
 
-#[derive(Default)]
+impl std::fmt::Debug for GlyphRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlyphRequest")
+            .field("parsed", &self.parsed)
+            .field("failed", &self.failed)
+            .field("requestors", &self.requestors)
+            .field("glyphs", &self.glyphs)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Default, Debug)]
 struct Entry {
     ranges: VecMap<GlyphRange, GlyphRequest>,
     /// Local and HarfBuzz glyphs. PBF glyphs are in the ranges.
@@ -122,7 +133,7 @@ type HBShapers = VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>;
 /// What the font-face engine's `prepare` reported, and how to wake the
 /// manager when it does; shared with its `ready` callback, which may run on
 /// another thread.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct EngineReadiness {
     result: Mutex<Option<Result<(), String>>>,
     waker: Mutex<Option<AsyncTaskSender>>,
@@ -160,6 +171,23 @@ pub(crate) struct GlyphManager {
     /// Parses `deferred_responses` on this thread once the engine is ready.
     deferred_task: RefCell<Option<AsyncTask>>,
     hb_shapers: RefCell<HBShapers>,
+}
+
+impl std::fmt::Debug for GlyphManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlyphManager")
+            .field("self_weak", &self.self_weak)
+            .field("glyph_url", &self.glyph_url)
+            .field("entries", &self.entries)
+            .field("requestors_missing_glyphs", &self.requestors_missing_glyphs)
+            .field("glyph_cache", &self.glyph_cache)
+            .field("font_faces", &self.font_faces)
+            .field("engine_prepared", &self.engine_prepared)
+            .field("engine_readiness", &self.engine_readiness)
+            .field("deferred_responses", &self.deferred_responses)
+            .field("deferred_task", &self.deferred_task)
+            .finish_non_exhaustive()
+    }
 }
 
 impl GlyphManager {

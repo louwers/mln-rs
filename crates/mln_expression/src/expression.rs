@@ -57,6 +57,12 @@ pub struct EvaluationContext<'a> {
     pub font_faces: Option<&'a FontFaces>,
 }
 
+impl fmt::Debug for EvaluationContext<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EvaluationContext").finish_non_exhaustive()
+    }
+}
+
 impl<'a> EvaluationContext<'a> {
     #[must_use]
     pub fn new(zoom: f32) -> Self {

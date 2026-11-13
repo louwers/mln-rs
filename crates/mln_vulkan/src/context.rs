@@ -103,6 +103,15 @@ struct FrameResources {
     deletion_queue: Vec<DeletionTask>,
 }
 
+impl std::fmt::Debug for FrameResources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameResources")
+            .field("command_buffer", &self.command_buffer)
+            .field("flight_frame_fence", &self.flight_frame_fence)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The attachments a render pass is made for. Without a depth format, the
 /// pass has a color attachment only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -120,7 +129,7 @@ pub(crate) struct RenderPassKey {
     pub(crate) depth_final_layout: Option<vk::ImageLayout>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Clipping {
     shader: Option<Weak<dyn ShaderProgramBase>>,
     vertex_buffer: Option<BufferResource>,
@@ -130,13 +139,14 @@ struct Clipping {
 }
 
 /// A tile's pole-capped mesh for its globe clip mask.
+#[derive(Debug)]
 struct GlobeClipMesh {
     vertices: BufferResource,
     indices: BufferResource,
     index_count: u32,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct GlobeClipping {
     shader: Option<Weak<dyn ShaderProgramBase>>,
     /// The meshes, by zoom, whether the tile is on the top or bottom row
@@ -145,6 +155,7 @@ struct GlobeClipping {
     pipeline_info: PipelineInfo,
 }
 
+#[derive(Debug)]
 pub struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
@@ -194,7 +205,7 @@ pub struct Context {
 
 /// Semaphores that a frame's submission waits on and signals, each with the
 /// value of a timeline, or zero for a binary semaphore.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct FrameSync {
     waits: Vec<(vk::Semaphore, u64)>,
     signals: Vec<(vk::Semaphore, u64)>,

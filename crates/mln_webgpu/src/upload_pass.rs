@@ -16,6 +16,7 @@ use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
+#[derive(Debug)]
 pub struct UploadPass {
     context: Rc<Context>,
 }

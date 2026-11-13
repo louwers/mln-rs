@@ -93,7 +93,7 @@ const _: () = {
 };
 
 /// The queue that the renderer's parts push to, once the renderer has one.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct EventSink(Rc<RefCell<Option<RendererEvents>>>);
 
 impl EventSink {

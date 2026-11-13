@@ -29,6 +29,12 @@ struct Entry {
     live: Cell<bool>,
 }
 
+impl std::fmt::Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry").field("live", &self.live).finish_non_exhaustive()
+    }
+}
+
 struct Pump {
     /// `None` where the browser gave none, which leaves the instance's work
     /// to its host's frames.
@@ -115,6 +121,7 @@ impl Pump {
 
 /// Runs a step in every slice of the pump, until it returns `false` or the
 /// guard drops, unless [`detach`](Self::detach)ed.
+#[derive(Debug)]
 #[must_use = "the step stops when its guard drops"]
 pub struct Step {
     entry: Option<Rc<Entry>>,

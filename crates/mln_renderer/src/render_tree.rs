@@ -40,12 +40,19 @@ pub(crate) struct LayerRenderItem {
     pub(crate) source: Option<String>,
 }
 
+impl std::fmt::Debug for LayerRenderItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayerRenderItem").field("source", &self.source).finish_non_exhaustive()
+    }
+}
+
 impl LayerRenderItem {
     pub(crate) fn new(layer: RenderLayerPtr, source: Option<String>) -> Self {
         LayerRenderItem { layer, source }
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct RenderTreeParameters {
     pub(crate) transform_params: TransformParameters,
     pub(crate) debug_options: MapDebugOptions,
@@ -90,6 +97,18 @@ pub struct RenderTree {
     placement: Option<std::rc::Rc<crate::text::placement::Placement>>,
     update_symbol_opacities: bool,
     start_time: mln_util::time::Instant,
+}
+
+impl std::fmt::Debug for RenderTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderTree")
+            .field("parameters", &self.parameters)
+            .field("layer_render_items", &self.layer_render_items)
+            .field("placement", &self.placement)
+            .field("update_symbol_opacities", &self.update_symbol_opacities)
+            .field("start_time", &self.start_time)
+            .finish_non_exhaustive()
+    }
 }
 
 impl RenderTree {

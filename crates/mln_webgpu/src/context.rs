@@ -54,7 +54,7 @@ use crate::uniform_buffer::{UNIFORM_BUFFER_ALIGNMENT, UniformBuffer};
 /// [`UNIFORM_BUFFER_ALIGNMENT`] bytes apart, kept across submissions and
 /// replaced by a bigger one when a submission needs more, and a bind group
 /// per slot, made with `layout`.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct ClipMaskSlots {
     buffer: Option<wgpu::Buffer>,
     layout: Option<wgpu::BindGroupLayout>,
@@ -68,6 +68,7 @@ struct ClipMaskSlots {
 
 /// A globe clipping mask mesh's vertex and index buffers (with their sizes in
 /// bytes) and its index count.
+#[derive(Debug)]
 struct GlobeClipMesh {
     vertices: (wgpu::Buffer, u64),
     indices: (wgpu::Buffer, u64),
@@ -103,6 +104,30 @@ pub(crate) struct Context {
     index_table: RefCell<Option<IndexTable>>,
     /// The bind groups drawables share.
     bind_groups: BindGroupCache,
+}
+
+impl std::fmt::Debug for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Context")
+            .field("base", &self.base)
+            .field("backend", &self.backend)
+            .field("weak_self", &self.weak_self)
+            .field("global_uniform_buffers", &self.global_uniform_buffers)
+            .field("tile_vertex_buffer", &self.tile_vertex_buffer)
+            .field("tile_index_buffer", &self.tile_index_buffer)
+            .field("clip_mask_shader", &self.clip_mask_shader)
+            .field("clip_mask_renderable", &self.clip_mask_renderable)
+            .field("clip_mask_pipeline_hash", &self.clip_mask_pipeline_hash)
+            .field("clip_mask_slots", &self.clip_mask_slots)
+            .field("globe_clip_mask_shader", &self.globe_clip_mask_shader)
+            .field("globe_clip_mask_pipeline_hash", &self.globe_clip_mask_pipeline_hash)
+            .field("globe_clip_mask_slots", &self.globe_clip_mask_slots)
+            .field("globe_clip_meshes", &self.globe_clip_meshes)
+            .field("submissions", &self.submissions)
+            .field("index_table", &self.index_table)
+            .field("bind_groups", &self.bind_groups)
+            .finish_non_exhaustive()
+    }
 }
 
 fn clip_mask_stencil_mode() -> StencilMode {

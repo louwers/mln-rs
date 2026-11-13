@@ -48,6 +48,7 @@ type ImageTargetTexture = unsafe extern "system" fn(u32, *mut c_void);
 
 /// The display's `EGLImage`s (`EGL_KHR_image_base`), and the GL function that
 /// makes a texture of one (`GL_OES_EGL_image`).
+#[derive(Debug)]
 struct Images {
     display: *mut c_void,
     create_image: CreateImage,
@@ -85,6 +86,12 @@ pub(crate) struct Exporter {
     source: Source,
     #[cfg(target_os = "android")]
     fences: Option<hardware_buffer::Fences>,
+}
+
+impl std::fmt::Debug for Exporter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Exporter").field("images", &self.images).finish_non_exhaustive()
+    }
 }
 
 // SAFETY: the display, the source's allocator and the functions may be used
@@ -203,7 +210,19 @@ struct SlotTexture {
     producer: RefCell<Option<std::os::fd::OwnedFd>>,
 }
 
+impl std::fmt::Debug for SlotTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SlotTexture")
+            .field("image", &self.image)
+            .field("texture", &self.texture)
+            .field("framebuffer", &self.framebuffer)
+            .field("depth", &self.depth)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A generation's GL objects and images, which go with it.
+#[derive(Debug)]
 struct Objects {
     context: std::rc::Weak<Context>,
     exporter: std::sync::Arc<Exporter>,
@@ -250,6 +269,7 @@ impl Drop for Objects {
 /// texture, and each frame's end blits it into the slot's buffer upside
 /// down: GL's rows start at the bottom of the image, and the readers of a
 /// dmabuf or hardware buffer take its first row as the top.
+#[derive(Debug)]
 struct Generation {
     // Before the objects, whose canvas its framebuffer attaches.
     target: BorrowedTarget,
@@ -415,6 +435,7 @@ impl Generation {
 
 /// Frames drawn into buffers of the target's own, and queued for the host to
 /// acquire.
+#[derive(Debug)]
 pub struct ExportedTarget {
     backend: Rc<RendererBackend>,
     exporter: std::sync::Arc<Exporter>,

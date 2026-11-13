@@ -26,6 +26,7 @@ use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 
+#[derive(Debug)]
 pub(crate) struct TransformParameters {
     pub(crate) proj_matrix: Mat4,
     pub(crate) aligned_proj_matrix: Mat4,
@@ -100,6 +101,12 @@ pub struct PaintParameters<'a> {
     pub(crate) scissor_rect: ScissorRect,
     /// The frame that custom layers draw into, set before their prerender.
     pub(crate) custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
+}
+
+impl std::fmt::Debug for PaintParameters<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaintParameters").finish_non_exhaustive()
+    }
 }
 
 /// The WebGPU context's `rawGlobeTileMesh(tile, borders,

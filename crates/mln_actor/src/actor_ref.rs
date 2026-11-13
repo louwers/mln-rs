@@ -12,6 +12,7 @@ use crate::mailbox::Mailbox;
 
 /// A non-owning, `Send` reference to an actor's object of type `O`.
 /// Sending to a reference whose actor is gone does nothing.
+#[derive(Debug)]
 pub struct ActorRef<O: 'static> {
     weak_mailbox: Weak<Mailbox>,
     _object: PhantomData<fn(&O)>,

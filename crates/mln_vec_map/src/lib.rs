@@ -255,18 +255,21 @@ impl<'a, K: Ord + Copy, V: Copy> Extend<(&'a K, &'a V)> for VecMap<K, V> {
 }
 
 /// [`VecMap::entry`].
+#[derive(Debug)]
 pub enum Entry<'a, K, V> {
     Occupied(OccupiedEntry<'a, K, V>),
     Vacant(VacantEntry<'a, K, V>),
 }
 
 /// An [`Entry`] whose key is in the map.
+#[derive(Debug)]
 pub struct OccupiedEntry<'a, K, V> {
     map: &'a mut VecMap<K, V>,
     index: usize,
 }
 
 /// An [`Entry`] whose key is not in the map.
+#[derive(Debug)]
 pub struct VacantEntry<'a, K, V> {
     map: &'a mut VecMap<K, V>,
     index: usize,

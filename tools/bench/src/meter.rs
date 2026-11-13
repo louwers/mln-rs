@@ -25,6 +25,7 @@ static PEAK: AtomicI64 = AtomicI64::new(0);
 
 /// The system allocator, counting allocations, the bytes they ask for, and
 /// the most bytes live at once since `reset_peak`.
+#[derive(Debug)]
 pub struct CountingAllocator;
 
 // SAFETY: every call forwards to `System` with the caller's arguments.

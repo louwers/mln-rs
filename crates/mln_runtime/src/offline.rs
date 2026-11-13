@@ -19,6 +19,7 @@ use crate::runtime::{Runtime, post, reply_on};
 /// The offline regions in a runtime's cache database, from
 /// [`Runtime::offline`]. Each call is a command of the runtime, and the
 /// regions download on the database's thread.
+#[derive(Debug)]
 pub struct Offline<'a> {
     runtime: &'a Runtime,
 }

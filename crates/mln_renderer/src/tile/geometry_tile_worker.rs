@@ -121,6 +121,12 @@ pub enum WorkerMessage {
     },
 }
 
+impl std::fmt::Debug for WorkerMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkerMessage").finish_non_exhaustive()
+    }
+}
+
 impl WorkerMessage {
     /// The message's correlation id, or 0 for the glyph and image replies,
     /// which have none.
@@ -141,7 +147,7 @@ impl WorkerMessage {
 /// The messages a `GeometryTileWorker` sends its `GeometryTile`: the tile's
 /// member functions the worker calls. Port-only: serde writes them for a
 /// worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum TileMessage {
     Layout { result: LayoutResult, correlation_id: u64 },
     Error { error: Error, correlation_id: u64 },

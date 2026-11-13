@@ -32,6 +32,12 @@ pub struct UniformBufferArray {
     uniform_buffer_vector: [Option<UniformBufferPtr>; MAX_UBO_COUNT_PER_SHADER],
 }
 
+impl std::fmt::Debug for UniformBufferArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UniformBufferArray").finish_non_exhaustive()
+    }
+}
+
 impl UniformBufferArray {
     #[must_use]
     pub fn new() -> Self {

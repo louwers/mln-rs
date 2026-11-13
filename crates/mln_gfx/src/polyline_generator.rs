@@ -179,6 +179,12 @@ pub struct PolylineGenerator<'a, V, S> {
     e3: isize,
 }
 
+impl<V, S> std::fmt::Debug for PolylineGenerator<'_, V, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PolylineGenerator").finish_non_exhaustive()
+    }
+}
+
 impl<'a, V, S> PolylineGenerator<'a, V, S> {
     pub fn new(
         polyline_vertices: &'a mut Vec<V>,

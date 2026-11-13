@@ -333,6 +333,15 @@ pub(crate) struct HTTPFileSource {
     resource_options: Mutex<ResourceOptions>,
 }
 
+impl std::fmt::Debug for HTTPFileSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HTTPFileSource")
+            .field("header_transform", &self.header_transform)
+            .field("resource_options", &self.resource_options)
+            .finish_non_exhaustive()
+    }
+}
+
 impl HTTPFileSource {
     /// An HTTP file source over the transport `set_transport` set, else
     /// the platform's default.

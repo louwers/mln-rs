@@ -25,7 +25,7 @@ use crate::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
 /// The data members of `gfx::Context`.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ContextBase {
     stats: RefCell<RenderingStats>,
 }

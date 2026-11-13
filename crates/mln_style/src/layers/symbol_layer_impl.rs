@@ -23,6 +23,7 @@ use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropert
 /// The alternatives `hasOverride`'s `formatted.match(...)` visits; C++
 /// templates it over `PropertyValue<Formatted>` and
 /// `PossiblyEvaluatedPropertyValue<Formatted>`.
+#[derive(Debug)]
 pub enum FormattedValue<'a> {
     Undefined,
     Constant(&'a Formatted),
@@ -55,6 +56,7 @@ impl AsFormattedValue for PossiblyEvaluatedPropertyValue<Formatted> {
 /// The format section overrides of the symbol paint properties. The only
 /// overridable property is `text-color`, so the checks are written out for it
 /// rather than folded over a list of overridable properties.
+#[derive(Debug)]
 pub struct SymbolLayerPaintPropertyOverrides;
 
 impl SymbolLayerPaintPropertyOverrides {

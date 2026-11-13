@@ -69,7 +69,7 @@ impl std::ops::BitAnd for DEMTileNeighbors {
 /// The messages a `RasterDEMTile` sends its `RasterDEMTileWorker`: the
 /// worker's public member functions. Port-only: serde writes them for a
 /// worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum RasterDEMWorkerMessage {
     Parse {
         #[serde(with = "shared_bytes::option")]
@@ -82,7 +82,7 @@ pub enum RasterDEMWorkerMessage {
 /// The messages a `RasterDEMTileWorker` sends its `RasterDEMTile`: the
 /// tile's member functions the worker calls. Port-only: serde writes them
 /// for a worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum RasterDEMTileMessage {
     Parsed { bucket: Option<Arc<HillshadeBucket>>, correlation_id: u64 },
     Error { error: Error, correlation_id: u64 },

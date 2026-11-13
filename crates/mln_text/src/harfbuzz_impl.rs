@@ -59,6 +59,12 @@ pub(crate) struct Impl {
     plans: Mutex<ShapePlans>,
 }
 
+impl std::fmt::Debug for Impl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Impl").field("type_", &self.type_).field("face", &self.face).finish_non_exhaustive()
+    }
+}
+
 /// The user features that stand in for `HB_NO_OT_SHAPE_FRACTIONS`.
 fn hb_tiny_features() -> [Feature; 3] {
     [

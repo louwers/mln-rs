@@ -29,6 +29,12 @@ pub struct RenderTarget {
     layer_groups_by_layer_index: VecMap<i32, LayerGroupBasePtr>,
 }
 
+impl std::fmt::Debug for RenderTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderTarget").finish_non_exhaustive()
+    }
+}
+
 impl RenderTarget {
     pub(crate) fn new(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget {

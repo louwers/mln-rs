@@ -42,6 +42,7 @@ const COLOR_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
 
 /// Port-only: what an overlay draws into (`SurfaceTarget::set_overlay`):
 /// the frame's drawable, after the map and before it is presented.
+#[derive(Debug)]
 pub struct OverlayTarget<'a> {
     pub device: &'a ProtocolObject<dyn MTLDevice>,
     /// The frame's command buffer, which the overlay encodes its passes into.
@@ -55,6 +56,7 @@ pub struct OverlayTarget<'a> {
 pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
 /// The depth and stencil textures of a drawable size.
+#[derive(Debug)]
 struct DepthStencil {
     size: (usize, usize),
     depth: MTLTexturePtr,
@@ -72,6 +74,21 @@ struct SurfaceState {
     readback_requested: Cell<bool>,
     readback: RefCell<Option<PremultipliedImage>>,
     overlay: RefCell<Option<Overlay>>,
+}
+
+impl std::fmt::Debug for SurfaceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SurfaceState")
+            .field("backend", &self.backend)
+            .field("layer", &self.layer)
+            .field("drawable", &self.drawable)
+            .field("command_buffer", &self.command_buffer)
+            .field("render_pass_descriptor", &self.render_pass_descriptor)
+            .field("depth_stencil", &self.depth_stencil)
+            .field("readback_requested", &self.readback_requested)
+            .field("readback", &self.readback)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SurfaceState {
@@ -255,6 +272,7 @@ impl std::fmt::Debug for Layer {
 
 /// `MetalBackend`'s layer without the window: frames presented to a
 /// `CAMetalLayer`.
+#[derive(Debug)]
 pub struct SurfaceTarget {
     state: Rc<SurfaceState>,
     image: Rc<DrawTarget>,

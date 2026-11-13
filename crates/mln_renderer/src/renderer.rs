@@ -50,6 +50,20 @@ pub struct Renderer {
     frame_projection: Option<FrameProjection>,
 }
 
+impl std::fmt::Debug for Renderer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Renderer")
+            .field("orchestrator", &self.orchestrator)
+            .field("pixel_ratio", &self.pixel_ratio)
+            .field("static_data", &self.static_data)
+            .field("render_state", &self.render_state)
+            .field("frame_count", &self.frame_count)
+            .field("style_loaded", &self.style_loaded)
+            .field("frame_projection", &self.frame_projection)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Renderer {
     /// A renderer with a glyph cache of its own. `local_font_family` is the
     /// platform's `LocalGlyphRasterizer`'s (see `DefaultLocalGlyphRasterizer`).

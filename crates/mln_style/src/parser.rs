@@ -26,6 +26,7 @@ use crate::transition_options::TransitionOptions;
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
 pub(crate) type StyleParseResult = Result<(), mln_util::Error>;
 
+#[derive(Debug)]
 pub struct Parser {
     pub sprites: Vec<Sprite>,
     pub glyph_url: String,

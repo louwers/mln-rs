@@ -40,6 +40,7 @@ pub(crate) fn unique_id() -> u64 {
 }
 
 /// A buffer and its memory, mapped.
+#[derive(Debug)]
 pub(crate) struct BufferAllocation {
     id: u64,
     backend: Rc<BackendImpl>,
@@ -133,6 +134,7 @@ impl Drop for BufferAllocation {
 
 pub(crate) type VersionType = u16;
 
+#[derive(Debug)]
 pub struct BufferResource {
     context: Weak<Context>,
     size: usize,

@@ -25,6 +25,12 @@ pub(crate) struct DrawTarget {
     resource: Rc<dyn TargetResource>,
 }
 
+impl std::fmt::Debug for DrawTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrawTarget").field("size", &self.size).finish_non_exhaustive()
+    }
+}
+
 impl DrawTarget {
     pub(crate) fn new(size: Size, resource: Rc<dyn TargetResource>) -> Self {
         DrawTarget { size: Cell::new(size), resource }

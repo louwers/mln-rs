@@ -35,6 +35,7 @@ pub(crate) struct HillshadeLayoutVertex {
 
 /// The masked geometry of a hillshade bucket (C++ `mask`, `vertices`,
 /// `indices`, `segments`).
+#[derive(Debug)]
 pub(crate) struct HillshadeBucketGeometry {
     pub(crate) mask: TileMask,
     pub(crate) vertices: Vec<HillshadeLayoutVertex>,
@@ -53,7 +54,7 @@ fn full_mask() -> TileMask {
 /// DEM, border included, which is what a worker sets (`tile/worker_codec`)
 /// and the tile backfills from its neighbours; the geometry is the tile's
 /// (`set_mask`) and the render state this side's.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct HillshadeBucket {
     pub(crate) base: BucketBase,
     #[serde(skip, default = "unmasked")]

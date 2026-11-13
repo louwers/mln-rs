@@ -33,7 +33,7 @@ use crate::renderer_backend::{PlatformContext, RendererBackend};
 use crate::types::Gl;
 
 /// The window to present to, as its windowing system names it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum WindowHandle {
     /// A `wl_display` and a `wl_surface` of it.
     Wayland { display: *mut c_void, surface: *mut c_void },
@@ -136,6 +136,7 @@ static SHARED_DISPLAYS: Mutex<Vec<SharedDisplay>> = Mutex::new(Vec::new());
 /// A window's use of its EGL display, which it gives up when dropped: it
 /// terminates a display that the library initialized for the windows of a
 /// native display, after their last one.
+#[derive(Debug)]
 struct DisplayUse {
     egl: &'static Egl,
     display: egl::Display,
@@ -230,6 +231,25 @@ struct EglWindow {
     /// What `handle` names, which stays open until the context and the
     /// display are gone.
     _window: Arc<dyn Window>,
+}
+
+impl std::fmt::Debug for EglWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EglWindow")
+            .field("egl", &self.egl)
+            .field("display", &self.display)
+            .field("config", &self.config)
+            .field("context", &self.context)
+            .field("handle", &self.handle)
+            .field("wayland_egl", &self.wayland_egl)
+            .field("size", &self.size)
+            .field("swap_interval", &self.swap_interval)
+            .field("presenting", &self.presenting)
+            .field("surface", &self.surface)
+            .field("on_surface", &self.on_surface)
+            .field("wl_egl_window", &self.wl_egl_window)
+            .finish_non_exhaustive()
+    }
 }
 
 impl EglWindow {
@@ -472,6 +492,7 @@ impl PlatformContext for WindowContext {
 
 /// What an overlay draws into: the window's framebuffer, bound, through the
 /// GL functions of the backend's context.
+#[derive(Debug)]
 pub struct OverlayTarget<'a> {
     pub gl: &'a Arc<Gl>,
     /// The size of the framebuffer, in pixels.
@@ -490,6 +511,15 @@ struct Presentation {
     readback: RefCell<Option<PremultipliedImage>>,
 }
 
+impl std::fmt::Debug for Presentation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Presentation")
+            .field("readback_requested", &self.readback_requested)
+            .field("readback", &self.readback)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The window's framebuffer.
 struct WindowResource {
     context: Weak<Context>,
@@ -505,6 +535,7 @@ impl TargetResource for WindowResource {
 }
 
 /// Frames presented to a window, from a GL context of the window's own.
+#[derive(Debug)]
 pub struct SurfaceTarget {
     backend: Rc<RendererBackend>,
     window: Rc<EglWindow>,

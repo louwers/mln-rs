@@ -33,7 +33,7 @@ use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
 /// The messages a `RasterTile` sends its `RasterTileWorker`: the worker's
 /// public member functions. Port-only: serde writes them for a worker in
 /// another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum RasterWorkerMessage {
     Parse {
         #[serde(with = "shared_bytes::option")]
@@ -45,7 +45,7 @@ pub enum RasterWorkerMessage {
 /// The messages a `RasterTileWorker` sends its `RasterTile`: the tile's
 /// member functions the worker calls. Port-only: serde writes them for a
 /// worker in another wasm instance (`tile/worker_codec`).
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum RasterTileMessage {
     Parsed { bucket: Option<Arc<RasterBucket>>, correlation_id: u64 },
     Error { error: Error, correlation_id: u64 },

@@ -30,6 +30,7 @@ use crate::shaders::shader_group::ShaderGroup;
 use crate::shaders::shader_source::shader_source;
 
 /// The device state the backend and its context share.
+#[derive(Debug)]
 pub(crate) struct BackendImpl {
     device: MTLDevicePtr,
     command_queue: MTLCommandQueuePtr,
@@ -54,6 +55,7 @@ impl BackendImpl {
 }
 
 /// A renderer's context on a [`Device`].
+#[derive(Debug)]
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,

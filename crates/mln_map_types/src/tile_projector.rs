@@ -6,7 +6,7 @@ use crate::transform_state::TransformState;
 
 /// Projects the points of one tile through the current projection, the way
 /// the vertex shaders do it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct TileProjector<'a> {
     state: &'a TransformState,
     tile_id: UnwrappedTileID,

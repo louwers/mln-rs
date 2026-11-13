@@ -158,6 +158,7 @@ type SharedEventPtr = Retained<ProtocolObject<dyn MTLSharedEvent>>;
 
 /// The frame's command buffer and render pass over the selected texture, and
 /// their depth and stencil textures.
+#[derive(Debug)]
 struct Resource {
     backend: Rc<BackendImpl>,
     textures: RefCell<BorrowedTextures>,
@@ -247,6 +248,7 @@ impl TargetResource for Resource {
 }
 
 /// Frames drawn into the host's textures, each given back to the host.
+#[derive(Debug)]
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
     resource: Rc<Resource>,
@@ -432,6 +434,7 @@ impl FrameTarget for BorrowedTarget {
 /// The host's reads of textures that a ring let go of, which the ring
 /// waits for before the host may use or destroy the textures. Dropping it
 /// stops waiting.
+#[derive(Debug)]
 pub struct PendingReads {
     waits: Vec<(SharedEventPtr, u64)>,
 }

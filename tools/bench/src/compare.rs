@@ -24,6 +24,7 @@ use std::process::{Command, Stdio};
 use crate::stats::{holm, mann_whitney, median};
 use crate::{Metrics, Report};
 
+#[derive(Debug)]
 pub struct Options {
     pub base: String,
     /// Processes per side; even, for ABBA.

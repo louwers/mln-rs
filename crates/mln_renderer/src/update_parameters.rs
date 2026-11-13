@@ -56,6 +56,42 @@ pub struct UpdateParameters {
     pub subdivision_granularity: SubdivisionGranularitySetting,
 }
 
+impl std::fmt::Debug for UpdateParameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdateParameters")
+            .field("style_loaded", &self.style_loaded)
+            .field("mode", &self.mode)
+            .field("pixel_ratio", &self.pixel_ratio)
+            .field("debug_options", &self.debug_options)
+            .field("time_point", &self.time_point)
+            .field("transform_state", &self.transform_state)
+            .field("glyph_url", &self.glyph_url)
+            .field("font_faces", &self.font_faces)
+            .field("sprite_loaded", &self.sprite_loaded)
+            .field("transition_options", &self.transition_options)
+            .field("light", &self.light)
+            .field("sky", &self.sky)
+            .field("images", &self.images)
+            .field("sources", &self.sources)
+            .field("layers", &self.layers)
+            .field("global_state", &self.global_state)
+            .field("feature_states", &self.feature_states)
+            .field("prefetch_zoom_delta", &self.prefetch_zoom_delta)
+            .field("still_image_request", &self.still_image_request)
+            .field("still_image_request_id", &self.still_image_request_id)
+            .field("cross_source_collisions", &self.cross_source_collisions)
+            .field("fast_pfor_enabled", &self.fast_pfor_enabled)
+            .field("capture_rendered_features", &self.capture_rendered_features)
+            .field("tile_lod_min_radius", &self.tile_lod_min_radius)
+            .field("tile_lod_scale", &self.tile_lod_scale)
+            .field("tile_lod_pitch_threshold", &self.tile_lod_pitch_threshold)
+            .field("tile_lod_zoom_shift", &self.tile_lod_zoom_shift)
+            .field("tile_lod_mode", &self.tile_lod_mode)
+            .field("subdivision_granularity", &self.subdivision_granularity)
+            .finish_non_exhaustive()
+    }
+}
+
 // The map and a renderer on another thread share an update.
 const _: () = {
     const fn assert_send_sync<T: Send + Sync>() {}

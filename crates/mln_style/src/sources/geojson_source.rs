@@ -134,6 +134,12 @@ pub struct GeoJSONDataBuilder {
     sequenced_scheduler: SchedulerPtr,
 }
 
+impl std::fmt::Debug for GeoJSONDataBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeoJSONDataBuilder").field("options", &self.options).finish_non_exhaustive()
+    }
+}
+
 impl GeoJSONDataBuilder {
     /// Fails as [`create_geojson_data`] does.
     pub fn build(&self, geojson: &GeoJSON) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {

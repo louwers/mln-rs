@@ -64,7 +64,7 @@ use crate::uniform_buffer::UniformBuffer;
 
 /// The objects whose owners are gone, deleted by `perform_cleanup` while the
 /// context is current (C++: `abandonedPrograms` and the others).
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Abandoned {
     programs: Vec<ProgramID>,
     buffers: Vec<BufferID>,
@@ -75,6 +75,7 @@ struct Abandoned {
 }
 
 /// A mesh the clip masks are drawn with.
+#[derive(Debug)]
 struct ClipMesh {
     vertex_array: VertexArrayID,
     vertex_buffer: BufferID,
@@ -83,7 +84,7 @@ struct ClipMesh {
 }
 
 /// What the context keeps to draw the tile clipping masks with.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct ClipMasks {
     shader: Option<Weak<dyn ShaderProgramBase>>,
     /// Where the Mercator shader takes its matrix.
@@ -98,6 +99,7 @@ struct ClipMasks {
     projection_buffer_size: usize,
 }
 
+#[derive(Debug)]
 pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,

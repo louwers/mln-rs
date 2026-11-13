@@ -25,6 +25,17 @@ pub(crate) struct TimerHandle {
     cb: RefCell<Option<Box<dyn FnMut()>>>,
 }
 
+impl std::fmt::Debug for TimerHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimerHandle")
+            .field("due", &self.due)
+            .field("repeat_ms", &self.repeat_ms)
+            .field("start_id", &self.start_id)
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
 thread_local! {
     static NEXT_START_ID: Cell<u64> = const { Cell::new(0) };
 }
@@ -57,6 +68,7 @@ impl TimerHandle {
     }
 }
 
+#[derive(Debug)]
 pub struct Timer {
     handle: Rc<TimerHandle>,
 }

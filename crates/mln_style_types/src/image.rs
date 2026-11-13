@@ -299,6 +299,7 @@ pub type ImagePositions = std::collections::HashMap<String, ImagePosition>;
 /// once per pair of sides, then by key (`mln_util::serialization::shared)`: a
 /// tile worker in another wasm instance gets the same icons and patterns for
 /// every tile.
+#[derive(Debug)]
 pub struct SharedImage;
 
 impl shared::Kind for SharedImage {

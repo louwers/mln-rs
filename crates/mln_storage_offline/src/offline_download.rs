@@ -171,8 +171,26 @@ struct Inner {
     traversal: Cell<u64>,
 }
 
+impl std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("id", &self.id)
+            .field("definition", &self.definition)
+            .field("offline_database", &self.offline_database)
+            .field("status", &self.status)
+            .field("next_request_id", &self.next_request_id)
+            .field("required_source_urls", &self.required_source_urls)
+            .field("resources_remaining", &self.resources_remaining)
+            .field("resources_to_be_marked_as_used", &self.resources_to_be_marked_as_used)
+            .field("buffer", &self.buffer)
+            .field("traversal", &self.traversal)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The download of an offline region's resources. Not `Clone`: tests and
 /// observers hold a `WeakOfflineDownload`.
+#[derive(Debug)]
 pub struct OfflineDownload {
     inner: Rc<Inner>,
 }

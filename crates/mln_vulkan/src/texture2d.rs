@@ -27,6 +27,7 @@ use crate::context::Context;
 use crate::renderer_backend::BackendImpl;
 
 /// An image, its memory and its view.
+#[derive(Debug)]
 pub(crate) struct ImageAllocation {
     id: u64,
     backend: Rc<BackendImpl>,
@@ -161,6 +162,7 @@ pub(crate) enum Texture2DUsage {
     Blit,
 }
 
+#[derive(Debug)]
 pub struct Texture2D {
     context: Weak<Context>,
     backend: Rc<BackendImpl>,

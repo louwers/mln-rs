@@ -27,6 +27,7 @@ thread_local! {
 ///
 /// [`start`]: UnavailableImages::start
 /// [`finish`]: UnavailableImages::finish
+#[derive(Debug)]
 pub struct UnavailableImages {
     outer: Option<VecSet<String>>,
 }
@@ -51,6 +52,7 @@ impl Drop for UnavailableImages {
     }
 }
 
+#[derive(Debug)]
 pub struct ImageExpression {
     base: ExpressionBase,
     image_id: Arc<dyn Expression>,

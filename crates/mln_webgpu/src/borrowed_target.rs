@@ -113,6 +113,7 @@ pub fn depth_stencil_format(format: wgpu::TextureFormat) -> Option<DepthStencilF
 }
 
 /// The selected texture's view, and the ring's depth and stencil texture.
+#[derive(Debug)]
 struct Resource {
     device: wgpu::Device,
     textures: RefCell<BorrowedTextures>,
@@ -160,6 +161,7 @@ impl TargetResource for Resource {
 }
 
 /// Frames drawn into the host's textures, each given back to the host.
+#[derive(Debug)]
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
     resource: Rc<Resource>,

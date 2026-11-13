@@ -21,7 +21,7 @@ pub struct TestRunOutput {
     pub failed_inputs: Vec<usize>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TestStats {
     pub passed: Vec<TestRunOutput>,
     pub failed: Vec<TestRunOutput>,

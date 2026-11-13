@@ -34,7 +34,7 @@ fn render_still_in_continuous_mode_is_an_error() {
     let mut frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
     let mut map = Map::new(MapOptions { size, ..Default::default() }).unwrap();
     frontend.attach(&map);
-    let error = frontend.render(&mut map).err().expect("error");
+    let error = frontend.render(&mut map).expect_err("error");
     assert_eq!(error, Error::invalid_state("Map is not in static or tile image render modes"));
 }
 

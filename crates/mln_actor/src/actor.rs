@@ -35,7 +35,14 @@ struct Queue<O> {
     closed: bool,
 }
 
+impl<O> std::fmt::Debug for Queue<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Queue").finish_non_exhaustive()
+    }
+}
+
 /// The `Mailbox` of a pool actor, with its target object.
+#[derive(Debug)]
 pub(crate) struct PoolMailbox<O: Send + 'static> {
     /// The receiving mutex; `None` once closed.
     object: Mutex<Option<O>>,
@@ -151,6 +158,7 @@ impl<O: Send + 'static> PoolMailbox<O> {
 
 /// A reference to a pool actor. Sending to a reference whose actor is gone
 /// does nothing.
+#[derive(Debug)]
 pub struct PoolActorRef<O: Send + 'static> {
     mailbox: Weak<PoolMailbox<O>>,
 }
@@ -187,6 +195,12 @@ pub struct Actor<O: Send + 'static> {
     /// `retainer`: keeps the scheduler alive.
     _retainer: SchedulerPtr,
     mailbox: Arc<PoolMailbox<O>>,
+}
+
+impl<O: Send + 'static> std::fmt::Debug for Actor<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Actor").finish_non_exhaustive()
+    }
 }
 
 impl<O: Send + 'static> Actor<O> {

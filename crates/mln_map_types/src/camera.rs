@@ -79,6 +79,19 @@ pub struct AnimationOptions {
     pub transition_id: Option<u64>,
 }
 
+impl std::fmt::Debug for AnimationOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnimationOptions")
+            .field("duration", &self.duration)
+            .field("velocity", &self.velocity)
+            .field("min_zoom", &self.min_zoom)
+            .field("max_duration", &self.max_duration)
+            .field("easing", &self.easing)
+            .field("transition_id", &self.transition_id)
+            .finish_non_exhaustive()
+    }
+}
+
 /// How a camera command ended, as maplibre-native-ffi's
 /// `mln_camera_transition_outcome` reports it. A command that ended in more
 /// than one way reports [`Cancelled`](Self::Cancelled) if any of it was
@@ -185,7 +198,7 @@ pub enum GesturePhase {
 /// explicit center overrides an anchor; the anchored change reads the camera
 /// after the pan. Both end through the one
 /// [`AnimationOptions::transition_end_fn`], once both have ended.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct CameraDelta {
     /// Moves the map's content this far on the screen, as a drag does.
     pub offset: Option<ScreenCoordinate>,
@@ -225,7 +238,7 @@ pub enum CameraUpdateMode {
 /// Moves the camera to absolute values, as maplibre-native-ffi's
 /// `mln_camera_update` does: the counterpart of [`CameraDelta`] for
 /// commands and gestures that know where the camera should go.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct CameraUpdate {
     pub mode: CameraUpdateMode,
     pub camera: CameraOptions,

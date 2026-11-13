@@ -29,6 +29,12 @@ pub struct HttpHeaderTransform {
     callback: Option<HttpHeaderCallback>,
 }
 
+impl std::fmt::Debug for HttpHeaderTransform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpHeaderTransform").finish_non_exhaustive()
+    }
+}
+
 impl HttpHeaderTransform {
     /// Adds the headers `callback` returns; `None` adds none.
     #[must_use]

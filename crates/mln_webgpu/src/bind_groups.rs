@@ -13,7 +13,7 @@ use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use wgpu::util::DeviceExt as _;
 
 /// A resource a bind group entry binds. wgpu handles compare by identity.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum EntryResource {
     /// A buffer, and the offset and size bound.
     Buffer(wgpu::Buffer, u64, u64),
@@ -23,7 +23,7 @@ pub(crate) enum EntryResource {
 
 /// What a bind group is created from: its layout and the resource of each
 /// binding.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct BindGroupKey {
     pub(crate) layout: wgpu::BindGroupLayout,
     pub(crate) resources: Vec<(u32, EntryResource)>,
@@ -57,7 +57,7 @@ impl Drop for SharedBindGroup {
 
 /// Bind groups by what they are created from, each kept while something
 /// holds its `Rc`, so the cache keeps no resource alive itself.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct BindGroupCache {
     entries: Rc<Entries>,
 }
@@ -95,6 +95,7 @@ const INITIAL_INDEX_CAPACITY: u32 = 256;
 /// The group of `globalIndex`, at binding [`ID_GLOBAL_UBO_INDEX`]: one
 /// uniform buffer whose entry `i`, at `i` strides, holds `i`, bound at the
 /// dynamic offset of the draw's index.
+#[derive(Debug)]
 pub(crate) struct IndexTable {
     layout: wgpu::BindGroupLayout,
     /// The distance between entries, a multiple of the device's uniform

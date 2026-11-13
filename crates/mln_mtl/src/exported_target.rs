@@ -120,6 +120,7 @@ fn surface_texture(device: &MTLDevicePtr, size: Size) -> Result<(CFRetained<IOSu
 
 /// One generation of a ring's surfaces, of one size, and the borrowed ring
 /// target that draws into the textures over them.
+#[derive(Debug)]
 struct Generation {
     target: BorrowedTarget,
     surfaces: Vec<CFRetained<IOSurfaceRef>>,
@@ -174,6 +175,7 @@ fn depth_texture(device: &MTLDevicePtr, size: Size) -> Result<MTLTexturePtr, Err
 
 /// Frames drawn into IOSurfaces of the target's own, and queued for the host
 /// to acquire.
+#[derive(Debug)]
 pub struct ExportedTarget {
     backend: Rc<RendererBackend>,
     depth: usize,

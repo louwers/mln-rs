@@ -133,6 +133,7 @@ thread_local! {
     static THREAD_OBSERVER: RefCell<Option<Box<dyn Observer>>> = const { RefCell::new(None) };
 }
 
+#[derive(Debug)]
 pub struct Log;
 
 impl Log {

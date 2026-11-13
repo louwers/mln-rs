@@ -31,6 +31,16 @@ struct SpriteData {
     sprite_request: Option<Box<dyn AsyncRequest>>,
 }
 
+impl std::fmt::Debug for SpriteData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpriteData")
+            .field("load", &self.load)
+            .field("image", &self.image)
+            .field("json", &self.json)
+            .finish_non_exhaustive()
+    }
+}
+
 struct Inner {
     data_map: RefCell<VecMap<String, SpriteData>>,
     observer: RefCell<Rc<dyn SpriteLoaderObserver>>,
@@ -39,6 +49,17 @@ struct Inner {
     loads: Cell<u64>,
 }
 
+impl std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("data_map", &self.data_map)
+            .field("thread_pool", &self.thread_pool)
+            .field("loads", &self.loads)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
 pub struct SpriteLoader {
     pixel_ratio: f32,
     inner: Rc<Inner>,

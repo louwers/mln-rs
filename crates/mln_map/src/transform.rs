@@ -95,6 +95,7 @@ pub trait TransformObserver {
     fn on_camera_did_change(&self, _change: CameraChange) {}
 }
 
+#[derive(Debug)]
 pub struct NullTransformObserver;
 impl TransformObserver for NullTransformObserver {}
 
@@ -157,6 +158,25 @@ struct Transition {
     /// For a gesture's momentum, the gesture's serial: its end ends the
     /// gesture, unless another one started since.
     gesture: Option<u64>,
+}
+
+impl std::fmt::Debug for Transition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Transition")
+            .field("fields", &self.fields)
+            .field("coupled_fields", &self.coupled_fields)
+            .field("moving_fields", &self.moving_fields)
+            .field("start", &self.start)
+            .field("duration", &self.duration)
+            .field("animation", &self.animation)
+            .field("anchor", &self.anchor)
+            .field("anchor_lat_lng", &self.anchor_lat_lng)
+            .field("momentum", &self.momentum)
+            .field("stopped", &self.stopped)
+            .field("source", &self.source)
+            .field("gesture", &self.gesture)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Transition {
@@ -247,7 +267,7 @@ fn nanos_from_secs(seconds: f64) -> Option<Duration> {
 
 /// How far one part of a momentum moves, over how long, and along which
 /// curve.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 struct Glide {
     distance: f64,
     duration: Duration,
@@ -338,7 +358,7 @@ fn bezier(easing: &MomentumEasing) -> UnitBezier {
 }
 
 /// One part of a running momentum.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 struct MomentumPart {
     /// The fields that this part needs to keep moving or to settle.
     fields: u16,
@@ -368,6 +388,7 @@ const MOMENTUM_BEARING: usize = 1;
 const MOMENTUM_PITCH: usize = 2;
 
 /// A momentum under way.
+#[derive(Debug)]
 struct MomentumState {
     options: CameraMomentum,
     /// The pan's distance, with its direction.
@@ -474,6 +495,19 @@ pub struct Transform {
     frame_time: Option<Instant>,
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
+}
+
+impl std::fmt::Debug for Transform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Transform")
+            .field("state", &self.state)
+            .field("transitions", &self.transitions)
+            .field("source", &self.source)
+            .field("gesture", &self.gesture)
+            .field("frame_time", &self.frame_time)
+            .field("globe_free_bearing", &self.globe_free_bearing)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The gesture that camera deltas and updates with a phase make, as

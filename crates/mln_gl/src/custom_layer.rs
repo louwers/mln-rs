@@ -11,6 +11,7 @@ use crate::types::{FramebufferID, Gl};
 /// The session's OpenGL context, current, outside the map's framebuffer, for
 /// a custom layer's prerender. Draw into framebuffers of your own; the map
 /// binds its own again before it draws.
+#[derive(Debug)]
 pub struct CustomLayerEncoder {
     pub(crate) context: Rc<Context>,
 }
@@ -33,6 +34,7 @@ impl CustomLayerEncoder {
 /// next draws need again. It leaves any other state as it found it, such as
 /// sampler objects, the pixel pack and unpack buffers and parameters, polygon
 /// offset and rasterizer discard, and doesn't clear the framebuffer.
+#[derive(Debug)]
 pub struct CustomLayerPass {
     pub(crate) context: Rc<Context>,
     /// The framebuffer the map draws into, none for the default one.

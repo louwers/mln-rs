@@ -138,7 +138,7 @@ pub enum Mode {
 }
 
 /// The frames the map reports, and why it failed, if it did.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Observer {
     frames: u64,
     last_frame: Option<RenderFrameStatus>,
@@ -178,6 +178,16 @@ pub struct Scene {
     map: Map,
     observer: Observer,
     _file_source: Option<Arc<dyn FileSource>>,
+}
+
+impl std::fmt::Debug for Scene {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Scene")
+            .field("frontend", &self.frontend)
+            .field("map", &self.map)
+            .field("observer", &self.observer)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Scene {

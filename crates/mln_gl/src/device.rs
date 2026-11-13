@@ -692,6 +692,7 @@ impl Device {
 }
 
 /// Presents a frame to the host's surface that a context is current on.
+#[derive(Debug)]
 pub(crate) enum SurfaceSwap {
     Egl {
         egl: &'static Egl,

@@ -44,6 +44,7 @@ pub struct CustomLayerFrame {
 }
 
 /// What [`CustomLayerHost::prerender`] gets.
+#[derive(Debug)]
 pub struct CustomLayerPrerenderParameters<'a> {
     /// The frame's commands outside the map's render pass, as the backend's
     /// type: `mln_vulkan::CustomLayerEncoder`, `mln_mtl::CustomLayerEncoder`,
@@ -53,6 +54,7 @@ pub struct CustomLayerPrerenderParameters<'a> {
 }
 
 /// What [`CustomLayerHost::render`] gets.
+#[derive(Debug)]
 pub struct CustomLayerRenderParameters<'a> {
     /// The map's render pass, as the backend's type:
     /// `mln_vulkan::CustomLayerPass`, `mln_mtl::CustomLayerPass`,

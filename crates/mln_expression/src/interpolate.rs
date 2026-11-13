@@ -61,6 +61,7 @@ fn interpolate_double(a: f64, b: f64, t: f64) -> f64 {
     a * (1.0 - t) + b * t
 }
 
+#[derive(Debug)]
 pub struct Interpolate {
     base: ExpressionBase,
     interpolator: Interpolator,

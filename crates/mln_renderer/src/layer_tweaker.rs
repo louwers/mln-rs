@@ -35,6 +35,16 @@ pub struct LayerTweakerBase {
     pub(crate) projection_uniform_buffer: Option<UniformBufferPtr>,
 }
 
+impl std::fmt::Debug for LayerTweakerBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayerTweakerBase")
+            .field("id", &self.id)
+            .field("evaluated_properties", &self.evaluated_properties)
+            .field("properties_updated", &self.properties_updated)
+            .finish_non_exhaustive()
+    }
+}
+
 impl LayerTweakerBase {
     pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         LayerTweakerBase {

@@ -28,6 +28,12 @@ pub struct BackendScope<'a> {
     activated: bool,
 }
 
+impl std::fmt::Debug for BackendScope<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackendScope").finish_non_exhaustive()
+    }
+}
+
 impl<'a> BackendScope<'a> {
     pub fn new(backend: &'a dyn RendererBackend, scope_type: ScopeType) -> Self {
         let id = backend.unique_id();

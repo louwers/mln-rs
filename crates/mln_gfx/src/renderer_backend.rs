@@ -15,6 +15,12 @@ pub struct RendererBackendBase {
     context: OnceCell<Rc<dyn Context>>,
 }
 
+impl std::fmt::Debug for RendererBackendBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RendererBackendBase").field("unique_id", &self.unique_id).finish_non_exhaustive()
+    }
+}
+
 impl Default for RendererBackendBase {
     fn default() -> Self {
         Self::new()

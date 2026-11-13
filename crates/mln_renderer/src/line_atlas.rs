@@ -199,6 +199,13 @@ enum DashTexture {
     Texture(Texture2DPtr),
 }
 
+impl std::fmt::Debug for DashTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DashTexture").finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct DashPatternTexture {
     from: LinePatternPos,
     to: LinePatternPos,
@@ -282,7 +289,7 @@ fn dash_key(from: &[f32], to: &[f32], cap: LinePatternCap) -> DashKey {
     (from.iter().map(|v| v.to_bits()).collect(), to.iter().map(|v| v.to_bits()).collect(), cap)
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct LineAtlas {
     textures: VecMap<DashKey, DashPatternTexture>,
     /// Stores a list of the texture objects that need uploading.

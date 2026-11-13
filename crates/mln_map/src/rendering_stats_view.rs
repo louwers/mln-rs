@@ -39,6 +39,7 @@ impl Default for RenderingStatsViewOptions {
 }
 
 /// Keeps a layer of the rendering stats in the style.
+#[derive(Debug)]
 pub(crate) struct RenderingStatsView {
     options: RenderingStatsViewOptions,
     last_update: Option<Instant>,

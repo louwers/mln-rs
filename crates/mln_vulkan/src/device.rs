@@ -215,6 +215,21 @@ pub struct HostDevice {
     pub enabled_extensions: Vec<CString>,
 }
 
+impl std::fmt::Debug for HostDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostDevice")
+            .field("get_instance_proc_addr", &self.get_instance_proc_addr)
+            .field("get_device_proc_addr", &self.get_device_proc_addr)
+            .field("instance", &self.instance)
+            .field("physical_device", &self.physical_device)
+            .field("device", &self.device)
+            .field("queue_family_index", &self.queue_family_index)
+            .field("queue", &self.queue)
+            .field("enabled_extensions", &self.enabled_extensions)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The library's instance, with the extensions its devices use and, when the
 /// validation layer is on, its messenger.
 //

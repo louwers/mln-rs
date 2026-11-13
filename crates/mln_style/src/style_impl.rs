@@ -973,6 +973,7 @@ fn state_values_equal(a: &Value, b: &Value) -> bool {
 
 /// A mutable layer of a style; notifies the style when dropped (see
 /// `Impl::get_layer_mut`).
+#[derive(Debug)]
 pub struct LayerRefMut<'a> {
     style: &'a mut Impl,
     id: String,
@@ -1034,6 +1035,7 @@ impl Drop for LightRefMut<'_> {
 
 /// The mutable projection of a style; notifies the style when dropped (see
 /// `Impl::get_projection_mut`).
+#[derive(Debug)]
 pub struct ProjectionRefMut<'a> {
     style: &'a mut Impl,
     before: Arc<projection::Impl>,

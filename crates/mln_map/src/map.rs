@@ -45,6 +45,7 @@ use crate::transform::{Transform, TransformObserver};
 pub(crate) type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
 
 /// A call of the style's observer.
+#[derive(Debug)]
 enum StyleEvent {
     SourceChanged(String),
     Update,
@@ -169,6 +170,40 @@ pub struct Map {
 
     /// Declared after `style`, so the style and its requests go first.
     file_source: Option<Arc<dyn FileSource>>,
+}
+
+impl std::fmt::Debug for Map {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Map")
+            .field("updates", &self.updates)
+            .field("transform", &self.transform)
+            .field("mode", &self.mode)
+            .field("pixel_ratio", &self.pixel_ratio)
+            .field("cross_source_collisions", &self.cross_source_collisions)
+            .field("fast_pfor_enabled", &self.fast_pfor_enabled)
+            .field("capture_rendered_features", &self.capture_rendered_features)
+            .field("unused_style_image_policy", &self.unused_style_image_policy)
+            .field("debug_options", &self.debug_options)
+            .field("rendering_stats_view", &self.rendering_stats_view)
+            .field("last_frame_stats", &self.last_frame_stats)
+            .field("style", &self.style)
+            .field("feature_state", &self.feature_state)
+            .field("camera_mutated", &self.camera_mutated)
+            .field("prefetch_zoom_delta", &self.prefetch_zoom_delta)
+            .field("loading", &self.loading)
+            .field("renderer_fully_loaded", &self.renderer_fully_loaded)
+            .field("still_image_request_id", &self.still_image_request_id)
+            .field("tile_lod_min_radius", &self.tile_lod_min_radius)
+            .field("tile_lod_scale", &self.tile_lod_scale)
+            .field("tile_lod_pitch_threshold", &self.tile_lod_pitch_threshold)
+            .field("tile_lod_zoom_shift", &self.tile_lod_zoom_shift)
+            .field("tile_lod_mode", &self.tile_lod_mode)
+            .field("generation", &self.generation)
+            .field("style_events", &self.style_events)
+            .field("renderer_events", &self.renderer_events)
+            .field("events", &self.events)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Map {

@@ -139,6 +139,7 @@ pub fn geojson_to_tile(
 }
 
 /// `GeoJSONVT`
+#[derive(Debug)]
 pub struct GeoJSONVT {
     pub(crate) options: Options,
     pub(crate) stats: BTreeMap<u8, u32>,

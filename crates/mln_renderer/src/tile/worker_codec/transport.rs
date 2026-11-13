@@ -58,6 +58,12 @@ pub struct ReplySink {
     transport: Arc<LocalObject<Weak<SerializingTransport>>>,
 }
 
+impl std::fmt::Debug for ReplySink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplySink").field("transport", &self.transport).finish_non_exhaustive()
+    }
+}
+
 impl ReplySink {
     /// Delivers a reply of instance `instance`.
     pub fn send(&self, instance: usize, reply: Encoded) {
@@ -83,7 +89,21 @@ pub struct SerializingTransport {
     next_instance: Cell<usize>,
 }
 
+impl std::fmt::Debug for SerializingTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SerializingTransport")
+            .field("self_weak", &self.self_weak)
+            .field("codecs", &self.codecs)
+            .field("synchronous", &self.synchronous)
+            .field("tiles", &self.tiles)
+            .field("next_tile", &self.next_tile)
+            .field("next_instance", &self.next_instance)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Where a tile's worker is, and the tile's endpoint for its replies.
+#[derive(Debug)]
 struct Route {
     instance: usize,
     tile: RouteTile,
@@ -96,6 +116,12 @@ enum RouteTile {
     Geometry(Rc<dyn TileEndpoint>),
     Raster(Rc<dyn TileEndpoint<RasterTileMessage>>),
     RasterDEM(Rc<dyn TileEndpoint<RasterDEMTileMessage>>),
+}
+
+impl std::fmt::Debug for RouteTile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouteTile").finish_non_exhaustive()
+    }
 }
 
 impl SerializingTransport {
@@ -266,6 +292,7 @@ impl Drop for RemoteWorker {
 
 /// Worker instances on threads of this process: a `TileWorkerHost` on each
 /// thread, with its workers on the thread's `RunLoop`.
+#[derive(Debug)]
 pub struct ThreadWorkerInstances {
     threads: Vec<Thread<TileWorkerHost>>,
 }

@@ -22,7 +22,7 @@ impl FreeTypeLibrary {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct FreeTypeFace {
     /// The font data the face reads from, shared with whoever handed it over
     /// (such as the response it arrived in).

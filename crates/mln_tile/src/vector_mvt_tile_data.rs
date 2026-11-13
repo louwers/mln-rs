@@ -311,6 +311,7 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
 
 /// A layer of the tile: its name and its message, as ranges of the tile's
 /// bytes.
+#[derive(Debug)]
 struct LayerEntry {
     name: Range<usize>,
     data: Range<usize>,
@@ -318,6 +319,7 @@ struct LayerEntry {
 
 /// Mapbox Vector Tile data. The layers are found lazily, on the first layer
 /// lookup, so the object can be made on the main thread cheaply.
+#[derive(Debug)]
 pub struct VectorMVTTileData {
     data: Arc<Vec<u8>>,
     /// The tile's layers in tile order. `OnceLock` (not `OnceCell`): the

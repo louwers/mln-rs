@@ -23,4 +23,10 @@ pub enum ChangeRequest {
     RemoveRenderTarget(crate::render_target::RenderTargetPtr),
 }
 
+impl std::fmt::Debug for ChangeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChangeRequest").finish_non_exhaustive()
+    }
+}
+
 pub(crate) type UniqueChangeRequestVec = Vec<ChangeRequest>;
