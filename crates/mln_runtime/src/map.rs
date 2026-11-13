@@ -3,13 +3,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use mln_actor::RunLoopHandle;
 use mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
+use mln_renderer::UpdateReader;
 use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
@@ -81,6 +82,8 @@ pub struct CameraQuery {
 /// What the runtime's thread publishes for a map's handles.
 pub(crate) struct Published {
     snapshot: Mutex<Option<MapSnapshot>>,
+    /// The map's updates for its renderer, once the map is built.
+    updates: OnceLock<UpdateReader>,
     /// The sequence number of the last command that ran.
     applied: AtomicU64,
     event_mask: AtomicU64,
@@ -105,6 +108,7 @@ impl Published {
     pub(crate) fn new(event_mask: EventMask) -> Self {
         Published {
             snapshot: Mutex::new(None),
+            updates: OnceLock::new(),
             applied: AtomicU64::new(0),
             event_mask: AtomicU64::new(event_mask.bits()),
             still_image: AtomicU64::new(0),
@@ -295,7 +299,15 @@ impl Map {
         if self.shared.released.load(Ordering::SeqCst) {
             return Err(released());
         }
-        self.shared.published.snapshot.lock().ok_or_else(|| Error::invalid_state("the map isn't built"))
+        let mut snapshot =
+            self.shared.published.snapshot.lock().ok_or_else(|| Error::invalid_state("the map isn't built"))?;
+        // The map publishes an update, which the renderer may draw at once,
+        // before it copies the snapshot: count the updates as they are now, so
+        // a frame never shows a later update than the snapshot.
+        if let Some(updates) = self.shared.published.updates.get() {
+            snapshot.update_generation = updates.generation();
+        }
+        Ok(snapshot)
     }
 
     /// The events that the map reports, as of the last command that ran.
@@ -1353,6 +1365,7 @@ pub(crate) fn create(
     {
         return outbox.resolve(resolver, Err(error));
     }
+    let _ = published.updates.set(map.update_reader());
     let flush_scheduled = Arc::new(AtomicBool::new(false));
     let scheduled = flush_scheduled.clone();
     let run_loop = core.run_loop.clone();
