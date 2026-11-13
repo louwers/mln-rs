@@ -1996,7 +1996,8 @@ impl Transform {
             }
             if let Some(delta) = part.snap_delta {
                 let duration = part.snap.unwrap_or_default().duration;
-                let t = if duration == Duration::ZERO {
+                // Without a clock, the snap ends with its command.
+                let t = if duration.is_zero() || now.is_none() {
                     1.0
                 } else {
                     mln_math::clamp_f64(elapsed.saturating_sub(part.snap_start).div_duration_f64(duration), 0.0, 1.0)

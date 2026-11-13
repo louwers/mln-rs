@@ -5188,6 +5188,18 @@ fn only_the_parts_a_gesture_changed_settle() {
 }
 
 #[test]
+fn an_animated_snap_settles_without_a_clock() {
+    let mut transform = outcome_transform();
+    transform.jump_to(&cam().with_bearing(Some(3.0)));
+    transform.apply_camera_delta(&CameraDelta { bearing: Some(1.0), ..delta(GesturePhase::Begin) }).unwrap();
+    let momentum = CameraMomentum { bearing_snap: Some(MomentumSnap::BEARING), ..CameraMomentum::default() };
+    transform.apply_camera_delta(&CameraDelta { momentum: Some(momentum), ..delta(GesturePhase::End) }).unwrap();
+    transform.update_transitions(None);
+    assert_near(bearing_degrees(&transform), 0.0, 1e-9);
+    assert!(!transform.in_transition());
+}
+
+#[test]
 fn a_delta_pans_and_zooms_around_its_anchor_and_ends_once() {
     let mut transform = outcome_transform();
     let anchor = sc(800.0, 300.0);
