@@ -176,10 +176,6 @@ generate-c-abi:
 generate-icu-tables icu_common:
     python3 -I crates/mln_text/tools/gen_icu_tables.py {{quote(icu_common)}} > crates/mln_text/src/icu/ubidi_props_data.rs
 
-# Regenerate vendor/nunicode's tables from the C++ core's vendored nunicode
-generate-nunicode-tables:
-    python3 -I vendor/nunicode/tools/gen_tables.py {{quote(cpp / 'vendor/nunicode')}} vendor/nunicode/src/tables
-
 # The spec is tools/style-codegen/v8.json, a copy of the MapLibre style spec's (`just update-style-spec` refreshes it).
 [doc("Regenerate crates/mln_style's generated style code from the style spec (checked by style-codegen's generated_code_test)")]
 generate-style-code:

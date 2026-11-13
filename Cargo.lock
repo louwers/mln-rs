@@ -2310,7 +2310,6 @@ dependencies = [
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-mtl",
- "mln-rs-nunicode",
  "mln-rs-polylabel",
  "mln-rs-renderer",
  "mln-rs-runtime",
@@ -2703,10 +2702,6 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
 ]
-
-[[package]]
-name = "mln-rs-nunicode"
-version = "0.0.11"
 
 [[package]]
 name = "mln-rs-pixelmatch"

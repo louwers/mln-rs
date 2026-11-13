@@ -76,7 +76,6 @@ mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.11" }
 mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.11" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.11" }
-nunicode = { package = "mln-rs-nunicode", path = "vendor/nunicode", version = "=0.0.11" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
 polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.11" }
 render_test = { package = "mln-rs-render-test", path = "tools/render-test", version = "=0.0.11" }
@@ -410,7 +409,6 @@ mln_vec_map.workspace = true
 mln_vulkan.workspace = true
 mln_web_host.workspace = true
 mln_webgpu.workspace = true
-nunicode.workspace = true
 polylabel.workspace = true
 shelf_pack.workspace = true
 supercluster.workspace = true
