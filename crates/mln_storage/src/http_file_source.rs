@@ -19,7 +19,7 @@
 //
 // The transfer itself is an `HttpTransport`, the platform's HTTP stack where
 // it has one: NSURLSession on Apple platforms, the browser's fetch on wasm,
-// ureq elsewhere, or another HTTP stack a host sets with `set_transport`.
+// ureq elsewhere.
 //
 // Differences (ureq): ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
@@ -188,16 +188,6 @@ pub(crate) trait HttpTransport: Send + Sync {
     fn start(&self, request: TransferRequest);
 }
 
-static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
-
-/// The transport `set_transport` set, else the default.
-fn current_transport() -> Arc<dyn HttpTransport> {
-    if let Some(transport) = TRANSPORT.lock().clone() {
-        return transport;
-    }
-    default_transport()
-}
-
 #[cfg(target_vendor = "apple")]
 fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(crate::nsurlsession_transport::NSURLSessionTransport::new())
@@ -334,12 +324,11 @@ pub(crate) struct HTTPFileSource {
 }
 
 impl HTTPFileSource {
-    /// An HTTP file source over the transport `set_transport` set, else
-    /// the platform's default.
+    /// An HTTP file source over the platform's HTTP stack.
     #[must_use]
     pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
         HTTPFileSource {
-            transport: current_transport(),
+            transport: default_transport(),
             header_transform: Mutex::new(HttpHeaderTransform::default()),
             resource_options: Mutex::new(resource_options.clone()),
         }
