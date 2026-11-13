@@ -50,9 +50,10 @@ impl DriverWork {
 
     /// Runs the session's work that is ready, and returns once none is: the
     /// attach, frames, the work that the handle sent, and the detach. The
-    /// first service builds the session's renderer. The session's
-    /// completions and wakes may run inside it, on this thread. Work that
-    /// becomes ready after it runs the wake again.
+    /// first service builds the session's renderer: in the browser, the first
+    /// once the device that the session asked WebGPU for is there. The
+    /// session's completions and wakes may run inside it, on this thread.
+    /// Work that becomes ready after it runs the wake again.
     ///
     /// Fails with [`ErrorKind::Busy`](mln_util::ErrorKind) inside a service
     /// that is running, which takes the work instead, and with
@@ -70,6 +71,12 @@ impl DriverWork {
         let abandoned = self.shared.state.lock().lifecycle == RenderSessionState::Abandoned;
         let armed = &self.shared.driver_armed;
         armed.store(true, Ordering::SeqCst);
+        if !abandoned && self.shared.preparing.load(Ordering::SeqCst) {
+            // The session's device is on its way, and the wake runs once it
+            // is here.
+            self.servicing.set(false);
+            return Ok(());
+        }
         {
             let _call = self.shared.enter_call();
             let _current = self.run_loop.enter();

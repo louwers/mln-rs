@@ -1,6 +1,8 @@
 // Drives the browser package's raw C ABI as a JavaScript host does, in a
 // module Web Worker: a runtime, a map with a GeoJSON style, a session on an
-// OffscreenCanvas, and frames until the canvas shows the style. Struct
+// OffscreenCanvas, and frames until the canvas shows the style. The session
+// runs on a core worker, or with `?driver=caller` on this thread's services
+// of its driver work. Struct
 // offsets are wasm32's (clang's layout of the headers). Posts the outcome to
 // the page.
 
@@ -8,6 +10,7 @@ const params = new URL(self.location.href).searchParams;
 // The page logs what this worker logs, and the check prints it.
 const log = (...args) => postMessage({ log: args.map(String) });
 const pkg = params.get('pkg');
+const driver = params.get('driver') ?? 'core';
 
 // Counts the tile workers' Web Workers that the library starts.
 let spawned = 0;
@@ -145,7 +148,8 @@ const results = alloc(16);
 const wake = glue.mlnWebUpcallPointer('mln_wake_callback');
 const attach = alloc(96);
 view().setUint32(attach, 96, true);
-view().setUint32(attach + 4, 1, true); // MLN_RENDER_DRIVER_CORE_WORKER
+// MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD or MLN_RENDER_DRIVER_CORE_WORKER.
+view().setUint32(attach + 4, driver === 'caller' ? 2 : 1, true);
 // The frame wake runs in the task that rendered, while the canvas still has
 // the frame.
 view().setUint32(attach + 16, wake, true);
@@ -173,6 +177,20 @@ view().setUint32(attach + 40, wake, true);
 view().setUint32(attach + 44, callback(() => {
   demandFrame();
 }), true);
+if (driver === 'caller') {
+  // The driver-work wake can run inside a library call, so the service runs
+  // in a microtask of its own.
+  let queued = false;
+  view().setUint32(attach + 64, wake, true);
+  view().setUint32(attach + 68, callback(() => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      check(wasm.mln_render_session_service_driver_work(session, prepare()), 'mln_render_session_service_driver_work');
+    });
+  }), true);
+}
 const attached = completion();
 out = alloc(8);
 check(wasm.mln_map_attach(map, target, 0n, attach, out, attached.pointer, prepare()), 'mln_map_attach');

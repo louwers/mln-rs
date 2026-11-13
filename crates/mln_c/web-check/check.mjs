@@ -2,7 +2,8 @@
 // Chromium and drives its raw C ABI from a module Web Worker (worker.js), as
 // a JavaScript host does: a runtime, a map whose GeoJSON layer the tile
 // workers lay out, and frames on an OffscreenCanvas until it shows the
-// layer. Fails when the canvas never does, or the library starts no tile
+// layer, once with the session on a core worker and once driven by the
+// worker's own services. Fails when the canvas never does, or the library starts no tile
 // worker, or the page or a worker logs an error.
 //
 // Usage: node crates/mln_c/web-check/check.mjs <package dir> <backend>
@@ -124,31 +125,36 @@ socket.onmessage = ({ data }) => {
 
 let failed = false;
 try {
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
-  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId);
-  await send('Runtime.enable', {}, sessionId);
-  await send('Page.navigate', { url: `${origin}/index.html?pkg=/pkg&backend=${backend}` }, sessionId);
-  let result;
-  for (const deadline = Date.now() + 120000; Date.now() < deadline;) {
-    const evaluated = await send(
-      'Runtime.evaluate',
-      { expression: 'window.result', awaitPromise: true, returnByValue: true },
-      sessionId,
-    );
-    result = evaluated.result.value;
-    if (result !== undefined) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  console.log(`${backend}: ${JSON.stringify(result)}`);
-  if (!result?.ok) failed = true;
-  else if (result.spawned === 0) {
-    console.log(`${backend}: the library started no tile worker`);
-    failed = true;
-  }
-  if (errors.length) {
-    console.log(`${backend}: errors in the page or its workers:\n  ${errors.join('\n  ')}`);
-    failed = true;
+  for (const driver of ['core', 'caller']) {
+    const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+    const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+    await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId);
+    await send('Runtime.enable', {}, sessionId);
+    await send('Page.navigate', { url: `${origin}/index.html?pkg=/pkg&backend=${backend}&driver=${driver}` }, sessionId);
+    let result;
+    for (const deadline = Date.now() + 120000; Date.now() < deadline;) {
+      const evaluated = await send(
+        'Runtime.evaluate',
+        { expression: 'window.result', awaitPromise: true, returnByValue: true },
+        sessionId,
+      );
+      result = evaluated.result.value;
+      if (result !== undefined) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const label = `${backend}, ${driver} driver`;
+    console.log(`${label}: ${JSON.stringify(result)}`);
+    if (!result?.ok) failed = true;
+    else if (result.spawned === 0) {
+      console.log(`${label}: the library started no tile worker`);
+      failed = true;
+    }
+    if (errors.length) {
+      console.log(`${label}: errors in the page or its workers:\n  ${errors.join('\n  ')}`);
+      errors.length = 0;
+      failed = true;
+    }
+    await send('Target.closeTarget', { targetId });
   }
 } finally {
   socket.close();

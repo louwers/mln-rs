@@ -295,6 +295,10 @@ pub(crate) struct SessionShared {
     /// ran a command only from that one on, so a command that no work waits
     /// for wakes no caller's driver.
     pub(crate) awaited_command: Arc<AtomicU64>,
+    /// In the browser, whether a caller-driven session waits for the device
+    /// that it asked the browser's WebGPU for: its services build nothing
+    /// until the device is there, and the driver-work wake runs then.
+    pub(crate) preparing: AtomicBool,
 }
 
 impl SessionShared {
@@ -849,6 +853,7 @@ fn attach_unlocked<R>(
         driver_work_taken: AtomicBool::new(false),
         driver_armed,
         awaited_command: Arc::new(AtomicU64::new(u64::MAX)),
+        preparing: AtomicBool::new(false),
         in_call: AtomicBool::new(false),
         sending: Mutex::new(()),
     });
@@ -877,6 +882,8 @@ fn attach_unlocked<R>(
         return Err(error);
     }
     if options.driver == Driver::CallerThread {
+        #[cfg(target_family = "wasm")]
+        prepare_caller_driven(session.shared());
         // The first service builds the renderer, which is work that is ready
         // now: this wakes the host, unless the map's first update, posted
         // from the runtime's thread, woke it already.
@@ -942,6 +949,23 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
         });
     });
     Ok(std::thread::current().id())
+}
+
+/// In the browser, asks for the device that a caller-driven session's build
+/// needs, as a core worker does before it builds, and wakes the host to
+/// service the session once the device is there.
+#[cfg(target_family = "wasm")]
+fn prepare_caller_driven(shared: &Arc<SessionShared>) {
+    shared.preparing.store(true, Ordering::SeqCst);
+    let prepared = worker::prepare(shared);
+    let shared = Arc::downgrade(shared);
+    wasm_bindgen_futures::spawn_local(async move {
+        prepared.await;
+        if let Some(shared) = shared.upgrade() {
+            shared.preparing.store(false, Ordering::SeqCst);
+            shared.run_loop.invoke(|| {});
+        }
+    });
 }
 
 impl RenderSession {
