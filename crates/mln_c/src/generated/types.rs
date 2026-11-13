@@ -1890,17 +1890,6 @@ pub struct mln_camera_query_result {
     pub generation: u64,
     pub camera: mln_camera,
 }
-/** A JavaScript object that you lent the library, as a handle into the object
- table of the module instance that you loaded. 0 names no object.
-
- Make one with the module's JavaScript export `mlnWebObjectInsert(value)`. A
- handle is valid only in the instance that made it.
-
- A call that takes a handle takes its own reference to the object before it
- returns, so you may release the handle right after the call. A handle that
- the library gives you is valid until the release of the object that it came
- from, such as an acquired frame. Don't release those.*/
-pub type mln_web_object = u32;
 /** Tells the caller that work is ready for it.
 
  One call can stand for several pieces of ready work, so take all of it each
@@ -1922,6 +1911,17 @@ pub struct mln_wake {
     pub release_user_data: mln_user_data_release,
     pub queue: mln_delivery_queue,
 }
+/** A JavaScript object that you lent the library, as a handle into the object
+ table of the module instance that you loaded. 0 names no object.
+
+ Make one with the module's JavaScript export `mlnWebObjectInsert(value)`. A
+ handle is valid only in the instance that made it.
+
+ A call that takes a handle takes its own reference to the object before it
+ returns, so you may release the handle right after the call. A handle that
+ the library gives you is valid until the release of the object that it came
+ from, such as an acquired frame. Don't release those.*/
+pub type mln_web_object = u32;
 /// A Vulkan non-dispatchable handle, such as a `VkImage`, as an integer.
 pub type mln_vulkan_non_dispatchable_handle = u64;
 /// A library thread.
@@ -3226,8 +3226,8 @@ pub struct mln_custom_layer_render_parameters {
     pub pass: mln_custom_layer_pass_data,
     pub frame: mln_custom_layer_frame,
     /** The depth that a 2D layer at the layer's place in the style writes, as
- mln_frame_projection describes, between `frame.frame_projection.far_depth` and
- 1.
+ mln_frame_projection describes, between `frame.frame_projection.far_depth`
+ and 1.
 
  The map draws the opaque fragments of its 2D layers before the render
  callback runs, those above the custom layer too. A fragment that you draw
@@ -3260,8 +3260,8 @@ pub type mln_custom_layer_prerender_callback = ::core::option::Option<
  The map draws its layers below the custom layer before the callback, and
  those above it after, except for the opaque fragments of 2D layers, which it
  draws before either, as mln_custom_layer_render_parameters.layer_depth
- describes. Draw through `frame.frame_projection.matrix` to depth-test against the
- map's 3D layers.
+ describes. Draw through `frame.frame_projection.matrix` to depth-test against
+ the map's 3D layers.
 
  Threads:
  Runs on the thread that runs the session's graphics work, as

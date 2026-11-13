@@ -56,8 +56,9 @@ MLN_API void* mln_web_alloc(size_t size, size_t align) MLN_NOEXCEPT;
  * Freeing null does nothing.
  */
 MLN_BINDING("platforms=web")
-MLN_API void mln_web_free(void* pointer, size_t size, size_t align)
-  MLN_NOEXCEPT;
+MLN_API void mln_web_free(
+  void* pointer, size_t size, size_t align
+) MLN_NOEXCEPT;
 
 #ifdef __cplusplus
 }

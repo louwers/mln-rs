@@ -1196,8 +1196,8 @@ typedef struct mln_custom_layer_render_parameters {
   mln_custom_layer_frame frame;
   /**
    * The depth that a 2D layer at the layer's place in the style writes, as
-   * mln_frame_projection describes, between `frame.frame_projection.far_depth` and
-   * 1.
+   * mln_frame_projection describes, between `frame.frame_projection.far_depth`
+   * and 1.
    *
    * The map draws the opaque fragments of its 2D layers before the render
    * callback runs, those above the custom layer too. A fragment that you draw
@@ -1234,8 +1234,8 @@ typedef void (*mln_custom_layer_prerender_callback)(
  * The map draws its layers below the custom layer before the callback, and
  * those above it after, except for the opaque fragments of 2D layers, which it
  * draws before either, as mln_custom_layer_render_parameters.layer_depth
- * describes. Draw through `frame.frame_projection.matrix` to depth-test against the
- * map's 3D layers.
+ * describes. Draw through `frame.frame_projection.matrix` to depth-test against
+ * the map's 3D layers.
  *
  * Threads:
  * Runs on the thread that runs the session's graphics work, as
