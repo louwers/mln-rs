@@ -14,10 +14,143 @@ use crate::tile::tile::Tile;
 
 /// The feature state of a map's sources, as the map's updates carry it: by
 /// source ID, the state of each source layer's features, where the empty
-/// source layer stands for none. A source without state has no entry, and no
-/// entry holds an empty state. Each source's state is shared, so an update
-/// shares the state of the sources it leaves alone with the update before.
-pub type FeatureStatesBySource = BTreeMap<String, Arc<LayerFeatureStates>>;
+/// source layer stands for none. A source without state has no entry. An
+/// update shares the state of the sources it leaves alone with the update
+/// before.
+pub type FeatureStatesBySource = BTreeMap<String, SourceFeatureStates>;
+
+/// A source's feature state, as of its newest change: a whole state, and the
+/// changes made since it, newest first. A renderer that holds an older
+/// value of the same source applies only the changes in between.
+///
+/// Cloning is cheap: the state and its changes are shared.
+#[derive(Clone, Debug)]
+pub struct SourceFeatureStates(Arc<StatesNode>);
+
+#[derive(Debug)]
+enum StatesNode {
+    Whole(LayerFeatureStates),
+    /// One feature's new state, empty for none.
+    Change {
+        source_layer: String,
+        feature_id: String,
+        state: FeatureState,
+        /// Only `None` while the node drops.
+        previous: Option<SourceFeatureStates>,
+    },
+}
+
+/// One feature's new state in a chain of changes.
+struct Change<'a> {
+    source_layer: &'a str,
+    feature_id: &'a str,
+    state: &'a FeatureState,
+}
+
+impl SourceFeatureStates {
+    /// The state `states`, whole.
+    #[must_use]
+    pub fn new(states: LayerFeatureStates) -> Self {
+        SourceFeatureStates(Arc::new(StatesNode::Whole(states)))
+    }
+
+    /// This state with the feature `feature_id` of `source_layer` taking
+    /// `state`, the whole of its new state, empty for none.
+    #[must_use]
+    pub fn with_change(&self, source_layer: &str, feature_id: &str, state: FeatureState) -> Self {
+        SourceFeatureStates(Arc::new(StatesNode::Change {
+            source_layer: source_layer.to_owned(),
+            feature_id: feature_id.to_owned(),
+            state,
+            previous: Some(self.clone()),
+        }))
+    }
+
+    /// Whether `self` and `other` are the same value, not just equal ones.
+    #[must_use]
+    pub fn ptr_eq(&self, other: &SourceFeatureStates) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// The feature's state, empty when it has none. Walks the changes since
+    /// the whole state, so it costs as many steps as there are changes.
+    #[must_use]
+    pub fn get(&self, source_layer: &str, feature_id: &str) -> FeatureState {
+        let mut node = self;
+        loop {
+            match &*node.0 {
+                StatesNode::Whole(states) => {
+                    return states
+                        .get(source_layer)
+                        .and_then(|layer| layer.get(feature_id))
+                        .cloned()
+                        .unwrap_or_default();
+                }
+                StatesNode::Change { source_layer: layer, feature_id: id, state, previous } => {
+                    if layer == source_layer && id == feature_id {
+                        return state.clone();
+                    }
+                    node = previous.as_ref().expect("a change has a previous state");
+                }
+            }
+        }
+    }
+
+    /// The whole state this one builds on, and the changes since it, oldest
+    /// first.
+    fn base(&self) -> (&LayerFeatureStates, Vec<Change<'_>>) {
+        let mut changes = Vec::new();
+        let mut node = self;
+        loop {
+            match &*node.0 {
+                StatesNode::Whole(states) => {
+                    changes.reverse();
+                    return (states, changes);
+                }
+                StatesNode::Change { source_layer, feature_id, state, previous } => {
+                    changes.push(Change { source_layer, feature_id, state });
+                    node = previous.as_ref().expect("a change has a previous state");
+                }
+            }
+        }
+    }
+
+    /// The changes from `older` to this state, oldest first, or `None` when
+    /// this state doesn't build on `older` through changes alone.
+    fn changes_since(&self, older: &SourceFeatureStates) -> Option<Vec<Change<'_>>> {
+        let mut changes = Vec::new();
+        let mut node = self;
+        while !Arc::ptr_eq(&node.0, &older.0) {
+            let StatesNode::Change { source_layer, feature_id, state, previous } = &*node.0 else {
+                return None;
+            };
+            changes.push(Change { source_layer, feature_id, state });
+            node = previous.as_ref().expect("a change has a previous state");
+        }
+        changes.reverse();
+        Some(changes)
+    }
+}
+
+impl Drop for StatesNode {
+    // A chain of changes drops one node at a time, not by recursion, which
+    // a long chain would overflow the stack with.
+    fn drop(&mut self) {
+        let StatesNode::Change { previous, .. } = self else {
+            return;
+        };
+        let mut next = previous.take();
+        while let Some(node) = next {
+            next = match Arc::try_unwrap(node.0) {
+                Ok(mut node) => match &mut node {
+                    StatesNode::Change { previous, .. } => previous.take(),
+                    StatesNode::Whole(_) => None,
+                },
+                Err(_) => None,
+            };
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct SourceFeatureState {
@@ -27,7 +160,10 @@ pub(crate) struct SourceFeatureState {
     /// Goes up in each `coalesce_changes` call that has changes.
     version: u64,
     /// The state that [`set_states`](Self::set_states) last gave the source.
-    given: Option<Arc<LayerFeatureStates>>,
+    given: Option<SourceFeatureStates>,
+    /// Whether the renderer's own calls changed the state since the source
+    /// was last given a state whole, so it no longer holds `given` alone.
+    changed_since_given: bool,
 }
 
 impl SourceFeatureState {
@@ -37,6 +173,7 @@ impl SourceFeatureState {
     }
 
     pub(crate) fn update_state(&mut self, source_layer_id: Option<&str>, feature_id: &str, new_state: &FeatureState) {
+        self.changed_since_given = true;
         let source_layer = source_layer_id.unwrap_or("").to_owned();
         for (key, value) in new_state {
             let layer_states = self.state_changes.entry(source_layer.clone()).or_default();
@@ -95,50 +232,55 @@ impl SourceFeatureState {
     /// Makes the source's state `states`, `None` for no state, as of the next
     /// `coalesce_changes`, in place of whatever it held or had queued. A
     /// source given the same `states` again changes nothing, so a map's
-    /// update can give every source its state each time.
-    pub(crate) fn set_states(&mut self, states: Option<&Arc<LayerFeatureStates>>) {
-        let unchanged = match (&self.given, states) {
-            (None, None) => true,
-            (Some(given), Some(states)) => Arc::ptr_eq(given, states),
-            _ => false,
+    /// update can give every source its state each time. A state that builds
+    /// on the one given before, by changes alone, costs only those changes.
+    pub(crate) fn set_states(&mut self, states: Option<&SourceFeatureStates>) {
+        let changes = match (&self.given, states) {
+            (None, None) => return,
+            (Some(given), Some(states)) if Arc::ptr_eq(&given.0, &states.0) => return,
+            (Some(given), Some(states)) if !self.changed_since_given => states.changes_since(given),
+            _ => None,
         };
-        if unchanged {
-            return;
+        match changes {
+            Some(changes) => {
+                for change in changes {
+                    self.retarget_feature(change.source_layer, change.feature_id, change.state);
+                }
+            }
+            None => self.set_whole_states(states),
         }
         self.given = states.cloned();
+    }
+
+    /// Queues the changes and removals that take the current state to
+    /// `states`, in place of whatever was queued.
+    fn set_whole_states(&mut self, states: Option<&SourceFeatureStates>) {
+        self.changed_since_given = false;
         self.state_changes.clear();
         self.deleted_states.clear();
         let empty = LayerFeatureStates::new();
-        let target = states.map_or(&empty, |states| &**states);
-        let target_state = |source_layer: &str, feature_id: &str| {
-            target.get(source_layer).and_then(|layer| layer.get(feature_id)).filter(|state| !state.is_empty())
+        let (base, changes) = states.map_or((&empty, Vec::new()), SourceFeatureStates::base);
+        // The features the changes leave alone take their base state, and
+        // each changed feature its newest.
+        let changed: HashMap<(&str, &str), &FeatureState> =
+            changes.iter().map(|change| ((change.source_layer, change.feature_id), change.state)).collect();
+        let target_state = |source_layer: &str, feature_id: &str| -> Option<&FeatureState> {
+            match changed.get(&(source_layer, feature_id)) {
+                Some(state) => Some(*state),
+                None => base.get(source_layer).and_then(|layer| layer.get(feature_id)),
+            }
+            .filter(|state| !state.is_empty())
         };
 
-        // The keys that change or go, as changes and removals of keys that
-        // `coalesce_changes` applies to the current state.
-        for (source_layer, features) in target {
-            let current_layer = self.current_states.get(source_layer);
+        for (source_layer, features) in base {
             for (feature_id, state) in features {
-                let current = current_layer.and_then(|layer| layer.get(feature_id));
-                let changed: FeatureState = state
-                    .iter()
-                    .filter(|(key, value)| current.and_then(|current| current.get(*key)) != Some(*value))
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect();
-                if !changed.is_empty() {
-                    self.state_changes.entry(source_layer.clone()).or_default().insert(feature_id.clone(), changed);
-                }
-                let removed: FeatureState = current
-                    .into_iter()
-                    .flat_map(|current| current.keys())
-                    .filter(|key| !state.contains_key(*key))
-                    .map(|key| (key.clone(), feature::Value::default()))
-                    .collect();
-                // An empty state removes every key below.
-                if !removed.is_empty() && !state.is_empty() {
-                    self.deleted_states.entry(source_layer.clone()).or_default().insert(feature_id.clone(), removed);
+                if !changed.contains_key(&(source_layer.as_str(), feature_id.as_str())) {
+                    self.queue_feature_diff(source_layer, feature_id, state);
                 }
             }
+        }
+        for (&(source_layer, feature_id), state) in &changed {
+            self.queue_feature_diff(source_layer, feature_id, state);
         }
         // The features whose state goes whole. An empty removal map would
         // remove the whole source layer, so each entry names its feature.
@@ -151,6 +293,57 @@ impl SourceFeatureState {
                         .insert(feature_id.clone(), FeatureState::new());
                 }
             }
+        }
+    }
+
+    /// Queues what takes the feature's current state to `state`, which an
+    /// empty state leaves to the removals of features whose state goes
+    /// whole.
+    fn queue_feature_diff(&mut self, source_layer: &str, feature_id: &str, state: &FeatureState) {
+        let current = self.current_states.get(source_layer).and_then(|layer| layer.get(feature_id));
+        let changed: FeatureState = state
+            .iter()
+            .filter(|(key, value)| current.and_then(|current| current.get(*key)) != Some(*value))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let removed: FeatureState = current
+            .into_iter()
+            .flat_map(|current| current.keys())
+            .filter(|key| !state.contains_key(*key))
+            .map(|key| (key.clone(), feature::Value::default()))
+            .collect();
+        if !changed.is_empty() {
+            self.state_changes.entry(source_layer.to_owned()).or_default().insert(feature_id.to_owned(), changed);
+        }
+        // An empty state removes every key below.
+        if !removed.is_empty() && !state.is_empty() {
+            self.deleted_states.entry(source_layer.to_owned()).or_default().insert(feature_id.to_owned(), removed);
+        }
+    }
+
+    /// Makes the feature's state `state`, empty for none, in place of what
+    /// was queued for it. Only the map's states are queued here, so no
+    /// removal covers a whole source layer.
+    fn retarget_feature(&mut self, source_layer: &str, feature_id: &str, state: &FeatureState) {
+        if let Some(layer) = self.state_changes.get_mut(source_layer) {
+            layer.remove(feature_id);
+            if layer.is_empty() {
+                self.state_changes.remove(source_layer);
+            }
+        }
+        if let Some(layer) = self.deleted_states.get_mut(source_layer) {
+            layer.remove(feature_id);
+            if layer.is_empty() {
+                self.deleted_states.remove(source_layer);
+            }
+        }
+        self.queue_feature_diff(source_layer, feature_id, state);
+        let current = self.current_states.get(source_layer).and_then(|layer| layer.get(feature_id));
+        if state.is_empty() && current.is_some_and(|current| !current.is_empty()) {
+            self.deleted_states
+                .entry(source_layer.to_owned())
+                .or_default()
+                .insert(feature_id.to_owned(), FeatureState::new());
         }
     }
 
@@ -251,6 +444,7 @@ impl SourceFeatureState {
         feature_id: Option<&str>,
         state_key: Option<&str>,
     ) {
+        self.changed_since_given = true;
         let source_layer = source_layer_id.unwrap_or("");
 
         let layer_deletions = self.deleted_states.get(source_layer);
@@ -369,7 +563,7 @@ mod tests {
 
     /// The source layer `layer` whose features take `states`, as a map's
     /// update carries it, and its features.
-    fn states_of(states: &[&FeatureState]) -> (Arc<LayerFeatureStates>, FeatureStates) {
+    fn states_of(states: &[&FeatureState]) -> (SourceFeatureStates, FeatureStates) {
         let features: FeatureStates = FEATURES
             .iter()
             .zip(states)
@@ -381,7 +575,7 @@ mod tests {
         } else {
             [("layer".to_owned(), features.clone())].into_iter().collect()
         };
-        (Arc::new(layers), features)
+        (SourceFeatureStates::new(layers), features)
     }
 
     impl Tile for StubTile {
@@ -618,7 +812,8 @@ mod tests {
                     render_frame(&mut state, &[&tile]);
                     apply(&mut state, &mut FeatureStates::new(), op);
                     // A copy, as the same state again changes nothing.
-                    state.set_states(Some(&Arc::new((**second).clone())));
+                    let (copy, _) = states_of(&[&second.get("layer", "1"), &second.get("layer", "2")]);
+                    state.set_states(Some(&copy));
                     let context = format!("from {first:?} by {op:?} to {second:?}");
                     assert_state(&state, expected, &format!("before rendering, {context}"));
                     render_frame(&mut state, &[&tile]);
@@ -627,5 +822,105 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `base` with each `(feature, state)` of `changes` applied as a change.
+    fn changed(base: &SourceFeatureStates, changes: &[(&str, &FeatureState)]) -> SourceFeatureStates {
+        changes
+            .iter()
+            .fold(base.clone(), |states, (feature, state)| states.with_change("layer", feature, (*state).clone()))
+    }
+
+    // From every state to every other through a chain of two changes, given
+    // one at a time with or without a render between, or together, the
+    // source holds and draws the newest state, as a whole state would leave
+    // it.
+    #[test]
+    fn changes_since_the_given_state_apply_as_the_whole_state_would() {
+        let options = feature_states();
+        let starts: Vec<_> =
+            options.iter().flat_map(|one| options.iter().map(move |two| states_of(&[one, two]))).collect();
+        for (start, start_expected) in &starts {
+            for first in FEATURES {
+                for first_state in &options {
+                    for second in FEATURES {
+                        for second_state in &options {
+                            for between in ["render", "no render", "together"] {
+                                let mut state = SourceFeatureState::new();
+                                let tile = StubTile::new(0);
+                                state.set_states(Some(start));
+                                render_frame(&mut state, &[&tile]);
+                                let one = changed(start, &[(first, first_state)]);
+                                if between != "together" {
+                                    state.set_states(Some(&one));
+                                }
+                                if between == "render" {
+                                    render_frame(&mut state, &[&tile]);
+                                }
+                                let two = changed(&one, &[(second, second_state)]);
+                                state.set_states(Some(&two));
+                                let mut expected = start_expected.clone();
+                                for (feature, feature_state) in [(first, first_state), (second, second_state)] {
+                                    if feature_state.is_empty() {
+                                        expected.remove(feature);
+                                    } else {
+                                        expected.insert(feature.to_owned(), feature_state.clone());
+                                    }
+                                }
+                                let context = format!(
+                                    "from {start_expected:?}: {first} to {first_state:?}, then {second} to \
+                                     {second_state:?}, {between}"
+                                );
+                                assert_state(&state, &expected, &format!("before rendering, {context}"));
+                                render_frame(&mut state, &[&tile]);
+                                assert_state(&state, &expected, &format!("after rendering, {context}"));
+                                assert_eq!(tile.drawn(), expected, "drawn, {context}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // A tile that holds the previous frame gets only the changed feature.
+    #[test]
+    fn a_change_reaches_the_tiles_alone() {
+        let mut state = SourceFeatureState::new();
+        let tile = StubTile::new(0);
+        let (start, _) = states_of(&[&hover(), &hover()]);
+        state.set_states(Some(&start));
+        render_frame(&mut state, &[&tile]);
+        state.set_states(Some(&changed(&start, &[("2", &FeatureState::new())])));
+        render_frame(&mut state, &[&tile]);
+        assert_eq!(2, tile.applied_count());
+        assert_eq!(vec!["2"], tile.applied(1)["layer"].keys().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    // The map's state wins over the renderer's own calls, also when the
+    // map's next state is only a change: the source takes it whole.
+    #[test]
+    fn a_change_after_the_renderers_own_call_takes_the_whole_state() {
+        let mut state = SourceFeatureState::new();
+        let tile = StubTile::new(0);
+        let (start, _) = states_of(&[&hover(), &FeatureState::new()]);
+        state.set_states(Some(&start));
+        render_frame(&mut state, &[&tile]);
+        state.update_state(Some("layer"), "2", &hover());
+        render_frame(&mut state, &[&tile]);
+        state.set_states(Some(&changed(&start, &[("1", &FeatureState::new())])));
+        render_frame(&mut state, &[&tile]);
+        assert!(tile.drawn().is_empty());
+        assert!(state.get_state(Some("layer"), "2").is_empty());
+    }
+
+    // Dropping a long chain of changes doesn't overflow the stack.
+    #[test]
+    fn a_long_chain_of_changes_drops() {
+        let mut states = SourceFeatureStates::new(LayerFeatureStates::new());
+        for index in 0..1_000_000 {
+            states = states.with_change("layer", "1", if index % 2 == 0 { hover() } else { FeatureState::new() });
+        }
+        drop(states);
     }
 }

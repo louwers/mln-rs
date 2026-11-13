@@ -112,6 +112,7 @@ pub fn all() -> Vec<Case> {
     cases.push(Case::new("Frame/AddImages", frame_add_images));
     cases.push(Case::new("Frame/FeatureState", frame_feature_state));
     cases.push(Case::new("Frame/FeatureStateHover", frame_feature_state_hover));
+    cases.push(Case::new("Frame/MapFeatureStateHover", frame_map_feature_state_hover));
     cases.push(Case::new("Frame/HideLayers", frame_hide_layers));
     for (name, data_driven) in [("Frame/Extrusions", false), ("Frame/Extrusions/DataDriven", true)] {
         cases.push(Case::new(name, move |cx| frame_extrusions(cx, name, data_driven)));
@@ -360,6 +361,67 @@ fn frame_feature_state_hover(cx: &Context) -> Metrics {
     }
     if let Some(dir) = &cx.frames {
         write_frame(dir, "Frame/FeatureStateHover", &scene.read_frame());
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Frames of a GeoJSON source of 100,000 points, every one given a state
+/// through the map, with one point's state changing through the map in
+/// every frame, as hover highlighting over a large dataset does.
+fn frame_map_feature_state_hover(cx: &Context) -> Metrics {
+    const POINTS: usize = 100_000;
+    let features: Vec<serde_json::Value> = (0..POINTS)
+        .map(|index| {
+            let (x, y) = (index % 400, index / 400);
+            serde_json::json!({
+                "type": "Feature",
+                "id": index,
+                "geometry": {"type": "Point", "coordinates": [-1.0 + x as f64 * 0.005, -0.6 + y as f64 * 0.005]},
+                "properties": {},
+            })
+        })
+        .collect();
+    let style = serde_json::json!({
+        "version": 8,
+        "sources": {"points": {"type": "geojson", "data": {"type": "FeatureCollection", "features": features}}},
+        "layers": [
+            {"id": "background", "type": "background", "paint": {"background-color": "#ffffff"}},
+            {
+                "id": "points",
+                "type": "circle",
+                "source": "points",
+                "paint": {
+                    "circle-radius": 2,
+                    "circle-color": ["case", ["boolean", ["feature-state", "selected"], false], "#e55e5e", "#3887be"],
+                },
+            },
+        ],
+    });
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(LatLng::new(0.0, 0.0).expect("a valid center"), 7.0);
+    scene.load_json(&style.to_string());
+    scene.settle();
+    scene.held(|scene| {
+        for index in 0..POINTS {
+            scene.set_map_feature_state("points", &index.to_string(), index % 2 == 0);
+        }
+    });
+    scene.settle();
+    let mut meter = Meter::new();
+    for index in 0..cx.iterations(100) {
+        let id = (index * 7919 % POINTS).to_string();
+        meter.time(|| {
+            scene.set_map_feature_state("points", &id, index % 2 == 1);
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/MapFeatureStateHover", &scene.read_frame());
     }
     let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
     let mut metrics = meter.finish();

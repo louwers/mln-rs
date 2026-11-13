@@ -448,6 +448,22 @@ impl Scene {
         });
     }
 
+    /// Sets `selected` on a feature through the map, as an app does: the
+    /// map sends its state to the renderer with its next update.
+    pub(crate) fn set_map_feature_state(&mut self, source: &str, id: &str, selected: bool) {
+        let mut state = ValueObject::new();
+        state.insert("selected".to_string(), Value::Bool(selected));
+        self.map.set_feature_state(source, None, id, state);
+    }
+
+    /// Runs `change` with the map's updates held, so its changes reach the
+    /// renderer in one update.
+    pub(crate) fn held(&mut self, change: impl FnOnce(&mut Scene)) {
+        self.map.hold_updates();
+        change(self);
+        self.map.release_updates();
+    }
+
     /// Sets the `selected` state of one feature.
     pub(crate) fn select_feature(&self, source: &str, source_layer: &str, id: &str, selected: bool) {
         self.frontend.with_renderer(|renderer| {

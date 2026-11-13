@@ -116,7 +116,7 @@ fn hover(value: bool) -> FeatureState {
 /// The `hover` state of `points`' feature `1` that the latest update carries.
 fn carried_hover(reader: &UpdateReader) -> Option<Value> {
     let update = reader.latest().expect("an update");
-    let state = update.parameters.feature_states.get("points")?.get("")?.get("1")?.get("hover")?.clone();
+    let state = update.parameters.feature_states.get("points")?.get("", "1").get("hover")?.clone();
     Some(state)
 }
 

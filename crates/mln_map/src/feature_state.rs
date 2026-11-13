@@ -1,42 +1,71 @@
 //! The feature state that a map keeps for its sources' features, and sends to
 //! its renderer with each update.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use mln_renderer::bucket::LayerFeatureStates;
-use mln_renderer::source_state::FeatureStatesBySource;
+use mln_renderer::source_state::{FeatureStatesBySource, SourceFeatureStates};
 use mln_style::expression::expression::FeatureState;
 
 /// A map's feature state, by source, source layer and feature ID, where the
 /// empty source layer stands for none. It keeps no empty entry, so a removal
 /// leaves no trace.
 ///
-/// The state is copied on write: an update shares it until the store
-/// changes, and then shares the sources that the change leaves alone.
+/// An update carries each source's state as a [`SourceFeatureStates`]: a
+/// whole state and the changes since it, so a change costs the renderer only
+/// that change. Once a source's changes outnumber the features with state,
+/// its next change starts again from the whole state, which bounds both the
+/// changes kept and the work a renderer that missed them redoes.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FeatureStateStore {
-    sources: Arc<FeatureStatesBySource>,
+    sources: BTreeMap<String, Source>,
+    /// The state as updates carry it, shared until the store changes.
+    shared: Arc<FeatureStatesBySource>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct Source {
+    states: LayerFeatureStates,
+    /// The features with state.
+    features: usize,
+    /// The changes since the whole state in `shared`.
+    changes: usize,
 }
 
 impl FeatureStateStore {
     /// The state as an update carries it.
     pub(crate) fn shared(&self) -> Arc<FeatureStatesBySource> {
-        Arc::clone(&self.sources)
+        Arc::clone(&self.shared)
     }
 
-    fn layers(&self, source_id: &str) -> Option<&LayerFeatureStates> {
-        self.sources.get(source_id).map(|layers| &**layers)
+    fn feature(&self, source_id: &str, source_layer_id: &str, feature_id: &str) -> Option<&FeatureState> {
+        self.sources.get(source_id)?.states.get(source_layer_id)?.get(feature_id)
     }
 
-    /// The source's state, to change.
-    fn layers_mut(&mut self, source_id: &str) -> &mut LayerFeatureStates {
-        Arc::make_mut(Arc::make_mut(&mut self.sources).entry(source_id.to_owned()).or_default())
+    /// Publishes the feature's state, as it now is, in `shared`.
+    fn publish(&mut self, source_id: &str, source_layer_id: &str, feature_id: &str) {
+        let source = self.sources.get_mut(source_id).expect("a changed source has an entry");
+        let state = source.states.get(source_layer_id).and_then(|layer| layer.get(feature_id)).cloned();
+        let shared = Arc::make_mut(&mut self.shared);
+        let published = match shared.get(source_id) {
+            Some(published) if source.changes < source.features.max(16) => {
+                source.changes += 1;
+                published.with_change(source_layer_id, feature_id, state.unwrap_or_default())
+            }
+            _ => {
+                source.changes = 0;
+                SourceFeatureStates::new(source.states.clone())
+            }
+        };
+        shared.insert(source_id.to_owned(), published);
     }
 
     /// Drops the source's entry when it holds no state.
     fn prune(&mut self, source_id: &str) {
-        if self.layers(source_id).is_some_and(LayerFeatureStates::is_empty) {
-            Arc::make_mut(&mut self.sources).remove(source_id);
+        if self.sources.get(source_id).is_some_and(|source| source.features == 0) {
+            self.sources.remove(source_id);
+            Arc::make_mut(&mut self.shared).remove(source_id);
         }
     }
 
@@ -49,7 +78,7 @@ impl FeatureStateStore {
         feature_id: &str,
         state: FeatureState,
     ) -> bool {
-        let current = self.layers(source_id).and_then(|layers| layers.get(source_layer_id)?.get(feature_id));
+        let current = self.feature(source_id, source_layer_id, feature_id);
         let changed: FeatureState = state
             .into_iter()
             .filter(|(key, value)| current.and_then(|current| current.get(key)) != Some(value))
@@ -57,24 +86,22 @@ impl FeatureStateStore {
         if changed.is_empty() {
             return false;
         }
-        let feature = self
-            .layers_mut(source_id)
-            .entry(source_layer_id.to_owned())
-            .or_default()
-            .entry(feature_id.to_owned())
-            .or_default();
+        let source = self.sources.entry(source_id.to_owned()).or_default();
+        let layer = source.states.entry(source_layer_id.to_owned()).or_default();
+        if !layer.contains_key(feature_id) {
+            source.features += 1;
+        }
+        let feature = layer.entry(feature_id.to_owned()).or_default();
         for (key, value) in changed {
             feature.insert(key, value);
         }
+        self.publish(source_id, source_layer_id, feature_id);
         true
     }
 
     /// The feature's state, empty when it has none.
     pub(crate) fn get(&self, source_id: &str, source_layer_id: &str, feature_id: &str) -> FeatureState {
-        self.layers(source_id)
-            .and_then(|layers| layers.get(source_layer_id)?.get(feature_id))
-            .cloned()
-            .unwrap_or_default()
+        self.feature(source_id, source_layer_id, feature_id).cloned().unwrap_or_default()
     }
 
     /// Removes the state of the feature `feature_id`, only its `state_key`
@@ -87,45 +114,62 @@ impl FeatureStateStore {
         feature_id: Option<&str>,
         state_key: Option<&str>,
     ) -> bool {
-        let Some(features) = self.layers(source_id).and_then(|layers| layers.get(source_layer_id)) else {
+        let Some(source) = self.sources.get_mut(source_id) else {
             return false;
         };
-        let present = match (feature_id, state_key) {
-            (None, _) => true,
-            (Some(feature_id), None) => features.contains_key(feature_id),
-            (Some(feature_id), Some(key)) => features.get(feature_id).is_some_and(|state| state.contains_key(key)),
-        };
-        if !present {
+        let Some(features) = source.states.get_mut(source_layer_id) else {
             return false;
-        }
-        let layers = self.layers_mut(source_id);
-        if let (Some(feature_id), Some(features)) = (feature_id, layers.get_mut(source_layer_id)) {
-            match state_key {
-                None => {
+        };
+        let removed: Vec<String> = match (feature_id, state_key) {
+            (None, _) => {
+                let removed: Vec<String> = features.keys().cloned().collect();
+                source.states.remove(source_layer_id);
+                removed
+            }
+            (Some(feature_id), None) => {
+                if features.remove(feature_id).is_none() {
+                    return false;
+                }
+                vec![feature_id.to_owned()]
+            }
+            (Some(feature_id), Some(key)) => {
+                let Some(state) = features.get_mut(feature_id) else {
+                    return false;
+                };
+                if state.remove(key).is_none() {
+                    return false;
+                }
+                if state.is_empty() {
                     features.remove(feature_id);
-                }
-                Some(key) => {
-                    if let Some(state) = features.get_mut(feature_id) {
-                        state.remove(key);
-                        if state.is_empty() {
-                            features.remove(feature_id);
-                        }
-                    }
+                    vec![feature_id.to_owned()]
+                } else {
+                    // The feature keeps state: publish its change alone.
+                    self.publish(source_id, source_layer_id, feature_id);
+                    return true;
                 }
             }
-            if features.is_empty() {
-                layers.remove(source_layer_id);
-            }
-        } else {
-            layers.remove(source_layer_id);
+        };
+        if source.states.get(source_layer_id).is_some_and(std::collections::HashMap::is_empty) {
+            source.states.remove(source_layer_id);
         }
-        self.prune(source_id);
+        source.features -= removed.len();
+        if source.features == 0 {
+            self.prune(source_id);
+        } else {
+            for feature_id in &removed {
+                self.publish(source_id, source_layer_id, feature_id);
+            }
+        }
         true
     }
 
     /// Removes the state of every feature of the source `source_id`.
     pub(crate) fn remove_source(&mut self, source_id: &str) -> bool {
-        self.sources.contains_key(source_id) && Arc::make_mut(&mut self.sources).remove(source_id).is_some()
+        if self.sources.remove(source_id).is_none() {
+            return false;
+        }
+        Arc::make_mut(&mut self.shared).remove(source_id);
+        true
     }
 
     /// Removes every feature's state.
@@ -133,7 +177,7 @@ impl FeatureStateStore {
         if self.sources.is_empty() {
             return false;
         }
-        self.sources = Arc::default();
+        *self = FeatureStateStore::default();
         true
     }
 }
@@ -192,8 +236,48 @@ mod tests {
 
         store.set("a", "", "1", state(&[("n", Value::Uint(2))]));
         let after = store.shared();
-        assert!(Arc::ptr_eq(&before["b"], &after["b"]));
-        assert!(!Arc::ptr_eq(&before["a"], &after["a"]));
-        assert_eq!(Some(&Value::Uint(1)), before["a"][""]["1"].get("n"));
+        assert!(before["b"].ptr_eq(&after["b"]));
+        assert!(!before["a"].ptr_eq(&after["a"]));
+        assert_eq!(Some(&Value::Uint(1)), before["a"].get("", "1").get("n"));
+        assert_eq!(Some(&Value::Uint(2)), after["a"].get("", "1").get("n"));
+    }
+
+    // A source's published state reads as the store does through every
+    // change, including those past the point where it starts again from
+    // the whole state.
+    #[test]
+    fn published_state_follows_the_store() {
+        let mut store = FeatureStateStore::default();
+        let check = |store: &FeatureStateStore| {
+            let shared = store.shared();
+            for layer in ["", "roads"] {
+                for id in 0..40 {
+                    let id = id.to_string();
+                    let published = shared.get("s").map(|s| s.get(layer, &id)).unwrap_or_default();
+                    assert_eq!(store.get("s", layer, &id), published, "{layer}/{id}");
+                }
+            }
+        };
+        for round in 0..200_u64 {
+            let id = (round * 7 % 40).to_string();
+            let layer = if round % 3 == 0 { "roads" } else { "" };
+            match round % 5 {
+                0..=2 => {
+                    store.set("s", layer, &id, state(&[("n", Value::Uint(round)), ("k", Value::Uint(round % 2))]));
+                }
+                3 => {
+                    store.remove("s", layer, Some(&id), Some("k"));
+                }
+                _ => {
+                    store.remove("s", layer, Some(&id), None);
+                }
+            }
+            check(&store);
+        }
+        store.remove("s", "roads", None, None);
+        check(&store);
+        store.remove("s", "", None, None);
+        check(&store);
+        assert!(store.shared().is_empty());
     }
 }

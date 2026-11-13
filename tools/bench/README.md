@@ -36,6 +36,7 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 | `Frame/Idle` | 100 ms of a settled map whose run loop draws whenever the map asks |
 | `Frame/FeatureState` | a frame of `Frame/Throughput` over the basemap with its buildings and a street overlay colored by feature state, every building and street of the loaded tiles given a state |
 | `Frame/FeatureStateHover` | a frame of `Frame/Throughput` over the basemap with its buildings colored by feature state, one building's state changing in every frame as hover highlighting does |
+| `Frame/MapFeatureStateHover` | a frame of 100,000 GeoJSON points, each with a feature state set through the map, one point's state changing through the map in every frame |
 | `Frame/HideLayers` | every layer of the loaded basemap hidden until the map settles, then shown again until it settles complete |
 | `Frame/Extrusions`, `Frame/Extrusions/DataDriven` | a frame of the basemap's buildings extruded over its background, at a pitch, the zoom alternating as in `Still`; the buildings' height and color are constant, or come from their ids |
 | `Frame/SettleWithoutSymbols` | from a camera nudge on the basemap with its symbol layers left out, which has nothing to place, until the map stops asking for frames |
