@@ -108,7 +108,9 @@ impl CustomLayerHost for Host {
 /// The header's variants of the backends' commands. A backend without one,
 /// such as WebGPU outside a browser, gives the host nothing to draw with.
 mod native {
-    use super::{Any, c_void, mln_custom_layer_encoder_data, mln_custom_layer_pass_data, mln_render_backend};
+    #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+    use super::c_void;
+    use super::{Any, mln_custom_layer_encoder_data, mln_custom_layer_pass_data, mln_render_backend};
 
     #[allow(unused_variables, clippy::needless_pass_by_ref_mut)]
     pub(super) fn encoder(encoder: &mut dyn Any) -> Option<(mln_render_backend, mln_custom_layer_encoder_data)> {
