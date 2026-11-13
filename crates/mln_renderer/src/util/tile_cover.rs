@@ -954,9 +954,7 @@ pub fn tile_cover(
         }
     }
 
-    // Sort results by distance. As in GL JS, the sort is stable: equally
-    // distant tiles keep the order the traversal found them in.
-    result.sort_by(|a, b| a.sqr_dist.total_cmp(&b.sqr_dist));
+    sort_by_distance(&mut result, |tile| tile.sqr_dist);
 
     let mut ids = Vec::with_capacity(result.len());
 
@@ -965,6 +963,12 @@ pub fn tile_cover(
     }
 
     ids
+}
+
+/// Sorts `tiles` nearest first by `sqr_dist`. As in GL JS, the sort is
+/// stable: equally distant tiles keep the order they were found in.
+fn sort_by_distance<T>(tiles: &mut [T], sqr_dist: impl Fn(&T) -> f64) {
+    tiles.sort_by(|a, b| sqr_dist(a).total_cmp(&sqr_dist(b)));
 }
 
 /// `tileCover(const LatLngBounds&, uint8_t z)`.
@@ -1040,6 +1044,18 @@ pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Equally distant tiles keep the order they were found in.
+    #[test]
+    fn sort_by_distance_keeps_ties_in_order() {
+        // Found in order 0, 1, 2, …, with four exactly equal distances.
+        let distance = |i: u32| f64::from(3 - i % 4);
+        let mut tiles: Vec<u32> = (0..40).collect();
+        sort_by_distance(&mut tiles, |&i| distance(i));
+        let mut expected: Vec<u32> = (0..40).collect();
+        expected.sort_by_key(|&i| (3 - i % 4, i));
+        assert_eq!(expected, tiles);
+    }
 
     /// `tileCount(Geometry)` streams the same `TileCover` as
     /// `tileCover(Geometry)` (the line of `TileCover.GeomLineZ10`).
