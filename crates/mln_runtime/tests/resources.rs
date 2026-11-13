@@ -27,7 +27,7 @@ fn style_response() -> Response {
 fn a_provider_serves_a_scheme_the_library_cant_load() {
     let runtime = runtime();
     let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
-    let record = seen.clone();
+    let record = Arc::clone(&seen);
     wait(runtime.set_resource_provider(move |request: ResourceRequest| {
         record.lock().push((request.resource().kind, request.resource().url.clone()));
         assert!(!request.is_cancelled());
@@ -77,7 +77,7 @@ fn a_replacement_completes_after_the_call_to_the_provider_it_replaces() {
     let runtime = runtime();
     let (requests, received) = std::sync::mpsc::channel();
     let dropped = Arc::new(AtomicBool::new(false));
-    wait(runtime.set_resource_provider(Lingering { requests, dropped: dropped.clone() }));
+    wait(runtime.set_resource_provider(Lingering { requests, dropped: Arc::clone(&dropped) }));
     let map = map(&runtime);
     let style = map.set_style_url("custom://lingering");
     let request = received.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
@@ -116,7 +116,7 @@ fn a_provider_passes_through_or_leaves_what_it_doesnt_serve() {
     });
     let runtime = runtime();
     let served = Arc::new(AtomicUsize::new(0));
-    wait(runtime.set_resource_provider(Routed { prefix: "custom://", served: served.clone() }));
+    wait(runtime.set_resource_provider(Routed { prefix: "custom://", served: Arc::clone(&served) }));
     let map = map(&runtime);
     wait(map.set_style_url(server.url("/style.json")));
     assert_eq!((0, 1), (served.load(Ordering::SeqCst), style.calls()));
@@ -163,7 +163,7 @@ fn a_not_modified_answer_delivers_the_cached_copy() {
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
     let runtime = Runtime::new(&options).unwrap();
     let revalidations = Arc::new(AtomicUsize::new(0));
-    let counted = revalidations.clone();
+    let counted = Arc::clone(&revalidations);
     wait(runtime.set_resource_provider(move |request: ResourceRequest| {
         if request.resource().prior_data.is_some() {
             counted.fetch_add(1, Ordering::SeqCst);

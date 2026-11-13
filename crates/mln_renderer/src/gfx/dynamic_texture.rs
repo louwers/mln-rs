@@ -191,7 +191,7 @@ impl DynamicTexture {
                 });
                 t.create();
             }
-            *self.gpu_texture.lock() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
+            *self.gpu_texture.lock() = Some(LocalObject::new(RefCell::new(Some(std::rc::Rc::clone(&texture)))));
             texture
         };
         let mut t = texture.borrow_mut();

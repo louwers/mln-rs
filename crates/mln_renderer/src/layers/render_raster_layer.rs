@@ -108,19 +108,15 @@ impl RenderRasterLayer {
         let Some(image) = &bucket.image else {
             return;
         };
-        let texture = self
-            .textures
-            .entry(bucket.base.bucket_id)
-            .or_insert_with(|| {
-                let texture = context.create_texture_2d();
-                texture.borrow_mut().set_image(Some(Rc::new((**image).clone())));
-                texture
-            })
-            .clone();
+        let texture = Rc::clone(self.textures.entry(bucket.base.bucket_id).or_insert_with(|| {
+            let texture = context.create_texture_2d();
+            texture.borrow_mut().set_image(Some(Rc::new((**image).clone())));
+            texture
+        }));
 
         texture.borrow_mut().set_sampler_configuration(self.sampler_state());
 
-        builder.set_texture(Some(texture.clone()), ID_RASTER_IMAGE0_TEXTURE);
+        builder.set_texture(Some(Rc::clone(&texture)), ID_RASTER_IMAGE0_TEXTURE);
         builder.set_texture(Some(texture), ID_RASTER_IMAGE1_TEXTURE);
     }
 
@@ -176,7 +172,7 @@ impl RenderRasterLayer {
                 return;
             };
             if let Some(tweaker) = &layer_tweaker {
-                changes.push(ChangeRequest::AddLayerTweaker(group.clone(), Rc::downgrade(tweaker)));
+                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&group), Rc::downgrade(tweaker)));
             }
             self.image_layer_group = Some(group);
             activate_layer_group(self.image_layer_group.as_ref(), self.base.is_renderable, changes);
@@ -233,7 +229,7 @@ fn raster_vertex_attributes(context: &dyn Context, vertices: &VertexVectorBasePt
         let stride = size_of::<RasterLayoutVertex>() as u32;
         if let Some(attr) = attrs.set(ID_RASTER_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(
-                Some(vertices.clone()),
+                Some(Rc::clone(vertices)),
                 0, // offsetof(RasterLayoutVertex, a1)
                 /*vertex_offset=*/ 0,
                 stride,
@@ -242,7 +238,7 @@ fn raster_vertex_attributes(context: &dyn Context, vertices: &VertexVectorBasePt
         }
         if let Some(attr) = attrs.set(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(
-                Some(vertices.clone()),
+                Some(Rc::clone(vertices)),
                 4, // offsetof(RasterLayoutVertex, a2)
                 /*vertex_offset=*/ 0,
                 stride,
@@ -281,7 +277,7 @@ impl RenderLayer for RenderRasterLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -387,12 +383,12 @@ impl RenderLayer for RenderRasterLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(RasterLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
             for group in [&self.base.layer_group, &self.image_layer_group].into_iter().flatten() {
                 // layerGroup->addLayerTweaker(layerTweaker)
-                changes.push(ChangeRequest::AddLayerTweaker(group.clone(), Rc::downgrade(&tweaker)));
+                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(group), Rc::downgrade(&tweaker)));
             }
         }
         let layer_tweaker = self.base.layer_tweaker.clone();
@@ -422,7 +418,7 @@ impl RenderLayer for RenderRasterLayer {
                 self.get_id().to_owned(),
             ) {
                 if let Some(tweaker) = &layer_tweaker {
-                    changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(tweaker)));
+                    changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(tweaker)));
                 }
                 self.set_layer_group(Some(layer_group), changes);
             }
@@ -460,7 +456,7 @@ impl RenderLayer for RenderRasterLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let bucket_ptr = tile.get_bucket(&*base_impl).filter(|b| b.has_data()).cloned();
             let Some(bucket_ptr) = bucket_ptr else {
                 self.remove_tile(render_pass, &tile_id);
@@ -561,13 +557,14 @@ impl RenderLayer for RenderRasterLayer {
                 if globe {
                     let globe_mesh =
                         self.globe_meshes.get(&tile_id.canonical, &geometry.mask, RasterBucket::layout_vertex);
-                    let vertices: VertexVectorBasePtr = globe_mesh.vertices.clone();
+                    let vertices: VertexVectorBasePtr =
+                        Rc::<mln_gfx::vertex_vector::VertexVector<RasterLayoutVertex>>::clone(&globe_mesh.vertices);
                     let attrs = raster_vertex_attributes(context, &vertices);
                     builder.set_vertex_attributes(Some(attrs));
                     builder.set_raw_vertices(Vec::new(), globe_mesh.vertices.elements(), AttributeDataType::Short2);
                     builder.set_segments_shared(
                         DrawMode::Triangles(),
-                        Some(globe_mesh.indices.clone()),
+                        Some(Rc::clone(&globe_mesh.indices)),
                         &globe_mesh.segments,
                     );
                 } else if shared {
@@ -581,11 +578,16 @@ impl RenderLayer for RenderRasterLayer {
                         &geometry.segments,
                     );
                 } else {
-                    let attrs =
-                        static_attrs.get_or_insert_with(|| raster_vertex_attributes(context, &static_vertices)).clone();
+                    let attrs = Rc::clone(
+                        static_attrs.get_or_insert_with(|| raster_vertex_attributes(context, &static_vertices)),
+                    );
                     builder.set_vertex_attributes(Some(attrs));
                     builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
-                    builder.set_segments_shared(DrawMode::Triangles(), Some(static_indices.clone()), &static_segments);
+                    builder.set_segments_shared(
+                        DrawMode::Triangles(),
+                        Some(Rc::clone(&static_indices)),
+                        &static_segments,
+                    );
                 }
             }
 

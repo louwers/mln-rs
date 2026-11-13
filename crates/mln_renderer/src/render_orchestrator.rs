@@ -360,9 +360,9 @@ impl RenderOrchestrator {
             && let (Some(previous), Some(current)) = (&self.global_state, &update_parameters.global_state)
         {
             let changed_keys = Arc::new(diff_global_state_keys(previous, current));
-            changed_global_state_keys = Some(changed_keys.clone());
+            changed_global_state_keys = Some(Arc::clone(&changed_keys));
             global_state_change =
-                Some(GlobalStateChange { prior_state: previous.clone(), changed_keys, state_only: false });
+                Some(GlobalStateChange { prior_state: Arc::clone(previous), changed_keys, state_only: false });
         }
         self.global_state = update_parameters.global_state.clone();
 
@@ -407,10 +407,10 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             capture_rendered_features: update_parameters.capture_rendered_features,
-            image_manager: self.image_manager.clone(),
-            glyph_manager: self.glyph_manager.clone(),
-            dynamic_texture_atlas: self.dynamic_texture_atlas.clone(),
-            tile_worker_transport: self.tile_worker_transport.clone(),
+            image_manager: Rc::clone(&self.image_manager),
+            glyph_manager: Rc::clone(&self.glyph_manager),
+            dynamic_texture_atlas: Arc::clone(&self.dynamic_texture_atlas),
+            tile_worker_transport: Rc::clone(&self.tile_worker_transport),
         };
 
         self.glyph_manager.set_url(&update_parameters.glyph_url);
@@ -420,7 +420,7 @@ impl RenderOrchestrator {
         let light_changed = !Arc::ptr_eq(&self.render_light.impl_, &update_parameters.light);
 
         if light_changed {
-            self.render_light.impl_ = update_parameters.light.clone();
+            self.render_light.impl_ = Arc::clone(&update_parameters.light);
             self.render_light.transition(&transition_parameters);
         } else if let Some(parameters) = &global_state_transition_parameters {
             self.render_light.transition(parameters);
@@ -435,11 +435,11 @@ impl RenderOrchestrator {
         if let Some(sky) = &update_parameters.sky {
             match &mut self.render_sky {
                 None => {
-                    self.render_sky = Some(crate::render_sky::RenderSky::new(sky.clone()));
+                    self.render_sky = Some(crate::render_sky::RenderSky::new(Arc::clone(sky)));
                     sky_changed = true;
                 }
                 Some(render_sky) if !Arc::ptr_eq(&render_sky.impl_, sky) => {
-                    render_sky.impl_ = sky.clone();
+                    render_sky.impl_ = Arc::clone(sky);
                     render_sky.transition(&transition_parameters);
                     sky_changed = true;
                 }
@@ -461,7 +461,7 @@ impl RenderOrchestrator {
         }
 
         let image_diff = diff_images(&self.image_impls, &update_parameters.images);
-        self.image_impls = update_parameters.images.clone();
+        self.image_impls = Arc::clone(&update_parameters.images);
 
         // Removing an image changes layout for tiles that use it, and
         // updating one does when its size changes. The image manager
@@ -476,12 +476,12 @@ impl RenderOrchestrator {
 
         // Add added images to sprite atlas.
         for image in image_diff.added.values() {
-            self.image_manager.add_image(image.clone());
+            self.image_manager.add_image(Arc::clone(image));
         }
 
         // Update changed images.
         for change in image_diff.changed.values() {
-            if self.image_manager.update_image(change.after.clone()) {
+            if self.image_manager.update_image(Arc::clone(&change.after)) {
                 self.pattern_atlas.borrow_mut().remove_pattern(&change.after.id);
                 has_image_diff = true;
             }
@@ -491,7 +491,7 @@ impl RenderOrchestrator {
         self.image_manager.set_loaded(update_parameters.sprite_loaded);
 
         let layer_diff = diff_layers(&self.layer_impls, &update_parameters.layers);
-        self.layer_impls = update_parameters.layers.clone();
+        self.layer_impls = Arc::clone(&update_parameters.layers);
 
         let mut changes: UniqueChangeRequestVec = Vec::new();
 
@@ -500,7 +500,7 @@ impl RenderOrchestrator {
         let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
         if render_layers_remade {
             for render_layer in self.render_layers.values_mut() {
-                let impl_ = render_layer.borrow().base().base_impl.clone();
+                let impl_ = Arc::clone(&render_layer.borrow().base().base_impl);
                 let Some(new_layer) = layermanager::create_render_layer(&impl_) else {
                     continue;
                 };
@@ -535,7 +535,7 @@ impl RenderOrchestrator {
 
                 let mut render_layer = render_layer.borrow_mut();
                 render_layer.layer_changed(&transition_parameters, new_layer, &mut changes);
-                render_layer.transition_with_impl(&transition_parameters, new_layer.clone());
+                render_layer.transition_with_impl(&transition_parameters, Arc::clone(new_layer));
             }
         }
 
@@ -549,7 +549,7 @@ impl RenderOrchestrator {
                 let Some(layer) = self.render_layers.get(&layer_impl.id) else {
                     continue;
                 };
-                self.ordered_layers.push(layer.clone());
+                self.ordered_layers.push(Rc::clone(layer));
 
                 // We're mutating the list of ordered layers and must notify
                 // them of their new assigned indices
@@ -604,7 +604,7 @@ impl RenderOrchestrator {
         }
 
         let source_diff = diff_sources(&self.source_impls, &update_parameters.sources);
-        self.source_impls = update_parameters.sources.clone();
+        self.source_impls = Arc::clone(&update_parameters.sources);
 
         // Remove render layers for removed sources.
         for id in source_diff.removed.keys() {
@@ -614,7 +614,7 @@ impl RenderOrchestrator {
         // Create render sources for newly added sources.
         for (id, impl_) in &source_diff.added {
             let mut render_source = render_source::create(impl_);
-            render_source.set_observer(self.source_observer.clone());
+            render_source.set_observer(Rc::<OrchestratorSourceObserver>::clone(&self.source_observer));
             render_source.set_cache_enabled(self.tile_cache_enabled);
             render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
             // `emplace` keeps an existing entry.
@@ -682,7 +682,7 @@ impl RenderOrchestrator {
 
             for (index, layer_ptr) in self.ordered_layers.iter().enumerate() {
                 let layer = layer_ptr.borrow();
-                let base_impl = layer.base().base_impl.clone();
+                let base_impl = Arc::clone(&layer.base().base_impl);
                 let layer_info = base_impl.get_type_info();
                 let layer_is_visible = base_impl.visibility != mln_style_types::VisibilityType::None;
                 let zoom_fits_layer = layer.supports_zoom(self.zoom_history.last_zoom);
@@ -723,13 +723,13 @@ impl RenderOrchestrator {
                             || has_layout_difference(&layer_diff, &layer_id)
                             || global_state_requires_relayout;
                         if layer_is_visible {
-                            self.filtered_layers_for_source.push(layer.base().evaluated_properties.clone());
+                            self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
                                 let source_id = source_impl.base().id.clone();
                                 layer_render_items
                                     .entry(index as u32)
-                                    .or_insert_with(|| LayerRenderItem::new(layer_ptr.clone(), Some(source_id)));
+                                    .or_insert_with(|| LayerRenderItem::new(Rc::clone(layer_ptr), Some(source_id)));
                                 update_list[index] = true;
                             }
                         }
@@ -756,7 +756,7 @@ impl RenderOrchestrator {
                     }
                     layer_render_items
                         .entry(index as u32)
-                        .or_insert_with(|| LayerRenderItem::new(layer_ptr.clone(), None));
+                        .or_insert_with(|| LayerRenderItem::new(Rc::clone(layer_ptr), None));
                     update_list[index] = true;
                 }
             }
@@ -767,7 +767,7 @@ impl RenderOrchestrator {
                 // without a render source has none.
                 if let Some(source) = self.render_sources.get_mut(&source_impl.base().id) {
                     source.update(
-                        source_impl.clone(),
+                        Arc::clone(source_impl),
                         &filtered_layers,
                         source_needs_rendering,
                         source_needs_relayout,
@@ -821,10 +821,10 @@ impl RenderOrchestrator {
                 line_atlas: &self.line_atlas,
             });
             if render_layer.needs_placement() {
-                layers_need_placement.push(render_item.layer.clone());
+                layers_need_placement.push(Rc::clone(&render_item.layer));
             }
             if !render_layer.get_follower_data().is_empty() {
-                layers_following_placement.push(render_item.layer.clone());
+                layers_following_placement.push(Rc::clone(&render_item.layer));
             }
             if render_tree_parameters.opaque_pass_cut_off == 0 {
                 opaque_pass_cut_off_estimation -= 1;
@@ -885,8 +885,8 @@ impl RenderOrchestrator {
             symbol_buckets_changed |= render_tree_parameters.placement_changed;
             if render_tree_parameters.placement_changed {
                 let mut placement = Placement::create(
-                    update_parameters.clone(),
-                    Some(self.placement_controller.get_placement().clone()),
+                    Arc::clone(update_parameters),
+                    Some(Rc::clone(self.placement_controller.get_placement())),
                 );
                 placement.place_layers(&layers_need_placement);
                 self.placement_controller.set_placement(Rc::new(placement));
@@ -904,7 +904,7 @@ impl RenderOrchestrator {
             render_tree_parameters.placement_changed = !layers_need_placement.is_empty();
             symbol_buckets_changed = render_tree_parameters.placement_changed;
             if render_tree_parameters.placement_changed {
-                let mut placement = Placement::create(update_parameters.clone(), None);
+                let mut placement = Placement::create(Arc::clone(update_parameters), None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place_layers(&layers_need_placement);
                 self.placement_controller.set_placement(Rc::new(placement));
@@ -933,7 +933,7 @@ impl RenderOrchestrator {
         render_tree.set_placement(
             layers_need_placement,
             layers_following_placement,
-            self.placement_controller.get_placement().clone(),
+            Rc::clone(self.placement_controller.get_placement()),
             symbol_buckets_changed,
         );
         Some(render_tree)
@@ -1057,7 +1057,7 @@ impl RenderOrchestrator {
                 self.layer_groups_by_layer_index.remove(&current);
             }
             layer_group.borrow_mut().update_layer_index(new_index);
-            self.layer_groups_by_layer_index.entry(new_index).or_default().push(layer_group.clone());
+            self.layer_groups_by_layer_index.entry(new_index).or_default().push(Rc::clone(layer_group));
             return;
         }
         // We're not tracking the layer, indicating that it's currently
@@ -1134,7 +1134,7 @@ impl RenderOrchestrator {
             let tweaker = Rc::new(RefCell::new(PolylineLayerTweaker::new(debug_line_properties(*type_))));
             let weak = Rc::downgrade(&tweaker);
             self.layer_group_tweakers.entry(group.borrow().get_id()).or_default().push(weak);
-            self.debug_layer_tweakers.insert(*type_, (group.clone(), tweaker));
+            self.debug_layer_tweakers.insert(*type_, (Rc::clone(group), tweaker));
         }
     }
 

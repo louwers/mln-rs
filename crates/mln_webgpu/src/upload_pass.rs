@@ -31,11 +31,11 @@ impl UploadPass {
     /// Starts an upload pass. C++ pushes the encoder's debug groups and
     /// `name` on the pass; WebGPU upload-pass debug groups are no-ops.
     pub(crate) fn new(command_encoder: &CommandEncoder, _name: &str) -> Self {
-        UploadPass { context: command_encoder.get_context().clone() }
+        UploadPass { context: Rc::clone(command_encoder.get_context()) }
     }
 
     fn create_vertex_buffer(&self, data: &[u8]) -> Rc<VertexBufferResource> {
-        let buffer = BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::VERTEX);
+        let buffer = BufferResource::new(Rc::clone(&self.context), Some(data), data.len(), wgpu::BufferUsages::VERTEX);
         if buffer.get_buffer().is_none() {
             eprintln!("  Failed to create vertex buffer!");
         }
@@ -47,7 +47,7 @@ impl UploadPass {
     fn create_vertex_buffer_of(&self, vec: &VertexVectorBasePtr, raw_size: usize) -> Rc<VertexBufferResource> {
         #[cfg(target_family = "wasm")]
         if let Some(data) = vec.get_host_data() {
-            let buffer = BufferResource::new_from_host(self.context.clone(), &data, wgpu::BufferUsages::VERTEX);
+            let buffer = BufferResource::new_from_host(Rc::clone(&self.context), &data, wgpu::BufferUsages::VERTEX);
             return Rc::new(VertexBufferResource::new(buffer));
         }
         self.create_vertex_buffer(&vec.get_raw_data()[..raw_size])
@@ -63,7 +63,7 @@ impl UploadPass {
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
         #[cfg(target_family = "wasm")]
         if let Some(data) = indexes.host_data() {
-            let buffer = BufferResource::new_from_host(self.context.clone(), data, wgpu::BufferUsages::INDEX);
+            let buffer = BufferResource::new_from_host(Rc::clone(&self.context), data, wgpu::BufferUsages::INDEX);
             return Box::new(IndexBufferResource::new(buffer));
         }
         upload_pass::UploadPass::create_index_buffer_resource(
@@ -84,7 +84,7 @@ impl UploadPass {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();
         let existing =
-            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| b.resource.clone());
+            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| Rc::clone(&b.resource));
         if let Some(resource) = existing
             && raw_size <= resource.get_size_in_bytes()
         {
@@ -104,7 +104,7 @@ impl UploadPass {
             debug_assert!(vec.has_raw_data());
             let resource = self.create_vertex_buffer_of(vec, raw_size);
             // A released vector frees its CPU copy here.
-            vec.set_buffer(Some(Box::new(VertexBuffer { resource: resource.clone() })));
+            vec.set_buffer(Some(Box::new(VertexBuffer { resource: Rc::clone(&resource) })));
             return Some(resource);
         }
         None
@@ -121,7 +121,7 @@ impl UploadPass {
         if let Some((count, buffer)) = cache.get(&data_type)
             && *count >= vertex_count
         {
-            return buffer.clone();
+            return Rc::clone(buffer);
         }
         let count = vertex_count.max(2 * cached_count).max(1);
         let mut data = vec![0u8; VertexAttribute::get_stride_of(data_type) * count];
@@ -131,7 +131,7 @@ impl UploadPass {
             }
         }
         let buffer: UniqueVertexBufferResource = self.create_vertex_buffer(&data);
-        cache.insert(data_type, (count, buffer.clone()));
+        cache.insert(data_type, (count, Rc::clone(&buffer)));
         buffer
     }
 
@@ -260,7 +260,7 @@ impl upload_pass::UploadPass for UploadPass {
         _usage: BufferUsageType,
         _persistent: bool,
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
-        let buffer = BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::INDEX);
+        let buffer = BufferResource::new(Rc::clone(&self.context), Some(data), data.len(), wgpu::BufferUsages::INDEX);
         Box::new(IndexBufferResource::new(buffer))
     }
 }

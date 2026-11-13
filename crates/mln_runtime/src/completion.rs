@@ -79,7 +79,7 @@ impl<T: Send + 'static> Completion<T> {
             ready: Condvar::new(),
             home,
         });
-        (Completion { shared: shared.clone() }, Resolver { shared: Some(shared) })
+        (Completion { shared: Arc::clone(&shared) }, Resolver { shared: Some(shared) })
     }
 
     /// A completion that already has its result.
@@ -281,7 +281,7 @@ mod tests {
     fn polling_wakes_when_the_result_arrives() {
         let (mut completion, resolver) = Completion::new(None);
         let flag = Arc::new(Flag(AtomicBool::new(false)));
-        let waker = Waker::from(flag.clone());
+        let waker = Waker::from(Arc::clone(&flag));
         let mut cx = Context::from_waker(&waker);
         assert!(Pin::new(&mut completion).poll(&mut cx).is_pending());
         resolver.resolve(Ok(1));

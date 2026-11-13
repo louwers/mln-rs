@@ -21,7 +21,7 @@ fn make_glyph(code: char) -> Arc<Glyph> {
 }
 
 fn glyphs(glyph: &Arc<Glyph>) -> Glyphs {
-    Glyphs::from([(glyph.id, Some(glyph.clone()))])
+    Glyphs::from([(glyph.id, Some(Arc::clone(glyph)))])
 }
 
 /// A 16×16 image named `id`.
@@ -47,7 +47,7 @@ fn make_sized_image(id: &str, sdf: bool, size: Size) -> Arc<ImageImpl> {
 }
 
 fn image_map(image: &Arc<ImageImpl>) -> ImageMap {
-    ImageMap::from([(image.id.clone(), image.clone())])
+    ImageMap::from([(image.id.clone(), Arc::clone(image))])
 }
 
 struct DynamicTextureAtlasTest {

@@ -50,10 +50,10 @@ fn debug_groups_enabled() -> bool {
 
 impl RenderPass {
     pub(crate) fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
-        let context = command_encoder.get_context().clone();
-        let backend = context.get_backend().clone();
+        let context = Rc::clone(command_encoder.get_context());
+        let backend = Rc::clone(context.get_backend());
         let mut pass = RenderPass {
-            context: context.clone(),
+            context: Rc::clone(&context),
             renderable_size: descriptor.target.size(),
             renderable_id: 0,
             encoder: RefCell::new(None),

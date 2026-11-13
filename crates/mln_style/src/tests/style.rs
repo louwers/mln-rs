@@ -234,7 +234,7 @@ fn source_collection_publishes_updates() {
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     style.add_layer(Box::new(LineLayer::new("line", "late")), None).unwrap();
     let observer = Rc::new(CountingObserver::default());
-    style.set_observer(Some(observer.clone()));
+    style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
 
     style.add_source(Box::new(GeoJSONSource::new("late", GeoJSONOptions::default_options()))).unwrap();
     assert_eq!(1, observer.updates.get());
@@ -254,7 +254,7 @@ fn image_removal_publishes_updates() {
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     style.add_image(make_image("image"));
     let observer = Rc::new(CountingObserver::default());
-    style.set_observer(Some(observer.clone()));
+    style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
     assert_eq!(1, style.get_image_impls().len());
 
     style.remove_image("image");
@@ -285,7 +285,7 @@ fn transition_options_publish_updates() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     let observer = Rc::new(CountingObserver::default());
-    style.set_observer(Some(observer.clone()));
+    style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
 
     style.set_transition_options(&TransitionOptions::new(
         Some(Duration::from_millis(123)),
@@ -319,7 +319,7 @@ fn layer_mut_guard_notifies_once_per_change() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#);
     let observer = Rc::new(CountingObserver::default());
-    style.set_observer(Some(observer.clone()));
+    style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
 
     let before = style.get_layer_impls();
     {
@@ -747,7 +747,7 @@ fn stub_with_style_response(
         ),
     );
     let observer = Rc::new(ResponseObserver::default());
-    style.set_observer(Some(observer.clone()));
+    style.set_observer(Some(Rc::<ResponseObserver>::clone(&observer)));
     (style, observer, run_loop)
 }
 
@@ -835,7 +835,7 @@ fn load_json_cancels_pending_load_url() {
         Some(response)
     });
     let mut style = Impl::with_file_source(
-        Some(file_source.clone()),
+        Some(Arc::<mln_storage::stub_file_source::StubFileSource>::clone(&file_source)),
         1.0,
         mln_actor::TaggedScheduler::new(
             mln_actor::scheduler::get_background(),

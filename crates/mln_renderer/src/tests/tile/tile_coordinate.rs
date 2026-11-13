@@ -47,7 +47,7 @@ impl TransformObserver for Observer {
 #[test]
 fn from_lat_lng() {
     let change_count = Rc::new(Cell::new(0usize));
-    let observer = Rc::new(Observer { change_count: change_count.clone() });
+    let observer = Rc::new(Observer { change_count: Rc::clone(&change_count) });
     let mut transform = Transform::new(observer, ConstrainMode::HeightOnly, ViewportMode::Default);
 
     let max = constants::TILE_SIZE_D;

@@ -69,7 +69,7 @@ impl SpriteLoaderTest {
     }
 
     fn run(&self) {
-        self.sprite_loader.set_observer(self.observer.clone());
+        self.sprite_loader.set_observer(Rc::<StubSpriteLoaderObserver>::clone(&self.observer));
 
         let sprite = Sprite::new("default", self.sprite_path.clone());
         self.sprite_loader.load(Some(sprite), &self.file_source);
@@ -122,12 +122,12 @@ fn loading_success(sprite_path: String, expected_images: usize, pixel_ratio: f32
 
     let failure: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let count: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
-    let (f, stop) = (failure.clone(), test.run_loop.clone());
+    let (f, stop) = (Rc::clone(&failure), test.run_loop.clone());
     *test.observer.sprite_error.borrow_mut() = Some(Box::new(move |error| {
         *f.borrow_mut() = Some(error.to_string());
         stop.stop();
     }));
-    let (c, stop) = (count.clone(), test.run_loop.clone());
+    let (c, stop) = (Rc::clone(&count), test.run_loop.clone());
     *test.observer.sprite_loaded.borrow_mut() = Some(Box::new(move |images| {
         *c.borrow_mut() = Some(images.len());
         stop.stop();
@@ -161,7 +161,7 @@ fn loading_success_versatiles_2x() {
 
 fn expect_error(test: &SpriteLoaderTest) -> Rc<RefCell<Option<String>>> {
     let error_message: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-    let (e, stop) = (error_message.clone(), test.run_loop.clone());
+    let (e, stop) = (Rc::clone(&error_message), test.run_loop.clone());
     *test.observer.sprite_error.borrow_mut() = Some(Box::new(move |error| {
         *e.borrow_mut() = Some(error.to_string());
         stop.stop();
@@ -240,7 +240,7 @@ fn loading_cancel() {
     test.file_source.set_response(Kind::SpriteJSON, end2);
 
     let loaded = Rc::new(RefCell::new(false));
-    let l = loaded.clone();
+    let l = Rc::clone(&loaded);
     *test.observer.sprite_loaded.borrow_mut() = Some(Box::new(move |_| {
         *l.borrow_mut() = true;
     }));

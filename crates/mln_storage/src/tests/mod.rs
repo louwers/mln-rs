@@ -152,7 +152,7 @@ pub(crate) struct FixtureLog {
 impl FixtureLog {
     pub(crate) fn new() -> Self {
         let messages = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
         FixtureLog { messages }
     }
 

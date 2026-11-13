@@ -49,7 +49,7 @@ impl ShaderProgram {
         ShaderProgram {
             shader_program_id: SimpleIdentity::new(),
             shader_name: name,
-            backend: context.get_backend().clone(),
+            backend: Rc::clone(context.get_backend()),
             context: context.weak(),
             vertex_shader,
             fragment_shader,
@@ -225,7 +225,7 @@ impl Drop for ShaderProgram {
         if pipelines.is_empty() {
             return;
         }
-        let backend = self.backend.clone();
+        let backend = Rc::clone(&self.backend);
         // SAFETY: the commands that use the pipelines have been waited for
         // when the deletion queue runs, or the context is gone.
         let destroy = move || unsafe {

@@ -186,7 +186,9 @@ pub(crate) fn fallback_font_faces() -> Vec<SystemFontFace> {
         .map(|(script, id, family, url)| {
             let bytes = data
                 .entry(id)
-                .or_insert_with(|| FontData::new(Arc::new(LazyFace { db: chosen.clone(), id, bytes: OnceLock::new() })))
+                .or_insert_with(|| {
+                    FontData::new(Arc::new(LazyFace { db: Arc::clone(&chosen), id, bytes: OnceLock::new() }))
+                })
                 .clone();
             let face = FontFace::fallback(&url, script.ranges.to_vec()).with_data(bytes);
             SystemFontFace { family, face }

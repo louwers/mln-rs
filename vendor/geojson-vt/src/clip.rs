@@ -344,11 +344,15 @@ pub(crate) fn clip<const I: u8>(
             match clipped_geom {
                 VtGeometry::MultiLineString(result) if line_metrics => {
                     for segment in result {
-                        clipped.push(VtFeature::new(VtGeometry::LineString(segment), props.clone(), id.clone()));
+                        clipped.push(VtFeature::new(
+                            VtGeometry::LineString(segment),
+                            std::sync::Arc::clone(props),
+                            id.clone(),
+                        ));
                     }
                 }
                 clipped_geom => {
-                    clipped.push(VtFeature::new(clipped_geom, props.clone(), id.clone()));
+                    clipped.push(VtFeature::new(clipped_geom, std::sync::Arc::clone(props), id.clone()));
                 }
             }
         }

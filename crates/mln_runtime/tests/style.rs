@@ -203,7 +203,7 @@ fn synchronous_tiling_installs_data_before_the_next_command() {
     wait(map.add_geojson_source("points", GeoJsonSourceOptions::default()));
     wait(map.set_geojson_source_synchronous_tiling("points", true));
     let installed = Arc::new(AtomicUsize::new(0));
-    let seen = installed.clone();
+    let seen = Arc::clone(&installed);
     map.set_geojson_source_data("points", point_collection("now")).unwrap().on_complete(move |result| {
         result.unwrap();
         seen.fetch_add(1, Ordering::SeqCst);
@@ -260,7 +260,7 @@ impl Drop for DropCounter {
 
 impl Probe {
     fn callbacks(&self) -> CustomSourceCallbacks {
-        let (fetches, counter) = (self.fetches.clone(), DropCounter(self.drops.clone()));
+        let (fetches, counter) = (Arc::clone(&self.fetches), DropCounter(Arc::clone(&self.drops)));
         CustomSourceCallbacks {
             fetch_tile: Box::new(move |_| {
                 let _ = &counter;

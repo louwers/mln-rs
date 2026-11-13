@@ -144,7 +144,7 @@ struct CallbackLog {
 impl CallbackLog {
     fn install(options: &mut AnimationOptions) -> CallbackLog {
         let log = CallbackLog { finishes: Arc::default() };
-        let finishes = log.finishes.clone();
+        let finishes = Arc::clone(&log.finishes);
         options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| {
             finishes.fetch_add(1, Ordering::Relaxed);
         }));
@@ -893,7 +893,8 @@ fn default_transform() {
 
     let observer = Rc::new(CountingObserver::default());
 
-    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform =
+        Transform::new(Rc::<CountingObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
     assert!(!transform.get_state().valid());
 
     let null_island = LatLng::default();
@@ -4083,7 +4084,7 @@ const LINEAR: UnitBezier = UnitBezier::new(1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 
 /// An end function that counts its calls.
 fn counting_end(options: &mut AnimationOptions) -> Arc<AtomicU32> {
     let count = Arc::new(AtomicU32::new(0));
-    let finished = count.clone();
+    let finished = Arc::clone(&count);
     options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| {
         finished.fetch_add(1, Ordering::Relaxed);
     }));
@@ -4294,10 +4295,11 @@ impl TransformObserver for EventObserver {
 #[test]
 fn partial_camera_commands_finish_together_for_still_image() {
     let observer = Rc::new(EventObserver::default());
-    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform =
+        Transform::new(Rc::<EventObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     let push = |event: i32| -> Option<TransitionEndFn> {
-        let events = observer.events.clone();
+        let events = Arc::clone(&observer.events);
         Some(Arc::new(move |_: &TransitionEnd| events.lock().push(event)))
     };
     let position = AnimationOptions { transition_end_fn: push(1), ..AnimationOptions::new(Duration::from_secs(5)) };
@@ -4328,7 +4330,8 @@ fn partial_camera_commands_finish_together_for_still_image() {
 #[test]
 fn cancel_transitions_by_id_leaves_others_running() {
     let observer = Rc::new(EventObserver::default());
-    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform =
+        Transform::new(Rc::<EventObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { zoom: Some(8.0), ..Default::default() });
     let mut zoom = AnimationOptions { transition_id: Some(1), ..AnimationOptions::new(Duration::from_secs(4)) };
@@ -4516,7 +4519,7 @@ fn duration_of(command: impl Fn(&mut Transform)) -> Duration {
 
 fn record_end() -> (AnimationOptions, Arc<OnceLock<TransitionEnd>>) {
     let ended = Arc::new(OnceLock::new());
-    let record = ended.clone();
+    let record = Arc::clone(&ended);
     let animation = AnimationOptions {
         transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {
             assert!(record.set(*end).is_ok(), "a command ends once");
@@ -5062,7 +5065,8 @@ fn camera_changes_report_whether_a_command_or_a_momentum_made_them() {
     use CameraChangeMode::{Animated, Immediate};
     use CameraChangeSource::{Command, Momentum};
     let observer = Rc::new(ChangeObserver::default());
-    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform =
+        Transform::new(Rc::<ChangeObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(8.0), ..Default::default() });
     observer.take();
@@ -5099,7 +5103,8 @@ fn a_gesture_reports_gesture_then_momentum_and_lasts_until_its_glide_ends() {
     use CameraChangeMode::{Animated, Immediate};
     use CameraChangeSource::{Gesture, Momentum};
     let observer = Rc::new(ChangeObserver::default());
-    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform =
+        Transform::new(Rc::<ChangeObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(8.0), ..Default::default() });
     observer.take();
@@ -5373,7 +5378,8 @@ fn camera_deltas_are_validated_as_maplibre_native_ffi_validates_them() {
 fn an_update_with_a_phase_reports_a_gesture_and_begin_cancels_animations() {
     use CameraChangeSource::Gesture;
     let observer = Rc::new(ChangeObserver::default());
-    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform =
+        Transform::new(Rc::<ChangeObserver>::clone(&observer), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(1000, 1000)).unwrap();
     let (animation, ended) = record_end();
     transform.ease_to(

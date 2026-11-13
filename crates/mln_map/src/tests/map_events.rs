@@ -81,7 +81,7 @@ fn the_waker_runs_when_the_map_has_events() {
     let mut map = map(MapOptions::default());
     map.drain_events();
     let wakes = Arc::new(AtomicUsize::new(0));
-    let counter = wakes.clone();
+    let counter = Arc::clone(&wakes);
     map.set_waker(Some(Arc::new(move || {
         counter.fetch_add(1, Ordering::SeqCst);
     })));
@@ -157,7 +157,7 @@ fn a_still_image_completes_with_a_full_frame() {
     let mut map = map(MapOptions { map_mode: MapMode::Static, ..Default::default() });
     map.style_mut().load_json(STYLE);
     let outcome = Rc::new(RefCell::new(None));
-    let result = outcome.clone();
+    let result = Rc::clone(&outcome);
     map.render_still(Box::new(move |done| *result.borrow_mut() = Some(done)));
 
     let stats = Arc::default();
@@ -179,7 +179,7 @@ fn a_still_image_completes_with_a_full_frame() {
     // A full frame of the first image's update, drawn late, doesn't complete
     // the next image.
     *outcome.borrow_mut() = None;
-    let result = outcome.clone();
+    let result = Rc::clone(&outcome);
     map.render_still(Box::new(move |done| *result.borrow_mut() = Some(done)));
     report(&map, frame(mln_renderer::RenderMode::Full, 1));
     map.process_events();

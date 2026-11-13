@@ -39,7 +39,7 @@ fn make_fullscreen_layer_group(
     let layer_group = context.create_layer_group(0, 1, name.to_owned())?;
 
     let mut builder = context.create_drawable_builder();
-    builder.set_shader(Some(shader.clone()));
+    builder.set_shader(Some(std::rc::Rc::clone(shader)));
     builder.set_render_pass(RenderPass::Translucent);
     builder.set_is_3d(is_3d);
     builder.set_depth_type(depth_mask);

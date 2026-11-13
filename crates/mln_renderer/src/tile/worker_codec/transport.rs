@@ -61,7 +61,7 @@ pub struct ReplySink {
 impl ReplySink {
     /// Delivers a reply of instance `instance`.
     pub fn send(&self, instance: usize, reply: Encoded) {
-        let transport = self.transport.clone();
+        let transport = Arc::clone(&self.transport);
         self.scheduler.schedule(Box::new(move || {
             if let Some(transport) = transport.get().and_then(|weak| weak.upgrade()) {
                 transport.receive(instance, reply);
@@ -105,14 +105,14 @@ impl SerializingTransport {
     /// transport.
     pub fn new(instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>) -> Rc<Self> {
         Rc::new_cyclic(|self_weak: &Weak<SerializingTransport>| {
-            let transport = Arc::new(LocalObject::new(self_weak.clone()));
+            let transport = Arc::new(LocalObject::new(Weak::clone(self_weak)));
             let instances = instances(ReplySink { scheduler: scheduler::get_current(), transport });
             let count = instances.count();
             assert!(count > 0, "a SerializingTransport needs a worker instance");
             // Its workers are called directly, so it schedules nothing.
             let synchronous = TaggedScheduler::new(scheduler::get_current(), SimpleIdentity::new());
             SerializingTransport {
-                self_weak: self_weak.clone(),
+                self_weak: Weak::clone(self_weak),
                 instances,
                 codecs: (0..count).map(|_| RefCell::new(MapCodec::new())).collect(),
                 synchronous: InProcessTransport::new(synchronous),

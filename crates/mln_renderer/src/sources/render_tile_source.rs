@@ -146,7 +146,7 @@ impl RenderItem for TileSourceRenderItem {
                                          data: Option<Box<dyn Any>>| {
             let builder = polyline_builder.get_or_insert_with(|| {
                 let mut builder = context.create_drawable_builder();
-                builder.set_shader(Some(polyline_shader.clone()));
+                builder.set_shader(Some(Rc::clone(&polyline_shader)));
                 builder.set_render_pass(render_pass);
                 builder.set_enable_depth(false);
                 builder.set_color_mode(&ColorMode::alpha_blended());
@@ -175,11 +175,11 @@ impl RenderItem for TileSourceRenderItem {
                                                layer_name: &str|
          -> Option<LayerGroupBasePtr> {
             if let Some(layer_group) = debug_layer_groups.get(&type_) {
-                return Some(layer_group.clone());
+                return Some(Rc::clone(layer_group));
             }
             let layer_group =
                 context.create_tile_layer_group(type_ as i32, /*initial_capacity=*/ 64, layer_name.to_owned())?;
-            debug_layer_groups.insert(type_, layer_group.clone());
+            debug_layer_groups.insert(type_, Rc::clone(&layer_group));
             Some(layer_group)
         };
 
@@ -573,7 +573,7 @@ impl RenderTileSource {
     }
 
     pub(crate) fn create_render_item(&mut self) -> Box<dyn RenderItem> {
-        Box::new(TileSourceRenderItem::new(self.render_tiles.clone(), self.base.base_impl.id.clone()))
+        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), self.base.base_impl.id.clone()))
     }
 
     pub(crate) fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>) {
@@ -619,7 +619,7 @@ impl RenderTileSource {
                 .filter(|(_, render_tile)| !render_tile.hold_for_fade())
                 .map(|(i, _)| i)
                 .collect();
-            *filtered = Some(RenderTiles::new(self.render_tiles.clone(), indices));
+            *filtered = Some(RenderTiles::new(Rc::clone(&self.render_tiles), indices));
         }
         filtered.clone()
     }
@@ -642,13 +642,13 @@ impl RenderTileSource {
                 // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
                 b.id.canonical.z.cmp(&a.id.canonical.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))
             });
-            *sorted = Some(RenderTiles::new(self.render_tiles.clone(), indices));
+            *sorted = Some(RenderTiles::new(Rc::clone(&self.render_tiles), indices));
         }
         sorted.clone()
     }
 
     pub(crate) fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
-        self.render_tiles.clone()
+        Rc::clone(&self.render_tiles)
     }
 
     pub(crate) fn set_cache_enabled(&mut self, enable: bool) {

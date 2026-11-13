@@ -117,10 +117,10 @@ fn start_attempt<A: Connector>(
     let request_level = details.request_level;
     let now = details.now;
     let timeout = details.timeout;
-    let current_time = details.current_time.clone();
-    let run_connector = details.run_connector.clone();
-    let register_shutdown = details.register_shutdown.clone();
-    let per_address = per_address.clone();
+    let current_time = Arc::clone(&details.current_time);
+    let run_connector = Arc::clone(&details.run_connector);
+    let register_shutdown = Arc::clone(&details.register_shutdown);
+    let per_address = Arc::clone(per_address);
     mln_util::thread::builder("HTTPFileSource connect").spawn(move || {
         // TcpConnector doesn't resolve; a resolver is only required.
         let resolver = DefaultResolver::default();
@@ -166,8 +166,8 @@ impl Transport {
         let (requests, receiver) = mpsc::channel::<TransferRequest>();
         let receiver = Arc::new(Mutex::new(receiver));
         for i in 0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS {
-            let client = client.clone();
-            let receiver = receiver.clone();
+            let client = Arc::clone(&client);
+            let receiver = Arc::clone(&receiver);
             // Detached: a worker exits when the channel closes.
             let _ = mln_util::thread::builder(format!("HTTPFileSource {i}")).spawn(move || worker(&client, &receiver));
         }
@@ -528,7 +528,7 @@ mod tests {
         let dropped: Vec<SocketAddr> = vec!["[2001:db8::1]:80".parse().unwrap(), "[2001:db8::2]:80".parse().unwrap()];
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let client = Client::with_parts(
-            DroppingConnector { dropped: dropped.clone(), attempts: attempts.clone() },
+            DroppingConnector { dropped: dropped.clone(), attempts: Arc::clone(&attempts) },
             FixedResolver(vec![dropped[0], dropped[1], server]),
         );
 

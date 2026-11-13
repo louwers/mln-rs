@@ -21,7 +21,7 @@ use support::{map, runtime, wait, wait_err};
 
 /// An animation whose ends `ends` records.
 fn recorded(ends: &Arc<Mutex<Vec<TransitionEnd>>>, duration: Duration) -> AnimationOptions {
-    let ends = ends.clone();
+    let ends = Arc::clone(ends);
     AnimationOptions {
         duration: Some(duration),
         transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| ends.lock().push(*end))),

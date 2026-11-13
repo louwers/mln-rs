@@ -221,9 +221,9 @@ impl RasterTile {
             missing: Cell::new(false),
             bucket: RefCell::new(None),
             worker,
-            mailbox: mailbox.clone(),
+            mailbox: Arc::clone(&mailbox),
         });
-        mailbox.open(&scheduler::get_current(), inner.clone());
+        mailbox.open(&scheduler::get_current(), Rc::<RasterTileInner>::clone(&inner));
         let weak: std::rc::Weak<RasterTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
         RasterTile { inner, loader: Some(loader) }

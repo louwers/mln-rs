@@ -45,7 +45,7 @@ fn multiple_run() {
 
     let second_timeout = Rc::new(Cell::new(false));
     let l = run_loop.clone();
-    let s = second_timeout.clone();
+    let s = Rc::clone(&second_timeout);
     timer.start(Duration::ZERO, Duration::ZERO, move || {
         s.set(true);
         l.stop();

@@ -31,7 +31,7 @@ fn request(fs: &PMTilesFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
     let req = req();
     let result = Rc::new(RefCell::new(None));
-    let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
+    let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         resource,
         Box::new(move |res: Response| {
@@ -142,7 +142,7 @@ fn repeated_tile_request() {
     let req1 = req();
     let req2 = req();
 
-    let (r1, r2, fs, stop) = (req1.clone(), req2.clone(), pmtiles.clone(), run_loop.clone());
+    let (r1, r2, fs, stop) = (Rc::clone(&req1), Rc::clone(&req2), Rc::clone(&pmtiles), run_loop.clone());
     *req1.borrow_mut() = Some(pmtiles.request(
         &tile(&to_absolute_url("geography-class-png.pmtiles"), 0),
         Box::new(move |res1: Response| {
@@ -150,7 +150,7 @@ fn repeated_tile_request() {
             assert_eq!(None, res1.error);
             let first_size = res1.data.as_ref().expect("data").len();
 
-            let (r2c, stop) = (r2.clone(), stop.clone());
+            let (r2c, stop) = (Rc::clone(&r2), stop.clone());
             *r2.borrow_mut() = Some(fs.request(
                 &tile(&to_absolute_url("geography-class-png.pmtiles"), 0),
                 Box::new(move |res2: Response| {

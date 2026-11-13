@@ -341,8 +341,8 @@ impl TestRunnerImpl for Impl {
         let maybe_image: Rc<std::cell::RefCell<Option<Vec<u8>>>> = Rc::default();
         let request_completed = Rc::new(Cell::new(false));
         let _req = {
-            let maybe_image = maybe_image.clone();
-            let request_completed = request_completed.clone();
+            let maybe_image = Rc::clone(&maybe_image);
+            let request_completed = Rc::clone(&request_completed);
             file_source.request(
                 &mln_storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
                 Box::new(move |response: mln_storage::Response| {
@@ -393,7 +393,7 @@ impl TestRunnerImpl for Impl {
         let sleeping = Rc::new(Cell::new(true));
         let sleep_timer = mln_actor::Timer::new();
         {
-            let sleeping = sleeping.clone();
+            let sleeping = Rc::clone(&sleeping);
             sleep_timer.start(duration, std::time::Duration::ZERO, move || sleeping.set(false));
         }
         while sleeping.get() {

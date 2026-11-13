@@ -677,7 +677,7 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
 
     // With one, every frame has it over the scene, read back or not, and
     // after a resize too.
-    backend.set_overlay(Some(quarter_overlay(calls.clone(), sizes.clone())));
+    backend.set_overlay(Some(quarter_overlay(Rc::clone(&calls), Rc::clone(&sizes))));
     let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
     check_overlaid(&image, size, green, clear, "overlay");
     render_frame(&backend, Some(&scene), set(blue), clear, false);
@@ -698,7 +698,7 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
 
     // Another overlay replaces it, and none stops it.
     let (other_calls, other_sizes) = (Rc::new(Cell::new(0)), Rc::new(RefCell::new(Vec::new())));
-    backend.set_overlay(Some(quarter_overlay(other_calls.clone(), other_sizes)));
+    backend.set_overlay(Some(quarter_overlay(Rc::clone(&other_calls), other_sizes)));
     let image = render_frame(&backend, Some(&scene), set(blue), clear, true).unwrap();
     check_overlaid(&image, size, blue, clear, "second overlay");
     assert_eq!((calls.get(), other_calls.get()), (5, 1));
@@ -755,10 +755,10 @@ fn a_new_target_on_the_backend_presents() {
     // what the renderer made on it stay, and the new target presents.
     let provider = Rc::new(HeadlessSurface::default());
     let size = Size::new(48, 32);
-    let Some(mut window) = surface_backend_on(provider.clone(), size, true) else {
+    let Some(mut window) = surface_backend_on(Rc::clone(&provider), size, true) else {
         return;
     };
-    let backend = window.backend.clone();
+    let backend = Rc::clone(&window.backend);
     let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
     let scene = Scene::new(&window);
     let (clear, red, green) = (color(0.4, 0.4, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
@@ -768,20 +768,26 @@ fn a_new_target_on_the_backend_presents() {
     // Replaced with a frame in flight: the scene and its uniforms are as
     // they were.
     render_frame(&window, Some(&scene), set(red), clear, false);
-    window.target = SurfaceTarget::from_provider(backend.clone(), provider.clone(), size, true).expect("target");
+    window.target =
+        SurfaceTarget::from_provider(Rc::clone(&backend), Rc::<HeadlessSurface>::clone(&provider), size, true)
+            .expect("target");
     assert_eq!(provider.made.get(), 2);
     let image = render_frame(&window, Some(&scene), Change::default(), clear, true).unwrap();
     check_halves(&image, size, clear, red, "new target");
 
     // At another size.
     let size = Size::new(80, 24);
-    window.target = SurfaceTarget::from_provider(backend.clone(), provider.clone(), size, true).expect("target");
+    window.target =
+        SurfaceTarget::from_provider(Rc::clone(&backend), Rc::<HeadlessSurface>::clone(&provider), size, true)
+            .expect("target");
     let image = render_frame(&window, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, clear, green, "new target at another size");
 
     // A surface that can't be made leaves the target the window has.
     provider.fail.set(true);
-    assert!(SurfaceTarget::from_provider(backend.clone(), provider.clone(), size, true).is_err());
+    assert!(
+        SurfaceTarget::from_provider(Rc::clone(&backend), Rc::<HeadlessSurface>::clone(&provider), size, true).is_err()
+    );
     provider.fail.set(false);
     let image = render_frame(&window, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, clear, red, "after a failed target");

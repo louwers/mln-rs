@@ -59,7 +59,7 @@ impl PortInstances {
             .iter()
             .enumerate()
             .map(|(instance, port)| {
-                let handlers = handlers.clone();
+                let handlers = Rc::clone(&handlers);
                 let listener = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
                     let data = event.data();
                     match data.dyn_into::<js_sys::Array>() {

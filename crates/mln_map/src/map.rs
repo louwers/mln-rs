@@ -474,7 +474,7 @@ impl Map {
                 mode: if fully_loaded { RenderMode::Full } else { RenderMode::Partial },
                 needs_repaint,
                 placement_changed,
-                rendering_stats: stats.clone(),
+                rendering_stats: Arc::clone(&stats),
             }));
 
             if needs_repaint || self.transform.in_transition() {
@@ -588,7 +588,7 @@ impl Map {
     /// Gives the transform the style's current projection, which constrains
     /// the target of an animation it starts.
     fn share_projection_with_transform(&mut self) {
-        let projection = (self.mode != MapMode::Tile).then(|| self.style.impl_.get_projection().impl_.clone());
+        let projection = (self.mode != MapMode::Tile).then(|| Arc::clone(&self.style.impl_.get_projection().impl_));
         self.transform.set_projection_for_zoom(Some(Rc::new(move |zoom: f64| match &projection {
             Some(projection) => projection.evaluate(zoom as f32),
             None => ProjectionDefinition::new(ProjectionType::Mercator),

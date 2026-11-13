@@ -17,7 +17,7 @@ use mln_util::size::Size;
 #[test]
 fn bind_keeps_the_pending_command_buffer() {
     let backend = Rc::new(RendererBackend::new(&Device::new(None).expect("Metal device")));
-    let target = OffscreenTarget::new(backend.clone(), Size::new(256, 256));
+    let target = OffscreenTarget::new(Rc::clone(&backend), Size::new(256, 256));
     let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
     let image = target.begin_frame().expect("a frame");
     let resource = downcast_resource::<OffscreenTextureResource>(&*image).expect("a Metal offscreen texture");

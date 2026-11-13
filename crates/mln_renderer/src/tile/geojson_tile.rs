@@ -46,7 +46,7 @@ impl GeoJSONTile {
     }
 
     pub(crate) fn update_data(&self, data: Arc<dyn GeoJSONData>, needs_relayout: bool, run_synchronously: bool) {
-        let requested = data.clone();
+        let requested = Arc::clone(&data);
         *self.data.borrow_mut() = Some(data);
         if needs_relayout {
             self.tile.reset();

@@ -82,7 +82,7 @@ impl Renderer {
     /// renderer makes its shaders and drawables again, and keeps its
     /// tiles. The host sizes the backend's framebuffer for the new ratio.
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
-        let backend = self.backend.clone();
+        let backend = Rc::clone(&self.backend);
         let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
         if pixel_ratio == self.pixel_ratio {
             return;
@@ -268,7 +268,7 @@ impl Renderer {
         update_parameters: &Arc<UpdateParameters>,
         target: &dyn FrameTarget,
     ) -> Option<Handoff> {
-        let backend = self.backend.clone();
+        let backend = Rc::clone(&self.backend);
         let context = backend.get_context();
 
         let image = target.begin_frame()?;
@@ -320,12 +320,12 @@ impl Renderer {
             render_tree_parameters.debug_options,
             &render_tree_parameters.transform_params,
             static_data,
-            orchestrator.get_pattern_atlas().clone(),
+            Rc::clone(orchestrator.get_pattern_atlas()),
             renderable_size,
             scissor_rect,
         );
 
-        parameters.line_atlas = orchestrator.get_line_atlas().clone();
+        parameters.line_atlas = Rc::clone(orchestrator.get_line_atlas());
         parameters.symbol_fade_change = render_tree_parameters.symbol_fade_change;
         parameters.evaluated_light = render_tree_parameters.light.clone(); // conformance
         parameters.opaque_pass_cutoff = render_tree_parameters.opaque_pass_cut_off;
@@ -624,7 +624,7 @@ impl Renderer {
 impl Drop for Renderer {
     fn drop(&mut self) {
         // `gfx::BackendScope guard{impl->backend}; impl.reset();`
-        let backend = self.backend.clone();
+        let backend = Rc::clone(&self.backend);
         let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
         // SAFETY: `orchestrator` is dropped once, here, and nothing reads it
         // afterwards: the remaining fields' drops don't touch it.

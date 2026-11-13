@@ -114,7 +114,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
         let timer = Timer::new();
-        let c = count.clone();
+        let c = Rc::clone(&count);
         let handle = run_loop.handle();
         timer.start(Duration::from_millis(20), Duration::ZERO, move || {
             c.set(c.get() + 1);
@@ -133,7 +133,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
         let timer = Rc::new(Timer::new());
-        let (c, t) = (count.clone(), Rc::downgrade(&timer));
+        let (c, t) = (Rc::clone(&count), Rc::downgrade(&timer));
         let handle = run_loop.handle();
         timer.start(Duration::from_millis(5), Duration::from_millis(5), move || {
             c.set(c.get() + 1);
@@ -153,7 +153,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let fired = Rc::new(Cell::new(false));
         let timer = Timer::new();
-        let f = fired.clone();
+        let f = Rc::clone(&fired);
         timer.start(Duration::ZERO, Duration::ZERO, move || f.set(true));
         drop(timer);
         run_loop.run_once();
@@ -165,7 +165,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let fired = Rc::new(Cell::new(0));
         let timer = Timer::new();
-        let f = fired.clone();
+        let f = Rc::clone(&fired);
         timer.start(Duration::ZERO, Duration::ZERO, move || f.set(f.get() + 1));
         run_loop.run_once();
         assert_eq!(fired.get(), 1);

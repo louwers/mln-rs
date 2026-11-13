@@ -58,7 +58,7 @@ mod tests {
 
     fn decode_now(data: &[u8]) -> DecodeResult {
         let result = Rc::new(RefCell::new(None));
-        let slot = result.clone();
+        let slot = Rc::clone(&result);
         decode(data, move |r| *slot.borrow_mut() = Some(r));
         result.take().expect("the default decoder answers before returning")
     }

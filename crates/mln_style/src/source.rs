@@ -60,7 +60,7 @@ impl SourceBase {
 
     pub(crate) fn observer(&self) -> Rc<dyn SourceObserver> {
         match &*self.observer.borrow() {
-            Some(observer) => observer.clone(),
+            Some(observer) => Rc::clone(observer),
             None => Rc::new(NullSourceObserver),
         }
     }

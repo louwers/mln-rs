@@ -127,7 +127,13 @@ fn parse_and_backfill_through_the_codec() {
     let tiles: Vec<RasterDEMTile> = (0..2)
         .map(|x| {
             let id = OverscaledTileID::from_zxy(1, x, 0);
-            RasterDEMTile::new(id, "s".to_owned(), &parameters, &test.tileset, Some(errors.clone()))
+            RasterDEMTile::new(
+                id,
+                "s".to_owned(),
+                &parameters,
+                &test.tileset,
+                Some(Rc::<ErrorObserver>::clone(&errors)),
+            )
         })
         .collect();
     for tile in &tiles {

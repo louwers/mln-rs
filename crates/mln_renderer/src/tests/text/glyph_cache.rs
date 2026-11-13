@@ -24,7 +24,7 @@ fn intern_range(cache: &GlyphCache, data: &[u8]) -> Vec<Arc<Glyph>> {
 }
 
 fn range(id: char, glyph: &Arc<Glyph>) -> GlyphCacheRange {
-    GlyphCacheRange::from([(GlyphID::new(id as u32), glyph.clone())])
+    GlyphCacheRange::from([(GlyphID::new(id as u32), Arc::clone(glyph))])
 }
 
 // gtest: GlyphCache.InternsEqualGlyphsOnce

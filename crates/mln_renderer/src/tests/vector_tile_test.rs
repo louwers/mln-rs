@@ -49,7 +49,7 @@ impl VectorTileTest {
     }
 
     fn tile_parameters(&self) -> TileParameters<'_> {
-        let file_source: Arc<dyn mln_storage::FileSource> = self.file_source.clone();
+        let file_source: Arc<dyn mln_storage::FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
         TileParameters {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
@@ -69,7 +69,7 @@ impl VectorTileTest {
             image_manager: crate::image_manager::ImageManager::create(),
             glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
-            tile_worker_transport: self.transport.clone(),
+            tile_worker_transport: Rc::clone(&self.transport),
         }
     }
 }
@@ -140,8 +140,8 @@ struct RecordingTile {
 impl TileWorkerTransport for RecordingTransport {
     fn create(&self, parameters: WorkerParameters, tile: Box<dyn TileEndpoint>) -> Box<dyn WorkerEndpoint> {
         self.log.lock().push("create");
-        let tile = Box::new(RecordingTile { inner: tile, log: self.log.clone() });
-        Box::new(RecordingWorker { inner: self.inner.create(parameters, tile), log: self.log.clone() })
+        let tile = Box::new(RecordingTile { inner: tile, log: Arc::clone(&self.log) });
+        Box::new(RecordingWorker { inner: self.inner.create(parameters, tile), log: Arc::clone(&self.log) })
     }
 
     fn create_raster(
@@ -186,7 +186,7 @@ fn tile_and_worker_talk_through_the_transport() {
     let mut test = VectorTileTest::new();
     let log = Arc::new(Mutex::new(Vec::new()));
     test.transport =
-        Rc::new(RecordingTransport { inner: InProcessTransport::new(test.thread_pool.clone()), log: log.clone() });
+        Rc::new(RecordingTransport { inner: InProcessTransport::new(test.thread_pool.clone()), log: Arc::clone(&log) });
     let tile = mvt_tile(&test);
     tile.geometry_tile().set_data(None);
     tile.geometry_tile().set_layers(&[], None);

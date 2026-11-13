@@ -77,7 +77,7 @@ impl ImageAllocation {
         };
         Some(ImageAllocation {
             id: unique_id(),
-            backend: backend.clone(),
+            backend: Rc::clone(backend),
             image,
             allocation: Some(allocation),
             image_view: vk::ImageView::null(),
@@ -235,7 +235,7 @@ impl Texture2D {
     pub(crate) fn new(context: &Context) -> Self {
         Texture2D {
             context: context.weak(),
-            backend: context.get_backend().clone(),
+            backend: Rc::clone(context.get_backend()),
             size: Size::new(0, 0),
             pixel_format: TexturePixelType::RGBA,
             channel_type: TextureChannelDataType::UnsignedByte,
@@ -460,7 +460,7 @@ impl Texture2D {
         if sampler == vk::Sampler::null() {
             return;
         }
-        let backend = self.backend.clone();
+        let backend = Rc::clone(&self.backend);
         // SAFETY: the commands that use the sampler have been waited for
         // when the deletion queue runs, or the context is gone.
         let destroy = move || unsafe { backend.get_device().destroy_sampler(sampler, None) };

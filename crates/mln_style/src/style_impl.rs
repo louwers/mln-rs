@@ -69,7 +69,7 @@ struct SpriteShared {
 impl SpriteShared {
     fn observer(&self) -> Rc<dyn Observer> {
         match &self.observer {
-            Some(observer) => observer.clone(),
+            Some(observer) => Rc::clone(observer),
             None => Rc::new(NullObserver),
         }
     }
@@ -576,7 +576,7 @@ impl Impl {
     /// Re-evaluate the visibility expressions of all layers against the
     /// current global state.
     pub(crate) fn reevaluate_layer_visibilities(&mut self) {
-        let global_state = self.global_state.clone();
+        let global_state = Arc::clone(&self.global_state);
         let mut changed = Vec::new();
         for layer in self.layers.get_wrappers_mut() {
             let before = layer.base_impl();
@@ -596,7 +596,7 @@ impl Impl {
     }
 
     pub fn get_global_state_shared(&self) -> Arc<GlobalStateMap> {
-        self.global_state.clone()
+        Arc::clone(&self.global_state)
     }
 
     // Sources
@@ -615,7 +615,7 @@ impl Impl {
             return Err(Error::already_exists(format!("Source {} already exists", source.get_id())));
         }
 
-        source.set_observer(Some(self.source_observer.clone()));
+        source.set_observer(Some(Rc::clone(&self.source_observer)));
         let item = self.sources.add(source);
         if let Some(file_source) = &self.file_source {
             item.load_description(&**file_source);
@@ -679,7 +679,7 @@ impl Impl {
         let id = layer.get_id();
         self.layers.add(layer, before);
         // The global state is not available while the layer itself is parsed.
-        let global_state = self.global_state.clone();
+        let global_state = Arc::clone(&self.global_state);
         let changed = {
             let result = self.layers.get_mut(&id).expect("layer just added");
             let before_impl = result.base_impl();
@@ -726,7 +726,7 @@ impl Impl {
 
     /// The light, for mutation (see `get_layer_mut`).
     pub(crate) fn get_light_mut(&mut self) -> LightRefMut<'_> {
-        let before = self.light.impl_.clone();
+        let before = Arc::clone(&self.light.impl_);
         LightRefMut { style: self, before }
     }
 
@@ -755,7 +755,7 @@ impl Impl {
 
     /// The projection, for mutation (see `get_layer_mut`).
     pub(crate) fn get_projection_mut(&mut self) -> ProjectionRefMut<'_> {
-        let before = self.projection.impl_.clone();
+        let before = Arc::clone(&self.projection.impl_);
         ProjectionRefMut { style: self, before }
     }
 
@@ -813,7 +813,7 @@ impl Impl {
     }
 
     pub fn get_image_impls(&self) -> Arc<ImageImpls> {
-        self.shared.borrow().images.clone()
+        Arc::clone(&self.shared.borrow().images)
     }
 
     /// The impls of the sources. A source whose impl changed since the
@@ -825,7 +825,7 @@ impl Impl {
         let current = |impl_: &Arc<dyn source::Impl>| -> Arc<dyn source::Impl> {
             match self.sources.get(&impl_.id) {
                 Some(source) => source.base_impl(),
-                None => impl_.clone(),
+                None => Arc::clone(impl_),
             }
         };
         if impls.iter().all(|impl_| Arc::ptr_eq(impl_, &current(impl_))) {
@@ -836,10 +836,10 @@ impl Impl {
             && Arc::ptr_eq(base, &impls)
             && refreshed.iter().all(|impl_| Arc::ptr_eq(impl_, &current(impl_)))
         {
-            return refreshed.clone();
+            return Arc::clone(refreshed);
         }
         let refreshed: ImmutableVector<dyn source::Impl> = Arc::new(impls.iter().map(current).collect());
-        *cache = Some((impls, refreshed.clone()));
+        *cache = Some((impls, Arc::clone(&refreshed)));
         refreshed
     }
 
@@ -849,13 +849,13 @@ impl Impl {
 
     /// The light's impl, for the renderer's `UpdateParameters`.
     pub fn get_light_impl(&self) -> Arc<light::Impl> {
-        self.light.impl_.clone()
+        Arc::clone(&self.light.impl_)
     }
 
     /// The sky's impl, if the style has a sky, for the renderer's
     /// `UpdateParameters`.
     pub fn get_sky_impl(&self) -> Option<Arc<sky::Impl>> {
-        self.sky.as_ref().map(|sky| sky.impl_.clone())
+        self.sky.as_ref().map(|sky| Arc::clone(&sky.impl_))
     }
 
     pub fn dump_debug_logs(&self) {
@@ -913,7 +913,7 @@ impl Impl {
     // LayerObserver implementation.
 
     pub(crate) fn on_layer_changed(&mut self, id: &str) {
-        let global_state = self.global_state.clone();
+        let global_state = Arc::clone(&self.global_state);
         if let Some(layer) = self.layers.get_mut(id) {
             layer.reevaluate_visibility(&global_state);
         }

@@ -52,7 +52,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
 
         let context = parameters.context;
 
-        let properties = self.base.evaluated_properties.clone();
+        let properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = background_layer_properties(&properties);
         let crossfade = *background_crossfade(&properties);
         let state = parameters.state;
@@ -152,7 +152,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
                         wrap_v: TextureWrapType::Clamp,
                         ..Default::default()
                     });
-                    drawable.set_texture(Some(tex.clone()), ID_BACKGROUND_IMAGE_TEXTURE);
+                    drawable.set_texture(Some(std::rc::Rc::clone(tex)), ID_BACKGROUND_IMAGE_TEXTURE);
                 }
 
                 let int_zoom = state.get_integer_zoom();

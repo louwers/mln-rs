@@ -199,7 +199,7 @@ impl TaggedString {
             self.has_need_shape_text_val = true;
         }
         if let Some(adjusts) = adjusts {
-            self.sections.last_mut().unwrap().adjusts = Some(adjusts.clone());
+            self.sections.last_mut().unwrap().adjusts = Some(Arc::clone(adjusts));
         }
         let section = self.sections.last_mut().unwrap();
         section.rtl = rtl;

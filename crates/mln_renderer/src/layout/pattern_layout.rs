@@ -153,7 +153,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                 image_dependencies.entry(constant_pattern.to.id().to_owned()).or_insert(ImageType::Pattern);
                 image_dependencies.entry(constant_pattern.from.id().to_owned()).or_insert(ImageType::Pattern);
             }
-            layer_properties_map.entry(layer_id).or_insert_with(|| layer_properties.clone());
+            layer_properties_map.entry(layer_id).or_insert_with(|| Arc::clone(layer_properties));
         }
 
         let constant_sort_key = if sorted { S::constant_sort_key(&layout) } else { None };
@@ -345,8 +345,8 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             let bucket: BucketPtr = Arc::new(bucket);
             for (layer_id, layer_properties) in &self.layer_properties_map {
                 render_data.entry(layer_id.clone()).or_insert_with(|| LayerRenderData {
-                    bucket: bucket.clone(),
-                    layer_properties: layer_properties.clone(),
+                    bucket: Arc::clone(&bucket),
+                    layer_properties: Arc::clone(layer_properties),
                 });
             }
         }

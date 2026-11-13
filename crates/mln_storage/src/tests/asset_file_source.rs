@@ -26,7 +26,7 @@ fn request(fs: &AssetFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
     let req = req();
     let result = Rc::new(RefCell::new(None));
-    let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
+    let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         resource,
         Box::new(move |res: Response| {
@@ -56,7 +56,7 @@ struct WorkerChain {
 impl WorkerChain {
     fn request(self: &Rc<Self>) {
         let asset = "asset://nonempty";
-        let this = self.clone();
+        let this = Rc::clone(self);
         let request = self.fs.request(
             &Resource::new(Kind::Unknown, asset),
             Box::new(move |res: Response| {
@@ -87,7 +87,7 @@ struct TestWorker {
 impl TestWorker {
     fn run(&self, end_callback: Box<dyn Fn() + Send>, failures: Arc<Mutex<Vec<String>>>) {
         let chain = Rc::new(WorkerChain {
-            fs: self.fs.clone(),
+            fs: Arc::clone(&self.fs),
             num_requests: Cell::new(1000),
             request: RefCell::new(None),
             end_callback,
@@ -121,10 +121,10 @@ fn load() {
     let mut threads = Vec::new();
 
     for _ in 0..num_threads {
-        let worker_fs = fs.clone();
+        let worker_fs = Arc::clone(&fs);
         let thread = Thread::new("Test", move |_| TestWorker { fs: worker_fs, chain: RefCell::new(None) });
 
-        let (completed, stop, failures) = (completed.clone(), run_loop.handle(), failures.clone());
+        let (completed, stop, failures) = (Arc::clone(&completed), run_loop.handle(), Arc::clone(&failures));
         thread.actor().invoke(move |worker: &TestWorker| {
             worker.run(
                 Box::new(move || {

@@ -121,7 +121,7 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
             loader,
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), link.clone());
+        let mailbox = Mailbox::with_target(&scheduler::get_current(), Rc::<Link<D>>::clone(&link));
         CustomTile { tile, link, mailbox, single_layer }
     }
 

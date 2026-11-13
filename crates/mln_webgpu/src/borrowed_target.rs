@@ -194,7 +194,7 @@ impl BorrowedTarget {
             depth_stencil_format,
             depth_stencil: RefCell::new(None),
         });
-        let target = Rc::new(DrawTarget::new(size, resource.clone()));
+        let target = Rc::new(DrawTarget::new(size, Rc::<Resource>::clone(&resource)));
         Ok(BorrowedTarget { backend, resource, target, producer })
     }
 
@@ -251,7 +251,7 @@ impl BorrowedTarget {
 
 impl FrameTarget for BorrowedTarget {
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        Some(self.target.clone())
+        Some(Rc::<DrawTarget>::clone(&self.target))
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {

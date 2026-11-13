@@ -68,7 +68,7 @@ thread_local! {
 pub(crate) fn drive_session(id: SessionId, run_loop: RunLoop, run: impl Fn() + 'static) {
     run_loop.set_waker(Some(pump::waker()));
     let session = Rc::new(SessionLoop { run: Box::new(run), running: Cell::new(false) });
-    SESSIONS.with(|sessions| sessions.borrow_mut().insert(id, session.clone()));
+    SESSIONS.with(|sessions| sessions.borrow_mut().insert(id, Rc::clone(&session)));
     pump::add(move || {
         run_session(&session);
         let stopped = run_loop.is_stopped();

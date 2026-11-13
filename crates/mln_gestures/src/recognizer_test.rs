@@ -890,7 +890,7 @@ fn gestures_and_their_steps_report_themselves_as_gestures() {
     use mln_map::CameraChangeSource::{Gesture, Momentum};
     let sources = Rc::new(Sources::default());
     let mut rig = Rig::new();
-    rig.camera = Transform::new(sources.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    rig.camera = Transform::new(Rc::<Sources>::clone(&sources), ConstrainMode::HeightOnly, ViewportMode::Default);
     rig.camera.resize(Size::new(800, 600)).unwrap();
     rig.camera.set_frame_time(Some(rig.time));
     let take = || std::mem::take(&mut *sources.0.borrow_mut());

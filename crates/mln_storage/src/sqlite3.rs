@@ -145,7 +145,7 @@ impl Transaction {
         };
         // C++ throws from the constructor: no destructor, no rollback.
         db.exec(sql)?;
-        Ok(Transaction { connection: db.connection.clone(), need_rollback: true })
+        Ok(Transaction { connection: Arc::clone(&db.connection), need_rollback: true })
     }
 
     fn exec(&self, sql: &str) -> Result<(), SqliteError> {

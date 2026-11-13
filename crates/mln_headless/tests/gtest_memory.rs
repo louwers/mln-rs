@@ -32,11 +32,12 @@ impl MemoryTest {
 
         // `response(path)`: the fixture's bytes, read once.
         let response = move |path: String| -> Option<Response> {
-            let data = cache
-                .borrow_mut()
-                .entry(path.clone())
-                .or_insert_with(|| Arc::new(read_bytes(&format!("test/fixtures/resources/{path}"))))
-                .clone();
+            let data = Arc::clone(
+                cache
+                    .borrow_mut()
+                    .entry(path.clone())
+                    .or_insert_with(|| Arc::new(read_bytes(&format!("test/fixtures/resources/{path}")))),
+            );
             let mut result = Response::new();
             result.data = Some(data);
             Some(result)
@@ -60,7 +61,7 @@ impl MemoryTest {
 
     fn map(&self, frontend: &HeadlessFrontend, ratio: f32) -> Map {
         let map = Map::with_file_source(
-            self.file_source.clone(),
+            Arc::<StubFileSource>::clone(&self.file_source),
             MapOptions {
                 map_mode: MapMode::Static,
                 size: frontend.get_size(),

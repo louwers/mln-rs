@@ -40,13 +40,13 @@ fn volatile_resource() {
     response.data = Some(Arc::new(b"Cached value".to_vec()));
     let req = req();
 
-    let (r, fs, res, stop) = (req.clone(), dbfs.clone(), resource.clone(), run_loop.clone());
+    let (r, fs, res, stop) = (Rc::clone(&req), Arc::clone(&dbfs), Rc::clone(&resource), run_loop.clone());
     let forwarded = resource.borrow().clone();
     dbfs.forward(
         &forwarded,
         &response,
         Some(local_callback(move || {
-            let (r1, fs1, res1) = (r.clone(), fs.clone(), res.clone());
+            let (r1, fs1, res1) = (Rc::clone(&r), Arc::clone(&fs), Rc::clone(&res));
             let request = res.borrow().clone();
             *r.borrow_mut() = Some(fs.request(
                 &request,
@@ -56,7 +56,7 @@ fn volatile_resource() {
                     assert!(!res_1.no_content);
                     assert_eq!(b"Cached value", res_1.data.unwrap().as_slice());
                     res1.borrow_mut().storage_policy = StoragePolicy::Volatile;
-                    let r2 = r1.clone();
+                    let r2 = Rc::clone(&r1);
                     let stop = stop.clone();
                     let request = res1.borrow().clone();
                     *r1.borrow_mut() = Some(fs1.request(
@@ -100,7 +100,7 @@ fn volatile_resource_is_not_stored() {
     resource.storage_policy = StoragePolicy::Permanent;
     let req = req();
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
-    let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
+    let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(dbfs.request(
         &resource,
         Box::new(move |res: Response| {
@@ -164,7 +164,7 @@ impl Drop for RemoveObserver {
 
 fn cached_request(run_loop: &RunLoop, source: &DatabaseFileSource, resource: &Resource) -> Response {
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
-    let (out, stop) = (result.clone(), run_loop.clone());
+    let (out, stop) = (Rc::clone(&result), run_loop.clone());
     let _req = source.request(
         resource,
         Box::new(move |res: Response| {
@@ -207,7 +207,7 @@ fn failed_accessed_flush_waits_for_next_read() {
     ))
     .unwrap();
     let failures = Arc::new(AtomicUsize::new(0));
-    Log::set_observer(Box::new(FlushFailures { count: failures.clone(), marker }));
+    Log::set_observer(Box::new(FlushFailures { count: Arc::clone(&failures), marker }));
     let _remove_observer = RemoveObserver;
 
     let source = DatabaseFileSource::new(

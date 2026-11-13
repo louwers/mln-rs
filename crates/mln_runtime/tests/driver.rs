@@ -49,7 +49,7 @@ fn caller_options() -> AttachOptions {
 /// A wake that counts its calls.
 fn counter() -> (Wake, Arc<AtomicUsize>) {
     let count = Arc::new(AtomicUsize::new(0));
-    let counted = count.clone();
+    let counted = Arc::clone(&count);
     (
         Arc::new(move || {
             counted.fetch_add(1, Ordering::SeqCst);
@@ -224,7 +224,7 @@ fn a_service_inside_a_service_is_busy() {
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");
     let busy = Arc::new(AtomicUsize::new(0));
-    let counted = busy.clone();
+    let counted = Arc::clone(&busy);
     let host = std::thread::current().id();
     // The frame wake runs inside the service that publishes the result.
     let frame_wake: Wake = Arc::new(move || {
@@ -499,7 +499,7 @@ fn the_driver_wake_runs_with_the_session_unlocked() {
     let map = map_of(&runtime, "#ff0000");
     let cell = Arc::new(OnceLock::<RenderSession>::new());
     let reads = Arc::new(AtomicUsize::new(0));
-    let (reader, counted) = (cell.clone(), reads.clone());
+    let (reader, counted) = (Arc::clone(&cell), Arc::clone(&reads));
     // The wake reads the session's state, which a lock held across the wake
     // would deadlock.
     let wake: Wake = Arc::new(move || {
@@ -528,9 +528,9 @@ fn work_sent_inside_a_service_leaves_the_wake_for_later_work() {
     let map = map_of(&runtime, "#ff0000");
     let (wake, wakes) = counter();
     let cell = Arc::new(OnceLock::<RenderSession>::new());
-    let reader = cell.clone();
+    let reader = Arc::clone(&cell);
     let demanded = Arc::new(AtomicBool::new(false));
-    let once = demanded.clone();
+    let once = Arc::clone(&demanded);
     // The frame wake runs inside the service, and demands another frame
     // there, once.
     let frame_wake: Wake = Arc::new(move || {
@@ -587,7 +587,7 @@ fn an_abandon_while_another_thread_services_is_busy() {
     let map = map_of(&runtime, "#ff0000");
     let cell = Arc::new(OnceLock::<RenderSession>::new());
     let (sender, receiver) = std::sync::mpsc::channel();
-    let reader = cell.clone();
+    let reader = Arc::clone(&cell);
     let host = std::thread::current().id();
     // The frame wake runs inside the host's service, and has another thread
     // abandon the session meanwhile.

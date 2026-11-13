@@ -103,7 +103,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let tile = Arc::new(tile);
     file_source.set_response(Kind::Tile, move |_resource| {
         let mut response = Response::new();
-        response.data = Some(tile.clone());
+        response.data = Some(Arc::clone(&tile));
         Some(response)
     });
 
@@ -112,7 +112,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     *observer.end.borrow_mut() = Some(Box::new(move || handle.stop()));
     let timeout = Timer::new();
     {
-        let observer = observer.clone();
+        let observer = Rc::clone(&observer);
         timeout.start(Duration::from_secs(30), Duration::ZERO, move || {
             observer.report(Outcome::Error("timeout".to_owned()));
         });
@@ -122,7 +122,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     mln_style::source::Source::load_description(&source, &*file_source);
     let base_impl = mln_style::source::Source::base_impl(&source);
     let mut render_source = render_source::create(&base_impl);
-    render_source.set_observer(observer.clone());
+    render_source.set_observer(Rc::<Observer>::clone(&observer));
     let file_source: Arc<dyn FileSource> = file_source;
     // A loaded sprite with the icon "v" answers the symbol layer's request.
     // The observer answers missing icons as Map::Impl does, and the timer
@@ -132,7 +132,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     image_manager.set_observer(Some(Rc::new(AnswerMissingImages)));
     let frame = Timer::new();
     {
-        let image_manager = image_manager.clone();
+        let image_manager = Rc::clone(&image_manager);
         frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
             image_manager.notify_if_missing_image_added();
         });
@@ -164,7 +164,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: image_manager.clone(),
+            image_manager: Rc::clone(&image_manager),
             glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
             tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(

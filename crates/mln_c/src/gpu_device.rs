@@ -285,7 +285,7 @@ fn create(request: Request) -> Result<(Device, Option<std::sync::Arc<HostQueueLo
         #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
         (Some(lock), Device::Vulkan(device)) => {
             let lock = std::sync::Arc::new(lock);
-            let device = device.with_queue_lock(lock.clone())?;
+            let device = device.with_queue_lock(std::sync::Arc::<HostQueueLock>::clone(&lock))?;
             Ok((Device::Vulkan(device), Some(lock)))
         }
         (Some(_), _) => Err(Error::new(ErrorKind::Unsupported, "only a Vulkan device takes a queue lock")),

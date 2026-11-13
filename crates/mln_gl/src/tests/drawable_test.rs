@@ -56,7 +56,7 @@ fn headless(size: Size) -> Option<(Rc<RendererBackend>, OffscreenTarget)> {
     match made {
         Ok(backend) => {
             let backend = Rc::new(backend);
-            let target = OffscreenTarget::new(backend.clone(), size);
+            let target = OffscreenTarget::new(Rc::clone(&backend), size);
             Some((backend, target))
         }
         Err(error)
@@ -165,10 +165,10 @@ fn draws_with_replaced_index_buffer() {
     let mut first = Drawable::new("first".to_owned());
     let mut second = Drawable::new("second".to_owned());
     for drawable in [&mut first, &mut second] {
-        drawable.set_shader(Some(shader.clone()));
+        drawable.set_shader(Some(Rc::clone(&shader)));
         drawable.set_enable_depth(false);
         drawable.set_color_mode(&ColorMode::unblended());
-        drawable.update_vertex_attributes(None, 6, DrawMode::Triangles(), Some(indexes.clone()), &segments);
+        drawable.update_vertex_attributes(None, 6, DrawMode::Triangles(), Some(Rc::clone(&indexes)), &segments);
     }
 
     let image = target.begin_frame().expect("a frame");

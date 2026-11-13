@@ -30,7 +30,7 @@ fn loader(fetch: Option<TileFunction>, cancel: Option<TileFunction>) -> Actor<Cu
 /// A tile function that counts its calls.
 fn counter() -> (Arc<AtomicUsize>, TileFunction) {
     let count = Arc::new(AtomicUsize::new(0));
-    let counted = count.clone();
+    let counted = Arc::clone(&count);
     (
         count,
         Arc::new(move |_: &CanonicalTileID| {
@@ -42,7 +42,7 @@ fn counter() -> (Arc<AtomicUsize>, TileFunction) {
 /// A tile function that records the tiles it's called with.
 fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     let ids = Arc::new(Mutex::new(Vec::new()));
-    let recorded = ids.clone();
+    let recorded = Arc::clone(&ids);
     (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 

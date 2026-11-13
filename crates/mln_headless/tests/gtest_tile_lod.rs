@@ -44,7 +44,7 @@ impl TileLODTest {
 
         let tile_count = Arc::new(AtomicU32::new(0));
         let handle = Arc::new(OnceLock::new());
-        let counted = tile_count.clone();
+        let counted = Arc::clone(&tile_count);
         let options = CustomGeometrySourceOptions {
             fetch_tile_function: Some(answer_with(&handle, move |tile_id| {
                 let center = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y).center();

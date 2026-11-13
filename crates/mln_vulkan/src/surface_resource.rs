@@ -117,7 +117,7 @@ impl SurfaceResource {
         read_every_frame: bool,
     ) -> Rc<Self> {
         let resource = Rc::new(SurfaceResource {
-            backend: context.get_backend().clone(),
+            backend: Rc::clone(context.get_backend()),
             context: context.weak(),
             owns_surface: provider.is_some(),
             provider,

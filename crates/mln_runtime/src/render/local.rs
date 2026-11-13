@@ -269,13 +269,13 @@ impl Backend {
     fn as_dyn(&self) -> Rc<dyn RendererBackend> {
         match *self {
             #[cfg(feature = "webgpu")]
-            Backend::WebGpu(ref backend) => backend.clone(),
+            Backend::WebGpu(ref backend) => Rc::<mln_webgpu::RendererBackend>::clone(backend),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            Backend::Metal(ref backend) => backend.clone(),
+            Backend::Metal(ref backend) => Rc::<mln_mtl::RendererBackend>::clone(backend),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            Backend::Vulkan(ref backend) => backend.clone(),
+            Backend::Vulkan(ref backend) => Rc::<mln_vulkan::RendererBackend>::clone(backend),
             #[cfg(feature = "gl")]
-            Backend::Gl(ref backend) => backend.clone(),
+            Backend::Gl(ref backend) => Rc::<mln_gl::RendererBackend>::clone(backend),
         }
     }
 
@@ -306,19 +306,19 @@ impl Backend {
         match (self, ring.kind) {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Backend::Vulkan(backend), RingKind::Vulkan(images)) => {
-                Ok(Box::new(mln_vulkan::BorrowedTarget::new(backend.clone(), images, producer)?))
+                Ok(Box::new(mln_vulkan::BorrowedTarget::new(Rc::clone(backend), images, producer)?))
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             (Backend::Metal(backend), RingKind::Metal(textures)) => {
-                Ok(Box::new(mln_mtl::BorrowedTarget::new(backend.clone(), textures, producer)?))
+                Ok(Box::new(mln_mtl::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
             }
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             (Backend::WebGpu(backend), RingKind::WebGpu(textures)) => {
-                Ok(Box::new(mln_webgpu::BorrowedTarget::new(backend.clone(), textures, producer)?))
+                Ok(Box::new(mln_webgpu::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
             }
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             (Backend::Gl(backend), RingKind::Gl(textures)) => {
-                Ok(Box::new(mln_gl::BorrowedTarget::new(backend.clone(), textures, producer)?))
+                Ok(Box::new(mln_gl::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
             }
             _ => {
                 let _ = producer;
@@ -342,18 +342,18 @@ impl Backend {
         match self {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Backend::Vulkan(backend) => {
-                Ok(Box::new(mln_vulkan::ExportedTarget::new(backend.clone(), ring, kind, size, producer)?))
+                Ok(Box::new(mln_vulkan::ExportedTarget::new(Rc::clone(backend), ring, kind, size, producer)?))
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Backend::Metal(backend) => {
-                Ok(Box::new(mln_mtl::ExportedTarget::new(backend.clone(), ring, kind, size, producer)?))
+                Ok(Box::new(mln_mtl::ExportedTarget::new(Rc::clone(backend), ring, kind, size, producer)?))
             }
             #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Backend::Gl(backend) => {
                 let Device::Gl(device) = device else {
                     return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
                 };
-                Ok(Box::new(mln_gl::ExportedTarget::new(backend.clone(), device, ring, kind, size, producer)?))
+                Ok(Box::new(mln_gl::ExportedTarget::new(Rc::clone(backend), device, ring, kind, size, producer)?))
             }
             _ => {
                 let _ = (device, ring, kind, size, producer);
@@ -376,13 +376,13 @@ impl Backend {
     fn offscreen(&self, size: Size) -> Result<Box<dyn Offscreen>, Error> {
         Ok(match *self {
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            Backend::WebGpu(ref backend) => Box::new(mln_webgpu::OffscreenTarget::new(backend.clone(), size)),
+            Backend::WebGpu(ref backend) => Box::new(mln_webgpu::OffscreenTarget::new(Rc::clone(backend), size)),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            Backend::Metal(ref backend) => Box::new(mln_mtl::OffscreenTarget::new(backend.clone(), size)),
+            Backend::Metal(ref backend) => Box::new(mln_mtl::OffscreenTarget::new(Rc::clone(backend), size)),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            Backend::Vulkan(ref backend) => Box::new(mln_vulkan::OffscreenTarget::new(backend.clone(), size)),
+            Backend::Vulkan(ref backend) => Box::new(mln_vulkan::OffscreenTarget::new(Rc::clone(backend), size)),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            Backend::Gl(ref backend) => Box::new(mln_gl::OffscreenTarget::new(backend.clone(), size)),
+            Backend::Gl(ref backend) => Box::new(mln_gl::OffscreenTarget::new(Rc::clone(backend), size)),
         })
     }
 
@@ -407,7 +407,7 @@ impl Backend {
                 let format = None;
                 let target = webgpu_surface(backend, kind)?;
                 let options = mln_webgpu::SurfaceOptions { format, ..mln_webgpu::SurfaceOptions::default() };
-                Ok(Box::new(mln_webgpu::SurfaceTarget::new(backend.clone(), target, size, options)?))
+                Ok(Box::new(mln_webgpu::SurfaceTarget::new(Rc::clone(backend), target, size, options)?))
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             (Backend::Metal(backend), SurfaceKind::MetalLayer(layer)) => {
@@ -415,11 +415,11 @@ impl Backend {
             }
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Backend::Vulkan(backend), SurfaceKind::Window(window)) => {
-                Ok(Box::new(mln_vulkan::SurfaceTarget::new(backend.clone(), window, size, true)?))
+                Ok(Box::new(mln_vulkan::SurfaceTarget::new(Rc::clone(backend), window, size, true)?))
             }
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Backend::Vulkan(backend), SurfaceKind::Vulkan(surface)) => {
-                Ok(Box::new(mln_vulkan::SurfaceTarget::on_host_surface(backend.clone(), surface, size, true)?))
+                Ok(Box::new(mln_vulkan::SurfaceTarget::on_host_surface(Rc::clone(backend), surface, size, true)?))
             }
             _ => {
                 let _ = size;
@@ -472,7 +472,7 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
     match (device, &surface.kind) {
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
         (Device::Vulkan(device), SurfaceKind::Window(window)) => {
-            let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, window.clone(), size, true)?;
+            let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, Arc::clone(window), size, true)?;
             Ok((Backend::Vulkan(backend), Box::new(target)))
         }
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -488,7 +488,7 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
         }
         #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
-            let (backend, target) = mln_gl::SurfaceTarget::with_backend(window.clone(), size, true)?;
+            let (backend, target) = mln_gl::SurfaceTarget::with_backend(Arc::clone(window), size, true)?;
             Ok((Backend::Gl(backend), Box::new(target)))
         }
         #[cfg(all(feature = "gl", target_family = "wasm"))]

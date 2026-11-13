@@ -102,7 +102,7 @@ pub(crate) fn run(launch: Launch) {
     Log::info(Event::Render, backend.describe());
     let adapter = backend.adapter();
     let paint = Rc::new(RefCell::new(Paint::default()));
-    backend.set_controls_overlay(paint.clone());
+    backend.set_controls_overlay(Rc::clone(&paint));
 
     if args.benchmark {
         Log::info(Event::General, "BENCHMARK MODE: Some optimizations are disabled.");
@@ -680,7 +680,7 @@ impl View {
         self.gfx = Some(Gfx { renderer, backend });
         // The new renderer draws the map's last update again.
         self.dirty = true;
-        self.backend().set_controls_overlay(self.paint.clone());
+        self.backend().set_controls_overlay(Rc::clone(&self.paint));
         self.paint.borrow_mut().resend_textures(&self.ui);
         // The controls take egui's textures before the map's next frame.
         self.ui_repaint_at = Some(Instant::now());

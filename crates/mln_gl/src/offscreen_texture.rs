@@ -75,7 +75,7 @@ impl OffscreenTextureResource {
     }
 
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        self.texture.clone()
+        Rc::<RefCell<Texture2D>>::clone(&self.texture)
     }
 }
 
@@ -117,7 +117,11 @@ impl OffscreenTexture {
     pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_));
         let texture = resource.get_texture();
-        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource, texture }
+        OffscreenTexture {
+            target: DrawTarget::new(size, Rc::<OffscreenTextureResource>::clone(&resource)),
+            resource,
+            texture,
+        }
     }
 
     pub(crate) fn resource(&self) -> &OffscreenTextureResource {
@@ -141,7 +145,7 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     }
 
     fn get_texture(&self) -> Texture2DPtr {
-        self.texture.clone()
+        Rc::clone(&self.texture)
     }
 
     /// GL runs the commands in the order they come.

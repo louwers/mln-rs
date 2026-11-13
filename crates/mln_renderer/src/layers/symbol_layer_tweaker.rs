@@ -76,7 +76,7 @@ impl LayerTweaker for SymbolLayerTweaker {
 
         let context = parameters.context;
         let state = parameters.state;
-        let properties = self.base.evaluated_properties.clone();
+        let properties = Arc::clone(&self.base.evaluated_properties);
         let symbol_layer_properties =
             (*properties).downcast_ref::<SymbolLayerProperties>().expect("SymbolLayerTweaker: symbol layer properties");
         let evaluated = get_evaluated::<SymbolLayerProperties>(&properties);

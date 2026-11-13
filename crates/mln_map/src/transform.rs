@@ -1598,7 +1598,7 @@ impl Transform {
         });
 
         let finished = self.release_fields(fields);
-        self.transitions.push(transition.clone());
+        self.transitions.push(Rc::clone(&transition));
         self.update_movement_flags();
         self.finish_transitions(&finished);
 
@@ -1786,7 +1786,7 @@ impl Transform {
         for transition in &active {
             if transition.has_run_out(now) || transition.fields.get() == 0 {
                 self.transitions.retain(|t| !Rc::ptr_eq(t, transition));
-                finished.push(transition.clone());
+                finished.push(Rc::clone(transition));
             }
         }
         self.update_movement_flags();
@@ -1812,7 +1812,7 @@ impl Transform {
             }
             if active.fields.get() == 0 {
                 active.ended_by(TransitionOutcome::Replaced);
-                finished.push(active.clone());
+                finished.push(Rc::clone(active));
             }
         }
         self.transitions.retain(|active| active.fields.get() != 0);

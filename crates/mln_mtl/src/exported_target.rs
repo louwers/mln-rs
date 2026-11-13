@@ -150,7 +150,7 @@ impl Generation {
             }
         }
         let textures = BorrowedTextures { textures, size, depth_textures };
-        let target = BorrowedTarget::new(backend.clone(), textures.clone(), producer)?;
+        let target = BorrowedTarget::new(Rc::clone(backend), textures.clone(), producer)?;
         Ok(Generation { target, surfaces, textures, size })
     }
 }

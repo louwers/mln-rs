@@ -40,7 +40,7 @@ fn prefetch_tiles() {
 
     let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
     let map = Map::with_file_source(
-        file_source.clone(),
+        Arc::<StubFileSource>::clone(&file_source),
         MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), ..Default::default() },
     )
     .unwrap();
@@ -51,7 +51,7 @@ fn prefetch_tiles() {
     let tiles: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
 
     {
-        let tiles = tiles.clone();
+        let tiles = Rc::clone(&tiles);
         let tile = Rc::new(read_bytes("test/fixtures/map/prefetch/tile.png"));
         file_source.set_global_response(move |res: &Resource| {
             let zoom = stoi(&res.url);

@@ -32,12 +32,12 @@ fn commands_run_in_the_order_each_thread_sent_them() {
     let applied = Arc::new(Mutex::new(Vec::new()));
     let senders: Vec<_> = (0..4)
         .map(|thread| {
-            let (map, ran, applied) = (map.clone(), ran.clone(), applied.clone());
+            let (map, ran, applied) = (map.clone(), Arc::clone(&ran), Arc::clone(&applied));
             std::thread::spawn(move || {
                 for i in 0..50 {
-                    let ran = ran.clone();
+                    let ran = Arc::clone(&ran);
                     drop(map.with_core(move |_| ran.lock().push((thread, i))).unwrap());
-                    let applied = applied.clone();
+                    let applied = Arc::clone(&applied);
                     map.request_repaint().unwrap().on_complete(move |result| {
                         applied.lock().push((thread, result.unwrap().sequence));
                     });
@@ -69,7 +69,7 @@ fn completions_arrive_in_send_order_across_maps_and_the_runtime() {
     let (first, second) = (map(&runtime), map(&runtime));
     let order = Arc::new(Mutex::new(Vec::new()));
     let record = |name: &'static str| {
-        let order = order.clone();
+        let order = Arc::clone(&order);
         move |ok: bool| {
             assert!(ok);
             order.lock().push(name);
@@ -235,7 +235,7 @@ impl Drop for DropFlag {
 fn a_disposed_runtime_shuts_down_after_its_last_map() {
     let runtime = runtime();
     let dropped = Arc::new(AtomicBool::new(false));
-    wait(runtime.set_resource_provider(DropFlag(dropped.clone())));
+    wait(runtime.set_resource_provider(DropFlag(Arc::clone(&dropped))));
     let map = map(&runtime);
     runtime.dispose().unwrap();
     assert_eq!(ErrorKind::InvalidState, runtime.clear_resource_provider().unwrap_err().kind);
@@ -250,7 +250,7 @@ fn a_disposed_runtime_shuts_down_after_its_last_map() {
 fn a_runtime_whose_handles_all_drop_shuts_down() {
     let runtime = runtime();
     let dropped = Arc::new(AtomicBool::new(false));
-    wait(runtime.set_resource_provider(DropFlag(dropped.clone())));
+    wait(runtime.set_resource_provider(DropFlag(Arc::clone(&dropped))));
     let map = map(&runtime);
     drop(runtime);
     wait(map.request_repaint());

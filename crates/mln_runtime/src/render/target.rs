@@ -584,7 +584,7 @@ impl Surface {
     /// backend presents to.
     pub(crate) fn clone_window(&self) -> Option<Surface> {
         match &self.kind {
-            SurfaceKind::Window(window) => Some(Surface { kind: SurfaceKind::Window(window.clone()) }),
+            SurfaceKind::Window(window) => Some(Surface { kind: SurfaceKind::Window(Arc::clone(window)) }),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             SurfaceKind::Gl(surface) => Some(Surface { kind: SurfaceKind::Gl(*surface) }),
             #[allow(unreachable_patterns)]
@@ -608,7 +608,7 @@ impl Surface {
     #[allow(clippy::match_wildcard_for_single_variants)]
     pub(crate) fn host_window(&self) -> Option<Arc<dyn Window>> {
         match &self.kind {
-            SurfaceKind::Window(window) => Some(window.clone()),
+            SurfaceKind::Window(window) => Some(Arc::clone(window)),
             #[allow(unreachable_patterns)]
             _ => None,
         }

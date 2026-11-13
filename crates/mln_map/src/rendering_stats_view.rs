@@ -63,7 +63,7 @@ impl RenderingStatsView {
     pub(crate) fn create(&self, style: &mut Style) {
         if style.get_source(RENDERING_STATS_SOURCE_ID).is_none() {
             let handle: Arc<OnceLock<CustomGeometrySourceHandle>> = Arc::new(OnceLock::new());
-            let fetch_handle = handle.clone();
+            let fetch_handle = Arc::clone(&handle);
             let options = CustomGeometrySourceOptions {
                 fetch_tile_function: Some(Arc::new(move |tile_id: &CanonicalTileID| {
                     if let Some(handle) = fetch_handle.get() {

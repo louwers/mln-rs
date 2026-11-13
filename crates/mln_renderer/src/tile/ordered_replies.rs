@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn replies_keep_the_order_of_their_slots() {
         let sent = Arc::new(Mutex::new(Vec::new()));
-        let replies = OrderedReplies::new(Box::new(Recorder(sent.clone())));
+        let replies = OrderedReplies::new(Box::new(Recorder(Arc::clone(&sent))));
         replies.slot().send(1);
         assert_eq!(*sent.lock(), [1]);
 
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn replies_after_the_worker_go_nowhere() {
         let sent = Arc::new(Mutex::new(Vec::new()));
-        let replies = OrderedReplies::new(Box::new(Recorder(sent.clone())));
+        let replies = OrderedReplies::new(Box::new(Recorder(Arc::clone(&sent))));
         let slot = replies.slot();
         drop(replies);
         slot.send(1);

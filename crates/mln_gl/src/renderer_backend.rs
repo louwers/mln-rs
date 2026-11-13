@@ -170,7 +170,7 @@ impl RendererBackend {
     }
 
     pub(crate) fn create_context(&self) -> Rc<Context> {
-        Context::new(self.impl_.clone())
+        Context::new(Rc::clone(&self.impl_))
     }
 
     /// Registers one shader group per built-in shader. A duplicate

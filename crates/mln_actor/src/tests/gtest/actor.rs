@@ -34,7 +34,7 @@ fn destruction() {
 
     let destructed = Arc::new(AtomicBool::new(false));
     {
-        let d = destructed.clone();
+        let d = Arc::clone(&destructed);
         let _test = Actor::new(scheduler::get_background(), move |_| TestActor { destructed: d });
     }
     assert!(destructed.load(Ordering::SeqCst));
@@ -117,7 +117,7 @@ fn destruction_blocks_on_send() {
         future: Mutex::new(exiting_future),
         waited: AtomicBool::new(false),
     });
-    let actor = Actor::new(scheduler.clone(), |_| TestActor);
+    let actor = Actor::new(Arc::clone(&scheduler), |_| TestActor);
 
     let actor_ref = actor.self_ref();
     let thread = std::thread::spawn(move || actor_ref.invoke(|_: &mut TestActor| {}));
@@ -146,10 +146,10 @@ fn destruction_allowed_in_receive_on_same_thread() {
     let (callback_fired_promise, callback_fired_future) = mpsc::channel();
 
     let retainer: SchedulerPtr = scheduler::get_background();
-    let test = Arc::new(Mutex::new(Some(Actor::new(retainer.clone(), |_| TestActor))));
+    let test = Arc::new(Mutex::new(Some(Actor::new(Arc::clone(&retainer), |_| TestActor))));
 
     // Callback (triggered while mutex is locked in Mailbox::receive())
-    let slot = test.clone();
+    let slot = Arc::clone(&test);
     let self_ref = test.lock().as_ref().unwrap().self_ref();
     self_ref.invoke(move |_: &mut TestActor| {
         TestActor::call_me_back(|| {
@@ -186,10 +186,10 @@ fn self_destruction_doesnt_crash_waiting_receiving_threads() {
 
     let closing_ref = closing_actor.lock().as_ref().unwrap().self_ref();
     let waiting_ref = waiting_actor.self_ref();
-    let slot = closing_actor.clone();
-    let processed = waiting_message_processed.clone();
+    let slot = Arc::clone(&closing_actor);
+    let processed = Arc::clone(&waiting_message_processed);
     let queued_ok = Arc::new(AtomicBool::new(false));
-    let queued_ok_in = queued_ok.clone();
+    let queued_ok_in = Arc::clone(&queued_ok);
 
     // Callback (triggered while mutex is locked in Mailbox::receive())
     closing_ref.clone().invoke(move |_: &mut TestActor| {
@@ -320,7 +320,7 @@ fn ask_void() {
     }
 
     let executed = Arc::new(AtomicBool::new(false));
-    let e = executed.clone();
+    let e = Arc::clone(&executed);
     let actor = Actor::new(scheduler::get_background(), move |_| TestActor { executed: e });
 
     wait(&actor.self_ref().ask(TestActor::do_it));

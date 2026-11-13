@@ -129,7 +129,7 @@ impl CustomGeometrySourceHandle {
     /// Hands over the tile's features. The GeoJSON is cut to the tile on the
     /// background thread, and only if a tile needs it.
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJSON) {
-        let options = self.tile_options.clone();
+        let options = Arc::clone(&self.tile_options);
         self.loader.invoke(move |loader| {
             if loader.is_required(&tile_id) {
                 let features = tile_features(&data, &tile_id, &options);
@@ -270,7 +270,7 @@ impl CustomGeometrySource {
     pub fn handle(&self) -> CustomGeometrySourceHandle {
         CustomGeometrySourceHandle {
             loader: self.inner.loader.self_ref(),
-            tile_options: self.impl_().tile_options.clone(),
+            tile_options: Arc::clone(&self.impl_().tile_options),
         }
     }
 

@@ -284,7 +284,7 @@ impl BorrowedTarget {
         let depth = textures.textures.len();
         let size = textures.size;
         let resource = Rc::new(Resource {
-            backend: backend.backend_impl().clone(),
+            backend: Rc::clone(backend.backend_impl()),
             textures: RefCell::new(textures),
             selected: Cell::new(0),
             depth: RefCell::new(None),
@@ -292,7 +292,7 @@ impl BorrowedTarget {
             render_pass_descriptor: RefCell::new(None),
             waits: RefCell::new(vec![None; depth]),
         });
-        let target = Rc::new(DrawTarget::new(size, resource.clone()));
+        let target = Rc::new(DrawTarget::new(size, Rc::<Resource>::clone(&resource)));
         Ok(BorrowedTarget { backend, resource, target, producer, event, event_value: Cell::new(0) })
     }
 
@@ -410,7 +410,7 @@ impl BorrowedTarget {
 
 impl FrameTarget for BorrowedTarget {
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        Some(self.target.clone())
+        Some(Rc::<DrawTarget>::clone(&self.target))
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {

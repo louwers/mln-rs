@@ -56,7 +56,7 @@ impl Headless {
     fn new(size: Size) -> Result<Headless, mln_util::error::Error> {
         let device = Device::with_options(DeviceOptions { api: api(), ..DeviceOptions::default() })?;
         let backend = std::rc::Rc::new(RendererBackend::new(&device)?);
-        let headless = Headless { target: OffscreenTarget::new(backend.clone(), size), backend };
+        let headless = Headless { target: OffscreenTarget::new(std::rc::Rc::clone(&backend), size), backend };
         Ok(headless)
     }
 

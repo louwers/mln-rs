@@ -132,7 +132,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
             available_images: &available_images,
             filter_groups: &mut FilterGroups::default(),
         },
-        SourceLayer::new(data.clone(), ""),
+        SourceLayer::new(Arc::clone(&data), ""),
         &[properties],
     )
     .unwrap()

@@ -35,7 +35,7 @@ fn loader(fetch: Option<TileFunction>, cancel: Option<TileFunction>) -> Actor<Cu
 /// A tile function that counts its calls.
 fn counter() -> (Arc<AtomicUsize>, TileFunction) {
     let count = Arc::new(AtomicUsize::new(0));
-    let counted = count.clone();
+    let counted = Arc::clone(&count);
     (
         count,
         Arc::new(move |_: &CanonicalTileID| {
@@ -47,7 +47,7 @@ fn counter() -> (Arc<AtomicUsize>, TileFunction) {
 /// A tile function that records the tiles it's called with.
 fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     let ids = Arc::new(Mutex::new(Vec::new()));
-    let recorded = ids.clone();
+    let recorded = Arc::clone(&ids);
     (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 
@@ -87,7 +87,7 @@ impl TileObserver for StubTileObserver {
 fn change_counter() -> (Rc<Cell<u32>>, Rc<StubTileObserver>) {
     let changes = Rc::new(Cell::new(0));
     let observer = Rc::new(StubTileObserver::default());
-    let counted = changes.clone();
+    let counted = Rc::clone(&changes);
     *observer.tile_changed.borrow_mut() = Some(Box::new(move |_| counted.set(counted.get() + 1)));
     (changes, observer)
 }
@@ -148,7 +148,7 @@ fn invalidate_failed_tile() {
 
     let observer = Rc::new(StubTileObserver::default());
     let failed = Rc::new(Cell::new(false));
-    let failed_set = failed.clone();
+    let failed_set = Rc::clone(&failed);
     *observer.tile_error.borrow_mut() = Some(Box::new(move |_, _| failed_set.set(true)));
 
     let tile = tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), Some(observer));
@@ -183,7 +183,7 @@ fn invoke_tile_changed() {
 
     let observer = Rc::new(StubTileObserver::default());
     let weak_tile = Rc::downgrade(&tile);
-    let properties = layer_properties.clone();
+    let properties = Arc::clone(&layer_properties);
     *observer.tile_changed.borrow_mut() = Some(Box::new(move |_| {
         // Once present, the bucket should never "disappear", which would
         // cause flickering.

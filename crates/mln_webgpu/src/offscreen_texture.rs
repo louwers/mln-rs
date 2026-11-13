@@ -307,7 +307,7 @@ impl OffscreenTexture {
         stencil: bool,
     ) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
-        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource }
+        OffscreenTexture { target: DrawTarget::new(size, Rc::<OffscreenTextureResource>::clone(&resource)), resource }
     }
 
     fn resource(&self) -> &OffscreenTextureResource {

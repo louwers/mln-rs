@@ -51,7 +51,7 @@ pub fn serve(port: &web_sys::MessagePort) {
     pump::set_slice(Duration::from_millis(10));
     let replies = Arc::new(Mutex::new(Vec::new()));
     let workers = TaggedScheduler::new(scheduler, SimpleIdentity::new());
-    let sink = replies.clone();
+    let sink = Arc::clone(&replies);
     // A raster tile's reply comes once the browser decoded its image,
     // outside a slice.
     let host = TileWorkerHost::new(workers, move |reply| {
@@ -59,7 +59,7 @@ pub fn serve(port: &web_sys::MessagePort) {
         pump::wake();
     });
     let connection = Rc::new_cyclic(|weak: &std::rc::Weak<Connection>| {
-        let connection = weak.clone();
+        let connection = std::rc::Weak::clone(weak);
         let listener = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
             let Some(connection) = connection.upgrade() else { return };
             let data = event.data();
@@ -71,7 +71,7 @@ pub fn serve(port: &web_sys::MessagePort) {
             }
         });
         port.set_onmessage(Some(listener.as_ref().unchecked_ref()));
-        let connection = weak.clone();
+        let connection = std::rc::Weak::clone(weak);
         let step = pump::add(move || {
             if let Some(connection) = connection.upgrade() {
                 connection.send_replies();

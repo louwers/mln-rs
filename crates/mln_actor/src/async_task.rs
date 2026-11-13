@@ -35,7 +35,7 @@ impl AsyncTask {
     /// `NetworkStatus` observers).
     #[must_use]
     pub fn sender(&self) -> AsyncTaskSender {
-        AsyncTaskSender { pending: self.handle.pending.clone(), core: self.handle.core.clone() }
+        AsyncTaskSender { pending: Arc::clone(&self.handle.pending), core: Arc::clone(&self.handle.core) }
     }
 }
 
@@ -71,7 +71,7 @@ mod tests {
     fn coalesces() {
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
-        let c = count.clone();
+        let c = Rc::clone(&count);
         let task = AsyncTask::new(move || c.set(c.get() + 1));
         task.send();
         task.send();

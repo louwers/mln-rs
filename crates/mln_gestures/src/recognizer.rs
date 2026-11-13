@@ -634,7 +634,7 @@ impl GestureRecognizer {
         if !std::mem::replace(&mut self.begun, false) {
             return;
         }
-        let cancelled_glide = self.cancelled_glide.clone();
+        let cancelled_glide = Arc::clone(&self.cancelled_glide);
         let animation = AnimationOptions {
             transition_id: Some(self.options.transition_id),
             transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {

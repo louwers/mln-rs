@@ -632,7 +632,7 @@ impl Device {
             }
             Kind::Single(single) => {
                 let user = single.users.fetch_add(1, Ordering::Relaxed) + 1;
-                let turns = SingleContextTurns { single: single.clone(), user, lost: Cell::new(false) };
+                let turns = SingleContextTurns { single: Arc::clone(single), user, lost: Cell::new(false) };
                 Self::functions(Box::new(turns))
             }
             Kind::Host(group) => {

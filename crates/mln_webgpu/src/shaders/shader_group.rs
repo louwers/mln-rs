@@ -103,7 +103,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
             program.init_instance_attribute(attribute);
         }
         let shader: ShaderProgramBasePtr = Rc::new(program);
-        if !self.register_shader_named(shader.clone(), &shader_name) {
+        if !self.register_shader_named(Rc::clone(&shader), &shader_name) {
             panic!("Failed to register {shader_name} with shader group!");
         }
         Some(shader)

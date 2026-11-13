@@ -19,7 +19,7 @@ fn cooperative() -> &'static Arc<CooperativeScheduler> {
 
 #[test]
 fn background_and_sequenced_are_the_cooperative_scheduler() {
-    let cooperative: Arc<dyn scheduler::Scheduler + Send + Sync> = cooperative().clone();
+    let cooperative: Arc<dyn scheduler::Scheduler + Send + Sync> = Arc::<CooperativeScheduler>::clone(cooperative());
     assert!(Arc::ptr_eq(&scheduler::get_background(), &cooperative));
     assert!(Arc::ptr_eq(&scheduler::get_sequenced(), &cooperative));
 }
@@ -53,12 +53,12 @@ fn a_thread_keeps_its_object_on_the_creating_threads_loop() {
     cooperative();
     let run_loop = RunLoop::get();
     let total = Arc::new(AtomicUsize::new(0));
-    let t = total.clone();
+    let t = Arc::clone(&total);
     let thread = Thread::new("Test", move |_| Counter { count: Cell::new(0), total: t });
     let main = std::thread::current().id();
     let seen = Arc::new(Mutex::new(Vec::new()));
     for i in 0..10 {
-        let seen = seen.clone();
+        let seen = Arc::clone(&seen);
         thread.actor().invoke(move |counter: &Counter| {
             assert_eq!(std::thread::current().id(), main);
             counter.count.set(counter.count.get() + 1);

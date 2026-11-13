@@ -195,7 +195,7 @@ fn get_layer_property(layer: &ColorReliefLayer, property: Property) -> StyleProp
 
 impl Layer for ColorReliefLayer {
     fn base_impl(&self) -> Arc<dyn layer::Impl> {
-        self.base_impl.clone()
+        Arc::<Impl>::clone(&self.base_impl)
     }
 
     fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase)) {

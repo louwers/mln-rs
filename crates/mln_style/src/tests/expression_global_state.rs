@@ -52,7 +52,7 @@ fn property_expression_captures_global_state() {
     );
 
     // Captured state is used when the context has none.
-    property_expression.capture_global_state(Some(state.clone()));
+    property_expression.capture_global_state(Some(Arc::clone(&state)));
     assert_eq!(3.0_f32, property_expression.evaluate(&EvaluationContext::new(0.0), 0.0));
 
     // An explicitly provided state takes precedence over the captured one.

@@ -327,7 +327,7 @@ fn read<'de, K: Kind, D: Deserializer<'de>>(deserializer: D) -> Result<KeyedRead
             with_table::<K, _>(|table| {
                 if let TableRef::Copies(copies) = table {
                     copies.keys.insert(address(&value), key);
-                    copies.by_key.insert(key, value.clone());
+                    copies.by_key.insert(key, Arc::clone(&value));
                 }
             });
             (Some(key), Some(value))
@@ -393,7 +393,7 @@ mod tests {
     );
 
     fn encode(tables: &mut Tables, value: &Arc<str>) -> Vec<u8> {
-        tables.open(|| postcard::to_allocvec(&Message(value.clone()))).unwrap()
+        tables.open(|| postcard::to_allocvec(&Message(Arc::clone(value)))).unwrap()
     }
 
     fn decode(tables: &mut Tables, bytes: &[u8]) -> Result<Arc<str>, postcard::Error> {
@@ -443,7 +443,7 @@ mod tests {
 
         let unsent: Arc<str> = Arc::from("unsent");
         let failed: Result<(), ()> = origin.open(|| {
-            postcard::to_allocvec(&Message(unsent.clone())).unwrap();
+            postcard::to_allocvec(&Message(Arc::clone(&unsent))).unwrap();
             Err(())
         });
         assert!(failed.is_err());

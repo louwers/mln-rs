@@ -62,8 +62,8 @@ fn add() {
     let l1 = TestLayerImpl::create("id-1", "src-1");
     let l2 = TestLayerImpl::create("id-2", "src-2");
 
-    let a: Vec<ImmutableLayer> = vec![l1.clone()];
-    let b: Vec<ImmutableLayer> = vec![l1.clone(), l2.clone()];
+    let a: Vec<ImmutableLayer> = vec![Arc::clone(&l1)];
+    let b: Vec<ImmutableLayer> = vec![Arc::clone(&l1), Arc::clone(&l2)];
 
     let diff = diff_layers(&Arc::new(a), &Arc::new(b));
 
@@ -78,8 +78,8 @@ fn remove() {
     let l1 = TestLayerImpl::create("id-1", "src-1");
     let l2 = TestLayerImpl::create("id-2", "src-2");
 
-    let a: Vec<ImmutableLayer> = vec![l1.clone(), l2.clone()];
-    let b: Vec<ImmutableLayer> = vec![l1.clone()];
+    let a: Vec<ImmutableLayer> = vec![Arc::clone(&l1), Arc::clone(&l2)];
+    let b: Vec<ImmutableLayer> = vec![Arc::clone(&l1)];
 
     let diff = diff_layers(&Arc::new(a), &Arc::new(b));
 
@@ -109,8 +109,8 @@ fn order() {
     let l1 = TestLayerImpl::create("id-1", "src-1");
     let l2 = TestLayerImpl::create("id-2", "src-2");
 
-    let a: Vec<ImmutableLayer> = vec![l1.clone(), l2.clone()];
-    let b: Vec<ImmutableLayer> = vec![l2.clone(), l1.clone()];
+    let a: Vec<ImmutableLayer> = vec![Arc::clone(&l1), Arc::clone(&l2)];
+    let b: Vec<ImmutableLayer> = vec![Arc::clone(&l2), Arc::clone(&l1)];
 
     let diff = diff_layers(&Arc::new(a), &Arc::new(b));
 

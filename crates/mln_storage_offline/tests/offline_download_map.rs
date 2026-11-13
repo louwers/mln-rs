@@ -88,25 +88,25 @@ fn resource_offline_usage_unset() {
         )
         .unwrap()
         .into(),
-        db.clone(),
-        file_source.clone(),
+        Rc::clone(&db),
+        Arc::<StubFileSource>::clone(&file_source),
     );
 
-    let s = size.clone();
+    let s = Rc::clone(&size);
     file_source.set_response(Kind::Style, move |resource: &Resource| {
         assert_eq!(resource.priority, Priority::Low);
         assert_eq!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "inline_source.style.json"))
     });
 
-    let s = size.clone();
+    let s = Rc::clone(&size);
     file_source.set_response(Kind::Tile, move |resource: &Resource| {
         assert_eq!(resource.priority, Priority::Low);
         assert_eq!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let (stop, db2, region_id) = (run_loop.clone(), db.clone(), region.id);
+    let (stop, db2, region_id) = (run_loop.clone(), Rc::clone(&db), region.id);
     download.set_observer(Some(Rc::new(StatusObserver(move |status: OfflineRegionStatus| {
         if status.complete() {
             // Once download completes, invalidate region and try rendering
@@ -119,13 +119,13 @@ fn resource_offline_usage_unset() {
     run_loop.run();
 
     let stubfile_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
-    let s = size.clone();
+    let s = Rc::clone(&size);
     stubfile_source.set_response(Kind::Style, move |resource: &Resource| {
         assert_ne!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "inline_source.style.json"))
     });
 
-    let s = size.clone();
+    let s = Rc::clone(&size);
     stubfile_source.set_response(Kind::Tile, move |resource: &Resource| {
         assert_ne!(resource.usage, Usage::Offline);
         Some(fixture_response(&s, "0-0-0.vector.pbf"))

@@ -101,7 +101,7 @@ pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
 pub fn get_background() -> SchedulerPtr {
     static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
     if let Some(cooperative) = cooperative() {
-        return cooperative.clone();
+        return Arc::<CooperativeScheduler>::clone(cooperative);
     }
     let mut weak = WEAK.lock();
     if let Some(scheduler) = weak.as_ref().and_then(Weak::upgrade) {
@@ -123,7 +123,7 @@ pub fn get_sequenced() -> SchedulerPtr {
     }
     static STATE: Mutex<State> = Mutex::new(State { weaks: Vec::new(), last_used_index: 0 });
     if let Some(cooperative) = cooperative() {
-        return cooperative.clone();
+        return Arc::<CooperativeScheduler>::clone(cooperative);
     }
     let mut state = STATE.lock();
     if state.weaks.is_empty() {

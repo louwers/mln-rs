@@ -132,7 +132,7 @@ impl OffscreenTextureResource {
     }
 
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        self.color_texture.clone()
+        Rc::<RefCell<Texture2D>>::clone(&self.color_texture)
     }
 }
 
@@ -227,7 +227,11 @@ impl OffscreenTexture {
     ) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
         let texture = resource.get_texture();
-        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource, texture }
+        OffscreenTexture {
+            target: DrawTarget::new(size, Rc::<OffscreenTextureResource>::clone(&resource)),
+            resource,
+            texture,
+        }
     }
 
     pub(crate) fn resource(&self) -> &OffscreenTextureResource {
@@ -251,7 +255,7 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     }
 
     fn get_texture(&self) -> Texture2DPtr {
-        self.texture.clone()
+        Rc::clone(&self.texture)
     }
 
     fn submit(&self, _encoder: &dyn CommandEncoder) {

@@ -84,7 +84,7 @@ fn render(tile: Data, source: &str, layer: &str, answer: Answer) -> Premultiplie
         let mut response = Response::new();
         let tile_data = resource.tile_data.as_ref().expect("tile data");
         if (tile_data.z, tile_data.x, tile_data.y) != (1, 0, 0) {
-            response.data = Some(tile.clone());
+            response.data = Some(Arc::clone(&tile));
             return Some(response);
         }
         match answer {

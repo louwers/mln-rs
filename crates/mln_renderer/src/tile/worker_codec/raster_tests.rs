@@ -31,7 +31,7 @@ struct Sink<M>(Arc<Mutex<Vec<M>>>);
 
 impl<M> Clone for Sink<M> {
     fn clone(&self) -> Self {
-        Sink(self.0.clone())
+        Sink(Arc::clone(&self.0))
     }
 }
 
@@ -145,7 +145,7 @@ fn parsed_image(message: RasterTileMessage) -> Option<PremultipliedImage> {
 #[test]
 fn raster_tiles_cross() {
     for data in [fixture("test/fixtures/annotations/emerald.png"), png(16, 16)] {
-        let direct = parsed_image(raster_direct(Some(data.clone()))).unwrap();
+        let direct = parsed_image(raster_direct(Some(Arc::clone(&data)))).unwrap();
         let through = parsed_image(raster_through_codec(Some(data))).unwrap();
         assert!(direct.valid());
         assert_eq!(through.size, direct.size);

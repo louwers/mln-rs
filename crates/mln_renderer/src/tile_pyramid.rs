@@ -119,7 +119,7 @@ where
             }
             tile
         } else {
-            let tile = (self.create_tile)(id, self.observer.clone())?;
+            let tile = (self.create_tile)(id, Rc::clone(self.observer))?;
             tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
             tile.set_pixel_ratio(self.parameters.pixel_ratio);
             tile.set_layers(self.layers, self.parameters.global_state.clone());

@@ -140,7 +140,7 @@ fn issue_7648() {
         OverscaledTileID::from_zxy(0, 0, 0),
         "source".to_owned(),
         &tile_parameters,
-        data.clone(),
+        Arc::clone(&data),
         None,
     ));
     let layer_properties = circle_layer_properties();
@@ -148,8 +148,8 @@ fn issue_7648() {
     let changed = Rc::new(RefCell::new(0));
     {
         let weak: Weak<GeoJSONTile> = Rc::downgrade(&tile);
-        let layer_properties = layer_properties.clone();
-        let changed = changed.clone();
+        let layer_properties = Arc::clone(&layer_properties);
+        let changed = Rc::clone(&changed);
         *observer.tile_changed.borrow_mut() = Some(Box::new(move |_tile| {
             // Once present, the bucket should never "disappear", which would
             // cause flickering.
@@ -159,9 +159,9 @@ fn issue_7648() {
         }));
     }
 
-    let layers = vec![layer_properties.clone()];
+    let layers = vec![Arc::clone(&layer_properties)];
     tile.set_layers(&layers, tile_parameters.global_state.clone());
-    tile.set_observer(observer.clone());
+    tile.set_observer(Rc::<StubTileObserver>::clone(&observer));
 
     while !tile.is_complete() {
         test.run_loop.run_once();
@@ -186,7 +186,7 @@ fn issue_9927() {
     let tile = GeoJSONTile::new(OverscaledTileID::from_zxy(0, 0, 0), "source".to_owned(), &tile_parameters, data, None);
 
     let layer_properties = circle_layer_properties();
-    let layers = vec![layer_properties.clone()];
+    let layers = vec![Arc::clone(&layer_properties)];
     tile.set_layers(&layers, tile_parameters.global_state.clone());
 
     while !tile.is_complete() {
@@ -218,7 +218,7 @@ fn evaluated_circle_layer_properties() -> Arc<dyn LayerProperties> {
     let layer = CircleLayer::new("circle", "source");
     let render_layer = crate::layermanager::create_render_layer(&layer.base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
-    render_layer.borrow().base().evaluated_properties.clone()
+    Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
 
 /// A transport whose workers are in `count` worker instances on threads.

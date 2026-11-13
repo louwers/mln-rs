@@ -110,7 +110,7 @@ impl RenderLayer for RenderBackgroundLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -208,12 +208,12 @@ impl RenderLayer for RenderBackgroundLayer {
             self.remove_all_drawables();
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(BackgroundLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
             // layerGroup->addLayerTweaker(layerTweaker): the orchestrator
             // keeps the layer groups' tweaker lists (see layer_group.rs).
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
 
         if self.update_projection_variant(state) {

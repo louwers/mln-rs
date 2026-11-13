@@ -284,7 +284,7 @@ impl Context {
         let context = Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
-            weak_self: weak.clone(),
+            weak_self: Weak::clone(weak),
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             global_descriptor_set: RefCell::new(None),
             descriptor_pools: RefCell::new(descriptor_pools),
@@ -375,7 +375,7 @@ impl Context {
     }
 
     pub fn weak(&self) -> Weak<Context> {
-        self.weak_self.clone()
+        Weak::clone(&self.weak_self)
     }
 
     pub(crate) fn get_backend(&self) -> &Rc<BackendImpl> {

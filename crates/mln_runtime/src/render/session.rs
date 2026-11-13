@@ -307,7 +307,7 @@ pub(crate) struct SessionShared {
 impl SessionShared {
     /// A completion that the session's thread resolves.
     fn completion<T: Send + 'static>(&self) -> (Completion<T>, Resolver<T>) {
-        Completion::at(Home::Later(self.thread.clone(), self.runtime_thread))
+        Completion::at(Home::Later(Arc::clone(&self.thread), self.runtime_thread))
     }
 
     /// The completion of the work `id`, unless an end of the session
@@ -654,7 +654,7 @@ fn with_unlocked_wakes<R>(call: impl FnOnce() -> R) -> R {
 fn wake_unlocked(wake: &Wake) {
     let deferred = DEFERRED_WAKES.with(|deferred| match deferred.borrow_mut().as_mut() {
         Some(wakes) => {
-            wakes.push(wake.clone());
+            wakes.push(Arc::clone(wake));
             true
         }
         None => false,
@@ -796,7 +796,7 @@ fn attach_unlocked<R>(
     if options.driver == Driver::CallerThread
         && let Some(wake) = options.driver_work_wake
     {
-        let armed = driver_armed.clone();
+        let armed = Arc::clone(&driver_armed);
         run_loop.set_waker(Some(Arc::new(move || {
             if armed.swap(false, Ordering::SeqCst) {
                 wake_unlocked(&wake);
@@ -873,11 +873,11 @@ fn attach_unlocked<R>(
     shared.state.lock().attach = Some(resolver);
     // Held until `then` returns: the session's thread delivers the attach's
     // result after, inside its driver call.
-    let sending = shared.clone();
+    let sending = Arc::clone(&shared);
     let _sending = sending.hold_sending();
     map.claim_session(id, Arc::downgrade(&shared))?;
     if options.driver == Driver::CoreWorker {
-        match start_thread(shared.clone()) {
+        match start_thread(Arc::clone(&shared)) {
             Ok(thread) => {
                 let _ = shared.thread.set(thread);
             }
@@ -888,7 +888,7 @@ fn attach_unlocked<R>(
         }
     }
     let session = RenderSession { handle: Arc::new(SessionHandle { shared }) };
-    if let Err(error) = map.bind_session(id, run_loop, session.shared().awaited_command.clone(), size) {
+    if let Err(error) = map.bind_session(id, run_loop, Arc::clone(&session.shared().awaited_command), size) {
         // The map was released meanwhile: the session lets go of it.
         drop(session);
         return Err(error);
@@ -1079,7 +1079,7 @@ impl RenderSession {
         let run_loop = RunLoop::adopt(&shared.run_loop)
             .ok_or_else(|| Error::invalid_state("the render session's driver work was taken already"))?;
         let _ = shared.thread.set(std::thread::current().id());
-        Ok(DriverWork::new(shared.clone(), run_loop))
+        Ok(DriverWork::new(Arc::clone(shared), run_loop))
     }
 
     /// What the session can do. Fails with
@@ -1145,7 +1145,7 @@ impl RenderSession {
         let Some(frame) = slot.frame.take() else { return Ok(None) };
         slot.acquired = true;
         state.acquired_frames += 1;
-        Ok(Some(AcquiredFrame { shared: shared.clone(), slot: index, frame, done: false }))
+        Ok(Some(AcquiredFrame { shared: Arc::clone(shared), slot: index, frame, done: false }))
     }
 
     /// Gives a borrowed ring new textures, of `size` logical pixels: as many
@@ -1164,7 +1164,7 @@ impl RenderSession {
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for textures of
     /// another format or kind.
     pub fn set_ring(&self, size: Size, ring: BorrowedRing) -> Result<Completion<Applied>, Error> {
-        let shared = self.shared().clone();
+        let shared = Arc::clone(self.shared());
         {
             let mut state = shared.state.lock();
             check_usable(&state)?;
@@ -1187,7 +1187,7 @@ impl RenderSession {
             }
             state.pending_retargets += 1;
         }
-        let guard = RetargetGuard(shared.clone());
+        let guard = RetargetGuard(Arc::clone(&shared));
         // The guard goes with the closure, whether the closure runs or the
         // resize drops it.
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
@@ -1335,7 +1335,7 @@ impl RenderSession {
         if self.shared().capabilities.export_kind.is_some() {
             return Err(Error::unsupported("an exported ring keeps its images until the session ends"));
         }
-        let shared = self.shared().clone();
+        let shared = Arc::clone(self.shared());
         let capabilities = shared.capabilities;
         if !capabilities.presentation && !capabilities.frame_acquisition {
             check_usable(&shared.state.lock())?;
@@ -1351,7 +1351,7 @@ impl RenderSession {
             // with it.
             capabilities.frame_acquisition.then(|| {
                 state.pending_retargets += 1;
-                RetargetGuard(shared.clone())
+                RetargetGuard(Arc::clone(&shared))
             })
         };
         self.settled_operation(move |worker, outbox| {
@@ -1697,7 +1697,7 @@ impl AcquiredFrame {
             return Err(Error::target_lost("the render session failed, or was detached, abandoned, or disposed"));
         }
         state.views += 1;
-        Ok(FrameView { shared: self.shared.clone() })
+        Ok(FrameView { shared: Arc::clone(&self.shared) })
     }
 
     /// Whether the session can still render: the frame's objects stay valid

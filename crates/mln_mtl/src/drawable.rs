@@ -223,7 +223,8 @@ impl Drawable {
             };
 
         if build_vertex_attribs {
-            let attrs = self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr).clone();
+            let attrs =
+                std::rc::Rc::clone(self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
             // Apply drawable values to shader defaults.
             let mut attribute_bindings = mln_gfx::upload_pass::UploadPass::build_attribute_bindings(
                 upload_pass,
@@ -586,7 +587,8 @@ impl drawable::Drawable for Drawable {
         self.impl_.vertex_count = count;
         self.impl_.vertex_type = data_type;
         if count != 0 && data_type != AttributeDataType::Invalid && !data.is_empty() {
-            let attrs = self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr).clone();
+            let attrs =
+                std::rc::Rc::clone(self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
             let mut attrs = attrs.borrow_mut();
             if let Some(attrib) = attrs.set(self.impl_.vertex_attr_id, /*index=*/ -1, data_type, 0) {
                 attrib.set_raw_data(data);

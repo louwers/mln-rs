@@ -254,11 +254,11 @@ impl RuntimeCore {
     fn new(resource_options: ResourceOptions, run_loop: RunLoopHandle, queued: Arc<AtomicUsize>) -> Self {
         let hooks = Arc::new(ResourceHooks::default());
         let file_sources = FileSourceManager::new();
-        let network_hooks = hooks.clone();
+        let network_hooks = Arc::clone(&hooks);
         file_sources.register_file_source_factory(
             FileSourceType::Network,
             Arc::new(move |_: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(ProviderFileSource::new(options, network_hooks.clone()))
+                Arc::new(ProviderFileSource::new(options, Arc::clone(&network_hooks)))
             }),
         );
         let network = file_sources.get_file_source(FileSourceType::Network, &resource_options);
@@ -402,7 +402,7 @@ impl Runtime {
     pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
         let queued = Arc::new(AtomicUsize::new(0));
-        let (run_loop, thread) = Self::start(resource_options, queued.clone())?;
+        let (run_loop, thread) = Self::start(resource_options, Arc::clone(&queued))?;
         Ok(Runtime {
             shared: Arc::new(RuntimeShared {
                 run_loop,
@@ -510,7 +510,7 @@ impl Runtime {
         }
         let id = MapId(self.shared.next_map_id.fetch_add(1, Ordering::Relaxed));
         let published = Arc::new(Published::new(options.event_mask));
-        let map = Map::new(MapShared::new(id, self.shared.clone(), &options, published.clone()));
+        let map = Map::new(MapShared::new(id, Arc::clone(&self.shared), &options, Arc::clone(&published)));
         let (completion, resolver) = self.shared.completion();
         self.shared.post(move |core, outbox| crate::map::create(core, id, &options, published, resolver, outbox));
         Ok((map, completion))

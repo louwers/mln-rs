@@ -352,6 +352,9 @@ pedantic = { level = "warn", priority = -1 }
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
+# `Arc::clone(&x)` and `Rc::clone(&x)` for a new reference to the same value,
+# so that `x.clone()` is a copy of a value.
+clone_on_ref_ptr = "warn"
 # Their fixes would change what the code does: numeric conversions that
 # truncate, wrap or saturate on purpose, where `try_from` would fail
 # instead, and exact float comparisons, which an epsilon would loosen.

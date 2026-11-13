@@ -354,7 +354,7 @@ pub(crate) struct CrossTileSymbolIndex {
 
 impl CrossTileSymbolIndex {
     pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, state: &TransformState) -> AddLayerResult {
-        let max_cross_tile_id = self.max_cross_tile_id.clone();
+        let max_cross_tile_id = Rc::clone(&self.max_cross_tile_id);
         let layer_index = self
             .layer_indexes
             .entry(layer.get_id().to_owned())

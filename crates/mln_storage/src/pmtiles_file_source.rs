@@ -109,14 +109,12 @@ struct State {
 impl State {
     fn get_file_source(&self) -> Arc<dyn FileSource> {
         let mut file_source = self.file_source.borrow_mut();
-        file_source
-            .get_or_insert_with(|| {
-                let resource_options = self.resource_options.lock().clone();
-                self.file_sources
-                    .get_file_source(FileSourceType::ResourceLoader, &resource_options)
-                    .expect("ResourceLoader file source")
-            })
-            .clone()
+        Arc::clone(file_source.get_or_insert_with(|| {
+            let resource_options = self.resource_options.lock().clone();
+            self.file_sources
+                .get_file_source(FileSourceType::ResourceLoader, &resource_options)
+                .expect("ResourceLoader file source")
+        }))
     }
 
     fn request(self: &Rc<Self>, req: u64, resource: &Resource, callback: impl FnMut(Response) + 'static) {
@@ -137,7 +135,7 @@ impl State {
 
         resource.data_range = Some((PMTILES_HEADER_OFFSET, PMTILES_HEADER_OFFSET + PMTILES_HEADER_LENGTH - 1));
 
-        let this = self.clone();
+        let this = Rc::clone(self);
         let url = url.to_owned();
         self.request(req, &resource, move |response: Response| {
             if let Some(response_error) = &response.error {
@@ -188,7 +186,7 @@ impl State {
             return;
         }
 
-        let this = self.clone();
+        let this = Rc::clone(self);
         let url = url.to_owned();
         self.get_header(
             &url.clone(),
@@ -199,10 +197,11 @@ impl State {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url].clone();
+                let header = Rc::clone(&this.header_cache.borrow()[&url]);
 
                 let parse_callback = {
-                    let (this, url, callback, header) = (this.clone(), url.clone(), callback.clone(), header.clone());
+                    let (this, url, callback, header) =
+                        (Rc::clone(&this), url.clone(), Rc::clone(&callback), Rc::clone(&header));
                     move |data: &[u8]| {
                         let mut doc = if data.is_empty() { Document::default() } else { Document::parse_object(data) };
 
@@ -283,7 +282,7 @@ impl State {
                         header.metadata_offset().wrapping_add(header.metadata_length()).wrapping_sub(1),
                     ));
 
-                    let callback = callback.clone();
+                    let callback = Rc::clone(&callback);
                     this.request(req, &resource, move |response_metadata: Response| {
                         if let Some(e) = &response_metadata.error {
                             callback(Some(Box::new(error(
@@ -395,7 +394,7 @@ impl State {
             return;
         }
 
-        let this = self.clone();
+        let this = Rc::clone(self);
         let url = url.to_owned();
         self.get_header(
             &url.clone(),
@@ -406,7 +405,7 @@ impl State {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url].clone();
+                let header = Rc::clone(&this.header_cache.borrow()[&url]);
 
                 let mut resource = Resource::new(Kind::Source, url.clone());
                 resource.loading_method = LoadingMethod::All;
@@ -415,7 +414,7 @@ impl State {
                     directory_offset.wrapping_add(u64::from(directory_length)).wrapping_sub(1),
                 ));
 
-                let (this2, url, callback) = (this.clone(), url.clone(), callback.clone());
+                let (this2, url, callback) = (Rc::clone(&this), url.clone(), Rc::clone(&callback));
                 this.request(req, &resource, move |response: Response| {
                     if let Some(e) = &response.error {
                         callback(Some(Box::new(error(
@@ -479,7 +478,7 @@ impl State {
             return;
         }
 
-        let this = self.clone();
+        let this = Rc::clone(self);
         let url = url.to_owned();
         self.get_directory(
             &url.clone(),
@@ -492,7 +491,7 @@ impl State {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url].clone();
+                let header = Rc::clone(&this.header_cache.borrow()[&url]);
                 // `find_tile`'s null entry, of length 0, is `None`: the crate
                 // refuses a directory with an entry of length 0.
                 let entry: Option<DirEntry> = {
@@ -514,7 +513,7 @@ impl State {
                         header.leaf_offset().wrapping_add(entry.offset()),
                         entry.length(),
                         directory_depth + 1,
-                        callback.clone(),
+                        Rc::clone(&callback),
                     );
                     return;
                 }
@@ -534,7 +533,7 @@ impl PMTilesFileSourceThread {
     pub(crate) fn request_tilejson(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let url = extract_url(&resource.url);
 
-        let (this, r, url2) = (self.state.clone(), r.clone(), url.clone());
+        let (this, r, url2) = (Rc::clone(&self.state), r.clone(), url.clone());
         self.state.get_metadata(
             &url,
             req,
@@ -565,7 +564,7 @@ impl PMTilesFileSourceThread {
             return;
         };
 
-        let (this, r, url2) = (self.state.clone(), r.clone(), url.clone());
+        let (this, r, url2) = (Rc::clone(&self.state), r.clone(), url.clone());
         self.state.get_header(
             &url,
             req,
@@ -578,7 +577,7 @@ impl PMTilesFileSourceThread {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url2].clone();
+                let header = Rc::clone(&this.header_cache.borrow()[&url2]);
 
                 // `std::cmp_less(z, min_zoom) || std::cmp_greater(z, max_zoom)`.
                 let z = i32::from(tile_data.z);
@@ -600,7 +599,7 @@ impl PMTilesFileSourceThread {
                     }
                 };
 
-                let (this2, r, url) = (this.clone(), r.clone(), url2.clone());
+                let (this2, r, url) = (Rc::clone(&this), r.clone(), url2.clone());
                 this.get_tile_address(
                     &url2,
                     req,
@@ -631,7 +630,7 @@ impl PMTilesFileSourceThread {
                             tile_address.0.wrapping_add(u64::from(tile_address.1)).wrapping_sub(1),
                         ));
 
-                        let (r, header) = (r.clone(), header.clone());
+                        let (r, header) = (r.clone(), Rc::clone(&header));
                         this2.request(req, &tile_resource, move |tile_response: Response| {
                             let mut response = Response::new();
                             response.no_content = true;
@@ -658,7 +657,7 @@ impl PMTilesFileSourceThread {
                                 return;
                             };
 
-                            response.data = Some(data.clone());
+                            response.data = Some(Arc::clone(data));
                             response.no_content = false;
                             response.modified = tile_response.modified;
                             response.expires = tile_response.expires;
@@ -677,7 +676,7 @@ impl PMTilesFileSourceThread {
                                         }
                                     }
                                 } else {
-                                    response.data = Some(data.clone());
+                                    response.data = Some(Arc::clone(data));
                                 }
                             }
 
@@ -712,7 +711,7 @@ impl PMTilesFileSource {
     #[must_use]
     pub(crate) fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let resource_options = Arc::new(Mutex::new(resource_options.clone()));
-        let ro = resource_options.clone();
+        let ro = Arc::clone(&resource_options);
         let file_sources = file_sources.clone();
         PMTilesFileSource {
             thread: Thread::new("PMTilesFileSource", move |_| PMTilesFileSourceThread {

@@ -94,7 +94,7 @@ impl Inner {
             let data_map = self.data_map.borrow();
             let data = data_map.get(&sprite.id).expect("sprite data");
             match (&data.image, &data.json) {
-                (Some(image), Some(json)) => (image.clone(), json.clone(), data.load),
+                (Some(image), Some(json)) => (Arc::clone(image), Arc::clone(json), data.load),
                 _ => return,
             }
         };

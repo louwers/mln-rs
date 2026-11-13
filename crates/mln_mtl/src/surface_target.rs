@@ -275,7 +275,7 @@ impl SurfaceTarget {
         #[cfg(not(target_os = "macos"))]
         let _ = cap_frame_rate;
         let state = Rc::new(SurfaceState {
-            backend: backend.backend_impl().clone(),
+            backend: Rc::clone(backend.backend_impl()),
             layer,
             drawable: RefCell::new(None),
             command_buffer: RefCell::new(None),
@@ -285,7 +285,7 @@ impl SurfaceTarget {
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
-        let image = Rc::new(DrawTarget::new(Size::new(0, 0), Rc::new(SurfaceResource { state: state.clone() })));
+        let image = Rc::new(DrawTarget::new(Size::new(0, 0), Rc::new(SurfaceResource { state: Rc::clone(&state) })));
         let target = SurfaceTarget { state, image, size: Cell::new(Size::new(0, 0)) };
         target.resize(framebuffer_size);
         target
@@ -343,7 +343,8 @@ impl FrameTarget for SurfaceTarget {
     /// render pass without a color attachment trips the drawables' debug
     /// assertions.
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        autoreleasepool(|_| self.state.acquire_drawable()).then(|| -> Rc<dyn frame::DrawTarget> { self.image.clone() })
+        autoreleasepool(|_| self.state.acquire_drawable())
+            .then(|| -> Rc<dyn frame::DrawTarget> { Rc::<DrawTarget>::clone(&self.image) })
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {

@@ -95,7 +95,7 @@ impl GeoJSONOptions {
     /// The default options, as one shared instance.
     pub fn default_options() -> Arc<GeoJSONOptions> {
         static OPTIONS: OnceLock<Arc<GeoJSONOptions>> = OnceLock::new();
-        OPTIONS.get_or_init(|| Arc::new(GeoJSONOptions::default())).clone()
+        Arc::clone(OPTIONS.get_or_init(|| Arc::new(GeoJSONOptions::default())))
     }
 }
 
@@ -137,7 +137,7 @@ pub struct GeoJSONDataBuilder {
 impl GeoJSONDataBuilder {
     /// Fails as [`create_geojson_data`] does.
     pub fn build(&self, geojson: &GeoJSON) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
-        create_geojson_data(geojson, self.sequenced_scheduler.clone(), &self.options)
+        create_geojson_data(geojson, Arc::clone(&self.sequenced_scheduler), &self.options)
     }
 }
 
@@ -206,8 +206,11 @@ impl GeoJSONSource {
 
     /// Sets the source's data. Fails as [`create_geojson_data`] does.
     pub fn set_geojson(&self, geojson: &GeoJSON) -> Result<(), mln_util::Error> {
-        let data =
-            create_geojson_data(geojson, self.inner.sequenced_scheduler.clone(), &self.impl_().get_options().clone())?;
+        let data = create_geojson_data(
+            geojson,
+            Arc::clone(&self.inner.sequenced_scheduler),
+            &Arc::clone(self.impl_().get_options()),
+        )?;
         self.set_geojson_data(Some(data));
         Ok(())
     }
@@ -217,8 +220,8 @@ impl GeoJSONSource {
     #[must_use]
     pub fn data_builder(&self) -> GeoJSONDataBuilder {
         GeoJSONDataBuilder {
-            options: self.impl_().get_options().clone(),
-            sequenced_scheduler: self.inner.sequenced_scheduler.clone(),
+            options: Arc::clone(self.impl_().get_options()),
+            sequenced_scheduler: Arc::clone(&self.inner.sequenced_scheduler),
         }
     }
 
@@ -251,7 +254,7 @@ impl GeoJSONSource {
 
     #[must_use]
     pub fn get_options(&self) -> Arc<GeoJSONOptions> {
-        self.impl_().get_options().clone()
+        Arc::clone(self.impl_().get_options())
     }
 
     #[must_use]
@@ -289,9 +292,9 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
         // Note: This task appears to be safe enough to schedule on the
         // generic background queue. This task does not reference other
         // objects who's lifetimes are coupled with a map.
-        let options = this.impl_().get_options().clone();
+        let options = Arc::clone(this.impl_().get_options());
         let data = res.data.clone();
-        let seq_scheduler = this.inner.sequenced_scheduler.clone();
+        let seq_scheduler = Arc::clone(&this.inner.sequenced_scheduler);
         let generation = this.inner.request_generation.get() + 1;
         this.inner.request_generation.set(generation);
         let weak = Rc::downgrade(&this.inner);

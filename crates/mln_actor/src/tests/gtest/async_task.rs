@@ -47,7 +47,7 @@ fn request_coalescing() {
     let run_loop = RunLoop::new();
 
     let count = Rc::new(Cell::new(0u32));
-    let c = count.clone();
+    let c = Rc::clone(&count);
     let async_ = AsyncTask::new(move || c.set(c.get() + 1));
 
     async_.send();
@@ -67,7 +67,7 @@ fn destroy_should_not_run_queue() {
     let _run_loop = RunLoop::new();
     let count = Rc::new(Cell::new(0u32));
 
-    let c = count.clone();
+    let c = Rc::clone(&count);
     let async_ = AsyncTask::new(move || c.set(c.get() + 1));
     async_.send();
     drop(async_);
@@ -88,7 +88,7 @@ fn destroy_after_signaling() {
     let task2: Rc<RefCell<Option<AsyncTask>>> = Rc::new(RefCell::new(None));
     let failed = Rc::new(Cell::new(false));
 
-    let (t1, t2, f) = (task1.clone(), task2.clone(), failed.clone());
+    let (t1, t2, f) = (Rc::clone(&task1), Rc::clone(&task2), Rc::clone(&failed));
     *task1.borrow_mut() = Some(AsyncTask::new(move || {
         let other = t2.borrow_mut().take();
         drop(other);
@@ -96,7 +96,7 @@ fn destroy_after_signaling() {
             f.set(true); // FAIL() << "Task was destroyed but invoked anyway";
         }
     }));
-    let (t1, t2, f) = (task1.clone(), task2.clone(), failed.clone());
+    let (t1, t2, f) = (Rc::clone(&task1), Rc::clone(&task2), Rc::clone(&failed));
     *task2.borrow_mut() = Some(AsyncTask::new(move || {
         let other = t1.borrow_mut().take();
         drop(other);
@@ -121,7 +121,7 @@ fn request_coalescing_multithreaded() {
     let id = SimpleIdentity::new();
     let count = Rc::new(Cell::new(0u32));
     let num_threads = 25;
-    let c = count.clone();
+    let c = Rc::clone(&count);
     let async_ = AsyncTask::new(move || c.set(c.get() + 1));
 
     let retainer = TaggedScheduler::new(scheduler::get_background(), id);
@@ -152,7 +152,7 @@ fn thread_safety() {
     let num_threads = 25;
     let completed = Arc::new(AtomicU32::new(num_threads));
 
-    let c = count.clone();
+    let c = Rc::clone(&count);
     let async_ = AsyncTask::new(move || c.set(c.get() + 1));
 
     let retainer = TaggedScheduler::new(scheduler::get_background(), id);
@@ -162,7 +162,7 @@ fn thread_safety() {
 
     for _ in 0..num_threads {
         // The callback runs on the worker, thus the atomic type.
-        let completed = completed.clone();
+        let completed = Arc::clone(&completed);
         let handle = run_loop.handle();
         worker_ref.invoke(move |w: &mut TestWorker| {
             w.run_with_callback(move || {
@@ -214,7 +214,7 @@ fn sequenced_scheduler() {
     let bg_id = Arc::new(Mutex::new(None));
     let count = Arc::new(AtomicI32::new(0));
 
-    let (f, b, c) = (failures.clone(), bg_id.clone(), count.clone());
+    let (f, b, c) = (failures.clone(), Arc::clone(&bg_id), Arc::clone(&count));
     let first = move || {
         f.expect(0 == c.load(Ordering::SeqCst), "0 == count");
         let id = std::thread::current().id();
@@ -222,13 +222,13 @@ fn sequenced_scheduler() {
         f.expect(caller_id != id, "caller_id != bg_id");
         c.fetch_add(1, Ordering::SeqCst);
     };
-    let (f, b, c) = (failures.clone(), bg_id.clone(), count.clone());
+    let (f, b, c) = (failures.clone(), Arc::clone(&bg_id), Arc::clone(&count));
     let second = move || {
         f.expect(1 == c.load(Ordering::SeqCst), "1 == count");
         f.expect(*b.lock() == Some(std::thread::current().id()), "bg_id == this thread");
         c.fetch_add(1, Ordering::SeqCst);
     };
-    let (f, b, c) = (failures.clone(), bg_id.clone(), count.clone());
+    let (f, b, c) = (failures.clone(), Arc::clone(&bg_id), Arc::clone(&count));
     let handle = run_loop.handle();
     let third = move || {
         f.expect(2 == c.load(Ordering::SeqCst), "2 == count");

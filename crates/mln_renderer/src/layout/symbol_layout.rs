@@ -329,7 +329,7 @@ impl SymbolLayout {
         capture(&mut this.text_radial_offset, parameters.global_state.as_ref());
         capture(&mut this.text_variable_anchor_offset, parameters.global_state.as_ref());
 
-        let layout = this.layout.clone();
+        let layout = Arc::clone(&this.layout);
         let has_text = has_text_field(&layout) && has_text_font(&layout);
         let has_icon = has_icon_image(&layout);
 
@@ -365,7 +365,7 @@ impl SymbolLayout {
         }
 
         for layer in layers {
-            this.layer_paint_properties.entry(layer.base_impl.id.clone()).or_insert_with(|| layer.clone());
+            this.layer_paint_properties.entry(layer.base_impl.id.clone()).or_insert_with(|| Arc::clone(layer));
         }
 
         // Determine glyph dependencies
@@ -690,7 +690,7 @@ impl SymbolLayout {
         let glyph_size = 24.0_f32;
         let zoom = self.zoom;
         let canonical = self.canonical_id;
-        let layout = self.layout.clone();
+        let layout = Arc::clone(&self.layout);
 
         let icon_offset = layout.evaluate_canonical::<IconOffset>(zoom, feature, &canonical);
 
@@ -870,7 +870,7 @@ impl SymbolLayout {
                         .as_ref()
                         .is_some_and(|text| self.anchor_is_too_close(text.raw_text(), text_repeat_distance, &anchor));
                     if !too_close {
-                        add_symbol_instance(self, anchor, shared_data.clone());
+                        add_symbol_instance(self, anchor, Arc::clone(&shared_data));
                     }
                 }
             }
@@ -1381,7 +1381,7 @@ impl Layout for SymbolLayout {
                         section.scale,
                         &section.font_stack,
                         section.type_,
-                        &Some(result.adjusts.clone()),
+                        &Some(Arc::clone(&result.adjusts)),
                         starts_right_to_left(sub_string),
                         section.key_section,
                         section.text_color,
@@ -1419,7 +1419,7 @@ impl Layout for SymbolLayout {
         image_map: &ImageMap,
         image_positions: &ImagePositions,
     ) {
-        let layout = self.layout.clone();
+        let layout = Arc::clone(&self.layout);
         let zoom = self.zoom;
         let canonical = self.canonical_id;
         let is_point_placement = *layout.get::<SymbolPlacement>() == SymbolPlacementType::Point;
@@ -1663,7 +1663,7 @@ impl Layout for SymbolLayout {
         canonical: &CanonicalTileID,
     ) -> Result<(), Error> {
         let mut bucket = SymbolBucket::new(
-            self.layout.clone(),
+            Arc::clone(&self.layout),
             &self.layer_paint_properties,
             &self.text_size,
             &self.icon_size,
@@ -1876,8 +1876,8 @@ impl Layout for SymbolLayout {
             let bucket: BucketPtr = Arc::new(bucket);
             for (id, properties) in &self.layer_paint_properties {
                 render_data.entry(id.clone()).or_insert_with(|| LayerRenderData {
-                    bucket: bucket.clone(),
-                    layer_properties: properties.clone(),
+                    bucket: Arc::clone(&bucket),
+                    layer_properties: Arc::clone(properties),
                 });
             }
         }

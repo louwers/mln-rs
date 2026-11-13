@@ -105,7 +105,7 @@ impl LayerTweaker for LineLayerTweaker {
         }
 
         let context = parameters.context;
-        let properties = self.base.evaluated_properties.clone();
+        let properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<LineLayerProperties>(&properties);
         let crossfade = *get_crossfade::<LineLayerProperties>(&properties);
 

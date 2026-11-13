@@ -163,7 +163,7 @@ impl HttpTransport for NSURLSessionTransport {
             // the completion block takes `request`.
             let slot = Arc::new(Mutex::new(TaskSlot::default()));
             request.set_cancel_handler({
-                let slot = slot.clone();
+                let slot = Arc::clone(&slot);
                 move || {
                     let mut slot = slot.lock();
                     slot.cancelled = true;

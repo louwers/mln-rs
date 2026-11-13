@@ -32,7 +32,7 @@ use wasm_bindgen::JsValue;
 /// `Thread` exists, which would start threads otherwise.
 #[must_use]
 pub fn install_cooperative_scheduler() -> Arc<CooperativeScheduler> {
-    scheduler::install_cooperative_once().clone()
+    Arc::clone(scheduler::install_cooperative_once())
 }
 
 /// Logs a panic's message to the console, and leaves it in the global

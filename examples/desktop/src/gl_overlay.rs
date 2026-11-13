@@ -28,7 +28,7 @@ pub(crate) fn gl_overlay(paint: Rc<RefCell<Paint>>) -> Overlay {
     Box::new(move |target: &OverlayTarget<'_>| {
         if painter.is_none() && !failed {
             // As egui-wgpu does by default, with dithering.
-            match egui_glow::Painter::new(target.gl.clone(), "", None, true) {
+            match egui_glow::Painter::new(std::sync::Arc::clone(target.gl), "", None, true) {
                 Ok(made) => painter = Some(Painter(made)),
                 Err(e) => {
                     failed = true;

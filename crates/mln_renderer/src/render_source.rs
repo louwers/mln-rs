@@ -126,7 +126,7 @@ impl RenderSourceBase {
     /// The source as the observer of its tiles.
     #[must_use]
     pub(crate) fn tile_observer(&self) -> Rc<dyn TileObserver> {
-        self.tile_observer.clone()
+        Rc::<RenderSourceTileObserver>::clone(&self.tile_observer)
     }
 }
 

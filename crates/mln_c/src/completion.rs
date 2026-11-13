@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn a_command_without_a_completion_logs_its_failure_as_a_warning() {
         let warnings = Arc::new(Mutex::new(Vec::new()));
-        let previous = mln_util::logging::Log::set_thread_observer(Some(Box::new(Warnings(warnings.clone()))));
+        let previous = mln_util::logging::Log::set_thread_observer(Some(Box::new(Warnings(Arc::clone(&warnings)))));
         let finish = |result: Result<(), mln_util::Error>| (result.map_err(Error::from), Generations::default());
         forward(mln_runtime::Completion::ready(Ok(())), None, finish);
         let failed = mln_util::Error::new(ErrorKind::InvalidState, "map has no open command group");

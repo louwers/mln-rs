@@ -22,11 +22,11 @@ fn a_command_sends_its_events_before_it_completes() {
     let runtime = runtime();
     let map = map(&runtime);
     let order = Arc::new(Mutex::new(Vec::new()));
-    let events = order.clone();
+    let events = Arc::clone(&order);
     wait(runtime.set_event_handler(move |batch| {
         events.lock().extend(batch.iter().map(|event| format!("{:?}", event.kind.event_type())));
     }));
-    let done = order.clone();
+    let done = Arc::clone(&order);
     let (tx, rx) = std::sync::mpsc::channel();
     map.set_style_json(EMPTY_STYLE).unwrap().on_complete(move |result| {
         done.lock().push("completed".to_owned());
@@ -44,7 +44,7 @@ fn an_event_comes_after_a_snapshot_that_includes_it() {
     let runtime = runtime();
     let map = map(&runtime);
     let checked = Arc::new(Mutex::new(Vec::new()));
-    let (record, inner) = (checked.clone(), map.clone());
+    let (record, inner) = (Arc::clone(&checked), map.clone());
     wait(runtime.set_event_handler(move |batch| {
         let snapshot = inner.snapshot().unwrap();
         for event in batch {

@@ -100,7 +100,7 @@ impl BufferResource {
                 id.set(value + 1);
                 value
             }),
-            backend: context.get_backend().clone(),
+            backend: Rc::clone(context.get_backend()),
             context: context.weak(),
             buffer: RefCell::new(buffer),
             raw: RefCell::new(raw),

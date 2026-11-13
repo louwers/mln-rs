@@ -150,9 +150,9 @@ fn executes_after() {
     let did_work = Arc::new(AtomicBool::new(false));
     let did_after = Arc::new(AtomicBool::new(false));
 
-    let w = did_work.clone();
+    let w = Arc::clone(&did_work);
     thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || w.store(true, Ordering::SeqCst)));
-    let a = did_after.clone();
+    let a = Arc::clone(&did_after);
     let handle = run_loop.handle();
     thread.actor().invoke(move |_: &TestWorker| {
         TestWorker::send(move || {
@@ -199,7 +199,7 @@ fn concurrency() {
     for _ in 0..num_messages {
         let threaded_object_ref = threaded_object_ref.clone();
         let handle = run_loop.handle();
-        let completed = completed.clone();
+        let completed = Arc::clone(&completed);
         pool_worker_ref.invoke(move |_: &mut PoolTestWorker| {
             PoolTestWorker::send(move || {
                 threaded_object_ref.invoke(move |_: &TestWorker| {
@@ -258,7 +258,7 @@ fn reference_can_outlive_thread() {
 
     let happened = Arc::new(AtomicBool::new(false));
     for _ in 0..1000 {
-        let h = happened.clone();
+        let h = Arc::clone(&happened);
         worker.invoke(move |_: &TestWorker| TestWorker::send(move || h.store(true, Ordering::SeqCst)));
     }
 
@@ -292,7 +292,7 @@ fn invoke_before_child_starts() {
     let count = Arc::new(AtomicI32::new(0));
 
     for _ in 0..100 {
-        let c = count.clone();
+        let c = Arc::clone(&count);
         thread.actor().invoke(move |_: &TestWorkerDelayedConstruction| {
             TestWorkerDelayedConstruction::send(move || {
                 c.fetch_add(1, Ordering::SeqCst);
@@ -324,7 +324,7 @@ fn delete_before_child_starts() {
     let control = Thread::new("Control", TestWorker::new);
     let thread = Thread::new("Test", move |actor| TestWorkerDelayedConstruction::new(actor, &start_future));
 
-    let f = flag.clone();
+    let f = Arc::clone(&flag);
     thread.actor().invoke(move |_: &TestWorkerDelayedConstruction| {
         TestWorkerDelayedConstruction::send(move || f.store(true, Ordering::SeqCst));
     });
@@ -362,10 +362,10 @@ fn pool_wait() {
 fn pool_wait_recursive_add() {
     let pool = scheduler::get_background();
 
-    let p = pool.clone();
+    let p = Arc::clone(&pool);
     pool.schedule(Box::new(move || {
         // Scheduled tasks can add more tasks
-        let p2 = p.clone();
+        let p2 = Arc::clone(&p);
         p.schedule(Box::new(move || {
             std::thread::sleep(Duration::from_millis(10));
             p2.schedule(Box::new(|| std::thread::sleep(Duration::from_millis(10))));
@@ -394,11 +394,11 @@ fn pool_wait_add() {
     state.add_active.store(true, Ordering::SeqCst);
 
     {
-        let pool = pool.clone();
-        let state = state.clone();
+        let pool = Arc::clone(&pool);
+        let state = Arc::clone(&state);
         seq.schedule(Box::new(move || {
             while state.add_active.load(Ordering::SeqCst) {
-                let s = state.clone();
+                let s = Arc::clone(&state);
                 pool.schedule(Box::new(move || {
                     s.executed.fetch_add(1, Ordering::SeqCst);
                 }));
@@ -431,7 +431,7 @@ fn wrong_thread() {
     let pool = scheduler::get_background();
 
     // Asserts in debug builds, silently ignored in release.
-    let p = pool.clone();
+    let p = Arc::clone(&pool);
     pool.schedule(Box::new(move || p.wait_for_empty()));
 
     pool.wait_for_empty();
@@ -442,7 +442,7 @@ fn make_counter_thread(pool: TaggedScheduler, stop_flag: Arc<AtomicBool>, counte
         std::thread::sleep(Duration::from_micros(10));
         counter.fetch_add(1, Ordering::SeqCst);
         if !stop_flag.load(Ordering::SeqCst) {
-            pool.schedule(make_counter_thread(pool.clone(), stop_flag.clone(), counter.clone()));
+            pool.schedule(make_counter_thread(pool.clone(), Arc::clone(&stop_flag), Arc::clone(&counter)));
         }
     })
 }
@@ -451,8 +451,8 @@ fn make_counter_thread(pool: TaggedScheduler, stop_flag: Arc<AtomicBool>, counte
 #[test]
 fn tagged_pools() {
     let background: SchedulerPtr = scheduler::get_background();
-    let pool_tag1 = TaggedScheduler::new(background.clone(), SimpleIdentity::new());
-    let pool_tag2 = TaggedScheduler::new(background.clone(), SimpleIdentity::new());
+    let pool_tag1 = TaggedScheduler::new(Arc::clone(&background), SimpleIdentity::new());
+    let pool_tag2 = TaggedScheduler::new(Arc::clone(&background), SimpleIdentity::new());
     let stop_tasks1 = Arc::new(AtomicBool::new(false));
     let stop_tasks2 = Arc::new(AtomicBool::new(false));
     let run_count1 = Arc::new(AtomicUsize::new(0));
@@ -460,8 +460,8 @@ fn tagged_pools() {
 
     // Run a bunch of tasks on two different pool tags (that share the same thread pool)
     for _ in 0..50 {
-        pool_tag1.schedule(make_counter_thread(pool_tag1.clone(), stop_tasks1.clone(), run_count1.clone()));
-        pool_tag2.schedule(make_counter_thread(pool_tag2.clone(), stop_tasks2.clone(), run_count2.clone()));
+        pool_tag1.schedule(make_counter_thread(pool_tag1.clone(), Arc::clone(&stop_tasks1), Arc::clone(&run_count1)));
+        pool_tag2.schedule(make_counter_thread(pool_tag2.clone(), Arc::clone(&stop_tasks2), Arc::clone(&run_count2)));
     }
     std::thread::sleep(Duration::from_millis(150));
 

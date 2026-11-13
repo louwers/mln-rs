@@ -162,7 +162,7 @@ impl Context {
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
-            weak_self: weak.clone(),
+            weak_self: Weak::clone(weak),
             state: State::default(),
             uniform_buffer_offset_alignment: alignment.max(1) as usize,
             half_float_renderable,
@@ -184,7 +184,7 @@ impl Context {
     }
 
     pub(crate) fn weak(&self) -> Weak<Context> {
-        self.weak_self.clone()
+        Weak::clone(&self.weak_self)
     }
 
     #[cfg(all(unix, not(target_vendor = "apple")))]

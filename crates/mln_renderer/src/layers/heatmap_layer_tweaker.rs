@@ -51,7 +51,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
 
         let context = parameters.context;
         let zoom = parameters.state.get_zoom() as f32;
-        let properties = self.base.evaluated_properties.clone();
+        let properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<HeatmapLayerProperties>(&properties);
 
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {

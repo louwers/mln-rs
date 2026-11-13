@@ -19,7 +19,7 @@ pub struct ActorRef<O: 'static> {
 
 impl<O: 'static> Clone for ActorRef<O> {
     fn clone(&self) -> Self {
-        ActorRef { weak_mailbox: self.weak_mailbox.clone(), _object: PhantomData }
+        ActorRef { weak_mailbox: Weak::clone(&self.weak_mailbox), _object: PhantomData }
     }
 }
 

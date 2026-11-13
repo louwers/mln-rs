@@ -291,9 +291,9 @@ mod tests {
         let (loading, loaded) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
         let loading_tile = VectorTileMock::new(loading);
         loading_tile.base.renderable.set(false);
-        let loading_necessity = loading_tile.necessity.clone();
+        let loading_necessity = Rc::clone(&loading_tile.necessity);
         let loaded_tile = VectorTileMock::new(loaded);
-        let loaded_necessity = loaded_tile.necessity.clone();
+        let loaded_necessity = Rc::clone(&loaded_tile.necessity);
 
         cache.add(loading, Box::new(loading_tile));
         cache.add(loaded, Box::new(loaded_tile));

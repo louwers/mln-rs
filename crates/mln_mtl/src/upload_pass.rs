@@ -40,7 +40,7 @@ impl UploadPass {
         if let Some(target) = as_mtl(target) {
             target.resource().bind();
         }
-        UploadPass { context: command_encoder.get_context().clone() }
+        UploadPass { context: Rc::clone(command_encoder.get_context()) }
     }
 
     fn create_vertex_buffer(&self, data: &[u8], persistent: bool) -> Rc<VertexBufferResource> {
@@ -71,7 +71,7 @@ impl UploadPass {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();
         let existing =
-            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| b.resource.clone());
+            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| Rc::clone(&b.resource));
         // If the already-allocated buffer is large enough, we can re-use it.
         if let Some(resource) = existing
             && raw_size <= resource.get_size_in_bytes()
@@ -93,7 +93,7 @@ impl UploadPass {
             debug_assert!(vec.has_raw_data());
             let resource = self.create_vertex_buffer(&vec.get_raw_data()[..raw_size], false);
             // A released vector frees its CPU copy here.
-            vec.set_buffer(Some(Box::new(VertexBuffer { resource: resource.clone() })));
+            vec.set_buffer(Some(Box::new(VertexBuffer { resource: Rc::clone(&resource) })));
             return Some(resource);
         }
         None

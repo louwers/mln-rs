@@ -177,7 +177,7 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
             if matches!(geometry.shape, Shape::Polygon(_) | Shape::MultiPolygon(_))
                 && let (Some(owner), Some(range)) = (self.layer.triangle_buffer(), &geometry.triangles)
             {
-                lines.set_triangles(owner.clone(), range.clone());
+                lines.set_triangles(Arc::clone(owner), range.clone());
             }
             lines
         })

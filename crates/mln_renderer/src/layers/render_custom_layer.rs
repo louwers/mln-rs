@@ -176,7 +176,7 @@ impl RenderLayer for RenderCustomLayer {
         if group.get_drawable_count() == 0
             && let Some(group) = group.as_layer_group_mut()
         {
-            group.add_drawable(Box::new(CustomDrawable::new(self.get_id().to_owned(), self.shared.clone())));
+            group.add_drawable(Box::new(CustomDrawable::new(self.get_id().to_owned(), Rc::clone(&self.shared))));
         }
     }
 
@@ -185,7 +185,7 @@ impl RenderLayer for RenderCustomLayer {
             return;
         };
         self.shared.frame.set(Some(frame));
-        self.shared.context.replace(Some(parameters.backend.get_context_ptr().clone()));
+        self.shared.context.replace(Some(Rc::clone(parameters.backend.get_context_ptr())));
         let Some(host) = self.shared.host() else { return };
         let Some(encoder) = parameters.encoder.as_deref() else { return };
         let lent = encoder.lend_to_custom_layer(target, &mut |encoder| {

@@ -470,7 +470,7 @@ pub struct RenderLayerBase {
 
 impl RenderLayerBase {
     pub(crate) fn new(properties: Arc<dyn LayerProperties>) -> Self {
-        let base_impl = properties.base_impl.clone();
+        let base_impl = Arc::clone(&properties.base_impl);
         RenderLayerBase {
             evaluated_properties: properties,
             base_impl,
@@ -831,10 +831,10 @@ pub(crate) fn activate_layer_group(
         if activate {
             // The RenderTree has determined this layer should be included in
             // the renderable set for a frame
-            changes.push(ChangeRequest::AddLayerGroup(layer_group.clone()));
+            changes.push(ChangeRequest::AddLayerGroup(Rc::clone(layer_group)));
         } else {
             // The RenderTree is informing us we should not render anything
-            changes.push(ChangeRequest::RemoveLayerGroup(layer_group.clone()));
+            changes.push(ChangeRequest::RemoveLayerGroup(Rc::clone(layer_group)));
         }
     }
 }
@@ -847,6 +847,6 @@ pub(crate) fn change_layer_index(
     if let Some(group) = group
         && group.borrow().get_layer_index() != new_index
     {
-        changes.push(ChangeRequest::UpdateLayerGroupIndex(group.clone(), new_index));
+        changes.push(ChangeRequest::UpdateLayerGroupIndex(Rc::clone(group), new_index));
     }
 }

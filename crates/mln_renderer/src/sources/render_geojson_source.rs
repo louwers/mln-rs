@@ -126,7 +126,7 @@ impl RenderSource for RenderGeoJSONSource {
                     if id.canonical.z <= max_z
                         && let Some(tile) = tile.downcast_ref::<GeoJSONTile>()
                     {
-                        tile.update_data(data.clone(), needs_relayout, parameters.is_update_synchronous);
+                        tile.update_data(Arc::clone(data), needs_relayout, parameters.is_update_synchronous);
                     }
                 }
             }
@@ -147,7 +147,13 @@ impl RenderSource for RenderGeoJSONSource {
             impl_.get_zoom_range(),
             None,
             |tile_id, observer| -> Option<Box<dyn Tile>> {
-                Some(Box::new(GeoJSONTile::new(*tile_id, source_id.clone(), parameters, data.clone(), Some(observer))))
+                Some(Box::new(GeoJSONTile::new(
+                    *tile_id,
+                    source_id.clone(),
+                    parameters,
+                    Arc::clone(&data),
+                    Some(observer),
+                )))
             },
         );
     }

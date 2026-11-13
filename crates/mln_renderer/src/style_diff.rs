@@ -50,17 +50,17 @@ fn diff<T: ?Sized>(
     // `emplace` keeps the first entry for a duplicate key, as C++ does.
     while a_it != a.len() || b_it != b.len() {
         if a_it != a.len() && (l_it == lcs.len() || !eq(&lcs[l_it], &a[a_it])) {
-            result.removed.entry(id(&a[a_it])).or_insert_with(|| a[a_it].clone());
+            result.removed.entry(id(&a[a_it])).or_insert_with(|| Arc::clone(&a[a_it]));
             a_it += 1;
         } else if b_it != b.len() && (l_it == lcs.len() || !eq(&lcs[l_it], &b[b_it])) {
-            result.added.entry(id(&b[b_it])).or_insert_with(|| b[b_it].clone());
+            result.added.entry(id(&b[b_it])).or_insert_with(|| Arc::clone(&b[b_it]));
             b_it += 1;
         } else {
             if !Arc::ptr_eq(&a[a_it], &b[b_it]) {
                 result
                     .changed
                     .entry(id(&b[b_it]))
-                    .or_insert_with(|| StyleChange { before: a[a_it].clone(), after: b[b_it].clone() });
+                    .or_insert_with(|| StyleChange { before: Arc::clone(&a[a_it]), after: Arc::clone(&b[b_it]) });
             }
             a_it += 1;
             b_it += 1;

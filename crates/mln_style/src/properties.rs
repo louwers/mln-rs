@@ -99,7 +99,7 @@ impl<T: Clone + Debug + PartialEq + 'static> PropertyValueLike for PropertyValue
 
     fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
         if self.is_expression() && self.transitions_on_global_state_change(Some(&change.changed_keys)) {
-            self.as_expression_mut().pin_global_state(change.prior_state.clone());
+            self.as_expression_mut().pin_global_state(std::sync::Arc::clone(&change.prior_state));
         }
     }
 }

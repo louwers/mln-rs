@@ -42,7 +42,7 @@ impl RenderPass {
             stats.num_draw_calls = 0;
             stats.num_frames += 1;
         }
-        RenderPass { context: context.clone(), framebuffer: context.bound_framebuffer() }
+        RenderPass { context: Rc::clone(context), framebuffer: context.bound_framebuffer() }
     }
 }
 
@@ -57,7 +57,7 @@ impl render_pass::RenderPass for RenderPass {
     fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         let (framebuffer, size, has_stencil) = self.framebuffer;
         self.context.state().bind_vertex_array(self.context.gl(), None);
-        let mut pass = CustomLayerPass { context: self.context.clone(), framebuffer, size };
+        let mut pass = CustomLayerPass { context: Rc::clone(&self.context), framebuffer, size };
         f(&mut pass);
         self.context.set_dirty_state();
         self.context.bind_framebuffer(framebuffer, size, has_stencil);

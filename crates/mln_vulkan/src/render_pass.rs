@@ -32,7 +32,7 @@ impl RenderPass {
     /// to draw into, as in a frame that acquired no image, the pass isn't
     /// encoding (`is_encoding`) and what is drawn in it is skipped.
     pub(crate) fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
-        let context = command_encoder.get_context().clone();
+        let context = Rc::clone(command_encoder.get_context());
         let command_buffer = command_encoder.get_command_buffer();
         let mut pass = RenderPass {
             context,

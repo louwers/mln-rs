@@ -55,7 +55,7 @@ impl RasterTileTest {
     }
 
     pub(crate) fn tile_parameters(&self) -> TileParameters<'_> {
-        let file_source: Arc<dyn mln_storage::FileSource> = self.file_source.clone();
+        let file_source: Arc<dyn mln_storage::FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
         TileParameters {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,

@@ -80,7 +80,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
             source,
             &additional_defines,
         )?);
-        if !self.register_shader_named(shader.clone(), &shader_name) {
+        if !self.register_shader_named(Rc::clone(&shader), &shader_name) {
             Log::error(Event::Shader, format!("Failed to register {shader_name} with shader group!"));
             debug_assert!(false);
             return None;

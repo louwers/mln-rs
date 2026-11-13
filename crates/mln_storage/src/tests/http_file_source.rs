@@ -286,7 +286,7 @@ pub(crate) fn load_request(
 ) {
     let current = state.number.get();
     state.number.set(current + 1);
-    let (fs2, state2, url2, run_loop2) = (fs.clone(), state.clone(), url.clone(), run_loop.clone());
+    let (fs2, state2, url2, run_loop2) = (Rc::clone(fs), Rc::clone(state), Rc::clone(url), run_loop.clone());
     let request = fs.request(
         &Resource::new(Kind::Unknown, url(current)),
         Box::new(move |res: Response| {
@@ -345,7 +345,7 @@ fn token_transform(seen: Arc<Mutex<Vec<(Kind, String)>>>) -> HttpHeaderTransform
 fn load_once(fs: &HTTPFileSource, kind: Kind, url: String) -> Response {
     let run_loop = RunLoop::new();
     let result = Rc::new(RefCell::new(None));
-    let (r, stop) = (result.clone(), run_loop.clone());
+    let (r, stop) = (Rc::clone(&result), run_loop.clone());
     let _req = fs.request(
         &Resource::new(kind, url),
         Box::new(move |res: Response| {
@@ -370,7 +370,7 @@ fn a_header_transform_adds_headers_until_cleared() {
     });
     let fs = http_file_source();
     let seen = Arc::new(Mutex::new(Vec::new()));
-    fs.set_http_header_transform(token_transform(seen.clone()));
+    fs.set_http_header_transform(token_transform(Arc::clone(&seen)));
 
     let res = load_once(&fs, Kind::Style, server.url("/with-token.json"));
     assert_eq!(None, res.error);

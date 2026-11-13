@@ -83,7 +83,7 @@ fn create_group_key(impl_: &Arc<dyn layer::Impl>) -> LayoutGroupKey {
         max_zoom: impl_.max_zoom,
         visibility: impl_.visibility,
         filter_expression: impl_.filter.expression.clone(),
-        impl_: impl_.clone(),
+        impl_: Arc::clone(impl_),
     }
 }
 
@@ -97,8 +97,8 @@ pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
         let key = create_group_key(&layer.base_impl);
         // libstdc++ compares the new key against the stored one.
         match group_map.iter_mut().find(|(k, _)| key == *k) {
-            Some((_, group)) => group.push(layer.clone()),
-            None => group_map.push((key, vec![layer.clone()])),
+            Some((_, group)) => group.push(Arc::clone(layer)),
+            None => group_map.push((key, vec![Arc::clone(layer)])),
         }
     }
     group_map

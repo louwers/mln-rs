@@ -71,7 +71,7 @@ pub(crate) struct DrawableBinders {
 #[expect(clippy::unnecessary_wraps, reason = "the value of a `Drawable` setter, which takes an `Option`")]
 pub(crate) fn drawable_binders_slot(bucket: &BucketPtr, layer_id: &str) -> Option<Rc<dyn Any>> {
     Some(Rc::new(DrawableBinders {
-        bucket: bucket.clone(),
+        bucket: Arc::clone(bucket),
         layer_id: layer_id.to_owned(),
         version: std::cell::Cell::new(bucket.get_version()),
     }))
@@ -134,7 +134,7 @@ impl DrawableRenderTile {
 #[must_use]
 pub(crate) fn drawable_render_tile_slot(owner: &Rc<Vec<RenderTile>>, tile: &RenderTile) -> Option<Rc<dyn Any>> {
     let index = owner.iter().position(|t| std::ptr::eq(t, tile))?;
-    Some(Rc::new(DrawableRenderTile { owner: owner.clone(), index }))
+    Some(Rc::new(DrawableRenderTile { owner: Rc::clone(owner), index }))
 }
 
 pub(crate) fn get_drawable_render_tile(drawable: &dyn Drawable) -> Option<&RenderTile> {

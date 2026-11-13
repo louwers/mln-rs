@@ -325,7 +325,7 @@ impl Painter {
     /// destroys itself too.
     fn free_texture(&self, texture: Texture) {
         let Texture { texture, set } = texture;
-        let free_sets = self.free_sets.clone();
+        let free_sets = Rc::clone(&self.free_sets);
         destroy_later(&self.context, move || free_sets.borrow_mut().push(set));
         drop(texture);
     }

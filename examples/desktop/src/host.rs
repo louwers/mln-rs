@@ -294,7 +294,7 @@ impl ApplicationHandler<UserEvent> for Host {
             size: window.inner_size(),
             frame_interval: Duration::from_secs_f64(1.0 / refresh_hz.max(1.0)),
             start: Instant::now(),
-            inbox: inbox.clone(),
+            inbox: Arc::clone(&inbox),
             proxy: self.proxy.clone(),
         };
         let mut open = Open {
@@ -451,7 +451,7 @@ impl ApplicationHandler<UserEvent> for Host {
                 let surface = open.metal_layer().and_then(|layer| layer.create_surface(&instance));
                 #[cfg(not(target_os = "macos"))]
                 let surface = instance
-                    .create_surface(open.window.clone())
+                    .create_surface(Arc::clone(&open.window))
                     .map_err(|e| format!("Failed to create a surface for the window: {e}"));
                 let _ = reply.send(surface);
             }
@@ -461,7 +461,7 @@ impl ApplicationHandler<UserEvent> for Host {
             }
             #[cfg(not(target_vendor = "apple"))]
             UserEvent::Window(reply) => {
-                let _ = reply.send(open.window.clone());
+                let _ = reply.send(Arc::clone(&open.window));
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
             UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),

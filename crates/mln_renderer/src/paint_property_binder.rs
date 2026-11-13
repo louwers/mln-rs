@@ -441,7 +441,13 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             let data_type = if self.is_interpolated() { T::INTERPOLATED_DATA_TYPE } else { T::BASE_DATA_TYPE };
 
             debug_assert_eq!(shared.get_raw_count() / buffer.stride.max(1), self.get_vertex_count(buffer));
-            attrib.set_shared_raw_data(Some(shared.clone()), self.vertex_offset as u32, 0, raw_size, data_type);
+            attrib.set_shared_raw_data(
+                Some(std::rc::Rc::clone(shared)),
+                self.vertex_offset as u32,
+                0,
+                raw_size,
+                data_type,
+            );
         } else {
             // getVertexCount() is 0 without an interleaved buffer: nothing
             // to set.
@@ -582,7 +588,13 @@ impl CrossFadedPaintPropertyBinder<Image> {
             let raw_size = buffer.stride as u32;
             // isInterpolated() is false: `Type::DataType`.
             let data_type = AttributeDataType::UShort4;
-            attrib.set_shared_raw_data(Some(shared.clone()), self.vertex_offset as u32, 0, raw_size, data_type);
+            attrib.set_shared_raw_data(
+                Some(std::rc::Rc::clone(shared)),
+                self.vertex_offset as u32,
+                0,
+                raw_size,
+                data_type,
+            );
         }
     }
 }

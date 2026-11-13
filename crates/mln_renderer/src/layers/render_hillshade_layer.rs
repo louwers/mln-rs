@@ -112,7 +112,7 @@ impl RenderHillshadeLayer {
 
     fn add_render_target(&mut self, render_target: &RenderTargetPtr, changes: &mut UniqueChangeRequestVec) {
         activate_render_target(Some(render_target), true, changes);
-        self.activated_render_targets.push(render_target.clone());
+        self.activated_render_targets.push(Rc::clone(render_target));
     }
 
     fn remove_render_targets(&mut self, changes: &mut UniqueChangeRequestVec) {
@@ -132,7 +132,7 @@ fn hillshade_vertex_attributes(context: &dyn Context, vertices: &VertexVectorBas
         let stride = size_of::<HillshadeLayoutVertex>() as u32;
         if let Some(attr) = attrs.set(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(
-                Some(vertices.clone()),
+                Some(Rc::clone(vertices)),
                 0, // offsetof(HillshadeLayoutVertex, a1)
                 0,
                 stride,
@@ -141,7 +141,7 @@ fn hillshade_vertex_attributes(context: &dyn Context, vertices: &VertexVectorBas
         }
         if let Some(attr) = attrs.set(ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(
-                Some(vertices.clone()),
+                Some(Rc::clone(vertices)),
                 4, // offsetof(HillshadeLayoutVertex, a2)
                 0,
                 stride,
@@ -193,10 +193,10 @@ impl RenderLayer for RenderHillshadeLayer {
         properties.base.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
         if let Some(prepare_layer_tweaker) = &self.prepare_layer_tweaker {
-            prepare_layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            prepare_layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -280,11 +280,11 @@ impl RenderLayer for RenderHillshadeLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(HillshadeLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
             // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
         let layer_tweaker = self.base.layer_tweaker.clone();
 
@@ -346,7 +346,7 @@ impl RenderLayer for RenderHillshadeLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let bucket_ptr = tile.get_bucket(&*base_impl).filter(|b| b.has_data()).cloned();
             let Some(bucket_ptr) = bucket_ptr else {
                 self.remove_tile(render_pass, &tile_id);
@@ -380,7 +380,7 @@ impl RenderLayer for RenderHillshadeLayer {
                     Size::new(u32::from(tilesize), u32::from(tilesize)),
                     TextureChannelDataType::UnsignedByte,
                 );
-                self.bucket_render_targets.insert(bucket_id, (render_target.clone(), generation));
+                self.bucket_render_targets.insert(bucket_id, (Rc::clone(&render_target), generation));
                 self.add_render_target(&render_target, changes);
 
                 let Some(single_tile_layer_group) =
@@ -388,35 +388,36 @@ impl RenderLayer for RenderHillshadeLayer {
                 else {
                     return;
                 };
-                render_target.borrow_mut().add_layer_group(single_tile_layer_group.clone(), /*replace=*/ true);
+                render_target.borrow_mut().add_layer_group(Rc::clone(&single_tile_layer_group), /*replace=*/ true);
 
                 if self.prepare_layer_tweaker.is_none() {
                     self.prepare_layer_tweaker = Some(Rc::new(RefCell::new(HillshadePrepareLayerTweaker::new(
                         self.get_id().to_owned(),
-                        self.base.evaluated_properties.clone(),
+                        Arc::clone(&self.base.evaluated_properties),
                     ))));
                 }
                 let prepare_layer_tweaker = self.prepare_layer_tweaker.clone().expect("prepare tweaker");
                 // singleTileLayerGroup->addLayerTweaker(prepareLayerTweaker)
                 changes.push(ChangeRequest::AddLayerTweaker(
-                    single_tile_layer_group.clone(),
+                    Rc::clone(&single_tile_layer_group),
                     Rc::downgrade(&prepare_layer_tweaker),
                 ));
 
                 let mut hillshade_prepare_builder = context.create_drawable_builder();
-                hillshade_prepare_builder.set_shader(Some(hillshade_prepare_shader.clone()));
+                hillshade_prepare_builder.set_shader(Some(Rc::clone(&hillshade_prepare_shader)));
                 hillshade_prepare_builder.set_depth_type(DepthMaskType::ReadOnly);
                 hillshade_prepare_builder.set_color_mode(&ColorMode::unblended());
                 hillshade_prepare_builder.set_cull_face_mode(&CullFaceMode::disabled());
                 hillshade_prepare_builder.set_render_pass(render_pass);
-                let attrs = hillshade_prepare_vertex_attrs
-                    .get_or_insert_with(|| hillshade_vertex_attributes(context, &static_data_shared_vertices))
-                    .clone();
+                let attrs = Rc::clone(
+                    hillshade_prepare_vertex_attrs
+                        .get_or_insert_with(|| hillshade_vertex_attributes(context, &static_data_shared_vertices)),
+                );
                 hillshade_prepare_builder.set_vertex_attributes(Some(attrs));
                 hillshade_prepare_builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
                 hillshade_prepare_builder.set_segments_shared(
                     DrawMode::Triangles(),
-                    Some(static_data_indices.clone()),
+                    Some(Rc::clone(&static_data_indices)),
                     &static_data_segments,
                 );
 
@@ -465,11 +466,12 @@ impl RenderLayer for RenderHillshadeLayer {
                 if self.base.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
                         self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
-                    let vertices: VertexVectorBasePtr = globe_mesh.vertices.clone();
+                    let vertices: VertexVectorBasePtr =
+                        Rc::<mln_gfx::vertex_vector::VertexVector<HillshadeLayoutVertex>>::clone(&globe_mesh.vertices);
                     (
                         vertices,
                         globe_mesh.vertices.elements(),
-                        globe_mesh.indices.clone(),
+                        Rc::clone(&globe_mesh.indices),
                         globe_mesh.segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
                         geometry.last_modified,
                     )
@@ -486,9 +488,9 @@ impl RenderLayer for RenderHillshadeLayer {
                     )
                 } else {
                     (
-                        static_data_shared_vertices.clone(),
+                        Rc::clone(&static_data_shared_vertices),
                         4,
-                        static_data_indices.clone(),
+                        Rc::clone(&static_data_indices),
                         static_data_segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
                         geometry.last_modified,
                     )
@@ -511,12 +513,12 @@ impl RenderLayer for RenderHillshadeLayer {
                         Some(hillshade_vertex_attributes(context, &vertices)),
                         vertex_count,
                         DrawMode::Triangles(),
-                        Some(indices.clone()),
+                        Some(Rc::clone(&indices)),
                         &segments,
                     );
                     drawable.set_data(Some(Box::new(HillshadeDrawableGeometryTime(geometry_time))));
                 }
-                drawable.set_texture(Some(render_target_texture.clone()), ID_HILLSHADE_IMAGE_TEXTURE);
+                drawable.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
 
                 true
             };
@@ -525,15 +527,15 @@ impl RenderLayer for RenderHillshadeLayer {
             }
 
             let mut hillshade_builder = context.create_drawable_builder();
-            hillshade_builder.set_shader(Some(hillshade_shader.clone()));
+            hillshade_builder.set_shader(Some(Rc::clone(&hillshade_shader)));
             hillshade_builder.set_enable_depth(false);
             hillshade_builder.set_color_mode(&ColorMode::alpha_blended());
             hillshade_builder.set_cull_face_mode(&CullFaceMode::disabled());
             hillshade_builder.set_render_pass(render_pass);
             hillshade_builder.set_vertex_attributes(Some(hillshade_vertex_attributes(context, &vertices)));
             hillshade_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-            hillshade_builder.set_segments_shared(DrawMode::Triangles(), Some(indices.clone()), &segments);
-            hillshade_builder.set_texture(Some(render_target_texture.clone()), ID_HILLSHADE_IMAGE_TEXTURE);
+            hillshade_builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
+            hillshade_builder.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
 
             hillshade_builder.flush(context);
 

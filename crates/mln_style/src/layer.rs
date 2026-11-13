@@ -396,7 +396,7 @@ fn set_visibility_value(layer: &mut (impl Layer + ?Sized), value: &Convertible<'
         // available here. The style reevaluates the expression when the layer
         // is added or when this change reaches its observer.
         let expression: Arc<dyn Expression> = Arc::from(parsed);
-        layer.mutate_base_impl(&mut |impl_| impl_.visibility_expression = Some(expression.clone()));
+        layer.mutate_base_impl(&mut |impl_| impl_.visibility_expression = Some(Arc::clone(&expression)));
         return None;
     }
 

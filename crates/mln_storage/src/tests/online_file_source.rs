@@ -73,7 +73,7 @@ fn cancel_multiple() {
 
     let req2 = fs.request(&resource, Box::new(|_: Response| panic!("Callback should not be called")));
     let req = req();
-    let (r, stop) = (req.clone(), run_loop.clone());
+    let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         &resource,
         Box::new(move |res: Response| {
@@ -163,7 +163,7 @@ fn connection_error() {
     let latest = Cell::new(CONNECTION_TIMEOUT + 0.3);
 
     let req = req();
-    let (r, stop) = (req.clone(), run_loop.clone());
+    let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         &Resource::new(Kind::Unknown, closed_port_url("/")),
         Box::new(move |res: Response| {
@@ -204,7 +204,7 @@ fn timeout() {
 
     let resource = Resource::new(Kind::Unknown, server.url("/test?cachecontrol=max-age=1"));
     let req = req();
-    let (r, stop, c) = (req.clone(), run_loop.clone(), counter.clone());
+    let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
     *req.borrow_mut() = Some(fs.request(
         &resource,
         Box::new(move |res: Response| {
@@ -238,7 +238,7 @@ fn retry_delay_on_expired_tile() {
     let counter = Rc::new(Cell::new(0));
 
     let resource = Resource::new(Kind::Unknown, server.url("/test?expires=10000"));
-    let (stop, c) = (run_loop.clone(), counter.clone());
+    let (stop, c) = (run_loop.clone(), Rc::clone(&counter));
     let _req = fs.request(
         &resource,
         Box::new(move |res: Response| {
@@ -394,7 +394,7 @@ fn network_status_change() {
 
     // This request takes 200 milliseconds to answer.
     let req = req();
-    let (r, stop) = (req.clone(), run_loop.clone());
+    let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         &resource,
         Box::new(move |res: Response| {
@@ -434,7 +434,7 @@ fn network_status_change_preempt() {
 
     let wait = Cell::new(CONNECTION_TIMEOUT);
     let req = req();
-    let (r, stop) = (req.clone(), run_loop.clone());
+    let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         &resource,
         Box::new(move |res: Response| {
@@ -496,7 +496,7 @@ fn network_status_online_offline() {
     online_timer.start(Duration::from_millis(100), Duration::ZERO, || NetworkStatus::set(Status::Online));
 
     let req = req();
-    let (r, stop) = (req.clone(), run_loop.clone());
+    let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         &resource,
         Box::new(move |res: Response| {
@@ -580,7 +580,7 @@ fn low_high_priority_requests() {
     // First regular request.
     let regular1 = Resource::new(Kind::Unknown, server.url("/load/1"));
     let req_0 = req();
-    let (r, c) = (req_0.clone(), response_counter.clone());
+    let (r, c) = (Rc::clone(&req_0), Rc::clone(&response_counter));
     *req_0.borrow_mut() = Some(fs.request(
         &regular1,
         Box::new(move |_: Response| {
@@ -593,7 +593,7 @@ fn low_high_priority_requests() {
     let mut low_prio = Resource::new(Kind::Unknown, server.url("/load/2"));
     low_prio.set_priority(Priority::Low);
     let req_1 = req();
-    let (r, c, stop) = (req_1.clone(), response_counter.clone(), run_loop.clone());
+    let (r, c, stop) = (Rc::clone(&req_1), Rc::clone(&response_counter), run_loop.clone());
     *req_1.borrow_mut() = Some(fs.request(
         &low_prio,
         Box::new(move |_: Response| {
@@ -608,7 +608,7 @@ fn low_high_priority_requests() {
     // request.
     let regular2 = Resource::new(Kind::Unknown, server.url("/load/3"));
     let req_2 = req();
-    let (r, c) = (req_2.clone(), response_counter.clone());
+    let (r, c) = (Rc::clone(&req_2), Rc::clone(&response_counter));
     *req_2.borrow_mut() = Some(fs.request(
         &regular2,
         Box::new(move |_: Response| {
@@ -646,7 +646,7 @@ fn low_high_priority_requests_many() {
     for num_reqs in 0..20 {
         let r = req();
         if num_reqs % 2 == 0 {
-            let (counter, correct_regular) = (response_counter.clone(), correct_regular.clone());
+            let (counter, correct_regular) = (Rc::clone(&response_counter), Rc::clone(&correct_regular));
             *r.borrow_mut() = Some(fs.request(
                 &Resource::new(Kind::Unknown, server.url(&format!("/load/{num_reqs}"))),
                 Box::new(move |_: Response| {
@@ -663,11 +663,11 @@ fn low_high_priority_requests_many() {
             resource.set_priority(Priority::Low);
 
             let (counter, correct_low, correct_regular, stop, collector) = (
-                response_counter.clone(),
-                correct_low.clone(),
-                correct_regular.clone(),
+                Rc::clone(&response_counter),
+                Rc::clone(&correct_low),
+                Rc::clone(&correct_regular),
                 run_loop.clone(),
-                collector.clone(),
+                Rc::clone(&collector),
             );
             *r.borrow_mut() = Some(fs.request(
                 &resource,
@@ -777,7 +777,7 @@ fn request_same_url_multiple_times() {
     let mut requests = Vec::new();
 
     for _ in 0..100 {
-        let (count, stop) = (count.clone(), run_loop.clone());
+        let (count, stop) = (Rc::clone(&count), run_loop.clone());
         requests.push(fs.request(
             &Resource::new(Kind::Unknown, server.url("/load")),
             Box::new(move |_: Response| {
@@ -828,7 +828,7 @@ fn retry_failed_resource_transform() {
 
     let transforms = Arc::new(AtomicU32::new(0));
     let (delayed, test) = (server.url("/delayed"), server.url("/test"));
-    let counter = transforms.clone();
+    let counter = Arc::clone(&transforms);
     fs.set_resource_transform(Some(Arc::new(move |_kind: Kind, url: &str, finished: FinishedCallback| {
         assert_eq!(delayed, url);
         if counter.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -881,7 +881,7 @@ fn a_header_transform_runs_for_every_attempt() {
         finished(Ok(rewritten.clone()));
     })));
     let urls = Arc::new(Mutex::new(Vec::new()));
-    let seen = urls.clone();
+    let seen = Arc::clone(&urls);
     fs.set_http_header_transform(HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {
         seen.lock().push((kind, url.to_owned()));
         vec![("X-Test-Token".to_owned(), "secret-token".to_owned())]

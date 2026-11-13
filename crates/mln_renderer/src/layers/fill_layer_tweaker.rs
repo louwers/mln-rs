@@ -65,7 +65,7 @@ impl LayerTweaker for FillLayerTweaker {
         }
 
         let context = parameters.context;
-        let properties = self.base.evaluated_properties.clone();
+        let properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<FillLayerProperties>(&properties);
         let crossfade = *get_crossfade::<FillLayerProperties>(&properties);
 

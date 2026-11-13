@@ -372,8 +372,8 @@ impl PlacementContext {
         let has_icon_text_fit = *layout.get::<IconTextFit>() != IconTextFitType::None;
 
         PlacementContext {
-            bucket: params.bucket.clone(),
-            tile_owner: params.tile_owner.clone(),
+            bucket: Arc::clone(&params.bucket),
+            tile_owner: Rc::clone(&params.tile_owner),
             tile_index: params.tile_index,
             bearing: state.get_bearing(),
             pixels_to_tile_units,
@@ -462,7 +462,7 @@ impl PlacementController {
     #[must_use]
     pub(crate) fn new() -> Self {
         let empty_placement = Rc::new(Placement::new_default());
-        PlacementController { placement: empty_placement.clone(), empty_placement, stale: false }
+        PlacementController { placement: Rc::clone(&empty_placement), empty_placement, stale: false }
     }
 
     pub(crate) fn set_placement(&mut self, placement: Rc<Placement>) {
@@ -474,7 +474,7 @@ impl PlacementController {
     /// was discarded.
     pub(crate) fn reset(&mut self) -> bool {
         let changed = !Rc::ptr_eq(&self.placement, &self.empty_placement);
-        self.set_placement(self.empty_placement.clone());
+        self.set_placement(Rc::clone(&self.empty_placement));
         changed
     }
 
@@ -2634,7 +2634,7 @@ impl Placement {
                 continue;
             }
             new_intersections.push(Intersection {
-                ctx: ctx.clone(),
+                ctx: Rc::clone(&ctx),
                 symbol_index,
                 anchor_point: symbol.get_anchor().point,
                 status: intersect_status,

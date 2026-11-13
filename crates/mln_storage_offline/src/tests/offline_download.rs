@@ -107,7 +107,7 @@ impl OfflineTest {
 
     /// A responder that returns the fixture at `path`.
     fn respond_with(&self, kind: Kind, path: &'static str, check: impl Fn(&Resource) + 'static) {
-        let size = self.size.clone();
+        let size = Rc::clone(&self.size);
         self.respond(kind, move |resource| {
             check(resource);
             fixture_response(&size, path)
@@ -115,7 +115,14 @@ impl OfflineTest {
     }
 
     fn download(&self, region_id: i64, style_url: &str, include_ideographs: bool) -> OfflineDownload {
-        self.download_with_zoom(region_id, style_url, 0.0, 0.0, include_ideographs, self.file_source.clone())
+        self.download_with_zoom(
+            region_id,
+            style_url,
+            0.0,
+            0.0,
+            include_ideographs,
+            Arc::<StubFileSource>::clone(&self.file_source),
+        )
     }
 
     fn download_with_zoom(
@@ -139,7 +146,7 @@ impl OfflineTest {
             )
             .unwrap()
             .into(),
-            self.db.clone(),
+            Rc::clone(&self.db),
             file_source,
         )
     }
@@ -204,7 +211,7 @@ fn no_subresources() {
     test.respond_with(Kind::Style, "empty.style.json", expect_style_url);
 
     let expects_inactive_status = Cell::new(false);
-    let (size, stop) = (test.size.clone(), test.run_loop.clone());
+    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
@@ -246,7 +253,7 @@ fn inline_source() {
         expect_tile_0_0_0("http://127.0.0.1:3000/{z}-{x}-{y}.vector.pbf"),
     );
 
-    let (size, stop) = (test.size.clone(), test.run_loop.clone());
+    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
@@ -278,7 +285,7 @@ fn geojson_source() {
         assert_eq!("http://127.0.0.1:3000/geojson.json", resource.url);
     });
 
-    let (size, stop) = (test.size.clone(), test.run_loop.clone());
+    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
@@ -330,7 +337,7 @@ fn activate() {
 
     respond_to_full_style(&test, true);
 
-    let (size, stop, weak) = (test.size.clone(), test.run_loop.clone(), download.downgrade());
+    let (size, stop, weak) = (Rc::clone(&test.size), test.run_loop.clone(), download.downgrade());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
@@ -358,7 +365,7 @@ fn exclude_ideographs() {
 
     respond_to_full_style(&test, true);
 
-    let (size, stop, weak) = (test.size.clone(), test.run_loop.clone(), download.downgrade());
+    let (size, stop, weak) = (Rc::clone(&test.size), test.run_loop.clone(), download.downgrade());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
@@ -431,7 +438,7 @@ impl FakeOnlineFileSource {
             .borrow()
             .iter()
             .find(|entry| entry.resource.kind == kind)
-            .map(|entry| entry.callback.clone());
+            .map(|entry| Rc::clone(&entry.callback));
 
         let request_found = callback.is_some();
 
@@ -480,7 +487,8 @@ fn does_not_flood_the_file_source_with_requests() {
     let test = OfflineTest::new();
     let file_source = Arc::new(FakeOnlineFileSource::new());
     let region = test.create_region().expect("region");
-    let download = test.download_with_zoom(region.id, STYLE_URL, 0.0, 0.0, true, file_source.clone());
+    let download =
+        test.download_with_zoom(region.id, STYLE_URL, 0.0, 0.0, true, Arc::<FakeOnlineFileSource>::clone(&file_source));
 
     download.set_observer(Some(Rc::new(MockObserver::default())));
     download.set_state(OfflineRegionDownloadState::Active);
@@ -579,8 +587,8 @@ fn get_status_infinite_max_zoom() {
         )
         .unwrap()
         .into(),
-        test.db.clone(),
-        test.file_source.clone(),
+        Rc::clone(&test.db),
+        Arc::<StubFileSource>::clone(&test.file_source),
     );
 
     let response = test.response("style.json");
@@ -632,9 +640,9 @@ fn request_errors_are_retried() {
     let region = test.create_region().expect("region");
     let download = test.download(region.id, STYLE_URL, true);
 
-    let (file_source, size) = (Arc::downgrade(&test.file_source), test.size.clone());
+    let (file_source, size) = (Arc::downgrade(&test.file_source), Rc::clone(&test.size));
     test.respond(Kind::Style, move |_| {
-        let size = size.clone();
+        let size = Rc::clone(&size);
         if let Some(file_source) = file_source.upgrade() {
             file_source.set_response(Kind::Style, move |_| Some(fixture_response(&size, "empty.style.json")));
         }
@@ -678,7 +686,7 @@ fn with_previously_existing_tile() {
 
     put_tile(&test, 0, 0, 0);
 
-    let (size, stop) = (test.size.clone(), test.run_loop.clone());
+    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
@@ -727,7 +735,7 @@ fn reactivate_previously_completed_download() {
 
     let statuses_after_reactivate: Rc<RefCell<Vec<OfflineRegionStatus>>> = Rc::new(RefCell::new(Vec::new()));
 
-    let (statuses, stop) = (statuses_after_reactivate.clone(), test.run_loop.clone());
+    let (statuses, stop) = (Rc::clone(&statuses_after_reactivate), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             statuses.borrow_mut().push(status);
@@ -838,7 +846,7 @@ fn interrupt_and_resume() {
     let (stop, weak) = (test.run_loop.clone(), download.downgrade());
     // `test.loop.schedule([&] { ... })`: a task on the test's RunLoop.
     let interrupt = Rc::new(RefCell::new(None::<AsyncTask>));
-    let interrupt2 = interrupt.clone();
+    let interrupt2 = Rc::clone(&interrupt);
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if !interrupted.get() && status.completed_resource_count > 0 {
@@ -885,7 +893,8 @@ fn interrupt_and_resume() {
 fn no_freezing_on_cached_tiles_and_new_style() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download_with_zoom(region.id, STYLE_URL, 1.0, 1.0, true, test.file_source.clone());
+    let download =
+        test.download_with_zoom(region.id, STYLE_URL, 1.0, 1.0, true, Arc::<StubFileSource>::clone(&test.file_source));
 
     test.file_source.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(2));
     test.respond_with(Kind::Style, "inline_source.style.json", |_| {});
@@ -927,7 +936,7 @@ fn no_freezing_on_not_found_error() {
     });
 
     let error_reported = Rc::new(Cell::new(false));
-    let (reported, reported2, stop) = (error_reported.clone(), error_reported.clone(), test.run_loop.clone());
+    let (reported, reported2, stop) = (Rc::clone(&error_reported), Rc::clone(&error_reported), test.run_loop.clone());
     let observer = MockObserver {
         response_error_fn: Some(Box::new(move |error: ResourceError| {
             assert_eq!(Reason::NotFound, error.reason);
@@ -996,7 +1005,7 @@ fn run_until_inactive(
     errors: Option<Rc<RefCell<Vec<ResourceError>>>>,
 ) -> OfflineRegionStatus {
     let completed = Rc::new(Cell::new(OfflineRegionStatus::default()));
-    let (last, stop) = (completed.clone(), test.run_loop.clone());
+    let (last, stop) = (Rc::clone(&completed), test.run_loop.clone());
     let observer = MockObserver {
         response_error_fn: Some(Box::new(move |error: ResourceError| match &errors {
             Some(errors) => errors.borrow_mut().push(error),
@@ -1025,7 +1034,12 @@ fn download_until_inactive(
     definition: &OfflineRegionDefinition,
     errors: Option<Rc<RefCell<Vec<ResourceError>>>>,
 ) -> OfflineRegionStatus {
-    let download = OfflineDownload::new(region_id, definition.clone(), test.db.clone(), test.file_source.clone());
+    let download = OfflineDownload::new(
+        region_id,
+        definition.clone(),
+        Rc::clone(&test.db),
+        Arc::<StubFileSource>::clone(&test.file_source),
+    );
     let completed = run_until_inactive(test, &download, errors);
     assert!(completed.complete());
     let stored = download.get_status();
@@ -1086,12 +1100,12 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
 
     let style_requests = Rc::new(Cell::new(0));
     let tile_requests = Rc::new(Cell::new(0));
-    let (requests, style) = (style_requests.clone(), new_style.clone());
+    let (requests, style) = (Rc::clone(&style_requests), new_style.clone());
     test.respond(Kind::Style, move |resource| {
         requests.set(requests.get() + 1);
         revalidate(resource, "style-1", style_not_modified, &style, "style-2")
     });
-    let (requests, tile) = (tile_requests.clone(), new_tile.clone());
+    let (requests, tile) = (Rc::clone(&tile_requests), new_tile.clone());
     test.respond(Kind::Tile, move |resource| {
         requests.set(requests.get() + 1);
         revalidate(resource, "tile-1", tile_not_modified, &tile, "tile-2")
@@ -1165,7 +1179,7 @@ fn revalidates_only_stored_resources_that_must_be_revalidated() {
     }
 
     let style_requests = Rc::new(Cell::new(0));
-    let requests = style_requests.clone();
+    let requests = Rc::clone(&style_requests);
     test.respond(Kind::Style, move |resource| {
         requests.set(requests.get() + 1);
         assert_eq!(Some("style-1"), resource.prior_etag.as_deref());
@@ -1198,7 +1212,13 @@ fn tile_json(tile_url: &str) -> String {
 /// The status of the region `region_id` as the database reports it while no
 /// download runs.
 fn stored_status(test: &OfflineTest, region_id: i64) -> OfflineRegionStatus {
-    OfflineDownload::new(region_id, world_at_zoom(0.0), test.db.clone(), test.file_source.clone()).get_status()
+    OfflineDownload::new(
+        region_id,
+        world_at_zoom(0.0),
+        Rc::clone(&test.db),
+        Arc::<StubFileSource>::clone(&test.file_source),
+    )
+    .get_status()
 }
 
 fn collect_errors() -> Rc<RefCell<Vec<ResourceError>>> {
@@ -1213,7 +1233,7 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     let v1 = "http://127.0.0.1:3000/v1/{z}-{x}-{y}.pbf";
     let v2 = "http://127.0.0.1:3000/v2/{z}-{x}-{y}.pbf";
     let tile_url = Rc::new(RefCell::new(v1));
-    let current_url = tile_url.clone();
+    let current_url = Rc::clone(&tile_url);
     test.respond(Kind::Style, move |_| with_data(inline_source_style(&current_url.borrow())));
     test.respond(Kind::Tile, |resource| {
         with_data(format!("tile {}", resource.tile_data.as_ref().unwrap().url_template))
@@ -1223,7 +1243,12 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     // The refreshed style moves the tile to another URL.
     *tile_url.borrow_mut() = v2;
     invalidate_region(&test, region.id);
-    let download = OfflineDownload::new(region.id, world_at_zoom(0.0), test.db.clone(), test.file_source.clone());
+    let download = OfflineDownload::new(
+        region.id,
+        world_at_zoom(0.0),
+        Rc::clone(&test.db),
+        Arc::<StubFileSource>::clone(&test.file_source),
+    );
     let active = run_until_inactive(&test, &download, None);
 
     // While it runs, the refresh counts what the current style lists.
@@ -1277,7 +1302,7 @@ fn reports_a_tile_json_without_tile_urls() {
     test.respond(Kind::Style, |_| with_data(TILE_JSON_SOURCE_STYLE));
     test.respond(Kind::Source, |_| with_data(r#"{"tilejson":"2.1.0","tiles":[]}"#));
     let errors = collect_errors();
-    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(errors.clone()));
+    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(Rc::clone(&errors)));
     assert_eq!(1, errors.borrow().len());
     assert_eq!(Reason::Other, errors.borrow()[0].reason);
     assert_eq!(2, status.completed_resource_count);
@@ -1298,7 +1323,7 @@ fn reports_a_style_with_no_content() {
     let region = test.create_region().expect("region");
     test.respond(Kind::Style, |_| no_content());
     let errors = collect_errors();
-    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(errors.clone()));
+    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(Rc::clone(&errors)));
     assert_eq!(1, errors.borrow().len());
     assert_eq!(Reason::Other, errors.borrow()[0].reason);
     assert_eq!(1, status.completed_resource_count);
@@ -1329,11 +1354,11 @@ impl RefreshedRegion {
         let style = Rc::new(RefCell::new(with_data(TILE_JSON_SOURCE_STYLE)));
         let source = Rc::new(RefCell::new(with_data(tile_json(REFRESHED_TILE_URL))));
         let tile_requests = Rc::new(Cell::new(0));
-        let body = style.clone();
+        let body = Rc::clone(&style);
         test.respond(Kind::Style, move |_| body.borrow().clone());
-        let body = source.clone();
+        let body = Rc::clone(&source);
         test.respond(Kind::Source, move |_| body.borrow().clone());
-        let requests = tile_requests.clone();
+        let requests = Rc::clone(&tile_requests);
         test.respond(Kind::Tile, move |_| {
             requests.set(requests.get() + 1);
             with_data("tile")
@@ -1348,7 +1373,7 @@ impl RefreshedRegion {
     /// refreshed.
     fn refresh_keeping_resources(&self, reason: Reason) {
         let errors = collect_errors();
-        let status = download_until_inactive(&self.test, self.region.id, &world_at_zoom(0.0), Some(errors.clone()));
+        let status = download_until_inactive(&self.test, self.region.id, &world_at_zoom(0.0), Some(Rc::clone(&errors)));
         assert_eq!(1, errors.borrow().len());
         assert_eq!(reason, errors.borrow()[0].reason);
         assert!(status.required_resource_count_is_precise);
@@ -1430,8 +1455,12 @@ fn pausing_from_an_error_stops_the_refresh() {
     *refreshed.style.borrow_mut() = with_data("not JSON");
 
     // The observer pauses the download when it reports the invalid style.
-    let download =
-        OfflineDownload::new(refreshed.region.id, world_at_zoom(0.0), test.db.clone(), test.file_source.clone());
+    let download = OfflineDownload::new(
+        refreshed.region.id,
+        world_at_zoom(0.0),
+        Rc::clone(&test.db),
+        Arc::<StubFileSource>::clone(&test.file_source),
+    );
     let (weak, stop) = (download.downgrade(), test.run_loop.clone());
     let observer = MockObserver {
         response_error_fn: Some(Box::new(move |_| {
@@ -1464,7 +1493,7 @@ fn missing_tile_json_leaves_a_precise_resource_count() {
     test.respond(Kind::Style, |_| with_data(TILE_JSON_SOURCE_STYLE));
     test.respond(Kind::Source, |_| not_found());
     let errors = collect_errors();
-    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(errors.clone()));
+    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(Rc::clone(&errors)));
     assert_eq!(1, errors.borrow().len());
     assert_eq!(1, status.required_resource_count);
     assert!(status.required_resource_count_is_precise);

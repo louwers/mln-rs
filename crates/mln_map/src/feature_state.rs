@@ -21,7 +21,7 @@ pub(crate) struct FeatureStateStore {
 impl FeatureStateStore {
     /// The state as an update carries it.
     pub(crate) fn shared(&self) -> Arc<FeatureStatesBySource> {
-        self.sources.clone()
+        Arc::clone(&self.sources)
     }
 
     fn layers(&self, source_id: &str) -> Option<&LayerFeatureStates> {

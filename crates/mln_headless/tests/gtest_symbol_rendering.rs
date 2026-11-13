@@ -264,8 +264,8 @@ fn continuous_collision_visibility_fades_and_reappears() {
     let phase = Rc::new(Cell::new(Phase::Initial));
     let failures = Rc::new(RefCell::new(Vec::<String>::new()));
     {
-        let phase = phase.clone();
-        let failures = failures.clone();
+        let phase = Rc::clone(&phase);
+        let failures = Rc::clone(&failures);
         let frontend = test.frontend.clone();
         let map = Rc::downgrade(&test.map);
         let saw_fade_out = Cell::new(false);
@@ -337,7 +337,7 @@ fn collision_fade_intermediate_frames() {
 
     let fully_loaded = Rc::new(Cell::new(false));
     {
-        let fully_loaded = fully_loaded.clone();
+        let fully_loaded = Rc::clone(&fully_loaded);
         test.observer
             .did_finish_rendering_frame_callback
             .set(move |status| fully_loaded.set(status.mode == RenderMode::Full));

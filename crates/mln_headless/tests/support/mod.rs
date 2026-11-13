@@ -138,7 +138,7 @@ pub(crate) fn answer_with(
     handle: &Arc<OnceLock<CustomGeometrySourceHandle>>,
     features: impl Fn(&CanonicalTileID) -> Vec<geojson::Feature> + Send + Sync + 'static,
 ) -> TileFunction {
-    let handle = handle.clone();
+    let handle = Arc::clone(handle);
     Arc::new(move |tile_id: &CanonicalTileID| {
         if let Some(handle) = handle.get() {
             handle.set_tile_data(*tile_id, geojson::GeoJSON::FeatureCollection(features(tile_id)));
@@ -354,7 +354,7 @@ impl FakeFileSource {
         let callback = {
             let list = self.list();
             let list = list.borrow();
-            list.iter().find(|entry| entry.resource.kind == kind).map(|entry| entry.callback.clone())
+            list.iter().find(|entry| entry.resource.kind == kind).map(|entry| Rc::clone(&entry.callback))
         };
         match callback {
             // Copy the callback, in case calling it deallocates the AsyncRequest.
@@ -425,7 +425,7 @@ pub(crate) struct FixtureLog {
 impl FixtureLog {
     pub(crate) fn new() -> Self {
         let messages: LogRecords = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
         FixtureLog { messages }
     }
 
@@ -468,7 +468,7 @@ pub(crate) fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
     let timed_out = Rc::new(Cell::new(false));
     let timer = Timer::new();
     {
-        let timed_out = timed_out.clone();
+        let timed_out = Rc::clone(&timed_out);
         let run_loop = run_loop.clone();
         timer.start(std::time::Duration::from_secs(seconds), std::time::Duration::ZERO, move || {
             timed_out.set(true);
@@ -529,7 +529,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         let observer = Rc::new(StubMapObserver::default());
         let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.get_size(), pixel_ratio, ..Default::default() };
-        let map = Map::with_file_source(file_source.clone(), options).unwrap();
+        let map = Map::with_file_source(Arc::<FS>::clone(&file_source), options).unwrap();
         frontend.attach(&map);
         let map = Rc::new(RefCell::new(map));
         let events = observer.observe(&map);

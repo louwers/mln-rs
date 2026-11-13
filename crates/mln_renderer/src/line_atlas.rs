@@ -251,7 +251,7 @@ impl DashPatternTexture {
     #[must_use]
     pub(crate) fn get_texture(&self) -> Option<Texture2DPtr> {
         match &self.texture {
-            DashTexture::Texture(texture) => Some(texture.clone()),
+            DashTexture::Texture(texture) => Some(std::rc::Rc::clone(texture)),
             DashTexture::Image(_) => None,
         }
     }

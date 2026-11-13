@@ -69,7 +69,7 @@ fn convert(json: &str) -> Box<dyn Layer> {
 fn layer(json: &str, z: f32) -> Arc<dyn LayerProperties> {
     let render_layer = layermanager::create_render_layer(&convert(json).base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
-    render_layer.borrow().base().evaluated_properties.clone()
+    Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
 
 fn layers(jsons: &[&str]) -> Vec<Arc<dyn LayerProperties>> {
@@ -103,7 +103,7 @@ fn set_layers(layers: &[Arc<dyn LayerProperties>], correlation_id: u64) -> Worke
 }
 
 fn set_data(data: &SharedTileData, correlation_id: u64) -> WorkerMessage {
-    WorkerMessage::SetData { data: Some(data.clone()), available_images: Arc::new(VecSet::new()), correlation_id }
+    WorkerMessage::SetData { data: Some(Arc::clone(data)), available_images: Arc::new(VecSet::new()), correlation_id }
 }
 
 /// What the tile answers a worker's glyph and image requests with: the
@@ -420,7 +420,7 @@ fn format_section_overrides_cross() {
     let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
     render_layer.borrow_mut().transition(&TransitionParameters::new(None, TransitionOptions::default()));
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
-    let layers = vec![render_layer.borrow().base().evaluated_properties.clone()];
+    let layers = vec![Arc::clone(&render_layer.borrow().base().evaluated_properties)];
     cross(&layers, &tile_data());
 }
 
@@ -535,7 +535,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     render_layer
         .transition_with_impl(&TransitionParameters::new(Some(start), transition), convert(&constant).base_impl());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
-    let transitioning = render_layer.base().evaluated_properties.clone();
+    let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
     assert!(!get_evaluated::<FillLayerProperties>(&transitioning).get::<FillColor>().is_constant());
 
     let mut codec = ThroughCodec::new();
@@ -596,7 +596,7 @@ fn layers_are_defined_once() {
         .map(|properties| {
             let render_layer = layermanager::create_render_layer(&properties.base_impl).unwrap();
             render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(1.0));
-            render_layer.borrow().base().evaluated_properties.clone()
+            Arc::clone(&render_layer.borrow().base().evaluated_properties)
         })
         .collect();
     let third = map.message(TILE, &set_layers(&again, 3)).unwrap();
@@ -654,9 +654,10 @@ impl LayerProperties for Unknown {
 fn failed_set_layers_define_nothing() {
     let mut map = map_codec();
     let fill = layer(FILL, 0.0);
-    let unknown: Arc<dyn LayerProperties> =
-        Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(layer(LINE, 0.0).base_impl.clone())));
-    assert!(map.message(TILE, &set_layers(&[fill.clone(), unknown], 1)).is_err());
+    let unknown: Arc<dyn LayerProperties> = Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(
+        Arc::clone(&layer(LINE, 0.0).base_impl),
+    )));
+    assert!(map.message(TILE, &set_layers(&[Arc::clone(&fill), unknown], 1)).is_err());
 
     // Decoded without the failed request, the next one defines the layer.
     let mut worker_codec = WorkerCodec::new();

@@ -73,7 +73,7 @@ fn loading_fail() {
     let observer = Rc::new(StubStyleObserver::default());
     let failed = Rc::new(RefCell::new(false));
     {
-        let failed = failed.clone();
+        let failed = Rc::clone(&failed);
         let handle = run_loop.handle();
         *observer.source_error.borrow_mut() = Some(Box::new(move |source, error| {
             assert_eq!("source", source.get_id());
@@ -84,7 +84,7 @@ fn loading_fail() {
     }
 
     let source = VectorSource::new("source", UrlOrTileset::Url("url".to_owned()), None, None, VectorEncoding::Mapbox);
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.load_description(&file_source);
 
     run_loop.run();
@@ -106,7 +106,7 @@ fn loading_corrupt() {
     let observer = Rc::new(StubStyleObserver::default());
     let failed = Rc::new(RefCell::new(None));
     {
-        let failed = failed.clone();
+        let failed = Rc::clone(&failed);
         let handle = run_loop.handle();
         *observer.source_error.borrow_mut() = Some(Box::new(move |source, error| {
             assert_eq!("source", source.get_id());
@@ -116,7 +116,7 @@ fn loading_corrupt() {
     }
 
     let source = VectorSource::new("source", UrlOrTileset::Url("url".to_owned()), None, None, VectorEncoding::Mapbox);
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.load_description(&file_source);
 
     run_loop.run();
@@ -144,7 +144,7 @@ fn geojson_source_url_update() {
     let observer = Rc::new(StubStyleObserver::default());
     let loaded = Rc::new(RefCell::new(false));
     {
-        let loaded = loaded.clone();
+        let loaded = Rc::clone(&loaded);
         let handle = run_loop.handle();
         *observer.source_loaded.borrow_mut() = Some(Box::new(move |_source| {
             // Should be called (test will hang if it doesn't)
@@ -154,7 +154,7 @@ fn geojson_source_url_update() {
     }
 
     let source = GeoJSONSource::with_default_options("source");
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
 
     // Load initial, so the source state will be loaded=true
     source.load_description(&file_source);
@@ -206,7 +206,7 @@ fn geojson_source_keeps_the_style_attribution() {
     assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
 
     let observer = Rc::new(StubStyleObserver::default());
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_geojson(&geojson::parse(r#"{"type": "Point", "coordinates": [1.1, 1.1]}"#).unwrap()).unwrap();
     assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
 
@@ -217,7 +217,7 @@ fn geojson_source_keeps_the_style_attribution() {
     });
     let loaded = Rc::new(RefCell::new(false));
     {
-        let loaded = loaded.clone();
+        let loaded = Rc::clone(&loaded);
         let handle = run_loop.handle();
         *observer.source_loaded.borrow_mut() = Some(Box::new(move |source| {
             assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
@@ -242,7 +242,7 @@ fn geojson_points(count: usize) -> Arc<Vec<u8>> {
 fn geojson_source_feature_count(source: &GeoJSONSource) -> usize {
     let count = Rc::new(RefCell::new(0));
     if let Some(data) = source.impl_().get_data().and_then(|data| data.upgrade()) {
-        let count = count.clone();
+        let count = Rc::clone(&count);
         data.get_tile(
             &CanonicalTileID::new(0, 0, 0),
             Box::new(move |features| *count.borrow_mut() = features.len()),
@@ -265,7 +265,7 @@ fn counting_loads() -> (Rc<StubStyleObserver>, Rc<RefCell<u32>>) {
     let observer = Rc::new(StubStyleObserver::default());
     let loads = Rc::new(RefCell::new(0));
     {
-        let loads = loads.clone();
+        let loads = Rc::clone(&loads);
         *observer.source_loaded.borrow_mut() = Some(Box::new(move |_| *loads.borrow_mut() += 1));
     }
     (observer, loads)
@@ -284,7 +284,7 @@ fn geojson_source_data_replaces_building_url_data() {
     let (observer, loads) = counting_loads();
 
     let source = GeoJSONSource::with_default_options("source");
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_url("url");
     source.load_description(&file_source);
     // The URL's data arrives and starts building in the background.
@@ -311,7 +311,7 @@ fn geojson_source_url_replaces_building_url_data() {
     let (observer, loads) = counting_loads();
 
     let source = GeoJSONSource::with_default_options("source");
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_url("old");
     source.load_description(&file_source);
     // The old URL's data arrives and starts building in the background.
@@ -345,13 +345,13 @@ fn geojson_source_synchronous_update_override_publishes_a_new_impl() {
     let (observer, loads) = counting_loads();
     let changes = Rc::new(RefCell::new(0));
     {
-        let changes = changes.clone();
+        let changes = Rc::clone(&changes);
         *observer.source_changed.borrow_mut() = Some(Box::new(move |_| *changes.borrow_mut() += 1));
     }
 
     let options = GeoJSONOptions { synchronous_update: true, ..Default::default() };
     let source = GeoJSONSource::new("source", Arc::new(options));
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_url("url");
     source.load_description(&file_source);
     // The URL's data arrives and starts building in the background.
@@ -387,7 +387,7 @@ fn vector_source_set_tiles() {
     let observer = Rc::new(StubStyleObserver::default());
     let changed = Rc::new(RefCell::new(false));
     {
-        let changed = changed.clone();
+        let changed = Rc::clone(&changed);
         *observer.source_changed.borrow_mut() = Some(Box::new(move |source| {
             assert_eq!(as_vector(source).get_tiles(), vec!["new".to_owned()]);
             *changed.borrow_mut() = true;
@@ -396,7 +396,7 @@ fn vector_source_set_tiles() {
 
     let tileset = Tileset { tiles: vec!["url".to_owned()], ..Default::default() };
     let source = VectorSource::new("source", UrlOrTileset::Tileset(tileset), None, None, VectorEncoding::Mapbox);
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_tiles(&["unused".to_owned()]); // make sure early setTiles does not crash
     source.load_description(&file_source);
     assert_eq!(source.get_tiles(), vec!["url".to_owned()]);
@@ -424,7 +424,7 @@ fn vector_source_url_set_tiles() {
     }));
     let count = Rc::new(RefCell::new(0));
     {
-        let count = count.clone();
+        let count = Rc::clone(&count);
         let handle = run_loop.handle();
         *observer.source_changed.borrow_mut() = Some(Box::new(move |source| {
             let n = *count.borrow();
@@ -437,7 +437,7 @@ fn vector_source_url_set_tiles() {
     }
 
     let source = VectorSource::new("source", UrlOrTileset::Url("url".to_owned()), None, None, VectorEncoding::Mapbox);
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.set_tiles(&["unused".to_owned()]);
     source.load_description(&file_source);
     run_loop.run();
@@ -460,7 +460,7 @@ fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
     let tileset = Rc::new(RefCell::new(None));
     let observer = Rc::new(StubStyleObserver::default());
     {
-        let tileset = tileset.clone();
+        let tileset = Rc::clone(&tileset);
         let handle = run_loop.handle();
         *observer.source_loaded.borrow_mut() = Some(Box::new(move |source| {
             let impl_ = source.base_impl();
@@ -470,7 +470,7 @@ fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
         }));
     }
 
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.load_description(&file_source);
     run_loop.run();
     tileset.take().expect("a tileset")
@@ -532,7 +532,7 @@ fn image_source_image_update() {
     let observer = Rc::new(StubStyleObserver::default());
     let changed = Rc::new(RefCell::new(false));
     {
-        let changed = changed.clone();
+        let changed = Rc::clone(&changed);
         let handle = run_loop.handle();
         *observer.source_changed.borrow_mut() = Some(Box::new(move |_source| {
             // Should be called (test will hang if it doesn't)
@@ -544,7 +544,7 @@ fn image_source_image_update() {
 
     let source = ImageSource::new("source", coords);
     source.set_url("http://url");
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
 
     // Load initial, so the source state will be loaded=true
     source.load_description(&file_source);

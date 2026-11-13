@@ -387,7 +387,7 @@ impl RenderLayer for RenderCircleLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -532,11 +532,11 @@ impl RenderLayer for RenderCircleLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(CircleLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
             // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
 
         if self.circle_shader_group.is_none() {
@@ -562,7 +562,7 @@ impl RenderLayer for RenderCircleLayer {
             });
         }
 
-        let evaluated_properties = self.base.evaluated_properties.clone();
+        let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<CircleLayerProperties>(&evaluated_properties);
         let layer_tweaker = self.base.layer_tweaker.clone();
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
@@ -570,7 +570,7 @@ impl RenderLayer for RenderCircleLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let render_data = super::render_data_for_pass(tile, &*base_impl, render_pass);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile(render_pass, &tile_id);

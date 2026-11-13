@@ -71,9 +71,9 @@ fn single_scope() {
     let deactivated = Rc::new(Cell::new(false));
 
     let backend = StubRendererBackend::new();
-    let a = activated.clone();
+    let a = Rc::clone(&activated);
     *backend.activate_function.borrow_mut() = Some(Box::new(move || a.set(true)));
-    let d = deactivated.clone();
+    let d = Rc::clone(&deactivated);
     *backend.deactivate_function.borrow_mut() = Some(Box::new(move || d.set(true)));
 
     {
@@ -93,9 +93,9 @@ fn nested_scopes() {
     let deactivated = Rc::new(Cell::new(0));
 
     let backend = StubRendererBackend::new();
-    let a = activated.clone();
+    let a = Rc::clone(&activated);
     *backend.activate_function.borrow_mut() = Some(Box::new(move || a.set(a.get() + 1)));
-    let d = deactivated.clone();
+    let d = Rc::clone(&deactivated);
     *backend.deactivate_function.borrow_mut() = Some(Box::new(move || d.set(d.get() + 1)));
 
     {
@@ -123,15 +123,15 @@ fn chained_scopes() {
     let activated_b = Rc::new(Cell::new(false));
 
     let backend_a = StubRendererBackend::new();
-    let a = activated_a.clone();
+    let a = Rc::clone(&activated_a);
     *backend_a.activate_function.borrow_mut() = Some(Box::new(move || a.set(true)));
-    let a = activated_a.clone();
+    let a = Rc::clone(&activated_a);
     *backend_a.deactivate_function.borrow_mut() = Some(Box::new(move || a.set(false)));
 
     let backend_b = StubRendererBackend::new();
-    let b = activated_b.clone();
+    let b = Rc::clone(&activated_b);
     *backend_b.activate_function.borrow_mut() = Some(Box::new(move || b.set(true)));
-    let b = activated_b.clone();
+    let b = Rc::clone(&activated_b);
     *backend_b.deactivate_function.borrow_mut() = Some(Box::new(move || b.set(false)));
 
     {

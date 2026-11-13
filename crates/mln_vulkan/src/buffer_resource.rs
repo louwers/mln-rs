@@ -96,7 +96,7 @@ impl BufferAllocation {
         let mapped_buffer = allocation.mapped_ptr().map_or(std::ptr::null_mut(), |p| p.as_ptr().cast::<u8>());
         Some(BufferAllocation {
             id: unique_id(),
-            backend: backend.clone(),
+            backend: Rc::clone(backend),
             buffer,
             allocation: Some(allocation),
             mapped_buffer,

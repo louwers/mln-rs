@@ -635,13 +635,13 @@ fn set_layout_attributes(
     let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
     let layout_data = bucket_vertices(geometry, bucket, &buffer.attribute_data);
     if let Some(attr) = attribs.set(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout_data.clone()), 0, 0, layout_size, AttributeDataType::Short4);
+        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 0, 0, layout_size, AttributeDataType::Short4);
     }
     if let Some(attr) = attribs.set(ID_SYMBOL_DATA_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout_data.clone()), 8, 0, layout_size, AttributeDataType::UShort4);
+        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 8, 0, layout_size, AttributeDataType::UShort4);
     }
     if let Some(attr) = attribs.set(ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout_data.clone()), 16, 0, layout_size, AttributeDataType::Short4);
+        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 16, 0, layout_size, AttributeDataType::Short4);
     }
     if let Some(attr) = attribs.set(ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
         attr.set_shared_raw_data(Some(layout_data), 24, 0, layout_size, AttributeDataType::UShort2);
@@ -889,10 +889,10 @@ impl RenderSymbolLayer {
         if self.collision_layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(CollisionLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.collision_layer_tweaker = Some(tweaker.clone());
-            changes.push(ChangeRequest::AddLayerTweaker(group.clone(), Rc::downgrade(&tweaker)));
+            self.collision_layer_tweaker = Some(Rc::clone(&tweaker));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&group), Rc::downgrade(&tweaker)));
         }
         Some(group)
     }
@@ -1000,16 +1000,16 @@ fn get_collision_vertex_attributes(
         let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
         let dynamic = shared_vertices(&buffer.dynamic_vertices);
         if let Some(attr) = attrs.set(ID_COLLISION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(layout.clone()), 0, 0, layout_stride, AttributeDataType::Short2);
+            attr.set_shared_raw_data(Some(Rc::clone(&layout)), 0, 0, layout_stride, AttributeDataType::Short2);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(layout.clone()), 4, 0, layout_stride, AttributeDataType::Short2);
+            attr.set_shared_raw_data(Some(Rc::clone(&layout)), 4, 0, layout_stride, AttributeDataType::Short2);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(Some(layout), 8, 0, layout_stride, AttributeDataType::Short2);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(dynamic.clone()), 0, 0, dynamic_stride, AttributeDataType::UShort2);
+            attr.set_shared_raw_data(Some(Rc::clone(&dynamic)), 0, 0, dynamic_stride, AttributeDataType::UShort2);
         }
         if let Some(attr) = attrs.set(ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(Some(dynamic), 4, 0, dynamic_stride, AttributeDataType::Float2);
@@ -1071,7 +1071,7 @@ impl RenderLayer for RenderSymbolLayer {
         // The symbol tweaker supports updating properties. When the style
         // changes, it will be replaced in `RenderLayer::layerChanged`
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -1149,7 +1149,7 @@ impl RenderLayer for RenderSymbolLayer {
         let Some(render_tiles) = self.base.render_tiles.clone() else {
             return;
         };
-        let owner = render_tiles.owner().clone();
+        let owner = Rc::clone(render_tiles.owner());
         for render_tile in render_tiles.iter() {
             let Some(bucket_ptr) = render_tile.get_bucket(&*self.base.base_impl) else {
                 continue;
@@ -1162,8 +1162,8 @@ impl RenderLayer for RenderSymbolLayer {
             };
             if bucket.bucket_leader_id != self.get_id() {
                 self.base.follower_data.push(BucketPlacementData {
-                    bucket: bucket_ptr.clone(),
-                    tile_owner: owner.clone(),
+                    bucket: Arc::clone(bucket_ptr),
+                    tile_owner: Rc::clone(&owner),
                     tile_index,
                     feature_index: None,
                     source_id: self.base.base_impl.source.clone(),
@@ -1178,8 +1178,8 @@ impl RenderLayer for RenderSymbolLayer {
 
             if bucket.sort_key_ranges.is_empty() {
                 self.base.placement_data.push(BucketPlacementData {
-                    bucket: bucket_ptr.clone(),
-                    tile_owner: owner.clone(),
+                    bucket: Arc::clone(bucket_ptr),
+                    tile_owner: Rc::clone(&owner),
                     tile_index,
                     feature_index,
                     source_id: self.base.base_impl.source.clone(),
@@ -1190,8 +1190,8 @@ impl RenderLayer for RenderSymbolLayer {
             } else {
                 for sort_key_range in &bucket.sort_key_ranges {
                     let layer_data = BucketPlacementData {
-                        bucket: bucket_ptr.clone(),
-                        tile_owner: owner.clone(),
+                        bucket: Arc::clone(bucket_ptr),
+                        tile_owner: Rc::clone(&owner),
                         tile_index,
                         feature_index: feature_index.clone(),
                         source_id: self.base.base_impl.source.clone(),
@@ -1263,10 +1263,10 @@ impl RenderLayer for RenderSymbolLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(SymbolLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
 
         if self.symbol_icon_group.is_none() {
@@ -1335,7 +1335,7 @@ impl RenderLayer for RenderSymbolLayer {
         for (tile_index, tile) in tiles.iter().enumerate() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let render_data = super::render_data_for_pass(tile, &*base_impl, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile_all(passes, &tile_id);
@@ -1506,7 +1506,7 @@ impl RenderLayer for RenderSymbolLayer {
 
             let tile = tiles[group.tile_index];
             let tile_id = tile.id.overscale_to(group.overscaled_z);
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let Some(render_data) = super::render_data_for_pass(tile, &*base_impl, passes) else {
                 continue;
             };
@@ -1585,7 +1585,7 @@ impl RenderLayer for RenderSymbolLayer {
                     let text_size_is_zoom_constant =
                         bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
                     tile_info.text_tweaker = Some(Rc::new(DrawableAtlasesTweaker::new(
-                        Some(atlases.clone()),
+                        Some(Rc::clone(atlases)),
                         Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                         Some(ID_SYMBOL_IMAGE_TEXTURE),
                         is_text,
@@ -1599,7 +1599,7 @@ impl RenderLayer for RenderSymbolLayer {
                     let icon_scaled =
                         bucket_layout.get::<IconSize>().constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
                     tile_info.icon_tweaker = Some(Rc::new(DrawableAtlasesTweaker::new(
-                        Some(atlases.clone()),
+                        Some(Rc::clone(atlases)),
                         Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                         Some(ID_SYMBOL_IMAGE_TEXTURE),
                         is_text,
@@ -1642,7 +1642,7 @@ impl RenderLayer for RenderSymbolLayer {
                     builder.add_tweaker(tweaker);
                 }
                 builder.set_drawable_name(format!("{layer_prefix}{suffix}"));
-                builder.set_vertex_attributes(Some(vertex_attribs.clone()));
+                builder.set_vertex_attributes(Some(Rc::clone(&vertex_attribs)));
 
                 builder.set_raw_vertices(Vec::new(), buffer.attribute_data.len(), AttributeDataType::Short4);
 

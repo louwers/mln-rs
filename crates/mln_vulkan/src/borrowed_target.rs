@@ -116,7 +116,7 @@ impl Resource {
         if let Some(depth) = &images.depth {
             return Self::with_host_depth(context, images, depth);
         }
-        let backend = context.get_backend().clone();
+        let backend = Rc::clone(context.get_backend());
         let extent = vk::Extent2D { width: images.size.width, height: images.size.height };
         let formats = [vk::Format::D24_UNORM_S8_UINT, vk::Format::D32_SFLOAT_S8_UINT, vk::Format::D16_UNORM_S8_UINT];
         let depth_format = formats
@@ -187,7 +187,7 @@ impl Resource {
             return Err(Error::native("Failed to create a render pass for the borrowed images"));
         }
         let mut resource = Resource {
-            backend: context.get_backend().clone(),
+            backend: Rc::clone(context.get_backend()),
             extent: vk::Extent2D { width: images.size.width, height: images.size.height },
             render_pass,
             framebuffers: Vec::new(),
@@ -360,9 +360,9 @@ impl BorrowedTarget {
         if !device.sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("the Vulkan device can't hand frames over with {producer:?}")));
         }
-        let context = backend.vulkan_context().clone();
+        let context = Rc::clone(backend.vulkan_context());
         let resource = Rc::new(Resource::new(&context, &images)?);
-        let target = Rc::new(DrawTarget::new(images.size, resource.clone()));
+        let target = Rc::new(DrawTarget::new(images.size, Rc::<Resource>::clone(&resource)));
         let mut this = BorrowedTarget {
             backend,
             slots: RefCell::new(Vec::new()),
@@ -558,7 +558,7 @@ impl BorrowedTarget {
     /// them, for the ring to wait for before it lets go of the images.
     pub fn take_pending(&self) -> PendingReads {
         let waits = self.slots.borrow_mut().iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
-        PendingReads { backend: self.backend.clone(), waits }
+        PendingReads { backend: Rc::clone(&self.backend), waits }
     }
 
     /// Draws into `images` from now on, which must have as many images, and
@@ -593,7 +593,7 @@ impl BorrowedTarget {
         // framebuffers go.
         self.backend.backend_impl().wait_idle("borrowed image replacement");
         let resource = Rc::new(Resource::new(self.backend.vulkan_context(), &images)?);
-        *self.target.borrow_mut() = Rc::new(DrawTarget::new(images.size, resource.clone()));
+        *self.target.borrow_mut() = Rc::new(DrawTarget::new(images.size, Rc::<Resource>::clone(&resource)));
         *self.resource.borrow_mut() = resource;
         let old = std::mem::replace(&mut *self.images.borrow_mut(), images);
         Ok(self.reset_slots(&old.images))
@@ -616,7 +616,7 @@ impl BorrowedTarget {
             slots.push(Slot { consumer_wait: carried, ..Slot::default() });
         }
         let waits = previous.iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
-        PendingReads { backend: self.backend.clone(), waits }
+        PendingReads { backend: Rc::clone(&self.backend), waits }
     }
 
     /// Releases the frame's image to the host's queue family, after the

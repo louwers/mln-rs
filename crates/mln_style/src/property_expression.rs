@@ -47,7 +47,7 @@ impl Clone for PropertyExpressionBase {
     #[inline(never)]
     fn clone(&self) -> Self {
         PropertyExpressionBase {
-            expression: self.expression.clone(),
+            expression: Arc::clone(&self.expression),
             captured_global_state: self.captured_global_state.clone(),
             global_state_refs: self.global_state_refs.clone(),
             use_integer_zoom: self.use_integer_zoom,
@@ -201,7 +201,7 @@ struct PropertyExpressionParts {
 impl Serialize for PropertyExpressionBase {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         PropertyExpressionParts {
-            expression: self.expression.clone(),
+            expression: Arc::clone(&self.expression),
             captured_global_state: self.captured_global_state.clone(),
             use_integer_zoom: self.use_integer_zoom,
             global_state_pinned: self.global_state_pinned,

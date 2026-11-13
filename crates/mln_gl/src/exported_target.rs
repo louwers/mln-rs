@@ -271,7 +271,7 @@ impl Generation {
         let context = backend.gl_context().ok_or_else(|| Error::native("the OpenGL backend has no context"))?;
         let mut objects = Objects {
             context: context.weak(),
-            exporter: exporter.clone(),
+            exporter: std::sync::Arc::clone(exporter),
             slots: Vec::new(),
             canvas: None,
             canvas_depth: None,
@@ -374,7 +374,7 @@ impl Generation {
         };
         // The ring hands its frames over itself, so the canvas's frames end
         // with none but a finished one.
-        let target = BorrowedTarget::new(backend.clone(), textures, SyncKind::CpuComplete)?;
+        let target = BorrowedTarget::new(Rc::clone(backend), textures, SyncKind::CpuComplete)?;
         Ok(Generation { target, objects, size, layout: layout.clone() })
     }
 

@@ -173,7 +173,7 @@ mod vulkan {
     #[test]
     fn a_wrapped_device_renders_under_the_hosts_queue_lock() {
         let lock = Arc::new(CountingLock::default());
-        let Some((wrap, library)) = wrapped(Some(lock.clone())) else { return };
+        let Some((wrap, library)) = wrapped(Some(Arc::<CountingLock>::clone(&lock))) else { return };
         let runtime = runtime();
         let (red, blue) = (map_of(&runtime, "#ff0000"), map_of(&runtime, "#0000ff"));
         // A session of the wrap and one of the library's device share the
@@ -213,7 +213,7 @@ mod vulkan {
     #[test]
     fn an_abandon_off_the_drivers_thread_lets_go_of_the_hosts_queue_lock() {
         let dropped = Arc::new(AtomicUsize::new(0));
-        let Some((wrap, library)) = wrapped(Some(Arc::new(DroppedLock(dropped.clone())))) else { return };
+        let Some((wrap, library)) = wrapped(Some(Arc::new(DroppedLock(Arc::clone(&dropped))))) else { return };
         let runtime = runtime();
         let map = map_of(&runtime, "#ff0000");
         let target = RenderTarget::Offscreen { size: SIZE, device: Some(wrap) };
@@ -292,7 +292,7 @@ mod vulkan {
         fn new() -> Option<(Device, Host)> {
             let Some(Device::Vulkan(vulkan)) = device_of(BackendType::Vulkan) else { return None };
             let lock = Arc::new(HostQueueLock::default());
-            let vulkan = vulkan.with_queue_lock(lock.clone()).unwrap();
+            let vulkan = vulkan.with_queue_lock(Arc::<HostQueueLock>::clone(&lock)).unwrap();
             let raw = vulkan.raw();
             // SAFETY: the device's own loader function and handles.
             let (instance, device) = unsafe {

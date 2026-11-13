@@ -155,7 +155,9 @@ impl StubFileSource {
             .borrow()
             .pending
             .iter()
-            .map(|(id, (resource, responder, callback))| (*id, resource.clone(), responder.clone(), callback.clone()))
+            .map(|(id, (resource, responder, callback))| {
+                (*id, resource.clone(), Rc::clone(responder), Rc::clone(callback))
+            })
             .collect();
         for (id, resource, responder, callback) in pending {
             if !state.borrow().pending.contains_key(&id) {

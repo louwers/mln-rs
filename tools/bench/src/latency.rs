@@ -84,7 +84,7 @@ impl FileSource for Delayed {
         TILE_REQUESTS.fetch_add(1, Ordering::SeqCst);
         let request: Rc<RefCell<Option<Box<dyn AsyncRequest>>>> = Rc::default();
         let timer = Timer::new();
-        let (inner, resource, slot) = (self.inner.clone(), resource.clone(), Rc::downgrade(&request));
+        let (inner, resource, slot) = (Arc::clone(&self.inner), resource.clone(), Rc::downgrade(&request));
         let mut callback = Some(callback);
         let delay = Duration::from_millis(latency);
         timer.start(delay, Duration::ZERO, move || {

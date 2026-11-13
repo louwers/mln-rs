@@ -163,7 +163,7 @@ fn on_image_response(weak: &Weak<Inner>, res: &Response) {
         observer.on_source_error(&this, Error::native("unexpectedly empty image url"));
     } else {
         let data = res.data.clone().unwrap_or_default();
-        let weak = weak.clone();
+        let weak = Weak::clone(weak);
         let generation = this.inner.generation.get();
         decoder::decode(&data, move |result| {
             let Some(inner) = weak.upgrade().filter(|inner| inner.generation.get() == generation) else {

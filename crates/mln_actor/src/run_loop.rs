@@ -178,13 +178,13 @@ impl RunLoop {
         let core = Arc::new(Core::new());
         core.adopted.store(true, Ordering::SeqCst);
         let run_loop = RunLoop::over(core);
-        CURRENT.with(|c| *c.borrow_mut() = Some(run_loop.inner.clone()));
+        CURRENT.with(|c| *c.borrow_mut() = Some(Rc::clone(&run_loop.inner)));
         scheduler::set_current(Some(run_loop.scheduler()));
         run_loop
     }
 
     fn over(core: Arc<Core>) -> Self {
-        let scheduler = Arc::new(RunLoopHandle { core: core.clone() });
+        let scheduler = Arc::new(RunLoopHandle { core: Arc::clone(&core) });
         RunLoop {
             inner: Rc::new(Inner {
                 core,
@@ -196,7 +196,7 @@ impl RunLoop {
     }
 
     fn scheduler(&self) -> scheduler::SchedulerPtr {
-        self.inner.scheduler.clone()
+        Arc::clone(&self.inner.scheduler)
     }
 
     /// The loop that runs the queue `handle` (see
@@ -209,7 +209,7 @@ impl RunLoop {
         if handle.core.adopted.swap(true, Ordering::SeqCst) {
             return None;
         }
-        Some(RunLoop::over(handle.core.clone()))
+        Some(RunLoop::over(Arc::clone(&handle.core)))
     }
 
     /// Makes this loop the current loop and scheduler of this
@@ -217,7 +217,7 @@ impl RunLoop {
     /// thread can run several loops in turn. What runs meanwhile, such as
     /// a timer or a mailbox that a task creates, belongs to this loop.
     pub fn enter(&self) -> EnteredRunLoop {
-        let previous = CURRENT.with(|c| c.borrow_mut().replace(self.inner.clone()));
+        let previous = CURRENT.with(|c| c.borrow_mut().replace(Rc::clone(&self.inner)));
         let previous_scheduler = scheduler::try_get_current();
         scheduler::set_current(Some(self.scheduler()));
         EnteredRunLoop { previous, previous_scheduler }
@@ -244,7 +244,7 @@ impl RunLoop {
     /// A handle other threads can post to.
     #[must_use]
     pub fn handle(&self) -> RunLoopHandle {
-        RunLoopHandle { core: self.inner.core.clone() }
+        RunLoopHandle { core: Arc::clone(&self.inner.core) }
     }
 
     /// Invoke `task` on this `RunLoop`.
@@ -356,7 +356,7 @@ impl RunLoop {
     }
 
     pub(crate) fn core(&self) -> Arc<Core> {
-        self.inner.core.clone()
+        Arc::clone(&self.inner.core)
     }
 
     pub fn wait_for_empty(&self) {
@@ -450,7 +450,7 @@ mod tests {
     fn invoke_runs_on_run_once() {
         let run_loop = RunLoop::new();
         let count = Arc::new(AtomicUsize::new(0));
-        let c = count.clone();
+        let c = Arc::clone(&count);
         run_loop.invoke(move || {
             c.fetch_add(1, Ordering::SeqCst);
         });
@@ -492,11 +492,11 @@ mod tests {
         let received = Rc::new(Cell::new(false));
         {
             let _entered = run_loop.enter();
-            mailbox.open(&scheduler::get_current(), received.clone());
+            mailbox.open(&scheduler::get_current(), Rc::<Cell<bool>>::clone(&received));
         }
         // Another thread sends while the loop isn't entered, and the loop
         // delivers once it is again.
-        let sender = mailbox.clone();
+        let sender = Arc::clone(&mailbox);
         std::thread::spawn(move || {
             sender.push(Box::new(|target: &dyn std::any::Any| {
                 if let Some(received) = target.downcast_ref::<Cell<bool>>() {
@@ -523,7 +523,7 @@ mod tests {
             assert_eq!(Some(Arc::as_ptr(&inner.inner.core)), current());
             // The ambient scheduler posts to the entered loop.
             let ran = Arc::new(AtomicUsize::new(0));
-            let counter = ran.clone();
+            let counter = Arc::clone(&ran);
             scheduler::get_current().schedule(Box::new(move || {
                 counter.fetch_add(1, Ordering::SeqCst);
             }));
@@ -537,7 +537,7 @@ mod tests {
     fn run_until_stopped_from_another_thread() {
         let (tx, rx) = std::sync::mpsc::channel();
         let count = Arc::new(AtomicUsize::new(0));
-        let c = count.clone();
+        let c = Arc::clone(&count);
         let thread = std::thread::spawn(move || {
             let run_loop = RunLoop::new();
             tx.send(run_loop.handle()).unwrap();
@@ -546,7 +546,7 @@ mod tests {
         });
         let handle = rx.recv().unwrap();
         for _ in 0..10 {
-            let c = count.clone();
+            let c = Arc::clone(&count);
             handle.invoke(move || {
                 c.fetch_add(1, Ordering::SeqCst);
             });

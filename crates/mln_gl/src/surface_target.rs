@@ -549,9 +549,9 @@ impl SurfaceTarget {
             })
         };
         let _ = window.clear_current();
-        let backend = Rc::new(RendererBackend::from_parts(gl, Box::new(WindowContext(window.clone()))));
+        let backend = Rc::new(RendererBackend::from_parts(gl, Box::new(WindowContext(Rc::clone(&window)))));
         let target = SurfaceTarget {
-            backend: backend.clone(),
+            backend: Rc::clone(&backend),
             window,
             presentation: Presentation::default(),
             size: Rc::new(Cell::new(framebuffer_size)),
@@ -605,7 +605,7 @@ impl FrameTarget for SurfaceTarget {
         }
         let mut image = self.image.borrow_mut();
         if image.is_none() {
-            let resource = WindowResource { context: self.backend.gl_context()?.weak(), size: self.size.clone() };
+            let resource = WindowResource { context: self.backend.gl_context()?.weak(), size: Rc::clone(&self.size) };
             *image = Some(Rc::new(DrawTarget::new(self.size.get(), Rc::new(resource))));
         }
         let image = image.clone()?;

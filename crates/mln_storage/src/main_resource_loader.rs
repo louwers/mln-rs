@@ -53,7 +53,7 @@ impl ThreadInner {
         callback: impl Fn(Response) + 'static,
     ) -> Option<Box<dyn AsyncRequest>> {
         let online_file_source = match &self.online_file_source {
-            Some(online) if online.can_request(resource) => online.clone(),
+            Some(online) if online.can_request(resource) => Arc::clone(online),
             _ => return parent,
         };
 

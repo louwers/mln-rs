@@ -69,10 +69,10 @@ pub(crate) fn activate_render_target(
         if activate {
             // The RenderTree has determined this render target should be
             // included in the renderable set for a frame
-            changes.push(ChangeRequest::AddRenderTarget(render_target.clone()));
+            changes.push(ChangeRequest::AddRenderTarget(Rc::clone(render_target)));
         } else {
             // The RenderTree is informing us we should not render anything
-            changes.push(ChangeRequest::RemoveRenderTarget(render_target.clone()));
+            changes.push(ChangeRequest::RemoveRenderTarget(Rc::clone(render_target)));
         }
     }
 }
@@ -247,10 +247,10 @@ impl RenderLayer for RenderHeatmapLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
         if let Some(texture_tweaker) = &self.texture_tweaker {
-            texture_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            texture_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -300,7 +300,7 @@ impl RenderLayer for RenderHeatmapLayer {
         // Set up a render target
         if self.render_target.is_none() {
             let render_target = RenderTarget::create(context, size, TextureChannelDataType::HalfFloat);
-            self.render_target = Some(render_target.clone());
+            self.render_target = Some(Rc::clone(&render_target));
             activate_render_target(self.render_target.as_ref(), self.base.is_renderable, changes);
 
             // Set up tile layer group
@@ -339,11 +339,11 @@ impl RenderLayer for RenderHeatmapLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(HeatmapLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
             // tileLayerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(tile_layer_group.clone(), Rc::downgrade(&tweaker)));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&tile_layer_group), Rc::downgrade(&tweaker)));
         }
         let layer_tweaker = self.base.layer_tweaker.clone();
 
@@ -362,7 +362,7 @@ impl RenderLayer for RenderHeatmapLayer {
             });
         }
 
-        let evaluated_properties = self.base.evaluated_properties.clone();
+        let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<HeatmapLayerProperties>(&evaluated_properties);
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
@@ -371,7 +371,7 @@ impl RenderLayer for RenderHeatmapLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let Some(render_data) = super::render_data_for_pass(tile, &*base_impl, render_pass) else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;
@@ -502,8 +502,10 @@ impl RenderLayer for RenderHeatmapLayer {
             ) {
                 Some(layer_group) => {
                     if let Some(texture_tweaker) = &self.texture_tweaker {
-                        changes
-                            .push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(texture_tweaker)));
+                        changes.push(ChangeRequest::AddLayerTweaker(
+                            Rc::clone(&layer_group),
+                            Rc::downgrade(texture_tweaker),
+                        ));
                     }
                     self.set_layer_group(Some(layer_group), changes);
                 }
@@ -514,10 +516,10 @@ impl RenderLayer for RenderHeatmapLayer {
         if self.texture_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(HeatmapTextureLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.texture_tweaker = Some(tweaker.clone());
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            self.texture_tweaker = Some(Rc::clone(&tweaker));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
         let texture_tweaker = self.texture_tweaker.clone();
 
@@ -575,7 +577,7 @@ impl RenderLayer for RenderHeatmapLayer {
         let texture = context.create_texture_2d();
         {
             let mut t = texture.borrow_mut();
-            t.set_image(Some(self.color_ramp.clone()));
+            t.set_image(Some(Rc::clone(&self.color_ramp)));
             t.set_sampler_configuration(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,

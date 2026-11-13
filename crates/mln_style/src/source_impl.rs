@@ -118,7 +118,7 @@ impl std::ops::Deref for dyn Impl {
 ///
 /// If `impl_` is not a `T`.
 pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
-    let any: Arc<dyn Any + Send + Sync> = impl_.clone();
+    let any: Arc<dyn Any + Send + Sync> = Arc::<dyn Impl>::clone(impl_);
     any.downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
 }
 

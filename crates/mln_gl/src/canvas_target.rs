@@ -127,7 +127,7 @@ impl CanvasTarget {
         let _ = webgl2.get_extension("EXT_color_buffer_float");
         let backend = Rc::new(RendererBackend::from_parts(webgl2, Box::new(CanvasContext)));
         let target = CanvasTarget {
-            backend: backend.clone(),
+            backend: Rc::clone(&backend),
             canvas,
             size: Rc::new(Cell::new(size)),
             image: RefCell::new(None),
@@ -148,7 +148,7 @@ impl FrameTarget for CanvasTarget {
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
         let mut image = self.image.borrow_mut();
         if image.is_none() {
-            let resource = CanvasResource { context: self.backend.gl_context()?.weak(), size: self.size.clone() };
+            let resource = CanvasResource { context: self.backend.gl_context()?.weak(), size: Rc::clone(&self.size) };
             *image = Some(Rc::new(DrawTarget::new(self.size.get(), Rc::new(resource))));
         }
         let image = image.clone()?;

@@ -54,7 +54,7 @@ impl Pump {
                     web_sys::console::error_2(&JsValue::from_str("the pump has no MessageChannel:"), error);
                 })
                 .ok();
-            let pump = pump.clone();
+            let pump = Weak::clone(pump);
             let on_message = Closure::<dyn FnMut()>::new(move || {
                 if let Some(pump) = pump.upgrade() {
                     pump.run_slice();
@@ -147,7 +147,7 @@ impl Drop for Step {
 pub fn add(step: impl FnMut() -> bool + 'static) -> Step {
     let entry = Rc::new(Entry { run: RefCell::new(Box::new(step)), live: Cell::new(true) });
     PUMP.with(|pump| {
-        pump.steps.borrow_mut().push(entry.clone());
+        pump.steps.borrow_mut().push(Rc::clone(&entry));
         pump.wake();
     });
     Step { entry: Some(entry) }

@@ -46,7 +46,7 @@ impl ThreadedScheduler {
             tagged_queue: Mutex::new(HashMap::new()),
             task_count: AtomicUsize::new(0),
         });
-        let threads = (0..n).map(|index| make_scheduler_thread(shared.clone(), index)).collect();
+        let threads = (0..n).map(|index| make_scheduler_thread(Arc::clone(&shared), index)).collect();
         ThreadedScheduler { shared, threads }
     }
 
@@ -121,7 +121,7 @@ impl Scheduler for ThreadedScheduler {
         let q = {
             let mut tagged_queue = self.shared.tagged_queue.lock();
             // find or insert
-            tagged_queue.entry(tag).or_default().clone()
+            Arc::clone(tagged_queue.entry(tag).or_default())
         };
 
         {
@@ -150,7 +150,7 @@ impl Scheduler for ThreadedScheduler {
         let q = {
             let tagged_queue = self.shared.tagged_queue.lock();
             match tagged_queue.get(&tag_to_find) {
-                Some(q) => q.clone(),
+                Some(q) => Arc::clone(q),
                 None => return,
             }
         };
@@ -259,7 +259,7 @@ mod tests {
         let tag = SimpleIdentity::new();
         let count = Arc::new(AtomicUsize::new(0));
         for _ in 0..50 {
-            let c = count.clone();
+            let c = Arc::clone(&count);
             pool.schedule_tagged(
                 tag,
                 Box::new(move || {
@@ -276,7 +276,7 @@ mod tests {
         let run_loop = RunLoop::new();
         let pool = ThreadPool::new();
         let result = Rc::new(RefCell::new(None));
-        let r = result.clone();
+        let r = Rc::clone(&result);
         let main = std::thread::current().id();
         schedule_and_reply_value(
             &pool,

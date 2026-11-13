@@ -71,7 +71,7 @@ fn done<T: Send + 'static>(completion: mln_runtime::Completion<T>, driver: Optio
 /// Renders to `first`, releases the surface, then moves to `second`.
 fn present(map: &Map, driver_kind: Driver, first: &Arc<Window>, second: &Arc<Window>) {
     let target =
-        RenderTarget::Surface { size: Size::new(64, 48), surface: Surface::window(first.clone()), device: None };
+        RenderTarget::Surface { size: Size::new(64, 48), surface: Surface::window(Arc::clone(first)), device: None };
     let (session, attached) = map.attach(target, AttachOptions { driver: driver_kind, ..Default::default() }).unwrap();
     let driver = (driver_kind == Driver::CallerThread).then(|| session.take_driver_work().unwrap());
     let driver = driver.as_ref();
@@ -87,7 +87,7 @@ fn present(map: &Map, driver_kind: Driver, first: &Arc<Window>, second: &Arc<Win
     assert!(!session.snapshot().unwrap().has_target);
     assert_eq!(FrameDisposition::TargetNotReady, frame(&session, driver, 2).disposition);
 
-    done(session.set_surface(Size::new(80, 40), Surface::window(second.clone())).unwrap(), driver);
+    done(session.set_surface(Size::new(80, 40), Surface::window(Arc::clone(second))).unwrap(), driver);
     let snapshot = session.snapshot().unwrap();
     assert!(snapshot.has_target);
     assert_eq!(Size::new(80, 40), snapshot.extent.size);

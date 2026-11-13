@@ -118,7 +118,7 @@ impl Sent {
     fn keep(&mut self, message: &WorkerMessage) -> Option<(String, u64)> {
         match message {
             WorkerMessage::SetData { data, available_images, correlation_id } => {
-                self.data = Kept::Sent((data.clone(), available_images.clone()));
+                self.data = Kept::Sent((data.clone(), Arc::clone(available_images)));
                 self.layers.error().map(|error| (error, *correlation_id))
             }
             WorkerMessage::SetLayers {
@@ -132,7 +132,7 @@ impl Sent {
                 self.layers = Kept::Sent((
                     layers.clone(),
                     global_state.clone(),
-                    available_images.clone(),
+                    Arc::clone(available_images),
                     *subdivision_granularity,
                     *pixel_ratio,
                 ));
@@ -140,10 +140,10 @@ impl Sent {
             }
             WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
                 if let Kept::Sent((_, images)) = &mut self.data {
-                    *images = available_images.clone();
+                    *images = Arc::clone(available_images);
                 }
                 if let Kept::Sent((_, _, images, _, _)) = &mut self.layers {
-                    *images = available_images.clone();
+                    *images = Arc::clone(available_images);
                 }
                 self.data.error().or_else(|| self.layers.error()).map(|error| (error, *correlation_id))
             }
@@ -167,7 +167,7 @@ impl Sent {
                         Some(WorkerMessage::SetLayers {
                             layers: layers.clone(),
                             global_state: global_state.clone(),
-                            available_images: available_images.clone(),
+                            available_images: Arc::clone(available_images),
                             subdivision_granularity: *subdivision_granularity,
                             pixel_ratio: *pixel_ratio,
                             correlation_id,
@@ -181,7 +181,7 @@ impl Sent {
                 match &self.data {
                     Kept::Sent((data, available_images)) => Some(WorkerMessage::SetData {
                         data: data.clone(),
-                        available_images: available_images.clone(),
+                        available_images: Arc::clone(available_images),
                         correlation_id,
                     }),
                     _ => None,
@@ -209,7 +209,7 @@ impl TileWorkerHost {
         let action = self.codec.lock().decode(request);
         match action {
             Ok(WorkerAction::Create { tile, parameters }) => {
-                let obsolete = parameters.obsolete.clone();
+                let obsolete = Arc::clone(&parameters.obsolete);
                 let worker = self.workers.create(parameters, Box::new(self.tile(tile)));
                 self.hosted.borrow_mut().insert(tile, Hosted::Geometry { obsolete, worker, sent: Sent::default() });
             }
@@ -294,7 +294,7 @@ impl TileWorkerHost {
 
     /// The endpoint through which the worker of `tile` reaches its tile.
     fn tile(&self, tile: u64) -> EncodingTile {
-        EncodingTile { tile, codec: self.codec.clone(), replies: self.replies.clone() }
+        EncodingTile { tile, codec: Arc::clone(&self.codec), replies: Arc::clone(&self.replies) }
     }
 }
 

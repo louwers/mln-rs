@@ -56,7 +56,7 @@ impl Drop for Entered {
 /// Makes the session in `slot` the one whose work this thread runs, until
 /// the guard drops: a host thread runs several sessions' work in turn.
 pub(crate) fn enter(slot: &Slot) -> Entered {
-    Entered { previous: CURRENT.with(|current| current.borrow_mut().replace(slot.clone())) }
+    Entered { previous: CURRENT.with(|current| current.borrow_mut().replace(Rc::clone(slot))) }
 }
 
 /// Runs `task` on the session whose loop is `run_loop`, after the work sent
@@ -71,7 +71,7 @@ pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut Worker, &mut
 /// first.
 fn run(task: impl FnOnce(&mut Worker, &mut Outbox)) {
     let Some(slot) = CURRENT.with(|current| current.borrow().clone()) else { return };
-    let Some(shared) = slot.borrow().as_ref().map(|worker| worker.shared.clone()) else { return };
+    let Some(shared) = slot.borrow().as_ref().map(|worker| Arc::clone(&worker.shared)) else { return };
     let _call = shared.enter_call();
     let mut outbox = Outbox::default();
     if let Some(worker) = slot.borrow_mut().as_mut() {
@@ -160,7 +160,7 @@ pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl Future<Output = ()> +
         .as_ref()
         .and_then(|init| init.downcast_ref::<Init>())
         .is_some_and(|init| init.target.needs_web_gpu_device());
-    let shared = shared.clone();
+    let shared = Arc::clone(shared);
     async move {
         if !needs_device {
             return;
@@ -228,7 +228,7 @@ pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
     let _call = shared.enter_call();
     let mut outbox = Outbox::default();
     let gate = shared.gate.lock();
-    let worker = Worker::new(shared.clone(), *init, &mut outbox);
+    let worker = Worker::new(Arc::clone(shared), *init, &mut outbox);
     *slot.borrow_mut() = Some(worker);
     drop(gate);
     shared.wait_for_senders();
@@ -265,7 +265,7 @@ impl Gfx {
             }
         };
         let backend = target.backend();
-        let mut renderer = Renderer::with_glyph_cache(backend.clone(), pixel_ratio, None, glyph_cache.clone());
+        let mut renderer = Renderer::with_glyph_cache(Rc::clone(&backend), pixel_ratio, None, Arc::clone(&glyph_cache));
         renderer.set_tile_cache_enabled(tile_cache_enabled);
         set_tile_worker_transport(&mut renderer);
         Ok(Gfx { renderer, target, backend, glyph_cache })
@@ -292,7 +292,7 @@ impl Gfx {
         self.backend = self.target.backend();
         let pixel_ratio = self.renderer.get_pixel_ratio();
         let mut renderer =
-            Renderer::with_glyph_cache(self.backend.clone(), pixel_ratio, None, self.glyph_cache.clone());
+            Renderer::with_glyph_cache(Rc::clone(&self.backend), pixel_ratio, None, Arc::clone(&self.glyph_cache));
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
         set_tile_worker_transport(&mut renderer);
@@ -460,7 +460,7 @@ fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
     // The browser's one thread polls in the pump's slices instead, which it
     // asks for meanwhile.
     let stop = Arc::new(AtomicBool::new(false));
-    let stopped = stop.clone();
+    let stopped = Arc::clone(&stop);
     let deadline = Instant::now() + SETTLE_TIMEOUT * 2;
     mln_web_host::pump::add(move || {
         if stopped.load(Ordering::SeqCst) || Instant::now() >= deadline {
@@ -477,7 +477,7 @@ fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
 #[cfg(not(target_family = "wasm"))]
 fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
     let stop = Arc::new(AtomicBool::new(false));
-    let stopped = stop.clone();
+    let stopped = Arc::clone(&stop);
     let deadline = Instant::now() + SETTLE_TIMEOUT * 2;
     let spawned = mln_util::thread::builder("RenderSessionSettle").spawn(move || {
         while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
@@ -598,7 +598,7 @@ impl Worker {
         }
         self.map_applied = self.map_applied.max(sequence);
         self.map_published = Some(published);
-        let scheduled = self.update_scheduled.clone();
+        let scheduled = Arc::clone(&self.update_scheduled);
         let run_loop = self.shared.run_loop.clone();
         // A caller-driven session's thread runs only when the host services
         // it, which the host may do only once it knows to draw, so the map's
@@ -1030,7 +1030,7 @@ impl Worker {
         let projection = gfx.renderer.frame_projection();
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
-        self.sources = Some(update.parameters.sources.clone());
+        self.sources = Some(Arc::clone(&update.parameters.sources));
         let report = events.iter().rev().find_map(|event| match event {
             RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => Some(FrameReport {
                 mode: match mode {
@@ -1270,7 +1270,7 @@ impl Worker {
             }
             return Ok(None);
         }
-        let backend = gfx.backend.clone();
+        let backend = Rc::clone(&gfx.backend);
         let replaced = {
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
             gfx.target.set_ring(ring.clone())
@@ -1435,7 +1435,7 @@ impl Worker {
     /// one: no texture of it stays quarantined.
     pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<Pending, Error> {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
-        let backend = gfx.backend.clone();
+        let backend = Rc::clone(&gfx.backend);
         let pending = {
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
             gfx.target.release_surface()
@@ -1533,7 +1533,7 @@ impl Worker {
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         let physical = physical_size(size, scale_factor as f32);
-        let backend = gfx.backend.clone();
+        let backend = Rc::clone(&gfx.backend);
         let replaced = {
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
             gfx.target.set_surface(surface, physical)

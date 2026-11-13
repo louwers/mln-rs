@@ -160,7 +160,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
             return;
         }
 
-        let properties = self.base.evaluated_properties.clone();
+        let properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<HillshadeLayerProperties>(&properties);
 
         // Get illumination properties

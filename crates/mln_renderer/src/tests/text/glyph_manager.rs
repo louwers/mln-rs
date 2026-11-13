@@ -162,11 +162,11 @@ impl GlyphManagerTest {
     }
 
     fn file_source(&self) -> Arc<dyn FileSource> {
-        self.file_source.clone()
+        Arc::<StubFileSource>::clone(&self.file_source)
     }
 
     fn requestor(&self) -> Rc<dyn GlyphRequestor> {
-        self.requestor.clone()
+        Rc::<StubGlyphRequestor>::clone(&self.requestor)
     }
 
     fn run(&mut self, url: &str, dependencies: GlyphDependencies) {
@@ -174,7 +174,7 @@ impl GlyphManagerTest {
         self.squelch_log = Some(SquelchLog::new());
 
         self.glyph_manager.set_url(url);
-        self.glyph_manager.set_observer(Some(self.observer.clone()));
+        self.glyph_manager.set_observer(Some(Rc::<StubGlyphManagerObserver>::clone(&self.observer)));
         self.glyph_manager.get_glyphs(&self.requestor(), dependencies, Some(&self.file_source()));
 
         self.run_loop.run();
@@ -237,7 +237,7 @@ fn loading_success() {
     }));
 
     let available = Rc::new(Cell::new(false));
-    let (a, run_loop) = (available.clone(), test.run_loop.clone());
+    let (a, run_loop) = (Rc::clone(&available), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
 
@@ -260,7 +260,7 @@ fn loading_success() {
 /// missing before the error is reported.
 fn expect_error(test: &GlyphManagerTest, message: &'static str) -> Rc<Cell<bool>> {
     let answered = Rc::new(Cell::new(false));
-    let a = answered.clone();
+    let a = Rc::clone(&answered);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
         assert_eq!(test_positions.len(), 2);
@@ -270,7 +270,7 @@ fn expect_error(test: &GlyphManagerTest, message: &'static str) -> Rc<Cell<bool>
     }));
 
     let called = Rc::new(Cell::new(false));
-    let (c, run_loop) = (called.clone(), test.run_loop.clone());
+    let (c, run_loop) = (Rc::clone(&called), test.run_loop.clone());
     *test.observer.glyphs_error.borrow_mut() = Some(Box::new(move |font_stack, glyph_range, error| {
         assert_eq!(*font_stack, test_stack());
         assert_eq!(*glyph_range, GlyphRange::new(0, 255, GlyphIDType::FontPBF));
@@ -317,7 +317,7 @@ fn fails_first_then_glyphs(requests: Rc<Cell<u32>>) -> impl Fn(&Resource) -> Opt
 
 fn count_requests(test: &GlyphManagerTest) -> Rc<Cell<u32>> {
     let requests = Rc::new(Cell::new(0));
-    let r = requests.clone();
+    let r = Rc::clone(&requests);
     *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, _| r.set(r.get() + 1)));
     requests
 }
@@ -327,15 +327,15 @@ fn count_requests(test: &GlyphManagerTest) -> Rc<Cell<u32>> {
 fn loading_fail_requests_the_range_again() {
     let mut test = GlyphManagerTest::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(requests.clone()));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
 
     let answers = Rc::new(Cell::new(0));
     let retry = Rc::new(Timer::new());
-    let (n, run_loop) = (answers.clone(), test.run_loop.clone());
+    let (n, run_loop) = (Rc::clone(&answers), test.run_loop.clone());
     let glyph_manager = Rc::downgrade(&test.glyph_manager);
     let requestor = Rc::downgrade(&test.requestor);
     let file_source = test.file_source();
-    let retry_timer = retry.clone();
+    let retry_timer = Rc::clone(&retry);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
         n.set(n.get() + 1);
@@ -344,7 +344,7 @@ fn loading_fail_requests_the_range_again() {
             // C++ asks again through `loop.invoke`, after this response is
             // processed.
             let (glyph_manager, requestor, file_source) =
-                (glyph_manager.clone(), requestor.clone(), file_source.clone());
+                (std::rc::Weak::clone(&glyph_manager), std::rc::Weak::clone(&requestor), Arc::clone(&file_source));
             retry_timer.start(Duration::ZERO, Duration::ZERO, move || {
                 let requestor: Rc<dyn GlyphRequestor> = requestor.upgrade().unwrap();
                 glyph_manager.upgrade().unwrap().get_glyphs(&requestor, dependencies(&['a']), Some(&file_source));
@@ -371,7 +371,7 @@ fn loading_fail_requests_the_range_again() {
 fn retry_failed_requests_asks_the_requestors_missing_glyphs() {
     let mut test = GlyphManagerTest::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(requests.clone()));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
     let run_loop = test.run_loop.clone();
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
 
@@ -426,7 +426,7 @@ fn loading_fail_still_answers_with_the_other_ranges() {
     });
 
     let answered = Rc::new(Cell::new(false));
-    let (a, run_loop) = (answered.clone(), test.run_loop.clone());
+    let (a, run_loop) = (Rc::clone(&answered), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
         assert_eq!(test_positions.len(), 2);
@@ -467,7 +467,7 @@ fn loading_corrupted() {
 fn shares_parsed_glyphs_between_managers_and_font_stacks() {
     let cache = Arc::new(GlyphCache::new());
     let load = |font_stack: &str| {
-        let mut test = GlyphManagerTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), cache.clone());
+        let mut test = GlyphManagerTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
         let font_stack = vec![font_stack.to_owned()];
         test.load(font_stack.clone(), &['a']);
         test.glyph_manager.get_glyph(&font_stack, gid('a'))
@@ -496,7 +496,7 @@ fn keeps_its_own_glyphs_without_a_cache() {
 #[test]
 fn releases_the_glyphs_of_evicted_font_stacks() {
     let cache = Arc::new(GlyphCache::new());
-    let mut test = GlyphManagerTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), cache.clone());
+    let mut test = GlyphManagerTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
     test.load(test_stack(), &['a']);
     assert_ne!(0, cache.size());
 
@@ -510,7 +510,7 @@ fn releases_the_glyphs_of_evicted_font_stacks() {
 fn does_not_keep_the_range_glyphs_it_draws_locally() {
     let loaded_glyphs = |rasterizer: Box<dyn LocalGlyphRasterizer>| {
         let cache = Arc::new(GlyphCache::new());
-        let mut test = GlyphManagerTest::with_glyph_cache(rasterizer, cache.clone());
+        let mut test = GlyphManagerTest::with_glyph_cache(rasterizer, Arc::clone(&cache));
         test.load(test_stack(), &['a', 'å']);
         cache.size()
     };
@@ -543,17 +543,17 @@ fn load_local_cjk_glyph() {
     let mut test = GlyphManagerTest::new();
     let glyph_responses = Rc::new(Cell::new(0));
 
-    let g = glyph_responses.clone();
+    let g = Rc::clone(&glyph_responses);
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
         g.set(g.get() + 1);
         None
     });
 
-    let g = glyph_responses.clone();
+    let g = Rc::clone(&glyph_responses);
     *test.observer.glyphs_loaded.borrow_mut() = Some(Box::new(move |_, _| g.set(g.get() + 1)));
 
     let available = Rc::new(Cell::new(false));
-    let (a, g, run_loop) = (available.clone(), glyph_responses.clone(), test.run_loop.clone());
+    let (a, g, run_loop) = (Rc::clone(&available), Rc::clone(&glyph_responses), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         assert_eq!(g.get(), 0); // Local generation should prevent requesting any glyphs
 
@@ -590,17 +590,17 @@ fn load_local_cjk_symbols() {
     let mut test = GlyphManagerTest::new();
     let glyph_responses = Rc::new(Cell::new(0));
 
-    let g = glyph_responses.clone();
+    let g = Rc::clone(&glyph_responses);
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
         g.set(g.get() + 1);
         None
     });
 
-    let g = glyph_responses.clone();
+    let g = Rc::clone(&glyph_responses);
     *test.observer.glyphs_loaded.borrow_mut() = Some(Box::new(move |_, _| g.set(g.get() + 1)));
 
     let available = Rc::new(Cell::new(false));
-    let (a, g, run_loop) = (available.clone(), glyph_responses.clone(), test.run_loop.clone());
+    let (a, g, run_loop) = (Rc::clone(&available), Rc::clone(&glyph_responses), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         assert_eq!(g.get(), 0); // Local generation should prevent requesting any glyphs.
 
@@ -627,7 +627,7 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
     let mut test = GlyphManagerTest::with(Box::new(KatakanaOnlyLocalGlyphRasterizer), ResponseType::Asynchronous);
     let first_glyph_response = Rc::new(Cell::new(false));
 
-    let f = first_glyph_response.clone();
+    let f = Rc::clone(&first_glyph_response);
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
         f.set(true);
         let mut response = Response::new();
@@ -636,7 +636,7 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
     });
 
     let done = Rc::new(Cell::new(false));
-    let (f, d, run_loop) = (first_glyph_response.clone(), done.clone(), test.run_loop.clone());
+    let (f, d, run_loop) = (Rc::clone(&first_glyph_response), Rc::clone(&done), test.run_loop.clone());
     let glyph_manager = Rc::downgrade(&test.glyph_manager);
     let requestor = Rc::downgrade(&test.requestor);
     let file_source = test.file_source();
@@ -702,7 +702,7 @@ fn loading_invalid() {
     }));
 
     let available = Rc::new(Cell::new(false));
-    let (a, run_loop) = (available.clone(), test.run_loop.clone());
+    let (a, run_loop) = (Rc::clone(&available), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
 
@@ -733,7 +733,7 @@ fn immediate_file_source() {
     *test.observer.glyphs_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("glyphsError")));
 
     let available = Rc::new(Cell::new(false));
-    let (a, run_loop) = (available.clone(), test.run_loop.clone());
+    let (a, run_loop) = (Rc::clone(&available), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_| {
         a.set(true);
         run_loop.stop();
@@ -750,16 +750,16 @@ fn immediate_file_source_failure_requests_the_range_again() {
     let test = GlyphManagerTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
     let _log = SquelchLog::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(requests.clone()));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
 
     let answers = Rc::new(RefCell::new(Vec::new()));
-    let a = answers.clone();
+    let a = Rc::clone(&answers);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         a.borrow_mut().push(glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_some());
     }));
 
     test.glyph_manager.set_url("test/fixtures/resources/glyphs.pbf");
-    test.glyph_manager.set_observer(Some(test.observer.clone()));
+    test.glyph_manager.set_observer(Some(Rc::<StubGlyphManagerObserver>::clone(&test.observer)));
 
     test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
     test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
@@ -839,7 +839,10 @@ const FONT_FACE: GlyphIDType = GlyphIDType(7);
 /// that answers its file with "font".
 fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphManagerTest {
     let mut test = GlyphManagerTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
-    test.glyph_manager = GlyphManager::with_font_face_engine(Some(Box::new(StubLocalGlyphRasterizer)), engine.clone());
+    test.glyph_manager = GlyphManager::with_font_face_engine(
+        Some(Box::new(StubLocalGlyphRasterizer)),
+        Arc::<DeferredEngine>::clone(engine),
+    );
     test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
         assert_eq!(resource.url, "test://face.ttf");
         let mut response = Response::new();
@@ -861,7 +864,7 @@ fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphManagerTest {
 /// Requests glyph 0 of the font face; returns what the requestor got.
 fn request_font_face(test: &GlyphManagerTest) -> Rc<RefCell<Option<GlyphMap>>> {
     let available: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
-    let a = available.clone();
+    let a = Rc::clone(&available);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         *a.borrow_mut() = Some(glyphs);
     }));

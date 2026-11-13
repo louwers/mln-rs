@@ -111,7 +111,7 @@ impl<O: Send + 'static> PoolMailbox<O> {
         let Some(scheduler) = self.scheduler.upgrade() else {
             return;
         };
-        let mailbox = self.weak_self.clone();
+        let mailbox = Weak::clone(&self.weak_self);
         let task = Box::new(move || {
             if let Some(mailbox) = mailbox.upgrade() {
                 mailbox.receive();
@@ -157,7 +157,7 @@ pub struct PoolActorRef<O: Send + 'static> {
 
 impl<O: Send + 'static> Clone for PoolActorRef<O> {
     fn clone(&self) -> Self {
-        PoolActorRef { mailbox: self.mailbox.clone() }
+        PoolActorRef { mailbox: Weak::clone(&self.mailbox) }
     }
 }
 
@@ -193,7 +193,7 @@ impl<O: Send + 'static> Actor<O> {
     /// Creates the actor on `scheduler`. `make` receives the actor's own
     /// reference and builds the object.
     pub fn new_tagged(scheduler: &TaggedScheduler, make: impl FnOnce(PoolActorRef<O>) -> O) -> Self {
-        Self::create(scheduler.get().clone(), Some(scheduler.tag), make)
+        Self::create(Arc::clone(scheduler.get()), Some(scheduler.tag), make)
     }
 
     pub fn new(scheduler: SchedulerPtr, make: impl FnOnce(PoolActorRef<O>) -> O) -> Self {
@@ -208,7 +208,7 @@ impl<O: Send + 'static> Actor<O> {
             receiving_thread: Mutex::new(None),
             scheduler: Arc::downgrade(&scheduler),
             scheduler_tag: tag,
-            weak_self: weak_self.clone(),
+            weak_self: Weak::clone(weak_self),
         });
         let object = make(PoolActorRef { mailbox: Arc::downgrade(&mailbox) });
         *mailbox.object.lock() = Some(object);
@@ -249,7 +249,7 @@ mod tests {
     fn messages_run_in_order_on_the_pool() {
         let pool: SchedulerPtr = Arc::new(ThreadPool::new());
         let (tx, rx) = mpsc::channel();
-        let actor = Actor::new(pool.clone(), |_self_ref| Counter { count: 0, done: tx });
+        let actor = Actor::new(Arc::clone(&pool), |_self_ref| Counter { count: 0, done: tx });
         for i in 0..100u32 {
             actor.self_ref().invoke(move |c: &mut Counter| {
                 assert_eq!(c.count, i);

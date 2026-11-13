@@ -56,7 +56,7 @@ impl Headless {
     fn new(size: Size) -> Headless {
         let device = Device::new(None).expect("Vulkan device");
         let backend = std::rc::Rc::new(RendererBackend::new(&device).expect("Vulkan backend"));
-        Headless { target: OffscreenTarget::new(backend.clone(), size), backend }
+        Headless { target: OffscreenTarget::new(std::rc::Rc::clone(&backend), size), backend }
     }
 
     /// The last frame's pixels.

@@ -76,7 +76,7 @@ impl CircleLayout {
         let mut layer_properties_map: VecMap<String, Arc<dyn LayerProperties>> = VecMap::new();
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
-            layer_properties_map.entry(layer_id).or_insert_with(|| layer_properties.clone());
+            layer_properties_map.entry(layer_id).or_insert_with(|| Arc::clone(layer_properties));
         }
 
         let mut features: Vec<CircleFeature> = Vec::new();
@@ -197,8 +197,8 @@ impl CircleLayout {
         let bucket: BucketPtr = Arc::new(bucket);
         for (layer_id, layer_properties) in &self.layer_properties_map {
             render_data.entry(layer_id.clone()).or_insert_with(|| LayerRenderData {
-                bucket: bucket.clone(),
-                layer_properties: layer_properties.clone(),
+                bucket: Arc::clone(&bucket),
+                layer_properties: Arc::clone(layer_properties),
             });
         }
         Ok(())

@@ -213,12 +213,12 @@ impl HeadlessFrontend {
         // the short waits of a single renderer; spinning briefly keeps them.
         const SPIN: std::time::Duration = std::time::Duration::from_millis(2);
 
-        let backend = self.shared.backend.clone();
+        let backend = Rc::clone(&self.shared.backend);
         self.attach(map);
         let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
 
         let outcome: Rc<RefCell<Option<Result<(), Error>>>> = Rc::new(RefCell::new(None));
-        let o = outcome.clone();
+        let o = Rc::clone(&outcome);
         map.render_still(Box::new(move |result| *o.borrow_mut() = Some(result)));
 
         let run_loop = RunLoop::get();
@@ -264,7 +264,12 @@ impl Shared {
     fn renderer(&self) -> RefMut<'_, Renderer> {
         RefMut::map(self.renderer.borrow_mut(), |renderer| {
             renderer.get_or_insert_with(|| {
-                Renderer::with_glyph_cache(self.backend.clone(), self.pixel_ratio.get(), None, self.glyph_cache.clone())
+                Renderer::with_glyph_cache(
+                    Rc::clone(&self.backend),
+                    self.pixel_ratio.get(),
+                    None,
+                    Arc::clone(&self.glyph_cache),
+                )
             })
         })
     }
@@ -304,7 +309,7 @@ impl Shared {
     }
 
     fn render(shared: &Rc<Shared>, update_parameters: &Arc<UpdateParameters>) {
-        let backend = shared.backend.clone();
+        let backend = Rc::clone(&shared.backend);
         let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
         if let Some(frames) = shared.target.frames() {
             shared.renderer().render(update_parameters, frames);

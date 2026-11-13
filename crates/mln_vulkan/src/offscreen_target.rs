@@ -61,11 +61,11 @@ impl FrameTarget for OffscreenTarget {
                 vk::PresentModeKHR::FIFO,
                 /*read_every_frame=*/ true,
             );
-            let target = Rc::new(DrawTarget::new(size, resource.clone()));
+            let target = Rc::new(DrawTarget::new(size, Rc::<SurfaceResource>::clone(&resource)));
             (resource, target)
         });
         context.set_surface(resource);
-        Some(target.clone())
+        Some(Rc::<DrawTarget>::clone(target))
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {

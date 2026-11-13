@@ -186,7 +186,7 @@ fn get_layer_property(layer: &BackgroundLayer, property: Property) -> StylePrope
 
 impl Layer for BackgroundLayer {
     fn base_impl(&self) -> Arc<dyn layer::Impl> {
-        self.base_impl.clone()
+        Arc::<Impl>::clone(&self.base_impl)
     }
 
     fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase)) {

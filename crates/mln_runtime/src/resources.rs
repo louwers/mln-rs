@@ -123,7 +123,7 @@ impl ProviderFileSource {
     }
 
     fn native(&self) -> Native {
-        Native { online: self.online.clone(), hooks: self.hooks.clone() }
+        Native { online: Arc::clone(&self.online), hooks: Arc::clone(&self.hooks) }
     }
 }
 
@@ -238,7 +238,7 @@ impl FileSource for ProviderFileSource {
         let mailbox = Mailbox::with_target(&scheduler::get_current(), target);
         let shared =
             Arc::new(RequestShared { state: Mutex::new(RequestState::default()), target: ActorRef::new(&mailbox) });
-        let request = ResourceRequest { resource: resource.clone(), shared: Some(shared.clone()) };
+        let request = ResourceRequest { resource: resource.clone(), shared: Some(Arc::clone(&shared)) };
         provider.request(request);
         drop(hooked);
         Box::new(ProviderRequest { mailbox, shared })
@@ -299,7 +299,7 @@ impl ProviderTarget {
         if response.not_modified
             && let Some(data) = &self.resource.prior_data
         {
-            response.data = Some(data.clone());
+            response.data = Some(Arc::clone(data));
             response.not_modified = false;
             response.modified = response.modified.or(self.resource.prior_modified);
             if response.etag.is_none() {

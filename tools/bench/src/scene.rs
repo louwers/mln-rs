@@ -260,7 +260,7 @@ impl Scene {
     /// costs no CPU time.
     pub(crate) fn render_still(&mut self) -> PremultipliedImage {
         let outcome: Rc<RefCell<Option<Result<(), String>>>> = Rc::default();
-        let done = outcome.clone();
+        let done = Rc::clone(&outcome);
         self.map.render_still(Box::new(move |result| {
             *done.borrow_mut() = Some(result.map_err(|error| error.to_string()));
         }));
@@ -385,7 +385,7 @@ impl Scene {
     pub(crate) fn run_for(&mut self, duration: Duration) {
         let timer = Timer::new();
         let elapsed = Rc::new(Cell::new(false));
-        let done = elapsed.clone();
+        let done = Rc::clone(&elapsed);
         timer.start(duration, Duration::ZERO, move || done.set(true));
         self.run_until(|| elapsed.get());
     }

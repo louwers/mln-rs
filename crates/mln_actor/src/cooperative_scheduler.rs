@@ -105,7 +105,7 @@ impl Scheduler for CooperativeScheduler {
     }
 
     fn schedule_tagged(&self, tag: SimpleIdentity, task: Task) {
-        let queue = self.queues.lock().entry(tag).or_default().clone();
+        let queue = Arc::clone(self.queues.lock().entry(tag).or_default());
         queue.lock().push_back(task);
         if self.task_count.fetch_add(1, Ordering::SeqCst) == 0 {
             let waker = self.waker.lock().clone();
@@ -147,7 +147,7 @@ mod tests {
     use super::*;
 
     fn push(scheduler: &CooperativeScheduler, tag: SimpleIdentity, order: &Arc<Mutex<Vec<i32>>>, value: i32) {
-        let order = order.clone();
+        let order = Arc::clone(order);
         let main = std::thread::current().id();
         scheduler.schedule_tagged(
             tag,
@@ -200,7 +200,7 @@ mod tests {
     fn the_first_waiting_task_wakes_the_host() {
         let scheduler = CooperativeScheduler::new();
         let wakes = Arc::new(AtomicUsize::new(0));
-        let w = wakes.clone();
+        let w = Arc::clone(&wakes);
         scheduler.set_waker(Some(Arc::new(move || {
             w.fetch_add(1, Ordering::SeqCst);
         })));
@@ -230,7 +230,7 @@ mod tests {
 
         // The untagged queue.
         push(&scheduler, SimpleIdentity::new(), &order, 4);
-        let untagged = order.clone();
+        let untagged = Arc::clone(&order);
         scheduler.schedule(Box::new(move || untagged.lock().push(5)));
         scheduler.wait_for_empty();
         assert_eq!(*order.lock(), vec![1, 3, 2, 5]);
@@ -242,7 +242,7 @@ mod tests {
         let scheduler = Arc::new(CooperativeScheduler::new());
         let tag = SimpleIdentity::new();
         let order = Arc::new(Mutex::new(Vec::new()));
-        let (inner, o) = (scheduler.clone(), order.clone());
+        let (inner, o) = (Arc::clone(&scheduler), Arc::clone(&order));
         scheduler.schedule_tagged(
             tag,
             Box::new(move || {

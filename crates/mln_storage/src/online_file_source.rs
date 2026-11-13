@@ -358,7 +358,7 @@ impl OnlineFileRequest {
         // Lazy constructed because this can be costly and the
         // ResourceTransform is not used by many apps.
         let mailbox = mailbox.get_or_insert_with(|| {
-            let target = Rc::new(OnlineFileRequestRef { state: self.state.clone(), id: self.id });
+            let target = Rc::new(OnlineFileRequestRef { state: Weak::clone(&self.state), id: self.id });
             Mailbox::with_target(&scheduler::get_current(), target)
         });
         ActorRef::new(mailbox)
@@ -399,7 +399,7 @@ impl OnlineFileRequest {
             return;
         }
 
-        let weak = self.state.clone();
+        let weak = Weak::clone(&self.state);
         let id = self.id;
         self.timer.start(timeout, Duration::ZERO, move || {
             let Some(state) = weak.upgrade() else {
@@ -547,7 +547,7 @@ impl OnlineFileSourceThread {
             transform_failed: Cell::new(false),
             mailbox: RefCell::new(None),
         });
-        self.state.tasks.borrow_mut().insert(req, request.clone());
+        self.state.tasks.borrow_mut().insert(req, Rc::clone(&request));
         self.state.add(&request);
     }
 

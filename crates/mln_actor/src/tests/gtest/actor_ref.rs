@@ -23,12 +23,12 @@ fn can_outlive_actor() {
     let received = Arc::new(AtomicBool::new(false));
 
     let test: PoolActorRef<TestActorRef> = {
-        let d = died.clone();
+        let d = Arc::clone(&died);
         Actor::new(scheduler::get_background(), move |_| TestActorRef { died: d }).self_ref()
     };
 
     assert!(died.load(Ordering::SeqCst));
-    let r = received.clone();
+    let r = Arc::clone(&received);
     // `receive() { FAIL(); }`
     test.invoke(move |_: &mut TestActorRef| r.store(true, Ordering::SeqCst));
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -70,7 +70,7 @@ fn ask_void() {
     }
 
     let executed = Arc::new(AtomicBool::new(false));
-    let e = executed.clone();
+    let e = Arc::clone(&executed);
     let actor = Actor::new(scheduler::get_background(), move |_| TestActorRef { executed: e });
     let r: PoolActorRef<TestActorRef> = actor.self_ref();
 
@@ -98,7 +98,7 @@ fn ask_on_destroyed_actor() {
     }
 
     let died = Arc::new(AtomicBool::new(false));
-    let d = died.clone();
+    let d = Arc::clone(&died);
     let actor = Actor::new(scheduler::get_background(), move |_| TestActorRef { died: d });
     let r: PoolActorRef<TestActorRef> = actor.self_ref();
 

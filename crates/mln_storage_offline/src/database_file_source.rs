@@ -30,12 +30,16 @@ fn get_download(thread: &DatabaseFileSourceThread, region_id: i64) -> Result<Rc<
     };
     let downloads = thread.extension::<Downloads>();
     if let Some(download) = downloads.downloads.borrow().get(&region_id) {
-        return Ok(download.clone());
+        return Ok(Rc::clone(download));
     }
     let definition = require_region(thread, region_id)?.definition.clone();
-    let download =
-        Rc::new(OfflineDownload::new(region_id, definition, thread.database().clone(), online_file_source.clone()));
-    downloads.downloads.borrow_mut().insert(region_id, download.clone());
+    let download = Rc::new(OfflineDownload::new(
+        region_id,
+        definition,
+        Rc::clone(thread.database()),
+        std::sync::Arc::clone(online_file_source),
+    ));
+    downloads.downloads.borrow_mut().insert(region_id, Rc::clone(&download));
     Ok(download)
 }
 

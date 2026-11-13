@@ -50,7 +50,7 @@ impl GeoJSONData for GeoJSONVTData {
             callback(geojsonvt_tile_features(&self.impl_, id));
         } else {
             let id = *id;
-            let geojsonvt_impl = self.impl_.clone();
+            let geojsonvt_impl = Arc::clone(&self.impl_);
             scheduler::schedule_and_reply_value(
                 &*self.sequenced_scheduler,
                 SimpleIdentity::EMPTY,
@@ -131,7 +131,7 @@ pub(super) fn create(
         // C++ shares one feature (default geometry) between the two
         // closures and assigns its properties before each
         // evaluation; a fresh feature per evaluation is the same.
-        let map_options = options.clone();
+        let map_options = Arc::clone(options);
         cluster_options.map = Arc::new(move |properties: &PropertyMap| -> PropertyMap {
             let mut ret = PropertyMap::new();
             if properties.is_empty() {
@@ -144,7 +144,7 @@ pub(super) fn create(
             }
             ret
         });
-        let reduce_options = options.clone();
+        let reduce_options = Arc::clone(options);
         cluster_options.reduce = Some(Arc::new(move |to_return: &mut PropertyMap, to_fill: &PropertyMap| {
             for (key, (_, reduce_expression)) in &reduce_options.cluster_properties {
                 if !to_fill.contains_key(key) {
@@ -198,7 +198,7 @@ impl Impl {
     pub(crate) fn with_data(other: &Impl, data: Option<Arc<dyn GeoJSONData>>) -> Self {
         Impl {
             base: other.base.clone(),
-            options: other.options.clone(),
+            options: Arc::clone(&other.options),
             data,
             synchronous_update: other.synchronous_update,
         }

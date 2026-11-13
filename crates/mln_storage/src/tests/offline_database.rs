@@ -1895,7 +1895,7 @@ fn batched_read_touches_deduplicate_and_skip_misses() {
     db.put(&fixture::tile(), &fixture::response());
     cache_sql(&filename, "UPDATE resources SET accessed = 100; UPDATE tiles SET accessed = 100");
     let callbacks = Arc::new(AtomicUsize::new(0));
-    let counter = callbacks.clone();
+    let counter = Arc::clone(&callbacks);
     db.set_accessed_callback(Box::new(move || {
         counter.fetch_add(1, Ordering::Relaxed);
     }));

@@ -285,9 +285,9 @@ impl RasterDEMTile {
             bucket: RefCell::new(None),
             neighboring_tiles: Cell::new(neighboring_tiles),
             worker,
-            mailbox: mailbox.clone(),
+            mailbox: Arc::clone(&mailbox),
         });
-        mailbox.open(&scheduler::get_current(), inner.clone());
+        mailbox.open(&scheduler::get_current(), Rc::<RasterDEMTileInner>::clone(&inner));
         let weak: std::rc::Weak<RasterDEMTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
         RasterDEMTile { inner, loader: Some(loader) }

@@ -105,7 +105,7 @@ struct Entry {
 impl Entry {
     fn find_glyph(&self, glyph_id: GlyphID) -> Option<Arc<Glyph>> {
         if let Some(glyph) = self.glyphs.get(&glyph_id) {
-            return Some(glyph.clone());
+            return Some(Arc::clone(glyph));
         }
         if glyph_id.type_ != GlyphIDType::FontPBF {
             return None;
@@ -197,7 +197,7 @@ impl GlyphManager {
         let local_glyph_rasterizer =
             local_glyph_rasterizer.unwrap_or_else(|| Box::new(DefaultLocalGlyphRasterizer::new(None)));
         Rc::new_cyclic(|self_weak| GlyphManager {
-            self_weak: self_weak.clone(),
+            self_weak: Weak::clone(self_weak),
             glyph_url: RefCell::new(String::new()),
             entries: RefCell::new(HashMap::new()),
             requestors_missing_glyphs: RefCell::new(HashMap::new()),
@@ -266,7 +266,7 @@ impl GlyphManager {
                     let needs_request = entry.ranges.get(&range).is_none_or(|request| !request.parsed);
                     if needs_request {
                         let request = entry.ranges.entry(range).or_default();
-                        request.requestors.insert(key, (weak.clone(), dependencies.clone()));
+                        request.requestors.insert(key, (Weak::clone(&weak), Rc::clone(&dependencies)));
                         if request.req.is_none() || request.failed {
                             to_request.push((font_stack.clone(), range));
                         }
@@ -333,7 +333,7 @@ impl GlyphManager {
             return;
         };
 
-        let weak_self = self.self_weak.clone();
+        let weak_self = Weak::clone(&self.self_weak);
         let callback_font_stack = font_stack.clone();
         let callback_range = range;
         let req = file_source.request(
@@ -423,7 +423,7 @@ impl GlyphManager {
             if error.is_some() {
                 let mut missing = self.requestors_missing_glyphs.borrow_mut();
                 for (key, (requestor, _)) in &requestors {
-                    missing.insert(*key, requestor.clone());
+                    missing.insert(*key, Weak::clone(requestor));
                 }
             }
             // Release this range's references first, so a requestor's
@@ -471,7 +471,7 @@ impl GlyphManager {
             }
         }
 
-        (requestor.clone(), response, glyph_dependencies.shapes.clone())
+        (Weak::clone(requestor), response, glyph_dependencies.shapes.clone())
     }
 
     fn deliver(notifications: Vec<Notification>) {
@@ -524,7 +524,7 @@ impl GlyphManager {
             let mut glyph = shaper.rasterize(&glyph_id);
             glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
             let glyph = Arc::new(glyph);
-            entry.glyphs.insert(glyph_id, glyph.clone());
+            entry.glyphs.insert(glyph_id, Arc::clone(&glyph));
             return glyph;
         }
 
@@ -546,7 +546,7 @@ impl GlyphManager {
         if self.engine_prepared.replace(true) {
             return;
         }
-        let readiness = self.engine_readiness.clone();
+        let readiness = Arc::clone(&self.engine_readiness);
         self.engine.prepare(Box::new(move |result| {
             if let Err(error) = &result {
                 Log::error(Event::Glyph, format!("font faces can't be loaded: {error}"));
@@ -570,7 +570,7 @@ impl GlyphManager {
         self.deferred_responses.borrow_mut().push((data.clone(), font_stack.clone(), range));
         let mut task = self.deferred_task.borrow_mut();
         let task = task.get_or_insert_with(|| {
-            let weak_self = self.self_weak.clone();
+            let weak_self = Weak::clone(&self.self_weak);
             AsyncTask::new(move || {
                 if let Some(this) = weak_self.upgrade() {
                     this.process_deferred_responses();

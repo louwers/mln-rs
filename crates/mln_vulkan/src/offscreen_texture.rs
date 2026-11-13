@@ -48,7 +48,7 @@ impl OffscreenTextureResource {
         }
         context.rendering_stats().num_frame_buffers += 1;
         OffscreenTextureResource {
-            backend: context.get_backend().clone(),
+            backend: Rc::clone(context.get_backend()),
             context: context.weak(),
             extent: vk::Extent2D { width: size.width, height: size.height },
             color_texture,
@@ -65,7 +65,7 @@ impl OffscreenTextureResource {
     }
 
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        self.color_texture.clone()
+        Rc::<RefCell<Texture2D>>::clone(&self.color_texture)
     }
 
     /// Makes the render pass and the framebuffer over the color texture, if
@@ -128,7 +128,7 @@ impl TargetResource for OffscreenTextureResource {
 impl Drop for OffscreenTextureResource {
     fn drop(&mut self) {
         let framebuffer = self.framebuffer.replace(vk::Framebuffer::null());
-        let backend = self.backend.clone();
+        let backend = Rc::clone(&self.backend);
         // SAFETY: the commands that use the framebuffer have been waited
         // for when the deletion queue runs, or the context is gone.
         let destroy = move || unsafe {
@@ -155,7 +155,7 @@ pub(crate) struct OffscreenTexture {
 impl OffscreenTexture {
     pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_));
-        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource }
+        OffscreenTexture { target: DrawTarget::new(size, Rc::<OffscreenTextureResource>::clone(&resource)), resource }
     }
 }
 

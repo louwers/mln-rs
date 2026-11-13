@@ -92,14 +92,14 @@ impl GeoJSONTileData {
 
 impl GeometryTileData for GeoJSONTileData {
     fn clone_data(&self) -> Box<dyn GeometryTileData> {
-        Box::new(GeoJSONTileData::from_shared(self.features.clone()))
+        Box::new(GeoJSONTileData::from_shared(Arc::clone(&self.features)))
     }
 
     fn get_layer(&self, _name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error> {
-        Ok(Some(Box::new(GeoJSONTileLayer::new(self.features.clone()))))
+        Ok(Some(Box::new(GeoJSONTileLayer::new(Arc::clone(&self.features)))))
     }
 
     fn encoded(&self) -> Option<EncodedTileData> {
-        Some(EncodedTileData::GeoJson(self.features.clone()))
+        Some(EncodedTileData::GeoJson(Arc::clone(&self.features)))
     }
 }

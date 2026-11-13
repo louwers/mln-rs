@@ -74,7 +74,7 @@ impl layer_group::LayerGroupBase for LayerGroup {
             let drawable_uniforms = drawable.mutable_uniform_buffers();
             for i in 0..uniform_buffers.allocated_size() {
                 if let Some(uniform_buffer) = uniform_buffers.get(i) {
-                    drawable_uniforms.set(i, Some(uniform_buffer.clone()));
+                    drawable_uniforms.set(i, Some(std::rc::Rc::clone(uniform_buffer)));
                 }
             }
 

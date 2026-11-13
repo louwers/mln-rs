@@ -135,7 +135,7 @@ impl Drop for WorkRequest {
 /// `Send` handle to it.
 fn invoke_cancellable(f: impl FnOnce() + 'static) -> Box<dyn AsyncRequest> {
     let task: CancellableTask = Rc::new(RefCell::new(Some(Box::new(f))));
-    let handle = LocalObject::from_rc(task.clone());
+    let handle = LocalObject::from_rc(Rc::clone(&task));
     RunLoop::get().invoke(move || {
         let task = handle.get().and_then(|task| task.borrow_mut().take());
         if let Some(task) = task {

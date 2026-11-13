@@ -190,7 +190,7 @@ mod webgpu {
     fn a_quad_draws_at_its_place_among_the_layers() {
         check(BackendType::WebGPU, || {
             let host = Arc::new(Host::default());
-            (host.clone(), host.calls.clone())
+            (Arc::<Host>::clone(&host), Arc::clone(&host.calls))
         });
     }
 }
@@ -343,7 +343,7 @@ mod vulkan {
     fn a_quad_draws_at_its_place_among_the_layers() {
         check(BackendType::Vulkan, || {
             let host = Arc::new(Host::default());
-            (host.clone(), host.calls.clone())
+            (Arc::<Host>::clone(&host), Arc::clone(&host.calls))
         });
     }
 }
@@ -424,7 +424,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
     fn a_quad_draws_at_its_place_among_the_layers() {
         check(BackendType::OpenGL, || {
             let host = Arc::new(Host::default());
-            (host.clone(), host.calls.clone())
+            (Arc::<Host>::clone(&host), Arc::clone(&host.calls))
         });
     }
 }

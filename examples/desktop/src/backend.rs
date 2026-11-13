@@ -165,7 +165,7 @@ impl WindowTarget {
                 let backend = Rc::new(mln_webgpu::RendererBackend::new(&device));
                 let options = mln_webgpu::SurfaceOptions { cap_frame_rate, ..Default::default() };
                 let surface = make_surface(proxy, &instance)?;
-                let target = mln_webgpu::SurfaceTarget::new(backend.clone(), surface, framebuffer_size, options)?;
+                let target = mln_webgpu::SurfaceTarget::new(Rc::clone(&backend), surface, framebuffer_size, options)?;
                 Ok(WindowTarget::WebGpu(backend, target))
             }
             #[cfg(target_os = "linux")]
@@ -273,12 +273,12 @@ impl WindowTarget {
     pub(crate) fn renderer_backend(&self) -> Rc<dyn RendererBackend> {
         match self {
             #[cfg(target_os = "macos")]
-            WindowTarget::Metal(backend, _) => backend.clone(),
+            WindowTarget::Metal(backend, _) => Rc::<mln_mtl::RendererBackend>::clone(backend),
             #[cfg(not(target_vendor = "apple"))]
-            WindowTarget::Vulkan(backend, _) => backend.clone(),
-            WindowTarget::WebGpu(backend, _) => backend.clone(),
+            WindowTarget::Vulkan(backend, _) => Rc::<mln_vulkan::RendererBackend>::clone(backend),
+            WindowTarget::WebGpu(backend, _) => Rc::<mln_webgpu::RendererBackend>::clone(backend),
             #[cfg(target_os = "linux")]
-            WindowTarget::OpenGl(backend, ..) => backend.clone(),
+            WindowTarget::OpenGl(backend, ..) => Rc::<mln_gl::RendererBackend>::clone(backend),
         }
     }
 

@@ -342,7 +342,7 @@ impl RendererBackend {
 
     fn with_frames(device: &Device, max_frames: u32) -> Result<Self, Error> {
         let impl_ = Rc::new(BackendImpl::new(device, max_frames)?);
-        let context = Context::new(impl_.clone()).map_err(Error::native)?;
+        let context = Context::new(Rc::clone(&impl_)).map_err(Error::native)?;
         Ok(RendererBackend { base: RendererBackendBase::new(), impl_, context })
     }
 
@@ -378,7 +378,7 @@ impl RendererBackend {
 
     /// The context made with the backend.
     pub(crate) fn create_context(&self) -> Rc<Context> {
-        self.context.clone()
+        Rc::clone(&self.context)
     }
 
     /// Registers one shader group per built-in shader. A duplicate

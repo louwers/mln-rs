@@ -137,12 +137,9 @@ impl Impl {
         features: &[Feature],
     ) -> Arc<ShapePlan> {
         let mut plans = self.plans.lock();
-        plans
-            .entry((script, rtl))
-            .or_insert_with(|| {
-                Arc::new(ShapePlan::new(font, direction(rtl), Some(to_script(script)), Some(language), features))
-            })
-            .clone()
+        Arc::clone(plans.entry((script, rtl)).or_insert_with(|| {
+            Arc::new(ShapePlan::new(font, direction(rtl), Some(to_script(script)), Some(language), features))
+        }))
     }
 
     pub(crate) fn create_complex_glyph_ids(

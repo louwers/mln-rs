@@ -270,7 +270,7 @@ impl Drawable {
             _ => true,
         };
         if build_attribs {
-            let attrs = self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr).clone();
+            let attrs = Rc::clone(self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
             // Apply drawable values to shader defaults (matching Metal's approach)
             let attribute_bindings = upload_pass.build_attribute_bindings(
                 self.impl_.vertex_count,
@@ -508,7 +508,7 @@ impl Drawable {
             });
             self.impl_.bind_groups.push(BindGroupRecord { slot: slot as u32, group, bind_group });
         }
-        self.impl_.bind_groups_shader = Some(shader_ptr.clone());
+        self.impl_.bind_groups_shader = Some(Rc::clone(shader_ptr));
         true
     }
 
@@ -637,7 +637,7 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
         let entry = match pos {
             None => {
                 out.push(UniqueBinding {
-                    vertex_resource: resource.clone(),
+                    vertex_resource: Rc::clone(resource),
                     stride: binding.vertex_stride,
                     base_offset: binding_byte_offset,
                     step_mode,
@@ -970,7 +970,7 @@ impl drawable::Drawable for Drawable {
         self.impl_.vertex_count = count;
         self.impl_.vertex_type = data_type;
         if count != 0 && data_type != AttributeDataType::Invalid && !data.is_empty() {
-            let attrs = self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr).clone();
+            let attrs = Rc::clone(self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
             let mut attrs = attrs.borrow_mut();
             if let Some(attrib) = attrs.set(self.impl_.vertex_attr_id, /*index=*/ -1, data_type, 0) {
                 attrib.set_raw_data(data);

@@ -252,12 +252,12 @@ pub trait DrawableBuilder {
             draw.set_tweakers(base.tweakers.clone());
             draw.set_origin(base.origin);
             if let Some(attrs) = &base.vertex_attrs {
-                draw.set_vertex_attributes(Some(attrs.clone()));
+                draw.set_vertex_attributes(Some(Rc::clone(attrs)));
             } else {
                 draw.set_vertex_attributes(new_vertex_attributes);
             }
             if let Some(attrs) = &base.instance_attrs {
-                draw.set_instance_attributes(Some(attrs.clone()));
+                draw.set_instance_attributes(Some(Rc::clone(attrs)));
             }
 
             self.init();
@@ -503,7 +503,7 @@ pub trait DrawableBuilder {
             let mut attrs = attrs.borrow_mut();
             if let Some(attr) = attrs.set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
                 attr.set_shared_raw_data(
-                    Some(verts.clone()),
+                    Some(Rc::clone(&verts)),
                     0, // offsetof(LineLayoutVertex, a1)
                     /*vertexOffset=*/ 0,
                     size_of::<LineLayoutVertex>() as u32,

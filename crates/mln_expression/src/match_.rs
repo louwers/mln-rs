@@ -268,7 +268,7 @@ fn create<T: MatchLabel>(
                 ctx.error_at("Branch labels must be unique.".to_owned(), index);
                 return None;
             }
-            typed_branches.insert(typed_label, result.clone());
+            typed_branches.insert(typed_label, Arc::clone(&result));
         }
 
         index += 2;

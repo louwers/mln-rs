@@ -199,7 +199,7 @@ fn create_builder(
     tweaker: Option<&DrawableTweakerPtr>,
 ) -> UniqueDrawableBuilder {
     let mut builder = context.create_drawable_builder();
-    builder.set_shader(Some(shader.clone()));
+    builder.set_shader(Some(Rc::clone(shader)));
     builder.set_is_3d(true);
     builder.set_enable_color(enable_color);
     if enable_color {
@@ -209,7 +209,7 @@ fn create_builder(
     builder.set_cull_face_mode(&CullFaceMode::back_ccw());
     builder.set_draw_priority(i64::from(enable_color));
     if let Some(tweaker) = tweaker {
-        builder.add_tweaker(tweaker.clone());
+        builder.add_tweaker(Rc::clone(tweaker));
     }
     builder
 }
@@ -280,7 +280,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -359,11 +359,11 @@ impl RenderLayer for RenderFillExtrusionLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(FillExtrusionLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
             // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
         let layer_tweaker = self.base.layer_tweaker.clone();
 
@@ -381,7 +381,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 shaders.get_shader_group("FillExtrusionPatternInstancedShader");
         }
 
-        let evaluated_properties = self.base.evaluated_properties.clone();
+        let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&evaluated_properties);
 
         let draw_pass = RenderPass::Translucent;
@@ -423,16 +423,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
             tile_layer_group.set_stencil_tiles(Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect())));
         }
 
-        let static_vertices = self
-            .static_data_vertices
-            .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices()))
-            .clone();
-        let static_indices = self
-            .static_data_indices
-            .get_or_insert_with(|| {
-                Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::fill_extrusion_triangle_indices())))
-            })
-            .clone();
+        let static_vertices = Rc::clone(
+            self.static_data_vertices
+                .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices())),
+        );
+        let static_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
+            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::fill_extrusion_triangle_indices())))
+        }));
         let instance_vertex_count = static_vertices.get_raw_count();
 
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
@@ -441,7 +438,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let render_data = super::render_data_for_pass(tile, &*base_impl, draw_pass);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile(draw_pass, &tile_id);
@@ -555,7 +552,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 && let Some(atlases) = tile.get_atlas_textures()
             {
                 let new_tweaker: DrawableTweakerPtr = Rc::new(DrawableAtlasesTweaker::new(
-                    Some(atlases.clone()),
+                    Some(Rc::clone(atlases)),
                     None,
                     Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
                     /*is_text=*/ false,
@@ -569,7 +566,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                         .into_iter()
                         .flatten()
                 {
-                    builder.add_tweaker(new_tweaker.clone());
+                    builder.add_tweaker(Rc::clone(&new_tweaker));
                 }
                 tweaker = Some(new_tweaker);
             }
@@ -582,19 +579,19 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
                 {
                     // offsetof(FillExtrusionLayoutVertex, a1)
-                    attr.set_shared_raw_data(Some(vertices.clone()), 0, 0, stride, AttributeDataType::Short2);
+                    attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
                 }
                 if let Some(attr) =
                     attrs.set(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
                 {
                     // offsetof(FillExtrusionLayoutVertex, a2)
-                    attr.set_shared_raw_data(Some(vertices.clone()), 4, 0, stride, AttributeDataType::UShort2);
+                    attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 4, 0, stride, AttributeDataType::UShort2);
                 }
             }
 
             if do_depth_pass && let Some(builder) = &mut depth_builder {
                 builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-                builder.set_vertex_attributes(Some(vertex_attrs.clone()));
+                builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
             }
 
             if let Some(builder) = &mut color_builder {
@@ -610,7 +607,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
                 {
                     attr.set_shared_raw_data(
-                        Some(static_vertices.clone()),
+                        Some(Rc::clone(&static_vertices)),
                         0,
                         0,
                         static_stride,
@@ -627,7 +624,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 ] {
                     if let Some(attr) = attrs.set(pos_id, -1, AttributeDataType::Invalid, 0) {
                         attr.set_shared_raw_data(
-                            Some(vertices.clone()),
+                            Some(Rc::clone(&vertices)),
                             0,
                             vertex_offset,
                             stride,
@@ -636,7 +633,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                     }
                     if let Some(attr) = attrs.set(decimals_ed_id, -1, AttributeDataType::Invalid, 0) {
                         attr.set_shared_raw_data(
-                            Some(vertices.clone()),
+                            Some(Rc::clone(&vertices)),
                             4,
                             vertex_offset,
                             stride,
@@ -648,8 +645,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             if do_depth_pass && let Some(builder) = &mut instanced_depth_builder {
                 builder.set_raw_vertices(Vec::new(), instance_vertex_count, AttributeDataType::Short2);
-                builder.set_vertex_attributes(Some(instance_vertex_attrs.clone()));
-                builder.set_instance_attributes(Some(instance_attrs.clone()));
+                builder.set_vertex_attributes(Some(Rc::clone(&instance_vertex_attrs)));
+                builder.set_instance_attributes(Some(Rc::clone(&instance_attrs)));
             }
 
             if let Some(builder) = &mut instanced_color_builder {
@@ -662,7 +659,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let triangles = bucket_indexes(geometry, bucket, &bucket.triangles);
             let instance_segments = [RenderStaticData::fill_extrusion_segment(vertex_count.saturating_sub(1))];
             let finish = |builder: &mut dyn DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
-                builder.set_segments_shared(DrawMode::Triangles(), Some(indexes.clone()), segments);
+                builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(indexes)), segments);
 
                 builder.flush(context);
 

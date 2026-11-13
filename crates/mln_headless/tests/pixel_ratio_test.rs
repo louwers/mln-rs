@@ -82,18 +82,18 @@ fn map_test(pixel_ratio: f32) -> (MapTest, Rc<Requests>) {
     let test = MapTest::with_mode(pixel_ratio, MapMode::Static);
     let requests = Rc::new(Requests::default());
     let fs = &test.file_source;
-    let r = requests.clone();
+    let r = Rc::clone(&requests);
     fs.set_response(Kind::Tile, move |_| {
         r.tiles.set(r.tiles.get() + 1);
         Some(file_response("test/fixtures/map/offline/0-0-0.vector.pbf"))
     });
     fs.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/map/offline/glyph.pbf")));
-    let r = requests.clone();
+    let r = Rc::clone(&requests);
     fs.set_response(Kind::SpriteJSON, move |resource| {
         r.sprites.borrow_mut().push(resource.url.clone());
         Some(response(sprite_json(if resource.url.contains("@2x") { 2 } else { 1 })))
     });
-    let r = requests.clone();
+    let r = Rc::clone(&requests);
     fs.set_response(Kind::SpriteImage, move |resource| {
         r.sprites.borrow_mut().push(resource.url.clone());
         Some(response(sprite_image(if resource.url.contains("@2x") { 2 } else { 1 })))

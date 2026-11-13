@@ -48,12 +48,12 @@ struct Shared {
 
 impl Shared {
     fn reader(self: &Arc<Self>) -> UpdateReader {
-        UpdateReader { shared: self.clone(), id: self.next_reader.fetch_add(1, Ordering::Relaxed) }
+        UpdateReader { shared: Arc::clone(self), id: self.next_reader.fetch_add(1, Ordering::Relaxed) }
     }
 
     /// Runs the wakers, with nothing locked.
     fn wake(&self) {
-        let wakers: Vec<Waker> = self.wakers.lock().iter().map(|(_, waker)| waker.clone()).collect();
+        let wakers: Vec<Waker> = self.wakers.lock().iter().map(|(_, waker)| Arc::clone(waker)).collect();
         for waker in wakers {
             waker();
         }

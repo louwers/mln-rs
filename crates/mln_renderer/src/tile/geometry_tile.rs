@@ -153,7 +153,7 @@ impl TileRenderData for GeometryTileRenderData {
     }
 
     fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
-        self.layout_result.as_ref().map(|result| result.feature_index.clone())
+        self.layout_result.as_ref().map(|result| Arc::clone(&result.feature_index))
     }
 
     fn get_bucket_geometry(&self) -> Option<&BucketGeometry> {
@@ -368,7 +368,7 @@ impl GeometryTileInner {
     }
 
     pub(crate) fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
-        self.layout_result.borrow().as_ref().map(|result| result.feature_index.clone())
+        self.layout_result.borrow().as_ref().map(|result| Arc::clone(&result.feature_index))
     }
 }
 
@@ -491,11 +491,11 @@ impl GeometryTile {
         let synchronous = parameters.is_update_synchronous;
         let worker_parameters = WorkerParameters {
             id,
-            obsolete: obsolete.clone(),
+            obsolete: Arc::clone(&obsolete),
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
             show_collision_boxes,
-            dynamic_texture_atlas: Some(parameters.dynamic_texture_atlas.clone()),
+            dynamic_texture_atlas: Some(Arc::clone(&parameters.dynamic_texture_atlas)),
             font_faces: parameters.glyph_manager.get_font_faces(),
             capture_rendered_features: parameters.capture_rendered_features,
             synchronous,
@@ -504,20 +504,20 @@ impl GeometryTile {
             // OptionalActorRef<GeometryTile>(isUpdateSynchronous, *this,
             // mailbox).
             let tile: Box<dyn TileEndpoint> = if synchronous {
-                Box::new(SynchronousTile(LocalObject::new(self_weak.clone())))
+                Box::new(SynchronousTile(LocalObject::new(Weak::clone(self_weak))))
             } else {
                 Box::new(ActorRef::<GeometryTileInner>::new(&mailbox))
             };
             GeometryTileInner {
                 base: TileBase::new(Kind::Geometry, id, source_id, observer),
-                self_weak: self_weak.clone(),
+                self_weak: Weak::clone(self_weak),
                 image_requestor_base: ImageRequestorBase::default(),
                 file_source: parameters.file_source.clone(),
-                glyph_manager: parameters.glyph_manager.clone(),
-                image_manager: parameters.image_manager.clone(),
+                glyph_manager: Rc::clone(&parameters.glyph_manager),
+                image_manager: Rc::clone(&parameters.image_manager),
                 obsolete,
                 worker: parameters.tile_worker_transport.create(worker_parameters, tile),
-                mailbox: mailbox.clone(),
+                mailbox: Arc::clone(&mailbox),
                 correlation_id: Cell::new(0),
                 has_data: Cell::new(false),
                 missing: Cell::new(false),
@@ -532,7 +532,7 @@ impl GeometryTile {
             }
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        mailbox.open(&scheduler::get_current(), inner.clone());
+        mailbox.open(&scheduler::get_current(), Rc::<GeometryTileInner>::clone(&inner));
         GeometryTile { inner }
     }
 
@@ -628,7 +628,7 @@ impl Tile for GeometryTile {
                 continue;
             }
 
-            impls.push(layer.clone());
+            impls.push(Arc::clone(layer));
         }
 
         inner.correlation_id.set(inner.correlation_id.get() + 1);
@@ -723,7 +723,7 @@ impl Tile for GeometryTile {
             // updates a copy if the result is shared.
             let result = Rc::make_mut(result);
             if let Some(render_data) = result.layer_render_data.get_mut(&layer_impl.id) {
-                render_data.layer_properties = layer_properties.clone();
+                render_data.layer_properties = Arc::clone(layer_properties);
             }
         }
 

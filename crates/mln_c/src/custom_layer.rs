@@ -247,7 +247,7 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_layer(
             drew: AtomicBool::new(false),
         });
         host.registration.accept();
-        let layer_host: Arc<dyn CustomLayerHost> = host.clone();
+        let layer_host: Arc<dyn CustomLayerHost> = Arc::<Host>::clone(&host);
         // SAFETY: the caller's contract.
         let sent = unsafe { map::command(map, completion, |map| map.add_custom_layer(id, layer_host, before)) };
         if sent.is_err() {

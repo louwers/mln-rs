@@ -35,7 +35,7 @@ impl LayerTweaker for HeatmapTextureLayerTweaker {
             return;
         }
 
-        let properties = self.base.evaluated_properties.clone();
+        let properties = Arc::clone(&self.base.evaluated_properties);
         let evaluated = get_evaluated::<HeatmapLayerProperties>(&properties);
 
         self.base.properties_updated = false;

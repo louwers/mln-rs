@@ -227,20 +227,22 @@ fn keep(bucket: &dyn Bucket) -> bool {
 impl BucketGeometry {
     /// The shared vertex vector of `vec`, one of `bucket`'s.
     pub(crate) fn vertices<V: bytemuck::Pod>(&self, bucket: &dyn Bucket, vec: &GeometryVec<V>) -> VertexVectorBasePtr {
-        self.vertices
-            .borrow_mut()
-            .entry(key(bucket, vec))
-            .or_insert_with(|| Rc::new(vec.vertex_vector(keep(bucket))))
-            .clone()
+        Rc::clone(
+            self.vertices
+                .borrow_mut()
+                .entry(key(bucket, vec))
+                .or_insert_with(|| Rc::new(vec.vertex_vector(keep(bucket)))),
+        )
     }
 
     /// The shared index vector of `vec`, one of `bucket`'s.
     pub(crate) fn indexes(&self, bucket: &dyn Bucket, vec: &GeometryVec<u16>) -> IndexVectorBasePtr {
-        self.indexes
-            .borrow_mut()
-            .entry(key(bucket, vec))
-            .or_insert_with(|| Rc::new(RefCell::new(vec.index_vector(keep(bucket)))))
-            .clone()
+        Rc::clone(
+            self.indexes
+                .borrow_mut()
+                .entry(key(bucket, vec))
+                .or_insert_with(|| Rc::new(RefCell::new(vec.index_vector(keep(bucket))))),
+        )
     }
 }
 

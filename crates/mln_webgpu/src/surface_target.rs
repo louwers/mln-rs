@@ -593,7 +593,7 @@ impl SurfaceTarget {
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
-        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::new(SurfaceResource { state: state.clone() })));
+        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::new(SurfaceResource { state: Rc::clone(&state) })));
         Ok(SurfaceTarget { backend, state, image })
     }
 
@@ -645,7 +645,7 @@ impl FrameTarget for SurfaceTarget {
     /// attachment trips the drawables' debug assertions.
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
         self.state.get_current_texture_view()?;
-        Some(self.image.clone())
+        Some(Rc::<DrawTarget>::clone(&self.image))
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {

@@ -83,7 +83,7 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
 
     #[must_use]
     pub(crate) fn get_impls(&self) -> ImmutableVector<T::Impl> {
-        self.impls.clone()
+        Arc::clone(&self.impls)
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {

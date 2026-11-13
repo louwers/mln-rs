@@ -67,7 +67,7 @@ impl Watchdog {
             wakeup: Condvar::new(),
             current: Arc::new(AtomicU64::new(0)),
         });
-        let thread_shared = shared.clone();
+        let thread_shared = Arc::clone(&shared);
         let thread = std::thread::Builder::new()
             .name("render-test-watchdog".to_owned())
             .spawn(move || watch(&thread_shared))
@@ -142,7 +142,7 @@ fn watch(shared: &Shared) {
         }
         // Expired: interrupt the test thread at its next RunLoop turn, once.
         let armed = state.armed.take().expect("armed");
-        let current = shared.current.clone();
+        let current = Arc::clone(&shared.current);
         let generation = armed.generation;
         let payload = TestTimedOut { limit: armed.limit };
         armed.run_loop.invoke(move || {

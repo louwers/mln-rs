@@ -262,7 +262,7 @@ impl RenderLayer for RenderFillLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -339,10 +339,10 @@ impl RenderLayer for RenderFillLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(FillLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
 
         self.update_projection_variant(state);
@@ -400,7 +400,7 @@ impl RenderLayer for RenderFillLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let render_data = super::render_data_for_pass(tile, &*base_impl, render_pass);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.remove_tile(render_pass, &tile_id);
@@ -497,7 +497,7 @@ impl RenderLayer for RenderFillLayer {
                     attrs.borrow_mut().set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
                 {
                     attr.set_shared_raw_data(
-                        Some(shared.clone()),
+                        Some(Rc::clone(&shared)),
                         0, // offsetof(LineLayoutVertex, a1)
                         /*vertexOffset=*/ 0,
                         size_of::<LineLayoutVertex>() as u32,
@@ -614,9 +614,9 @@ impl RenderLayer for RenderFillLayer {
                         && data_driven_outline
                         && let Some(outline) = outline_builder.as_mut()
                     {
-                        outline.set_vertex_attributes(Some(vertex_attrs.clone()));
+                        outline.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
                     }
-                    builder.set_vertex_attributes(Some(vertex_attrs.clone()));
+                    builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
 
                     builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
                     builder.set_segments_shared(
@@ -690,7 +690,7 @@ impl RenderLayer for RenderFillLayer {
                 let atlas_tweaker = tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()).map(
                     |atlases| -> mln_gfx::drawable_tweaker::DrawableTweakerPtr {
                         Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
-                            Some(atlases.clone()),
+                            Some(Rc::clone(atlases)),
                             None,
                             Some(ID_FILL_IMAGE_TEXTURE),
                             /*is_text*/ false,
@@ -727,13 +727,13 @@ impl RenderLayer for RenderFillLayer {
                 if let Some(builder) = pattern_builder.as_mut() {
                     builder.clear_tweakers();
                     if let Some(tweaker) = &atlas_tweaker {
-                        builder.add_tweaker(tweaker.clone());
+                        builder.add_tweaker(Rc::clone(tweaker));
                     }
                 }
                 if do_outline && let Some(builder) = outline_pattern_builder.as_mut() {
                     builder.clear_tweakers();
                     if let Some(tweaker) = &atlas_tweaker {
-                        builder.add_tweaker(tweaker.clone());
+                        builder.add_tweaker(Rc::clone(tweaker));
                     }
                 }
 
@@ -743,9 +743,9 @@ impl RenderLayer for RenderFillLayer {
                     builder.set_shader(fill_shader.clone());
                     builder.set_render_pass(render_pass);
                     if do_outline && let Some(outline) = outline_pattern_builder.as_mut() {
-                        outline.set_vertex_attributes(Some(vertex_attrs.clone()));
+                        outline.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
                     }
-                    builder.set_vertex_attributes(Some(vertex_attrs.clone()));
+                    builder.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
                     builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
                     builder.set_segments_shared(
                         DrawMode::Triangles(),

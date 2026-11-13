@@ -78,7 +78,7 @@ impl Test {
     fn new(mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
         let corrupt = Rc::new(Cell::new(None));
-        let next = corrupt.clone();
+        let next = Rc::clone(&corrupt);
         let transport = SerializingTransport::new(move |replies| {
             Box::new(Corrupting { instances: ThreadWorkerInstances::new(1, &replies), next })
         });
@@ -106,7 +106,7 @@ impl Test {
         };
         let errors = Rc::new(Errors::default());
         let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
-        let tile = GeometryTile::new(id, "s".to_owned(), &parameters, Some(errors.clone()));
+        let tile = GeometryTile::new(id, "s".to_owned(), &parameters, Some(Rc::<Errors>::clone(&errors)));
         Test { run_loop, tile, errors, corrupt }
     }
 
@@ -158,7 +158,7 @@ fn layer(id: &str, type_: &str) -> Arc<dyn LayerProperties> {
     let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
     let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
-    render_layer.borrow().base().evaluated_properties.clone()
+    Arc::clone(&render_layer.borrow().base().evaluated_properties)
 }
 
 /// A tile laid out with the fixture and the layer "fill".

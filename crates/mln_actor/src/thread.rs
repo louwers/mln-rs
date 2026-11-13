@@ -49,7 +49,7 @@ impl<O: 'static> Thread<O> {
             let established = EstablishedActor::new(&scheduler::get_current(), &object, make);
             return Thread { object, backing: Backing::Local { _established: LocalObject::new(established) } };
         }
-        let mailbox = object.mailbox.clone();
+        let mailbox = std::sync::Arc::clone(&object.mailbox);
         let (running_tx, running_rx) = mpsc::channel::<RunLoopHandle>();
         let thread = mln_util::thread::builder(name)
             .spawn(move || {
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn messages_run_on_the_thread_in_order() {
         let total = Arc::new(AtomicUsize::new(0));
-        let t = total.clone();
+        let t = Arc::clone(&total);
         let thread = Thread::new("Test", move |_| Counter { count: Cell::new(0), total: t });
         let main = std::thread::current().id();
         for i in 0..100 {

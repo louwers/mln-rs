@@ -195,7 +195,7 @@ fn generation_grows_with_each_change() {
 fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
     let reader = map.update_reader();
     let wakes = Arc::new(AtomicU64::new(0));
-    let counter = wakes.clone();
+    let counter = Arc::clone(&wakes);
     reader.set_waker(Some(Arc::new(move || {
         counter.fetch_add(1, Ordering::SeqCst);
     })));

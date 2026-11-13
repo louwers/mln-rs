@@ -357,7 +357,7 @@ impl HTTPFileSource {
             resource: resource.clone(),
             headers,
             reply: ActorRef::new(&mailbox),
-            cancellation: cancellation.clone(),
+            cancellation: Arc::clone(&cancellation),
         });
         Box::new(HTTPRequest { mailbox, cancellation })
     }

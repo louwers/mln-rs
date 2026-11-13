@@ -105,7 +105,7 @@ pub(crate) struct RenderPass {
 
 impl RenderPass {
     pub(crate) fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
-        let context = command_encoder.get_context().clone();
+        let context = Rc::clone(command_encoder.get_context());
         let mut command_buffer = None;
         let mut encoder = None;
         let mut formats = AttachmentFormats { color: MTLPixelFormat::BGRA8Unorm, depth: None, stencil: None };

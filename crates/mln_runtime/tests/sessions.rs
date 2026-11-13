@@ -169,7 +169,7 @@ fn frame_results_wake_the_host_once_until_it_drains() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let wakes = Arc::new(AtomicUsize::new(0));
-    let counter = wakes.clone();
+    let counter = Arc::clone(&wakes);
     let options = AttachOptions {
         frame_wake: Some(Arc::new(move || {
             counter.fetch_add(1, Ordering::SeqCst);
@@ -351,7 +351,7 @@ fn the_redraw_wake_runs_once_per_demand() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let redraws = Arc::new(AtomicUsize::new(0));
-    let counter = redraws.clone();
+    let counter = Arc::clone(&redraws);
     let options = AttachOptions {
         redraw_wake: Some(Arc::new(move || {
             counter.fetch_add(1, Ordering::SeqCst);
@@ -379,7 +379,7 @@ fn a_new_session_wakes_for_the_map_it_has_to_draw() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let redraws = Arc::new(AtomicUsize::new(0));
-    let counter = redraws.clone();
+    let counter = Arc::clone(&redraws);
     let options = AttachOptions {
         redraw_wake: Some(Arc::new(move || {
             counter.fetch_add(1, Ordering::SeqCst);
@@ -971,7 +971,7 @@ impl HeldTile {
     fn new(runtime: &Runtime) -> HeldTile {
         let held = Arc::new(Mutex::new(None));
         let requests = Arc::new(AtomicUsize::new(0));
-        let (holder, counter) = (held.clone(), requests.clone());
+        let (holder, counter) = (Arc::clone(&held), Arc::clone(&requests));
         wait(runtime.set_resource_provider(move |request: ResourceRequest| {
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
                 *holder.lock() = Some(request);

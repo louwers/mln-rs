@@ -190,7 +190,7 @@ impl LayoutResult {
         let mut buckets: Vec<(&BucketPtr, Vec<RenderingLayer>)> = Vec::new();
         for layer_id in layer_ids {
             let LayerRenderData { bucket, layer_properties } = &self.layer_render_data[layer_id];
-            let layer = RenderingLayer(layer_id.clone(), layer_properties.clone());
+            let layer = RenderingLayer(layer_id.clone(), Arc::clone(layer_properties));
             match buckets.iter_mut().find(|(shared, _)| Arc::ptr_eq(shared, bucket)) {
                 Some((_, layers)) => layers.push(layer),
                 None => buckets.push((bucket, vec![layer])),
@@ -228,7 +228,7 @@ impl<'de> Deserialize<'de> for LayoutResult {
         for (bucket, layers) in layout.buckets {
             let bucket = bucket_ptr(bucket);
             for RenderingLayer(layer_id, layer_properties) in layers {
-                layer_render_data.insert(layer_id, LayerRenderData { bucket: bucket.clone(), layer_properties });
+                layer_render_data.insert(layer_id, LayerRenderData { bucket: Arc::clone(&bucket), layer_properties });
             }
         }
         Ok(LayoutResult {

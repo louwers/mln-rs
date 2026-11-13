@@ -231,7 +231,7 @@ fn color_relief_vertex_attributes(context: &dyn Context, vertices: &VertexVector
         let stride = size_of::<HillshadeLayoutVertex>() as u32;
         if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(
-                Some(vertices.clone()),
+                Some(Rc::clone(vertices)),
                 0, // offsetof(HillshadeLayoutVertex, a1)
                 0,
                 stride,
@@ -240,7 +240,7 @@ fn color_relief_vertex_attributes(context: &dyn Context, vertices: &VertexVector
         }
         if let Some(attr) = attrs.set(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(
-                Some(vertices.clone()),
+                Some(Rc::clone(vertices)),
                 4, // offsetof(HillshadeLayoutVertex, a2)
                 0,
                 stride,
@@ -303,7 +303,7 @@ impl RenderLayer for RenderColorReliefLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -370,11 +370,11 @@ impl RenderLayer for RenderColorReliefLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(ColorReliefLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
             // layerGroup->addLayerTweaker(layerTweaker)
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
         let layer_tweaker = self.base.layer_tweaker.clone();
 
@@ -432,7 +432,7 @@ impl RenderLayer for RenderColorReliefLayer {
             self.elevation_stops_texture = Some(ramp_changed_texture);
 
             let color_stops_texture =
-                self.color_stops_texture.get_or_insert_with(|| context.create_texture_2d()).clone();
+                Rc::clone(self.color_stops_texture.get_or_insert_with(|| context.create_texture_2d()));
             {
                 let mut t = color_stops_texture.borrow_mut();
                 t.set_image(Some(Rc::new(self.color_stops.clone())));
@@ -473,7 +473,7 @@ impl RenderLayer for RenderColorReliefLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let bucket_ptr = tile.get_bucket(&*base_impl).filter(|b| b.has_data()).cloned();
             let Some(bucket_ptr) = bucket_ptr else {
                 self.remove_tile(render_pass, &tile_id);
@@ -503,11 +503,12 @@ impl RenderLayer for RenderColorReliefLayer {
                 if self.base.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
                         self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
-                    let vertices: VertexVectorBasePtr = globe_mesh.vertices.clone();
+                    let vertices: VertexVectorBasePtr =
+                        Rc::<mln_gfx::vertex_vector::VertexVector<HillshadeLayoutVertex>>::clone(&globe_mesh.vertices);
                     (
                         vertices,
                         globe_mesh.vertices.elements(),
-                        globe_mesh.indices.clone(),
+                        Rc::clone(&globe_mesh.indices),
                         globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                         geometry.last_modified,
                     )
@@ -522,9 +523,9 @@ impl RenderLayer for RenderColorReliefLayer {
                     )
                 } else {
                     (
-                        static_data_shared_vertices.clone(),
+                        Rc::clone(&static_data_shared_vertices),
                         4,
-                        static_data_indices.clone(),
+                        Rc::clone(&static_data_indices),
                         static_data_segments.iter().map(SegmentBase::copy).collect(),
                         geometry.last_modified,
                     )
@@ -553,11 +554,11 @@ impl RenderLayer for RenderColorReliefLayer {
             };
             let generation = bucket.render_target_generation();
             let dem_texture = match self.dem_textures.get(&bucket_id) {
-                Some((texture, made_at)) if *made_at == generation => texture.clone(),
+                Some((texture, made_at)) if *made_at == generation => Rc::clone(texture),
                 _ => {
                     let texture = context.create_texture_2d();
                     texture.borrow_mut().set_image(Some(Rc::new(dem_image)));
-                    self.dem_textures.insert(bucket_id, (texture.clone(), generation));
+                    self.dem_textures.insert(bucket_id, (Rc::clone(&texture), generation));
                     texture
                 }
             };
@@ -573,9 +574,10 @@ impl RenderLayer for RenderColorReliefLayer {
                 }
 
                 // Update textures
-                drawable.set_texture(Some(dem_texture.clone()), ID_COLOR_RELIEF_IMAGE_TEXTURE);
-                drawable.set_texture(Some(elevation_stops_texture.clone()), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
-                drawable.set_texture(Some(color_stops_texture.clone()), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
+                drawable.set_texture(Some(Rc::clone(&dem_texture)), ID_COLOR_RELIEF_IMAGE_TEXTURE);
+                drawable
+                    .set_texture(Some(Rc::clone(&elevation_stops_texture)), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
+                drawable.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
 
                 true
             };
@@ -585,20 +587,20 @@ impl RenderLayer for RenderColorReliefLayer {
             }
 
             let mut builder = context.create_drawable_builder();
-            builder.set_shader(Some(color_relief_shader.clone()));
+            builder.set_shader(Some(Rc::clone(&color_relief_shader)));
             builder.set_enable_depth(false);
             builder.set_color_mode(&ColorMode::alpha_blended());
             builder.set_cull_face_mode(&CullFaceMode::disabled());
             builder.set_render_pass(render_pass);
             builder.set_vertex_attributes(Some(color_relief_vertex_attributes(context, &vertices)));
             builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-            builder.set_segments_shared(DrawMode::Triangles(), Some(indices.clone()), &segments);
+            builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
 
             builder.set_texture(Some(dem_texture), ID_COLOR_RELIEF_IMAGE_TEXTURE);
 
             // Bind color ramp textures
-            builder.set_texture(Some(elevation_stops_texture.clone()), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
-            builder.set_texture(Some(color_stops_texture.clone()), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
+            builder.set_texture(Some(Rc::clone(&elevation_stops_texture)), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
+            builder.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
 
             builder.flush(context);
 

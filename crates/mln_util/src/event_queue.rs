@@ -25,7 +25,7 @@ pub struct EventQueue<T> {
 
 impl<T> Clone for EventQueue<T> {
     fn clone(&self) -> Self {
-        EventQueue { shared: self.shared.clone() }
+        EventQueue { shared: Arc::clone(&self.shared) }
     }
 }
 
@@ -99,7 +99,7 @@ mod tests {
     fn wakes_once_per_batch() {
         let queue = EventQueue::new();
         let wakes = Arc::new(AtomicUsize::new(0));
-        let counter = wakes.clone();
+        let counter = Arc::clone(&wakes);
         queue.set_waker(Some(Arc::new(move || {
             counter.fetch_add(1, Ordering::SeqCst);
         })));
@@ -116,7 +116,7 @@ mod tests {
         let queue = EventQueue::new();
         queue.push(1);
         let wakes = Arc::new(AtomicUsize::new(0));
-        let counter = wakes.clone();
+        let counter = Arc::clone(&wakes);
         queue.set_waker(Some(Arc::new(move || {
             counter.fetch_add(1, Ordering::SeqCst);
         })));

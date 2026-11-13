@@ -171,7 +171,7 @@ impl CustomLayer {
 
 impl Layer for CustomLayer {
     fn base_impl(&self) -> Arc<dyn layer::Impl> {
-        self.base_impl.clone()
+        Arc::<Impl>::clone(&self.base_impl)
     }
 
     fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase)) {
@@ -192,7 +192,7 @@ impl Layer for CustomLayer {
     fn clone_ref(&self, id: &str) -> Box<dyn Layer> {
         let mut impl_ = (*self.base_impl).clone();
         impl_.base.id = id.to_owned();
-        Box::new(CustomLayer { base_impl: Arc::new(impl_), host: self.host.clone() })
+        Box::new(CustomLayer { base_impl: Arc::new(impl_), host: Arc::clone(&self.host) })
     }
 
     fn set_property_internal(&mut self, name: &str, _value: &Convertible<'_>) -> Option<Error> {
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn the_impls_of_a_removed_layer_dont_keep_its_host() {
         let host: Arc<dyn CustomLayerHost> = Arc::new(Host);
-        let layer = CustomLayer::new("custom", host.clone());
+        let layer = CustomLayer::new("custom", Arc::clone(&host));
         let impl_ = layer.base_impl();
         let impl_ = impl_.downcast_ref::<Impl>().unwrap();
         assert!(impl_.has_host(&host));

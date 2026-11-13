@@ -903,7 +903,7 @@ impl Generation {
                 final_layout: vk::ImageLayout::GENERAL,
             }),
         };
-        let target = BorrowedTarget::new(backend.clone(), borrowed, producer)?;
+        let target = BorrowedTarget::new(Rc::clone(backend), borrowed, producer)?;
         Ok(Generation { target, images, depth_images, size })
     }
 }

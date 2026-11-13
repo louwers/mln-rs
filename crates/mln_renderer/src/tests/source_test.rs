@@ -257,7 +257,7 @@ fn tile_empty(kind: Tiled) {
     let observer = Rc::new(StubRenderSourceObserver::default());
     let changed = Rc::new(RefCell::new(false));
     {
-        let changed = changed.clone();
+        let changed = Rc::clone(&changed);
         let end = test.end_handle();
         *observer.tile_changed.borrow_mut() = Some(Box::new(move |source_id, _tile_id| {
             assert_eq!("source", source_id);
@@ -283,7 +283,7 @@ fn tile_fail(kind: Tiled) {
     let observer = Rc::new(StubRenderSourceObserver::default());
     let failed = Rc::new(RefCell::new(false));
     {
-        let failed = failed.clone();
+        let failed = Rc::clone(&failed);
         let end = test.end_handle();
         *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
             assert_eq!("source", source_id);
@@ -312,7 +312,7 @@ fn tile_corrupt(kind: Tiled) {
     let observer = Rc::new(StubRenderSourceObserver::default());
     let failed = Rc::new(RefCell::new(false));
     {
-        let failed = failed.clone();
+        let failed = Rc::clone(&failed);
         let end = test.end_handle();
         *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
             assert_eq!("source", source_id);
@@ -337,7 +337,7 @@ fn tile_cancel(kind: Tiled) {
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
     let requested = Rc::new(RefCell::new(false));
     {
-        let requested = requested.clone();
+        let requested = Rc::clone(&requested);
         let end = test.end_handle();
         file_source.set_response(Kind::Tile, move |_resource| {
             *requested.borrow_mut() = true;
@@ -382,7 +382,7 @@ impl FileSource for PendingTileSource {
         let tile = (data.z, data.x, data.y);
         self.requested.lock().push(tile);
         self.orders.lock().push(resource.order.clone());
-        Box::new(PendingTileRequest { tile, cancelled: self.cancelled.clone() })
+        Box::new(PendingTileRequest { tile, cancelled: Arc::clone(&self.cancelled) })
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
@@ -405,7 +405,7 @@ fn tile_out_of_view_keeps_loading() {
     let mut test = SourceTest::new();
     test.transform.resize(Size::new(1024, 128)).unwrap();
     let file_source = Arc::new(PendingTileSource::default());
-    let (requested, cancelled) = (file_source.requested.clone(), file_source.cancelled.clone());
+    let (requested, cancelled) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.cancelled));
     let layers = Tiled::Vector.layers();
     let source = Tiled::Vector.source(tiles_tileset());
     source.load_description(&*file_source);
@@ -419,7 +419,7 @@ fn tile_out_of_view_keeps_loading() {
             bearing: Some(bearing),
             ..Default::default()
         });
-        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs.clone()));
+        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
         render_source.update(source.base_impl(), &layers, true, needs_relayout, &parameters);
         requested.lock().clone()
     };
@@ -586,7 +586,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     let observer = Rc::new(StubStyleObserver::default());
     let changed = Rc::new(RefCell::new(false));
     {
-        let changed = changed.clone();
+        let changed = Rc::clone(&changed);
         let end = test.end_handle();
         *observer.source_changed.borrow_mut() = Some(Box::new(move |source| {
             assert_eq!(Some(attribution.to_owned()), source.get_attribution());
@@ -596,11 +596,11 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     }
 
     let source = kind.source(UrlOrTileset::Url("url".to_owned()));
-    source.set_observer(Some(observer.clone()));
+    source.set_observer(Some(Rc::<StubStyleObserver>::clone(&observer)));
     source.load_description(&*file_source);
 
     let mut render_source = render_source::create(&source.base_impl());
-    let fs: Arc<dyn FileSource> = file_source.clone();
+    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     render_source.update(
         source.base_impl(),
         &layers,
@@ -799,7 +799,7 @@ fn observe_tile_errors(render_source: &mut dyn RenderSource) -> Rc<RefCell<usize
     let errors = Rc::new(RefCell::new(0));
     let observer = Rc::new(StubRenderSourceObserver::default());
     {
-        let errors = errors.clone();
+        let errors = Rc::clone(&errors);
         *observer.tile_error.borrow_mut() = Some(Box::new(move |_, _, _| *errors.borrow_mut() += 1));
     }
     render_source.set_observer(observer);
@@ -817,7 +817,7 @@ fn geojson_source_tiles_after_data_reset() {
     .unwrap();
     let geojson_data =
         create_geojson_data(&geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
-    source.set_geojson_data(Some(geojson_data.clone()));
+    source.set_geojson_data(Some(Arc::clone(&geojson_data)));
     let mut render_source =
         RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
 
@@ -871,7 +871,7 @@ impl SynchronousUpdateSource {
     fn new(synchronous_update: bool) -> Self {
         let options: Arc<GeoJSONOptions> =
             Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
-        let source = GeoJSONSource::new("source", options.clone());
+        let source = GeoJSONSource::new("source", Arc::clone(&options));
         let render_source =
             RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
         SynchronousUpdateSource { options, source, render_source, layers: circle_layers() }
@@ -944,7 +944,8 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     )
     .unwrap();
     source.set_geojson_data(Some(
-        create_geojson_data(&geojson, slicer.clone(), &GeoJSONOptions::default_options()).unwrap(),
+        create_geojson_data(&geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options())
+            .unwrap(),
     ));
     let mut render_source =
         RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
@@ -996,7 +997,7 @@ struct FixtureLog {
 impl FixtureLog {
     fn new() -> Self {
         let messages: Records = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
         FixtureLog { messages }
     }
 
@@ -1032,7 +1033,7 @@ fn set_max_parent_overscale_factor() {
 
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
     {
-        let timer = timer.clone();
+        let timer = Rc::clone(&timer);
         let end = test.end_handle();
         file_source.set_response(Kind::Tile, move |res| {
             let z = res.tile_data.as_ref().unwrap().z;
@@ -1061,14 +1062,14 @@ fn set_max_parent_overscale_factor() {
 
     let observer = Rc::new(StubRenderSourceObserver::default());
     let render_source: Rc<RefCell<Box<dyn RenderSource>>> = Rc::new(RefCell::new(render_source::create(&base_impl)));
-    render_source.borrow_mut().set_observer(observer.clone());
-    let fs: Arc<dyn FileSource> = file_source.clone();
+    render_source.borrow_mut().set_observer(Rc::<StubRenderSourceObserver>::clone(&observer));
+    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     render_source.borrow_mut().update(
-        base_impl.clone(),
+        Arc::clone(&base_impl),
         &layers,
         true,
         true,
-        &test.tile_parameters_with(MapMode::Continuous, Some(fs.clone())),
+        &test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs))),
     );
 
     {
@@ -1077,8 +1078,8 @@ fn set_max_parent_overscale_factor() {
         let thread_pool = test.thread_pool.clone();
         *observer.tile_changed.borrow_mut() = Some(Box::new(move |_, _| {
             if let Some(render_source) = render_source.upgrade() {
-                let parameters = tile_parameters(&state, &thread_pool, MapMode::Continuous, Some(fs.clone()));
-                render_source.borrow_mut().update(base_impl.clone(), &layers, true, true, &parameters);
+                let parameters = tile_parameters(&state, &thread_pool, MapMode::Continuous, Some(Arc::clone(&fs)));
+                render_source.borrow_mut().update(Arc::clone(&base_impl), &layers, true, true, &parameters);
             }
         }));
     }
@@ -1101,7 +1102,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
     let requested_zooms = Rc::new(RefCell::new(Vec::<i8>::new()));
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
     {
-        let requested_zooms = requested_zooms.clone();
+        let requested_zooms = Rc::clone(&requested_zooms);
         file_source.set_response(Kind::Tile, move |res| {
             requested_zooms.borrow_mut().push(res.tile_data.as_ref().unwrap().z);
             let mut response = Response::new();
@@ -1116,8 +1117,8 @@ fn raster_dem_tile_rounds_covering_zoom() {
 
     let observer = Rc::new(StubRenderSourceObserver::default());
     let mut render_source = render_source::create(&source.base_impl());
-    render_source.set_observer(observer.clone());
-    let fs: Arc<dyn FileSource> = file_source.clone();
+    render_source.set_observer(Rc::<StubRenderSourceObserver>::clone(&observer));
+    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     render_source.update(
         source.base_impl(),
         &layers,

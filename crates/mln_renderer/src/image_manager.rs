@@ -108,7 +108,7 @@ impl ImageManager {
     #[must_use]
     pub(crate) fn create() -> Rc<ImageManager> {
         Rc::new_cyclic(|self_weak| ImageManager {
-            self_weak: self_weak.clone(),
+            self_weak: Weak::clone(self_weak),
             state: RefCell::new(State {
                 loaded: false,
                 requestors: VecMap::new(),
@@ -177,7 +177,7 @@ impl ImageManager {
                 // Pending requests receive the image through
                 // notify_if_missing_image_added.
                 if !state.missing_image_requestors.contains_key(key) {
-                    state.image_requestors_to_relayout.entry(*key).or_insert_with(|| requestor.clone());
+                    state.image_requestors_to_relayout.entry(*key).or_insert_with(|| Weak::clone(requestor));
                 }
             }
         }
@@ -339,7 +339,7 @@ impl ImageManager {
     }
 
     pub(crate) fn get_available_images(&self) -> Arc<VecSet<String>> {
-        self.state.borrow().available_images.clone()
+        Arc::clone(&self.state.borrow().available_images)
     }
 
     /// The versions of the updated images, by image id. Read by
@@ -378,7 +378,7 @@ impl ImageManager {
             } else if let Some(requestors) = state.requested_images.get_mut(id) {
                 // The missing-image path below never registers images that are
                 // already present.
-                requestors.entry(key).or_insert(requestor.clone());
+                requestors.entry(key).or_insert(Weak::clone(requestor));
             }
         }
 
@@ -388,7 +388,7 @@ impl ImageManager {
         }
 
         debug_assert!(!state.missing_image_requestors.contains_key(&key));
-        state.missing_image_requestors.entry(key).or_insert((requestor.clone(), pair.clone()));
+        state.missing_image_requestors.entry(key).or_insert((Weak::clone(requestor), pair.clone()));
 
         let Some(requestor_rc) = requestor.upgrade() else {
             return;
@@ -407,17 +407,17 @@ impl ImageManager {
                 if first_pending {
                     // Still waiting for the client response for this image.
                     requestor_rc.add_pending_request(missing_image);
-                    existing_requestors.entry(key).or_insert(requestor.clone());
+                    existing_requestors.entry(key).or_insert(Weak::clone(requestor));
                     continue;
                 }
                 // The request for this image has been already delivered to
                 // the client, so we do not treat it as pending.
-                existing_requestors.entry(key).or_insert(requestor.clone());
+                existing_requestors.entry(key).or_insert(Weak::clone(requestor));
                 // TODO: we could `continue;` here, but we need to call
                 // `observer->onStyleImageMissing`, so that rendering is
                 // re-launched from the handler at Map::Impl.
             } else {
-                state.requested_images.entry(missing_image.clone()).or_default().insert(key, requestor.clone());
+                state.requested_images.entry(missing_image.clone()).or_default().insert(key, Weak::clone(requestor));
                 requestor_rc.add_pending_request(missing_image);
             }
             missing_calls.push(missing_image.clone());
@@ -426,7 +426,7 @@ impl ImageManager {
 
         let observer = self.observer.borrow().clone();
         for missing_image in missing_calls {
-            let weak_self = self.self_weak.clone();
+            let weak_self = Weak::clone(&self.self_weak);
             let image_id = missing_image.clone();
             let remove_pending_requests = move || {
                 let Some(this) = weak_self.upgrade() else {
@@ -456,9 +456,9 @@ impl ImageManager {
         for (id, type_) in &pair.0 {
             if let Some(image) = state.images.get(id) {
                 if *type_ == ImageType::Pattern {
-                    pattern_map.entry(id.clone()).or_insert_with(|| image.clone());
+                    pattern_map.entry(id.clone()).or_insert_with(|| Arc::clone(image));
                 } else {
-                    icon_map.entry(id.clone()).or_insert_with(|| image.clone());
+                    icon_map.entry(id.clone()).or_insert_with(|| Arc::clone(image));
                 }
 
                 if let Some(version) = state.updated_image_versions.get(id) {
@@ -467,7 +467,7 @@ impl ImageManager {
             }
         }
 
-        (requestor.clone(), icon_map, pattern_map, version_map, pair.1)
+        (Weak::clone(requestor), icon_map, pattern_map, version_map, pair.1)
     }
 
     fn deliver(notifications: Vec<Notification>) {

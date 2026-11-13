@@ -44,7 +44,7 @@ struct FixtureLog {
 impl FixtureLog {
     fn new() -> Self {
         let messages: Messages = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
         FixtureLog { messages }
     }
 
@@ -95,7 +95,7 @@ impl StubImageRequestor {
     fn new(image_manager: &Rc<ImageManager>) -> Rc<StubImageRequestor> {
         Rc::new(StubImageRequestor {
             base: ImageRequestorBase::default(),
-            image_manager: image_manager.clone(),
+            image_manager: Rc::clone(image_manager),
             images_available: RefCell::new(None),
             image_correlation_id: Cell::new(0),
             relayouts: Cell::new(0),
@@ -140,7 +140,7 @@ fn get_images(
     dependencies: ImageDependencies,
     id: u64,
 ) {
-    let requestor: Rc<dyn ImageRequestor> = requestor.clone();
+    let requestor: Rc<dyn ImageRequestor> = Rc::<StubImageRequestor>::clone(requestor);
     image_manager.get_images(&requestor, (dependencies, id));
 }
 
@@ -200,7 +200,7 @@ fn basic() {
     )
     .expect("parseSprite");
     for image in &images {
-        image_manager.add_image(image.clone());
+        image_manager.add_image(Arc::clone(image));
         let stored = image_manager.get_image(&image.id);
         let stored = stored.expect("stored");
         assert_eq!(image.image.size, stored.image.size);
@@ -282,7 +282,7 @@ fn notifies_requestor_when_sprite_is_loaded() {
     let observer: Rc<dyn ImageManagerObserver> = Rc::new(DefaultImageManagerObserver);
     image_manager.set_observer(Some(observer));
 
-    let n = notified.clone();
+    let n = Rc::clone(&notified);
     *requestor.images_available.borrow_mut() = Some(Box::new(move |_, _, _| n.set(true)));
 
     let image_correlation_id = 0;
@@ -306,7 +306,7 @@ fn notifies_requestor_immediately_if_dependencies_are_satisfied() {
     let requestor = StubImageRequestor::new(&image_manager);
     let notified = Rc::new(Cell::new(false));
 
-    let n = notified.clone();
+    let n = Rc::clone(&notified);
     *requestor.images_available.borrow_mut() = Some(Box::new(move |_, _, _| n.set(true)));
 
     let image_correlation_id = 0;
@@ -324,11 +324,11 @@ fn on_style_image_missing_before_sprite_loaded() {
     let requestor = StubImageRequestor::new(&image_manager);
     let observer = StubImageManagerObserver::new();
 
-    image_manager.set_observer(Some(observer.clone()));
+    image_manager.set_observer(Some(Rc::<StubImageManagerObserver>::clone(&observer)));
 
     let notified = Rc::new(Cell::new(false));
 
-    let n = notified.clone();
+    let n = Rc::clone(&notified);
     *requestor.images_available.borrow_mut() = Some(Box::new(move |_, _, _| n.set(true)));
 
     let mut image_correlation_id = 0;
@@ -382,11 +382,11 @@ fn on_style_image_missing_after_sprite_loaded() {
     let requestor = StubImageRequestor::new(&image_manager);
     let observer = StubImageManagerObserver::new();
 
-    image_manager.set_observer(Some(observer.clone()));
+    image_manager.set_observer(Some(Rc::<StubImageManagerObserver>::clone(&observer)));
 
     let notified = Rc::new(Cell::new(false));
 
-    let n = notified.clone();
+    let n = Rc::clone(&notified);
     *requestor.images_available.borrow_mut() = Some(Box::new(move |_, _, _| n.set(true)));
 
     assert_eq!(observer.count.get(), 0);
@@ -415,7 +415,7 @@ fn remove_unused_style_images() {
     let run_loop = RunLoop::new();
     let image_manager = ImageManager::create();
     let observer = StubImageManagerObserver::new();
-    image_manager.set_observer(Some(observer.clone()));
+    image_manager.set_observer(Some(Rc::<StubImageManagerObserver>::clone(&observer)));
     image_manager.set_loaded(true);
 
     // The observer is owned by the manager here, so it holds the manager
@@ -537,7 +537,7 @@ fn mixed_dependencies_retain_provided_images() {
     let run_loop = RunLoop::new();
     let image_manager = ImageManager::create();
     let observer = StubImageManagerObserver::new();
-    image_manager.set_observer(Some(observer.clone()));
+    image_manager.set_observer(Some(Rc::<StubImageManagerObserver>::clone(&observer)));
     image_manager.set_loaded(true);
 
     let weak_manager: Weak<ImageManager> = Rc::downgrade(&image_manager);
@@ -547,7 +547,7 @@ fn mixed_dependencies_retain_provided_images() {
     });
     let evicted: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
     let weak_manager: Weak<ImageManager> = Rc::downgrade(&image_manager);
-    let evicted_by_observer = evicted.clone();
+    let evicted_by_observer = Rc::clone(&evicted);
     *observer.remove_unused_style_images.borrow_mut() = Box::new(move |ids: &[String]| {
         let image_manager = weak_manager.upgrade().expect("imageManager");
         evicted_by_observer.borrow_mut().extend(ids.iter().cloned());
@@ -564,8 +564,8 @@ fn mixed_dependencies_retain_provided_images() {
     }
     let notified = Rc::new(Cell::new(false));
     {
-        let notified = notified.clone();
-        let dependencies = dependencies.clone();
+        let notified = Rc::clone(&notified);
+        let dependencies = Rc::clone(&dependencies);
         *requestor.as_ref().unwrap().images_available.borrow_mut() =
             Some(Box::new(move |icons: ImageMap, _: ImageMap, _: ImageVersionMap| {
                 notified.set(true);
@@ -633,7 +633,7 @@ fn requestor_relayouts_when_requested_image_is_added() {
     let unrelated = StubImageRequestor::new(&image_manager);
     let answered = Rc::new(Cell::new(0));
     for stub in [&requestor, &unrelated] {
-        let answered = answered.clone();
+        let answered = Rc::clone(&answered);
         *stub.images_available.borrow_mut() = Some(Box::new(move |_, _, _| answered.set(answered.get() + 1)));
     }
 
@@ -665,7 +665,7 @@ fn pending_requestor_gets_added_image_without_relayout() {
     let requestor = StubImageRequestor::new(&image_manager);
     let icons = Rc::new(RefCell::new(Vec::new()));
     {
-        let icons = icons.clone();
+        let icons = Rc::clone(&icons);
         *requestor.images_available.borrow_mut() =
             Some(Box::new(move |received: ImageMap, _, _| icons.borrow_mut().extend(received.keys().cloned())));
     }

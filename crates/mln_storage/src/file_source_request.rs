@@ -23,7 +23,7 @@ impl FileSourceRequestState {
         // Copy, because calling the callback will sometimes self destroy
         // this object. We cannot move because this method can be called
         // more than once.
-        let callback = self.response_callback.clone();
+        let callback = Rc::clone(&self.response_callback);
         (callback.borrow_mut())(response);
     }
 }

@@ -269,7 +269,7 @@ impl FontData {
     /// The same bytes, for readers that take any shared bytes.
     #[must_use]
     pub(crate) fn shared(&self) -> Arc<dyn AsRef<[u8]> + Send + Sync> {
-        self.0.clone()
+        Arc::clone(&self.0)
     }
 }
 

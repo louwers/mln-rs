@@ -227,7 +227,7 @@ impl MapCodec {
             // Before anything can fail: their bins are released when they
             // drop.
             let atlases = head.atlases.map(|mut atlases| {
-                atlases.dynamic_texture_atlas = Some(self.atlas.clone());
+                atlases.dynamic_texture_atlas = Some(Arc::<AtlasMirror>::clone(&self.atlas));
                 Arc::new(atlases)
             });
             let Some(worker_type) = self.tiles.get(&head.tile).map(|state| state.worker_type) else {
@@ -297,7 +297,7 @@ impl TextureAtlas for AtlasMirror {
         if let Some(texture) = dynamic_texture
             && !texture_handles.is_empty()
         {
-            self.released.lock().push((texture.clone(), texture_handles.to_vec()));
+            self.released.lock().push((Arc::clone(texture), texture_handles.to_vec()));
         }
     }
 

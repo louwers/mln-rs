@@ -139,7 +139,7 @@ impl SurfaceTarget {
         cap_frame_rate: bool,
     ) -> Result<(Rc<RendererBackend>, SurfaceTarget), Error> {
         let backend = Rc::new(RendererBackend::presenting(device)?);
-        let target = Self::from_provider(backend.clone(), provider, framebuffer_size, cap_frame_rate)?;
+        let target = Self::from_provider(Rc::clone(&backend), provider, framebuffer_size, cap_frame_rate)?;
         Ok((backend, target))
     }
 
@@ -263,7 +263,7 @@ impl SurfaceTarget {
         if resource.get_image_count() == 0 && framebuffer_size.width > 0 && framebuffer_size.height > 0 {
             return Err(Error::native("Failed to create a swapchain for the window"));
         }
-        let image = Rc::new(DrawTarget::new(framebuffer_size, resource.clone()));
+        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::<SurfaceResource>::clone(&resource)));
         Ok(SurfaceTarget {
             backend,
             resource,
@@ -353,7 +353,7 @@ impl FrameTarget for SurfaceTarget {
         if self.rebuild.take() || unbuilt {
             context.request_surface_update(false);
         }
-        Some(self.image.clone())
+        Some(Rc::<DrawTarget>::clone(&self.image))
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {

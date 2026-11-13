@@ -99,7 +99,7 @@ impl WorkerCodec {
         }
         Ok(match request.action {
             Action::Create { tile, mut parameters } => {
-                parameters.dynamic_texture_atlas = Some(self.atlas.clone());
+                parameters.dynamic_texture_atlas = Some(Arc::clone(&self.atlas));
                 WorkerAction::Create { tile, parameters }
             }
             Action::CreateRaster { tile } => WorkerAction::CreateRaster { tile },
@@ -119,7 +119,7 @@ impl WorkerCodec {
     /// payloads. What can't cross becomes an error for the tile.
     pub(crate) fn encode(&mut self, tile: u64, message: TileMessage) -> Encoded {
         let (correlation_id, atlases) = match &message {
-            TileMessage::Layout { result, correlation_id } => (*correlation_id, Some(result.atlases.clone())),
+            TileMessage::Layout { result, correlation_id } => (*correlation_id, Some(Arc::clone(&result.atlases))),
             TileMessage::Error { correlation_id, .. } => (*correlation_id, None),
             TileMessage::GetGlyphs(_) | TileMessage::GetImages(_) => (0, None),
         };
@@ -170,7 +170,7 @@ impl WorkerCodec {
         let mut uploads = Vec::new();
         for texture in &textures {
             for (bin, rect, pixels) in texture.take_uploads() {
-                uploads.push(TextureUpload { texture: texture.clone(), bin, rect, pixels });
+                uploads.push(TextureUpload { texture: Arc::clone(texture), bin, rect, pixels });
             }
         }
         let forget = self.tables.forget_dead();

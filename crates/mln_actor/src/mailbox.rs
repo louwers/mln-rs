@@ -47,7 +47,7 @@ impl Mailbox {
         Arc::new_cyclic(|weak_self| Mailbox {
             state: Mutex::new(State { queue: VecDeque::new(), closed: false, scheduler: None, scheduler_tag: None }),
             id: local_object::next_id(),
-            weak_self: weak_self.clone(),
+            weak_self: Weak::clone(weak_self),
         })
     }
 
@@ -134,7 +134,7 @@ impl Mailbox {
         let Some(scheduler) = state.scheduler.as_ref().and_then(Weak::upgrade) else {
             return;
         };
-        let mailbox = self.weak_self.clone();
+        let mailbox = Weak::clone(&self.weak_self);
         let set_to_receive = Box::new(move || {
             if let Some(locked) = mailbox.upgrade() {
                 locked.receive();

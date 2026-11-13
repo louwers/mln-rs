@@ -165,17 +165,15 @@ impl DynamicTextureAtlas {
 
         let mut glyph_atlas = GlyphAtlas::default();
         if glyphs.is_empty() {
-            let texture = state
-                .dummy_dynamic_texture
-                .entry(pixel_type_key(TexturePixelType::Alpha))
-                .or_insert_with(|| {
+            let texture = Arc::clone(
+                state.dummy_dynamic_texture.entry(pixel_type_key(TexturePixelType::Alpha)).or_insert_with(|| {
                     let mut dummy_image = AlphaImage::new(DUMMY_SIZE);
                     dummy_image.fill(0);
                     let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::Alpha));
                     texture.add_image(&dummy_image.data, DUMMY_SIZE, -1);
                     texture
-                })
-                .clone();
+                }),
+            );
             glyph_atlas.dynamic_texture = Some(texture);
             return glyph_atlas;
         }
@@ -186,7 +184,7 @@ impl DynamicTextureAtlas {
 
         while glyph_atlas.dynamic_texture.is_none() {
             let texture = if dyn_tex_index < state.dynamic_textures.len() {
-                let t = state.dynamic_textures[dyn_tex_index].clone();
+                let t = Arc::clone(&state.dynamic_textures[dyn_tex_index]);
                 dyn_tex_index += 1;
                 t
             } else {
@@ -199,7 +197,7 @@ impl DynamicTextureAtlas {
             if texture.get_pixel_format() != TexturePixelType::Alpha {
                 continue;
             }
-            glyph_atlas.dynamic_texture = Some(texture.clone());
+            glyph_atlas.dynamic_texture = Some(Arc::clone(&texture));
 
             let mut has_space = true;
             for (&font_stack, font_glyphs) in glyphs {
@@ -209,7 +207,7 @@ impl DynamicTextureAtlas {
                         continue;
                     }
                     if let Some(tex_handle) = Self::reserve_glyph(&mut state, &texture, glyph) {
-                        glyphs_to_upload.push((tex_handle, glyph.clone(), font_stack));
+                        glyphs_to_upload.push((tex_handle, Arc::clone(glyph), font_stack));
                     } else {
                         has_space = false;
                         break;
@@ -227,7 +225,7 @@ impl DynamicTextureAtlas {
         }
         let texture = glyph_atlas.dynamic_texture.clone().expect("dynamic texture");
         if dyn_tex_index > state.dynamic_textures.len() {
-            state.dynamic_textures.push(texture.clone());
+            state.dynamic_textures.push(Arc::clone(&texture));
         }
 
         for (mut tex_handle, glyph, font_stack) in glyphs_to_upload {
@@ -266,17 +264,15 @@ impl DynamicTextureAtlas {
 
         let mut image_atlas = ImageAtlas::default();
         if icons.is_empty() && patterns.is_empty() {
-            let texture = state
-                .dummy_dynamic_texture
-                .entry(pixel_type_key(TexturePixelType::RGBA))
-                .or_insert_with(|| {
+            let texture = Arc::clone(
+                state.dummy_dynamic_texture.entry(pixel_type_key(TexturePixelType::RGBA)).or_insert_with(|| {
                     let mut dummy_image = PremultipliedImage::new(DUMMY_SIZE);
                     dummy_image.fill(0);
                     let texture = Arc::new(DynamicTexture::new(DUMMY_SIZE, TexturePixelType::RGBA));
                     texture.add_image(&dummy_image.data, DUMMY_SIZE, -1);
                     texture
-                })
-                .clone();
+                }),
+            );
             image_atlas.dynamic_texture = Some(texture);
             return image_atlas;
         }
@@ -288,7 +284,7 @@ impl DynamicTextureAtlas {
 
         while image_atlas.dynamic_texture.is_none() {
             let texture = if dyn_tex_index < state.dynamic_textures.len() {
-                let t = state.dynamic_textures[dyn_tex_index].clone();
+                let t = Arc::clone(&state.dynamic_textures[dyn_tex_index]);
                 dyn_tex_index += 1;
                 t
             } else {
@@ -305,7 +301,7 @@ impl DynamicTextureAtlas {
             let mut has_space = true;
             for icon in icons.values() {
                 if let Some(tex_handle) = Self::reserve_image(&mut state, &texture, icon, ImageType::Icon) {
-                    icons_to_upload.push((tex_handle, icon.clone()));
+                    icons_to_upload.push((tex_handle, Arc::clone(icon)));
                 } else {
                     has_space = false;
                     break;
@@ -314,7 +310,7 @@ impl DynamicTextureAtlas {
             if has_space {
                 for pattern in patterns.values() {
                     if let Some(tex_handle) = Self::reserve_image(&mut state, &texture, pattern, ImageType::Pattern) {
-                        patterns_to_upload.push((tex_handle, pattern.clone()));
+                        patterns_to_upload.push((tex_handle, Arc::clone(pattern)));
                     } else {
                         has_space = false;
                         break;
@@ -336,7 +332,7 @@ impl DynamicTextureAtlas {
         }
         let texture = image_atlas.dynamic_texture.clone().expect("dynamic texture");
         if dyn_tex_index > state.dynamic_textures.len() {
-            state.dynamic_textures.push(texture.clone());
+            state.dynamic_textures.push(Arc::clone(&texture));
         }
 
         image_atlas.icon_positions.reserve(icons.len());
@@ -447,7 +443,9 @@ impl DynamicTextureAtlas {
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
-            state.image_allocations.insert(key, ImageAllocation { _image: image.clone(), bin_id: tex_handle.get_id() });
+            state
+                .image_allocations
+                .insert(key, ImageAllocation { _image: Arc::clone(image), bin_id: tex_handle.get_id() });
             state
                 .image_allocation_keys
                 .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
@@ -473,7 +471,9 @@ impl DynamicTextureAtlas {
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
-            state.glyph_allocations.insert(key, GlyphAllocation { _glyph: glyph.clone(), bin_id: tex_handle.get_id() });
+            state
+                .glyph_allocations
+                .insert(key, GlyphAllocation { _glyph: Arc::clone(glyph), bin_id: tex_handle.get_id() });
             state
                 .glyph_allocation_keys
                 .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);

@@ -49,7 +49,7 @@ pub(crate) struct UniformBuffer {
 impl UniformBuffer {
     /// A uniform buffer of `size` bytes, holding `data` if there is any.
     pub(crate) fn new(context: &Context, data: Option<&[u8]>, size: usize) -> Self {
-        Self::with_backend(context.get_backend().clone(), context.weak(), data, size)
+        Self::with_backend(Rc::clone(context.get_backend()), context.weak(), data, size)
     }
 
     fn with_backend(backend: Rc<BackendImpl>, context: Weak<Context>, data: Option<&[u8]>, size: usize) -> Self {

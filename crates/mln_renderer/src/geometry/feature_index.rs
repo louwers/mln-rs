@@ -128,10 +128,10 @@ impl FeatureIndex {
             self.unique_layer_ids.reserve(EXPECTED_UNIQUE_LAYER_IDS);
         }
         if let Some(existing) = self.unique_layer_ids.get(name) {
-            return existing.clone();
+            return Arc::clone(existing);
         }
         let name: Arc<str> = Arc::from(name);
-        self.unique_layer_ids.insert(name.clone());
+        self.unique_layer_ids.insert(Arc::clone(&name));
         name
     }
 
@@ -140,10 +140,10 @@ impl FeatureIndex {
             self.bucket_layer_ids.reserve(EXPECTED_UNIQUE_LEADER_IDS);
         }
         if let Some((existing, _)) = self.bucket_layer_ids.get_key_value(id) {
-            return existing.clone();
+            return Arc::clone(existing);
         }
         let id: Arc<str> = Arc::from(id);
-        self.bucket_layer_ids.insert(id.clone(), Vec::new());
+        self.bucket_layer_ids.insert(Arc::clone(&id), Vec::new());
         id
     }
 
@@ -171,8 +171,8 @@ impl FeatureIndex {
                     RefIndexedSubfeature {
                         index,
                         sort_index: feature_sort_index,
-                        source_layer_name: emplaced_layer_name.clone(),
-                        bucket_leader_id: emplaced_leader_id.clone(),
+                        source_layer_name: Arc::clone(&emplaced_layer_name),
+                        bucket_leader_id: Arc::clone(&emplaced_leader_id),
                         bucket_instance_id: 0,
                         collision_group_id: 0,
                     },

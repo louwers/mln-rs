@@ -51,7 +51,7 @@ fn request(fs: &LocalFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
     let req = req();
     let result = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
+    let (r, out, stop) = (std::rc::Rc::clone(&req), std::rc::Rc::clone(&result), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
         resource,
         Box::new(move |res: Response| {

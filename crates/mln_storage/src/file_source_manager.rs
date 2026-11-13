@@ -126,7 +126,7 @@ impl FileSourceManager {
             if let Some(file_source) = find(&registry) {
                 return Some(file_source);
             }
-            registry.factories.get(&type_)?.clone()
+            Arc::clone(registry.factories.get(&type_)?)
         };
 
         let file_source = factory(self, options);

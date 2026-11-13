@@ -36,7 +36,7 @@ impl UploadPass {
     #[must_use]
     pub(crate) fn new(command_encoder: &CommandEncoder, name: &str) -> Self {
         let pass = UploadPass {
-            context: command_encoder.get_context().clone(),
+            context: Rc::clone(command_encoder.get_context()),
             command_buffer: command_encoder.get_command_buffer(),
         };
         // Push the group for the name provided.
@@ -79,7 +79,7 @@ impl UploadPass {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();
         let existing =
-            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| b.resource.clone());
+            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| Rc::clone(&b.resource));
         // If we already have a buffer and it hasn't changed, use it. A
         // freed vector's data is already in the buffer.
         if let Some(resource) = existing
@@ -98,7 +98,7 @@ impl UploadPass {
             let resource = self.create_vertex_buffer(&vec.get_raw_data()[..raw_size], false);
             resource.set_last_updated(vec.get_last_modified());
             // A released vector frees its CPU copy here.
-            vec.set_buffer(Some(Box::new(VertexBuffer { resource: resource.clone() })));
+            vec.set_buffer(Some(Box::new(VertexBuffer { resource: Rc::clone(&resource) })));
             return Some(resource);
         }
         None

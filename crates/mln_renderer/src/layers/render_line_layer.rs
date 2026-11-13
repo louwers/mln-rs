@@ -417,7 +417,7 @@ impl RenderLayer for RenderLineLayer {
         self.base.evaluated_properties = Arc::new(properties);
 
         if let Some(layer_tweaker) = &self.base.layer_tweaker {
-            layer_tweaker.borrow_mut().update_properties(self.base.evaluated_properties.clone());
+            layer_tweaker.borrow_mut().update_properties(Arc::clone(&self.base.evaluated_properties));
         }
     }
 
@@ -486,7 +486,7 @@ impl RenderLayer for RenderLineLayer {
         let Some(render_tiles) = self.base.render_tiles.clone() else {
             return;
         };
-        let base_impl = self.base.base_impl.clone();
+        let base_impl = Arc::clone(&self.base.base_impl);
         for tile in render_tiles.iter() {
             let Some(render_data) = tile.get_layer_render_data(&*base_impl) else {
                 continue;
@@ -548,10 +548,10 @@ impl RenderLayer for RenderLineLayer {
         if self.base.layer_tweaker.is_none() {
             let tweaker: LayerTweakerPtr = Rc::new(RefCell::new(LineLayerTweaker::new(
                 self.get_id().to_owned(),
-                self.base.evaluated_properties.clone(),
+                Arc::clone(&self.base.evaluated_properties),
             )));
-            self.base.layer_tweaker = Some(tweaker.clone());
-            changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
+            self.base.layer_tweaker = Some(Rc::clone(&tweaker));
+            changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(&tweaker)));
         }
 
         let render_pass =
@@ -600,7 +600,7 @@ impl RenderLayer for RenderLineLayer {
                 vertex_attrs.borrow_mut().set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
             {
                 attr.set_shared_raw_data(
-                    Some(shared.clone()),
+                    Some(Rc::clone(&shared)),
                     0, // offsetof(LineLayoutVertex, a1)
                     /*vertexOffset=*/ 0,
                     size_of::<LineLayoutVertex>() as u32,
@@ -638,7 +638,7 @@ impl RenderLayer for RenderLineLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let base_impl = self.base.base_impl.clone();
+            let base_impl = Arc::clone(&self.base.base_impl);
             let Some(render_data) = super::render_data_for_pass(tile, &*base_impl, render_pass) else {
                 self.remove_tile(render_pass, &tile_id);
                 continue;
@@ -747,7 +747,7 @@ impl RenderLayer for RenderLineLayer {
                         let texture = context.create_texture_2d();
                         {
                             let mut t = texture.borrow_mut();
-                            t.set_image(Some(color_ramp.clone()));
+                            t.set_image(Some(Rc::clone(color_ramp)));
                             t.set_sampler_configuration(SamplerState {
                                 filter: TextureFilterType::Linear,
                                 wrap_u: TextureWrapType::Clamp,
@@ -783,7 +783,7 @@ impl RenderLayer for RenderLineLayer {
 
                 ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
                 if let Some(texture) = &self.color_ramp_texture_2d {
-                    builder.set_texture(Some(texture.clone()), ID_LINE_IMAGE_TEXTURE);
+                    builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
 
                     set_segments(builder.as_mut(), geometry, bucket);
 
@@ -845,7 +845,7 @@ impl RenderLayer for RenderLineLayer {
                 if let Some(atlases) = tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()) {
                     let icon_tweaker: mln_gfx::drawable_tweaker::DrawableTweakerPtr =
                         Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
-                            Some(atlases.clone()),
+                            Some(Rc::clone(atlases)),
                             None,
                             Some(ID_LINE_IMAGE_TEXTURE),
                             /*is_text*/ false,
@@ -888,7 +888,7 @@ impl RenderLayer for RenderLineLayer {
 
                 ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
                 if let Some(texture) = &self.color_ramp_texture_2d {
-                    builder.set_texture(Some(texture.clone()), ID_LINE_IMAGE_TEXTURE);
+                    builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
 
                     set_segments(builder.as_mut(), geometry, bucket);
 

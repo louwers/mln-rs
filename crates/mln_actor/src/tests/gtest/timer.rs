@@ -27,7 +27,7 @@ fn basic() {
     let first = Instant::now();
 
     let callback_time: Rc<Cell<Option<f64>>> = Rc::new(Cell::new(None));
-    let (l, c) = (run_loop.clone(), callback_time.clone());
+    let (l, c) = (run_loop.clone(), Rc::clone(&callback_time));
     let callback = move || {
         c.set(Some(elapsed_ms(first)));
         l.stop();
@@ -53,7 +53,7 @@ fn repeat() {
     let timer = Timer::new();
 
     let count = Rc::new(Cell::new(10u32));
-    let (l, c) = (run_loop.clone(), count.clone());
+    let (l, c) = (run_loop.clone(), Rc::clone(&count));
     let callback = move || {
         c.set(c.get() - 1);
         if c.get() == 0 {
@@ -90,7 +90,7 @@ fn stop() {
 
     let count = Rc::new(Cell::new(0));
 
-    let (c, t1) = (count.clone(), Rc::downgrade(&timer1));
+    let (c, t1) = (Rc::clone(&count), Rc::downgrade(&timer1));
     let callback1 = move || {
         c.set(c.get() + 1);
         if let Some(t1) = t1.upgrade() {
@@ -98,7 +98,7 @@ fn stop() {
         }
     };
 
-    let (c, l) = (count.clone(), run_loop.clone());
+    let (c, l) = (Rc::clone(&count), run_loop.clone());
     let callback2 = move || {
         c.set(c.get() + 1);
         l.stop();
@@ -133,14 +133,14 @@ fn destroy_should_stop() {
 
     let count = Rc::new(Cell::new(0));
 
-    let (c, t1) = (count.clone(), timer1.clone());
+    let (c, t1) = (Rc::clone(&count), Rc::clone(&timer1));
     let callback1 = move || {
         c.set(c.get() + 1);
         let timer = t1.borrow_mut().take();
         drop(timer);
     };
 
-    let (c, l) = (count.clone(), run_loop.clone());
+    let (c, l) = (Rc::clone(&count), run_loop.clone());
     let callback2 = move || {
         c.set(c.get() + 1);
         l.stop();
@@ -180,7 +180,7 @@ fn stopped_during_expiration() {
         // than the loop stop timer (and thus the callback will be called)
     };
 
-    let (t, l) = (timer.clone(), run_loop.clone());
+    let (t, l) = (Rc::clone(&timer), run_loop.clone());
     let loop_stop_timer_callback = move || {
         t.stop();
         l.stop();
@@ -210,7 +210,7 @@ fn stopped_after_expiration() {
 
     let callback_fired = Rc::new(Cell::new(false));
 
-    let c = callback_fired.clone();
+    let c = Rc::clone(&callback_fired);
     let timer_callback = move || c.set(true);
 
     let first = Instant::now();
@@ -247,13 +247,13 @@ fn start_overrides() {
 
     let count = Rc::new(Cell::new(0));
 
-    let (c, l) = (count.clone(), run_loop.clone());
+    let (c, l) = (Rc::clone(&count), run_loop.clone());
     let callback2 = move || {
         c.set(c.get() + 1);
         l.stop();
     };
 
-    let (c, t) = (count.clone(), Rc::downgrade(&timer));
+    let (c, t) = (Rc::clone(&count), Rc::downgrade(&timer));
     let callback2 = RefCell::new(Some(callback2));
     let callback1 = move || {
         c.set(c.get() + 1);

@@ -18,7 +18,7 @@ use crate::response::{Reason, ResourceError, Response};
 /// Registers a `Network` factory on `manager` that counts its calls.
 fn count_network_factory(manager: &FileSourceManager) -> Arc<AtomicUsize> {
     let calls = Arc::new(AtomicUsize::new(0));
-    let counter = calls.clone();
+    let counter = Arc::clone(&calls);
     manager.register_file_source_factory(
         FileSourceType::Network,
         Arc::new(move |_: &FileSourceManager, options: &ResourceOptions| {
@@ -106,7 +106,7 @@ fn loader_error(manager: &FileSourceManager) -> String {
     let run_loop = RunLoop::new();
     let loader = manager.get_file_source(FileSourceType::ResourceLoader, &ResourceOptions::default()).unwrap();
     let message = Arc::new(parking_lot::Mutex::new(String::new()));
-    let (out, stop) = (message.clone(), run_loop.clone());
+    let (out, stop) = (Arc::clone(&message), run_loop.clone());
     let _req = loader.request(
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(move |res: Response| {

@@ -127,7 +127,7 @@ fn parse_through_the_codec() {
     let tiles: Vec<RasterTile> = (0..2)
         .map(|x| {
             let id = OverscaledTileID::from_zxy(1, x, 0);
-            RasterTile::new(id, "s".to_owned(), &parameters, &test.tileset, Some(errors.clone()))
+            RasterTile::new(id, "s".to_owned(), &parameters, &test.tileset, Some(Rc::<ErrorObserver>::clone(&errors)))
         })
         .collect();
     for (tile, size) in tiles.iter().zip([16, 32]) {
