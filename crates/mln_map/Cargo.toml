@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
@@ -31,7 +33,7 @@ mln_util.workspace = true
 parking_lot.workspace = true
 
 [dev-dependencies]
-mln_storage = { workspace = true, features = ["test-support"] }
+mln_storage = { workspace = true, features = ["stub-file-source"] }
 
 [lints]
 workspace = true
