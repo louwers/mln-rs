@@ -1,6 +1,6 @@
 // The styles the page offers: keyless styles from two providers, which draw
-// two tile schemas (OpenMapTiles and Shortbread). `dark` turns the page's
-// controls dark.
+// vector tiles of two schemas (OpenMapTiles and Shortbread) and satellite
+// imagery in raster tiles. `dark` turns the page's controls dark.
 
 /** A style the page can show; `key` is null for one from a URL. */
 export interface Style {
@@ -51,6 +51,13 @@ export const STYLES: Style[] = [
     name: 'Colorful',
     provider: 'VersaTiles',
     url: 'https://tiles.versatiles.org/assets/styles/colorful/style.json',
+  },
+  {
+    key: 'satellite',
+    name: 'Satellite',
+    provider: 'VersaTiles',
+    url: 'https://tiles.versatiles.org/assets/styles/satellite/style.json',
+    dark: true,
   },
 ];
 
