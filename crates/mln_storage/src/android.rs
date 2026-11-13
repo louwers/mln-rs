@@ -45,9 +45,19 @@ struct AssetManager {
 
 static ASSETS: OnceLock<AssetManager> = OnceLock::new();
 
+/// Set once [`init`] gave rustls-platform-verifier the app's Java VM.
+static VERIFIER: OnceLock<()> = OnceLock::new();
+
+/// Whether [`init`] gave Android's certificate verifier the app's Java VM,
+/// which the verifier panics without.
+pub(crate) fn verifier_ready() -> bool {
+    VERIFIER.get().is_some()
+}
+
 /// Gives the file sources the Java VM of `jni_env` and the app's `context`.
 /// Call it before the first HTTPS request or app asset; a later call changes
-/// nothing.
+/// nothing. Without it, HTTPS trusts the certificates of Android's store
+/// files, which leave out the ones a user installed.
 ///
 /// The app must include rustls-platform-verifier's Android component, whose
 /// classes verify the certificates.
@@ -77,7 +87,10 @@ pub unsafe fn init(jni_env: *mut c_void, context: *mut c_void) -> Result<(), Err
         })
         .into_outcome();
     match outcome {
-        Outcome::Ok(()) => Ok(()),
+        Outcome::Ok(()) => {
+            let _ = VERIFIER.set(());
+            Ok(())
+        }
         Outcome::Err(error) => Err(Error::native(format!("Android initialization failed: {error}"))),
         Outcome::Panic(_) => Err(Error::native("Android initialization panicked")),
     }

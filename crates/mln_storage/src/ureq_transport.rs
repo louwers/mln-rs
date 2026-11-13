@@ -8,7 +8,8 @@
 //!
 //! TLS checks certificates against the system's trust store (rustls with
 //! rustls-platform-verifier; `SChannel` through native-tls on Windows), as curl
-//! does with the system's CA bundle. A proxy comes from the environment
+//! does with the system's CA bundle. On Android without the app's Java VM,
+//! that is the store's certificate files. A proxy comes from the environment
 //! (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, ...), as for curl.
 //!
 //! ureq follows redirects with every header it was given, so a request with
@@ -16,7 +17,9 @@
 //! once a redirect leaves their origin.
 
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, mpsc};
+#[cfg(any(target_os = "android", test))]
+use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::Duration;
 
 use mln_util::chrono::rfc1123;
@@ -154,9 +157,11 @@ pub struct Transport {
 
 impl Transport {
     /// Starts as many workers as the online file source's default
-    /// maximum of concurrent requests.
+    /// maximum of concurrent requests. Their client is made with the first
+    /// transfer, so that it sees the host's setup until then, such as
+    /// `android::init`.
     pub fn new() -> Self {
-        let client = Arc::new(Client::new());
+        let client = Arc::new(OnceLock::new());
         let (requests, receiver) = mpsc::channel::<TransferRequest>();
         let receiver = Arc::new(Mutex::new(receiver));
         for i in 0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS {
@@ -175,7 +180,7 @@ impl HttpTransport for Transport {
     }
 }
 
-fn worker(client: &Client, requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
+fn worker(client: &OnceLock<Client>, requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
     loop {
         let request = match requests.lock() {
             Ok(receiver) => receiver.recv(),
@@ -187,7 +192,7 @@ fn worker(client: &Client, requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
         if request.is_cancelled() {
             continue;
         }
-        let transfer = client.transfer(request.resource(), request.headers());
+        let transfer = client.get_or_init(Client::new).transfer(request.resource(), request.headers());
         request.finish(transfer);
     }
 }
@@ -217,16 +222,50 @@ fn tls_config() -> TlsConfig {
     TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build()
 }
 
-/// The system's trust store, through rustls-platform-verifier, with ring's
-/// cryptography (ureq's rustls without its baked-in Mozilla roots needs the
-/// provider spelled out).
+/// The system's trust store, with ring's cryptography (ureq's rustls without
+/// its baked-in Mozilla roots needs the provider spelled out).
 #[cfg(not(target_os = "windows"))]
 fn tls_config() -> TlsConfig {
     TlsConfig::builder()
         .provider(TlsProvider::Rustls)
-        .root_certs(RootCerts::PlatformVerifier)
+        .root_certs(root_certs())
         .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .build()
+}
+
+/// The system's verifier, through rustls-platform-verifier.
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
+fn root_certs() -> RootCerts {
+    RootCerts::PlatformVerifier
+}
+
+/// Android's verifier once [`android::init`](crate::android::init) gave it
+/// the app's Java VM, which it panics without. Otherwise the certificates of
+/// Android's store, from its files: Conscrypt's, which Android 14 and later
+/// update, else the system image's. Those leave out the ones a user
+/// installed.
+#[cfg(target_os = "android")]
+fn root_certs() -> RootCerts {
+    if crate::android::verifier_ready() {
+        return RootCerts::PlatformVerifier;
+    }
+    certificates_in(&[Path::new("/apex/com.android.conscrypt/cacerts"), Path::new("/system/etc/security/cacerts")])
+}
+
+/// The PEM certificates in the first of `dirs` that has any, or none.
+#[cfg(any(target_os = "android", test))]
+fn certificates_in(dirs: &[&Path]) -> RootCerts {
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        let certs: Vec<_> = entries
+            .filter_map(|entry| std::fs::read(entry.ok()?.path()).ok())
+            .filter_map(|pem| ureq::tls::Certificate::from_pem(&pem).ok())
+            .collect();
+        if !certs.is_empty() {
+            return RootCerts::new_with_certs(&certs);
+        }
+    }
+    RootCerts::new_with_certs(&[])
 }
 
 impl Client {
@@ -531,6 +570,56 @@ mod tests {
         assert_eq!(redirect_url("no-scheme", "/c.json"), None);
         assert_eq!(redirect_url("http://host.localhost", "c.json").as_deref(), Some("http://host.localhost/c.json"));
         assert_eq!(redirect_url("http://host.localhost?q", "c.json").as_deref(), Some("http://host.localhost/c.json"));
+    }
+
+    /// A self-signed certificate, followed by text as in Android's store
+    /// files.
+    const CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----
+MIIBajCCARCgAwIBAgIUCH3FebEqN5UxxXgKDcRPYzuZ5x8wCgYIKoZIzj0EAwIw
+GjEYMBYGA1UEAwwPY2VydGlmaWNhdGVzX2luMCAXDTI2MTExMzA4MDI0M1oYDzIx
+MjYxMDIwMDgwMjQzWjAaMRgwFgYDVQQDDA9jZXJ0aWZpY2F0ZXNfaW4wWTATBgcq
+hkjOPQIBBggqhkjOPQMBBwNCAAR+aUOIMLuZ3C54InMK72dDWUTvGmZBNB9xxyaA
+o6fcYEHKpiWN1lXFRyyCqAJxVvIyGgeKUgzUu+uOTTUv/1ndozIwMDAdBgNVHQ4E
+FgQUDQfGE8z6YxPo2nDz6XsWYHJQADowDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjO
+PQQDAgNIADBFAiEAxxCQPrBob9yTzGqIewLiHbeuMC7tbH2ggvzkL9WE3PcCIEVy
+EDlU/+n+jFaxs2Xlku8oIXS1LVGH0/GTBlXygJsx
+-----END CERTIFICATE-----
+Certificate:
+    Data:
+        Version: 3 (0x2)
+";
+
+    fn certificate_count(roots: &RootCerts) -> usize {
+        match roots {
+            RootCerts::Specific(certs) => certs.len(),
+            _ => panic!("not specific certificates"),
+        }
+    }
+
+    #[test]
+    fn certificates_come_from_the_first_folder_that_has_any() {
+        let temp = crate::tests::temp_path("stores");
+        let base = Path::new(&*temp);
+        let (missing, empty, store, later) =
+            (base.join("missing"), base.join("empty"), base.join("store"), base.join("later"));
+        for dir in [&empty, &store, &later] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(store.join("0a1b2c3d.0"), CERTIFICATE).unwrap();
+        std::fs::write(store.join("README"), "not a certificate").unwrap();
+        std::fs::write(later.join("0a1b2c3d.0"), CERTIFICATE).unwrap();
+        std::fs::write(later.join("0a1b2c3d.1"), CERTIFICATE).unwrap();
+
+        assert_eq!(certificate_count(&certificates_in(&[&missing, &empty, &store, &later])), 1);
+        assert_eq!(certificate_count(&certificates_in(&[&later, &store])), 2);
+    }
+
+    #[test]
+    fn without_certificates_nothing_is_trusted() {
+        let temp = crate::tests::temp_path("stores");
+        let empty = Path::new(&*temp).join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(certificate_count(&certificates_in(&[&empty, Path::new("/nonexistent/cacerts")])), 0);
     }
 
     #[test]
