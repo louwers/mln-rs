@@ -43,11 +43,16 @@ impl FeatureStateStore {
         self.sources.get(source_id)?.states.get(source_layer_id)?.get(feature_id)
     }
 
-    /// Publishes the feature's state, as it now is, in `shared`.
-    fn publish(&mut self, source_id: &str, source_layer_id: &str, feature_id: &str) {
-        let source = self.sources.get_mut(source_id).expect("a changed source has an entry");
+    /// Publishes the feature's state in `source`, as it now is, in `shared`.
+    fn publish(
+        shared: &mut Arc<FeatureStatesBySource>,
+        source_id: &str,
+        source: &mut Source,
+        source_layer_id: &str,
+        feature_id: &str,
+    ) {
         let state = source.states.get(source_layer_id).and_then(|layer| layer.get(feature_id)).cloned();
-        let shared = Arc::make_mut(&mut self.shared);
+        let shared = Arc::make_mut(shared);
         let published = match shared.get(source_id) {
             Some(published) if source.changes < source.features.max(16) => {
                 source.changes += 1;
@@ -95,7 +100,7 @@ impl FeatureStateStore {
         for (key, value) in changed {
             feature.insert(key, value);
         }
-        self.publish(source_id, source_layer_id, feature_id);
+        Self::publish(&mut self.shared, source_id, source, source_layer_id, feature_id);
         true
     }
 
@@ -144,7 +149,7 @@ impl FeatureStateStore {
                     vec![feature_id.to_owned()]
                 } else {
                     // The feature keeps state: publish its change alone.
-                    self.publish(source_id, source_layer_id, feature_id);
+                    Self::publish(&mut self.shared, source_id, source, source_layer_id, feature_id);
                     return true;
                 }
             }
@@ -157,7 +162,7 @@ impl FeatureStateStore {
             self.prune(source_id);
         } else {
             for feature_id in &removed {
-                self.publish(source_id, source_layer_id, feature_id);
+                Self::publish(&mut self.shared, source_id, source, source_layer_id, feature_id);
             }
         }
         true

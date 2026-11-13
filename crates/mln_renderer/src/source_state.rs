@@ -4,7 +4,7 @@
 // tiles).
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use mln_style::expression::expression::FeatureState;
 use mln_vec_map::VecMap;
@@ -35,10 +35,14 @@ enum StatesNode {
         source_layer: String,
         feature_id: String,
         state: FeatureState,
-        /// Only `None` while the node drops.
-        previous: Option<SourceFeatureStates>,
+        previous: SourceFeatureStates,
     },
 }
+
+/// The empty whole state, which a dropping chain of changes leaves in each
+/// node it takes apart.
+static EMPTY: LazyLock<SourceFeatureStates> =
+    LazyLock::new(|| SourceFeatureStates(Arc::new(StatesNode::Whole(LayerFeatureStates::new()))));
 
 /// One feature's new state in a chain of changes.
 struct Change<'a> {
@@ -62,7 +66,7 @@ impl SourceFeatureStates {
             source_layer: source_layer.to_owned(),
             feature_id: feature_id.to_owned(),
             state,
-            previous: Some(self.clone()),
+            previous: self.clone(),
         }))
     }
 
@@ -90,7 +94,7 @@ impl SourceFeatureStates {
                     if layer == source_layer && id == feature_id {
                         return state.clone();
                     }
-                    node = previous.as_ref().expect("a change has a previous state");
+                    node = previous;
                 }
             }
         }
@@ -109,7 +113,7 @@ impl SourceFeatureStates {
                 }
                 StatesNode::Change { source_layer, feature_id, state, previous } => {
                     changes.push(Change { source_layer, feature_id, state });
-                    node = previous.as_ref().expect("a change has a previous state");
+                    node = previous;
                 }
             }
         }
@@ -125,7 +129,7 @@ impl SourceFeatureStates {
                 return None;
             };
             changes.push(Change { source_layer, feature_id, state });
-            node = previous.as_ref().expect("a change has a previous state");
+            node = previous;
         }
         changes.reverse();
         Some(changes)
@@ -139,15 +143,14 @@ impl Drop for StatesNode {
         let StatesNode::Change { previous, .. } = self else {
             return;
         };
-        let mut next = previous.take();
-        while let Some(node) = next {
-            next = match Arc::try_unwrap(node.0) {
-                Ok(mut node) => match &mut node {
-                    StatesNode::Change { previous, .. } => previous.take(),
-                    StatesNode::Whole(_) => None,
-                },
-                Err(_) => None,
+        let mut next = std::mem::replace(previous, EMPTY.clone());
+        // Each node this drop owns alone gives up its previous one before
+        // it drops, so it drops without recursing.
+        while let Ok(mut node) = Arc::try_unwrap(next.0) {
+            let StatesNode::Change { previous, .. } = &mut node else {
+                return;
             };
+            next = std::mem::replace(previous, EMPTY.clone());
         }
     }
 }
