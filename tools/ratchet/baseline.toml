@@ -76,8 +76,7 @@
 "crates/mln_renderer/src/render_layer.rs" = 1
 "crates/mln_renderer/src/render_target.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
-"crates/mln_renderer/src/renderer.rs" = 2
-"crates/mln_renderer/src/renderer_impl.rs" = 7
+"crates/mln_renderer/src/renderer.rs" = 7
 "crates/mln_renderer/src/sources/render_image_source.rs" = 2
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
@@ -202,8 +201,7 @@
 "crates/mln_renderer/src/render_source.rs" = 1
 "crates/mln_renderer/src/render_static_data.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
-"crates/mln_renderer/src/renderer.rs" = 1
-"crates/mln_renderer/src/renderer_impl.rs" = 4
+"crates/mln_renderer/src/renderer.rs" = 5
 "crates/mln_renderer/src/sources/mod.rs" = 1
 "crates/mln_renderer/src/sources/render_image_source.rs" = 1
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1

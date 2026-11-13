@@ -36,7 +36,6 @@ pub mod render_tile;
 pub mod render_tree;
 pub mod renderer;
 pub mod renderer_event;
-pub mod renderer_impl;
 pub mod sky_pass;
 pub mod source_state;
 pub mod sources;
