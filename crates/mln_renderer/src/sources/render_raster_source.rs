@@ -63,6 +63,11 @@ impl RenderRasterSource {
             self.tile_source.tile_pyramid.get_rendered_tiles().map(|(id, tile)| (*id, tile)).collect();
         update_tile_masks(&renderables);
     }
+
+    #[cfg(test)]
+    pub(crate) fn tile_source(&self) -> &RenderTileSource {
+        &self.tile_source
+    }
 }
 
 impl RenderSource for RenderRasterSource {

@@ -431,13 +431,15 @@ fn tile_out_of_view_keeps_loading() {
 
 /// The requests for a view's tiles stand in the order the view needs them:
 /// the coarse cover's, then the ideal cover's from the centre outwards. A
-/// tile that leaves the view while it loads stands behind them all, until
-/// the view comes back to it.
+/// tile that leaves the view while it loads, and goes on loading next to it,
+/// stands behind them all until the view comes back to it.
 #[test]
 fn tile_requests_follow_the_view() {
     const UNWANTED: u32 = u32::MAX;
     let mut test = SourceTest::new();
-    test.transform.resize(Size::new(1024, 1024)).unwrap();
+    // One ideal tile wide and several tall, so that a move of one tile to
+    // the side leaves every ideal tile behind, next to the new ones.
+    test.transform.resize(Size::new(256, 1024)).unwrap();
     let file_source = Arc::new(PendingTileSource::default());
     let (requested, orders) = (file_source.requested.clone(), file_source.orders.clone());
     let layers = Tiled::Vector.layers();
@@ -456,7 +458,9 @@ fn tile_requests_follow_the_view() {
         (requested.lock().clone(), orders)
     };
 
-    let here = LatLng::new(20.0, 20.0).unwrap();
+    // The middle of the zoom 6 tile column `x`.
+    let column = |x: f64| LatLng::new(20.0, -180.0 + (x + 0.5) * 360.0 / 64.0).unwrap();
+    let here = column(35.0);
     let (tiles, first) = look_at(&mut test, here, true);
     let coarse: Vec<u32> = tiles.iter().zip(&first).filter(|(tile, _)| tile.0 == 2).map(|(_, order)| *order).collect();
     let ideal: Vec<u32> = tiles.iter().zip(&first).filter(|(tile, _)| tile.0 == 6).map(|(_, order)| *order).collect();
@@ -467,9 +471,16 @@ fn tile_requests_follow_the_view() {
     assert!(ideal.is_sorted_by(|a, b| a < b), "the ideal tiles come in the cover's order");
     assert!(ideal.iter().all(|order| *order < UNWANTED));
 
-    let (tiles, second) = look_at(&mut test, LatLng::new(-40.0, -120.0).unwrap(), false);
+    let first_tiles = tiles;
+    let (tiles, second) = look_at(&mut test, column(36.0), false);
     assert!(tiles.len() > first.len(), "the new view needs other tiles");
-    assert!(second[..first.len()].iter().all(|order| *order == UNWANTED), "the tiles left behind come last");
+    for ((tile, before), after) in first_tiles.iter().zip(&first).zip(&second) {
+        if tile.0 == 6 {
+            assert_eq!(*after, UNWANTED, "the tiles left behind come last");
+        } else {
+            assert_eq!(after, before, "the coarse tile stays in view");
+        }
+    }
     assert!(second[first.len()..].iter().all(|order| *order < UNWANTED));
 
     let (back_tiles, back) = look_at(&mut test, here, false);

@@ -128,6 +128,18 @@ impl TileCache {
         self.ordered_keys.clear();
     }
 
+    /// Releases the tiles still loading here whose id `keep` turns down, so
+    /// that they stop loading. Renderable tiles stay.
+    pub(crate) fn release_loading(&mut self, keep: impl Fn(&OverscaledTileID) -> bool) {
+        let released: Vec<OverscaledTileID> =
+            self.tiles.iter().filter(|(key, tile)| !tile.is_renderable() && !keep(key)).map(|(key, _)| *key).collect();
+        for key in released {
+            if let Some(tile) = self.pop(&key) {
+                self.evict(tile);
+            }
+        }
+    }
+
     /// Port-only: releases a tile the cache doesn't keep. One still loading
     /// is made optional first, so that its loader stops: a custom source
     /// gets the tile's cancellation.
@@ -291,5 +303,35 @@ mod tests {
         cache.set_size(0);
         assert_eq!(Some(TileNecessity::Optional), loading_necessity.get());
         assert_eq!(None, loaded_necessity.get());
+    }
+
+    /// `release_loading` lets go of the loading tiles that its predicate
+    /// turns down, made optional so that they stop loading, and keeps the
+    /// others and every renderable tile.
+    #[test]
+    fn release_loading_lets_go_of_the_loading_tiles_turned_down() {
+        let mut cache = TileCache::new(3);
+        let (far, near, loaded) = (
+            OverscaledTileID::from_zxy(2, 0, 0),
+            OverscaledTileID::from_zxy(2, 3, 3),
+            OverscaledTileID::from_zxy(2, 1, 0),
+        );
+        let far_tile = VectorTileMock::new(far);
+        far_tile.base.renderable.set(false);
+        let far_necessity = far_tile.necessity.clone();
+        let near_tile = VectorTileMock::new(near);
+        near_tile.base.renderable.set(false);
+        let near_necessity = near_tile.necessity.clone();
+        cache.add(far, Box::new(far_tile));
+        cache.add(near, Box::new(near_tile));
+        cache.add(loaded, Box::new(VectorTileMock::new(loaded)));
+
+        cache.release_loading(|id| *id == near);
+        assert!(!cache.has(&far));
+        assert_eq!(Some(TileNecessity::Optional), far_necessity.get());
+        assert!(cache.has(&near));
+        assert_eq!(None, near_necessity.get());
+        assert!(cache.has(&loaded), "a renderable tile stays");
+        assert_eq!(cache.ordered_keys, [near, loaded]);
     }
 }

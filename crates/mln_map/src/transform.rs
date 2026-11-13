@@ -474,6 +474,19 @@ pub struct Transform {
     frame_time: Option<Instant>,
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
+    globe_drag_hold: Option<GlobeDragHold>,
+}
+
+/// The location a drag on the globe holds under the cursor, from the step
+/// that grabbed it. The next step carries the drag on if it starts where
+/// that one ended, at `cursor` with the camera and the view as that step
+/// left them; any other step grabs the location under where it starts.
+#[derive(Clone, Copy, Debug)]
+struct GlobeDragHold {
+    location: LatLng,
+    cursor: ScreenCoordinate,
+    camera: CameraOptions,
+    size: Size,
 }
 
 /// The gesture that camera deltas and updates with a phase make, as
@@ -527,6 +540,7 @@ impl Transform {
             frame_time: None,
             projection_for_zoom: None,
             globe_free_bearing: false,
+            globe_drag_hold: None,
         }
     }
 
@@ -540,6 +554,7 @@ impl Transform {
             frame_time: None,
             projection_for_zoom: None,
             globe_free_bearing: false,
+            globe_drag_hold: None,
         }
     }
 
@@ -1161,8 +1176,12 @@ impl Transform {
     }
 
     /// Moves the map by `offset`. A drag on the globe turns the planet so
-    /// that the location under `anchor` follows the cursor. Fails as
-    /// [`move_by`](Self::move_by) does.
+    /// that the location under `anchor` follows the cursor. With the bearing
+    /// held, steps that follow one another, each starting at the `anchor` of
+    /// the one before with the camera as it left it, hold the location the
+    /// first of them grabbed, wherever
+    /// [`VerticalPerspectiveProjection::drag_center_holding`] has a center
+    /// that does. Fails as [`move_by`](Self::move_by) does.
     pub fn move_by_with_anchor(
         &mut self,
         offset: &ScreenCoordinate,
@@ -1249,20 +1268,55 @@ impl Transform {
             // held, around the cursor when it is on the planet and around the
             // center otherwise. With a free bearing the rotation turns the
             // bearing too, so the location stays under the cursor.
+            //
+            // With the bearing held, that rotation loses the turn it would
+            // give the bearing, so step after step the location slips from
+            // under the cursor. Where a center holds it there exactly, the
+            // drag takes that center instead, for the location its first step
+            // grabbed. A step the exact center isn't for doesn't hold: the
+            // step after it grabs anew, so the drag goes from one way to the
+            // other without a jump.
+            let on_globe = |state: &TransformState, point: &ScreenCoordinate| {
+                VerticalPerspectiveProjection::screen_coordinate_hits_globe(state, &flipped(state, point))
+            };
             let grab = match anchor {
-                Some(anchor)
-                    if VerticalPerspectiveProjection::screen_coordinate_hits_globe(
-                        &self.state,
-                        &flipped(&self.state, &anchor),
-                    ) =>
-                {
-                    anchor
-                }
+                Some(anchor) if on_globe(&self.state, &anchor) => anchor,
                 _ => view_center,
             };
             let pan_delta = ScreenCoordinate::new(offset.x, -offset.y);
             let mut camera = CameraOptions::default();
-            let mut center = if self.globe_free_bearing {
+            let held = self.globe_drag_hold.take();
+            let hold = match anchor {
+                Some(anchor) if !self.globe_free_bearing && on_globe(&self.state, &anchor) => {
+                    let from = ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y);
+                    let location = match held {
+                        Some(held)
+                            if (held.cursor.x - from.x).hypot(held.cursor.y - from.y) < 1e-3
+                                && held.size == size
+                                && held.camera == self.get_camera_options(None) =>
+                        {
+                            Some(held.location)
+                        }
+                        _ if on_globe(&self.state, &from) => self
+                            .state
+                            .screen_coordinate_to_lat_lng(&flipped(&self.state, &from), WrapMode::Unwrapped)
+                            .ok(),
+                        _ => None,
+                    };
+                    location.and_then(|location| {
+                        VerticalPerspectiveProjection::drag_center_holding(
+                            &self.state,
+                            &location,
+                            &flipped(&self.state, &anchor),
+                        )
+                        .map(|center| (location, anchor, center))
+                    })
+                }
+                _ => None,
+            };
+            let mut center = if let Some((_, _, center)) = hold {
+                center
+            } else if self.globe_free_bearing {
                 let drag =
                     VerticalPerspectiveProjection::drag_camera(&self.state, &flipped(&self.state, &grab), &pan_delta);
                 camera = CameraOptions { bearing: Some(drag.bearing), ..camera };
@@ -1277,6 +1331,12 @@ impl Transform {
                     center.latitude(),
                 );
             self.ease_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..camera }, animation);
+            self.globe_drag_hold = hold.map(|(location, cursor, _)| GlobeDragHold {
+                location,
+                cursor,
+                camera: self.get_camera_options(None),
+                size,
+            });
             return Ok(());
         }
 
