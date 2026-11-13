@@ -120,6 +120,9 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
   parent.append(hud);
 
   const bars: Bar[] = [];
+  // The frames of the last second, for the frame rate, which the graph's
+  // history would cap.
+  const lastSecond: Bar[] = [];
   let hovered: number | null = null; // index into bars
   let shown = false;
   let ticker: ReturnType<typeof setInterval> | null = null;
@@ -134,9 +137,9 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
   // falls to 0 while the map is still.
   function showRate() {
     const now = performance.now();
-    const recent = bars.filter((bar) => now - bar.arrived <= 1000);
-    fps.textContent = `${recent.length} fps`;
-    const intervals = recent.filter((bar) => !bar.resumed).map((bar) => bar.sample.interval);
+    while (lastSecond.length > 0 && now - (lastSecond[0]?.arrived ?? now) > 1000) lastSecond.shift();
+    fps.textContent = `${lastSecond.length} fps`;
+    const intervals = lastSecond.filter((bar) => !bar.resumed).map((bar) => bar.sample.interval);
     frameMs.textContent = intervals.length === 0
       ? 'still'
       : `${(intervals.reduce((sum, ms) => sum + ms, 0) / intervals.length).toFixed(1)} ms · ` +
@@ -241,6 +244,7 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
       shown = on;
       hud.hidden = !on;
       bars.length = 0;
+      lastSecond.length = 0;
       hovered = null;
       if (ticker !== null) clearInterval(ticker);
       ticker = on ? setInterval(showRate, TEXT_MS) : null;
@@ -251,8 +255,9 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
     },
     frame(sample) {
       if (!shown) return;
-      const resumed = bars.length === 0 || sample.interval > PAUSE_MS;
-      bars.push({ sample, arrived: performance.now(), resumed });
+      const bar = { sample, arrived: performance.now(), resumed: bars.length === 0 || sample.interval > PAUSE_MS };
+      bars.push(bar);
+      lastSecond.push(bar);
       // The graph stays put under a hovering pointer.
       if (bars.length > HISTORY) {
         bars.shift();
