@@ -109,6 +109,31 @@ fn sessions_of_two_maps_share_each_backends_device() {
     }
 }
 
+/// A session on a WebGPU device that is lost fails with the device's reason,
+/// rather than rendering on into nothing.
+#[cfg(feature = "webgpu")]
+#[test]
+fn a_session_fails_once_its_web_gpu_device_is_lost() {
+    let Some(device) = device_of(BackendType::WebGPU) else { return };
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let session = attach(&map, RenderTarget::Offscreen { size: SIZE, device: Some(device.clone()) }, SyncKinds::NONE);
+    assert_eq!(FrameDisposition::Rendered, render(&session));
+
+    let Device::WebGpu(webgpu) = &device else { unreachable!("a WebGPU device") };
+    webgpu.device().destroy();
+    // wgpu runs the device-lost callback as it polls the device.
+    let reported = eventually(|| {
+        let _ = webgpu.device().poll(wgpu::PollType::Poll);
+        webgpu.lost().is_some()
+    });
+    assert!(reported, "the device reports its loss");
+    assert_eq!(FrameDisposition::Failed, render(&session));
+    let failure = session.snapshot().unwrap().failure.expect("a failure");
+    assert_eq!(failure.kind, ErrorKind::TargetLost);
+    assert!(failure.message.contains("the WebGPU device was lost"), "{}", failure.message);
+}
+
 /// An OpenGL device of either API, whose sessions have a context each or
 /// take turns in one.
 #[test]

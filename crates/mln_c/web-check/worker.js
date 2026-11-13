@@ -1,8 +1,9 @@
 // Drives the browser package's raw C ABI as a JavaScript host does, in a
-// module Web Worker: a runtime, a map with a GeoJSON style, a session on an
-// OffscreenCanvas, and frames until the canvas shows the style. The session
-// runs on a core worker, or with `?driver=caller` on this thread's services
-// of its driver work. Struct
+// module Web Worker: a runtime, a map with a GeoJSON style, and sessions one
+// after another, each on a new OffscreenCanvas and a device of its own, that
+// render until the canvas shows the style. The sessions run on a core worker,
+// or with `?driver=caller` on this thread's services of their driver work. A
+// session that fails reports its failure. Struct
 // offsets are wasm32's (clang's layout of the headers). Posts the outcome to
 // the page.
 
@@ -24,6 +25,9 @@ globalThis.Worker = class extends NativeWorker {
 
 const glue = await import(`${pkg}/maplibre_native_c.js`);
 const wasm = await glue.default();
+// A panic logs its message before it aborts the instance, which fails the
+// check.
+glue.mlnWebSetPanicHook();
 
 const SIZE = 256;
 const view = () => new DataView(wasm.memory.buffer);
@@ -124,86 +128,128 @@ const style = {
 const styled = completion();
 check(wasm.mln_map_set_style_json(map, text(JSON.stringify(style)), styled.pointer, prepare()), 'mln_map_set_style_json');
 
-const canvas = new OffscreenCanvas(SIZE, SIZE);
-const target = alloc(64);
-view().setUint32(target, 64, true);
-view().setUint32(target + 4, 17, true); // MLN_RENDER_TARGET_KIND_WEB_CANVAS
-view().setUint32(target + 8, SIZE, true);
-view().setUint32(target + 12, SIZE, true);
-view().setUint32(target + 16, glue.mlnWebObjectInsert(canvas), true);
-
-let session = 0n;
 const demand = alloc(16);
 view().setUint32(demand, 16, true);
-function demandFrame() {
-  check(wasm.mln_render_session_demand_frame(session, demand, prepare()), 'mln_render_session_demand_frame');
-}
-
 const scratch = new OffscreenCanvas(SIZE, SIZE).getContext('2d', { willReadFrequently: true });
-const deadline = performance.now() + 60000;
-let frames = 0;
-const outcome = new Promise((resolve, reject) => (settled = { resolve, reject }));
 const batch = alloc(8);
 const results = alloc(16);
+const abandoned = alloc(16);
+const failure = alloc(1024, 1);
+const failureLength = alloc(8);
 const wake = glue.mlnWebUpcallPointer('mln_wake_callback');
-const attach = alloc(96);
-view().setUint32(attach, 96, true);
-// MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD or MLN_RENDER_DRIVER_CORE_WORKER.
-view().setUint32(attach + 4, driver === 'caller' ? 2 : 1, true);
-// The frame wake runs in the task that rendered, while the canvas still has
-// the frame.
-view().setUint32(attach + 16, wake, true);
-view().setUint32(attach + 20, callback(() => {
-  view().setBigUint64(batch, 0n, true);
-  view().setUint32(results, 16, true);
-  check(wasm.mln_render_session_drain_frame_results(session, batch, results, prepare()), 'drain');
-  const count = view().getUint32(results + 12, true);
-  const stride = view().getUint32(results + 4, true);
-  const first = view().getUint32(results + 8, true);
-  let rendered = false;
-  for (let i = 0; i < count; i++) {
-    const disposition = view().getUint32(first + i * stride + 4, true);
-    rendered ||= disposition === 0;
-  }
-  wasm.mln_render_frame_batch_release(view().getBigUint64(batch, true));
-  if (!rendered) return;
-  frames++;
-  scratch.drawImage(canvas, 0, 0);
-  const [r, g, b] = scratch.getImageData(SIZE / 2, SIZE / 2, 1, 1).data;
-  if (b > 200 && r < 50) settled.resolve({ frames, spawned, pixel: [r, g, b] });
-  else if (performance.now() > deadline) settled.reject(new Error(`the center is still ${[r, g, b]} after ${frames} frames`));
-}), true);
-view().setUint32(attach + 40, wake, true);
-view().setUint32(attach + 44, callback(() => {
-  demandFrame();
-}), true);
-if (driver === 'caller') {
-  // The driver-work wake can run inside a library call, so the service runs
-  // in a microtask of its own.
-  let queued = false;
-  view().setUint32(attach + 64, wake, true);
-  view().setUint32(attach + 68, callback(() => {
-    if (queued) return;
-    queued = true;
-    queueMicrotask(() => {
-      queued = false;
-      check(wasm.mln_render_session_service_driver_work(session, prepare()), 'mln_render_session_service_driver_work');
-    });
-  }), true);
-}
-const attached = completion();
-out = alloc(8);
-check(wasm.mln_map_attach(map, target, 0n, attach, out, attached.pointer, prepare()), 'mln_map_attach');
-session = view().getBigUint64(out, true);
-log('attaching', session);
-check(await attached.done, 'the attach');
-log('attached');
-check(await styled.done, 'the style');
-log('styled');
-demandFrame();
+let frames = 0;
 
+/** The message of a failed session. */
+function failureOf(session) {
+  check(wasm.mln_render_session_get_failure(session, failure, 1024, failureLength, prepare()), 'mln_render_session_get_failure');
+  const length = Math.min(view().getUint32(failureLength, true), 1023);
+  return new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, failure, length));
+}
+
+/**
+ * Attaches a session on a device of its own to a new OffscreenCanvas,
+ * renders until the canvas shows the layer, and ends the session by `end`:
+ * "detach" detaches and then releases it, and "abandon" abandons and then
+ * releases it, as a binding's finalizer does.
+ */
+async function show(label, end) {
+  const canvas = new OffscreenCanvas(SIZE, SIZE);
+  const handle = glue.mlnWebObjectInsert(canvas);
+  const target = alloc(64);
+  view().setUint32(target, 64, true);
+  view().setUint32(target + 4, 17, true); // MLN_RENDER_TARGET_KIND_WEB_CANVAS
+  view().setUint32(target + 8, SIZE, true);
+  view().setUint32(target + 12, SIZE, true);
+  view().setUint32(target + 16, handle, true);
+
+  let session = 0n;
+  let released = false;
+  const demandFrame = () => {
+    if (!released) check(wasm.mln_render_session_demand_frame(session, demand, prepare()), `${label}: demand`);
+  };
+  const deadline = performance.now() + 60000;
+  const outcome = new Promise((resolve, reject) => (settled = { resolve, reject }));
+  const attach = alloc(96);
+  view().setUint32(attach, 96, true);
+  // MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD or MLN_RENDER_DRIVER_CORE_WORKER.
+  view().setUint32(attach + 4, driver === 'caller' ? 2 : 1, true);
+  // The frame wake runs in the task that rendered, while the canvas still has
+  // the frame.
+  view().setUint32(attach + 16, wake, true);
+  view().setUint32(attach + 20, callback(() => {
+    if (released) return;
+    view().setBigUint64(batch, 0n, true);
+    view().setUint32(results, 16, true);
+    check(wasm.mln_render_session_drain_frame_results(session, batch, results, prepare()), `${label}: drain`);
+    const count = view().getUint32(results + 12, true);
+    const stride = view().getUint32(results + 4, true);
+    const first = view().getUint32(results + 8, true);
+    let rendered = false;
+    let failed = false;
+    for (let i = 0; i < count; i++) {
+      const disposition = view().getUint32(first + i * stride + 4, true);
+      rendered ||= disposition === 0; // MLN_RENDER_RESULT_RENDERED
+      failed ||= disposition === 4; // MLN_RENDER_RESULT_FAILED
+    }
+    wasm.mln_render_frame_batch_release(view().getBigUint64(batch, true));
+    if (failed) settled.reject(new Error(`${label} failed: ${failureOf(session)}`));
+    if (!rendered) return;
+    frames++;
+    scratch.clearRect(0, 0, SIZE, SIZE);
+    scratch.drawImage(canvas, 0, 0);
+    const [r, g, b] = scratch.getImageData(SIZE / 2, SIZE / 2, 1, 1).data;
+    if (b > 200 && r < 50) settled.resolve();
+    else if (performance.now() > deadline) settled.reject(new Error(`${label}: the center is still ${[r, g, b]}`));
+  }), true);
+  view().setUint32(attach + 40, wake, true);
+  view().setUint32(attach + 44, callback(demandFrame), true);
+  if (driver === 'caller') {
+    // The driver-work wake can run inside a library call, so the service runs
+    // in a microtask of its own.
+    let queued = false;
+    view().setUint32(attach + 64, wake, true);
+    view().setUint32(attach + 68, callback(() => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        if (!released) check(wasm.mln_render_session_service_driver_work(session, prepare()), `${label}: service`);
+      });
+    }), true);
+  }
+  const attached = completion();
+  out = alloc(8);
+  check(wasm.mln_map_attach(map, target, 0n, attach, out, attached.pointer, prepare()), `${label}: mln_map_attach`);
+  session = view().getBigUint64(out, true);
+  check(await attached.done, `${label}: the attach`);
+  log(label, 'attached');
+  check(await styled.done, 'the style');
+  demandFrame();
+  await outcome;
+  log(label, 'shown; ending it with', end);
+
+  if (end === 'detach') {
+    const detached = completion();
+    check(wasm.mln_render_session_detach(session, detached.pointer, prepare()), `${label}: mln_render_session_detach`);
+    check(await detached.done, `${label}: the detach`);
+  } else {
+    view().setUint32(abandoned, 16, true);
+    check(wasm.mln_render_session_abandon(session, abandoned, prepare()), `${label}: mln_render_session_abandon`);
+  }
+  const release = completion();
+  check(wasm.mln_render_session_release(session, release.pointer, prepare()), `${label}: mln_render_session_release`);
+  check(await release.done, `${label}: the release`);
+  released = true;
+  wasm.mln_web_object_release(handle);
+}
+
+// Each session asks the browser for a device of its own, which must render
+// after the sessions before it ended either way.
 try {
-  postMessage({ ok: true, backend: params.get('backend'), ...(await outcome) });
+  await show('the first session', 'detach');
+  await show('the second session', 'abandon');
+  await show('the third session', 'detach');
+  postMessage({ ok: true, backend: params.get('backend'), sessions: 3, frames, spawned });
 } catch (error) {
   postMessage({ ok: false, error: String(error), frames, spawned });
 }

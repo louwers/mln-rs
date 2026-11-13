@@ -873,6 +873,17 @@ impl Device {
         }
     }
 
+    /// Why the device was lost, once the library's WebGPU device is: the
+    /// failure of the sessions that render on it.
+    pub(crate) fn lost(&self) -> Option<Error> {
+        match *self {
+            #[cfg(feature = "webgpu")]
+            Device::WebGpu(ref device) => device.lost().map(|message| Error::target_lost(message.to_owned())),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
     /// Whether an abandon keeps a session's graphics objects on the device
     /// until the process exits, which only a detach frees: OpenGL's and
     /// WebGPU's, as the C API promises, since only the session's own thread

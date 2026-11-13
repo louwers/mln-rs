@@ -500,8 +500,9 @@ impl SurfaceTarget {
     /// A target on `backend` that presents to `surface`, made with the
     /// instance of the backend's device, at `framebuffer_size` physical
     /// pixels. The surface is configured with the options' format, or the
-    /// device's surface format, or else the first of BGRA8 and RGBA8 that
-    /// the surface supports.
+    /// device's surface format, or else an 8-bit RGBA or BGRA format that
+    /// the surface supports: in the browser the one the canvas prefers, and
+    /// elsewhere the first of BGRA8 and RGBA8.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
     /// device's adapter can't present to the surface or the surface supports
@@ -525,15 +526,24 @@ impl SurfaceTarget {
                 Some(format) => {
                     return Err(Error::unsupported(format!("The surface does not take the {format:?} format")));
                 }
-                None => [
-                    wgpu::TextureFormat::Bgra8Unorm,
-                    wgpu::TextureFormat::Bgra8UnormSrgb,
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                ]
-                .into_iter()
-                .find(|f| capabilities.formats.contains(f))
-                .ok_or_else(|| Error::unsupported("The surface takes none of the formats the map renders in"))?,
+                None => {
+                    const RENDERED: [wgpu::TextureFormat; 4] = [
+                        wgpu::TextureFormat::Bgra8Unorm,
+                        wgpu::TextureFormat::Bgra8UnormSrgb,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                    ];
+                    // A browser lists the canvas format it prefers first
+                    // (`getPreferredCanvasFormat()`), which it presents
+                    // without a copy.
+                    let format = if cfg!(target_family = "wasm") {
+                        capabilities.formats.iter().copied().find(|f| RENDERED.contains(f))
+                    } else {
+                        RENDERED.into_iter().find(|f| capabilities.formats.contains(f))
+                    };
+                    format
+                        .ok_or_else(|| Error::unsupported("The surface takes none of the formats the map renders in"))?
+                }
             };
             let (usage, present_mode) = surface_options(&capabilities);
             (format, usage, present_mode)

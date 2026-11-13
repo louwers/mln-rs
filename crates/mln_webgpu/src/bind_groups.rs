@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
-use wgpu::util::DeviceExt as _;
 
 /// A resource a bind group entry binds. wgpu handles compare by identity.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -129,9 +128,10 @@ impl IndexTable {
         &self.layout
     }
 
-    /// Makes the table hold `index`. Returns the size of the buffer it
-    /// replaced (0 if none) and of the new one, if it made one.
-    pub fn reserve(&mut self, device: &wgpu::Device, index: u32) -> Option<(u64, u64)> {
+    /// Makes the table hold `index`, writing a new buffer's entries with
+    /// `queue`. Returns the size of the buffer it replaced (0 if none) and of
+    /// the new one, if it made one.
+    pub fn reserve(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, index: u32) -> Option<(u64, u64)> {
         let replaced = match &self.table {
             Some((_, _, capacity)) if index < *capacity => return None,
             Some((buffer, _, _)) => buffer.size(),
@@ -142,11 +142,16 @@ impl IndexTable {
         for (i, entry) in contents.chunks_exact_mut(self.stride as usize).enumerate() {
             entry[..4].copy_from_slice(&(i as u32).to_ne_bytes());
         }
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        // Written through the queue rather than mapped at creation: a
+        // browser throws from `createBuffer` with `mappedAtCreation` once it
+        // has lost the device, which would abort the instance.
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("UBO index table"),
-            contents: &contents,
-            usage: wgpu::BufferUsages::UNIFORM,
+            size: contents.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+        queue.write_buffer(&buffer, 0, &contents);
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("UBO index"),
             layout: &self.layout,
@@ -176,8 +181,9 @@ impl IndexTable {
 mod tests {
     use super::*;
 
-    fn device() -> wgpu::Device {
-        crate::Device::new(None).expect("a WebGPU device").device().clone()
+    fn device() -> (wgpu::Device, wgpu::Queue) {
+        let device = crate::Device::new(None).expect("a WebGPU device");
+        (device.device().clone(), device.queue().clone())
     }
 
     fn uniform_buffer(device: &wgpu::Device) -> wgpu::Buffer {
@@ -191,7 +197,7 @@ mod tests {
 
     #[test]
     fn bind_groups_are_shared_while_held() {
-        let device = device();
+        let (device, _) = device();
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -237,19 +243,19 @@ mod tests {
 
     #[test]
     fn index_table_grows_to_hold_an_index() {
-        let device = device();
+        let (device, queue) = device();
         let mut table = IndexTable::new(&device);
         assert!(table.get(0).is_none());
 
-        let (replaced, size) = table.reserve(&device, 3).expect("a first buffer");
+        let (replaced, size) = table.reserve(&device, &queue, 3).expect("a first buffer");
         assert_eq!(replaced, 0);
         assert_eq!(size, u64::from(INITIAL_INDEX_CAPACITY * table.stride));
-        assert_eq!(table.reserve(&device, INITIAL_INDEX_CAPACITY - 1), None);
+        assert_eq!(table.reserve(&device, &queue, INITIAL_INDEX_CAPACITY - 1), None);
         let (_, offset) = table.get(3).unwrap();
         assert_eq!(offset, 3 * table.stride);
         assert!(table.get(INITIAL_INDEX_CAPACITY).is_none());
 
-        assert_eq!(table.reserve(&device, INITIAL_INDEX_CAPACITY), Some((size, 2 * size)));
+        assert_eq!(table.reserve(&device, &queue, INITIAL_INDEX_CAPACITY), Some((size, 2 * size)));
         assert!(table.get(INITIAL_INDEX_CAPACITY).is_some());
     }
 }

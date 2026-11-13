@@ -158,7 +158,7 @@ impl Context {
         let device = self.backend.device();
         let mut table = self.index_table.borrow_mut();
         let table = table.get_or_insert_with(|| IndexTable::new(device));
-        if let Some((replaced, size)) = table.reserve(device, index) {
+        if let Some((replaced, size)) = table.reserve(device, self.backend.queue(), index) {
             if replaced > 0 {
                 self.count_buffer_released(replaced);
             }

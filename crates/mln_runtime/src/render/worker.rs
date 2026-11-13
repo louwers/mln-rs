@@ -840,6 +840,7 @@ impl Worker {
         let token = Some(pending.demand.token);
         let latest = self.latest();
         let latest_generation = latest.as_ref().map_or(0, |update| update.generation);
+        self.fail_if_device_lost(outbox);
         if self.gfx.is_none() {
             let failed = self.shared.state.lock().lifecycle == RenderSessionState::Failed;
             let disposition = if failed { FrameDisposition::Failed } else { FrameDisposition::TargetNotReady };
@@ -922,6 +923,9 @@ impl Worker {
             || self.retargeting()
             || !self.gfx.as_ref().is_some_and(Gfx::ready_for_frame)
         {
+            return;
+        }
+        if self.fail_if_device_lost(outbox) {
             return;
         }
         let slot = match self.pick_slot() {
@@ -1384,6 +1388,15 @@ impl Worker {
         }
         self.target_changed(size, None);
         Ok(())
+    }
+
+    /// Fails the attached session when its device was lost, which it can't
+    /// render on again. Returns whether it failed.
+    fn fail_if_device_lost(&mut self, outbox: &mut Outbox) -> bool {
+        let Some(error) = self.gfx.as_ref().and_then(|gfx| gfx.target.device().lost()) else { return false };
+        Log::error(Event::Render, error.message.clone());
+        self.fail(error, outbox);
+        true
     }
 
     /// Fails the attached session with `error`, ending the demands on their

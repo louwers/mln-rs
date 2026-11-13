@@ -13,6 +13,8 @@
 // object) while another thread destroys an instance, which renderers on many
 // threads did whenever one of them finished.
 
+use std::sync::{Arc, OnceLock};
+
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 #[cfg(not(target_family = "wasm"))]
@@ -31,6 +33,18 @@ pub struct Device {
     queue: wgpu::Queue,
     /// The format the host configures its surfaces with.
     surface_format: Option<wgpu::TextureFormat>,
+    /// Why the library's device was lost, once it is.
+    lost: Arc<OnceLock<String>>,
+}
+
+/// Records in `lost` why `device` is lost, once it is.
+fn watch_for_loss(device: &wgpu::Device) -> Arc<OnceLock<String>> {
+    let lost = Arc::new(OnceLock::new());
+    let record = lost.clone();
+    device.set_device_lost_callback(move |reason, message| {
+        let _ = record.set(format!("the WebGPU device was lost ({reason:?}): {message}"));
+    });
+    lost
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -107,10 +121,11 @@ impl Device {
         // C++ sets no uncaptured-error callback, and Dawn logs the error and
         // invalidates the object. wgpu's default handler panics; log instead
         // (Dawn's logUncapturedError).
-        device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
+        device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
             Log::error(Event::Render, format!("WebGPU validation error: {error}"));
         }));
-        Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None })
+        let lost = watch_for_loss(&device);
+        Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None, lost })
     }
 
     /// The library's device in the browser, on the browser's WebGPU and its
@@ -145,17 +160,18 @@ impl Device {
             })
             .await
             .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
-        device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
+        device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
             Log::error(Event::Render, format!("WebGPU validation error: {error}"));
         }));
-        Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None })
+        let lost = watch_for_loss(&device);
+        Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None, lost })
     }
 
     /// The host's device and queue. Window surfaces need the `instance` that
-    /// made the device. A surface is configured with `surface_format`, which
-    /// it must support, or else with a format it supports that is the first
-    /// of BGRA8 and RGBA8 for the device's adapter. The host keeps the
-    /// device's uncaptured-error handler.
+    /// made the device. A surface on it is configured with the format that
+    /// its options name, or else with `surface_format`, which it must
+    /// support. The host keeps the device's uncaptured-error and device-lost
+    /// handlers.
     #[must_use]
     pub fn from_wgpu(
         instance: Option<wgpu::Instance>,
@@ -163,7 +179,7 @@ impl Device {
         queue: wgpu::Queue,
         surface_format: Option<wgpu::TextureFormat>,
     ) -> Device {
-        Device { instance, adapter: None, device, queue, surface_format }
+        Device { instance, adapter: None, device, queue, surface_format, lost: Arc::default() }
     }
 
     #[must_use]
@@ -187,6 +203,14 @@ impl Device {
 
     pub(crate) fn surface_format(&self) -> Option<wgpu::TextureFormat> {
         self.surface_format
+    }
+
+    /// Why the device was lost, once the library's device is: a browser
+    /// loses it when the GPU process resets or can't present. The host's
+    /// device keeps its own device-lost callback, and reports nothing here.
+    #[must_use]
+    pub fn lost(&self) -> Option<&str> {
+        self.lost.get().map(String::as_str)
     }
 
     /// The adapter the device is on (name, backend, driver).

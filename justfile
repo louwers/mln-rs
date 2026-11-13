@@ -265,8 +265,9 @@ c-web backend="webgpu":
     bind mln_web_shaper
 
 # Loads the package in headless Chromium and drives its raw C ABI from a Web Worker, as a JavaScript host does, until a
-# map with a GeoJSON layer that the tile workers lay out shows on an OffscreenCanvas (crates/mln_c/web-check). Needs Node
-# 24 and Playwright's Chromium (`npx playwright@1.61.1 install chromium`), as `web-check` does.
+# map with a GeoJSON layer that the tile workers lay out shows on an OffscreenCanvas, for sessions one after another on
+# devices of their own (crates/mln_c/web-check). Needs Node 24 and Playwright's Chromium
+# (`npx playwright@1.61.1 install chromium`), as `web-check` does.
 [doc("Check crates/mln_c's browser package for one backend in headless Chromium")]
 c-web-check backend="webgpu":  (c-web backend)
     node crates/mln_c/web-check/check.mjs "${CARGO_TARGET_DIR:-target}/c-web/{{backend}}" {{backend}}

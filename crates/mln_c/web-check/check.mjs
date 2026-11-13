@@ -1,10 +1,12 @@
 // Loads crates/mln_c's browser package (`just c-web <backend>`) in headless
 // Chromium and drives its raw C ABI from a module Web Worker (worker.js), as
 // a JavaScript host does: a runtime, a map whose GeoJSON layer the tile
-// workers lay out, and frames on an OffscreenCanvas until it shows the
-// layer, once with the session on a core worker and once driven by the
-// worker's own services. Fails when the canvas never does, or the library starts no tile
-// worker, or the page or a worker logs an error.
+// workers lay out, and sessions one after another, each on a new
+// OffscreenCanvas and a device of its own, that render until the canvas
+// shows the layer and then end, once with the sessions on a core worker and
+// once driven by the worker's own services. Fails when a canvas never shows
+// the layer or a session fails, or the library starts no tile worker, or the
+// page or a worker logs an error.
 //
 // Usage: node crates/mln_c/web-check/check.mjs <package dir> <backend>
 // [--chromium <path>]. Node 24 with no packages, and Playwright's Chromium
