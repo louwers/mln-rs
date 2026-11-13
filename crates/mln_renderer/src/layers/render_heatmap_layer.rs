@@ -313,16 +313,7 @@ impl RenderLayer for RenderHeatmapLayer {
             self.texture_tweaker = None;
         }
 
-        {
-            // `renderTarget->getTexture()->setSize(size)`.
-            // The WebGPU offscreen texture has no resize callback
-            // (`handleResize`): the texture is resized, the
-            // renderable keeps its size.
-            let texture = self.render_target.as_ref().expect("render target").borrow().get_texture();
-            if texture.borrow().get_size() != size {
-                texture.borrow_mut().set_size(size);
-            }
-        }
+        self.render_target.as_ref().expect("render target").borrow_mut().set_size(context, size);
 
         let Some(tile_layer_group) = self.render_target_layer_group() else {
             return;

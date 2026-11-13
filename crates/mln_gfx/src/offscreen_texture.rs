@@ -6,7 +6,8 @@ use crate::command_encoder::CommandEncoder;
 use crate::frame::DrawTarget;
 use crate::texture2d::Texture2DPtr;
 
-/// A texture that render passes draw into.
+/// A texture that render passes draw into, of the size it was made with:
+/// its color texture's size isn't to be changed.
 pub trait OffscreenTexture: Any {
     /// What a render pass draws into the texture through.
     fn draw_target(&self) -> &dyn DrawTarget;

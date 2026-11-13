@@ -100,6 +100,11 @@ path = "tests/empty_tile_test.rs"
 name = "custom_layer_test"
 path = "tests/custom_layer_test.rs"
 
+# Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.
+[[test]]
+name = "resize_test"
+path = "tests/resize_test.rs"
+
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }

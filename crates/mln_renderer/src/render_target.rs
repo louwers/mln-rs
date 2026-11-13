@@ -26,6 +26,8 @@ pub(crate) type RenderTargetPtr = Rc<RefCell<RenderTarget>>;
 /// Render target class
 pub struct RenderTarget {
     offscreen_texture: Box<dyn OffscreenTexture>,
+    /// The channel type the offscreen texture was asked for.
+    type_: TextureChannelDataType,
     layer_groups_by_layer_index: VecMap<i32, LayerGroupBasePtr>,
 }
 
@@ -33,6 +35,7 @@ impl RenderTarget {
     pub(crate) fn new(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget {
             offscreen_texture: context.create_offscreen_texture(size, type_),
+            type_,
             layer_groups_by_layer_index: VecMap::new(),
         }
     }
@@ -46,6 +49,15 @@ impl RenderTarget {
     #[must_use]
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
         self.offscreen_texture.get_texture()
+    }
+
+    /// Draws into a texture of `size` from now on: a texture of another size
+    /// replaces the current one, and [`get_texture`](Self::get_texture)
+    /// returns the new one.
+    pub(crate) fn set_size(&mut self, context: &dyn Context, size: Size) {
+        if self.get_texture().borrow().get_size() != size {
+            self.offscreen_texture = context.create_offscreen_texture(size, self.type_);
+        }
     }
 
     /// Add a layer group to the render target; `replace`: replace if

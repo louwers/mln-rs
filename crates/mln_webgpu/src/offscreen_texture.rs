@@ -6,9 +6,9 @@
 // next frame's own submission ends with the copy, which C++ submits
 // separately on each read.
 //
-// There is no size-changed callback (`handleResize` / `setSizeListener`)
-// that resizes the textures when someone calls `setSize` on the color
-// texture.
+// There is no size-changed callback (`handleResize` / `setSizeListener`):
+// an offscreen texture keeps its size, and a render target of another size
+// makes a new one.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
