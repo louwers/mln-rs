@@ -1491,3 +1491,37 @@ mod metal {
         wait(session.detach());
     }
 }
+
+// A still image that waits while the ring is released renders once a new
+// ring lands, without a demand of the host's.
+#[cfg(feature = "webgpu")]
+#[test]
+fn a_still_image_renders_into_a_new_ring_after_a_release() {
+    let Some((device, textures)) = webgpu_ring(1) else { return };
+    let runtime = runtime();
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
+        ..Default::default()
+    };
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
+    wait(map.set_style_json(style("#ff0000")));
+    let session = webgpu_session(&map, &device, &textures, AttachOptions::default());
+
+    wait(session.release_target());
+    let still = map.request_still_image().unwrap();
+    // A read behind the request: the map has asked for the image.
+    wait(map.camera());
+    assert!(!still.is_complete());
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
+        textures: textures.clone(),
+        size: SIZE,
+        depth_textures: Vec::new(),
+    });
+    wait(session.set_ring(SIZE, ring));
+    assert!(eventually(|| still.is_complete()), "the still image never rendered into the new ring");
+    still.wait().unwrap();
+    let frame = session.acquire_frame().unwrap().expect("the still image's frame");
+    drop(frame);
+    wait(session.detach());
+}

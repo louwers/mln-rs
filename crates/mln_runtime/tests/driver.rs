@@ -655,3 +655,64 @@ fn center_pixel_after(driver: &DriverWork, session: &RenderSession, token: &mut 
     take_one(driver, session);
     center_pixel(driver, session)
 }
+
+// A still image that fails while the next one waits behind it ends its own
+// demand, and the next one gets a demand of its own: each image's demand
+// finishes with a result.
+#[test]
+fn each_still_image_ends_its_own_demand() {
+    use mln_runtime::ResourceRequest;
+    use mln_storage::response::Reason;
+    use mln_storage::{ResourceError, Response};
+
+    let runtime = runtime();
+    // The first tile fails, and every later one is empty.
+    let requests = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&requests);
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+        let response = if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+            let error = ResourceError::new(Reason::Other, "no tile here");
+            Response { error: Some(Box::new(error)), ..Response::default() }
+        } else {
+            Response { no_content: true, ..Response::default() }
+        };
+        let _ = request.respond(response);
+    }));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
+        ..Default::default()
+    };
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
+    wait(map.set_style_json(
+        r##"{"version":8,"sources":{"tiles":{"type":"vector","tiles":["custom://tiles/{z}/{x}/{y}.pbf"],"minzoom":0,"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}},{"id":"fill","type":"fill","source":"tiles","source-layer":"any"}]}"##,
+    ));
+    let (session, driver) = attach(&map, caller_options());
+
+    // The session renders the first image until its tile fails, and the map
+    // fails the image on the runtime's thread. A session that the test
+    // services only now and then usually hears of that after the map waits
+    // for the second image already.
+    let first = map.request_still_image().unwrap();
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while !first.is_complete() {
+        assert!(std::time::Instant::now() < deadline, "the first image never failed");
+        driver.service().unwrap();
+        // The map fails the image on the runtime's thread.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(ErrorKind::Native, first.wait().unwrap_err().kind);
+    let second = map.request_still_image().unwrap();
+    // A read behind the request: the map waits for the second image.
+    wait(map.camera());
+    let mut results = Vec::new();
+    service_until(&driver, || {
+        results.extend(session.drain_frame_results().unwrap());
+        second.is_complete()
+    });
+    second.wait().unwrap();
+    results.extend(session.drain_frame_results().unwrap());
+    let ends: Vec<_> = results.iter().map(|result| (result.token, result.disposition)).collect();
+    assert_eq!(vec![(None, FrameDisposition::NoUpdate), (None, FrameDisposition::Rendered)], ends);
+    wait_release(&driver, &session);
+}

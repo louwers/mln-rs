@@ -324,6 +324,8 @@ struct PendingDemand {
 /// The demand that renders the map's still image while the image waits for
 /// a frame. Its result has no token.
 struct StillDemand {
+    /// The `still_image_request_id` of the image.
+    request: u64,
     /// The update that the demand tried and drew nothing of, since a
     /// resource that the image needs had yet to load. The demand waits for
     /// a newer one.
@@ -916,19 +918,21 @@ impl Worker {
     /// lands, and the next session once it attaches.
     fn serve_still(&mut self, outbox: &mut Outbox) {
         let pending = self.pending_still_image();
+        // The image completed or failed meanwhile, and the next one, if one
+        // waits, gets a demand of its own.
+        if self.still.as_ref().is_some_and(|still| still.request != pending) {
+            self.still = None;
+            let result = FrameResult::unrendered(None, FrameDisposition::NoUpdate, self.latest_generation());
+            self.publish(&result, outbox);
+        }
         if pending == 0 {
-            // The image completed or failed meanwhile.
-            if self.still.take().is_some() {
-                let result = FrameResult::unrendered(None, FrameDisposition::NoUpdate, self.latest_generation());
-                self.publish(&result, outbox);
-            }
             return;
         }
         if self.still.is_none() {
             if pending <= self.still_rendered || !self.can_render() {
                 return;
             }
-            self.still = Some(StillDemand { tried: None });
+            self.still = Some(StillDemand { request: pending, tried: None });
         }
         // The demand ends once the map fails the image.
         if pending == self.still_failing.get() {
@@ -1041,14 +1045,15 @@ impl Worker {
             state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
         }
         let mut events = self.renderer_events.take();
-        if token.is_some() {
+        let dropped = gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped));
+        if token.is_some() || dropped {
             for event in &mut events {
                 if let RendererEvent::RenderFrameFinished { still_image_request_id, .. } = event {
                     *still_image_request_id = 0;
                 }
             }
         }
-        if gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped)) {
+        if dropped {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return RenderedFrame { result, events, slot: None };
         }
@@ -1329,6 +1334,9 @@ impl Worker {
         let waiting: Vec<_> = self.waiting.drain(..).map(|(pending, _)| pending).collect();
         self.parked.extend(waiting);
         self.pump(outbox);
+        // A still image that waits for a target gets its demand again, once
+        // the replacement no longer counts as on its way.
+        post(&self.shared.run_loop, Worker::still_image_changed);
         Ok(pending)
     }
 
