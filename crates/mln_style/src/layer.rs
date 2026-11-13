@@ -24,7 +24,7 @@ use crate::expression::{
 };
 use crate::filter::Filter;
 pub(crate) use crate::layer_impl::FontStack;
-pub use crate::layer_impl::{Impl, ImplBase, downcast_arc};
+pub use crate::layer_impl::{Impl, ImplBase, downcast_arc, font_stacks};
 use crate::style_property::StyleProperty;
 
 /// The enums nested in C++ `LayerTypeInfo`.

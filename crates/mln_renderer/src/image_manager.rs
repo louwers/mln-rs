@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use mln_actor::scheduler;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
-#[cfg(test)]
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
@@ -331,7 +330,8 @@ impl ImageManager {
         }
     }
 
-    #[cfg(test)]
+    /// Asks the observer to remove the unused requested images once they
+    /// take more than `DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE` bytes.
     pub(crate) fn reduce_memory_use_if_cache_size_exceeds_limit(&self) {
         if self.state.borrow().requested_images_cache_size > DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE {
             self.reduce_memory_use();

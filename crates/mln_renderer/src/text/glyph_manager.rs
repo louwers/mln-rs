@@ -44,9 +44,7 @@ use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::logging::{Event, Log};
 use mln_util::tiny_sdf::transform_raster_to_sdf;
-use mln_vec_map::VecMap;
-#[cfg(test)]
-use mln_vec_map::VecSet;
+use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +101,14 @@ struct Entry {
 }
 
 impl Entry {
+    /// Whether a live requestor waits for one of the ranges.
+    fn is_awaited(&self) -> bool {
+        self.ranges
+            .values()
+            .flat_map(|request| request.requestors.values())
+            .any(|(requestor, _)| requestor.strong_count() > 0)
+    }
+
     fn find_glyph(&self, glyph_id: GlyphID) -> Option<Arc<Glyph>> {
         if let Some(glyph) = self.glyphs.get(&glyph_id) {
             return Some(Arc::clone(glyph));
@@ -505,10 +511,17 @@ impl GlyphManager {
         }
     }
 
-    /// `evict(keep)`: remove glyphs for all but the supplied font stacks.
-    #[cfg(test)]
+    /// Drops the glyphs and pending requests of the font stacks not in
+    /// `keep`, except those of a font stack a live requestor still waits
+    /// for: dropping its requests would leave that requestor waiting for an
+    /// answer that never comes.
     pub(crate) fn evict(&self, keep: &VecSet<FontStack>) {
-        self.entries.borrow_mut().retain(|font_stack, _| keep.contains(font_stack));
+        // Dropping a request cancels it; that happens after the borrow ends.
+        let _evicted: Vec<(FontStack, Entry)> = self
+            .entries
+            .borrow_mut()
+            .extract_if(|font_stack, entry| !keep.contains(font_stack) && !entry.is_awaited())
+            .collect();
     }
 
     pub(crate) fn get_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Arc<Glyph> {

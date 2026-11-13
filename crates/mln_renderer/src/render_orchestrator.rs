@@ -2,8 +2,6 @@
 // tiles call it from asynchronous replies while the orchestrator is owned by
 // the renderer, so that half is `OrchestratorSourceObserver`, an `Rc` that
 // shares the orchestrator's event sink.
-//
-// Not supported: glyph eviction and image-manager memory trimming.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -562,6 +560,10 @@ impl RenderOrchestrator {
         }
         debug_assert_eq!(self.ordered_layers.len(), self.render_layers.len());
 
+        if layers_added_or_removed || !layer_diff.changed.is_empty() {
+            self.glyph_manager.evict(&layer::font_stacks(self.layer_impls.iter()));
+        }
+
         // Update layers for class and zoom changes.
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
         for layer in &self.ordered_layers {
@@ -921,6 +923,7 @@ impl RenderOrchestrator {
         if !render_tree_parameters.needs_repaint && render_tree_parameters.loaded {
             // Notify observer about unused images when map is fully loaded
             // and there are no ongoing transitions.
+            self.image_manager.reduce_memory_use_if_cache_size_exceeds_limit();
         }
 
         let mut source_render_items: Vec<Box<dyn RenderItem>> = Vec::new();
@@ -1023,6 +1026,7 @@ impl RenderOrchestrator {
         }
 
         self.image_manager.clear();
+        self.glyph_manager.evict(&VecSet::new());
     }
 
     /// Drops what holds the renderer's shaders: the render layers, the sky

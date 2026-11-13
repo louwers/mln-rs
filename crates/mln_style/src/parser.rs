@@ -371,12 +371,7 @@ impl Parser {
     /// Statically evaluate layer properties to determine what font stacks are used.
     #[must_use]
     pub fn font_stacks(&self) -> VecSet<FontStack> {
-        // mln::fontStacks(impls) (src/mln/util/font_stack.cpp).
-        let mut result = VecSet::new();
-        for layer in &self.layers {
-            layer.base_impl().populate_font_stack(&mut result);
-        }
-        result
+        crate::layer::font_stacks(self.layers.iter().map(|layer| layer.base_impl()))
     }
 }
 

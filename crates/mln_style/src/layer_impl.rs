@@ -18,6 +18,16 @@ use crate::serialization::shared_expression;
 
 pub(crate) type FontStack = Vec<String>;
 
+/// The font stacks `layers` use, found by statically evaluating their
+/// `text-font` values.
+pub fn font_stacks<L: AsRef<dyn Impl>>(layers: impl IntoIterator<Item = L>) -> VecSet<FontStack> {
+    let mut result = VecSet::new();
+    for layer in layers {
+        layer.as_ref().populate_font_stack(&mut result);
+    }
+    result
+}
+
 /// The data members of `Layer::Impl`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImplBase {
