@@ -611,6 +611,17 @@ pub struct OnlineFileSource {
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 impl OnlineFileSource {
+    /// How many requests the source holds: active, queued, or waiting for
+    /// the network.
+    #[cfg(test)]
+    pub(crate) fn request_count(&self) -> usize {
+        let (count, counted) = std::sync::mpsc::channel();
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| {
+            let _ = count.send(t.state.all_requests.borrow().len());
+        });
+        counted.recv().unwrap_or(0)
+    }
+
     #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         let ro = resource_options.clone();

@@ -18,6 +18,7 @@ use crate::file_source::{FileSource, FileSourceType, MAX_CONCURRENT_REQUESTS_KEY
 use crate::file_source_manager::FileSourceManager;
 use crate::main_resource_loader::MainResourceLoader;
 use crate::network_status::{NetworkStatus, Status};
+use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::FinishedCallback;
@@ -866,6 +867,15 @@ fn cached_resource_low_priority() {
     ));
 
     drop(paused);
+    // The network comes back once every request reached the online source,
+    // the cached ones' refreshes included, which then starts them in
+    // priority order. Before that, a refresh could start before request 2
+    // finished its cache lookup.
+    let online = online_fs.downcast_ref::<OnlineFileSource>().expect("OnlineFileSource");
+    while online.request_count() < 5 {
+        run_loop.run_once();
+        std::thread::sleep(Duration::from_millis(1));
+    }
     NetworkStatus::set(Status::Online);
 
     run_loop.run();
