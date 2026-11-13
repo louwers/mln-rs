@@ -226,8 +226,8 @@ fn many_live_icon_revisions_get_their_own_allocations() {
 /// A 16×16 image named `id` whose pixel (x, y) is `[x, y, 0, 255]`.
 fn make_gradient_image(id: &str) -> Arc<ImageImpl> {
     let mut image = PremultipliedImage::new(Size::new(16, 16));
-    for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
-        pixel.copy_from_slice(&[(i % 16) as u8, (i / 16) as u8, 0, 255]);
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        *pixel = [(i % 16) as u8, (i / 16) as u8, 0, 255];
     }
     Arc::new(ImageImpl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None).expect("image"))
 }
@@ -244,7 +244,7 @@ fn patched_pattern_is_queued_for_its_bin() {
     assert!(!image_atlas.patch_image(&make_sized_image("pattern", false, Size::new(8, 8)), ImageType::Pattern));
     assert!(!image_atlas.patch_image(&make_image("pattern", false), ImageType::Icon));
     assert!(!image_atlas.patch_image(&make_image("other", false), ImageType::Pattern));
-    assert!(texture.take_uploads().is_empty());
+    assert_eq!(texture.take_uploads(), Vec::new());
 
     assert!(image_atlas.patch_image(&make_gradient_image("pattern"), ImageType::Pattern));
     let uploads = texture.take_uploads();
