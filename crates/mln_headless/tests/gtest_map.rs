@@ -4328,6 +4328,98 @@ fn tile_selection_options_publish_updates() {
     check(&mut map, &updates, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
 }
 
+const RED: [u8; 4] = [255, 0, 0, 255];
+const GREEN: [u8; 4] = [0, 255, 0, 255];
+const BLUE: [u8; 4] = [0, 0, 255, 255];
+
+const ICON_STYLE: &str = r#"{
+  "version": 8,
+  "sources": {"point": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}},
+  "layers": [
+    {"id": "background", "type": "background", "paint": {"background-color": "white"}},
+    {"id": "icon", "type": "symbol", "source": "point",
+     "layout": {"icon-image": "icon", "icon-size": 4, "icon-allow-overlap": true, "icon-ignore-placement": true}}
+  ]
+}"#;
+
+/// An image named "icon" of `size`, every pixel `color`.
+fn solid_icon(size: Size, color: [u8; 4]) -> Arc<mln_style::image::Impl> {
+    let pixels = color.repeat((size.width * size.height) as usize);
+    style_image("icon", PremultipliedImage::from_vec(size, pixels), 1.0)
+}
+
+fn same_color(actual: [u8; 4], expected: [u8; 4]) -> bool {
+    actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2)
+}
+
+/// Renders frames until every tile is laid out and nothing is left to animate.
+#[track_caller]
+fn render_until_idle(test: &MapTest) {
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |status: RenderFrameStatus| {
+            if status.mode == RenderMode::Full && !status.needs_repaint {
+                run_loop.stop();
+            }
+        });
+    }
+    run_with_timeout(&test.run_loop, 10);
+    test.observer.did_finish_rendering_frame_callback.clear();
+}
+
+/// Renders the map's latest state without running the run loop, so a tile
+/// keeps its current layout until [`render_until_idle`] lets the relayout
+/// land.
+fn render_frame(test: &MapTest) {
+    test.map().process_events();
+    test.frontend.render_frame();
+}
+
+fn center_pixel_of(test: &MapTest) -> [u8; 4] {
+    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+    center_pixel(&test.frontend.read_still_image())
+}
+
+// gtest: Map.ImageUpdatedAgainBeforeResizeRelayout
+#[test]
+fn image_updated_again_before_resize_relayout() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(ICON_STYLE);
+    test.map().style_mut().add_image(solid_icon(Size::new(10, 10), RED));
+    render_until_idle(&test);
+
+    // The old layout must not receive pixels of a size it has no room for.
+    test.map().style_mut().add_image(solid_icon(Size::new(20, 20), BLUE));
+    render_frame(&test);
+    test.map().style_mut().add_image(solid_icon(Size::new(20, 20), GREEN));
+    render_frame(&test);
+
+    render_until_idle(&test);
+    let pixel = center_pixel_of(&test);
+    assert!(same_color(pixel, GREEN), "{pixel:?}");
+}
+
+// gtest: Map.ImageReaddedBeforeRelayout
+#[test]
+fn image_readded_before_relayout() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(ICON_STYLE);
+    test.map().style_mut().add_image(solid_icon(Size::new(10, 10), RED));
+    render_until_idle(&test);
+
+    // The relayout must show the re-added pixels, although the old layout
+    // still holds the texture of the removed image when the relayout
+    // reserves its own.
+    test.map().style_mut().remove_image("icon");
+    render_frame(&test);
+    test.map().style_mut().add_image(solid_icon(Size::new(10, 10), BLUE));
+    render_frame(&test);
+
+    render_until_idle(&test);
+    let pixel = center_pixel_of(&test);
+    assert!(same_color(pixel, BLUE), "{pixel:?}");
+}
+
 // gtest: Map.FallbackFontFacesCoverEveryFontStack
 #[test]
 fn fallback_font_faces_cover_every_font_stack() {

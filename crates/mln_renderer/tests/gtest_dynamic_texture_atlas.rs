@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use mln_renderer::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphAtlas, ImageAtlas, ImageVersionMap};
-use mln_style_types::image::{ImageMap, Impl as ImageImpl};
+use mln_style_types::image::{ImageMap, ImagePosition, Impl as ImageImpl};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
@@ -27,9 +27,13 @@ fn glyphs(glyph: &Arc<Glyph>) -> Glyphs {
     Glyphs::from([(glyph.id, Some(glyph.clone()))])
 }
 
-/// `makeImage(id, sdf, size = {16, 16})`.
+/// `makeImage(id, sdf)`, of the default size {16, 16}.
 fn make_image(id: &str, sdf: bool) -> Arc<ImageImpl> {
-    let size = Size::new(16, 16);
+    make_sized_image(id, sdf, Size::new(16, 16))
+}
+
+/// `makeImage(id, sdf, size)`.
+fn make_sized_image(id: &str, sdf: bool, size: Size) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
             id.to_owned(),
@@ -129,6 +133,22 @@ fn icon_and_pattern_usage_do_not_share_allocation() {
 
     assert_eq!(2, image_atlas.texture_handles.len());
     assert_ne!(image_atlas.texture_handles[0].get_rectangle(), image_atlas.texture_handles[1].get_rectangle());
+}
+
+// gtest: DynamicTextureAtlasTest.ResizedImageWithSameAreaGetsItsOwnShape
+#[test]
+fn resized_image_with_same_area_gets_its_own_shape() {
+    let mut test = DynamicTextureAtlasTest::new();
+    let tall = make_sized_image("image", false, Size::new(10, 20));
+    let wide = make_sized_image("image", false, Size::new(20, 10));
+
+    // The layout of the tall image still holds its allocation while the wide one is laid out.
+    test.upload_icon(&tall, 0);
+    let position = &test.upload_icon(&wide, 0).icon_positions["image"];
+
+    let padding = 2 * ImagePosition::PADDING;
+    assert_eq!(u32::from(position.padded_rect.w - padding), wide.image.size.width);
+    assert_eq!(u32::from(position.padded_rect.h - padding), wide.image.size.height);
 }
 
 // gtest: DynamicTextureAtlasTest.ReleasedRevisionGetsFreshAllocation
