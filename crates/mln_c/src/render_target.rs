@@ -73,7 +73,7 @@ enum Target {
     #[cfg_attr(target_family = "wasm", allow(dead_code))]
     Borrowed {
         size: Size,
-        ring: BorrowedRing,
+        ring: PendingRing,
     },
     /// A ring of the library's images, which it exports.
     Exported {
@@ -131,6 +131,40 @@ impl WindowSurface {
             #[cfg(target_vendor = "apple")]
             // SAFETY: as above.
             WindowSurface::MetalLayer(layer) => Ok(Surface::metal_layer(unsafe { mln_mtl::Layer::from_raw(layer) })),
+        }
+    }
+}
+
+/// A borrowed ring, which the call takes once the handles it names check
+/// out: until then, textures that a stale handle's call would never use may
+/// be no textures at all.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+enum PendingRing {
+    /// A ring of Vulkan images or OpenGL textures, which are handles rather
+    /// than objects.
+    #[cfg_attr(target_vendor = "apple", allow(dead_code))]
+    Ready(BorrowedRing),
+    /// Metal textures, which the ring retains.
+    #[cfg(target_vendor = "apple")]
+    Metal { textures: Vec<NonNull<c_void>>, depth: Vec<NonNull<c_void>>, physical: Size },
+}
+
+impl PendingRing {
+    /// The ring.
+    ///
+    /// # Safety
+    ///
+    /// Metal textures are the host's live `id<MTLTexture>`s, which the
+    /// header's contract keeps alive through the call.
+    unsafe fn into_ring(self) -> BorrowedRing {
+        match self {
+            PendingRing::Ready(ring) => ring,
+            #[cfg(target_vendor = "apple")]
+            // SAFETY: the caller's contract; the ring keeps its own
+            // references from here on.
+            PendingRing::Metal { textures, depth, physical } => {
+                BorrowedRing::metal(unsafe { mln_mtl::BorrowedTextures::from_raw(&textures, &depth, physical) })
+            }
         }
     }
 }
@@ -272,7 +306,7 @@ fn vulkan_ring(
                 final_layout: vk::ImageLayout::from_raw(target.depth_final_layout as i32),
             }),
         };
-        Ok(Target::Borrowed { size, ring: BorrowedRing::vulkan(images) })
+        Ok(Target::Borrowed { size, ring: PendingRing::Ready(BorrowedRing::vulkan(images)) })
     }
     #[cfg(not(backend_vulkan))]
     {
@@ -624,15 +658,16 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 }
                 #[cfg(target_vendor = "apple")]
                 {
-                    let pointers: Vec<*mut c_void> = textures.iter().map(|texture| texture.texture).collect();
-                    let depth: Vec<*mut c_void> = depth.iter().map(|texture| texture.texture).collect();
-                    let physical = Size::new(ring.physical_width, ring.physical_height);
-                    // SAFETY: the host's textures, which the header's contract
-                    // makes `id<MTLTexture>`s.
-                    match mln_mtl::BorrowedTextures::from_raw(&pointers, &depth, physical) {
-                        Some(textures) => Target::Borrowed { size, ring: BorrowedRing::metal(textures) },
-                        None => return Err(Error::invalid_argument(format!("{name} textures must not be null"))),
-                    }
+                    // The loop above turned down null textures.
+                    let pointers = |textures: &[crate::generated::types::mln_metal_borrowed_texture]| {
+                        textures.iter().filter_map(|texture| NonNull::new(texture.texture)).collect()
+                    };
+                    let ring = PendingRing::Metal {
+                        textures: pointers(textures),
+                        depth: pointers(depth),
+                        physical: Size::new(ring.physical_width, ring.physical_height),
+                    };
+                    Target::Borrowed { size, ring }
                 }
                 #[cfg(not(target_vendor = "apple"))]
                 Target::Unsupported("Metal textures are not supported by this build")
@@ -665,7 +700,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                         size: Size::new(ring.physical_width, ring.physical_height),
                         depth_textures: depth.iter().map(|texture| texture.texture).collect(),
                     };
-                    Target::Borrowed { size, ring: BorrowedRing::gl(textures) }
+                    Target::Borrowed { size, ring: PendingRing::Ready(BorrowedRing::gl(textures)) }
                 }
                 #[cfg(not(backend_gl))]
                 Target::Unsupported("OpenGL textures of the host's are not supported by this build")
@@ -860,6 +895,8 @@ pub(crate) unsafe extern "C" fn mln_map_attach(
                 let Some(device) = device else {
                     return Err(unsupported("a borrowed ring renders on the device of its textures"));
                 };
+                // SAFETY: the caller's contract.
+                let ring = unsafe { ring.into_ring() };
                 if !ring.takes_depth_on(&device) {
                     return Err(unsupported("the device draws no depth into textures of the ring's depth format"));
                 }
@@ -932,7 +969,11 @@ pub(crate) unsafe extern "C" fn mln_render_session_set_target(
             Target::HostSurface { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
             #[cfg(target_family = "wasm")]
             Target::WebCanvas { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
-            Target::Borrowed { size, ring } => Box::new(move |session| session.set_ring(size, ring)),
+            Target::Borrowed { size, ring } => {
+                // SAFETY: the caller's contract.
+                let ring = unsafe { ring.into_ring() };
+                Box::new(move |session| session.set_ring(size, ring))
+            }
             Target::Exported { .. } => {
                 return Err(unsupported("an exported ring is no replacement target: resize the session instead"));
             }
@@ -1038,7 +1079,8 @@ mod tests {
     #[test]
     fn targets_check_their_kind_size_and_objects() {
         use crate::generated::types::{
-            mln_android_window_target, mln_metal_layer_target, mln_offscreen_target, mln_render_target_data,
+            mln_android_window_target, mln_metal_borrowed_texture, mln_metal_borrowed_textures_target,
+            mln_metal_layer_target, mln_offscreen_target, mln_render_target_data,
         };
         let fake = NonNull::<c_void>::dangling().as_ptr();
         let Ok(Target::Surface { size, kind, .. }) = read(&wayland(fake, fake), Some(2.0)) else {
@@ -1085,6 +1127,24 @@ mod tests {
         #[cfg(not(target_vendor = "apple"))]
         assert!(matches!(read(&metal(fake), None), Ok(Target::Unsupported(_))));
         assert_eq!(read(&metal(core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+
+        // Nor does reading a ring of Metal textures retain them.
+        let textures = [mln_metal_borrowed_texture { texture: fake }];
+        let ring = mln_metal_borrowed_textures_target {
+            logical_size,
+            physical_width: 8,
+            physical_height: 8,
+            textures: textures.as_ptr(),
+            texture_count: textures.len(),
+            depth_textures: core::ptr::null(),
+            depth_texture_count: 0,
+        };
+        let data = mln_render_target_data { metal_borrowed_textures: ring };
+        let ring = target(MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES, data);
+        #[cfg(target_vendor = "apple")]
+        assert!(matches!(read(&ring, None), Ok(Target::Borrowed { .. })));
+        #[cfg(not(target_vendor = "apple"))]
+        assert!(matches!(read(&ring, None), Ok(Target::Unsupported(_))));
 
         // OpenHarmony takes only its own windows: see the OpenHarmony test.
         #[cfg(not(target_env = "ohos"))]

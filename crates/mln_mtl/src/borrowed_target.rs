@@ -4,6 +4,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
+use std::ptr::NonNull;
 use std::rc::Rc;
 
 use mln_gfx::command_encoder::CommandEncoder;
@@ -11,6 +12,7 @@ use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::size::Size;
+use objc2::Message;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
@@ -48,20 +50,21 @@ impl BorrowedTextures {
     ///
     /// # Safety
     ///
-    /// Each pointer is an `id<MTLTexture>`.
+    /// Each pointer is a live `id<MTLTexture>`.
+    #[must_use]
     pub unsafe fn from_raw(
-        textures: &[*mut c_void],
-        depth_textures: &[*mut c_void],
+        textures: &[NonNull<c_void>],
+        depth_textures: &[NonNull<c_void>],
         size: Size,
-    ) -> Option<BorrowedTextures> {
-        let retain = |textures: &[*mut c_void]| {
+    ) -> BorrowedTextures {
+        let retain = |textures: &[NonNull<c_void>]| {
             textures
                 .iter()
                 // SAFETY: the caller's contract.
-                .map(|texture| unsafe { Retained::retain(texture.cast::<ProtocolObject<dyn MTLTexture>>()) })
-                .collect::<Option<Vec<_>>>()
+                .map(|texture| unsafe { texture.cast::<ProtocolObject<dyn MTLTexture>>().as_ref() }.retain())
+                .collect()
         };
-        Some(BorrowedTextures { textures: retain(textures)?, size, depth_textures: retain(depth_textures)? })
+        BorrowedTextures { textures: retain(textures), size, depth_textures: retain(depth_textures) }
     }
 
     /// The formats of the depth textures that frames draw into: Metal's
