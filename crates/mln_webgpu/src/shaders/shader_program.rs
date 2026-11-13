@@ -277,15 +277,13 @@ impl ShaderProgram {
             has_fragment_entry_point: true,
             logged_missing_entry_point: Cell::new(false),
         };
-        let Some(device) = context.get_backend().get_device() else {
-            return program;
-        };
+        let device = context.get_backend().device();
 
         program.has_vertex_entry_point = !trim_string(vertex_source).is_empty();
         program.has_fragment_entry_point = !trim_string(fragment_source).is_empty();
 
         let create_module = |label: &str, source: &str| -> Option<wgpu::ShaderModule> {
-            let module = validated(&device, || {
+            let module = validated(device, || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some(label),
                     source: shader_source(source),
@@ -410,9 +408,7 @@ impl ShaderProgram {
     }
 
     fn create_pipeline_layout(&mut self, vertex_source: &str, fragment_source: &str) {
-        let Some(device) = self.context.get_backend().get_device() else {
-            return;
-        };
+        let device = self.context.get_backend().device().clone();
         if !vertex_source.is_empty() || !fragment_source.is_empty() {
             self.binding_infos.clear();
             if !vertex_source.is_empty() {
@@ -563,12 +559,10 @@ impl ShaderProgram {
 
         for (group, mut infos) in grouped {
             infos.sort_by_key(|info| info.binding);
-            if Some(group) == self.index_group
-                && let Some(layout) = self.context.index_bind_group_layout()
-            {
+            if Some(group) == self.index_group {
                 self.bind_group_order.push(group);
                 self.bindings_per_group.push(infos);
-                self.bind_group_layouts.push(layout);
+                self.bind_group_layouts.push(self.context.index_bind_group_layout());
                 continue;
             }
             let layout_entries: Vec<wgpu::BindGroupLayoutEntry> = infos
@@ -627,7 +621,7 @@ impl ShaderProgram {
         draw_mode_type: DrawModeType,
         cull_mode: CullFaceMode,
     ) -> Option<wgpu::RenderPipeline> {
-        let device = self.context.get_backend().get_device();
+        let device = self.context.get_backend().device();
         if !self.has_vertex_entry_point || !self.has_fragment_entry_point {
             if !self.logged_missing_entry_point.get() {
                 eprintln!(
@@ -638,12 +632,9 @@ impl ShaderProgram {
             }
             return None;
         }
-        let (Some(device), Some(vertex_module), Some(fragment_module), Some(pipeline_layout)) = (
-            device,
-            self.vertex_shader_module.as_ref(),
-            self.fragment_shader_module.as_ref(),
-            self.pipeline_layout.as_ref(),
-        ) else {
+        let (Some(vertex_module), Some(fragment_module), Some(pipeline_layout)) =
+            (self.vertex_shader_module.as_ref(), self.fragment_shader_module.as_ref(), self.pipeline_layout.as_ref())
+        else {
             eprintln!(
                 "createPipeline missing requirement: vertexModule={}, fragmentModule={}, pipelineLayout={}",
                 self.vertex_shader_module.is_some(),
@@ -777,7 +768,7 @@ impl ShaderProgram {
 
         // Create render pipeline (inside an error scope: a failure is the C++
         // null pipeline)
-        let pipeline = validated(&device, || {
+        let pipeline = validated(device, || {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(&self.shader_name),
                 layout: Some(pipeline_layout),

@@ -25,11 +25,9 @@ use crate::shaders::shader_source::shader_source;
 use crate::writes::Writes;
 
 /// `RendererBackend::Impl`
-#[derive(Default)]
 pub struct BackendImpl {
-    instance: RefCell<Option<wgpu::Instance>>,
-    device: RefCell<Option<wgpu::Device>>,
-    queue: RefCell<Option<wgpu::Queue>>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     /// `wgpu::TextureFormat::Undefined` is `None`.
     depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
     color_format: Cell<Option<wgpu::TextureFormat>>,
@@ -43,25 +41,21 @@ pub struct BackendImpl {
 const UNIFORM_PAGE: u64 = 16 << 10;
 
 impl BackendImpl {
-    pub fn set_instance(&self, instance: Option<wgpu::Instance>) {
-        *self.instance.borrow_mut() = instance;
+    fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        BackendImpl {
+            device,
+            queue,
+            depth_stencil_format: Cell::new(None),
+            color_format: Cell::new(None),
+            writes: RefCell::default(),
+            uniform_page: RefCell::new(None),
+        }
     }
-    pub fn set_device(&self, device: Option<wgpu::Device>) {
-        *self.device.borrow_mut() = device;
-        *self.writes.borrow_mut() = Writes::default();
-        *self.uniform_page.borrow_mut() = None;
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
     }
-    pub fn set_queue(&self, queue: Option<wgpu::Queue>) {
-        *self.queue.borrow_mut() = queue;
-    }
-    pub fn get_instance(&self) -> Option<wgpu::Instance> {
-        self.instance.borrow().clone()
-    }
-    pub fn get_device(&self) -> Option<wgpu::Device> {
-        self.device.borrow().clone()
-    }
-    pub fn get_queue(&self) -> Option<wgpu::Queue> {
-        self.queue.borrow().clone()
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
     }
     pub fn set_depth_stencil_format(&self, format: Option<wgpu::TextureFormat>) {
         self.depth_stencil_format.set(format);
@@ -80,18 +74,14 @@ impl BackendImpl {
     /// [`submit`](Self::submit)'s commands, as `Queue::write_buffer` does,
     /// but small writes are gathered and copied into place together.
     pub(crate) fn write_buffer(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
-        if let (Some(device), Some(queue)) = (self.device.borrow().as_ref(), self.queue.borrow().as_ref()) {
-            self.writes.borrow_mut().write(device, queue, buffer, offset, data);
-        }
+        self.writes.borrow_mut().write(&self.device, &self.queue, buffer, offset, data);
     }
 
     /// Port-only: [`write_buffer`](Self::write_buffer) where the bytes after
     /// `data` up to `padded` bytes from `offset` already hold zeros
     /// (`Writes::write_padded`).
     pub(crate) fn write_buffer_padded(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8], padded: u64) {
-        if let (Some(device), Some(queue)) = (self.device.borrow().as_ref(), self.queue.borrow().as_ref()) {
-            self.writes.borrow_mut().write_padded(device, queue, buffer, offset, data, padded);
-        }
+        self.writes.borrow_mut().write_padded(&self.device, &self.queue, buffer, offset, data, padded);
     }
 
     /// Port-only: `size` bytes (a multiple of 256) of a new uniform buffer,
@@ -99,9 +89,9 @@ impl BackendImpl {
     /// in turn from a shared page, so that UBOs made together sit together
     /// and their writes join one copy. A page is freed with the last of its
     /// UBOs (and the bind groups and commands that use them).
-    pub(crate) fn allocate_uniform_buffer(&self, device: &wgpu::Device, size: u64) -> (wgpu::Buffer, u64) {
+    pub(crate) fn allocate_uniform_buffer(&self, size: u64) -> (wgpu::Buffer, u64) {
         let create = |size| {
-            device.create_buffer(&wgpu::BufferDescriptor {
+            self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Uniform Buffer"),
                 size,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
@@ -135,31 +125,26 @@ impl BackendImpl {
         offset: u64,
         data: &mln_util::host_bytes::HostBytes,
     ) {
-        let (Some(device), Some(queue)) = (self.device.borrow().clone(), self.queue.borrow().clone()) else {
-            return;
-        };
+        let (device, queue) = (&self.device, &self.queue);
         let len = data.len() as u64;
         let aligned = len & !(wgpu::COPY_BUFFER_ALIGNMENT - 1);
         let mut writes = self.writes.borrow_mut();
-        writes.write_from_host(&device, &queue, buffer, offset, data, aligned);
+        writes.write_from_host(device, queue, buffer, offset, data, aligned);
         if aligned < len
             && let Some(array) = data.array()
         {
             // writeBuffer takes whole 4-byte words.
             let mut tail = [0u8; wgpu::COPY_BUFFER_ALIGNMENT as usize];
             array.subarray(aligned as u32, len as u32).copy_to(&mut tail[..(len - aligned) as usize]);
-            writes.write(&device, &queue, buffer, offset + aligned, &tail);
+            writes.write(device, queue, buffer, offset + aligned, &tail);
         }
     }
 
     /// Port-only: submits `command_buffer` after the copies of the writes
     /// gathered by [`write_buffer`](Self::write_buffer).
     pub(crate) fn submit(&self, command_buffer: wgpu::CommandBuffer) {
-        let (Some(device), Some(queue)) = (self.device.borrow().clone(), self.queue.borrow().clone()) else {
-            return;
-        };
-        let writes = self.writes.borrow_mut().encode(&device, &queue);
-        queue.submit(writes.into_iter().chain([command_buffer]));
+        let writes = self.writes.borrow_mut().encode(&self.device, &self.queue);
+        self.queue.submit(writes.into_iter().chain([command_buffer]));
     }
 }
 
@@ -214,10 +199,7 @@ impl RendererBackend {
     /// each submitting to the device's queue.
     #[must_use]
     pub fn new(device: &Device) -> Self {
-        let impl_ = BackendImpl::default();
-        impl_.set_instance(device.instance().cloned());
-        impl_.set_device(Some(device.device().clone()));
-        impl_.set_queue(Some(device.queue().clone()));
+        let impl_ = BackendImpl::new(device.device().clone(), device.queue().clone());
         RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(impl_), device: device.clone() }
     }
 
@@ -270,15 +252,6 @@ impl RendererBackend {
         }
     }
 
-    pub fn get_instance(&self) -> Option<wgpu::Instance> {
-        self.impl_.get_instance()
-    }
-    pub fn get_device(&self) -> Option<wgpu::Device> {
-        self.impl_.get_device()
-    }
-    pub fn get_queue(&self) -> Option<wgpu::Queue> {
-        self.impl_.get_queue()
-    }
     pub fn set_depth_stencil_format(&self, format: Option<wgpu::TextureFormat>) {
         self.impl_.set_depth_stencil_format(format);
     }

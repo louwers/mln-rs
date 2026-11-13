@@ -28,15 +28,15 @@ pub struct CommandEncoder {
     encoder: RefCell<Option<wgpu::CommandEncoder>>,
 }
 
-fn new_encoder(context: &Context) -> Option<wgpu::CommandEncoder> {
-    let device = context.get_backend().get_device()?;
-    Some(device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("MapLibre Command Encoder") }))
+fn new_encoder(context: &Context) -> wgpu::CommandEncoder {
+    let device = context.get_backend().device();
+    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("MapLibre Command Encoder") })
 }
 
 impl CommandEncoder {
     pub fn new(context: Rc<Context>) -> Self {
         let encoder = new_encoder(&context);
-        CommandEncoder { context, encoder: RefCell::new(encoder) }
+        CommandEncoder { context, encoder: RefCell::new(Some(encoder)) }
     }
 
     pub fn get_context(&self) -> &Rc<Context> {
@@ -51,10 +51,6 @@ impl CommandEncoder {
     /// Submits the command buffer, ending it with what `resource` records
     /// in `finish_frame`.
     pub(crate) fn submit_frame(&self, resource: Option<&dyn TargetResource>) {
-        let backend = self.context.get_backend();
-        if backend.get_device().is_none() || backend.get_queue().is_none() {
-            return;
-        }
         let Some(mut encoder) = self.encoder.borrow_mut().take() else {
             return;
         };
@@ -63,10 +59,10 @@ impl CommandEncoder {
             resource.finish_frame(&mut encoder);
         }
         // Finish and submit the command buffer, after the buffer writes
-        backend.submit(encoder.finish());
+        self.context.get_backend().submit(encoder.finish());
         // Create a new command encoder (C++ also updates
         // context.setCurrentCommandEncoder).
-        *self.encoder.borrow_mut() = new_encoder(&self.context);
+        *self.encoder.borrow_mut() = Some(new_encoder(&self.context));
     }
 }
 
@@ -92,9 +88,7 @@ impl command_encoder::CommandEncoder for CommandEncoder {
     /// Moves the encoder to the host for the call and back.
     fn lend_to_custom_layer(&self, _target: &dyn DrawTarget, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         let backend = self.context.get_backend();
-        let (Some(device), Some(queue)) = (backend.get_device(), backend.get_queue()) else {
-            return false;
-        };
+        let (device, queue) = (backend.device().clone(), backend.queue().clone());
         let mut slot = self.encoder.borrow_mut();
         let Some(encoder) = slot.take() else {
             return false;

@@ -239,11 +239,10 @@ impl render_pass::RenderPass for RenderPass {
     /// state that the pass knew, so the next draws set what they need.
     fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         let backend = self.context.get_backend();
-        let (Some(device), Some(queue), Some(color_format)) =
-            (backend.get_device(), backend.get_queue(), self.color_format)
-        else {
+        let Some(color_format) = self.color_format else {
             return false;
         };
+        let (device, queue) = (backend.device().clone(), backend.queue().clone());
         let mut encoder = self.get_encoder();
         let Some(pass) = encoder.take() else {
             return false;

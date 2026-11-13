@@ -61,13 +61,11 @@ impl UniformBuffer {
         let mut buffer = None;
         let mut offset = 0;
         let mut written = 0;
-        if let Some(device) = backend.get_device()
-            && aligned_size > 0
-        {
+        if aligned_size > 0 {
             // C++ creates the buffer mapped and copies the data (zero padded);
             // a queue write of the data has the same effect for the next
             // submission.
-            let (b, at) = backend.allocate_uniform_buffer(&device, aligned_size as u64);
+            let (b, at) = backend.allocate_uniform_buffer(aligned_size as u64);
             if let Some(data) = data {
                 backend.write_buffer_padded(&b, at, &data[..size], aligned_size as u64);
                 written = size;

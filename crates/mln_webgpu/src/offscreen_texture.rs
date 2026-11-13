@@ -169,10 +169,8 @@ impl OffscreenTextureResource {
     /// back reads the next one too, and the copy then costs no submission
     /// of its own.
     pub(crate) fn encode_requested_copy(&self, encoder: &mut wgpu::CommandEncoder) {
-        let Some(device) = self.context.get_backend().get_device() else {
-            return;
-        };
-        if self.read_back.replace(false) && self.encode_copy(&device, encoder) {
+        let device = self.context.get_backend().device();
+        if self.read_back.replace(false) && self.encode_copy(device, encoder) {
             self.copied_at.set(Some(self.context.submissions()));
         }
     }
@@ -186,15 +184,12 @@ impl OffscreenTextureResource {
         self.read_back.set(true);
 
         let backend = self.context.get_backend();
-        let (Some(device), Some(queue)) = (backend.get_device(), backend.get_queue()) else {
-            eprintln!("WebGPU: No device or queue available for readback");
-            return PremultipliedImage::from_vec(size, data);
-        };
+        let (device, queue) = (backend.device(), backend.queue());
 
         // Any later submission may have drawn the texture again.
         if self.copied_at.take() != Some(self.context.submissions()) {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            if !self.encode_copy(&device, &mut encoder) {
+            if !self.encode_copy(device, &mut encoder) {
                 eprintln!("WebGPU: Color texture is null");
                 return PremultipliedImage::from_vec(size, data);
             }

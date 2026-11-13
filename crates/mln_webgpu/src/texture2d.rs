@@ -113,9 +113,7 @@ impl Texture2D {
     }
 
     fn write(&self, texture: &wgpu::Texture, copy: &UploadCopyData, origin: wgpu::Origin3d, region: Size) {
-        let Some(queue) = self.context.get_backend().get_queue() else {
-            return;
-        };
+        let queue = self.context.get_backend().queue();
         {
             let mut stats = self.context.rendering_stats_mut();
             stats.num_texture_updates += 1;
@@ -165,23 +163,22 @@ impl texture2d::Texture2D for Texture2D {
             TextureWrapType::Repeat => wgpu::AddressMode::Repeat,
             TextureWrapType::Clamp => wgpu::AddressMode::ClampToEdge,
         };
-        if let Some(device) = self.context.get_backend().get_device() {
-            self.sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("Texture Sampler"),
-                address_mode_u: map_wrap_mode(self.sampler_state.wrap_u),
-                address_mode_v: map_wrap_mode(self.sampler_state.wrap_v),
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: filter,
-                min_filter: filter,
-                mipmap_filter: if self.sampler_state.mipmapped {
-                    wgpu::MipmapFilterMode::Linear
-                } else {
-                    wgpu::MipmapFilterMode::Nearest
-                },
-                anisotropy_clamp: u16::from(self.sampler_state.max_anisotropy),
-                ..Default::default()
-            }));
-        }
+        let device = self.context.get_backend().device();
+        self.sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Texture Sampler"),
+            address_mode_u: map_wrap_mode(self.sampler_state.wrap_u),
+            address_mode_v: map_wrap_mode(self.sampler_state.wrap_v),
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: filter,
+            min_filter: filter,
+            mipmap_filter: if self.sampler_state.mipmapped {
+                wgpu::MipmapFilterMode::Linear
+            } else {
+                wgpu::MipmapFilterMode::Nearest
+            },
+            anisotropy_clamp: u16::from(self.sampler_state.max_anisotropy),
+            ..Default::default()
+        }));
     }
 
     fn set_format(&mut self, pixel_format: TexturePixelType, channel_type: TextureChannelDataType) {
@@ -249,9 +246,7 @@ impl texture2d::Texture2D for Texture2D {
         self.texture_view = None;
         self.release_texture();
 
-        let Some(device) = self.context.get_backend().get_device() else {
-            return;
-        };
+        let device = self.context.get_backend().device();
         if self.size.width == 0 || self.size.height == 0 {
             return;
         }

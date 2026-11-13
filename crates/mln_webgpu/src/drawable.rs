@@ -374,9 +374,7 @@ impl Drawable {
         self.impl_.bind_groups_shader = None;
         let mut previous = std::mem::take(&mut self.impl_.bind_groups);
         self.impl_.index_slot = None;
-        let Some(device) = context.get_backend().get_device() else {
-            return true;
-        };
+        let device = context.get_backend().device();
         let draw_call_count = DRAW_CALL_COUNT.with(Cell::get);
         let global_buffers = render_pass.get_global_uniform_buffers();
         let textures = &self.base.textures;
@@ -709,11 +707,6 @@ impl drawable::Drawable for Drawable {
             return;
         };
         if !self.base.enabled {
-            return;
-        }
-
-        let backend = context.get_backend();
-        if backend.get_device().is_none() || backend.get_queue().is_none() {
             return;
         }
 
