@@ -25,7 +25,9 @@
 //! error, as for the other transports. Dropping a request disconnects its
 //! connection, which ends a transfer in flight.
 
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JByteArray, JObject, JString, JThrowable, JValue, JValueOwned};
@@ -49,30 +51,64 @@ const MAXIMUM_REDIRECTS: u32 = 10;
 const BUFFER_SIZE: i32 = 64 * 1024;
 
 /// The transport: requests wait in a queue for the next free one of its
-/// worker threads, which runs the transfer. The workers exit when the
-/// transport is dropped, each after its current transfer.
+/// worker threads, which runs the transfer.
+///
+/// Dropping it ends the workers once their current transfers return: a
+/// dropped request disconnects its connection, which ends its transfer. It
+/// waits up to `STOP_TIMEOUT` for them, and a worker still in a transfer
+/// after that ends alone once it returns.
 pub(crate) struct Transport {
-    requests: mpsc::Sender<TransferRequest>,
+    requests: Option<mpsc::Sender<TransferRequest>>,
+    workers: Vec<JoinHandle<()>>,
+    /// Disconnects once every worker has returned.
+    ended: Mutex<mpsc::Receiver<()>>,
 }
+
+/// How long dropping a [`Transport`] waits for its workers, as the ureq
+/// transport does: long enough for a transfer that a disconnect ends, short
+/// enough not to hold up a host that drops its runtime behind a stalled
+/// name lookup or connect.
+const STOP_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl Transport {
     /// Starts as many workers as the online file source's default maximum
     /// of concurrent requests.
     pub(crate) fn new() -> Self {
         let (requests, receiver) = mpsc::channel::<TransferRequest>();
-        let receiver = std::sync::Arc::new(Mutex::new(receiver));
-        for i in 0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS {
-            let receiver = std::sync::Arc::clone(&receiver);
-            // Detached: a worker exits when the channel closes.
-            let _ = mln_util::thread::builder(format!("HTTPFileSource {i}")).spawn(move || worker(&receiver));
+        let (running, ended) = mpsc::channel::<()>();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let workers = (0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS)
+            .filter_map(|i| {
+                let receiver = Arc::clone(&receiver);
+                let running = running.clone();
+                mln_util::thread::spawn(format!("HTTPFileSource {i}"), move || {
+                    // Tells the transport that the worker returned, when it drops.
+                    let _running = running;
+                    worker(&receiver);
+                })
+                .ok()
+            })
+            .collect();
+        Transport { requests: Some(requests), workers, ended: Mutex::new(ended) }
+    }
+}
+
+impl Drop for Transport {
+    fn drop(&mut self) {
+        self.requests = None;
+        if matches!(self.ended.get_mut().recv_timeout(STOP_TIMEOUT), Err(mpsc::RecvTimeoutError::Disconnected)) {
+            for worker in self.workers.drain(..) {
+                mln_util::thread::join(worker);
+            }
         }
-        Transport { requests }
     }
 }
 
 impl HttpTransport for Transport {
     fn start(&self, request: TransferRequest) {
-        let _ = self.requests.send(request);
+        if let Some(requests) = &self.requests {
+            let _ = requests.send(request);
+        }
     }
 }
 
