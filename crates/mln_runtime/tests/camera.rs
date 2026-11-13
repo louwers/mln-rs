@@ -6,6 +6,7 @@
 mod support;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, NorthOrientation, TileLodMode, TransitionEnd,
@@ -14,7 +15,6 @@ use mln_map::{
 use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };
-use mln_util::chrono::Duration;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
 use support::{map, runtime, wait, wait_err};
 
@@ -43,7 +43,7 @@ fn an_end_reports_the_snapshot_that_shows_it_before_its_completion() {
     let map = map(&runtime);
     let ends = Arc::new(Mutex::new(Vec::new()));
 
-    let jumped = wait(map.update_camera(zoom_to(3.0, recorded(&ends, Duration::zero()))));
+    let jumped = wait(map.update_camera(zoom_to(3.0, recorded(&ends, Duration::ZERO))));
     let end = ends.lock().unwrap().pop().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Completed, jumped.generation));
     assert_eq!(jumped.generation, map.snapshot().unwrap().generation);

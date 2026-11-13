@@ -419,9 +419,7 @@ fn format_section_overrides_cross() {
         "paint": {"text-color": "blue"}}"#,
     );
     let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
-    render_layer
-        .borrow_mut()
-        .transition(&TransitionParameters::new(mln_util::chrono::TimePoint::default(), TransitionOptions::default()));
+    render_layer.borrow_mut().transition(&TransitionParameters::new(None, TransitionOptions::default()));
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     let layers = vec![render_layer.borrow().base().evaluated_properties.clone()];
     cross(&layers, &tile_data());
@@ -520,20 +518,23 @@ fn geojson_tiles_cross() {
 /// them back.
 #[test]
 fn properties_cross_while_a_paint_property_transitions() {
+    use std::time::Duration;
+
     use mln_style::layer_properties::get_evaluated;
     use mln_style::layers::fill_layer_properties::{FillColor, FillLayerProperties};
     use mln_style::map::zoom_history::ZoomHistory;
-    use mln_util::chrono::{Duration, TimePoint};
+    use mln_util::time::Instant;
 
     let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
     let render_layer = layermanager::create_render_layer(&convert(FILL).base_impl()).unwrap();
     let mut render_layer = render_layer.borrow_mut();
-    let start = TimePoint::new(Duration::from_secs(1));
-    let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), now, Duration::zero());
-    render_layer.transition(&TransitionParameters::new(start, TransitionOptions::default()));
+    let start = Instant::now();
+    let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), Some(now), Duration::ZERO);
+    render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
     render_layer.evaluate(&at(start));
     let transition = TransitionOptions::new(Some(Duration::from_millis(300)), None, true);
-    render_layer.transition_with_impl(&TransitionParameters::new(start, transition), convert(&constant).base_impl());
+    render_layer
+        .transition_with_impl(&TransitionParameters::new(Some(start), transition), convert(&constant).base_impl());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = render_layer.base().evaluated_properties.clone();
     assert!(!get_evaluated::<FillLayerProperties>(&transitioning).get::<FillColor>().is_constant());

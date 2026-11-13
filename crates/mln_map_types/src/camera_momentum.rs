@@ -7,7 +7,8 @@
 // which Orbis's orb-camera also names, so that hosts and the gesture
 // recognizer start from the same glide.
 
-use mln_util::chrono::Duration;
+use std::time::Duration;
+
 use mln_util::geo::ScreenCoordinate;
 
 /// `MomentumDecay::Model`.
@@ -79,7 +80,7 @@ impl MomentumDecay {
         half_life: Duration::from_millis(140),
         stop_speed: 1.0,
         distance: 0.0,
-        duration: Duration::zero(),
+        duration: Duration::ZERO,
         easing: MomentumEasing { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 },
         min_speed: 0.0,
         max_speed: f64::INFINITY,
@@ -134,7 +135,7 @@ impl MomentumSnap {
 
 impl Default for MomentumSnap {
     fn default() -> Self {
-        MomentumSnap { spacing: 360.0, offset: 0.0, tolerance: 7.0, duration: Duration::zero() }
+        MomentumSnap { spacing: 360.0, offset: 0.0, tolerance: 7.0, duration: Duration::ZERO }
     }
 }
 

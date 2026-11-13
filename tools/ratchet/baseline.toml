@@ -124,7 +124,7 @@
 "crates/mln_style/src/layers/raster_layer_properties.rs" = 1
 "crates/mln_style/src/layers/symbol_layer_impl.rs" = 3
 "crates/mln_style/src/layers/symbol_layer_properties.rs" = 1
-"crates/mln_style/src/properties.rs" = 4
+"crates/mln_style/src/properties.rs" = 2
 "crates/mln_style/src/property_value.rs" = 3
 "crates/mln_style/src/source_impl.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1

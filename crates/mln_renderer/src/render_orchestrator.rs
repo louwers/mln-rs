@@ -16,6 +16,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
@@ -32,11 +33,11 @@ use mln_style::{
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_tile_id::OverscaledTileID;
-use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
+use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
@@ -363,9 +364,8 @@ impl RenderOrchestrator {
 
         // TODO(port): annotationManager->updateData() (annotations).
 
-        let zoom_changed = self
-            .zoom_history
-            .update(update_parameters.transform_state.get_zoom() as f32, &update_parameters.time_point);
+        let zoom_changed =
+            self.zoom_history.update(update_parameters.transform_state.get_zoom() as f32, update_parameters.time_point);
 
         let transition_options =
             if is_map_mode_continuous { update_parameters.transition_options } else { TransitionOptions::default() };
@@ -373,7 +373,7 @@ impl RenderOrchestrator {
         let transition_duration = transition_options.duration.unwrap_or(if is_map_mode_continuous {
             DEFAULT_TRANSITION_DURATION
         } else {
-            Duration::zero()
+            Duration::ZERO
         });
 
         let global_state_changed = !ptr_eq_option(self.global_state.as_ref(), update_parameters.global_state.as_ref());
@@ -973,7 +973,7 @@ impl RenderOrchestrator {
         Some(render_tree)
     }
 
-    pub fn has_transitions(&self, time_point: TimePoint) -> bool {
+    pub fn has_transitions(&self, time_point: Option<Instant>) -> bool {
         // conformance
         if self.render_light.has_transition() {
             return true;

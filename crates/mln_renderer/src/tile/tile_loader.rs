@@ -9,11 +9,11 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_storage::response::Reason;
 use mln_storage::{AsyncRequest, Data, FileSource, LoadingMethod, Resource, Response, StoragePolicy};
 use mln_tile_id::OverscaledTileID;
-use mln_util::chrono::Duration;
 use mln_util::error::Error;
 use mln_util::tileset::Tileset;
 
@@ -168,7 +168,7 @@ impl TileLoader {
             file_source: if tileset.tiles.is_empty() { None } else { parameters.file_source.clone() },
             request: None,
             failed: false,
-            update_parameters: TileUpdateParameters { minimum_update_interval: Duration::zero(), is_volatile: false },
+            update_parameters: TileUpdateParameters { minimum_update_interval: Duration::ZERO, is_volatile: false },
         }));
         let loader = TileLoader { state };
 

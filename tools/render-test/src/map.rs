@@ -400,11 +400,7 @@ impl TestRunnerImpl for Impl {
         let sleep_timer = mln_actor::Timer::new();
         {
             let sleeping = sleeping.clone();
-            sleep_timer.start(
-                mln_util::chrono::Duration::from_millis(duration.as_millis() as i64),
-                mln_util::chrono::Duration::zero(),
-                move || sleeping.set(false),
-            );
+            sleep_timer.start(duration, std::time::Duration::ZERO, move || sleeping.set(false));
         }
         while sleeping.get() {
             RunLoop::get().run_once();

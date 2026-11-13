@@ -2,9 +2,9 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mln_actor::{RunLoop, Timer};
-use mln_util::chrono::Duration;
 
 // gtest: RunLoop.Stop
 #[test]
@@ -13,7 +13,7 @@ fn stop() {
     let timer = Timer::new();
 
     let l = run_loop.clone();
-    timer.start(Duration::zero(), Duration::zero(), move || l.stop());
+    timer.start(Duration::ZERO, Duration::ZERO, move || l.stop());
 
     run_loop.run();
 }
@@ -25,7 +25,7 @@ fn multiple_stop() {
     let timer = Timer::new();
 
     let l = run_loop.clone();
-    timer.start(Duration::zero(), Duration::zero(), move || {
+    timer.start(Duration::ZERO, Duration::ZERO, move || {
         l.stop();
         l.stop();
         l.stop();
@@ -42,13 +42,13 @@ fn multiple_run() {
     let timer = Timer::new();
 
     let l = run_loop.clone();
-    timer.start(Duration::zero(), Duration::zero(), move || l.stop());
+    timer.start(Duration::ZERO, Duration::ZERO, move || l.stop());
     run_loop.run();
 
     let second_timeout = Rc::new(Cell::new(false));
     let l = run_loop.clone();
     let s = second_timeout.clone();
-    timer.start(Duration::zero(), Duration::zero(), move || {
+    timer.start(Duration::ZERO, Duration::ZERO, move || {
         s.set(true);
         l.stop();
     });

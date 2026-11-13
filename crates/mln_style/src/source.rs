@@ -18,10 +18,10 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_storage::FileSource;
 use mln_style_types::SourceType;
-use mln_util::chrono::Duration;
 use mln_util::logging::{Event, Log};
 
 use crate::layer::LayerTypeInfo;

@@ -13,6 +13,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use feature::Value;
 use geojson::{Feature, GeoJSON, Geometry, Point};
@@ -57,7 +58,7 @@ use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
 use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
-use mln_util::chrono::{Duration, Timestamp};
+use mln_util::chrono::Timestamp;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
@@ -303,7 +304,7 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
     let timeout = Timer::new();
     {
         let run_loop = test.run_loop.clone();
-        timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
+        timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
     }
     {
         let loaded = loaded.clone();
@@ -335,7 +336,7 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
         let timeout = Timer::new();
         {
             let run_loop = test.run_loop.clone();
-            timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
+            timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
         }
         {
             let idle = idle.clone();
@@ -605,7 +606,7 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
     test.map()
         .apply_camera_delta(&mln_map::CameraDelta {
             offset: Some(ScreenCoordinate::new(-2.0 * degree, 0.0)),
-            animation: AnimationOptions::new(mln_util::chrono::seconds(10)),
+            animation: AnimationOptions::new(std::time::Duration::from_secs(10)),
             phase: mln_map::GesturePhase::Begin,
             ..mln_map::CameraDelta::default()
         })
@@ -1097,7 +1098,7 @@ fn style_not_found() {
         let (timer, run_loop) = (timer.clone(), test.run_loop.clone());
         test.observer.did_fail_loading_map_callback.set(move |()| {
             let run_loop = run_loop.clone();
-            timer.start(Duration::from_millis(1100), Duration::zero(), move || run_loop.stop());
+            timer.start(Duration::from_millis(1100), Duration::ZERO, move || run_loop.stop());
         });
     }
 
@@ -1266,7 +1267,7 @@ fn continuous_rendering() {
     {
         let run_loop = run_loop.clone();
         let did_not_stop = did_not_stop.clone();
-        emergency_shutoff.start(Duration::from_secs(10), Duration::zero(), move || {
+        emergency_shutoff.start(Duration::from_secs(10), Duration::ZERO, move || {
             run_loop.stop();
             did_not_stop.set(true);
         });
@@ -1287,7 +1288,7 @@ fn continuous_rendering() {
             // will trigger, failing the test.
             if let Some(timer) = timer.upgrade() {
                 let run_loop = run_loop.clone();
-                timer.start(Duration::from_secs(1), Duration::zero(), move || run_loop.stop());
+                timer.start(Duration::from_secs(1), Duration::ZERO, move || run_loop.stop());
             }
         });
     }
@@ -2364,7 +2365,7 @@ fn source_minimum_update_interval_override() {
                 assert_eq!(Duration::from_secs(1), resource.minimum_update_interval);
                 a.set(a.get() + 1);
             } else if first_symbol == b'b' {
-                assert_eq!(Duration::zero(), resource.minimum_update_interval);
+                assert_eq!(Duration::ZERO, resource.minimum_update_interval);
                 b.set(b.get() + 1);
             } else {
                 panic!("Never reached");

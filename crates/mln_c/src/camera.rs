@@ -6,6 +6,7 @@ mod momentum;
 use core::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use ::mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
@@ -14,7 +15,6 @@ use ::mln_map::{
 };
 use mln_runtime::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use mln_util::UnitBezier;
-use mln_util::chrono::Duration;
 use mln_util::constants::{MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D, TILE_SIZE_I};
 use mln_util::geo::{EdgeInsets, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::for_each_point;
@@ -171,15 +171,16 @@ unsafe fn read_struct<T: abi::Versioned>(pointer: *const T, message: &'static st
 
 // MARK: - Animations
 
-/// Whether `milliseconds` converts to a [`Duration`]: finite, not negative,
-/// and below its largest count, which the nearest double rounds up past.
+/// Whether `milliseconds` converts to a [`Duration`] of whole nanoseconds:
+/// finite, not negative, and below `u64::MAX` nanoseconds, which the nearest
+/// double rounds up past.
 fn is_duration_ms(milliseconds: f64) -> bool {
-    milliseconds.is_finite() && milliseconds >= 0.0 && milliseconds < Duration::max().count() as f64 / 1e6
+    milliseconds.is_finite() && milliseconds >= 0.0 && milliseconds * 1e6 < u64::MAX as f64
 }
 
 /// `milliseconds`, which [`is_duration_ms`] accepts, in whole nanoseconds.
 fn duration(milliseconds: f64) -> Duration {
-    Duration::from_nanos((milliseconds * 1e6) as i64)
+    Duration::from_nanos((milliseconds * 1e6) as u64)
 }
 
 type EndCallback = unsafe extern "C" fn(*mut c_void, *const mln_camera_transition_end);
@@ -1243,8 +1244,8 @@ mod tests {
     fn durations_stay_within_the_native_range() {
         assert!(is_duration_ms(0.0) && is_duration_ms(300.0));
         assert!(!is_duration_ms(-1.0) && !is_duration_ms(f64::NAN) && !is_duration_ms(1e300));
-        assert!(!is_duration_ms(Duration::max().count() as f64 / 1e6));
-        assert_eq!(duration(1.5), Duration::from_nanos(1_500_000));
+        assert!(!is_duration_ms(u64::MAX as f64 / 1e6));
+        assert_eq!(duration(1.5), Duration::from_micros(1_500));
     }
 
     fn animation(fields: u32) -> mln_animation_options {

@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use mln_actor::RunLoop;
 use mln_map::{
@@ -12,7 +13,6 @@ use mln_map::{
 };
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
-use mln_util::chrono::Duration;
 use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::size::Size;

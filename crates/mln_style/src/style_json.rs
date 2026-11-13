@@ -2,9 +2,10 @@
 //! as text, so a caller on another thread hands over text and the style's
 //! own thread parses it.
 
+use std::time::Duration;
+
 use feature::Value;
 use mln_conversion::{Convertible, value_to_json};
-use mln_util::chrono::Duration;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
@@ -474,11 +475,10 @@ fn properties_json<'a>(names: &[&'a str], property: impl Fn(&'a str) -> StylePro
 /// Whole milliseconds as an integer, and finer durations with their
 /// fraction.
 fn milliseconds_json(duration: Duration) -> serde_json::Value {
-    let nanoseconds = duration.count();
-    if nanoseconds % 1_000_000 == 0 {
-        serde_json::Value::from(nanoseconds / 1_000_000)
+    if duration.subsec_nanos().is_multiple_of(1_000_000) {
+        serde_json::Value::from(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
     } else {
-        serde_json::Value::from(nanoseconds as f64 / 1e6)
+        serde_json::Value::from(duration.as_nanos() as f64 / 1e6)
     }
 }
 

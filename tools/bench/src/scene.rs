@@ -384,10 +384,9 @@ impl Scene {
     /// (`Mode::Driven`).
     pub fn run_for(&mut self, duration: Duration) {
         let timer = Timer::new();
-        let timeout = mln_util::chrono::Duration::from_nanos(duration.as_nanos() as i64);
         let elapsed = Rc::new(Cell::new(false));
         let done = elapsed.clone();
-        timer.start(timeout, mln_util::chrono::Duration::zero(), move || done.set(true));
+        timer.start(duration, Duration::ZERO, move || done.set(true));
         self.run_until(|| elapsed.get());
     }
 

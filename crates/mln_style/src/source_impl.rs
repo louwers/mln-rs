@@ -6,9 +6,9 @@
 
 use std::any::Any;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_style_types::SourceType;
-use mln_util::chrono::Duration;
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
 
@@ -45,7 +45,7 @@ impl ImplBase {
             id,
             prefetch_zoom_delta: None,
             max_overscale_factor: None,
-            minimum_tile_update_interval: Duration::zero(),
+            minimum_tile_update_interval: Duration::ZERO,
             volatile_flag: false,
         }
     }

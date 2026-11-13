@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use geojson::GeoJSON;
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
@@ -38,7 +39,6 @@ use mln_style::sources::geojson_source_impl;
 use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 use mln_style_types::SourceType;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::chrono::{Duration, milliseconds};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
@@ -985,7 +985,7 @@ fn set_max_parent_overscale_factor() {
             let z = res.tile_data.as_ref().unwrap().z;
             if z == 5 {
                 let end = end.clone();
-                timer.start(milliseconds(10), Duration::zero(), end);
+                timer.start(Duration::from_millis(10), Duration::ZERO, end);
             }
             // No tiles above zoom level 5 should be requested.
             assert!(5 <= i32::from(z), "requested z{z}");

@@ -3,6 +3,7 @@
 // style's conversion tests.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_conversion::Convertible;
 use mln_renderer::render_sky::RenderSky;
@@ -16,7 +17,7 @@ use mln_style::style_property::Kind;
 use mln_style::transition_options::TransitionOptions;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::Color;
-use mln_util::chrono::{Duration, TimePoint, milliseconds};
+use mln_util::time::Instant;
 
 fn parse_sky(source: &str, error: &mut Error) -> Option<Sky> {
     let json: serde_json::Value = serde_json::from_str(source).expect("JSON");
@@ -95,8 +96,8 @@ fn sky_constants_and_transitions() {
     assert_float_eq(0.2, *sky.get_horizon_fog_blend().as_constant());
     assert_float_eq(0.3, *sky.get_sky_horizon_blend().as_constant());
     assert_float_eq(0.4, *sky.get_atmosphere_blend().as_constant());
-    assert_eq!(Some(milliseconds(1000)), sky.get_sky_color_transition().duration);
-    assert_eq!(Some(milliseconds(20)), sky.get_sky_color_transition().delay);
+    assert_eq!(Some(Duration::from_millis(1000)), sky.get_sky_color_transition().duration);
+    assert_eq!(Some(Duration::from_millis(20)), sky.get_sky_color_transition().delay);
 
     let mut transition_source = Sky::new();
     transition_source.set_atmosphere_blend(PropertyValue::Constant(0.4));
@@ -104,19 +105,19 @@ fn sky_constants_and_transitions() {
     let mut changed = transition_source.mutable_impl();
     changed.properties.get_mut::<SkyAtmosphereBlend>().value = PropertyValue::Constant(0.9);
     transitioning.impl_ = Arc::new(changed);
-    let start = TimePoint::new(Duration::zero());
+    let start = Instant::now();
     transitioning.transition(&TransitionParameters::new(
-        start,
-        TransitionOptions { duration: Some(milliseconds(100)), ..TransitionOptions::default() },
+        Some(start),
+        TransitionOptions { duration: Some(Duration::from_millis(100)), ..TransitionOptions::default() },
     ));
     assert!(transitioning.has_transition());
 
     let mut evaluation = PropertyEvaluationParameters::new(0.0);
-    evaluation.now = start;
+    evaluation.now = Some(start);
     transitioning.evaluate(&evaluation);
     assert_float_eq(0.4, *transitioning.get_evaluated().get::<SkyAtmosphereBlend>());
 
-    evaluation.now = start + milliseconds(100);
+    evaluation.now = Some(start + Duration::from_millis(100));
     transitioning.evaluate(&evaluation);
     assert_float_eq(0.9, *transitioning.get_evaluated().get::<SkyAtmosphereBlend>());
     assert!(!transitioning.has_transition());

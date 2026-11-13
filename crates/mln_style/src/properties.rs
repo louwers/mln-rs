@@ -19,13 +19,14 @@
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Debug;
+use std::time::Duration;
 
 use mln_expression::expression::FeatureState;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
-use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
+use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -113,63 +114,87 @@ pub struct Transitioning<V> {
     // `evaluate` is const but drops the prior once the transition is over,
     // which `hasTransition()` (and so the map's continuous repaint) observes.
     prior: RefCell<Option<Box<Transitioning<V>>>>,
-    begin: TimePoint,
-    end: TimePoint,
+    /// When the transition from `prior` was set up; `None` without a clock,
+    /// where it has already ended.
+    start: Option<Instant>,
+    /// How long after `start` the transition begins.
+    delay: Duration,
+    /// How long it lasts once it has begun.
+    duration: Duration,
     value: V,
+}
+
+/// Where a transition stands at a time.
+enum Stage {
+    /// Its delay hasn't passed yet.
+    Delayed,
+    /// It is this share of the way from the prior value, in [0, 1).
+    Running(f32),
+    Ended,
 }
 
 impl<V: PropertyValueLike> Transitioning<V> {
     /// `explicit Transitioning(Value)`.
     pub fn new(value: V) -> Self {
-        Transitioning { prior: RefCell::new(None), begin: TimePoint::default(), end: TimePoint::default(), value }
+        Transitioning { prior: RefCell::new(None), start: None, delay: Duration::ZERO, duration: Duration::ZERO, value }
     }
 
-    /// `Transitioning(Value, Transitioning<Value> prior, const TransitionOptions&, TimePoint now)`.
-    pub fn with_prior(value: V, prior: Transitioning<V>, transition: &TransitionOptions, now: TimePoint) -> Self {
-        let begin = now + transition.delay.unwrap_or(Duration::zero());
-        let end = begin + transition.duration.unwrap_or(Duration::zero());
+    /// `Transitioning(Value, Transitioning<Value> prior, const TransitionOptions&, TimePoint now)`:
+    /// a transition from `prior` that starts at `now`, or one that has
+    /// already ended for `None`.
+    pub fn with_prior(value: V, prior: Transitioning<V>, transition: &TransitionOptions, now: Option<Instant>) -> Self {
         Transitioning {
             prior: RefCell::new(if transition.is_defined() { Some(Box::new(prior)) } else { None }),
-            begin,
-            end,
+            start: now,
+            delay: transition.delay.unwrap_or_default(),
+            duration: transition.duration.unwrap_or_default(),
             value,
         }
     }
 
-    pub fn evaluate<E>(&self, evaluator: &E, now: TimePoint) -> E::ResultType
+    fn stage(&self, now: Option<Instant>) -> Stage {
+        let (Some(now), Some(start)) = (now, self.start) else {
+            return Stage::Ended;
+        };
+        let Some(running) = now.saturating_duration_since(start).checked_sub(self.delay) else {
+            return Stage::Delayed;
+        };
+        if running < self.duration { Stage::Running(running.div_duration_f32(self.duration)) } else { Stage::Ended }
+    }
+
+    /// The value at `now`; `None` evaluates it as after every transition.
+    pub fn evaluate<E>(&self, evaluator: &E, now: Option<Instant>) -> E::ResultType
     where
         E: Evaluator<V::Type>,
         E::ResultType: Interpolate,
     {
         let final_value = self.value.evaluate(evaluator);
-        if self.prior.borrow().is_none() {
+        let guard = self.prior.borrow();
+        let Some(prior) = guard.as_deref() else {
             // No prior value.
-            final_value
-        } else if now >= self.end {
-            // Transition from prior value is now complete.
+            return final_value;
+        };
+        let stage = self.stage(now);
+        if matches!(stage, Stage::Ended) || self.value.is_data_driven() {
+            // Transition from prior value is now complete, or the new value is
+            // data-driven: transitions to data-driven properties are not
+            // supported. We snap immediately to the data-driven value so that,
+            // when we perform layout, we see the data-driven function and can
+            // use it to populate vertex buffers.
+            drop(guard);
             *self.prior.borrow_mut() = None;
-            final_value
-        } else if self.value.is_data_driven() {
-            // Transitions to data-driven properties are not supported.
-            // We snap immediately to the data-driven value so that, when we
-            // perform layout, we see the data-driven function and can use it to
-            // populate vertex buffers.
-            *self.prior.borrow_mut() = None;
-            final_value
-        } else if now < self.begin {
-            // Transition hasn't started yet.
-            let prior = self.prior.borrow();
-            prior.as_ref().unwrap().evaluate(evaluator, now)
-        } else {
+            return final_value;
+        }
+        let prior_value = prior.evaluate(evaluator, now);
+        match stage {
             // Interpolate between recursively-calculated prior value and final.
-            let t: f32 = Duration::float_seconds_div(now - self.begin, self.end - self.begin);
-            let prior_value = {
-                let prior = self.prior.borrow();
-                prior.as_ref().unwrap().evaluate(evaluator, now)
-            };
             // util::interpolate(prior, final, static_cast<float>(ease.solve(t, 0.001))):
             // the float-t overload.
-            prior_value.interpolate_f32(&final_value, DEFAULT_TRANSITION_EASE.solve(f64::from(t), 0.001) as f32)
+            Stage::Running(t) => {
+                prior_value.interpolate_f32(&final_value, DEFAULT_TRANSITION_EASE.solve(f64::from(t), 0.001) as f32)
+            }
+            // Transition hasn't started yet.
+            Stage::Delayed | Stage::Ended => prior_value,
         }
     }
 
@@ -177,8 +202,8 @@ impl<V: PropertyValueLike> Transitioning<V> {
         self.prior.borrow().is_some()
     }
 
-    pub fn is_transitioning(&self, now: TimePoint) -> bool {
-        self.has_transition() && (self.begin <= now) && (now < self.end) && !self.value.is_data_driven()
+    pub fn is_transitioning(&self, now: Option<Instant>) -> bool {
+        self.has_transition() && matches!(self.stage(now), Stage::Running(_)) && !self.value.is_data_driven()
     }
 
     pub fn is_undefined(&self) -> bool {

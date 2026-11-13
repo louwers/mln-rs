@@ -9,7 +9,7 @@
 use mln_gfx::{LayerGroupBasePtr, UploadPass}; // layers: debug
 use mln_map_types::{MapDebugOptions, MapMode, TransformState};
 use mln_util::Color;
-use mln_util::chrono::TimePoint;
+use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -67,7 +67,8 @@ pub struct RenderTreeParameters {
     pub transform_params: TransformParameters,
     pub map_mode: MapMode,
     pub debug_options: MapDebugOptions,
-    pub time_point: TimePoint,
+    /// As in [`UpdateParameters::time_point`](crate::update_parameters::UpdateParameters::time_point).
+    pub time_point: Option<Instant>,
     /// conformance: `EvaluatedLight light`.
     pub light: crate::render_light::EvaluatedLight,
     pub sky: Option<crate::render_sky::EvaluatedSky>,
@@ -86,7 +87,7 @@ impl RenderTreeParameters {
         state: &TransformState,
         map_mode: MapMode,
         debug_options: MapDebugOptions,
-        time_point: TimePoint,
+        time_point: Option<Instant>,
     ) -> Self {
         RenderTreeParameters {
             transform_params: TransformParameters::new(state),

@@ -7,7 +7,7 @@ mod support;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration as StdDuration, Instant};
+use std::time::{Duration, Instant};
 
 use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::rendering_stats::RenderingStats;
@@ -20,7 +20,6 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style_types::VisibilityType;
-use mln_util::chrono::{TimePoint, milliseconds, seconds};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -104,10 +103,10 @@ impl TimedHeadlessFrontend {
         }
     }
 
-    fn render_at(&self, time: TimePoint) -> RenderResult {
+    fn render_at(&self, time: Instant) -> RenderResult {
         let update = self.updates.borrow().as_ref().and_then(UpdateReader::latest).expect("update parameters");
         let mut parameters = (*update.parameters).clone();
-        parameters.time_point = time;
+        parameters.time_point = Some(time);
         let parameters = Arc::new(parameters);
         let _scope = BackendScope::new(self.frontend.get_backend(), ScopeType::Explicit);
         if let Some(frames) = self.frontend.target().frames() {
@@ -241,10 +240,10 @@ fn collision_visibility_updates_existing_drawables() {
 /// rather than hangs when hidden drawables never stop drawing or never
 /// draw again.
 fn run_until(run_loop: &RunLoop, done: impl Fn() -> bool) {
-    let deadline = Instant::now() + StdDuration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !done() && Instant::now() < deadline {
         if !run_loop.run_once() {
-            std::thread::sleep(StdDuration::from_millis(1));
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 }
@@ -344,14 +343,14 @@ fn collision_fade_intermediate_frames() {
             .did_finish_rendering_frame_callback
             .set(move |status| fully_loaded.set(status.mode == RenderMode::Full));
     }
-    let start = TimePoint::default() + seconds(100);
-    let frame = |ms: i64| {
+    let start = Instant::now();
+    let frame = |ms: u64| {
         test.run_loop.run_once();
-        test.frontend.render_at(start + milliseconds(ms))
+        test.frontend.render_at(start + Duration::from_millis(ms))
     };
 
     // Wait only for resources; simulated time stays fixed while loading.
-    let deadline = Instant::now() + StdDuration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !fully_loaded.get() && Instant::now() < deadline {
         frame(0);
     }

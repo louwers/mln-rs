@@ -9,11 +9,12 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_conversion::Convertible;
 use mln_style_types::VisibilityType;
-use mln_util::chrono::{Duration, TimePoint, milliseconds};
 use mln_util::logging::{Event, EventSeverity};
+use mln_util::time::Instant;
 use mln_util::{Color, UnitBezier};
 
 use super::util::FixtureLog;
@@ -76,12 +77,12 @@ fn transition_and_evaluate(
     unevaluated: BackgroundPaintProperties::Unevaluated,
     zoom_history: &mut ZoomHistory,
     zoom: f32,
-    now: TimePoint,
+    now: Instant,
     transition: TransitionOptions,
 ) -> (BackgroundPaintProperties::Unevaluated, BackgroundPaintProperties::PossiblyEvaluated) {
-    let unevaluated = impl_.paint.transitioned(&TransitionParameters::new(now, transition), unevaluated);
-    zoom_history.update(zoom, &now);
-    let parameters = PropertyEvaluationParameters::with_zoom_history(*zoom_history, now, Duration::zero());
+    let unevaluated = impl_.paint.transitioned(&TransitionParameters::new(Some(now), transition), unevaluated);
+    zoom_history.update(zoom, Some(now));
+    let parameters = PropertyEvaluationParameters::with_zoom_history(*zoom_history, Some(now), Duration::ZERO);
     let evaluated = unevaluated.evaluate(&parameters);
     (unevaluated, evaluated)
 }
@@ -99,7 +100,7 @@ fn evaluate_static(style: &Impl, id: &str) -> BackgroundPaintProperties::Possibl
         unevaluated,
         &mut zoom_history,
         zoom,
-        TimePoint::new(milliseconds(1_000_000)),
+        Instant::now(),
         TransitionOptions::default(),
     );
     evaluated
@@ -187,7 +188,7 @@ fn background_color_transition() {
     let mut style = load("background-color/transition");
     let zoom = 0.0_f32;
     let mut zoom_history = ZoomHistory::default();
-    let t0 = TimePoint::new(milliseconds(1_000_000));
+    let t0 = Instant::now();
 
     let impl0 = background_impl(&style, "background");
     let (unevaluated, evaluated) = transition_and_evaluate(
@@ -210,14 +211,14 @@ fn background_color_transition() {
 
     // What Transitioning::evaluate computes: the prior red->red transition
     // started at t0, the red->white one at t1, both 1000 ms long.
-    let ease = |start: TimePoint, now: TimePoint| {
-        let t = Duration::float_seconds_div(now - start, milliseconds(1000));
+    let ease = |start: Instant, now: Instant| {
+        let t = (now - start).div_duration_f32(Duration::from_millis(1000));
         UnitBezier::new(0.0, 0.0, 0.25, 1.0).solve(f64::from(t), 0.001) as f32
     };
     let red = Color::parse("red").unwrap();
     let white = Color::parse("white").unwrap();
-    let t1 = t0 + milliseconds(16);
-    let expected_at = |now: TimePoint| lerp_color_f32(lerp_color_f32(red, red, ease(t0, now)), white, ease(t1, now));
+    let t1 = t0 + Duration::from_millis(16);
+    let expected_at = |now: Instant| lerp_color_f32(lerp_color_f32(red, red, ease(t0, now)), white, ease(t1, now));
 
     let (unevaluated, evaluated) =
         transition_and_evaluate(&impl1, unevaluated, &mut zoom_history, zoom, t1, style.get_transition_options());
@@ -225,14 +226,14 @@ fn background_color_transition() {
     assert_background(&evaluated, expected_at(t1), 1.0);
     assert!(unevaluated.has_transition());
 
-    let t2 = t1 + milliseconds(500);
-    let parameters = PropertyEvaluationParameters::with_zoom_history(zoom_history, t2, Duration::zero());
+    let t2 = t1 + Duration::from_millis(500);
+    let parameters = PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(t2), Duration::ZERO);
     let evaluated = unevaluated.evaluate(&parameters);
     assert_background(&evaluated, expected_at(t2), 1.0);
     assert!(unevaluated.has_transition());
 
-    let t3 = t1 + milliseconds(1000);
-    let parameters = PropertyEvaluationParameters::with_zoom_history(zoom_history, t3, Duration::zero());
+    let t3 = t1 + Duration::from_millis(1000);
+    let parameters = PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(t3), Duration::ZERO);
     let evaluated = unevaluated.evaluate(&parameters);
     assert_background(&evaluated, white, 1.0);
     assert!(!unevaluated.has_transition());

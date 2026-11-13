@@ -23,10 +23,11 @@ use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{ActorRef, AsyncTask, Mailbox, Thread, Timer, scheduler};
-use mln_util::chrono::{Duration, Timestamp, now};
+use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{
     ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
 };
@@ -197,7 +198,7 @@ fn interpolate_expiration(current: Timestamp, prior: Option<Timestamp>, expired:
     // Assume that either the client or server clock is wrong and try to
     // interpolate a valid expiration date (from the client POV) observing a
     // minimum timeout.
-    let minimum = CLOCK_SKEW_RETRY_TIMEOUT.count() / 1_000_000_000;
+    let minimum = CLOCK_SKEW_RETRY_TIMEOUT.as_secs() as i64;
     Timestamp::from_secs(now.secs_since_epoch() + delta.max(minimum))
 }
 
@@ -374,13 +375,14 @@ impl OnlineFileRequest {
         let prior_expires = self.resource.borrow().prior_expires;
         let timeout = match prior_expires {
             Some(_) => self.get_update_interval(prior_expires),
-            None => Duration::zero(),
+            None => Some(Duration::ZERO),
         };
         self.schedule(timeout);
     }
 
-    /// `schedule(Duration timeout)`
-    fn schedule(&self, mut timeout: Duration) {
+    /// `schedule(Duration timeout)`: requests the resource again after
+    /// `timeout`, or never for `None`.
+    fn schedule(&self, timeout: Option<Duration>) {
         let Some(state) = self.state.upgrade() else {
             return;
         };
@@ -389,22 +391,23 @@ impl OnlineFileRequest {
             return;
         }
 
-        if timeout == Duration::max() {
+        let Some(timeout) = timeout else {
             return;
-        }
+        };
 
-        // Emulate a Connection error when the Offline mode is forced with a
-        // really long timeout. The request will get re-triggered when the
+        // Emulate a Connection error when the Offline mode is forced, and
+        // don't retry: the request will get re-triggered when the
         // NetworkStatus is set back to Online.
         if NetworkStatus::get() == Status::Offline {
             self.failed_request_reason.set(Reason::Connection);
             self.failed_requests.set(1);
-            timeout = Duration::max();
+            self.timer.stop();
+            return;
         }
 
         let weak = self.state.clone();
         let id = self.id;
-        self.timer.start(timeout, Duration::zero(), move || {
+        self.timer.start(timeout, Duration::ZERO, move || {
             let Some(state) = weak.upgrade() else {
                 return;
             };
@@ -415,16 +418,19 @@ impl OnlineFileRequest {
         });
     }
 
-    /// `getUpdateInterval(std::optional<Timestamp> expires)`
-    fn get_update_interval(&self, expires: Option<Timestamp>) -> Duration {
+    /// `getUpdateInterval(std::optional<Timestamp> expires)`: when to request
+    /// the resource again, or `None` for never.
+    fn get_update_interval(&self, expires: Option<Timestamp>) -> Option<Duration> {
         // Calculate a timeout that depends on how many consecutive errors
         // we've encountered, and on the expiration time, if present.
         let error_retry =
             error_retry_timeout(self.failed_request_reason.get(), self.failed_requests.get(), self.retry_after.get());
-        let expiration = expiration_timeout(expires, self.expired_requests.get());
         let minimum = self.resource.borrow().minimum_update_interval;
-        let expiration = if expiration < minimum { minimum } else { expiration };
-        if expiration < error_retry { expiration } else { error_retry }
+        let expiration = expiration_timeout(expires, self.expired_requests.get()).map(|e| e.max(minimum));
+        match (expiration, error_retry) {
+            (Some(expiration), Some(error_retry)) => Some(expiration.min(error_retry)),
+            (expiration, error_retry) => expiration.or(error_retry),
+        }
     }
 
     /// `completed(Response)`
@@ -500,7 +506,7 @@ impl OnlineFileRequest {
         // start retrying them, and we only immediately restart request that
         // failed due to connection issues.
         if self.failed_request_reason.get() == Reason::Connection {
-            self.schedule(Duration::zero());
+            self.schedule(Some(Duration::ZERO));
         }
     }
 }

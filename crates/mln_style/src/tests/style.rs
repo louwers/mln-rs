@@ -3,11 +3,11 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use feature::Value;
 use mln_conversion::Convertible;
 use mln_style_types::{ProjectionDefinition, VisibilityType};
-use mln_util::chrono::milliseconds;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::size::Size;
@@ -77,12 +77,12 @@ fn properties() {
     assert_eq!(99.0, style.get_default_camera().roll.unwrap());
 
     style.load_json(r"{}");
-    assert_eq!(milliseconds(300), style.get_transition_options().duration.unwrap());
+    assert_eq!(Duration::from_millis(300), style.get_transition_options().duration.unwrap());
     assert_eq!(None, style.get_transition_options().delay);
 
     style.load_json(r#"{"transition": { "duration": 500, "delay": 50 }}"#);
-    assert_eq!(milliseconds(500), style.get_transition_options().duration.unwrap());
-    assert_eq!(milliseconds(50), style.get_transition_options().delay.unwrap());
+    assert_eq!(Duration::from_millis(500), style.get_transition_options().duration.unwrap());
+    assert_eq!(Duration::from_millis(50), style.get_transition_options().delay.unwrap());
 
     style.load_json(r#"{"name": 23, "center": {}, "bearing": "north", "zoom": null, "pitch": "wide"}"#);
     assert_eq!("", style.get_name());
@@ -202,15 +202,19 @@ fn layer_transition_refreshes_immutable_collection() {
     {
         let mut layer = style.get_layer_mut("line").unwrap();
         let line = layer.downcast_mut::<LineLayer>().unwrap();
-        line.set_line_color_transition(&TransitionOptions::new(Some(milliseconds(123)), Some(milliseconds(45)), true));
+        line.set_line_color_transition(&TransitionOptions::new(
+            Some(Duration::from_millis(123)),
+            Some(Duration::from_millis(45)),
+            true,
+        ));
     }
     let after = style.get_layer_impls();
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
     assert!(Arc::ptr_eq(&style.get_layer("line").unwrap().base_impl(), &after[0]));
     let impl_ = after[0].downcast_ref::<LineLayerImpl>().unwrap();
-    assert_eq!(Some(milliseconds(123)), impl_.paint.get::<LineColor>().options.duration);
-    assert_eq!(Some(milliseconds(45)), impl_.paint.get::<LineColor>().options.delay);
+    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.get::<LineColor>().options.duration);
+    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.get::<LineColor>().options.delay);
 }
 
 #[derive(Default)]
@@ -287,16 +291,28 @@ fn transition_options_publish_updates() {
     let observer = Rc::new(CountingObserver::default());
     style.set_observer(Some(observer.clone()));
 
-    style.set_transition_options(&TransitionOptions::new(Some(milliseconds(123)), Some(milliseconds(45)), true));
-    assert_eq!(Some(milliseconds(123)), style.get_transition_options().duration);
-    assert_eq!(Some(milliseconds(45)), style.get_transition_options().delay);
+    style.set_transition_options(&TransitionOptions::new(
+        Some(Duration::from_millis(123)),
+        Some(Duration::from_millis(45)),
+        true,
+    ));
+    assert_eq!(Some(Duration::from_millis(123)), style.get_transition_options().duration);
+    assert_eq!(Some(Duration::from_millis(45)), style.get_transition_options().delay);
     assert_eq!(1, observer.updates.get());
-    style.set_transition_options(&TransitionOptions::new(Some(milliseconds(123)), Some(milliseconds(45)), false));
+    style.set_transition_options(&TransitionOptions::new(
+        Some(Duration::from_millis(123)),
+        Some(Duration::from_millis(45)),
+        false,
+    ));
     assert!(!style.get_transition_options().enable_placement_transitions);
     assert_eq!(2, observer.updates.get());
 
     let updates = observer.updates.get();
-    style.set_transition_options(&TransitionOptions::new(Some(milliseconds(123)), Some(milliseconds(45)), false));
+    style.set_transition_options(&TransitionOptions::new(
+        Some(Duration::from_millis(123)),
+        Some(Duration::from_millis(45)),
+        false,
+    ));
     assert_eq!(updates, observer.updates.get());
 }
 

@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
@@ -23,7 +24,6 @@ use mln_style::layers::{
 use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
-use mln_util::chrono::{Duration, milliseconds, seconds};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
@@ -112,7 +112,9 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let timeout = Timer::new();
     {
         let observer = observer.clone();
-        timeout.start(seconds(30), Duration::zero(), move || observer.report(Outcome::Error("timeout".to_owned())));
+        timeout.start(Duration::from_secs(30), Duration::ZERO, move || {
+            observer.report(Outcome::Error("timeout".to_owned()))
+        });
     }
 
     let source = VectorSource::new("source", UrlOrTileset::Tileset(tileset), None, None, VectorEncoding::Mapbox);
@@ -130,7 +132,9 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let frame = Timer::new();
     {
         let image_manager = image_manager.clone();
-        frame.start(milliseconds(10), milliseconds(10), move || image_manager.notify_if_missing_image_added());
+        frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
+            image_manager.notify_if_missing_image_added()
+        });
     }
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
     icon.data.fill(255);

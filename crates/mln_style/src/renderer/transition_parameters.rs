@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use mln_util::chrono::TimePoint;
+use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use crate::expression::GlobalStateMap;
@@ -23,7 +23,8 @@ pub struct GlobalStateChange {
 
 #[derive(Clone, Debug, Default)]
 pub struct TransitionParameters {
-    pub now: TimePoint,
+    /// When the transitions start; `None` starts them ended.
+    pub now: Option<Instant>,
     pub transition: TransitionOptions,
     /// Set when the global state changed since the last transition.
     pub global_state_change: Option<GlobalStateChange>,
@@ -32,7 +33,7 @@ pub struct TransitionParameters {
 impl TransitionParameters {
     /// Parameters without a global-state change.
     #[must_use]
-    pub fn new(now: TimePoint, transition: TransitionOptions) -> Self {
+    pub fn new(now: Option<Instant>, transition: TransitionOptions) -> Self {
         TransitionParameters { now, transition, global_state_change: None }
     }
 

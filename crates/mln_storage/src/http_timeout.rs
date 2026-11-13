@@ -2,58 +2,56 @@
 // (`http::errorRetryTimeout`, `http::expirationTimeout`). They live here
 // rather than in mln_util because they take `Response::Error::Reason`.
 
-use mln_util::chrono::{Duration, Timestamp, now};
+use std::time::Duration;
+
+use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_RATE_LIMIT_TIMEOUT;
 
 use crate::response::Reason;
 
-fn seconds(secs: i64) -> Duration {
-    Duration::from_secs(secs)
+/// How long from now until `timestamp`; zero once it has passed.
+fn until(timestamp: Timestamp) -> Duration {
+    Duration::from_secs(u64::try_from(timestamp.secs_since_epoch() - now().secs_since_epoch()).unwrap_or(0))
 }
 
-/// `Timestamp - Timestamp` as a `Duration` (both are whole seconds).
-fn timestamp_diff(a: Timestamp, b: Timestamp) -> Duration {
-    seconds(a.secs_since_epoch() - b.secs_since_epoch())
-}
-
-/// `errorRetryTimeout(failedRequestReason, failedRequests, retryAfter)`
+/// `errorRetryTimeout(failedRequestReason, failedRequests, retryAfter)`: how
+/// long to wait before retrying a failed request; `None` when the failure
+/// doesn't call for a retry.
 #[must_use]
 pub fn error_retry_timeout(
     failed_request_reason: Reason,
     failed_requests: u32,
     retry_after: Option<Timestamp>,
-) -> Duration {
+) -> Option<Duration> {
     match failed_request_reason {
         Reason::Server => {
             // Retry after one second three times, then start exponential backoff.
-            seconds(if failed_requests <= 3 { 1 } else { 1i64 << (failed_requests - 3).min(31) })
+            Some(Duration::from_secs(if failed_requests <= 3 { 1 } else { 1 << (failed_requests - 3).min(31) }))
         }
         Reason::Connection => {
             // Immediate exponential backoff.
             debug_assert!(failed_requests > 0);
-            seconds(1i64 << failed_requests.wrapping_sub(1).min(31))
+            Some(Duration::from_secs(1 << failed_requests.wrapping_sub(1).min(31)))
         }
-        Reason::RateLimit => match retry_after {
-            Some(retry_after) => std::cmp::max(Duration::zero(), timestamp_diff(retry_after, now())),
+        Reason::RateLimit => Some(match retry_after {
+            Some(retry_after) => until(retry_after),
             // Default
-            None => seconds(i64::from(DEFAULT_RATE_LIMIT_TIMEOUT)),
-        },
+            None => DEFAULT_RATE_LIMIT_TIMEOUT,
+        }),
         // No error, or not an error that triggers retries.
-        _ => Duration::max(),
+        _ => None,
     }
 }
 
-/// `expirationTimeout(expires, expiredRequests)`
+/// `expirationTimeout(expires, expiredRequests)`: how long until a response
+/// expires, or, after it came back expired, the backoff before asking again;
+/// `None` when it never expires.
 #[must_use]
-pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Duration {
+pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Option<Duration> {
     if expired_requests > 0 {
-        return seconds(1i64 << (expired_requests - 1).min(31));
+        return Some(Duration::from_secs(1 << (expired_requests - 1).min(31)));
     }
-    if let Some(expires) = expires {
-        let d = timestamp_diff(expires, now());
-        return if d < Duration::zero() { Duration::zero() } else { d };
-    }
-    Duration::max()
+    expires.map(until)
 }
 
 #[cfg(test)]
@@ -63,31 +61,31 @@ mod tests {
 
     #[test]
     fn error_retry_timeouts() {
-        assert_eq!(error_retry_timeout(Reason::Success, 1, None), Duration::max());
-        assert_eq!(error_retry_timeout(Reason::NotFound, 1, None), Duration::max());
-        assert_eq!(error_retry_timeout(Reason::Server, 1, None), seconds(1));
-        assert_eq!(error_retry_timeout(Reason::Server, 2, None), seconds(1));
-        assert_eq!(error_retry_timeout(Reason::Server, 3, None), seconds(1));
-        assert_eq!(error_retry_timeout(Reason::Server, 4, None), seconds(2));
-        assert_eq!(error_retry_timeout(Reason::Server, 5, None), seconds(4));
-        assert_eq!(error_retry_timeout(Reason::Connection, 1, None), seconds(1));
-        assert_eq!(error_retry_timeout(Reason::Connection, 2, None), seconds(2));
-        assert_eq!(error_retry_timeout(Reason::Connection, 3, None), seconds(4));
-        assert_eq!(error_retry_timeout(Reason::Connection, 4, None), seconds(8));
-        assert_eq!(error_retry_timeout(Reason::Connection, 50, None), seconds(1 << 31));
-        assert_eq!(error_retry_timeout(Reason::RateLimit, 1, None), seconds(5));
+        assert_eq!(error_retry_timeout(Reason::Success, 1, None), None);
+        assert_eq!(error_retry_timeout(Reason::NotFound, 1, None), None);
+        assert_eq!(error_retry_timeout(Reason::Server, 1, None), Some(Duration::from_secs(1)));
+        assert_eq!(error_retry_timeout(Reason::Server, 2, None), Some(Duration::from_secs(1)));
+        assert_eq!(error_retry_timeout(Reason::Server, 3, None), Some(Duration::from_secs(1)));
+        assert_eq!(error_retry_timeout(Reason::Server, 4, None), Some(Duration::from_secs(2)));
+        assert_eq!(error_retry_timeout(Reason::Server, 5, None), Some(Duration::from_secs(4)));
+        assert_eq!(error_retry_timeout(Reason::Connection, 1, None), Some(Duration::from_secs(1)));
+        assert_eq!(error_retry_timeout(Reason::Connection, 2, None), Some(Duration::from_secs(2)));
+        assert_eq!(error_retry_timeout(Reason::Connection, 3, None), Some(Duration::from_secs(4)));
+        assert_eq!(error_retry_timeout(Reason::Connection, 4, None), Some(Duration::from_secs(8)));
+        assert_eq!(error_retry_timeout(Reason::Connection, 50, None), Some(Duration::from_secs(1 << 31)));
+        assert_eq!(error_retry_timeout(Reason::RateLimit, 1, None), Some(Duration::from_secs(5)));
         let in_one_minute = Timestamp::from_secs(now().secs_since_epoch() + 60);
         let rate_limited = error_retry_timeout(Reason::RateLimit, 1, Some(in_one_minute));
-        assert!(rate_limited >= seconds(59) && rate_limited <= seconds(60));
+        assert!(rate_limited >= Some(Duration::from_secs(59)) && rate_limited <= Some(Duration::from_secs(60)));
     }
 
     #[test]
     fn expiration_timeouts() {
-        assert_eq!(expiration_timeout(None, 0), Duration::max());
-        assert_eq!(expiration_timeout(None, 1), seconds(1));
-        assert_eq!(expiration_timeout(None, 2), seconds(2));
-        assert_eq!(expiration_timeout(None, 3), seconds(4));
+        assert_eq!(expiration_timeout(None, 0), None);
+        assert_eq!(expiration_timeout(None, 1), Some(Duration::from_secs(1)));
+        assert_eq!(expiration_timeout(None, 2), Some(Duration::from_secs(2)));
+        assert_eq!(expiration_timeout(None, 3), Some(Duration::from_secs(4)));
         let past = Timestamp::from_secs(now().secs_since_epoch() - 10);
-        assert_eq!(expiration_timeout(Some(past), 0), Duration::zero());
+        assert_eq!(expiration_timeout(Some(past), 0), Some(Duration::ZERO));
     }
 }

@@ -16,6 +16,7 @@ use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use geometry::Point;
 use mln_map_types::{
@@ -26,7 +27,6 @@ use mln_map_types::{
 };
 use mln_style_types::ProjectionDefinition;
 use mln_util::UnitBezier;
-use mln_util::chrono::{Clock, Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI, PITCH_MAX};
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -35,6 +35,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
+use mln_util::time::Instant;
 
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -150,7 +151,7 @@ struct Transition {
     /// `fields` when reporting movement, so replaced properties no longer
     /// contribute. A momentum adds the fields its settling moves.
     moving_fields: Cell<u16>,
-    start: TimePoint,
+    start: Instant,
     /// A momentum extends it for its settling.
     duration: Cell<Duration>,
     animation: AnimationOptions,
@@ -176,7 +177,7 @@ impl Transition {
     fn new(
         fields: u16,
         moving_fields: u16,
-        start: TimePoint,
+        start: Instant,
         duration: Duration,
         animation: &AnimationOptions,
         frame: FrameFn,
@@ -200,7 +201,7 @@ impl Transition {
     }
 
     fn mode(&self) -> CameraChangeMode {
-        if self.duration.get() == Duration::zero() { CameraChangeMode::Immediate } else { CameraChangeMode::Animated }
+        if self.duration.get() == Duration::ZERO { CameraChangeMode::Immediate } else { CameraChangeMode::Animated }
     }
 
     /// Records why the command stops: `Cancelled` or `Replaced`. A
@@ -226,20 +227,35 @@ impl Transition {
         TransitionEnd { outcome, velocity, generation: 0 }
     }
 
-    /// The elapsed share of the duration, in [0, 1]; 1 for an immediate
-    /// command.
-    fn progress(&self, now: TimePoint) -> f64 {
+    /// The elapsed share of the duration at `now`, in [0, 1]; 1 for an
+    /// immediate command, or without a clock.
+    fn progress(&self, now: Option<Instant>) -> f64 {
         let duration = self.duration.get();
-        if duration == Duration::zero() {
-            return 1.0;
+        match now {
+            Some(now) if !duration.is_zero() => {
+                mln_math::clamp_f64(now.saturating_duration_since(self.start).div_duration_f64(duration), 0.0, 1.0)
+            }
+            _ => 1.0,
         }
-        mln_math::clamp_f64((now - self.start).count() as f64 / duration.count() as f64, 0.0, 1.0)
+    }
+
+    /// The time since the command started, at `now`; zero before it, and
+    /// `Duration::MAX` without a clock, which ends every command.
+    fn elapsed(&self, now: Option<Instant>) -> Duration {
+        now.map_or(Duration::MAX, |now| now.saturating_duration_since(self.start))
+    }
+
+    /// Whether the command's time has run out at `now`.
+    fn has_run_out(&self, now: Option<Instant>) -> bool {
+        now.is_none_or(|now| now >= self.start && self.elapsed(Some(now)) >= self.duration.get())
     }
 }
 
-/// A `Duration` in seconds.
-fn seconds_f64(duration: Duration) -> f64 {
-    duration.count() as f64 / 1e9
+/// `seconds` truncated to whole nanoseconds, as `duration_cast` does; `None`
+/// when negative, NaN, or too long for a `Duration` made of nanoseconds. The
+/// bound is exclusive because `u64::MAX` rounds up as a double.
+fn nanos_from_secs(seconds: f64) -> Option<Duration> {
+    (seconds >= 0.0 && seconds * 1e9 < u64::MAX as f64).then(|| Duration::from_nanos((seconds * 1e9) as u64))
 }
 
 /// `MomentumState::Glide`: how far one part moves, over how long, and along
@@ -265,7 +281,7 @@ impl Glide {
         let seconds;
         match decay.model {
             MomentumDecayModel::Friction => {
-                let half_life = seconds_f64(decay.half_life);
+                let half_life = decay.half_life.as_secs_f64();
                 if half_life.is_nan() || half_life <= 0.0 || decay.stop_speed.is_nan() || decay.stop_speed <= 0.0 {
                     return None;
                 }
@@ -279,26 +295,15 @@ impl Glide {
             }
             MomentumDecayModel::Ease => {
                 glide.distance = f64::min(decay.distance, decay.max_distance);
-                seconds = seconds_f64(decay.duration);
+                seconds = decay.duration.as_secs_f64();
                 glide.easing = Some(decay.easing);
             }
         }
-        // A glide too long for the clock doesn't move. The bound is
-        // exclusive, as in flyTo(), because Duration::max() rounds up as a
-        // double.
-        if glide.distance.is_nan()
-            || glide.distance <= 0.0
-            || seconds.is_nan()
-            || seconds <= 0.0
-            || seconds >= seconds_f64(Duration::max())
-        {
+        // A glide too long for the clock doesn't move.
+        if glide.distance.is_nan() || glide.distance <= 0.0 {
             return None;
         }
-        // duration_cast truncates.
-        glide.duration = Duration::from_nanos((seconds * 1e9) as i64);
-        if glide.duration <= Duration::zero() {
-            return None;
-        }
+        glide.duration = nanos_from_secs(seconds).filter(|duration| !duration.is_zero())?;
         Some(glide)
     }
 
@@ -307,11 +312,11 @@ impl Glide {
         if elapsed >= self.duration {
             return 1.0;
         }
-        if elapsed <= Duration::zero() {
+        if elapsed.is_zero() {
             return 0.0;
         }
-        let t = seconds_f64(elapsed);
-        let total = seconds_f64(self.duration);
+        let t = elapsed.as_secs_f64();
+        let total = self.duration.as_secs_f64();
         match self.easing {
             None => (-self.rate * t).exp_m1() / (-self.rate * total).exp_m1(),
             Some(easing) => bezier(&easing).solve(t / total, 1e-6),
@@ -323,8 +328,8 @@ impl Glide {
         if elapsed >= self.duration {
             return 0.0;
         }
-        let t = f64::max(0.0, seconds_f64(elapsed));
-        let total = seconds_f64(self.duration);
+        let t = elapsed.as_secs_f64();
+        let total = self.duration.as_secs_f64();
         let Some(easing) = self.easing else {
             return self.rate * (-self.rate * t).exp() / -(-self.rate * total).exp_m1();
         };
@@ -479,7 +484,7 @@ pub struct Transform {
     source: CameraChangeSource,
     gesture: GestureState,
     /// The host's current frame time (see [`Self::set_frame_time`]).
-    frame_time: Option<TimePoint>,
+    frame_time: Option<Instant>,
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
 }
@@ -625,11 +630,11 @@ impl Transform {
         let mut camera = *input_camera;
         let globe = self.state.is_globe_rendering();
 
-        let duration = animation.duration.unwrap_or(Duration::zero());
+        let duration = animation.duration.unwrap_or(Duration::ZERO);
         if !globe
             && self.state.get_lat_lng_bounds() == LatLngBounds::default()
             && !self.is_gesture_in_progress()
-            && duration != Duration::zero()
+            && duration != Duration::ZERO
             && animation.easing.is_none()
         {
             // A plain timed ease flies without the zoom-out. The flight's
@@ -1063,19 +1068,13 @@ impl Transform {
             if let Some(v) = animation.velocity {
                 velocity = v / rho;
             }
-            let seconds = total_s / velocity;
-            // A duration Duration can't hold jumps, as one past max_duration
-            // does, rather than saturating to a flight that never ends. The
-            // bound is exclusive: Duration::max() rounds up as a double.
-            if seconds.is_finite() && seconds >= 0.0 && seconds < Duration::max().count() as f64 / 1_000_000_000.0 {
-                // duration_cast<Duration>(duration<double>(S / velocity))
-                Duration::from_nanos((seconds * 1_000_000_000.0) as i64)
-            } else {
-                Duration::zero()
-            }
+            // duration_cast<Duration>(duration<double>(S / velocity)). A
+            // duration Duration can't hold jumps, as one past max_duration
+            // does, rather than saturating to a flight that never ends.
+            nanos_from_secs(total_s / velocity).unwrap_or_default()
         };
         let duration = match animation.max_duration {
-            Some(max) if !linear_zoom_interpolation && duration > max => Duration::zero(),
+            Some(max) if !linear_zoom_interpolation && duration > max => Duration::ZERO,
             _ => duration,
         };
         let start_scale = self.state.get_scale();
@@ -1189,7 +1188,7 @@ impl Transform {
         };
         let size = self.state.get_size();
         let view_center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
-        let fling_duration = animation.duration.filter(|duration| *duration > Duration::zero());
+        let fling_duration = animation.duration.filter(|duration| *duration > Duration::ZERO);
         let globe = self.globe_on_screen();
         if globe && (offset.x.is_nan() || offset.y.is_nan()) {
             return Err(Error::invalid_argument("offset must not be NaN"));
@@ -1582,7 +1581,7 @@ impl Transform {
             | (if rotating { BEARING } else { 0 });
 
         let start = self.now();
-        let duration = if fields != 0 { duration } else { Duration::zero() };
+        let duration = if fields != 0 { duration } else { Duration::ZERO };
         let transition = Rc::new(Transition {
             coupled_fields,
             anchor,
@@ -1595,11 +1594,11 @@ impl Transform {
         self.update_movement_flags();
         self.finish_transitions(&finished);
 
-        let animated = duration != Duration::zero();
+        let animated = duration != Duration::ZERO;
         self.observer.on_camera_will_change(CameraChange { mode: transition.mode(), source: self.source });
 
         if !animated {
-            self.apply_transitions(std::slice::from_ref(&transition), start);
+            self.apply_transitions(std::slice::from_ref(&transition), Some(start));
             self.transitions.retain(|active| !Rc::ptr_eq(active, &transition));
             self.update_movement_flags();
             self.finish_transitions(&[transition]);
@@ -1608,7 +1607,7 @@ impl Transform {
 
     /// Composes the current camera with each of `active`'s cameras at `now`,
     /// for the fields it still owns, then applies the result.
-    fn apply_transitions(&mut self, active: &[Rc<Transition>], now: TimePoint) {
+    fn apply_transitions(&mut self, active: &[Rc<Transition>], now: Option<Instant>) {
         // The center is unwrapped, or wrapped on the globe without bounds
         // (TransformState::get_camera_options).
         let current = self.state.get_camera_options(None);
@@ -1755,7 +1754,9 @@ impl Transform {
         !self.transitions.is_empty()
     }
 
-    pub fn update_transitions(&mut self, now: TimePoint) {
+    /// Moves the camera to where its commands are at `now`, and ends the
+    /// ones that have run out; `None`, for a map without a clock, ends them all.
+    pub fn update_transitions(&mut self, now: Option<Instant>) {
         if self.transitions.is_empty() {
             return;
         }
@@ -1775,7 +1776,7 @@ impl Transform {
         // command finishes exactly once.
         let mut finished = Vec::new();
         for transition in &active {
-            if now - transition.start >= transition.duration.get() || transition.fields.get() == 0 {
+            if transition.has_run_out(now) || transition.fields.get() == 0 {
                 self.transitions.retain(|t| !Rc::ptr_eq(t, transition));
                 finished.push(transition.clone());
             }
@@ -1831,11 +1832,11 @@ impl Transform {
             scalars: [MomentumPart::default(); 3],
             scalar_totals: [0.0; 3],
             replaced: false,
-            elapsed: Duration::zero(),
+            elapsed: Duration::ZERO,
         };
         let mut moving = 0;
         let mut settling = 0;
-        let mut motion = Duration::zero();
+        let mut motion = Duration::ZERO;
         if let Some(velocity) = options.pan_velocity {
             let speed = velocity.x.hypot(velocity.y);
             if let Some(glide) = Glide::plan(speed, &options.pan_decay) {
@@ -1871,7 +1872,7 @@ impl Transform {
             });
             if part.snap_pending {
                 settling |= part.fields;
-                if snap.is_some_and(|snap| snap.duration != Duration::zero()) {
+                if snap.is_some_and(|snap| snap.duration != Duration::ZERO) {
                     instant = false;
                 }
             }
@@ -1946,10 +1947,10 @@ impl Transform {
         }
     }
 
-    fn advance_momentum(&mut self, transition: &Transition, now: TimePoint) {
+    fn advance_momentum(&mut self, transition: &Transition, now: Option<Instant>) {
         let Some(momentum) = &transition.momentum else { return };
         let mut momentum = momentum.borrow_mut();
-        let elapsed = now - transition.start;
+        let elapsed = transition.elapsed(now);
         momentum.elapsed = elapsed;
 
         let advance = |part: &mut MomentumPart| -> f64 {
@@ -1989,16 +1990,16 @@ impl Transform {
                 if delta != 0.0 {
                     part.snap_delta = Some(delta);
                     part.snap_start = elapsed;
-                    transition.duration.set(transition.duration.get().max(elapsed + snap.duration));
+                    transition.duration.set(transition.duration.get().max(elapsed.saturating_add(snap.duration)));
                     transition.moving_fields.set(transition.moving_fields.get() | part.fields);
                 }
             }
             if let Some(delta) = part.snap_delta {
                 let duration = part.snap.unwrap_or_default().duration;
-                let t = if duration == Duration::zero() {
+                let t = if duration == Duration::ZERO {
                     1.0
                 } else {
-                    mln_math::clamp_f64(seconds_f64(elapsed - part.snap_start) / seconds_f64(duration), 0.0, 1.0)
+                    mln_math::clamp_f64(elapsed.saturating_sub(part.snap_start).div_duration_f64(duration), 0.0, 1.0)
                 };
                 let eased = if t >= 1.0 { 1.0 } else { DEFAULT_TRANSITION_EASE.solve(t, 0.001) };
                 let fraction = eased - part.snap_applied;
@@ -2174,17 +2175,17 @@ impl Transform {
     }
 
     /// Puts the camera's animations on the host's frame clock: commands start
-    /// at the latest frame's time rather than at `Clock::now()` when they are
+    /// at the latest frame's time rather than at `Instant::now()` when they are
     /// made, and the map samples them at it. Each frame then shows its
     /// animations exactly one frame further on, whenever the input or the
     /// map's update ran, and an animation started between frames moves by
     /// that frame's interval on the next one: no frame repeats the
-    /// camera, and none skips ahead. `None` goes back to `Clock::now()`.
+    /// camera, and none skips ahead. `None` goes back to `Instant::now()`.
     ///
     /// Orbis starts animations on the first frame after the call, which
     /// keeps the camera still for that frame; a glide that continues a drag
     /// would pause there.
-    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+    pub fn set_frame_time(&mut self, time: Option<Instant>) {
         self.frame_time = time;
     }
 
@@ -2193,17 +2194,17 @@ impl Transform {
     /// forgot to set it this frame. A stale frame time would start a command
     /// in the past, which the next frame would show already under way or
     /// over.
-    pub fn frame_time(&self) -> Option<TimePoint> {
-        self.fresh_frame_time(Clock::now())
+    pub fn frame_time(&self) -> Option<Instant> {
+        self.fresh_frame_time(Instant::now())
     }
 
-    fn fresh_frame_time(&self, now: TimePoint) -> Option<TimePoint> {
-        self.frame_time.filter(|&time| now - time <= STALE_FRAME_TIME)
+    fn fresh_frame_time(&self, now: Instant) -> Option<Instant> {
+        self.frame_time.filter(|&time| now.saturating_duration_since(time) <= STALE_FRAME_TIME)
     }
 
     /// When commands start: the frame time, or now.
-    fn now(&self) -> TimePoint {
-        let now = Clock::now();
+    fn now(&self) -> Instant {
+        let now = Instant::now();
         self.fresh_frame_time(now).unwrap_or(now)
     }
 

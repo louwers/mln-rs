@@ -86,8 +86,8 @@ impl FileSource for Delayed {
         let timer = Timer::new();
         let (inner, resource, slot) = (self.inner.clone(), resource.clone(), Rc::downgrade(&request));
         let mut callback = Some(callback);
-        let delay = mln_util::chrono::Duration::from_millis(latency as i64);
-        timer.start(delay, mln_util::chrono::Duration::zero(), move || {
+        let delay = std::time::Duration::from_millis(latency);
+        timer.start(delay, std::time::Duration::ZERO, move || {
             if let (Some(slot), Some(mut callback)) = (slot.upgrade(), callback.take()) {
                 let fresh = Box::new(move |mut response: Response| {
                     let expires = mln_util::chrono::now().secs_since_epoch() + FRESH_SECONDS;

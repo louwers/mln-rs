@@ -5,11 +5,12 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{ActorRef, Mailbox, RunLoop, Timer, scheduler};
 use mln_test_server::HttpServer;
-use mln_util::chrono::{Duration, Timestamp, now};
+use mln_util::chrono::{Timestamp, now};
 
 use super::{local_callback, req, serial, temp_path};
 use crate::database_file_source::DatabaseFileSource;
@@ -908,7 +909,7 @@ fn no_double_dispatch() {
                         count.set(count.get() + 1);
                         if count.get() == 1 {
                             let (stop, count) = (stop.clone(), count.clone());
-                            check.start(Duration::from_millis(100), Duration::zero(), move || {
+                            check.start(Duration::from_millis(100), Duration::ZERO, move || {
                                 assert_eq!(1, count.get());
                                 stop.stop();
                             });

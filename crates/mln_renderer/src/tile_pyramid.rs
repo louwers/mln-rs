@@ -59,7 +59,7 @@ where
     parameters: &'p TileParameters<'a>,
     tile_range: Option<TileRange>,
     needs_relayout: bool,
-    minimum_update_interval: mln_util::chrono::Duration,
+    minimum_update_interval: std::time::Duration,
     is_volatile: bool,
     create_tile: F,
     /// Whether `renderTile` marks tiles and updates `previouslyRenderedTiles`

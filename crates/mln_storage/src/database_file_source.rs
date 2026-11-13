@@ -14,10 +14,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{ActorRef, Thread, Timer, scheduler};
-use mln_util::chrono::Duration;
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
 use mln_util::sync::MutexExt;
@@ -76,7 +76,7 @@ impl DatabaseFileSourceThread {
 
     fn start_accessed_flush_timer(&self) {
         let actor = self.self_ref.clone();
-        self.accessed_flush_timer.start(ACCESSED_FLUSH_DELAY, Duration::zero(), move || {
+        self.accessed_flush_timer.start(ACCESSED_FLUSH_DELAY, Duration::ZERO, move || {
             actor.invoke(|t: &DatabaseFileSourceThread| {
                 t.accessed_flush_scheduled.store(false, Ordering::Relaxed);
                 t.db.borrow_mut().flush_accessed();

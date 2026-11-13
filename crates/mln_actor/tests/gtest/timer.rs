@@ -9,10 +9,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mln_actor::{RunLoop, Timer};
-use mln_util::chrono::{Duration, milliseconds};
 
 /// `duration_cast<Milliseconds>(now - first).count()`.
 fn elapsed_ms(first: Instant) -> f64 {
@@ -38,7 +37,7 @@ fn basic() {
     };
 
     let timer = Timer::new();
-    timer.start(milliseconds(300), Duration::zero(), callback);
+    timer.start(Duration::from_millis(300), Duration::ZERO, callback);
 
     run_loop.run();
 
@@ -69,7 +68,7 @@ fn repeat() {
     let expected_total_time = interval * f64::from(count.get());
 
     let first = Instant::now();
-    timer.start(milliseconds(50), milliseconds(50), callback);
+    timer.start(Duration::from_millis(50), Duration::from_millis(50), callback);
 
     run_loop.run();
 
@@ -88,8 +87,8 @@ fn stop() {
     let timer1 = Rc::new(Timer::new());
     let timer2 = Timer::new();
 
-    let interval1 = milliseconds(50);
-    let interval2 = milliseconds(250);
+    let interval1 = Duration::from_millis(50);
+    let interval2 = Duration::from_millis(250);
     let expected_total_time = 250.0;
 
     let count = Rc::new(Cell::new(0));
@@ -110,7 +109,7 @@ fn stop() {
 
     let first = Instant::now();
     timer1.start(interval1, interval1, callback1);
-    timer2.start(interval2, Duration::zero(), callback2);
+    timer2.start(interval2, Duration::ZERO, callback2);
 
     run_loop.run();
 
@@ -131,8 +130,8 @@ fn destroy_should_stop() {
     let timer1: Rc<RefCell<Option<Timer>>> = Rc::new(RefCell::new(Some(Timer::new())));
     let timer2 = Timer::new();
 
-    let interval1 = milliseconds(50);
-    let interval2 = milliseconds(250);
+    let interval1 = Duration::from_millis(50);
+    let interval2 = Duration::from_millis(250);
     let expected_total_time = 250.0;
 
     let count = Rc::new(Cell::new(0));
@@ -152,7 +151,7 @@ fn destroy_should_stop() {
 
     let first = Instant::now();
     timer1.borrow().as_ref().unwrap().start(interval1, interval1, callback1);
-    timer2.start(interval2, Duration::zero(), callback2);
+    timer2.start(interval2, Duration::ZERO, callback2);
 
     run_loop.run();
 
@@ -191,8 +190,8 @@ fn stopped_during_expiration() {
     };
 
     let first = Instant::now();
-    loop_stop_timer.start(milliseconds(50), milliseconds(0), loop_stop_timer_callback);
-    timer.start(milliseconds(50), milliseconds(0), timer_callback);
+    loop_stop_timer.start(Duration::from_millis(50), Duration::from_millis(0), loop_stop_timer_callback);
+    timer.start(Duration::from_millis(50), Duration::from_millis(0), timer_callback);
 
     run_loop.run();
 
@@ -218,7 +217,7 @@ fn stopped_after_expiration() {
     let timer_callback = move || c.set(true);
 
     let first = Instant::now();
-    timer.start(milliseconds(50), milliseconds(0), timer_callback);
+    timer.start(Duration::from_millis(50), Duration::from_millis(0), timer_callback);
 
     // poll until the timer expires
     let expire_wait_interval = expire_timeout * 2.0;
@@ -262,12 +261,12 @@ fn start_overrides() {
     let callback1 = move || {
         c.set(c.get() + 1);
         if let (Some(t), Some(callback2)) = (t.upgrade(), callback2.borrow_mut().take()) {
-            t.start(milliseconds(250), Duration::zero(), callback2);
+            t.start(Duration::from_millis(250), Duration::ZERO, callback2);
         }
     };
 
     let first = Instant::now();
-    timer.start(milliseconds(50), Duration::zero(), callback1);
+    timer.start(Duration::from_millis(50), Duration::ZERO, callback1);
 
     run_loop.run();
 

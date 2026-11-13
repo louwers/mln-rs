@@ -74,7 +74,7 @@ fn light() {
         assert!(!light.get_color().is_undefined());
         assert!(light.get_color().is_constant());
         assert!(!light.get_color().is_expression());
-        assert_eq!(light.get_color_transition().duration, Some(mln_util::chrono::milliseconds(1000)));
+        assert_eq!(light.get_color_transition().duration, Some(std::time::Duration::from_millis(1000)));
         assert!(light.get_color_transition().delay.is_none());
     }
 

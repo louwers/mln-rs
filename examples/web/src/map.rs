@@ -5,6 +5,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
@@ -17,7 +18,6 @@ use mln_map::{
 use mln_renderer::Renderer;
 use mln_renderer::text::font_face_engine;
 use mln_util::LatLng;
-use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
 use mln_web_host::shaper::{self, ShaperModuleEngine};
@@ -303,7 +303,7 @@ impl WebMap {
     /// to `budget_ms` and delivers their results. Returns whether it drew.
     pub fn frame(&mut self, budget_ms: f64, now: f64) -> bool {
         // The map samples its animations at this frame's time.
-        self.map.set_frame_time(Some(mln_util::chrono::Clock::now()));
+        self.map.set_frame_time(Some(mln_util::time::Instant::now()));
         self.gestures.frame(&mut self.map, now);
         self.run_loop.run_once();
         self.handle_map_events();

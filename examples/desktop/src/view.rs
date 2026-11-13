@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mln_actor::{RunLoop, Timer};
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
@@ -42,7 +42,6 @@ use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceT
 use mln_style::PropertyValue;
 use mln_style::projection::Projection;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
-use mln_util::chrono::{Clock, Duration};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -70,7 +69,7 @@ pub(crate) struct Launch {
     /// The window's size in physical pixels.
     pub size: PhysicalSize<u32>,
     /// The least time between frames, outside benchmark mode.
-    pub frame_interval: std::time::Duration,
+    pub frame_interval: Duration,
     /// The epoch of the gesture recognizer's clock.
     pub start: Instant,
     pub inbox: Arc<Inbox>,
@@ -206,7 +205,7 @@ pub(crate) fn run(launch: Launch) {
         gesture_test: args.gesture_test.then_some(GestureTest { step: 0, next_at: None }),
         readback_path: args.readback.as_ref().map(PathBuf::from),
         readback_requested: false,
-        quit_at: args.quit_after.map(|s| Instant::now() + std::time::Duration::from_secs_f64(s)),
+        quit_at: args.quit_after.map(|s| Instant::now() + Duration::from_secs_f64(s)),
         style_reported: false,
     };
 
@@ -269,7 +268,7 @@ struct View {
     inbox: Arc<Inbox>,
     proxy: EventLoopProxy<UserEvent>,
     start: Instant,
-    frame_interval: std::time::Duration,
+    frame_interval: Duration,
     next_frame_at: Instant,
 
     /// `None` only while the backend switches.
@@ -428,14 +427,7 @@ impl View {
     /// Sleeps in the `RunLoop` until it has work, or until `deadline`.
     fn wait_until(&self, deadline: Option<Instant>) {
         match deadline {
-            Some(at) => {
-                let nanos = at.saturating_duration_since(Instant::now()).as_nanos();
-                self.wake.start(
-                    Duration::from_nanos(i64::try_from(nanos).unwrap_or(i64::MAX)),
-                    Duration::zero(),
-                    || {},
-                );
-            }
+            Some(at) => self.wake.start(at.saturating_duration_since(Instant::now()), Duration::ZERO, || {}),
             None => self.wake.stop(),
         }
         self.run_loop.wait_for_work();
@@ -453,7 +445,7 @@ impl View {
         let drawable = (self.needs_frame() || !self.inbox.is_empty()) && self.backend().acquire_next_texture();
 
         // The map samples its animations at this frame's time.
-        self.map.set_frame_time(Some(Clock::now()));
+        self.map.set_frame_time(Some(Instant::now()));
         for message in self.inbox.take() {
             self.handle(message);
         }
@@ -608,7 +600,7 @@ impl View {
             .viewport_output
             .get(&egui::ViewportId::ROOT)
             .map(|viewport| viewport.repaint_delay)
-            .filter(|delay| *delay < std::time::Duration::from_secs(3600))
+            .filter(|delay| *delay < Duration::from_secs(3600))
             .map(|delay| now + delay);
         if output.shapes != self.ui_shapes || !output.textures_delta.is_empty() {
             let primitives = self.ui.tessellate(output.shapes.clone(), output.pixels_per_point);
@@ -879,7 +871,7 @@ impl View {
         if test.next_at.is_some_and(|t| now < t) {
             return;
         }
-        test.next_at = Some(now + std::time::Duration::from_millis(1500));
+        test.next_at = Some(now + Duration::from_millis(1500));
         let step = test.step;
         test.step += 1;
 
@@ -967,7 +959,7 @@ impl View {
         let mut time = now;
         for input in inputs {
             self.handle(Message::Input { input, at: time });
-            time += std::time::Duration::from_millis(16);
+            time += Duration::from_millis(16);
         }
         for code in keys {
             self.handle(Message::Key { code, pressed: true, modifiers: none, at: time });

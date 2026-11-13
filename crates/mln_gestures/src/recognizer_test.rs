@@ -3,17 +3,18 @@
 // The rig runs the transform on its own frame clock, as a host does with
 // `set_frame_time`: each frame samples the animations 16 ms after the one
 // before, and commands start at the latest frame's time. The clock runs an
-// hour ahead of `Clock::now()`, so its frame time never goes stale.
+// hour ahead of `Instant::now()`, so its frame time never goes stale.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
-use mln_util::chrono::{Clock, TimePoint, milliseconds, seconds};
 use mln_util::geo::LatLngBounds;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use super::*;
 
@@ -43,7 +44,7 @@ struct Rig {
     camera: Transform,
     input: GestureRecognizer,
     now: f64,
-    time: TimePoint,
+    time: Instant,
 }
 
 impl Rig {
@@ -52,7 +53,7 @@ impl Rig {
     }
 
     fn with(options: &GestureOptions) -> Self {
-        let time = Clock::now() + seconds(3600);
+        let time = Instant::now() + Duration::from_secs(3600);
         let mut camera = transform();
         camera.set_frame_time(Some(time));
         Rig { camera, input: GestureRecognizer::new(*options), now: 1000.0, time }
@@ -111,8 +112,8 @@ impl Rig {
     fn frame(&mut self) -> bool {
         self.now += 16.0;
         let gesture = self.input.frame(&mut self.camera, self.now);
-        self.time += milliseconds(16);
-        self.camera.update_transitions(self.time);
+        self.time += Duration::from_millis(16);
+        self.camera.update_transitions(Some(self.time));
         self.camera.set_frame_time(Some(self.time));
         gesture || self.camera.in_transition()
     }
@@ -552,7 +553,7 @@ fn a_scroll_stops_the_cameras_animations() {
     let mut rig = Rig::new();
     rig.camera.ease_to(
         &CameraOptions { bearing: Some(45.0), ..Default::default() },
-        &AnimationOptions::new(milliseconds(500)),
+        &AnimationOptions::new(Duration::from_millis(500)),
     );
     rig.send(notches(p(400.0, 300.0), 1.0));
     assert!(!rig.camera.in_transition());
@@ -579,16 +580,20 @@ fn keys_step_the_camera() {
 #[test]
 fn input_interrupts_animations() {
     let mut rig = Rig::new();
-    rig.camera
-        .ease_to(&CameraOptions { zoom: Some(4.0), ..Default::default() }, &AnimationOptions::new(milliseconds(500)));
+    rig.camera.ease_to(
+        &CameraOptions { zoom: Some(4.0), ..Default::default() },
+        &AnimationOptions::new(Duration::from_millis(500)),
+    );
     rig.frame();
     rig.down(1, PointerKind::Mouse, 10.0, 10.0);
     assert!(!rig.camera.in_transition());
 
     // Or only the recognizer's own.
     let mut rig = Rig::with(&GestureOptions { interrupt_animations: false, ..GestureOptions::DEFAULT });
-    rig.camera
-        .ease_to(&CameraOptions { zoom: Some(4.0), ..Default::default() }, &AnimationOptions::new(milliseconds(500)));
+    rig.camera.ease_to(
+        &CameraOptions { zoom: Some(4.0), ..Default::default() },
+        &AnimationOptions::new(Duration::from_millis(500)),
+    );
     rig.frame();
     rig.down(1, PointerKind::Mouse, 10.0, 10.0);
     assert!(rig.camera.in_transition());
@@ -857,7 +862,7 @@ fn a_cancelled_pointer_stops_the_gesture_and_the_cameras_animations() {
     // An animation the app starts mid-gesture.
     rig.camera.ease_to(
         &CameraOptions { bearing: Some(45.0), ..Default::default() },
-        &AnimationOptions::new(milliseconds(500)),
+        &AnimationOptions::new(Duration::from_millis(500)),
     );
     rig.send(Input::PointerCancel { id: 1 });
     assert!(!rig.camera.is_gesture_in_progress());

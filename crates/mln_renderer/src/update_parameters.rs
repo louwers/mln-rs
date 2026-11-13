@@ -7,8 +7,8 @@ use mln_style::collection::ImmutableVector;
 use mln_style::expression::GlobalStateMap;
 use mln_style::transition_options::TransitionOptions;
 use mln_style::{image, layer, light, sky, source};
-use mln_util::chrono::TimePoint;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::time::Instant;
 
 #[derive(Clone)]
 pub struct UpdateParameters {
@@ -16,7 +16,9 @@ pub struct UpdateParameters {
     pub mode: MapMode,
     pub pixel_ratio: f32,
     pub debug_options: MapDebugOptions,
-    pub time_point: TimePoint,
+    /// The frame's time; `None` in still modes, which have no clock and show
+    /// every transition and fade as ended.
+    pub time_point: Option<Instant>,
     pub transform_state: TransformState,
 
     pub glyph_url: String,

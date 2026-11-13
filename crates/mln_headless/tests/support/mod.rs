@@ -468,13 +468,13 @@ impl Drop for FixtureLog {
 /// `runLoop.run()`, stopped (and failed) after `seconds` if nothing stopped
 /// it: a hang fails the test instead of hanging the test run.
 #[track_caller]
-pub fn run_with_timeout(run_loop: &RunLoop, seconds: i64) {
+pub fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
     let timed_out = Rc::new(Cell::new(false));
     let timer = Timer::new();
     {
         let timed_out = timed_out.clone();
         let run_loop = run_loop.clone();
-        timer.start(mln_util::chrono::Duration::from_secs(seconds), mln_util::chrono::Duration::zero(), move || {
+        timer.start(std::time::Duration::from_secs(seconds), std::time::Duration::ZERO, move || {
             timed_out.set(true);
             run_loop.stop();
         });

@@ -4,13 +4,13 @@
 
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mln_map::{
     AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
     CameraVelocity, GesturePhase, MomentumDecay, TransitionEnd, TransitionOutcome,
 };
 use mln_util::UnitBezier;
-use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
 use mln_util::sync::MutexExt;
 
@@ -21,8 +21,8 @@ use crate::velocity::VelocityTracker;
 
 /// The eases of a double-click or key step (GL JS and ffi's demo) and of a
 /// box zoom (GL JS).
-const STEP_EASE_MS: i64 = 300;
-const BOX_EASE_MS: i64 = 500;
+const STEP_EASE: Duration = Duration::from_millis(300);
+const BOX_EASE: Duration = Duration::from_millis(500);
 /// GL JS's `defaultEasing` and `easeOut`.
 const EASE_X1: f64 = 0.25;
 const EASE_Y1: f64 = 0.1;
@@ -583,9 +583,9 @@ impl GestureRecognizer {
     }
 
     /// The animation options of the recognizer's eased steps.
-    fn animation(&self, duration_ms: i64, easing: UnitBezier) -> AnimationOptions {
+    fn animation(&self, duration: Duration, easing: UnitBezier) -> AnimationOptions {
         AnimationOptions {
-            duration: Some(Duration::from_millis(duration_ms)),
+            duration: Some(duration),
             easing: Some(easing),
             transition_id: Some(self.options.transition_id),
             ..AnimationOptions::default()
@@ -1027,7 +1027,7 @@ impl GestureRecognizer {
         let update = CameraUpdate {
             mode: CameraUpdateMode::Ease,
             camera: CameraOptions { center: Some(center), zoom: Some(target), ..Default::default() },
-            animation: self.animation(BOX_EASE_MS, EASE),
+            animation: self.animation(BOX_EASE, EASE),
             phase: GesturePhase::None,
         };
         self.step_to(camera, update);
@@ -1036,7 +1036,7 @@ impl GestureRecognizer {
     /// Double-click, double-tap and two-finger-tap zoom: one level around a
     /// point, eased (GL JS, 300 ms).
     fn zoom_step(&mut self, camera: &mut dyn GestureCamera, at: V2, delta: f64) {
-        let animation = self.animation(STEP_EASE_MS, EASE);
+        let animation = self.animation(STEP_EASE, EASE);
         let step =
             CameraDelta { scale: Some(delta.exp2()), anchor: Some(at.into()), animation, ..CameraDelta::default() };
         self.eased_step(camera, step);
@@ -1117,7 +1117,7 @@ impl GestureRecognizer {
             }
             return boxing;
         }
-        let animation = self.animation(STEP_EASE_MS, EASE_OUT);
+        let animation = self.animation(STEP_EASE, EASE_OUT);
         let (pan, bearing, pitch) = (self.options.key_pan, self.options.key_bearing, self.options.key_pitch);
         let mut step = CameraDelta { animation, ..CameraDelta::default() };
         match (key, modifiers.shift) {

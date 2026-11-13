@@ -15,7 +15,7 @@
 //!
 //! Hosts read two clocks each frame: the recognizer's, in milliseconds on any
 //! clock their input events use (`performance.now()`, an `Instant`), which
-//! times taps, releases and scrolls; and the map's `Clock::now()`, which they
+//! times taps, releases and scrolls; and the map's `Instant::now()`, which they
 //! give [`Map::set_frame_time`](mln_map::Map::set_frame_time) and which times
 //! the camera's animations. The two never meet, so their epochs don't
 //! matter.

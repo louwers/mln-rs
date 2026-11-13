@@ -7,11 +7,13 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{RunLoop, Timer};
 use mln_test_server::{HttpServer, closed_port_url};
-use mln_util::chrono::{Clock, Duration, Timestamp, now};
+use mln_util::chrono::{Timestamp, now};
+use mln_util::time::Instant;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
@@ -40,9 +42,9 @@ fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
 }
 
-/// `std::chrono::duration<const double>(Clock::now() - start).count()`.
-fn seconds_since(start: mln_util::chrono::TimePoint) -> f64 {
-    (Clock::now() - start).count() as f64 / 1e9
+/// The seconds since `start`.
+fn seconds_since(start: mln_util::time::Instant) -> f64 {
+    start.elapsed().as_secs_f64()
 }
 
 // gtest: OnlineFileSource.Cancel
@@ -98,7 +100,7 @@ fn temporary_error() {
     let run_loop = RunLoop::new();
     let fs = online_file_source();
 
-    let start = Clock::now();
+    let start = Instant::now();
     let counter = Cell::new(0);
 
     let stop = run_loop.clone();
@@ -147,7 +149,7 @@ fn connection_error() {
     let run_loop = RunLoop::new();
     let fs = online_file_source();
 
-    let start = Clock::now();
+    let start = Instant::now();
     let counter = Cell::new(0);
     let wait = Cell::new(CONNECTION_TIMEOUT);
 
@@ -335,7 +337,7 @@ fn respect_minimum_update_interval() {
     let _req = fs.request(
         &resource,
         Box::new(move |_: Response| {
-            let wait = Duration::from_secs(now().secs_since_epoch() - start.secs_since_epoch());
+            let wait = Duration::from_secs((now().secs_since_epoch() - start.secs_since_epoch()) as u64);
             assert!(wait >= minimum_update_interval);
             stop.stop();
         }),
@@ -402,7 +404,7 @@ fn network_status_change() {
 
     // After 50 milliseconds, we're going to trigger a NetworkStatus change.
     let reachable_timer = Timer::new();
-    reachable_timer.start(Duration::from_millis(50), Duration::zero(), NetworkStatus::reachable);
+    reachable_timer.start(Duration::from_millis(50), Duration::ZERO, NetworkStatus::reachable);
 
     run_loop.run();
 }
@@ -418,7 +420,7 @@ fn network_status_change_preempt() {
     let fs = online_file_source();
     let paused = fs.pause();
 
-    let start = Clock::now();
+    let start = Instant::now();
     let counter = Cell::new(0);
 
     let resource = Resource::new(Kind::Unknown, closed_port_url("/test"));
@@ -461,8 +463,8 @@ fn network_status_change_preempt() {
     // NetworkStatus change.
     let reachable_timer = Timer::new();
     reachable_timer.start(
-        Duration::from_millis((CONNECTION_TIMEOUT * 1000.0) as i64 + 400),
-        Duration::zero(),
+        Duration::from_millis((CONNECTION_TIMEOUT * 1000.0) as u64 + 400),
+        Duration::ZERO,
         NetworkStatus::reachable,
     );
 
@@ -484,7 +486,7 @@ fn network_status_online_offline() {
     NetworkStatus::set(Status::Offline);
 
     let online_timer = Timer::new();
-    online_timer.start(Duration::from_millis(100), Duration::zero(), || NetworkStatus::set(Status::Online));
+    online_timer.start(Duration::from_millis(100), Duration::ZERO, || NetworkStatus::set(Status::Online));
 
     let req = req();
     let (r, stop) = (req.clone(), run_loop.clone());

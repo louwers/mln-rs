@@ -25,7 +25,6 @@ use mln_style::source::Source;
 use mln_style::sprite::Sprite;
 use mln_style::{Style, StyleLoadError};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
-use mln_util::chrono::{Clock, TimePoint};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -34,6 +33,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::Mat4;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::time::Instant;
 use mln_util::vectors::Vec3;
 
 use crate::feature_state::FeatureStateStore;
@@ -521,11 +521,9 @@ impl Map {
             return;
         }
 
-        let time_point = if self.mode == MapMode::Continuous {
-            self.transform.frame_time().unwrap_or_else(Clock::now)
-        } else {
-            TimePoint::max()
-        };
+        // Still modes have no clock: they show every transition as ended.
+        let time_point =
+            (self.mode == MapMode::Continuous).then(|| self.transform.frame_time().unwrap_or_else(Instant::now));
 
         self.transform.update_transitions(time_point);
         let projection = self.projection_at(self.transform.get_zoom());
@@ -804,14 +802,14 @@ impl Map {
 
     /// Samples the camera's animations at the host's frame time, from now on,
     /// and starts new ones from it: call it at the start of each frame with
-    /// `Clock::now()`, before rendering. One older than
+    /// `Instant::now()`, before rendering. One older than
     /// [`STALE_FRAME_TIME`](crate::transform::STALE_FRAME_TIME) counts as
     /// unset, so commands made while the host isn't drawing start now. If an
     /// animation runs, the map updates for this frame at once. `None` goes
-    /// back to sampling at `Clock::now()` whenever the map updates. Still
+    /// back to sampling at `Instant::now()` whenever the map updates. Still
     /// images ignore it. See
     /// [`Transform::set_frame_time`](crate::transform::Transform::set_frame_time).
-    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+    pub fn set_frame_time(&mut self, time: Option<Instant>) {
         self.process_events();
         self.transform.set_frame_time(time);
         if self.transform.in_transition() {

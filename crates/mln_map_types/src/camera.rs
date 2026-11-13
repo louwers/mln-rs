@@ -2,8 +2,9 @@
 // FreeCameraOptions; the FreeCameraOptions methods are in util/camera.cpp,
 // see util_camera.rs).
 
+use std::time::Duration;
+
 use mln_util::UnitBezier;
-use mln_util::chrono::Duration;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate};
 use mln_util::vectors::{Vec3, Vec4};
 
@@ -300,7 +301,7 @@ impl CameraDelta {
         if self.offset.is_some()
             && self.anchor.is_some()
             && anchored
-            && self.animation.duration.is_some_and(|duration| duration > Duration::zero())
+            && self.animation.duration.is_some_and(|duration| duration > Duration::ZERO)
         {
             return Err(CameraError::AnimatedAnchoredOffset);
         }

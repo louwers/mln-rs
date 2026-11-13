@@ -19,11 +19,11 @@ use mln_gfx::{
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileLodMode, TransformState, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::Color;
-use mln_util::chrono::TimePoint;
 use mln_util::mat4::Mat4;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
@@ -92,7 +92,8 @@ pub struct PaintParameters<'a> {
     pub pass: RenderPass,
     pub map_mode: MapMode,
     pub debug_options: MapDebugOptions,
-    pub time_point: TimePoint,
+    /// As in [`UpdateParameters::time_point`](crate::update_parameters::UpdateParameters::time_point).
+    pub time_point: Option<Instant>,
 
     pub pixel_ratio: f32,
     pub renderable_size: Size,
@@ -140,7 +141,7 @@ impl<'a> PaintParameters<'a> {
         backend: &'a dyn RendererBackend,
         map_mode: MapMode,
         debug_options: MapDebugOptions,
-        time_point: TimePoint,
+        time_point: Option<Instant>,
         transform_params: &'a TransformParameters,
         static_data: &'a RenderStaticData,
         pattern_atlas: Rc<RefCell<PatternAtlas>>,
