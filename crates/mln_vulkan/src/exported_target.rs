@@ -843,9 +843,8 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
 pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
     let (producer, consumer) = device.sync_kinds();
     let crossing = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::SyncFd, SyncKind::D3d12Fence]);
-    let keep = |kinds: SyncKinds| {
-        crossing.iter().filter(|kind| kinds.contains(*kind)).fold(SyncKinds::NONE, mln_gfx::SyncKinds::with)
-    };
+    let keep =
+        |kinds: SyncKinds| crossing.iter().filter(|kind| kinds.contains(*kind)).fold(SyncKinds::NONE, SyncKinds::with);
     (keep(producer), keep(consumer))
 }
 
@@ -913,7 +912,6 @@ impl Generation {
 /// queued for the host to acquire.
 pub struct ExportedTarget {
     backend: Rc<RendererBackend>,
-    kind: ExportKind,
     layout: Layout,
     depth: usize,
     producer: SyncKind,
@@ -976,18 +974,12 @@ impl ExportedTarget {
         let current = Generation::new(&backend, &layout, ring.depth, size, producer, depth_format)?;
         Ok(ExportedTarget {
             backend,
-            kind,
             layout,
             depth: ring.depth,
             producer,
             depth_format,
             generations: RefCell::new(Generations::new(current)),
         })
-    }
-
-    /// How the target shares its images.
-    pub fn kind(&self) -> ExportKind {
-        self.kind
     }
 
     /// Has the next frame draw into the image at `slot`.

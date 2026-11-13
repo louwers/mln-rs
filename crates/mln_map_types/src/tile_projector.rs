@@ -55,9 +55,4 @@ impl<'a> TileProjector<'a> {
     pub fn get_tile_id(&self) -> &UnwrappedTileID {
         &self.tile_id
     }
-
-    #[must_use]
-    pub fn get_projection_data(&self) -> &ProjectionData {
-        &self.data
-    }
 }

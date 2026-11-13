@@ -6,12 +6,12 @@ use crate::spec::Property;
 use crate::types::{evaluated_type, is_color_ramp};
 
 /// The line width the templates wrap at (`split120Line`, `reduceConditions`).
-pub const MAX_WIDTH: usize = 120;
+pub(crate) const MAX_WIDTH: usize = 120;
 
 /// `if a || b || ... {` at `indent`, wrapped after `||` past
 /// [`MAX_WIDTH`], continuation lines indented four more spaces.
 #[must_use]
-pub fn if_condition(indent: &str, terms: &[String]) -> Vec<String> {
+pub(crate) fn if_condition(indent: &str, terms: &[String]) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current = format!("{indent}if {}", terms[0]);
     for term in &terms[1..] {
@@ -29,17 +29,17 @@ pub fn if_condition(indent: &str, terms: &[String]) -> Vec<String> {
     lines
 }
 
-pub struct Writer {
+pub(crate) struct Writer {
     out: String,
 }
 
 impl Writer {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Writer { out: String::new() }
     }
 
-    pub fn line(&mut self, line: &str) {
+    pub(crate) fn line(&mut self, line: &str) {
         if line.is_empty() {
             self.out.push('\n');
         } else {
@@ -48,12 +48,12 @@ impl Writer {
         }
     }
 
-    pub fn blank(&mut self) {
+    pub(crate) fn blank(&mut self) {
         self.out.push('\n');
     }
 
     /// `use` lines, merged per module and sorted.
-    pub fn imports(&mut self, paths: Vec<String>) {
+    pub(crate) fn imports(&mut self, paths: Vec<String>) {
         let mut modules: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for path in paths {
             let (module, items) = if let Some(i) = path.find("::{") {
@@ -77,7 +77,7 @@ impl Writer {
 
     /// Writes `{keyword} {module}::{items};` on one line, or one item group
     /// per line, as rustfmt breaks it, when that is wider than [`MAX_WIDTH`].
-    pub fn use_items(&mut self, keyword: &str, module: &str, items: &[String]) {
+    pub(crate) fn use_items(&mut self, keyword: &str, module: &str, items: &[String]) {
         let one_line = if items.len() == 1 {
             format!("{keyword} {module}::{};", items[0])
         } else {
@@ -103,14 +103,14 @@ impl Writer {
     }
 
     /// Drops the blank line(s) before a closing brace.
-    pub fn finish_block(&mut self) {
+    pub(crate) fn finish_block(&mut self) {
         while self.out.ends_with("\n\n") {
             self.out.pop();
         }
     }
 
     #[must_use]
-    pub fn finish(mut self) -> String {
+    pub(crate) fn finish(mut self) -> String {
         while self.out.ends_with("\n\n") {
             self.out.pop();
         }
@@ -127,12 +127,12 @@ impl Default for Writer {
 /// `type.replace('-', '_')` in generate-style-code.mjs (the first hyphen
 /// only; no layer type has two).
 #[must_use]
-pub fn layer_file_name(type_: &str) -> String {
+pub(crate) fn layer_file_name(type_: &str) -> String {
     type_.replacen('-', "_", 1)
 }
 
 /// The `use` paths of the value types the properties mention.
-pub fn imports_for<'a>(properties: impl Iterator<Item = &'a Property>, with_color_ramp: bool) -> Vec<String> {
+pub(crate) fn imports_for<'a>(properties: impl Iterator<Item = &'a Property>, with_color_ramp: bool) -> Vec<String> {
     let mut names = Vec::new();
     let mut color_ramp = false;
     for p in properties {

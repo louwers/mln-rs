@@ -23,7 +23,7 @@ pub struct PropertyEvaluator<'a, T> {
 }
 
 impl<'a, T> PropertyEvaluator<'a, T> {
-    pub fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
+    pub(crate) fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
         PropertyEvaluator { parameters, default_value }
     }
 }

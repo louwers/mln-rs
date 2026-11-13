@@ -12,7 +12,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
+#[cfg(test)]
+use std::rc::Weak;
 use std::sync::Arc;
 
 use feature::Value;
@@ -177,22 +179,26 @@ pub struct OfflineDownload {
 
 /// A weak reference to an `OfflineDownload` (for observers that call back
 /// into it, as C++ observers capture the download by reference).
+#[cfg(test)]
 #[derive(Clone)]
-pub struct WeakOfflineDownload {
+pub(crate) struct WeakOfflineDownload {
     inner: Weak<Inner>,
 }
 
+#[cfg(test)]
 impl WeakOfflineDownload {
     /// Sets the download's state, if the download still exists.
-    pub fn set_state(&self, state: OfflineRegionDownloadState) {
+    #[cfg(test)]
+    pub(crate) fn set_state(&self, state: OfflineRegionDownloadState) {
         if let Some(inner) = self.inner.upgrade() {
             inner.set_state(state);
         }
     }
 
     /// The download's status, if the download still exists.
+    #[cfg(test)]
     #[must_use]
-    pub fn get_status(&self) -> Option<OfflineRegionStatus> {
+    pub(crate) fn get_status(&self) -> Option<OfflineRegionStatus> {
         self.inner.upgrade().map(|inner| inner.get_status())
     }
 }
@@ -225,8 +231,9 @@ impl OfflineDownload {
     }
 
     /// A weak reference, for observers that call back into the download.
+    #[cfg(test)]
     #[must_use]
-    pub fn downgrade(&self) -> WeakOfflineDownload {
+    pub(crate) fn downgrade(&self) -> WeakOfflineDownload {
         WeakOfflineDownload { inner: Rc::downgrade(&self.inner) }
     }
 
@@ -239,7 +246,7 @@ impl OfflineDownload {
     }
 
     #[must_use]
-    pub fn get_status(&self) -> OfflineRegionStatus {
+    pub(crate) fn get_status(&self) -> OfflineRegionStatus {
         self.inner.get_status()
     }
 }

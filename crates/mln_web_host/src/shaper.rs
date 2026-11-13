@@ -167,7 +167,7 @@ impl FontFaceEngine for ShaperModuleEngine {
             _ => Err(JsValue::from_str("the shaper module isn't loaded")),
         });
         match opened {
-            Ok(face) => face.map(|face| Box::new(ShaperFace { face, type_ }) as Box<dyn FontFaceShaper>),
+            Ok(face) => face.map(|face| -> Box<dyn FontFaceShaper> { Box::new(ShaperFace { face, type_ }) }),
             Err(error) => {
                 Log::error(Event::Glyph, format!("opening a font face failed: {}", message(&error)));
                 None

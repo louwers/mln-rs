@@ -4,7 +4,7 @@ use crate::types::VtPoint;
 
 /// square distance from a point to a segment
 #[must_use]
-pub fn get_sq_seg_dist(p: &VtPoint, a: &VtPoint, b: &VtPoint) -> f64 {
+pub(crate) fn get_sq_seg_dist(p: &VtPoint, a: &VtPoint, b: &VtPoint) -> f64 {
     let mut x = a.x;
     let mut y = a.y;
     let mut dx = b.x - a.x;
@@ -29,7 +29,7 @@ pub fn get_sq_seg_dist(p: &VtPoint, a: &VtPoint, b: &VtPoint) -> f64 {
 }
 
 /// calculate simplification data using optimized Douglas-Peucker algorithm
-pub fn simplify_range(points: &mut [VtPoint], first: usize, last: usize, sq_tolerance: f64) {
+pub(crate) fn simplify_range(points: &mut [VtPoint], first: usize, last: usize, sq_tolerance: f64) {
     let mut max_sq_dist = sq_tolerance;
     let mut index: usize = 0;
     // Quirk: `mid` is relative to `first`, but compared with absolute
@@ -68,7 +68,7 @@ pub fn simplify_range(points: &mut [VtPoint], first: usize, last: usize, sq_tole
 }
 
 /// `simplify(points, tolerance)`
-pub fn simplify(points: &mut [VtPoint], tolerance: f64) {
+pub(crate) fn simplify(points: &mut [VtPoint], tolerance: f64) {
     let len = points.len();
 
     // always retain the endpoints (1 is the max value)

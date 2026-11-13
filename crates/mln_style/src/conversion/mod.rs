@@ -6,26 +6,26 @@
 //! `convert_property_value::<T>(value, error, allow_data_expressions,
 //! convert_tokens)` and `convert_source(value, error, id)`.
 
-pub mod color_ramp_property_value;
-pub mod constant;
-pub mod coordinate;
-pub mod custom_geometry_source_options;
-pub mod filter;
+pub(crate) mod color_ramp_property_value;
+pub(crate) mod constant;
+pub(crate) mod coordinate;
+pub(crate) mod custom_geometry_source_options;
+pub(crate) mod filter;
 pub mod function;
-pub mod geojson;
-pub mod geojson_options;
-pub mod image;
+pub(crate) mod geojson;
+pub(crate) mod geojson_options;
+pub(crate) mod image;
 pub mod layer;
-pub mod light;
-pub mod position;
-pub mod projection;
-pub mod property_value;
-pub mod rotation;
-pub mod sky;
+pub(crate) mod light;
+pub(crate) mod position;
+pub(crate) mod projection;
+pub(crate) mod property_value;
+pub(crate) mod rotation;
+pub(crate) mod sky;
 pub mod source;
-pub mod sprite;
+pub(crate) mod sprite;
 pub mod tileset;
-pub mod transition_options;
+pub(crate) mod transition_options;
 
 pub use mln_conversion::{Convertible, Error};
 
@@ -39,7 +39,7 @@ pub fn convert<T: Converter>(value: &Convertible<'_>, error: &mut Error) -> Opti
     T::convert(value, error)
 }
 
-pub use color_ramp_property_value::convert_color_ramp_property_value;
-pub use layer::{convert_layer, set_paint_properties};
+pub(crate) use color_ramp_property_value::convert_color_ramp_property_value;
+pub use layer::convert_layer;
 pub use property_value::convert_property_value;
 pub use source::convert_source;

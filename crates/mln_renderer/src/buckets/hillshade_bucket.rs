@@ -28,19 +28,19 @@ use crate::tile_mask::TileMask;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct HillshadeLayoutVertex {
-    pub a1: [i16; 2],
-    pub a2: [u16; 2],
+pub(crate) struct HillshadeLayoutVertex {
+    pub(crate) a1: [i16; 2],
+    pub(crate) a2: [u16; 2],
 }
 
 /// The masked geometry of a hillshade bucket (C++ `mask`, `vertices`,
 /// `indices`, `segments`).
-pub struct HillshadeBucketGeometry {
-    pub mask: TileMask,
-    pub vertices: Vec<HillshadeLayoutVertex>,
-    pub indices: Vec<u16>,
-    pub segments: Vec<SegmentBase>,
-    pub last_modified: Instant,
+pub(crate) struct HillshadeBucketGeometry {
+    pub(crate) mask: TileMask,
+    pub(crate) vertices: Vec<HillshadeLayoutVertex>,
+    pub(crate) indices: Vec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
+    pub(crate) last_modified: Instant,
 }
 
 fn full_mask() -> TileMask {
@@ -55,7 +55,7 @@ fn full_mask() -> TileMask {
 /// (`set_mask`) and the render state this side's.
 #[derive(Serialize, Deserialize)]
 pub struct HillshadeBucket {
-    pub base: BucketBase,
+    pub(crate) base: BucketBase,
     #[serde(skip, default = "unmasked")]
     geometry: Mutex<HillshadeBucketGeometry>,
     demdata: RwLock<DEMData>,
@@ -79,12 +79,12 @@ fn unmasked() -> Mutex<HillshadeBucketGeometry> {
 impl HillshadeBucket {
     /// Builds the bucket from a DEM image; `Err` if `DEMData::new` rejects
     /// the image.
-    pub fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
+    pub(crate) fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
         Ok(Self::with_dem_data(DEMData::new(image, encoding)?))
     }
 
     #[must_use]
-    pub fn with_dem_data(demdata: DEMData) -> Self {
+    pub(crate) fn with_dem_data(demdata: DEMData) -> Self {
         HillshadeBucket {
             base: BucketBase::default(),
             geometry: unmasked(),
@@ -95,44 +95,34 @@ impl HillshadeBucket {
     }
 
     #[must_use]
-    pub fn layout_vertex(p: Point<i16>, t: Point<u16>) -> HillshadeLayoutVertex {
+    pub(crate) fn layout_vertex(p: Point<i16>, t: Point<u16>) -> HillshadeLayoutVertex {
         HillshadeLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
     }
 
     /// The masked geometry (C++ reads the members directly).
-    pub fn geometry(&self) -> MutexGuard<'_, HillshadeBucketGeometry> {
+    pub(crate) fn geometry(&self) -> MutexGuard<'_, HillshadeBucketGeometry> {
         self.geometry.lock()
     }
 
-    pub fn get_dem_data(&self) -> RwLockReadGuard<'_, DEMData> {
+    pub(crate) fn get_dem_data(&self) -> RwLockReadGuard<'_, DEMData> {
         self.demdata.read()
     }
 
-    pub fn get_dem_data_mut(&self) -> RwLockWriteGuard<'_, DEMData> {
+    pub(crate) fn get_dem_data_mut(&self) -> RwLockWriteGuard<'_, DEMData> {
         self.demdata.write()
     }
 
-    pub fn is_prepared(&self) -> bool {
-        self.prepared.load(Ordering::SeqCst)
-    }
-
-    pub fn set_prepared(&self, prepared_state: bool) {
+    pub(crate) fn set_prepared(&self, prepared_state: bool) {
         self.prepared.store(prepared_state, Ordering::SeqCst);
     }
 
-    pub fn reset_render_target_prepared(&self) {
+    pub(crate) fn reset_render_target_prepared(&self) {
         self.render_target_generation.fetch_add(1, Ordering::SeqCst);
     }
 
     /// The number of `renderTargetPrepared = false` resets so far.
-    pub fn render_target_generation(&self) -> u64 {
+    pub(crate) fn render_target_generation(&self) -> u64 {
         self.render_target_generation.load(Ordering::SeqCst)
-    }
-
-    pub fn clear(&self) {
-        let mut geometry = self.geometry();
-        Self::clear_geometry(&mut geometry);
-        self.base.uploaded.store(false, Ordering::SeqCst);
     }
 
     fn clear_geometry(geometry: &mut HillshadeBucketGeometry) {
@@ -143,7 +133,7 @@ impl HillshadeBucket {
         geometry.last_modified = Instant::now();
     }
 
-    pub fn set_mask(&self, mask: TileMask) {
+    pub(crate) fn set_mask(&self, mask: TileMask) {
         const VERTEX_LENGTH: usize = 4;
 
         let mut geometry = self.geometry();

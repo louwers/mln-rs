@@ -24,31 +24,31 @@ use crate::transition_options::TransitionOptions;
 
 /// What `Parser::parse` returns: a style that isn't one fails with
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
-pub type StyleParseResult = Result<(), mln_util::Error>;
+pub(crate) type StyleParseResult = Result<(), mln_util::Error>;
 
 pub struct Parser {
     pub sprites: Vec<Sprite>,
     pub glyph_url: String,
     pub font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
     pub sources: Vec<Box<dyn Source>>,
-    pub layers: Vec<Box<dyn Layer>>,
+    pub(crate) layers: Vec<Box<dyn Layer>>,
 
-    pub transition: TransitionOptions,
-    pub light: Light,
-    pub sky: Option<Sky>,
-    pub projection: Projection,
+    pub(crate) transition: TransitionOptions,
+    pub(crate) light: Light,
+    pub(crate) sky: Option<Sky>,
+    pub(crate) projection: Projection,
 
     /// Default values of the root "state" property, keyed by state property
     /// name, used by the "global-state" expression.
-    pub global_state_defaults: GlobalStateMap,
+    pub(crate) global_state_defaults: GlobalStateMap,
 
-    pub name: String,
-    pub lat_lng: LatLng,
-    pub zoom: f64,
-    pub bearing: f64,
-    pub pitch: f64,
-    pub roll: f64,
-    pub center_altitude: f64,
+    pub(crate) name: String,
+    pub(crate) lat_lng: LatLng,
+    pub(crate) zoom: f64,
+    pub(crate) bearing: f64,
+    pub(crate) pitch: f64,
+    pub(crate) roll: f64,
+    pub(crate) center_altitude: f64,
 }
 
 impl Default for Parser {

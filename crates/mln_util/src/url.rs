@@ -2,7 +2,7 @@
 // `std::pair<size_t, size_t>`. `usize::MAX` is `std::string::npos`; the
 // size_t arithmetic wraps as in C++ (`substr` clamps, see `substr`).
 
-pub type Segment = (usize, usize);
+pub(crate) type Segment = (usize, usize);
 
 const NPOS: usize = usize::MAX;
 
@@ -88,8 +88,8 @@ pub fn percent_decode(input: &str) -> Vec<u8> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct URL {
     pub query: Segment,
-    pub scheme: Segment,
-    pub domain: Segment,
+    pub(crate) scheme: Segment,
+    pub(crate) domain: Segment,
     pub path: Segment,
 }
 

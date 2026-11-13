@@ -92,7 +92,7 @@ pub(crate) type Pending = Option<Box<dyn PendingReads>>;
     all(feature = "metal", target_vendor = "apple")
 ))]
 fn pending(mut reads: impl PendingReads + 'static) -> Pending {
-    (!reads.poll()).then(|| Box::new(reads) as Box<dyn PendingReads>)
+    (!reads.poll()).then(|| -> Box<dyn PendingReads> { Box::new(reads) })
 }
 
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -632,8 +632,8 @@ impl LocalTarget {
     pub fn frames(&self) -> Option<&dyn FrameTarget> {
         match &self.frames {
             Frames::Offscreen(target) => Some(&**target),
-            Frames::Presenting(target) => target.as_deref().map(|target| target as &dyn FrameTarget),
-            Frames::Borrowed { target, .. } => target.as_deref().map(|target| target as &dyn FrameTarget),
+            Frames::Presenting(target) => target.as_deref().map(|target| -> &dyn FrameTarget { target }),
+            Frames::Borrowed { target, .. } => target.as_deref().map(|target| -> &dyn FrameTarget { target }),
             Frames::Exported(target) => Some(&**target),
         }
     }

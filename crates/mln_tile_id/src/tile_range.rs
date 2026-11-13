@@ -10,7 +10,7 @@ use crate::tile_id::CanonicalTileID;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileRange {
     pub range: Range<Point<u32>>,
-    pub zoom_range: Range<u8>,
+    pub(crate) zoom_range: Range<u8>,
 }
 
 impl TileRange {

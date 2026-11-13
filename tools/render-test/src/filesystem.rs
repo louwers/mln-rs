@@ -176,7 +176,7 @@ impl Grammar {
 }
 
 #[must_use]
-pub fn is_relative(path: &str) -> bool {
+pub(crate) fn is_relative(path: &str) -> bool {
     NATIVE.is_relative(path)
 }
 
@@ -185,44 +185,44 @@ pub fn is_relative(path: &str) -> bool {
 /// ends with one (and on Windows, `rel`'s root directory keeps only `base`'s
 /// root name).
 #[must_use]
-pub fn join(base: &str, rel: &str) -> String {
+pub(crate) fn join(base: &str, rel: &str) -> String {
     NATIVE.join(base, rel)
 }
 
 /// The part of `path` after the last separator (empty for `"a/"`).
 #[must_use]
-pub fn filename(path: &str) -> &str {
+pub(crate) fn filename(path: &str) -> &str {
     NATIVE.filename(path)
 }
 
 /// `path` without its filename, keeping the trailing separator.
 #[must_use]
-pub fn remove_filename(path: &str) -> String {
+pub(crate) fn remove_filename(path: &str) -> String {
     NATIVE.remove_filename(path)
 }
 
 #[must_use]
-pub fn stem(path: &str) -> &str {
+pub(crate) fn stem(path: &str) -> &str {
     NATIVE.stem(path)
 }
 
 /// Whether `path` exists, following symlinks.
 #[must_use]
-pub fn exists(path: &str) -> bool {
+pub(crate) fn exists(path: &str) -> bool {
     Path::new(path).exists()
 }
 
 /// `path` in normal form ([fs.path.generic]), as `path::lexically_normal`
 /// returns it.
 #[must_use]
-pub fn lexically_normal(path: &str) -> String {
+pub(crate) fn lexically_normal(path: &str) -> String {
     NATIVE.lexically_normal(path)
 }
 
 /// The entries of `std::filesystem::directory_iterator(dir)`, as
 /// `dir / filename` strings, in `readdir` order (libstdc++ does not sort
 /// either).
-pub fn directory_entries(dir: &str) -> io::Result<Vec<String>> {
+pub(crate) fn directory_entries(dir: &str) -> io::Result<Vec<String>> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -234,7 +234,7 @@ pub fn directory_entries(dir: &str) -> io::Result<Vec<String>> {
 /// The entries of `std::filesystem::recursive_directory_iterator(root)`:
 /// pre-order, `readdir` order, descending into directories but not into
 /// symlinks to directories (no `follow_directory_symlink`).
-pub fn recursive_directory_entries(root: &str) -> io::Result<Vec<String>> {
+pub(crate) fn recursive_directory_entries(root: &str) -> io::Result<Vec<String>> {
     fn walk(dir: &str, out: &mut Vec<String>) -> io::Result<()> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
@@ -254,7 +254,7 @@ pub fn recursive_directory_entries(root: &str) -> io::Result<Vec<String>> {
 
 /// Whether `path` is a regular file, following symlinks.
 #[must_use]
-pub fn is_regular_file(path: &str) -> bool {
+pub(crate) fn is_regular_file(path: &str) -> bool {
     fs::metadata(path).is_ok_and(|m| m.is_file())
 }
 

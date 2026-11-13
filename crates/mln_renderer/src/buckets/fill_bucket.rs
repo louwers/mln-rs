@@ -41,30 +41,30 @@ crate::paint_property_binders!(
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct FillLayoutVertex {
-    pub a1: [i16; 2],
+pub(crate) struct FillLayoutVertex {
+    pub(crate) a1: [i16; 2],
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct FillBucket {
-    pub base: BucketBase,
+pub(crate) struct FillBucket {
+    pub(crate) base: BucketBase,
 
     // MLN_TRIANGULATE_FILL_OUTLINES
-    pub line_vertices: GeometryVec<LineLayoutVertex>,
-    pub line_indexes: GeometryVec<u16>,
-    pub line_segments: Vec<SegmentBase>,
+    pub(crate) line_vertices: GeometryVec<LineLayoutVertex>,
+    pub(crate) line_indexes: GeometryVec<u16>,
+    pub(crate) line_segments: Vec<SegmentBase>,
 
-    pub basic_lines: GeometryVec<u16>,
-    pub basic_line_segments: Vec<SegmentBase>,
+    pub(crate) basic_lines: GeometryVec<u16>,
+    pub(crate) basic_line_segments: Vec<SegmentBase>,
 
-    pub vertices: GeometryVec<FillLayoutVertex>,
-    pub triangles: GeometryVec<u16>,
-    pub triangle_segments: Vec<SegmentBase>,
-    pub subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) vertices: GeometryVec<FillLayoutVertex>,
+    pub(crate) triangles: GeometryVec<u16>,
+    pub(crate) triangle_segments: Vec<SegmentBase>,
+    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: VecMap<String, RwLock<FillBinders>>,
+    pub(crate) paint_property_binders: VecMap<String, RwLock<FillBinders>>,
 
     #[serde(with = "sorted::map")]
     sdf_patterns: HashMap<String, bool>,
@@ -76,7 +76,7 @@ static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl FillBucket {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         _layout: &FillLayoutProperties::PossiblyEvaluated,
         layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
@@ -105,12 +105,12 @@ impl FillBucket {
         }
     }
 
-    pub fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
+    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
         self.subdivision_granularity = *value;
     }
 
     #[must_use]
-    pub fn layout_vertex(p: GeometryCoordinate) -> FillLayoutVertex {
+    pub(crate) fn layout_vertex(p: GeometryCoordinate) -> FillLayoutVertex {
         FillLayoutVertex { a1: [p.x, p.y] }
     }
 

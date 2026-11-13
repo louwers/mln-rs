@@ -19,7 +19,7 @@ use crate::context::Context;
 use crate::enums;
 use crate::types::TextureID;
 
-pub struct Texture2D {
+pub(crate) struct Texture2D {
     context: Weak<Context>,
     texture: Option<TextureID>,
     size: Size,
@@ -35,7 +35,7 @@ pub struct Texture2D {
 
 impl Texture2D {
     #[must_use]
-    pub fn new(context: Weak<Context>) -> Self {
+    pub(crate) fn new(context: Weak<Context>) -> Self {
         Texture2D {
             context,
             texture: None,
@@ -51,7 +51,7 @@ impl Texture2D {
     }
 
     #[must_use]
-    pub fn get_texture_id(&self) -> Option<TextureID> {
+    pub(crate) fn get_texture_id(&self) -> Option<TextureID> {
         self.texture
     }
 
@@ -144,7 +144,7 @@ impl Texture2D {
     }
 
     /// Binds the texture to `texture_unit`, which the sampler reads.
-    pub fn bind(&mut self, context: &Context, texture_unit: u32) {
+    pub(crate) fn bind(&mut self, context: &Context, texture_unit: u32) {
         debug_assert!((texture_unit as i32) < texture2d::MAX_ACTIVE_TEXTURE_UNITS);
         // Update the sampler state if it was changed after resource creation
         if self.sampler_state_dirty && self.texture.is_some() {

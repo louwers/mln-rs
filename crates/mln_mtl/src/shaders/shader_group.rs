@@ -20,14 +20,14 @@ use crate::shaders::shader_program::ShaderProgram;
 
 const UNIFORM_PREFIX: &str = "HAS_UNIFORM_u_";
 
-pub struct ShaderGroup {
+pub(crate) struct ShaderGroup {
     data: ShaderGroupData,
     shader_id: BuiltIn,
     program_parameters: ProgramParameters,
 }
 
 impl ShaderGroup {
-    pub fn new(shader_id: BuiltIn, program_parameters: ProgramParameters) -> Self {
+    pub(crate) fn new(shader_id: BuiltIn, program_parameters: ProgramParameters) -> Self {
         ShaderGroup { data: ShaderGroupData::default(), shader_id, program_parameters }
     }
 

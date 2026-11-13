@@ -253,7 +253,7 @@ fn feature_collection(features: &[feature::Feature<f64>]) -> LentText {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_query_rendered_features(
+pub(crate) unsafe extern "C" fn mln_render_session_query_rendered_features(
     session: mln_render_session,
     geometry: *const mln_rendered_query_geometry,
     options: *const mln_rendered_feature_query_options,
@@ -281,7 +281,7 @@ pub unsafe extern "C" fn mln_render_session_query_rendered_features(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_query_source_features(
+pub(crate) unsafe extern "C" fn mln_render_session_query_source_features(
     session: mln_render_session,
     source_id: mln_buffer_view,
     options: *const mln_source_feature_query_options,
@@ -316,7 +316,7 @@ pub unsafe extern "C" fn mln_render_session_query_source_features(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_get_cluster_children(
+pub(crate) unsafe extern "C" fn mln_render_session_get_cluster_children(
     session: mln_render_session,
     source_id: mln_buffer_view,
     cluster_id: u32,
@@ -344,7 +344,7 @@ pub unsafe extern "C" fn mln_render_session_get_cluster_children(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_get_cluster_leaves(
+pub(crate) unsafe extern "C" fn mln_render_session_get_cluster_leaves(
     session: mln_render_session,
     source_id: mln_buffer_view,
     cluster_id: u32,
@@ -374,7 +374,7 @@ pub unsafe extern "C" fn mln_render_session_get_cluster_leaves(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_get_cluster_expansion_zoom(
+pub(crate) unsafe extern "C" fn mln_render_session_get_cluster_expansion_zoom(
     session: mln_render_session,
     source_id: mln_buffer_view,
     cluster_id: u32,

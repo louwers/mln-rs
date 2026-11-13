@@ -62,17 +62,10 @@ impl<T> PropertyValue<T> {
         matches!(self, PropertyValue::Expression(_))
     }
 
-    pub fn is_data_driven(&self) -> bool {
+    pub(crate) fn is_data_driven(&self) -> bool {
         match self {
             PropertyValue::Undefined | PropertyValue::Constant(_) => false,
             PropertyValue::Expression(fn_) => !fn_.is_feature_constant(),
-        }
-    }
-
-    pub fn is_zoom_constant(&self) -> bool {
-        match self {
-            PropertyValue::Undefined | PropertyValue::Constant(_) => true,
-            PropertyValue::Expression(fn_) => fn_.is_zoom_constant(),
         }
     }
 
@@ -100,7 +93,7 @@ impl<T> PropertyValue<T> {
     }
 
     /// `evaluate(evaluator)`: visits the alternative with the evaluator.
-    pub fn evaluate<E: Evaluator<T>>(&self, evaluator: &E) -> E::ResultType {
+    pub(crate) fn evaluate<E: Evaluator<T>>(&self, evaluator: &E) -> E::ResultType {
         match self {
             PropertyValue::Undefined => evaluator.undefined(),
             PropertyValue::Constant(t) => evaluator.constant(t),
@@ -108,21 +101,21 @@ impl<T> PropertyValue<T> {
         }
     }
 
-    pub fn has_data_driven_property_difference(&self, other: &PropertyValue<T>) -> bool
+    pub(crate) fn has_data_driven_property_difference(&self, other: &PropertyValue<T>) -> bool
     where
         T: PartialEq,
     {
         *self != *other && (self.is_data_driven() || other.is_data_driven())
     }
 
-    pub fn get_dependencies(&self) -> Dependency {
+    pub(crate) fn get_dependencies(&self) -> Dependency {
         match self {
             PropertyValue::Undefined | PropertyValue::Constant(_) => Dependency::NONE,
             PropertyValue::Expression(ex) => ex.get_dependencies(),
         }
     }
 
-    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
+    pub(crate) fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         match self {
             PropertyValue::Undefined | PropertyValue::Constant(_) => None,
             PropertyValue::Expression(ex) => ex.get_global_state_refs(),

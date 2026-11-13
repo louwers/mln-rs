@@ -105,7 +105,7 @@ fn a_region_lives_from_creation_to_deletion() {
 
     wait(|done| source.invalidate_offline_region(region.id, done)).unwrap();
     wait(|done| source.delete_offline_region(region.id, done)).unwrap();
-    assert_eq!(wait(|done| source.list_offline_regions(done)).unwrap(), [] as [mln_storage::offline::OfflineRegion; 0]);
+    assert_eq!(wait(|done| source.list_offline_regions(done)).unwrap(), Vec::<OfflineRegion>::new());
     let id = region.id;
     let not_found =
         |result: Result<(), DatabaseError>| matches!(result, Err(DatabaseError::RegionNotFound(i)) if i == id);

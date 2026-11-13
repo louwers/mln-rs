@@ -13,23 +13,23 @@ use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
 
 /// Records into the command buffer of a frame.
-pub struct CommandEncoder {
+pub(crate) struct CommandEncoder {
     context: Rc<Context>,
     command_buffer: vk::CommandBuffer,
 }
 
 impl CommandEncoder {
-    pub fn new(context: Rc<Context>, command_buffer: vk::CommandBuffer) -> Self {
+    pub(crate) fn new(context: Rc<Context>, command_buffer: vk::CommandBuffer) -> Self {
         CommandEncoder { context, command_buffer }
     }
 
     #[must_use]
-    pub fn get_context(&self) -> &Rc<Context> {
+    pub(crate) fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
 
     #[must_use]
-    pub fn get_command_buffer(&self) -> vk::CommandBuffer {
+    pub(crate) fn get_command_buffer(&self) -> vk::CommandBuffer {
         self.command_buffer
     }
 }

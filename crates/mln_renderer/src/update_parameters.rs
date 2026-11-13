@@ -21,7 +21,7 @@ pub struct UpdateParameters {
 
     pub glyph_url: String,
     /// symbols: `std::shared_ptr<FontFaces> fontFaces`.
-    pub font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
+    pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
     pub sprite_loaded: bool,
     pub transition_options: TransitionOptions,
     pub light: Arc<light::Impl>,

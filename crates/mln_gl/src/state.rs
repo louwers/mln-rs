@@ -22,7 +22,7 @@ use crate::enums;
 use crate::types::{BufferID, FramebufferID, Gl, ProgramID, TextureID, VertexArrayID};
 
 /// A scissor box or a viewport: x, y, width, height, from the bottom left.
-pub type Rect = (i32, i32, i32, i32);
+pub(crate) type Rect = (i32, i32, i32, i32);
 
 /// What GL was last told about one piece of state.
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -44,7 +44,7 @@ fn changed<T: Copy + PartialEq>(cell: &Cell<Cached<T>>, value: T) -> bool {
 }
 
 #[derive(Default)]
-pub struct State {
+pub(crate) struct State {
     program: Cell<Cached<Option<ProgramID>>>,
     vertex_array: Cell<Cached<Option<VertexArrayID>>>,
     framebuffer: Cell<Cached<Option<FramebufferID>>>,
@@ -89,7 +89,7 @@ pub struct State {
 impl State {
     /// Forgets what GL was last told, after code outside the backend has used
     /// the context.
-    pub fn set_dirty(&self) {
+    pub(crate) fn set_dirty(&self) {
         self.program.set(Cached::Dirty);
         self.vertex_array.set(Cached::Dirty);
         self.framebuffer.set(Cached::Dirty);
@@ -139,28 +139,21 @@ impl State {
         }
     }
 
-    pub fn use_program(&self, gl: &Gl, program: Option<ProgramID>) {
+    pub(crate) fn use_program(&self, gl: &Gl, program: Option<ProgramID>) {
         if changed(&self.program, program) {
             // SAFETY: the program is alive, or none.
             unsafe { gl.use_program(program) };
         }
     }
 
-    pub fn current_program(&self) -> Option<ProgramID> {
-        match self.program.get() {
-            Cached::Known(program) => program,
-            Cached::Dirty => None,
-        }
-    }
-
-    pub fn bind_vertex_array(&self, gl: &Gl, vertex_array: Option<VertexArrayID>) {
+    pub(crate) fn bind_vertex_array(&self, gl: &Gl, vertex_array: Option<VertexArrayID>) {
         if changed(&self.vertex_array, vertex_array) {
             // SAFETY: the vertex array is alive, or none.
             unsafe { gl.bind_vertex_array(vertex_array) };
         }
     }
 
-    pub fn bind_framebuffer(&self, gl: &Gl, framebuffer: Option<FramebufferID>) {
+    pub(crate) fn bind_framebuffer(&self, gl: &Gl, framebuffer: Option<FramebufferID>) {
         if changed(&self.framebuffer, framebuffer) {
             // SAFETY: the framebuffer is alive, or the default one.
             unsafe { gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer) };
@@ -169,7 +162,7 @@ impl State {
 
     /// Binds `texture` to `unit`, which becomes the active one if GL has to
     /// be told.
-    pub fn bind_texture(&self, gl: &Gl, unit: u32, texture: Option<TextureID>) {
+    pub(crate) fn bind_texture(&self, gl: &Gl, unit: u32, texture: Option<TextureID>) {
         let Some(cell) = self.textures.get(unit as usize) else {
             debug_assert!(false, "texture unit out of range");
             return;
@@ -185,7 +178,7 @@ impl State {
 
     /// Makes `unit` the active texture unit, with `texture` bound to it, for
     /// calls that change the texture.
-    pub fn activate_texture(&self, gl: &Gl, unit: u32, texture: Option<TextureID>) {
+    pub(crate) fn activate_texture(&self, gl: &Gl, unit: u32, texture: Option<TextureID>) {
         self.active_texture(gl, unit);
         if let Some(cell) = self.textures.get(unit as usize)
             && changed(cell, texture)
@@ -204,7 +197,7 @@ impl State {
 
     /// Forgets `texture`, which is being deleted or rendered into: unbinds it
     /// from the units it is bound to.
-    pub fn unbind_texture(&self, gl: &Gl, texture: TextureID) {
+    pub(crate) fn unbind_texture(&self, gl: &Gl, texture: TextureID) {
         for unit in 0..self.textures.len() {
             if self.textures[unit].get() == Cached::Known(Some(texture)) {
                 self.bind_texture(gl, unit as u32, None);
@@ -214,7 +207,7 @@ impl State {
 
     /// Binds `size` bytes at `offset` of `buffer` to the uniform buffer
     /// binding point `index`.
-    pub fn bind_uniform_buffer_range(&self, gl: &Gl, index: usize, buffer: BufferID, offset: i32, size: i32) {
+    pub(crate) fn bind_uniform_buffer_range(&self, gl: &Gl, index: usize, buffer: BufferID, offset: i32, size: i32) {
         let Some(cell) = self.uniform_buffers.get(index) else {
             debug_assert!(false, "uniform buffer binding out of range");
             return;
@@ -226,7 +219,7 @@ impl State {
     }
 
     /// Forgets `buffer`, which is being deleted or has new storage.
-    pub fn forget_uniform_buffer(&self, buffer: BufferID) {
+    pub(crate) fn forget_uniform_buffer(&self, buffer: BufferID) {
         for cell in &self.uniform_buffers {
             if matches!(cell.get(), Cached::Known((bound, _, _)) if bound == buffer) {
                 cell.set(Cached::Dirty);
@@ -234,7 +227,7 @@ impl State {
         }
     }
 
-    pub fn set_depth_mode(&self, gl: &Gl, depth: &DepthMode) {
+    pub(crate) fn set_depth_mode(&self, gl: &Gl, depth: &DepthMode) {
         if depth.func == DepthFunctionType::Always && depth.mask != DepthMaskType::ReadWrite {
             Self::capability(gl, &self.depth_test, glow::DEPTH_TEST, false);
             // Depth-related state should not matter when the depth test is
@@ -263,7 +256,7 @@ impl State {
         }
     }
 
-    pub fn set_stencil_mode(&self, gl: &Gl, stencil: &StencilMode) {
+    pub(crate) fn set_stencil_mode(&self, gl: &Gl, stencil: &StencilMode) {
         if stencil.test == Test::Always && stencil.mask == 0 {
             Self::capability(gl, &self.stencil_test, glow::STENCIL_TEST, false);
             return;
@@ -295,7 +288,7 @@ impl State {
         }
     }
 
-    pub fn set_color_mode(&self, gl: &Gl, color: &ColorMode) {
+    pub(crate) fn set_color_mode(&self, gl: &Gl, color: &ColorMode) {
         match color.blend_function {
             mln_gfx::color_mode::BlendFunction::Replace => Self::capability(gl, &self.blend, glow::BLEND, false),
             function => {
@@ -330,7 +323,7 @@ impl State {
         }
     }
 
-    pub fn set_cull_face_mode(&self, gl: &Gl, mode: &CullFaceMode) {
+    pub(crate) fn set_cull_face_mode(&self, gl: &Gl, mode: CullFaceMode) {
         Self::capability(gl, &self.cull_face, glow::CULL_FACE, mode.enabled);
         // These shouldn't need to be updated when face culling is disabled,
         // but we might end up having the same issues with Adreno 2xx GPUs as
@@ -347,7 +340,7 @@ impl State {
 
     /// Restricts drawing to `rect`, or to nothing less than the framebuffer
     /// without one.
-    pub fn set_scissor(&self, gl: &Gl, rect: Option<Rect>) {
+    pub(crate) fn set_scissor(&self, gl: &Gl, rect: Option<Rect>) {
         if !changed(&self.scissor, rect) {
             return;
         }
@@ -363,28 +356,28 @@ impl State {
         }
     }
 
-    pub fn set_viewport(&self, gl: &Gl, rect: Rect) {
+    pub(crate) fn set_viewport(&self, gl: &Gl, rect: Rect) {
         if changed(&self.viewport, rect) {
             // SAFETY: the sizes aren't negative.
             unsafe { gl.viewport(rect.0, rect.1, rect.2, rect.3) };
         }
     }
 
-    pub fn set_line_width(&self, gl: &Gl, width: f32) {
+    pub(crate) fn set_line_width(&self, gl: &Gl, width: f32) {
         if changed(&self.line_width, width) {
             // SAFETY: the width is positive (`DrawMode`).
             unsafe { gl.line_width(width) };
         }
     }
 
-    pub fn set_pixel_store_pack_alignment(&self, gl: &Gl, alignment: i32) {
+    pub(crate) fn set_pixel_store_pack_alignment(&self, gl: &Gl, alignment: i32) {
         if changed(&self.pixel_store_pack_alignment, alignment) {
             // SAFETY: an alignment GL defines.
             unsafe { gl.pixel_store_i32(glow::PACK_ALIGNMENT, alignment) };
         }
     }
 
-    pub fn set_pixel_store_unpack_alignment(&self, gl: &Gl, alignment: i32) {
+    pub(crate) fn set_pixel_store_unpack_alignment(&self, gl: &Gl, alignment: i32) {
         if changed(&self.pixel_store_unpack_alignment, alignment) {
             // SAFETY: an alignment GL defines.
             unsafe { gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, alignment) };
@@ -393,7 +386,7 @@ impl State {
 
     /// Clears the buffers given a value, all of each: the scissor test and
     /// the buffers' write masks would restrict it.
-    pub fn clear(&self, gl: &Gl, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
+    pub(crate) fn clear(&self, gl: &Gl, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
         let mut mask = 0;
         if let Some(color) = color {
             mask |= glow::COLOR_BUFFER_BIT;
@@ -429,25 +422,25 @@ impl State {
     }
 
     /// Forgets the objects in `f`'s lists, which are being deleted.
-    pub fn forget_program(&self, program: ProgramID) {
+    pub(crate) fn forget_program(&self, program: ProgramID) {
         if self.program.get() == Cached::Known(Some(program)) {
             self.program.set(Cached::Dirty);
         }
     }
 
-    pub fn forget_vertex_array(&self, vertex_array: VertexArrayID) {
+    pub(crate) fn forget_vertex_array(&self, vertex_array: VertexArrayID) {
         if self.vertex_array.get() == Cached::Known(Some(vertex_array)) {
             self.vertex_array.set(Cached::Dirty);
         }
     }
 
-    pub fn forget_framebuffer(&self, framebuffer: FramebufferID) {
+    pub(crate) fn forget_framebuffer(&self, framebuffer: FramebufferID) {
         if self.framebuffer.get() == Cached::Known(Some(framebuffer)) {
             self.framebuffer.set(Cached::Dirty);
         }
     }
 
-    pub fn forget_texture(&self, texture: TextureID) {
+    pub(crate) fn forget_texture(&self, texture: TextureID) {
         for cell in &self.textures {
             if cell.get() == Cached::Known(Some(texture)) {
                 cell.set(Cached::Dirty);

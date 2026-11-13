@@ -64,19 +64,19 @@ use crate::text::collision_index::{CollisionBoundaries, CollisionIndex, Intersec
 use crate::update_parameters::UpdateParameters;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct OpacityState {
-    pub opacity: f32,
-    pub placed: bool,
+pub(crate) struct OpacityState {
+    pub(crate) opacity: f32,
+    pub(crate) placed: bool,
 }
 
 impl OpacityState {
     #[must_use]
-    pub fn new(placed: bool, skip_fade: bool) -> Self {
+    pub(crate) fn new(placed: bool, skip_fade: bool) -> Self {
         OpacityState { opacity: if skip_fade && placed { 1.0 } else { 0.0 }, placed }
     }
 
     #[must_use]
-    pub fn from_prev(prev_state: &OpacityState, increment: f32, placed: bool) -> Self {
+    pub(crate) fn from_prev(prev_state: OpacityState, increment: f32, placed: bool) -> Self {
         OpacityState {
             opacity: fmaxf(
                 0.0,
@@ -87,20 +87,20 @@ impl OpacityState {
     }
 
     #[must_use]
-    pub fn is_hidden(&self) -> bool {
+    pub(crate) fn is_hidden(self) -> bool {
         self.opacity == 0.0 && !self.placed
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct JointOpacityState {
-    pub icon: OpacityState,
-    pub text: OpacityState,
+pub(crate) struct JointOpacityState {
+    pub(crate) icon: OpacityState,
+    pub(crate) text: OpacityState,
 }
 
 impl JointOpacityState {
     #[must_use]
-    pub fn new(placed_text: bool, placed_icon: bool, skip_fade: bool) -> Self {
+    pub(crate) fn new(placed_text: bool, placed_icon: bool, skip_fade: bool) -> Self {
         JointOpacityState {
             icon: OpacityState::new(placed_icon, skip_fade),
             text: OpacityState::new(placed_text, skip_fade),
@@ -108,76 +108,80 @@ impl JointOpacityState {
     }
 
     #[must_use]
-    pub fn from_prev(
+    pub(crate) fn from_prev(
         prev_opacity_state: &JointOpacityState,
         increment: f32,
         placed_text: bool,
         placed_icon: bool,
     ) -> Self {
         JointOpacityState {
-            icon: OpacityState::from_prev(&prev_opacity_state.icon, increment, placed_icon),
-            text: OpacityState::from_prev(&prev_opacity_state.text, increment, placed_text),
+            icon: OpacityState::from_prev(prev_opacity_state.icon, increment, placed_icon),
+            text: OpacityState::from_prev(prev_opacity_state.text, increment, placed_text),
         }
     }
 
     #[must_use]
-    pub fn is_hidden(&self) -> bool {
+    pub(crate) fn is_hidden(&self) -> bool {
         self.icon.is_hidden() && self.text.is_hidden()
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct VariableOffset {
-    pub offset: [f32; 2],
-    pub width: f32,
-    pub height: f32,
-    pub anchor: SymbolAnchorType,
-    pub text_box_scale: f32,
-    pub prev_anchor: Option<SymbolAnchorType>,
+pub(crate) struct VariableOffset {
+    pub(crate) offset: [f32; 2],
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) anchor: SymbolAnchorType,
+    pub(crate) text_box_scale: f32,
+    pub(crate) prev_anchor: Option<SymbolAnchorType>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct JointPlacement {
-    pub text: bool,
-    pub icon: bool,
+pub(crate) struct JointPlacement {
+    pub(crate) text: bool,
+    pub(crate) icon: bool,
     /// skipFade = outside viewport, but within `CollisionIndex::viewportPadding`
     /// px of the edge Because these symbols aren't onscreen yet, we can skip
     /// the "fade in" animation, and if a subsequent viewport change brings
     /// them into view, they'll be fully visible right away.
-    pub skip_fade: bool,
+    pub(crate) skip_fade: bool,
 }
 
 impl JointPlacement {
     #[must_use]
-    pub fn new(text: bool, icon: bool, skip_fade: bool) -> Self {
+    pub(crate) fn new(text: bool, icon: bool, skip_fade: bool) -> Self {
         JointPlacement { text, icon, skip_fade }
     }
 
     #[must_use]
-    pub fn placed(&self) -> bool {
+    pub(crate) fn placed(self) -> bool {
         self.text || self.icon
     }
 }
 
 #[derive(Debug)]
-pub struct RetainedQueryData {
-    pub bucket_instance_id: u32,
-    pub feature_index: Option<Arc<FeatureIndex>>,
-    pub tile_id: OverscaledTileID,
-    pub feature_sort_order: RefCell<Option<Arc<Vec<usize>>>>,
+pub(crate) struct RetainedQueryData {
+    pub(crate) bucket_instance_id: u32,
+    pub(crate) feature_index: Option<Arc<FeatureIndex>>,
+    pub(crate) tile_id: OverscaledTileID,
+    pub(crate) feature_sort_order: RefCell<Option<Arc<Vec<usize>>>>,
 }
 
 impl RetainedQueryData {
     #[must_use]
-    pub fn new(bucket_instance_id: u32, feature_index: Option<Arc<FeatureIndex>>, tile_id: OverscaledTileID) -> Self {
+    pub(crate) fn new(
+        bucket_instance_id: u32,
+        feature_index: Option<Arc<FeatureIndex>>,
+        tile_id: OverscaledTileID,
+    ) -> Self {
         RetainedQueryData { bucket_instance_id, feature_index, tile_id, feature_sort_order: RefCell::new(None) }
     }
 }
 
-pub type CollisionGroupPredicate = Rc<dyn Fn(&IndexedSubfeature) -> bool>;
-pub type CollisionGroup = (u16, Option<CollisionGroupPredicate>);
+pub(crate) type CollisionGroupPredicate = Rc<dyn Fn(&IndexedSubfeature) -> bool>;
+pub(crate) type CollisionGroup = (u16, Option<CollisionGroupPredicate>);
 
-pub struct CollisionGroups {
+pub(crate) struct CollisionGroups {
     collision_groups: VecMap<String, CollisionGroup>,
     max_group_id: u16,
     cross_source_collisions: bool,
@@ -185,11 +189,11 @@ pub struct CollisionGroups {
 
 impl CollisionGroups {
     #[must_use]
-    pub fn new(cross_source_collisions: bool) -> Self {
+    pub(crate) fn new(cross_source_collisions: bool) -> Self {
         CollisionGroups { collision_groups: VecMap::new(), max_group_id: 0, cross_source_collisions }
     }
 
-    pub fn get(&mut self, source_id: &str) -> CollisionGroup {
+    pub(crate) fn get(&mut self, source_id: &str) -> CollisionGroup {
         // The predicate/groupID mechanism allows for arbitrary grouping,
         // but the current interface defines one source == one group when
         // crossSourceCollisions == true.
@@ -245,7 +249,7 @@ fn translation_point(
     if screen_space {
         return Point::new(0.0, 0.0);
     }
-    let translation = RenderTile::tile_unit_translation(tile_id, &translate.offset, translate.anchor, state);
+    let translation = RenderTile::tile_unit_translation(tile_id, translate.offset, translate.anchor, state);
     Point::new(translation[0], translation[1])
 }
 
@@ -261,27 +265,27 @@ fn without_horizon(mut data: ProjectionData) -> ProjectionData {
 /// placement (and its collision index's state) mutably, so the port builds
 /// them over a copy of the state for each pass over a context's symbols
 /// (`PlacementContext::projectors`) instead of keeping them in it.
-pub struct PlacementProjectors<'a> {
-    pub tile_projector: TileProjector<'a>,
-    pub text_label_plane: LabelPlaneProjector<'a>,
-    pub icon_label_plane: LabelPlaneProjector<'a>,
+pub(crate) struct PlacementProjectors<'a> {
+    pub(crate) tile_projector: TileProjector<'a>,
+    pub(crate) text_label_plane: LabelPlaneProjector<'a>,
+    pub(crate) icon_label_plane: LabelPlaneProjector<'a>,
 }
 
-pub struct PlacementContext {
+pub(crate) struct PlacementContext {
     bucket: Arc<dyn Bucket>,
     tile_owner: Rc<Vec<RenderTile>>,
     tile_index: usize,
     bearing: f64,
 
-    pub pixels_to_tile_units: f32,
-    pub scale: f32,
-    pub pixel_ratio: f32,
+    pub(crate) pixels_to_tile_units: f32,
+    pub(crate) scale: f32,
+    pub(crate) pixel_ratio: f32,
 
-    pub rotate_text_with_map: bool,
-    pub pitch_text_with_map: bool,
-    pub rotate_icon_with_map: bool,
-    pub pitch_icon_with_map: bool,
-    pub placement_type: SymbolPlacementType,
+    pub(crate) rotate_text_with_map: bool,
+    pub(crate) pitch_text_with_map: bool,
+    pub(crate) rotate_icon_with_map: bool,
+    pub(crate) pitch_icon_with_map: bool,
+    pub(crate) placement_type: SymbolPlacementType,
 
     /// The tile's projection for `tileProjector`. Screen-space symbols are
     /// drawn over the view, so the planet does not hide them: no horizon
@@ -289,15 +293,15 @@ pub struct PlacementContext {
     tile_projection: ProjectionData,
     // Labels collide where `*-translate` puts them, line labels' circles
     // included.
-    pub text_translation: Point<f32>,
-    pub icon_translation: Point<f32>,
+    pub(crate) text_translation: Point<f32>,
+    pub(crate) icon_translation: Point<f32>,
 
-    pub collision_group: CollisionGroup,
-    pub partially_evaluated_text_size: ZoomEvaluatedSize,
-    pub partially_evaluated_icon_size: ZoomEvaluatedSize,
+    pub(crate) collision_group: CollisionGroup,
+    pub(crate) partially_evaluated_text_size: ZoomEvaluatedSize,
+    pub(crate) partially_evaluated_icon_size: ZoomEvaluatedSize,
 
-    pub text_allow_overlap: bool,
-    pub icon_allow_overlap: bool,
+    pub(crate) text_allow_overlap: bool,
+    pub(crate) icon_allow_overlap: bool,
     // This logic is similar to the "defaultOpacityState" logic below in
     // updateBucketOpacities If we know a symbol is always supposed to show,
     // force it to be marked visible even if it wasn't placed into the collision
@@ -313,19 +317,19 @@ pub struct PlacementContext {
     //  in on pan", but should look like any other collision and hopefully not
     //  be too noticeable.
     // See https://github.com/mapbox/mapbox-gl-native/issues/12683
-    pub always_show_text: bool,
-    pub always_show_icon: bool,
+    pub(crate) always_show_text: bool,
+    pub(crate) always_show_icon: bool,
 
-    pub has_icon_text_fit: bool,
+    pub(crate) has_icon_text_fit: bool,
 
-    pub avoid_edges: Option<CollisionBoundaries>,
+    pub(crate) avoid_edges: Option<CollisionBoundaries>,
 }
 
 impl PlacementContext {
     /// The context for placing `bucket`'s symbols, with the translations from
     /// `params`. Locks the bucket's state briefly; call it without holding the
     /// lock.
-    pub fn new(
+    pub(crate) fn new(
         params: &BucketPlacementData,
         state: &TransformState,
         placement_zoom: f32,
@@ -396,7 +400,7 @@ impl PlacementContext {
     }
 
     /// The context's projectors through `state`, the collision index's.
-    pub fn projectors<'a>(&self, state: &'a TransformState) -> PlacementProjectors<'a> {
+    pub(crate) fn projectors<'a>(&self, state: &'a TransformState) -> PlacementProjectors<'a> {
         let tile_projector = TileProjector::with_data(state, &self.get_render_tile().id, self.tile_projection);
         PlacementProjectors {
             text_label_plane: LabelPlaneProjector::new(
@@ -418,22 +422,22 @@ impl PlacementContext {
     }
 
     #[must_use]
-    pub fn get_bucket(&self) -> &SymbolBucket {
+    pub(crate) fn get_bucket(&self) -> &SymbolBucket {
         symbol_bucket(&self.bucket).expect("PlacementContext: a symbol bucket")
     }
 
     #[must_use]
-    pub fn get_layout(&self) -> &SymbolLayoutProperties::PossiblyEvaluated {
+    pub(crate) fn get_layout(&self) -> &SymbolLayoutProperties::PossiblyEvaluated {
         &self.get_bucket().layout
     }
 
     #[must_use]
-    pub fn get_render_tile(&self) -> &RenderTile {
+    pub(crate) fn get_render_tile(&self) -> &RenderTile {
         &self.tile_owner[self.tile_index]
     }
 
     #[must_use]
-    pub fn get_overscaled_id(&self) -> &OverscaledTileID {
+    pub(crate) fn get_overscaled_id(&self) -> &OverscaledTileID {
         self.get_render_tile().get_overscaled_tile_id()
     }
 
@@ -442,7 +446,7 @@ impl PlacementContext {
     }
 }
 
-pub struct PlacementController {
+pub(crate) struct PlacementController {
     empty_placement: Rc<Placement>,
     placement: Rc<Placement>,
     stale: bool,
@@ -456,35 +460,40 @@ impl Default for PlacementController {
 
 impl PlacementController {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let empty_placement = Rc::new(Placement::new_default());
         PlacementController { placement: empty_placement.clone(), empty_placement, stale: false }
     }
 
-    pub fn set_placement(&mut self, placement: Rc<Placement>) {
+    pub(crate) fn set_placement(&mut self, placement: Rc<Placement>) {
         self.placement = placement;
         self.stale = false;
     }
 
     /// Resets to the empty placement; returns whether a committed placement
     /// was discarded.
-    pub fn reset(&mut self) -> bool {
+    pub(crate) fn reset(&mut self) -> bool {
         let changed = !Rc::ptr_eq(&self.placement, &self.empty_placement);
         self.set_placement(self.empty_placement.clone());
         changed
     }
 
     #[must_use]
-    pub fn get_placement(&self) -> &Rc<Placement> {
+    pub(crate) fn get_placement(&self) -> &Rc<Placement> {
         &self.placement
     }
 
-    pub fn set_placement_stale(&mut self) {
+    pub(crate) fn set_placement_stale(&mut self) {
         self.stale = true;
     }
 
     #[must_use]
-    pub fn placement_is_recent(&self, now: Option<Instant>, zoom: f32, period_override: Option<Duration>) -> bool {
+    pub(crate) fn placement_is_recent(
+        &self,
+        now: Option<Instant>,
+        zoom: f32,
+        period_override: Option<Duration>,
+    ) -> bool {
         if !self.placement.transitions_enabled() {
             return false;
         }
@@ -498,7 +507,7 @@ impl PlacementController {
     }
 
     #[must_use]
-    pub fn has_transitions(&self, now: Option<Instant>) -> bool {
+    pub(crate) fn has_transitions(&self, now: Option<Instant>) -> bool {
         if !self.placement.transitions_enabled() {
             return false;
         }
@@ -558,7 +567,7 @@ fn elapsed(now: Option<Instant>, since: Option<Instant>) -> Duration {
 }
 
 /// `Placement`.
-pub struct Placement {
+pub(crate) struct Placement {
     kind: PlacementKind,
 
     update_parameters: Option<Arc<UpdateParameters>>,
@@ -818,7 +827,7 @@ fn place_text_for_placement_modes(
 impl Placement {
     /// The initial placement of a `PlacementController`.
     #[must_use]
-    pub fn new_default() -> Self {
+    pub(crate) fn new_default() -> Self {
         Placement {
             kind: PlacementKind::Continuous,
             update_parameters: None,
@@ -876,7 +885,7 @@ impl Placement {
 
     /// A new placement, from the given update parameters and the previous
     /// placement. In Continuous map mode, `prev_placement` must be provided.
-    pub fn create(update_parameters: Arc<UpdateParameters>, prev_placement: Option<Rc<Placement>>) -> Placement {
+    pub(crate) fn create(update_parameters: Arc<UpdateParameters>, prev_placement: Option<Rc<Placement>>) -> Placement {
         match update_parameters.mode {
             MapMode::Continuous => {
                 debug_assert!(prev_placement.is_some());
@@ -895,15 +904,15 @@ impl Placement {
         self.update_parameters.as_ref().expect("updateParameters").transform_state.get_pitch() != 0.0
     }
 
-    pub fn get_collision_index(&self) -> &CollisionIndex {
+    pub(crate) fn get_collision_index(&self) -> &CollisionIndex {
         &self.collision_index
     }
 
-    pub fn get_commit_time(&self) -> Option<Instant> {
+    pub(crate) fn get_commit_time(&self) -> Option<Instant> {
         self.commit_time
     }
 
-    pub fn place_layers(&mut self, layers: &[RenderLayerPtr]) {
+    pub(crate) fn place_layers(&mut self, layers: &[RenderLayerPtr]) {
         if matches!(self.kind, PlacementKind::Tile(_)) {
             self.tile_place_layers(layers);
             return;
@@ -1048,7 +1057,7 @@ impl Placement {
                             ctx.pitch_text_with_map,
                             ctx.rotate_text_with_map,
                             this.show_collision_boxes,
-                            &ctx.avoid_edges,
+                            ctx.avoid_edges.as_ref(),
                             ctx.collision_group_predicate(),
                             &mut this.text_boxes,
                         );
@@ -1214,7 +1223,7 @@ impl Placement {
                     ctx.pitch_text_with_map,
                     ctx.rotate_text_with_map,
                     this.show_collision_boxes,
-                    &ctx.avoid_edges,
+                    ctx.avoid_edges.as_ref(),
                     ctx.collision_group_predicate(),
                     &mut this.icon_boxes,
                 )
@@ -1393,7 +1402,7 @@ impl Placement {
                 ctx.pitch_text_with_map,
                 ctx.rotate_text_with_map,
                 self.show_collision_boxes,
-                &ctx.avoid_edges,
+                ctx.avoid_edges.as_ref(),
                 ctx.collision_group_predicate(),
                 &mut self.text_boxes,
             );
@@ -1413,7 +1422,7 @@ impl Placement {
                     ctx.pitch_text_with_map, // TODO: shall it be pitchIconWithMap?
                     ctx.rotate_text_with_map,
                     self.show_collision_boxes,
-                    &ctx.avoid_edges,
+                    ctx.avoid_edges.as_ref(),
                     ctx.collision_group_predicate(),
                     &mut self.icon_boxes,
                 );
@@ -1573,7 +1582,7 @@ impl Placement {
         }
     }
 
-    pub fn update_layer_buckets(&self, layer: &dyn RenderLayer, state: &TransformState, update_opacities: bool) {
+    pub(crate) fn update_layer_buckets(&self, layer: &dyn RenderLayer, state: &TransformState, update_opacities: bool) {
         let mut seen_cross_tile_ids: BTreeSet<u32> = BTreeSet::new();
         for item in layer.get_placement_data() {
             // `sortKeyRange->isFirstRange()`: `start == 0u`.
@@ -1585,7 +1594,7 @@ impl Placement {
 
     /// Lays out the positions of a layer drawn from buckets other layers
     /// place, after `update_layer_buckets`.
-    pub fn update_follower_buckets(&self, layer: &dyn RenderLayer, state: &TransformState) {
+    pub(crate) fn update_follower_buckets(&self, layer: &dyn RenderLayer, state: &TransformState) {
         for item in layer.get_follower_data() {
             if let Some(bucket) = symbol_bucket(&item.bucket) {
                 bucket.update_layer_vertices(self, state, item, layer.get_id());
@@ -1597,7 +1606,7 @@ impl Placement {
     /// vertices were updated. With a layer ID, updates that layer's own
     /// positions, which it needs only at another translation than the
     /// leader's.
-    pub fn update_bucket_dynamic_attribute_data(
+    pub(crate) fn update_bucket_dynamic_attribute_data(
         &self,
         bucket: &SymbolBucket,
         state: &TransformState,
@@ -1880,7 +1889,7 @@ impl Placement {
         result
     }
 
-    pub fn update_bucket_opacities(
+    pub(crate) fn update_bucket_opacities(
         &self,
         bucket: &SymbolBucket,
         state: &TransformState,
@@ -2178,7 +2187,7 @@ impl Placement {
     }
 
     /// The virtual `symbolFadeChange(now)`.
-    pub fn symbol_fade_change(&self, now: Option<Instant>) -> f32 {
+    pub(crate) fn symbol_fade_change(&self, now: Option<Instant>) -> f32 {
         match self.kind {
             PlacementKind::Continuous => {
                 let duration = self.transition_options.duration.unwrap_or(DEFAULT_TRANSITION_DURATION);
@@ -2191,7 +2200,7 @@ impl Placement {
         }
     }
 
-    pub fn zoom_adjustment(&self, zoom: f32) -> f32 {
+    pub(crate) fn zoom_adjustment(&self, zoom: f32) -> f32 {
         // When zooming out labels can overlap each other quickly. This
         // adjustment is used to reduce the fade duration for symbols while zooming
         // out quickly. It is also used to reduce the interval between placement
@@ -2202,12 +2211,12 @@ impl Placement {
         if 0.0 < adjustment { adjustment } else { 0.0 }
     }
 
-    pub fn get_symbol_placement(&self, symbol: &SymbolInstance) -> Option<&JointPlacement> {
+    pub(crate) fn get_symbol_placement(&self, symbol: &SymbolInstance) -> Option<&JointPlacement> {
         debug_assert!(symbol.get_cross_tile_id() != 0);
         self.placements.get(&symbol.get_cross_tile_id())
     }
 
-    pub fn get_update_period(&self, zoom: f32) -> Duration {
+    pub(crate) fn get_update_period(&self, zoom: f32) -> Duration {
         // Even if transitionOptions.duration is set to a value < 300ms, we still wait
         // for this default transition duration before attempting another placement operation.
         let duration = self.transition_options.duration.unwrap_or(DEFAULT_TRANSITION_DURATION);
@@ -2219,7 +2228,7 @@ impl Placement {
     }
 
     /// The virtual `transitionsEnabled()`.
-    pub fn transitions_enabled(&self) -> bool {
+    pub(crate) fn transitions_enabled(&self) -> bool {
         match self.kind {
             PlacementKind::Continuous => self.transition_options.enable_placement_transitions,
             PlacementKind::Static | PlacementKind::Tile(_) => false,
@@ -2227,7 +2236,7 @@ impl Placement {
     }
 
     /// The virtual `hasTransitions(now)`.
-    pub fn has_transitions(&self, now: Option<Instant>) -> bool {
+    pub(crate) fn has_transitions(&self, now: Option<Instant>) -> bool {
         match self.kind {
             PlacementKind::Continuous => {
                 debug_assert!(self.transitions_enabled());
@@ -2239,14 +2248,14 @@ impl Placement {
     }
 
     /// The virtual `collectPlacedSymbolData(enable)`.
-    pub fn collect_placed_symbol_data(&mut self, enable: bool) {
+    pub(crate) fn collect_placed_symbol_data(&mut self, enable: bool) {
         if let PlacementKind::Tile(tile) = &mut self.kind {
             tile.collect_data = enable;
         }
     }
 
     /// The virtual `getPlacedSymbolsData()`.
-    pub fn get_placed_symbols_data(&self) -> &[PlacedSymbolData] {
+    pub(crate) fn get_placed_symbols_data(&self) -> &[PlacedSymbolData] {
         match &self.kind {
             PlacementKind::Tile(tile) => &tile.placed_symbols_data,
             _ => &[],
@@ -2254,7 +2263,7 @@ impl Placement {
     }
 
     /// The query data of a bucket instance; `Err` if there is none.
-    pub fn get_query_data(&self, bucket_instance_id: u32) -> Result<&RetainedQueryData, String> {
+    pub(crate) fn get_query_data(&self, bucket_instance_id: u32) -> Result<&RetainedQueryData, String> {
         self.retained_query_data
             .get(&bucket_instance_id)
             .ok_or_else(|| "Placement::getQueryData with unrecognized bucketInstanceId".to_owned())
@@ -2641,7 +2650,7 @@ impl Placement {
 }
 
 /// Places the bucket's symbols. Only symbol buckets have any.
-pub fn place_bucket(
+pub(crate) fn place_bucket(
     bucket: &dyn Bucket,
     placement: &mut Placement,
     data: &BucketPlacementData,
@@ -2654,7 +2663,7 @@ pub fn place_bucket(
 
 /// Updates the bucket's vertices for `placement`. Only symbol buckets have
 /// any to update.
-pub fn update_vertices(
+pub(crate) fn update_vertices(
     bucket: &dyn Bucket,
     placement: &Placement,
     update_opacities: bool,
@@ -2668,11 +2677,12 @@ pub fn update_vertices(
 }
 
 impl SymbolBucket {
-    pub fn place(&self, placement: &mut Placement, data: &BucketPlacementData, seen_ids: &mut BTreeSet<u32>) {
+    #[expect(clippy::unused_self, reason = "a bucket places its symbols, as the C++ `Placement` asks each bucket")]
+    pub(crate) fn place(&self, placement: &mut Placement, data: &BucketPlacementData, seen_ids: &mut BTreeSet<u32>) {
         placement.place_symbol_bucket(data, seen_ids);
     }
 
-    pub fn update_vertices(
+    pub(crate) fn update_vertices(
         &self,
         placement: &Placement,
         update_opacities: bool,
@@ -2693,7 +2703,7 @@ impl SymbolBucket {
 
     /// Lays out the positions a layer sharing this bucket draws at its own
     /// translation, from the leader's placement.
-    pub fn update_layer_vertices(
+    pub(crate) fn update_layer_vertices(
         &self,
         placement: &Placement,
         state: &TransformState,
@@ -2718,10 +2728,10 @@ mod tests {
     fn opacity_state() {
         let state = OpacityState::new(true, true);
         assert_eq!(state.opacity, 1.0);
-        let faded = OpacityState::from_prev(&OpacityState::new(false, false), 0.5, false);
+        let faded = OpacityState::from_prev(OpacityState::new(false, false), 0.5, false);
         assert_eq!(faded.opacity, 0.0);
         assert!(faded.is_hidden());
-        let fading_in = OpacityState::from_prev(&OpacityState::new(true, false), 0.25, true);
+        let fading_in = OpacityState::from_prev(OpacityState::new(true, false), 0.25, true);
         assert_eq!(fading_in.opacity, 0.25);
     }
 }

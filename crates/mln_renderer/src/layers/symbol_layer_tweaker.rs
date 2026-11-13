@@ -26,7 +26,7 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::PaintParameters;
 use crate::render_tile::RenderTile;
 
-pub struct SymbolLayerTweaker {
+pub(crate) struct SymbolLayerTweaker {
     base: LayerTweakerBase,
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
@@ -34,7 +34,7 @@ pub struct SymbolLayerTweaker {
 }
 
 impl SymbolLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         SymbolLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,
@@ -168,7 +168,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                 get_projection_data(
                     &tile_id,
                     parameters,
-                    &[0.0, 0.0],
+                    [0.0, 0.0],
                     anchor,
                     NEAR_CLIPPED,
                     IN_VIEWPORT_PIXEL_UNITS,
@@ -183,7 +183,7 @@ impl LayerTweaker for SymbolLayerTweaker {
             let tile_translation: [f32; 2] = if is_screen_space {
                 [0.0, 0.0]
             } else {
-                RenderTile::tile_unit_translation(&tile_id, translate, anchor, state)
+                RenderTile::tile_unit_translation(&tile_id, *translate, anchor, state)
             };
             projection.translate = [0.0, 0.0];
             let matrix = projection.fallback_matrix;

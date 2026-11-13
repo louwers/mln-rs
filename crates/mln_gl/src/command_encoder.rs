@@ -14,17 +14,17 @@ use crate::custom_layer::CustomLayerEncoder;
 use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
 
-pub struct CommandEncoder {
+pub(crate) struct CommandEncoder {
     context: Rc<Context>,
 }
 
 impl CommandEncoder {
-    pub fn new(context: Rc<Context>) -> Self {
+    pub(crate) fn new(context: Rc<Context>) -> Self {
         CommandEncoder { context }
     }
 
     #[must_use]
-    pub fn get_context(&self) -> &Rc<Context> {
+    pub(crate) fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
 }

@@ -23,7 +23,7 @@ use crate::layer::layer_type_info::TileKind;
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl;
 
-pub type ClusterExpression = (Arc<dyn Expression>, Arc<dyn Expression>);
+pub(crate) type ClusterExpression = (Arc<dyn Expression>, Arc<dyn Expression>);
 pub type ClusterProperties = VecMap<String, ClusterExpression>;
 
 #[derive(Clone)]
@@ -135,11 +135,6 @@ pub struct GeoJSONDataBuilder {
 }
 
 impl GeoJSONDataBuilder {
-    #[must_use]
-    pub fn options(&self) -> &Arc<GeoJSONOptions> {
-        &self.options
-    }
-
     /// Fails as [`create_geojson_data`] does.
     pub fn build(&self, geojson: &GeoJSON) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
         create_geojson_data(geojson, self.sequenced_scheduler.clone(), &self.options)
@@ -192,7 +187,7 @@ impl GeoJSONSource {
     }
 
     #[must_use]
-    pub fn impl_(&self) -> Arc<Impl> {
+    pub(crate) fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 

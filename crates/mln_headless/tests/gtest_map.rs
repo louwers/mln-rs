@@ -601,7 +601,7 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
     test.map()
         .apply_camera_delta(&mln_map::CameraDelta {
             offset: Some(ScreenCoordinate::new(-2.0 * degree, 0.0)),
-            animation: AnimationOptions::new(std::time::Duration::from_secs(10)),
+            animation: AnimationOptions::new(Duration::from_secs(10)),
             phase: mln_map::GesturePhase::Begin,
             ..mln_map::CameraDelta::default()
         })
@@ -1231,7 +1231,7 @@ fn dont_load_unneeded_tiles() {
             // Since the layer's maxzoom is 1.6, we should never load z2 or z3 tiles.
             &[]
         };
-        tiles.iter().map(std::string::ToString::to_string).collect()
+        tiles.iter().map(ToString::to_string).collect()
     };
 
     // Loop through zoom levels from 0 to 3 and check that the correct tiles are
@@ -2053,7 +2053,7 @@ fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: 
 }
 
 /// Stops the run loop at the next full frame.
-fn stop_on_full_frame<FS: mln_storage::FileSource + 'static>(test: &MapTest<FS>) {
+fn stop_on_full_frame<FS: FileSource + 'static>(test: &MapTest<FS>) {
     let run_loop = test.run_loop.clone();
     test.observer.did_finish_rendering_frame_callback.set(move |status: RenderFrameStatus| {
         if status.mode == RenderMode::Full {
@@ -2341,7 +2341,7 @@ fn source_minimum_update_interval_override() {
 
     // Vector source
     let vector_source_a = vector_source("source-a", "a/{z}/{x}/{y}");
-    mln_style::source::set_minimum_tile_update_interval(&vector_source_a, Duration::from_secs(1));
+    source::set_minimum_tile_update_interval(&vector_source_a, Duration::from_secs(1));
     test.map().style_mut().add_source(Box::new(vector_source_a)).unwrap();
 
     let vector_source_b = vector_source("source-b", "b/{z}/{x}/{y}");
@@ -2416,7 +2416,7 @@ fn keep_render_data() {
     requests_count.set(0);
     // Clear render data.
     for i in 1..=iterations {
-        test.frontend.with_renderer(mln_renderer::Renderer::clear_data);
+        test.frontend.with_renderer(Renderer::clear_data);
         test.render();
         assert_eq!(resources_count * i, requests_count.get());
     }
@@ -2468,7 +2468,7 @@ fn disabled_placed_symbol_data() {
     test.render();
 
     let placed_symbols = test.frontend.with_renderer(|renderer| renderer.get_placed_symbols_data());
-    assert_ne!(placed_symbols, [] as [mln_renderer::text::placement::PlacedSymbolData; 0]);
+    assert_ne!(placed_symbols, Vec::<mln_renderer::text::placement::PlacedSymbolData>::new());
 
     let mut placed_text_inside_tile = 0;
     let mut placed_text = 0;
@@ -2519,7 +2519,7 @@ fn disabled_placed_symbol_data() {
 
     assert_eq!(
         test.frontend.with_renderer(|renderer| renderer.get_placed_symbols_data()),
-        [] as [mln_renderer::text::placement::PlacedSymbolData; 0]
+        Vec::<mln_renderer::text::placement::PlacedSymbolData>::new()
     );
 }
 
@@ -2552,7 +2552,7 @@ fn volatile_source() {
     }"#,
     );
     let source = vector_source("vector", "a/{z}/{x}/{y}");
-    mln_style::source::set_volatile(&source, is_volatile);
+    source::set_volatile(&source, is_volatile);
     test.map().style_mut().add_source(Box::new(source)).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
@@ -3236,7 +3236,7 @@ fn globe_hand_off_keeps_tiles() {
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
     assert!(map.get_transform_state().is_globe_rendering());
     let first_visit = std::mem::take(&mut *parsed.borrow_mut());
-    assert_ne!(first_visit, [] as [mln_tile_id::OverscaledTileID; 0]);
+    assert_ne!(first_visit, Vec::<OverscaledTileID>::new());
 
     // Zoom 12.5 is Mercator. The zoom-10 tiles stay on screen while their children load; they must not be parsed
     // again.
@@ -4233,7 +4233,7 @@ fn global_state_change_transitions_paint_property() {
     assert!(changed[2] < 55, "{changed:?}");
 
     // Once the transition has run its course, the new state shows.
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    std::thread::sleep(Duration::from_millis(200));
     let finished = render_center_pixel(&test);
     assert!(finished[0] < 10, "{finished:?}");
     assert!(finished[2] > 240, "{finished:?}");

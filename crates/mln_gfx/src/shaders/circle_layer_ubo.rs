@@ -20,7 +20,7 @@ pub struct CircleDrawableUBO {
     /* 108 */ pub pad3: f32,
     /* 112 */
 }
-const _: () = assert!(std::mem::size_of::<CircleDrawableUBO>() == 7 * 16);
+const _: () = assert!(size_of::<CircleDrawableUBO>() == 7 * 16);
 
 /// Evaluated properties that do not depend on the tile (64 bytes). The
 /// colors are the premultiplied `mln::Color` as r, g, b, a floats.
@@ -39,4 +39,4 @@ pub struct CircleEvaluatedPropsUBO {
     /* 60 */ pub pad1: f32,
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<CircleEvaluatedPropsUBO>() == 4 * 16);
+const _: () = assert!(size_of::<CircleEvaluatedPropsUBO>() == 4 * 16);

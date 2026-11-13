@@ -215,7 +215,7 @@ impl TransformState {
 
     /// The definition that [`set_projection_definition`](Self::set_projection_definition)
     /// last set.
-    pub fn get_projection_definition(&self) -> ProjectionDefinition {
+    pub(crate) fn get_projection_definition(&self) -> ProjectionDefinition {
         self.projection_definition
     }
 
@@ -664,7 +664,7 @@ impl TransformState {
         }
     }
 
-    pub fn get_north_orientation_angle(&self) -> f64 {
+    pub(crate) fn get_north_orientation_angle(&self) -> f64 {
         let mut angle_orientation = 0.0;
         if self.orientation == NorthOrientation::Rightwards {
             angle_orientation += PI / 2.0;
@@ -771,16 +771,6 @@ impl TransformState {
                 self.get_lat_lng(WrapMode::Unwrapped).latitude(),
                 self.get_zoom(),
             )
-    }
-
-    pub fn pixel_x(&self) -> f64 {
-        let center = (f64::from(self.size.width) - Projection::world_size(self.scale)) / 2.0;
-        center + self.x
-    }
-
-    pub fn pixel_y(&self) -> f64 {
-        let center = (f64::from(self.size.height) - Projection::world_size(self.scale)) / 2.0;
-        center + self.y
     }
 
     // MARK: - Zoom
@@ -937,17 +927,6 @@ impl TransformState {
     pub fn set_y(&mut self, val: f64) {
         if self.y != val {
             self.y = val;
-            self.invalidate_matrices();
-        }
-    }
-
-    pub fn get_z(&self) -> f64 {
-        self.z
-    }
-
-    pub fn set_z(&mut self, val: f64) {
-        if self.z != val {
-            self.z = val;
             self.invalidate_matrices();
         }
     }
@@ -1432,7 +1411,7 @@ impl TransformState {
 
     /// Viewport center offset, from [size.width / 2, size.height / 2],
     /// defined by |edgeInsets| in screen coordinates, with top left origin.
-    pub fn get_center_offset(&self) -> ScreenCoordinate {
+    pub(crate) fn get_center_offset(&self) -> ScreenCoordinate {
         ScreenCoordinate::new(
             0.5 * (self.edge_insets.left - self.edge_insets.right),
             0.5 * (self.edge_insets.top - self.edge_insets.bottom),

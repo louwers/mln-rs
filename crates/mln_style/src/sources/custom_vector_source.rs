@@ -84,18 +84,18 @@ impl CustomVectorSourceHandle {
 
     /// Reports that the host failed to load the tile. Invalidating the tile, or
     /// needing it again, asks for it again.
-    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
+    pub(crate) fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, &error));
     }
 
     /// Drops the tile's data, and asks the host for it again if a tile needs
     /// it.
-    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
+    pub(crate) fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.loader.invoke(move |loader| loader.invalidate_tile(&tile_id));
     }
 
     /// Invalidates every tile that `bounds` intersect.
-    pub fn invalidate_region(&self, bounds: LatLngBounds) {
+    pub(crate) fn invalidate_region(&self, bounds: LatLngBounds) {
         self.loader.invoke(move |loader| loader.invalidate_region(&bounds));
     }
 }
@@ -185,7 +185,7 @@ impl CustomVectorSource {
     }
 
     #[must_use]
-    pub fn impl_(&self) -> Arc<Impl> {
+    pub(crate) fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
@@ -200,17 +200,17 @@ impl CustomVectorSource {
         self.handle().set_tile_data(tile_id, data, format);
     }
 
-    /// See [`CustomVectorSourceHandle::set_tile_error`].
+    /// See `CustomVectorSourceHandle::set_tile_error`.
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.handle().set_tile_error(tile_id, error);
     }
 
-    /// See [`CustomVectorSourceHandle::invalidate_tile`].
+    /// See `CustomVectorSourceHandle::invalidate_tile`.
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.handle().invalidate_tile(tile_id);
     }
 
-    /// See [`CustomVectorSourceHandle::invalidate_region`].
+    /// See `CustomVectorSourceHandle::invalidate_region`.
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
         self.handle().invalidate_region(bounds);
     }

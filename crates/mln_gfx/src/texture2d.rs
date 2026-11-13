@@ -53,12 +53,14 @@ pub trait Texture2D: Any {
 impl dyn Texture2D {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: Texture2D>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_mut<T: Texture2D>(&mut self) -> Option<&mut T> {
-        (self as &mut dyn Any).downcast_mut()
+        let any: &mut dyn Any = self;
+        any.downcast_mut()
     }
 }
 

@@ -179,16 +179,6 @@ impl Image {
     }
 
     #[must_use]
-    pub fn from_impl(base_impl: Arc<Impl>) -> Self {
-        Image { base_impl }
-    }
-
-    #[must_use]
-    pub fn get_id(&self) -> String {
-        self.base_impl.id.clone()
-    }
-
-    #[must_use]
     pub fn get_image(&self) -> &PremultipliedImage {
         &self.base_impl.image
     }
@@ -196,11 +186,6 @@ impl Image {
     #[must_use]
     pub fn get_pixel_ratio(&self) -> f32 {
         self.base_impl.pixel_ratio
-    }
-
-    #[must_use]
-    pub fn is_sdf(&self) -> bool {
-        self.base_impl.sdf
     }
 
     #[must_use]
@@ -216,16 +201,6 @@ impl Image {
     #[must_use]
     pub fn get_content(&self) -> &Option<ImageContent> {
         &self.base_impl.content
-    }
-
-    #[must_use]
-    pub fn get_text_fit_width(&self) -> &Option<TextFit> {
-        &self.base_impl.text_fit_width
-    }
-
-    #[must_use]
-    pub fn get_text_fit_height(&self) -> &Option<TextFit> {
-        &self.base_impl.text_fit_height
     }
 }
 

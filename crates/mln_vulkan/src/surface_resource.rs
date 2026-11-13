@@ -89,7 +89,7 @@ struct SurfaceState {
 
 /// A frame target's images, a swapchain's when there is a platform surface
 /// and its own otherwise, with a depth and stencil attachment.
-pub struct SurfaceResource {
+pub(crate) struct SurfaceResource {
     backend: Rc<BackendImpl>,
     context: Weak<Context>,
     provider: Option<Rc<dyn SurfaceProvider>>,
@@ -108,7 +108,7 @@ impl SurfaceResource {
     /// the surface, which the resource then destroys, and makes it again when
     /// it is lost; without one, the surface is the host's. `present_mode` is
     /// used when the surface has it, FIFO otherwise.
-    pub fn new(
+    pub(crate) fn new(
         context: &Context,
         size: Size,
         surface: Option<vk::SurfaceKHR>,
@@ -164,42 +164,37 @@ impl SurfaceResource {
     }
 
     /// Whether the resource presents to a surface.
-    pub fn has_platform_surface(&self) -> bool {
+    pub(crate) fn has_platform_surface(&self) -> bool {
         self.state.borrow().surface != vk::SurfaceKHR::null()
     }
 
-    pub fn get_swapchain(&self) -> vk::SwapchainKHR {
+    pub(crate) fn get_swapchain(&self) -> vk::SwapchainKHR {
         self.state.borrow().swapchain
     }
 
-    pub fn get_color_format(&self) -> vk::Format {
+    pub(crate) fn get_color_format(&self) -> vk::Format {
         self.state.borrow().color_format
     }
 
-    pub fn get_image_count(&self) -> u32 {
+    pub(crate) fn get_image_count(&self) -> u32 {
         self.state.borrow().swapchain_framebuffers.len() as u32
     }
 
-    pub fn get_acquired_image_index(&self) -> u32 {
+    pub(crate) fn get_acquired_image_index(&self) -> u32 {
         self.state.borrow().acquired_image_index
     }
 
-    pub fn set_acquired_image_index(&self, index: u32) {
+    pub(crate) fn set_acquired_image_index(&self, index: u32) {
         self.state.borrow_mut().acquired_image_index = index;
     }
 
-    pub fn get_acquired_image(&self) -> vk::Image {
-        let state = self.state.borrow();
-        state.swapchain_images.get(state.acquired_image_index as usize).copied().unwrap_or_default()
-    }
-
     /// The semaphore the frame `frame_index` acquires its image with.
-    pub fn get_acquire_semaphore(&self, frame_index: u8) -> vk::Semaphore {
+    pub(crate) fn get_acquire_semaphore(&self, frame_index: u8) -> vk::Semaphore {
         self.state.borrow().acquire_semaphores.get(usize::from(frame_index)).copied().unwrap_or_default()
     }
 
     /// The semaphore the acquired image is presented with.
-    pub fn get_present_semaphore(&self) -> vk::Semaphore {
+    pub(crate) fn get_present_semaphore(&self) -> vk::Semaphore {
         let state = self.state.borrow();
         state.present_semaphores.get(state.acquired_image_index as usize).copied().unwrap_or_default()
     }
@@ -532,7 +527,7 @@ impl SurfaceResource {
 
     /// Makes the swapchain, and the surface if it was lost, again. Returns
     /// whether it did.
-    pub fn recreate_swapchain(&self, recreate_surface: bool) -> bool {
+    pub(crate) fn recreate_swapchain(&self, recreate_surface: bool) -> bool {
         let Some(context) = self.context.upgrade() else {
             return false;
         };
@@ -567,24 +562,24 @@ impl SurfaceResource {
 
     /// Sets the size the swapchain is made with when the surface doesn't give
     /// one.
-    pub fn set_extent(&self, size: Size) {
+    pub(crate) fn set_extent(&self, size: Size) {
         self.state.borrow_mut().extent = vk::Extent2D { width: size.width, height: size.height };
     }
 
     /// Has the frame being recorded, or else the next one, copied for
     /// `read_image`.
-    pub fn queue_surface_read(&self) {
+    pub(crate) fn queue_surface_read(&self) {
         self.state.borrow_mut().surface_read = true;
     }
 
     /// Whether a frame is still to be copied for `read_image`.
-    pub fn is_surface_read_queued(&self) -> bool {
+    pub(crate) fn is_surface_read_queued(&self) -> bool {
         self.state.borrow().surface_read
     }
 
     /// Port-only: draws `overlay` over each frame from now on, or stops
     /// with `None` (`SurfaceTarget::set_overlay`).
-    pub fn set_overlay(&self, overlay: Option<Overlay>) {
+    pub(crate) fn set_overlay(&self, overlay: Option<Overlay>) {
         *self.overlay.borrow_mut() = overlay;
     }
 
@@ -740,7 +735,7 @@ impl SurfaceResource {
     }
 
     /// The last frame copied for reading, if any.
-    pub fn read_image(&self) -> Option<PremultipliedImage> {
+    pub(crate) fn read_image(&self) -> Option<PremultipliedImage> {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
         let use_blit = self.use_blit(state);

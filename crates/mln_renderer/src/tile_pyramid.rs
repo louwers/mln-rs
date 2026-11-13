@@ -2,11 +2,11 @@
 // maps to the key of the tile in `tiles`: every rendered tile is one of the
 // pyramid's tiles.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode};
+use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source;
@@ -16,17 +16,29 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::logging::{Event, Log};
+use mln_util::projection::Projection;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
-use crate::tile::tile::{Tile, TileNecessity, TileUpdateParameters};
+use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_cache::TileCache;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_parameters::TileParameters;
-use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, tile_cover};
+use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 
-pub struct TilePyramid {
+/// The coarsest zoom a source can start at and still have its whole first
+/// level kept loaded on the globe: four tiles, no more than a view's prefetch
+/// cover holds.
+const GLOBE_BASE_LEVEL_MAX_ZOOM: u8 = 1;
+
+/// The largest planet, as its radius over the viewport's longer side, whose
+/// base level is kept loaded. Up to here that side spans about 29 degrees of
+/// arc or more, so a fling across a few view widths reaches ground that no
+/// tile loaded for the view covers.
+const GLOBE_BASE_LEVEL_MAX_RADIUS: f64 = 2.0;
+
+pub(crate) struct TilePyramid {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
     cache: TileCache,
 
@@ -62,6 +74,10 @@ where
     /// Whether `renderTile` marks tiles and updates `previouslyRenderedTiles`
     /// (the ideal pass; the pan pass passes a no-op).
     render: bool,
+    /// The tiles the current pass has retained. A pass retains tiles in its
+    /// cover's order, nearest the view's centre first, each followed by the
+    /// parents that stand in for it.
+    pass_rank: usize,
 }
 
 impl<F> RenderablesContext for UpdateContext<'_, '_, F>
@@ -69,7 +85,21 @@ where
     F: FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
 {
     fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
-        self.tiles.contains_key(id).then_some(*id)
+        if self.tiles.contains_key(id) {
+            return Some(*id);
+        }
+        // On the globe every wrap of a tile is the same piece of the sphere,
+        // and the cover gives the tiles either side of the antimeridian
+        // different wraps: a tile there finds its parent under the wrap of
+        // the tiles on the other side. The cover's wraps are at most two
+        // apart.
+        if self.finds_tiles_across_wraps() {
+            return [-1, 1, -2, 2]
+                .into_iter()
+                .map(|delta| id.unwrap_to(id.wrap.wrapping_add(delta)))
+                .find(|other| self.tiles.contains_key(other));
+        }
+        None
     }
 
     fn create_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
@@ -108,6 +138,12 @@ where
                 minimum_update_interval: self.minimum_update_interval,
                 is_volatile: self.is_volatile,
             });
+            // The pan pass comes first, so a tile of both covers loads with
+            // the coarse ones.
+            let order =
+                if self.render { TileLoadOrder::ideal(self.pass_rank) } else { TileLoadOrder::coarse(self.pass_rank) };
+            self.pass_rank += 1;
+            tile.set_load_order(order);
             tile.set_necessity(necessity);
             tile.base().retained_necessity.set(necessity);
         }
@@ -125,6 +161,8 @@ where
         if !self.render {
             return;
         }
+        // A globe tile found under another wrap is drawn once, under its own.
+        let id = if self.finds_tiles_across_wraps() { &key.to_unwrapped() } else { id };
         // addRenderTile(tileID, tile)
         debug_assert!(self.tiles[key].is_renderable());
         self.rendered_tiles.entry(*id).or_insert(*key);
@@ -155,6 +193,67 @@ where
     }
 }
 
+impl<F> UpdateContext<'_, '_, F>
+where
+    F: FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
+{
+    /// Whether a tile lookup that misses looks under the neighbouring wraps:
+    /// on the full globe only. While it blends into Mercator, a tile's flat
+    /// half is placed by its wrap, so a tile of another wrap would land a
+    /// world away there.
+    fn finds_tiles_across_wraps(&self) -> bool {
+        self.parameters.transform_state.get_projection_transition() >= 1.0
+    }
+}
+
+/// Whether every tile of the source's minimum zoom is kept loaded: on the
+/// globe, for a source whose first level is a few tiles, while the planet is
+/// small enough in the view that it soon turns to its far side, and while the
+/// search for a loaded parent reaches that level from the tiles of the view.
+fn keeps_globe_base_level(
+    parameters: &TileParameters<'_>,
+    zoom_range: Range<u8>,
+    tile_zoom: i32,
+    max_parent_overscale_factor: Option<u8>,
+) -> bool {
+    let state = parameters.transform_state;
+    if !state.is_globe_rendering() || zoom_range.min > GLOBE_BASE_LEVEL_MAX_ZOOM {
+        return false;
+    }
+    if max_parent_overscale_factor.is_some_and(|factor| tile_zoom - i32::from(zoom_range.min) > i32::from(factor)) {
+        return false;
+    }
+    let size = state.get_size();
+    let radius = VerticalPerspectiveProjection::globe_radius_pixels(
+        Projection::world_size(state.get_scale()),
+        state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+    );
+    radius <= GLOBE_BASE_LEVEL_MAX_RADIUS * f64::from(std::cmp::max(size.width, size.height))
+}
+
+/// The tiles a view wants: its ideal and prefetched tiles.
+struct WantedTiles(HashSet<(u8, u8, u32, u32)>);
+
+impl WantedTiles {
+    fn new<'a>(ids: impl Iterator<Item = &'a OverscaledTileID>) -> Self {
+        WantedTiles(ids.map(|id| (id.overscaled_z, id.canonical.z, id.canonical.x, id.canonical.y)).collect())
+    }
+
+    /// Whether `id` is a wanted tile or next to one at its zoom level, in any
+    /// world copy. A view that turns or swings back and forth shows such
+    /// tiles at its edges for moments at a time.
+    fn is_near(&self, id: &OverscaledTileID) -> bool {
+        let tiles = 1i64 << id.canonical.z;
+        let (x, y) = (i64::from(id.canonical.x), i64::from(id.canonical.y));
+        (y - 1..=y + 1).filter(|y| (0..tiles).contains(y)).any(|ny| {
+            (x - 1..=x + 1).any(|nx| {
+                let nx = nx.rem_euclid(tiles);
+                self.0.contains(&(id.overscaled_z, id.canonical.z, nx as u32, ny as u32))
+            })
+        })
+    }
+}
+
 impl Default for TilePyramid {
     fn default() -> Self {
         Self::new()
@@ -164,7 +263,7 @@ impl Default for TilePyramid {
 impl TilePyramid {
     /// An empty pyramid. Takes no thread pool (see `TileCache::new`).
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         TilePyramid {
             tiles: BTreeMap::new(),
             cache: TileCache::new(0),
@@ -178,12 +277,12 @@ impl TilePyramid {
     }
 
     #[must_use]
-    pub fn is_loaded(&self) -> bool {
+    pub(crate) fn is_loaded(&self) -> bool {
         self.tiles.values().all(|tile| tile.is_complete())
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn update(
+    pub(crate) fn update(
         &mut self,
         layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
@@ -224,6 +323,8 @@ impl TilePyramid {
                     }
                 }
             }
+            // So are the tiles that went on loading in the cache.
+            self.cache.release_loading(|_| false);
 
             self.rendered_tiles.clear();
             self.cache.defer_pending_releases();
@@ -293,6 +394,22 @@ impl TilePyramid {
             }
 
             ideal_tiles = tile_cover(&tile_cover_parameters, ideal_zoom as u8, zoom_range, Some(tile_zoom as u8));
+
+            // The globe cover leaves out the far side of the planet, so a
+            // view turned there would find no parent to draw until its tiles
+            // load. The source's whole first level stays loaded with the
+            // prefetched tiles, ahead of them, and is drawn only where the
+            // search for a loaded parent reaches it.
+            if parameters.mode == MapMode::Continuous
+                && type_ != SourceType::GeoJSON
+                && keeps_globe_base_level(parameters, zoom_range, tile_zoom, max_parent_tile_overscale_factor)
+            {
+                let mut base_tiles =
+                    globe_level_cover(&tile_cover_parameters, zoom_range.min, zoom_range, Some(tile_zoom as u8));
+                pan_tiles.retain(|id| !base_tiles.contains(id));
+                base_tiles.append(&mut pan_tiles);
+                pan_tiles = base_tiles;
+            }
             if parameters.mode == MapMode::Tile
                 && type_ != SourceType::Raster
                 && type_ != SourceType::RasterDEM
@@ -360,16 +477,18 @@ impl TilePyramid {
             is_volatile,
             create_tile,
             render: false,
+            pass_rank: 0,
         };
 
         if !pan_tiles.is_empty() {
             // `[](const UnwrappedTileID&, Tile&) {}` and no prefetched tiles.
             ctx.render = false;
-            update_renderables(&mut ctx, &pan_tiles, &zoom_range, max_parent_tile_overscale_factor);
+            update_renderables(&mut ctx, &pan_tiles, zoom_range, max_parent_tile_overscale_factor);
         }
 
         ctx.render = true;
-        update_renderables(&mut ctx, &ideal_tiles, &zoom_range, max_parent_tile_overscale_factor);
+        ctx.pass_rank = 0;
+        update_renderables(&mut ctx, &ideal_tiles, zoom_range, max_parent_tile_overscale_factor);
 
         let previously_rendered: Vec<(UnwrappedTileID, OverscaledTileID)> =
             ctx.previously_rendered_tiles.iter().map(|(id, key)| (*id, *key)).collect();
@@ -401,6 +520,16 @@ impl TilePyramid {
             self.cache.set_size(0);
         }
 
+        // Port-only: a tile that leaves the view while it loads goes on
+        // loading in the cache while it is next to the view's tiles (C++
+        // releases it). A view that turns back and forth needs the tiles at
+        // its corners for moments too short to load them each time. A tile
+        // that the view has left further behind, such as one of a zoom level
+        // that a fast zoom passed, stops loading as in C++: it would hold up
+        // the requests and the tile workers that the view's own tiles need.
+        let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles));
+        self.cache.release_loading(|id| wanted.is_near(id));
+
         // Remove stale tiles. This goes through the (sorted!) tiles map and
         // retain set in lockstep and removes items from tiles that don't
         // have the corresponding key in the retain set.
@@ -414,17 +543,18 @@ impl TilePyramid {
                 } else if tile.is_renderable() {
                     tile.set_necessity(TileNecessity::Optional);
                     self.cache.add(key, tile);
-                } else if tile.base().retained_necessity.get() == TileNecessity::Required {
-                    // Port-only: a tile still loading keeps its necessity,
-                    // so that it goes on loading in the cache (C++ releases
-                    // it, and optional, it would stop loading). A view that
-                    // turns back and forth needs the tiles at its corners
-                    // for moments too short to load them each time.
+                } else if tile.base().retained_necessity.get() == TileNecessity::Required && wanted.is_near(&key) {
+                    // Still loading, near the view: it keeps its necessity
+                    // and goes on loading in the cache. Its request waits
+                    // behind those of the tiles in view.
+                    tile.set_load_order(TileLoadOrder::UNWANTED);
                     self.cache.add(key, tile);
                 } else {
                     // A fallback that looked only in the cache, and found
                     // nothing there, loads nothing: kept, it would only push
-                    // the tiles that the view needed out of the cache.
+                    // the tiles that the view needed out of the cache. A
+                    // tile still loading far from the view stops loading.
+                    tile.set_necessity(TileNecessity::Optional);
                     self.cache.deferred_release(tile);
                 }
             }
@@ -457,18 +587,18 @@ impl TilePyramid {
     }
 
     /// The rendered tiles, sorted by tile id.
-    pub fn get_rendered_tiles(&self) -> impl Iterator<Item = (&UnwrappedTileID, &dyn Tile)> + '_ {
+    pub(crate) fn get_rendered_tiles(&self) -> impl Iterator<Item = (&UnwrappedTileID, &dyn Tile)> + '_ {
         self.rendered_tiles.iter().map(|(id, key)| (id, self.tiles[key].as_ref()))
     }
 
     #[must_use]
-    pub fn rendered_tile_count(&self) -> usize {
+    pub(crate) fn rendered_tile_count(&self) -> usize {
         self.rendered_tiles.len()
     }
 
     /// The tile with this id, from the pyramid or the cache.
     #[must_use]
-    pub fn get_tile(&self, tile_id: &OverscaledTileID) -> Option<&dyn Tile> {
+    pub(crate) fn get_tile(&self, tile_id: &OverscaledTileID) -> Option<&dyn Tile> {
         match self.tiles.get(tile_id) {
             Some(tile) => Some(tile.as_ref()),
             None => self.cache.get(tile_id),
@@ -477,7 +607,7 @@ impl TilePyramid {
 
     // query
     #[allow(clippy::too_many_arguments)]
-    pub fn query_rendered_features(
+    pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         transform_state: &mln_map_types::TransformState,
@@ -506,7 +636,7 @@ impl TilePyramid {
         };
         let globe = transform_state.is_globe_rendering();
         let on_planet = |p: &mln_util::geo::ScreenCoordinate| {
-            mln_map_types::VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+            VerticalPerspectiveProjection::screen_coordinate_hits_globe(
                 transform_state,
                 &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
             )
@@ -722,7 +852,7 @@ impl TilePyramid {
         Ok(result)
     }
 
-    pub fn query_source_features(
+    pub(crate) fn query_source_features(
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
@@ -734,11 +864,6 @@ impl TilePyramid {
         }
 
         Ok(result)
-    }
-
-    #[must_use]
-    pub fn get_rendered_tile(&self, tile_id: &UnwrappedTileID) -> Option<&dyn Tile> {
-        self.rendered_tiles.get(tile_id).map(|key| self.tiles[key].as_ref())
     }
 
     /// On the globe every wrap of a tile is the same piece of the sphere, and
@@ -796,7 +921,7 @@ impl TilePyramid {
     ///
     /// This enables us to reuse the tiles at more ideal locations and
     /// prevent flickering.
-    pub fn handle_wrap_jump(&mut self, lng: f32) {
+    pub(crate) fn handle_wrap_jump(&mut self, lng: f32) {
         let lng_difference = lng - self.prev_lng;
         let world_difference = lng_difference / 360.0f32;
         let wrap_delta = world_difference.round() as i16;
@@ -825,36 +950,36 @@ impl TilePyramid {
         }
     }
 
-    pub fn set_cache_enabled(&mut self, enable: bool) {
+    pub(crate) fn set_cache_enabled(&mut self, enable: bool) {
         self.cache_enabled = enable;
     }
 
-    pub fn reduce_memory_use(&mut self) {
+    pub(crate) fn reduce_memory_use(&mut self) {
         self.cache.clear();
     }
 
-    pub fn retry_failed_tiles(&self) {
+    pub(crate) fn retry_failed_tiles(&self) {
         for tile in self.tiles.values() {
             tile.retry_failed_load();
         }
     }
 
-    pub fn set_observer(&mut self, observer: Rc<dyn TileObserver>) {
+    pub(crate) fn set_observer(&mut self, observer: Rc<dyn TileObserver>) {
         self.observer = observer;
     }
 
-    pub fn dump_debug_logs(&self) {
+    pub(crate) fn dump_debug_logs(&self) {
         for tile in self.tiles.values() {
             tile.dump_debug_logs();
         }
     }
 
     #[must_use]
-    pub fn get_tiles(&self) -> &BTreeMap<OverscaledTileID, Box<dyn Tile>> {
+    pub(crate) fn get_tiles(&self) -> &BTreeMap<OverscaledTileID, Box<dyn Tile>> {
         &self.tiles
     }
 
-    pub fn clear_all(&mut self) {
+    pub(crate) fn clear_all(&mut self) {
         self.fading_tiles = false;
         self.tiles.clear();
         self.rendered_tiles.clear();
@@ -863,7 +988,7 @@ impl TilePyramid {
         self.cache.defer_pending_releases();
     }
 
-    pub fn update_fading_tiles(&mut self) {
+    pub(crate) fn update_fading_tiles(&mut self) {
         self.fading_tiles = false;
         for key in self.rendered_tiles.values() {
             let tile = &self.tiles[key];
@@ -875,13 +1000,7 @@ impl TilePyramid {
     }
 
     #[must_use]
-    pub fn has_fading_tiles(&self) -> bool {
+    pub(crate) fn has_fading_tiles(&self) -> bool {
         self.fading_tiles
-    }
-
-    /// The tile cache, for tests.
-    #[must_use]
-    pub fn cache(&self) -> &TileCache {
-        &self.cache
     }
 }

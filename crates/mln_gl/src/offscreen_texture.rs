@@ -19,7 +19,7 @@ use crate::draw_target::{DrawTarget, TargetResource};
 use crate::texture2d::Texture2D;
 use crate::types::FramebufferID;
 
-pub struct OffscreenTextureResource {
+pub(crate) struct OffscreenTextureResource {
     context: Weak<Context>,
     size: Size,
     texture: Rc<RefCell<Texture2D>>,
@@ -28,7 +28,7 @@ pub struct OffscreenTextureResource {
 }
 
 impl OffscreenTextureResource {
-    pub fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         debug_assert!(size.width != 0 && size.height != 0);
         let texture = context.create_gl_texture_2d();
         {
@@ -63,7 +63,7 @@ impl OffscreenTextureResource {
         }
     }
 
-    pub fn read_still_image(&self) -> PremultipliedImage {
+    pub(crate) fn read_still_image(&self) -> PremultipliedImage {
         let mut image = PremultipliedImage::new(self.size);
         if let Some(context) = self.context.upgrade()
             && let Some(framebuffer) = self.framebuffer.get()
@@ -74,7 +74,7 @@ impl OffscreenTextureResource {
         image
     }
 
-    pub fn get_texture(&self) -> Texture2DPtr {
+    pub(crate) fn get_texture(&self) -> Texture2DPtr {
         self.texture.clone()
     }
 }
@@ -106,7 +106,7 @@ impl TargetResource for OffscreenTextureResource {
     }
 }
 
-pub struct OffscreenTexture {
+pub(crate) struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,
     /// The resource's color texture.
@@ -114,13 +114,13 @@ pub struct OffscreenTexture {
 }
 
 impl OffscreenTexture {
-    pub fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_));
         let texture = resource.get_texture();
         OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource, texture }
     }
 
-    pub fn resource(&self) -> &OffscreenTextureResource {
+    pub(crate) fn resource(&self) -> &OffscreenTextureResource {
         &self.resource
     }
 }

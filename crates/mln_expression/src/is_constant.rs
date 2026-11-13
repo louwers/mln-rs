@@ -3,7 +3,7 @@ use crate::expression::{Dependency, Expression, Kind, downcast};
 use crate::literal::Literal;
 use crate::value::Value;
 
-pub fn is_global_property_constant(expression: &dyn Expression, properties: &[&str]) -> bool {
+pub(crate) fn is_global_property_constant(expression: &dyn Expression, properties: &[&str]) -> bool {
     if expression.get_kind() == Kind::CompoundExpression {
         let e = downcast::<CompoundExpression>(expression).expect("CompoundExpression");
         for property in properties {

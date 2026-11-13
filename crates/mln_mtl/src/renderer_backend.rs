@@ -30,7 +30,7 @@ use crate::shaders::shader_group::ShaderGroup;
 use crate::shaders::shader_source::shader_source;
 
 /// The device state the backend and its context share.
-pub struct BackendImpl {
+pub(crate) struct BackendImpl {
     device: MTLDevicePtr,
     command_queue: MTLCommandQueuePtr,
     base_vertex_instance_drawing_supported: bool,
@@ -38,17 +38,17 @@ pub struct BackendImpl {
 
 impl BackendImpl {
     #[must_use]
-    pub fn get_device(&self) -> &MTLDevicePtr {
+    pub(crate) fn get_device(&self) -> &MTLDevicePtr {
         &self.device
     }
 
     #[must_use]
-    pub fn get_command_queue(&self) -> &MTLCommandQueuePtr {
+    pub(crate) fn get_command_queue(&self) -> &MTLCommandQueuePtr {
         &self.command_queue
     }
 
     #[must_use]
-    pub fn is_base_vertex_instance_drawing_supported(&self) -> bool {
+    pub(crate) fn is_base_vertex_instance_drawing_supported(&self) -> bool {
         self.base_vertex_instance_drawing_supported
     }
 }
@@ -131,21 +131,17 @@ impl RendererBackend {
 
     /// The backend's context, made on first use. Call inside a
     /// `BackendScope`.
-    pub fn mtl_context(&self) -> Option<Rc<Context>> {
+    pub(crate) fn mtl_context(&self) -> Option<Rc<Context>> {
         let context = renderer_backend::RendererBackend::get_context(self);
         context.downcast_ref::<Context>().map(Context::rc)
     }
 
-    pub fn backend_impl(&self) -> &Rc<BackendImpl> {
+    pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
         &self.impl_
     }
 
-    pub fn get_device(&self) -> &MTLDevicePtr {
+    pub(crate) fn get_device(&self) -> &MTLDevicePtr {
         self.impl_.get_device()
-    }
-
-    pub fn get_command_queue(&self) -> &MTLCommandQueuePtr {
-        self.impl_.get_command_queue()
     }
 
     /// Drops the context, releasing what it caches first
@@ -159,7 +155,7 @@ impl RendererBackend {
     }
 
     /// Opens the autorelease pool of a frame.
-    pub fn activate(&self) {
+    pub(crate) fn activate(&self) {
         // SAFETY: `deactivate` pops it on this thread, after the pools
         // opened inside the scope (BackendScopes nest on one thread).
         let pool = unsafe { objc2::ffi::objc_autoreleasePoolPush() };
@@ -167,7 +163,7 @@ impl RendererBackend {
     }
 
     /// Drains the autorelease pool of the innermost `activate`.
-    pub fn deactivate(&self) {
+    pub(crate) fn deactivate(&self) {
         if let Some(pool) = self.autorelease_pools.borrow_mut().pop() {
             // SAFETY: `pool` is the innermost pool: the scopes opened inside
             // the one that pushed it have ended.
@@ -175,7 +171,7 @@ impl RendererBackend {
         }
     }
 
-    pub fn create_context(&self) -> Rc<Context> {
+    pub(crate) fn create_context(&self) -> Rc<Context> {
         Context::new(self.impl_.clone())
     }
 

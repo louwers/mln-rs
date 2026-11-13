@@ -14,7 +14,7 @@ pub struct SkyPropsUBO {
     /* 60 */ pub sky_blend: f32,
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<SkyPropsUBO>() == 4 * 16);
+const _: () = assert!(size_of::<SkyPropsUBO>() == 4 * 16);
 
 /// The atmosphere properties uniform block (96 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -27,4 +27,4 @@ pub struct AtmospherePropsUBO {
     pub sun_position: [f32; 4],
     /* 96 */
 }
-const _: () = assert!(std::mem::size_of::<AtmospherePropsUBO>() == 6 * 16);
+const _: () = assert!(size_of::<AtmospherePropsUBO>() == 6 * 16);

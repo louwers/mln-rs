@@ -22,14 +22,14 @@ fn layer_capabilities(type_: &str) -> [&'static str; 6] {
 
 /// Whether the layer type's constructor takes no source ID.
 #[must_use]
-pub fn is_source_less(type_: &str) -> bool {
+pub(crate) fn is_source_less(type_: &str) -> bool {
     type_ == "background"
 }
 
 /// The conversion call that `set_property_internal` makes for a property
 /// (also the grouping key, as in the template).
 #[must_use]
-pub fn conversion(property: &Property) -> String {
+pub(crate) fn conversion(property: &Property) -> String {
     let data_driven = is_data_driven(property);
     let convert_tokens = property.name == "icon-image" || property.name == "text-field";
     if is_color_ramp(property) {
@@ -44,7 +44,9 @@ pub fn conversion(property: &Property) -> String {
 
 /// Groups properties by conversion, in order of first appearance (JS object
 /// key order of the template's `conversions`).
-pub fn conversion_groups<'a>(properties: impl Iterator<Item = &'a Property>) -> Vec<(String, Vec<&'a Property>)> {
+pub(crate) fn conversion_groups<'a>(
+    properties: impl Iterator<Item = &'a Property>,
+) -> Vec<(String, Vec<&'a Property>)> {
     let mut groups: Vec<(String, Vec<&'a Property>)> = Vec::new();
     for p in properties {
         let key = conversion(p);
@@ -58,7 +60,7 @@ pub fn conversion_groups<'a>(properties: impl Iterator<Item = &'a Property>) -> 
 
 /// Writes `let Some(typed_value) = <key> else { return Some(error); };`,
 /// wrapped as rustfmt does past the line width.
-pub fn let_else(w: &mut Writer, indent: &str, key: &str) {
+pub(crate) fn let_else(w: &mut Writer, indent: &str, key: &str) {
     let one_line = format!("{indent}let Some(typed_value) = {key} else {{");
     if one_line.len() <= MAX_WIDTH {
         w.line(&one_line);
@@ -165,7 +167,7 @@ fn property_variant(layer: &LayerSpec, property: &Property) -> String {
 }
 
 #[must_use]
-pub fn emit(layer: &LayerSpec) -> String {
+pub(crate) fn emit(layer: &LayerSpec) -> String {
     let t = camelize(&layer.type_);
     let file = layer_file_name(&layer.type_);
     let layer_name = format!("{t}Layer");

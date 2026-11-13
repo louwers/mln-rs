@@ -33,8 +33,6 @@ pub const PITCH_MAX: f64 = std::f64::consts::PI;
 pub const DEFAULT_FOV: f64 = 0.643_501_108_793_284_4;
 pub const MIN_ZOOM: f64 = 0.0;
 pub const MAX_ZOOM: f64 = 25.5;
-pub const MIN_ZOOM_F: f32 = MIN_ZOOM as f32;
-pub const MAX_ZOOM_F: f32 = MAX_ZOOM as f32;
 pub const DEFAULT_MAX_ZOOM: u8 = 22;
 
 /// `ONE_EM` constant used to go between "em" units used in style spec and
@@ -69,14 +67,4 @@ pub const LAST_RESORT_ALPHABETIC_FONT: &str = "Open Sans Regular";
 pub const LAST_RESORT_PAN_UNICODE_FONT: &str = "Arial Unicode MS Regular";
 
 /// Debug warning switches; the ones that are on are on in debug builds only.
-pub mod debug {
-    pub const TILE_PARSE_WARNINGS: bool = false;
-    pub const STYLE_PARSE_WARNINGS: bool = false;
-    pub const SPRITE_WARNINGS: bool = false;
-    pub const RENDER_WARNINGS: bool = false;
-    pub const LABEL_TEXT_MISSING_WARNING: bool = cfg!(debug_assertions);
-    pub const MISSING_FONT_STACK_WARNING: bool = cfg!(debug_assertions);
-    pub const MISSING_FONT_FACE_WARNING: bool = cfg!(debug_assertions);
-    pub const GLYPH_WARNING: bool = cfg!(debug_assertions);
-    pub const SHAPING_WARNING: bool = cfg!(debug_assertions);
-}
+pub(crate) mod debug {}

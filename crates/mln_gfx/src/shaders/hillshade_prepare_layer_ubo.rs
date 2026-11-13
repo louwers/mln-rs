@@ -7,7 +7,7 @@ pub struct HillshadePrepareDrawableUBO {
     /*  0 */ pub matrix: [f32; 4 * 4],
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadePrepareDrawableUBO>() == 4 * 16);
+const _: () = assert!(size_of::<HillshadePrepareDrawableUBO>() == 4 * 16);
 
 /// The hillshade prepare shader's per-tile uniform block (32 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -19,4 +19,4 @@ pub struct HillshadePrepareTilePropsUBO {
     /* 28 */ pub maxzoom: f32,
     /* 32 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadePrepareTilePropsUBO>() == 2 * 16);
+const _: () = assert!(size_of::<HillshadePrepareTilePropsUBO>() == 2 * 16);

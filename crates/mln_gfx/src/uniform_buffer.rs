@@ -15,7 +15,8 @@ pub trait UniformBuffer: Any {
 impl dyn UniformBuffer {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: UniformBuffer>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 
@@ -59,7 +60,7 @@ impl UniformBufferArray {
     }
 
     /// Create and add a new buffer or update an existing one.
-    pub fn create_or_update(&mut self, id: usize, data: &[u8], context: &dyn Context, persistent: bool) {
+    pub(crate) fn create_or_update(&mut self, id: usize, data: &[u8], context: &dyn Context, persistent: bool) {
         if let Some(ubo) = self.get(id)
             && ubo.get_size() == data.len()
         {

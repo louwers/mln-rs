@@ -14,7 +14,7 @@ use crate::tile_render_data::TileAtlasTextures;
 
 /// Tweaker that applies the latest values from a retained
 /// `TileAtlasTexturesPtr`.
-pub struct DrawableAtlasesTweaker {
+pub(crate) struct DrawableAtlasesTweaker {
     atlases: Option<Rc<TileAtlasTextures>>,
     icon_texture_id: Option<usize>,
     glyph_texture_id: Option<usize>,
@@ -28,7 +28,7 @@ pub struct DrawableAtlasesTweaker {
 impl DrawableAtlasesTweaker {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         atlases: Option<Rc<TileAtlasTextures>>,
         icon_texture_id: Option<usize>,
         glyph_texture_id: Option<usize>,

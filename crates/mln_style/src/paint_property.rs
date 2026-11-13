@@ -8,7 +8,6 @@
 // kinds are not carried: they name gfx attribute bindings, which the
 // renderer looks up by property.
 
-#[macro_export]
 macro_rules! paint_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr) => {
         $(#[$meta])*
@@ -37,8 +36,8 @@ macro_rules! paint_property {
         }
     };
 }
+pub(crate) use paint_property;
 
-#[macro_export]
 macro_rules! cross_faded_paint_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr) => {
         $(#[$meta])*
@@ -71,11 +70,11 @@ macro_rules! cross_faded_paint_property {
         }
     };
 }
+pub(crate) use cross_faded_paint_property;
 
 /// Declares a data-driven paint property. `use_integer_zoom = true` replaces
 /// the evaluator with `DataDrivenPropertyEvaluator<T, true>` (for
 /// line-floor-width).
-#[macro_export]
 macro_rules! data_driven_paint_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr
         $(, use_integer_zoom = $int_zoom:literal)?) => {
@@ -115,8 +114,8 @@ macro_rules! data_driven_paint_property {
         }
     };
 }
+pub(crate) use data_driven_paint_property;
 
-#[macro_export]
 macro_rules! cross_faded_data_driven_paint_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr) => {
         $(#[$meta])*
@@ -151,10 +150,10 @@ macro_rules! cross_faded_data_driven_paint_property {
         }
     };
 }
+pub(crate) use cross_faded_data_driven_paint_property;
 
 /// Declares a color ramp paint property, the special case for
 /// heatmap-color, line-gradient and color-relief-color.
-#[macro_export]
 macro_rules! color_ramp_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident) => {
         $(#[$meta])*
@@ -183,12 +182,11 @@ macro_rules! color_ramp_property {
         }
     };
 }
+pub(crate) use color_ramp_property;
 
 /// The `PossiblyEvaluated` overloads that pick out a
 /// `PossiblyEvaluatedPropertyValue` (`isConstant`, `getDependencies`,
 /// `collectGlobalStateRefs`).
-#[doc(hidden)]
-#[macro_export]
 macro_rules! __data_driven_possibly_evaluated_hooks {
     () => {
         fn possibly_evaluated_is_constant(value: &Self::PossiblyEvaluatedType) -> bool {
@@ -206,11 +204,10 @@ macro_rules! __data_driven_possibly_evaluated_hooks {
         }
     };
 }
+pub(crate) use __data_driven_possibly_evaluated_hooks;
 
 /// Implements `Property::evaluate_possibly_evaluated` for a plain
 /// `PossiblyEvaluatedType`.
-#[doc(hidden)]
-#[macro_export]
 macro_rules! __constant_feature_evaluation {
     ($t:ty) => {
         fn evaluate_possibly_evaluated(
@@ -224,11 +221,10 @@ macro_rules! __constant_feature_evaluation {
         }
     };
 }
+pub(crate) use __constant_feature_evaluation;
 
 /// Implements `Property::evaluate_possibly_evaluated` for a
 /// `PossiblyEvaluatedPropertyValue<T>`.
-#[doc(hidden)]
-#[macro_export]
 macro_rules! __data_driven_feature_evaluation {
     ($t:ty) => {
         fn evaluate_possibly_evaluated(
@@ -242,11 +238,10 @@ macro_rules! __data_driven_feature_evaluation {
         }
     };
 }
+pub(crate) use __data_driven_feature_evaluation;
 
 /// Implements `Property::evaluate_possibly_evaluated` for the cross-faded
 /// kinds.
-#[doc(hidden)]
-#[macro_export]
 macro_rules! __cross_faded_feature_evaluation {
     ($t:ty) => {
         fn evaluate_possibly_evaluated(
@@ -260,3 +255,4 @@ macro_rules! __cross_faded_feature_evaluation {
         }
     };
 }
+pub(crate) use __cross_faded_feature_evaluation;

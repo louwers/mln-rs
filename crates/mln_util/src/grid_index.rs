@@ -24,7 +24,7 @@ impl<T> GeometryBox<T> {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Circle<T> {
     pub center: Point<T>,
-    pub radius: T,
+    pub(crate) radius: T,
 }
 
 impl<T> Circle<T> {

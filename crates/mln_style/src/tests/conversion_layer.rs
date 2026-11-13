@@ -40,7 +40,7 @@ fn layer_transition() {
     )
     .unwrap();
     assert_eq!("background", layer.get_type_info().type_);
-    let background = (layer.as_ref() as &dyn Layer).downcast_ref::<BackgroundLayer>().unwrap();
+    let background = (layer.as_ref()).downcast_ref::<BackgroundLayer>().unwrap();
     assert_eq!(Some(Duration::from_millis(400)), background.impl_().paint.get::<BackgroundColor>().options.duration);
     assert_eq!(Some(Duration::from_millis(500)), background.impl_().paint.get::<BackgroundColor>().options.delay);
 }

@@ -16,14 +16,14 @@ use super::raster_layer_factory::RasterLayerFactory;
 use super::symbol_layer_factory::SymbolLayerFactory;
 use crate::layer::Layer;
 
-pub struct LayerManager {
+pub(crate) struct LayerManager {
     factories: Vec<Box<dyn LayerFactory>>,
     type_to_factory: VecMap<String, usize>,
 }
 
 impl LayerManager {
     /// A singleton getter.
-    pub fn get() -> &'static LayerManager {
+    pub(crate) fn get() -> &'static LayerManager {
         static INSTANCE: OnceLock<LayerManager> = OnceLock::new();
         INSTANCE.get_or_init(LayerManager::new_default)
     }
@@ -61,7 +61,7 @@ impl LayerManager {
     }
 
     /// Returns a new Layer instance on success call; returns `None` otherwise.
-    pub fn create_layer(
+    pub(crate) fn create_layer(
         &self,
         type_: &str,
         id: &str,

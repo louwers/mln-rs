@@ -178,7 +178,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_create_map(
+pub(crate) unsafe extern "C" fn mln_runtime_create_map(
     runtime: mln_runtime,
     options: *const mln_map_options,
     out_map: *mut mln_map,
@@ -246,7 +246,7 @@ fn retire(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_release(
+pub(crate) unsafe extern "C" fn mln_map_release(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -269,7 +269,7 @@ pub unsafe extern "C" fn mln_map_release(
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_dispose(map: mln_map, out_diagnostic: *mut mln_diagnostic) -> mln_status {
+pub(crate) unsafe extern "C" fn mln_map_dispose(map: mln_map, out_diagnostic: *mut mln_diagnostic) -> mln_status {
     export!(out_diagnostic, { dispose(map) })
 }
 
@@ -336,7 +336,7 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_snapshot(
+pub(crate) unsafe extern "C" fn mln_map_get_snapshot(
     map: mln_map,
     out_snapshot: *mut mln_map_snapshot,
     out_diagnostic: *mut mln_diagnostic,
@@ -357,7 +357,7 @@ pub unsafe extern "C" fn mln_map_get_snapshot(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_resize(
+pub(crate) unsafe extern "C" fn mln_map_resize(
     map: mln_map,
     extent: mln_logical_extent,
     completion: *const mln_completion,
@@ -376,7 +376,7 @@ pub unsafe extern "C" fn mln_map_resize(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_request_repaint(
+pub(crate) unsafe extern "C" fn mln_map_request_repaint(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -393,7 +393,7 @@ pub unsafe extern "C" fn mln_map_request_repaint(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_begin_command_group(
+pub(crate) unsafe extern "C" fn mln_map_begin_command_group(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -410,7 +410,7 @@ pub unsafe extern "C" fn mln_map_begin_command_group(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_end_command_group(
+pub(crate) unsafe extern "C" fn mln_map_end_command_group(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -427,7 +427,7 @@ pub unsafe extern "C" fn mln_map_end_command_group(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_event_mask(
+pub(crate) unsafe extern "C" fn mln_map_set_event_mask(
     map: mln_map,
     mask: mln_runtime_event_flags,
     completion: *const mln_completion,
@@ -447,7 +447,7 @@ pub unsafe extern "C" fn mln_map_set_event_mask(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_url(
+pub(crate) unsafe extern "C" fn mln_map_set_style_url(
     map: mln_map,
     url: mln_buffer_view,
     completion: *const mln_completion,
@@ -467,7 +467,7 @@ pub unsafe extern "C" fn mln_map_set_style_url(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_json(
+pub(crate) unsafe extern "C" fn mln_map_set_style_json(
     map: mln_map,
     json: mln_buffer_view,
     completion: *const mln_completion,
@@ -487,7 +487,7 @@ pub unsafe extern "C" fn mln_map_set_style_json(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_loaded_style_json(
+pub(crate) unsafe extern "C" fn mln_map_get_loaded_style_json(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -504,7 +504,7 @@ pub unsafe extern "C" fn mln_map_get_loaded_style_json(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_url(
+pub(crate) unsafe extern "C" fn mln_map_get_style_url(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -525,7 +525,7 @@ pub unsafe extern "C" fn mln_map_get_style_url(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_request_still_image(
+pub(crate) unsafe extern "C" fn mln_map_request_still_image(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -621,7 +621,7 @@ fn feature_state(json: &str) -> Result<FeatureState, Error> {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_feature_state(
+pub(crate) unsafe extern "C" fn mln_map_set_feature_state(
     map: mln_map,
     selector: *const mln_feature_state_selector,
     state: mln_buffer_view,
@@ -644,7 +644,7 @@ pub unsafe extern "C" fn mln_map_set_feature_state(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_feature_state(
+pub(crate) unsafe extern "C" fn mln_map_get_feature_state(
     map: mln_map,
     selector: *const mln_feature_state_selector,
     completion: *const mln_completion,
@@ -674,7 +674,7 @@ pub unsafe extern "C" fn mln_map_get_feature_state(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_remove_feature_state(
+pub(crate) unsafe extern "C" fn mln_map_remove_feature_state(
     map: mln_map,
     selector: *const mln_feature_state_selector,
     completion: *const mln_completion,

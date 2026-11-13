@@ -29,9 +29,47 @@ use crate::tile_render_data::TileRenderData;
 /// - required means that every effort should be taken to obtain the data
 ///   (e.g. load from internet and keep the data fresh if it expires)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TileNecessity {
+pub(crate) enum TileNecessity {
     Optional,
     Required,
+}
+
+/// When a tile's network request starts among the requests that wait for a
+/// connection; lower starts sooner. Every tile's comes after the requests
+/// for anything else (styles, sources, sprites, glyphs), which leave theirs
+/// at zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct TileLoadOrder(u32);
+
+impl TileLoadOrder {
+    const RANKS: u32 = 1 << 24;
+
+    /// A tile that no cover of the current view holds.
+    pub(crate) const UNWANTED: TileLoadOrder = TileLoadOrder(u32::MAX);
+
+    /// The `rank`th tile that the coarse cover of the current view retains:
+    /// there are few of them, and each gives a large part of the view
+    /// something to show.
+    #[must_use]
+    pub(crate) fn coarse(rank: usize) -> Self {
+        Self::band(1, rank)
+    }
+
+    /// The `rank`th tile that the ideal cover of the current view retains.
+    #[must_use]
+    pub(crate) fn ideal(rank: usize) -> Self {
+        Self::band(2, rank)
+    }
+
+    fn band(band: u32, rank: usize) -> Self {
+        TileLoadOrder(band * Self::RANKS + (rank as u32).min(Self::RANKS - 1))
+    }
+
+    /// The value for a resource's `RequestOrder`.
+    #[must_use]
+    pub(crate) fn value(self) -> u32 {
+        self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,50 +96,55 @@ pub enum TileOperation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TileUpdateParameters {
-    pub minimum_update_interval: Duration,
-    pub is_volatile: bool,
+pub(crate) struct TileUpdateParameters {
+    pub(crate) minimum_update_interval: Duration,
+    pub(crate) is_volatile: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Kind {
+pub(crate) enum Kind {
     Geometry,
     Raster,
     RasterDEM,
 }
 
 /// The data members of `Tile`.
-pub struct TileBase {
-    pub kind: Kind,
+pub(crate) struct TileBase {
+    pub(crate) kind: Kind,
     id: Cell<OverscaledTileID>,
-    pub source_id: String,
-    pub modified: Cell<Option<Timestamp>>,
-    pub expires: Cell<Option<Timestamp>>,
+    pub(crate) source_id: String,
+    pub(crate) modified: Cell<Option<Timestamp>>,
+    pub(crate) expires: Cell<Option<Timestamp>>,
     /// Indicates whether this tile is used for the currently visible layers
     /// on the map. Re-initialized at every source update.
-    pub used_by_rendered_layers: Cell<bool>,
+    pub(crate) used_by_rendered_layers: Cell<bool>,
 
-    pub tried_optional: Cell<bool>,
-    pub renderable: Cell<bool>,
-    pub pending: Cell<bool>,
-    pub loaded: Cell<bool>,
+    pub(crate) tried_optional: Cell<bool>,
+    pub(crate) renderable: Cell<bool>,
+    pub(crate) pending: Cell<bool>,
+    pub(crate) loaded: Cell<bool>,
 
     /// Port-only: the necessity that the tile's pyramid last retained the
     /// tile with. A tile retained as optional only looks in the cache, so
     /// one that isn't renderable then loads nothing.
-    pub retained_necessity: Cell<TileNecessity>,
+    pub(crate) retained_necessity: Cell<TileNecessity>,
 
     /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
     /// version this tile's buckets hold; 0 for buckets that have none.
-    pub feature_state_version: Cell<u64>,
+    pub(crate) feature_state_version: Cell<u64>,
 
     observer: RefCell<Rc<dyn TileObserver>>,
 }
 
 impl TileBase {
     #[must_use]
-    pub fn new(kind: Kind, id: OverscaledTileID, source_id: String, observer: Option<Rc<dyn TileObserver>>) -> Self {
+    pub(crate) fn new(
+        kind: Kind,
+        id: OverscaledTileID,
+        source_id: String,
+        observer: Option<Rc<dyn TileObserver>>,
+    ) -> Self {
         TileBase {
             kind,
             id: Cell::new(id),
@@ -120,23 +163,24 @@ impl TileBase {
     }
 
     /// The `id` member.
-    pub fn id(&self) -> OverscaledTileID {
+    pub(crate) fn id(&self) -> OverscaledTileID {
         self.id.get()
     }
 
-    pub fn set_id(&self, id: OverscaledTileID) {
+    pub(crate) fn set_id(&self, id: OverscaledTileID) {
         self.id.set(id);
     }
 
-    pub fn observer(&self) -> Rc<dyn TileObserver> {
+    pub(crate) fn observer(&self) -> Rc<dyn TileObserver> {
         self.observer.borrow().clone()
     }
 
-    pub fn set_observer(&self, observer: Rc<dyn TileObserver>) {
+    #[cfg(test)]
+    pub(crate) fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         *self.observer.borrow_mut() = observer;
     }
 
-    pub fn set_tried_cache(&self) {
+    pub(crate) fn set_tried_cache(&self) {
         self.tried_optional.set(true);
         self.observer().on_tile_changed(self);
     }
@@ -144,14 +188,14 @@ impl TileBase {
     /// Returns true when the tile source has received a first response,
     /// regardless of whether a load error occurred or actual data was
     /// loaded.
-    pub fn has_tried_cache(&self) -> bool {
+    pub(crate) fn has_tried_cache(&self) -> bool {
         self.tried_optional.get()
     }
 
     /// Tile data considered "Renderable" can be used for rendering. Data in
     /// partial state is still waiting for network resources but can also be
     /// rendered, although layers will be missing.
-    pub fn is_renderable(&self) -> bool {
+    pub(crate) fn is_renderable(&self) -> bool {
         self.renderable.get()
     }
 
@@ -159,7 +203,7 @@ impl TileBase {
     /// `FileSource`, and have attempted to parse the tile (if applicable).
     /// Tile implementations should set this to true when a load error
     /// occurred, or after the tile was parsed successfully.
-    pub fn is_loaded(&self) -> bool {
+    pub(crate) fn is_loaded(&self) -> bool {
         self.loaded.get()
     }
 
@@ -170,11 +214,11 @@ impl TileBase {
     /// tile to a renderable state. Some tiles may not be renderable, but
     /// complete, e.g. when a raster tile couldn't be loaded, or parsing
     /// failed.
-    pub fn is_complete(&self) -> bool {
+    pub(crate) fn is_complete(&self) -> bool {
         self.loaded.get() && !self.pending.get()
     }
 
-    pub fn dump_debug_logs(&self) {
+    pub(crate) fn dump_debug_logs(&self) {
         let kind_string = match self.kind {
             Kind::Geometry => "Geometry",
             Kind::Raster => "Raster",
@@ -187,22 +231,27 @@ impl TileBase {
         Log::info(Event::General, format!("Tile::loaded: {}", if self.is_loaded() { "yes" } else { "no" }));
     }
 
-    pub fn on_tile_action(&self, op: TileOperation) {
+    pub(crate) fn on_tile_action(&self, op: TileOperation) {
         self.observer().on_tile_action(&self.id(), &self.source_id, op);
     }
 }
 
 /// The virtual interface of `Tile`.
-pub trait Tile: Any {
+pub(crate) trait Tile: Any {
     fn base(&self) -> &TileBase;
 
     fn create_render_data(&self) -> Box<dyn TileRenderData>;
 
+    #[cfg(test)]
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         self.base().set_observer(observer);
     }
 
     fn set_necessity(&self, _necessity: TileNecessity) {}
+
+    /// Sets when the tile's network request starts among those waiting,
+    /// for a request that waits now as for a later one.
+    fn set_load_order(&self, _order: TileLoadOrder) {}
 
     fn set_update_parameters(&self, _parameters: &TileUpdateParameters) {}
 
@@ -296,10 +345,6 @@ pub trait Tile: Any {
         self.base().id()
     }
 
-    fn set_tried_cache(&self) {
-        self.base().set_tried_cache();
-    }
-
     fn has_tried_cache(&self) -> bool {
         self.base().has_tried_cache()
     }
@@ -323,7 +368,8 @@ pub trait Tile: Any {
 
 impl dyn Tile {
     /// The concrete type behind this trait object, if it is a `T`.
-    pub fn downcast_ref<T: Tile>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+    pub(crate) fn downcast_ref<T: Tile>(&self) -> Option<&T> {
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }

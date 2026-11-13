@@ -15,6 +15,6 @@ pub trait SpriteLoaderObserver {
 }
 
 /// The C++ `nullObserver` (a default-constructed `SpriteLoaderObserver`).
-pub struct NullSpriteLoaderObserver;
+pub(crate) struct NullSpriteLoaderObserver;
 
 impl SpriteLoaderObserver for NullSpriteLoaderObserver {}

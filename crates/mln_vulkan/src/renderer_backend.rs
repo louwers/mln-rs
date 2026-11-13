@@ -53,7 +53,7 @@ use crate::shaders::shader_source::shader_source;
 /// The platform's part of a backend that renders to a window: what C++'s
 /// `SurfaceResource::createPlatformSurface` and the platform's
 /// `getInstanceExtensions` do.
-pub trait SurfaceProvider {
+pub(crate) trait SurfaceProvider {
     /// The instance extensions the surface needs.
     fn instance_extensions(&self) -> Vec<&'static CStr>;
 
@@ -63,7 +63,7 @@ pub trait SurfaceProvider {
 
 /// What a backend makes on its device, which the backend, its context and
 /// their resources share.
-pub struct BackendImpl {
+pub(crate) struct BackendImpl {
     device: Device,
     command_pool: vk::CommandPool,
     max_frames: u32,
@@ -103,72 +103,73 @@ impl BackendImpl {
     }
 
     /// The device the backend renders on.
-    pub fn device(&self) -> &Device {
+    pub(crate) fn device(&self) -> &Device {
         &self.device
     }
 
     /// The loaded Vulkan library.
-    pub fn entry(&self) -> &ash::Entry {
+    pub(crate) fn entry(&self) -> &ash::Entry {
         self.device.shared.entry()
     }
 
-    pub fn get_instance(&self) -> &ash::Instance {
+    pub(crate) fn get_instance(&self) -> &ash::Instance {
         self.device.shared.instance()
     }
 
-    pub fn get_physical_device(&self) -> vk::PhysicalDevice {
+    pub(crate) fn get_physical_device(&self) -> vk::PhysicalDevice {
         self.device.shared.physical_device()
     }
 
-    pub fn get_device(&self) -> &ash::Device {
+    pub(crate) fn get_device(&self) -> &ash::Device {
         self.device.shared.device()
     }
 
     /// `VK_KHR_surface`, when the instance has it.
-    pub fn get_surface_loader(&self) -> Option<&ash::khr::surface::Instance> {
+    pub(crate) fn get_surface_loader(&self) -> Option<&ash::khr::surface::Instance> {
         self.device.shared.surface()
     }
 
     /// `VK_KHR_swapchain`, when the device has it.
-    pub fn get_swapchain_loader(&self) -> Option<&ash::khr::swapchain::Device> {
+    pub(crate) fn get_swapchain_loader(&self) -> Option<&ash::khr::swapchain::Device> {
         self.device.shared.swapchain()
     }
 
     /// `VK_KHR_external_semaphore_fd`, when the device has it.
-    pub fn get_semaphore_fd_loader(&self) -> Option<&ash::khr::external_semaphore_fd::Device> {
+    #[cfg_attr(not(unix), expect(dead_code, reason = "sync files are Unix's"))]
+    pub(crate) fn get_semaphore_fd_loader(&self) -> Option<&ash::khr::external_semaphore_fd::Device> {
         self.device.shared.semaphore_fd()
     }
 
-    pub fn get_command_pool(&self) -> vk::CommandPool {
+    pub(crate) fn get_command_pool(&self) -> vk::CommandPool {
         self.command_pool
     }
 
-    pub fn get_max_frames(&self) -> u32 {
+    pub(crate) fn get_max_frames(&self) -> u32 {
         self.max_frames
     }
 
     /// Runs `f` with the allocator.
-    pub fn with_allocator<R>(&self, f: impl FnOnce(&mut Allocator) -> R) -> R {
+    pub(crate) fn with_allocator<R>(&self, f: impl FnOnce(&mut Allocator) -> R) -> R {
         f(&mut self.allocator.borrow_mut())
     }
 
-    pub fn get_device_properties(&self) -> &vk::PhysicalDeviceProperties {
+    pub(crate) fn get_device_properties(&self) -> &vk::PhysicalDeviceProperties {
         self.device.shared.properties()
     }
 
     /// The features the device was created with.
-    pub fn get_device_features(&self) -> &vk::PhysicalDeviceFeatures {
+    pub(crate) fn get_device_features(&self) -> &vk::PhysicalDeviceFeatures {
         self.device.shared.enabled_features()
     }
 
     /// The family of the device's queue, which renders and presents.
-    pub fn get_graphics_queue_index(&self) -> u32 {
+    pub(crate) fn get_graphics_queue_index(&self) -> u32 {
         self.device.shared.queue_family_index()
     }
 
     /// Submits `submits` to the device's queue, with `fence` signaled when
     /// they finish.
-    pub fn submit(&self, submits: &[vk::SubmitInfo<'_>], fence: vk::Fence) -> ash::prelude::VkResult<()> {
+    pub(crate) fn submit(&self, submits: &[vk::SubmitInfo<'_>], fence: vk::Fence) -> ash::prelude::VkResult<()> {
         let device = self.get_device();
         // SAFETY: the caller's submissions are valid for the device, and the
         // queue is held for the call.
@@ -177,7 +178,7 @@ impl BackendImpl {
 
     /// Presents to the device's queue, which presents to the swapchains
     /// that `info` names. `Ok(true)` when a swapchain is suboptimal.
-    pub fn present(&self, info: &vk::PresentInfoKHR<'_>) -> ash::prelude::VkResult<bool> {
+    pub(crate) fn present(&self, info: &vk::PresentInfoKHR<'_>) -> ash::prelude::VkResult<bool> {
         let Some(loader) = self.get_swapchain_loader() else {
             return Err(vk::Result::ERROR_EXTENSION_NOT_PRESENT);
         };
@@ -188,7 +189,7 @@ impl BackendImpl {
 
     /// Names an object for the validation layer's messages and for
     /// debuggers.
-    pub fn set_debug_name<T: vk::Handle>(&self, object: T, name: &str) {
+    pub(crate) fn set_debug_name<T: vk::Handle>(&self, object: T, name: &str) {
         let Some(debug_utils) = self.device.shared.debug_utils() else {
             return;
         };
@@ -200,7 +201,7 @@ impl BackendImpl {
         let _ = unsafe { debug_utils.set_debug_utils_object_name(&info) };
     }
 
-    pub fn begin_debug_label(&self, buffer: vk::CommandBuffer, name: &str, color: [f32; 4]) {
+    pub(crate) fn begin_debug_label(&self, buffer: vk::CommandBuffer, name: &str, color: [f32; 4]) {
         let Some(debug_utils) = self.device.shared.debug_utils() else {
             return;
         };
@@ -212,14 +213,14 @@ impl BackendImpl {
         unsafe { debug_utils.cmd_begin_debug_utils_label(buffer, &label) };
     }
 
-    pub fn end_debug_label(&self, buffer: vk::CommandBuffer) {
+    pub(crate) fn end_debug_label(&self, buffer: vk::CommandBuffer) {
         if let Some(debug_utils) = self.device.shared.debug_utils() {
             // SAFETY: as in `begin_debug_label`, which opened the label.
             unsafe { debug_utils.cmd_end_debug_utils_label(buffer) };
         }
     }
 
-    pub fn insert_debug_label(&self, buffer: vk::CommandBuffer, name: &str) {
+    pub(crate) fn insert_debug_label(&self, buffer: vk::CommandBuffer, name: &str) {
         let Some(debug_utils) = self.device.shared.debug_utils() else {
             return;
         };
@@ -237,7 +238,7 @@ impl BackendImpl {
     /// waits on the whole device, which would need every queue of it, nor
     /// holds the queue while it waits. Logs `what` was going on when the
     /// wait fails.
-    pub fn wait_idle(&self, what: &str) {
+    pub(crate) fn wait_idle(&self, what: &str) {
         let device = self.get_device();
         // SAFETY: the fence is made, waited for and destroyed here, and the
         // empty submission is valid for the queue.
@@ -345,12 +346,12 @@ impl RendererBackend {
         Ok(RendererBackend { base: RendererBackendBase::new(), impl_, context })
     }
 
-    pub fn backend_impl(&self) -> &Rc<BackendImpl> {
+    pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
         &self.impl_
     }
 
     /// The backend's context.
-    pub fn vulkan_context(&self) -> &Rc<Context> {
+    pub(crate) fn vulkan_context(&self) -> &Rc<Context> {
         &self.context
     }
 
@@ -376,13 +377,14 @@ impl RendererBackend {
     }
 
     /// The context made with the backend.
-    pub fn create_context(&self) -> Rc<Context> {
+    pub(crate) fn create_context(&self) -> Rc<Context> {
         self.context.clone()
     }
 
     /// Registers one shader group per built-in shader. A duplicate
     /// registration is an error, which C++ throws and this logs.
-    pub fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
+    #[expect(clippy::unused_self, reason = "each backend registers its shaders through its own `init_shaders`")]
+    pub(crate) fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
         for &shader_id in REGISTERED_SHADERS {
             let Some(source) = shader_source(shader_id) else {
                 continue;

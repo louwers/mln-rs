@@ -7,7 +7,7 @@ fn stringify_color(r: f64, g: f64, b: f64, a: f64) -> String {
     [r, g, b, a].map(to_string_double).join(", ")
 }
 
-pub fn rgba(r: f64, g: f64, b: f64, a: f64) -> EvalResult<Color> {
+pub(crate) fn rgba(r: f64, g: f64, b: f64, a: f64) -> EvalResult<Color> {
     if r < 0.0 || r > 255.0 || g < 0.0 || g > 255.0 || b < 0.0 || b > 255.0 {
         return Err(EvaluationError::new(format!(
             "Invalid rgba value [{}]: 'r', 'g', and 'b' must be between 0 and 255.",

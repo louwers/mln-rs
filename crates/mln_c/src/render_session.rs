@@ -151,11 +151,7 @@ impl AttachRequest {
     /// Fails with `MLN_STATUS_UNSUPPORTED` unless the caller asked for a core
     /// worker.
     pub(crate) fn require_core_worker(&self, message: &'static str) -> Result<(), Error> {
-        if self.driver == Driver::CoreWorker {
-            Ok(())
-        } else {
-            Err(Error::new(mln_util::ErrorKind::Unsupported, message))
-        }
+        if self.driver == Driver::CoreWorker { Ok(()) } else { Err(Error::new(ErrorKind::Unsupported, message)) }
     }
 
     fn wakes(&self) -> [&Wake; 3] {
@@ -243,7 +239,7 @@ fn state(state: RenderSessionState) -> u32 {
 fn failure_status(failure: Option<&mln_util::Error>) -> mln_status {
     match failure {
         None => MLN_STATUS_OK,
-        Some(error) if error.kind == mln_util::ErrorKind::TargetLost => MLN_STATUS_TARGET_LOST,
+        Some(error) if error.kind == ErrorKind::TargetLost => MLN_STATUS_TARGET_LOST,
         Some(_) => MLN_STATUS_NATIVE_ERROR,
     }
 }
@@ -254,7 +250,7 @@ fn failure_status(failure: Option<&mln_util::Error>) -> mln_status {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_get_capabilities(
+pub(crate) unsafe extern "C" fn mln_render_session_get_capabilities(
     session: mln_render_session,
     out_capabilities: *mut mln_render_session_capabilities,
     out_diagnostic: *mut mln_diagnostic,
@@ -279,7 +275,7 @@ pub unsafe extern "C" fn mln_render_session_get_capabilities(
             consumer_sync_kinds: crate::gpu_device::sync_flags(capabilities.consumer_sync_kinds),
             export_kind: capabilities
                 .export_kind
-                .map_or(crate::generated::types::MLN_GPU_EXPORT_KIND_NONE, crate::render_target::export_kind_value),
+                .map_or(crate::generated::types::MLN_GPU_EXPORT_KIND_NONE, render_target::export_kind_value),
         };
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_capabilities, &capabilities) }
@@ -292,7 +288,7 @@ pub unsafe extern "C" fn mln_render_session_get_capabilities(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_get_snapshot(
+pub(crate) unsafe extern "C" fn mln_render_session_get_snapshot(
     session: mln_render_session,
     out_snapshot: *mut mln_render_session_snapshot,
     out_diagnostic: *mut mln_diagnostic,
@@ -325,7 +321,7 @@ pub unsafe extern "C" fn mln_render_session_get_snapshot(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_get_failure(
+pub(crate) unsafe extern "C" fn mln_render_session_get_failure(
     session: mln_render_session,
     out_message: *mut c_char,
     message_capacity: usize,
@@ -349,7 +345,7 @@ pub unsafe extern "C" fn mln_render_session_get_failure(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_demand_frame(
+pub(crate) unsafe extern "C" fn mln_render_session_demand_frame(
     session: mln_render_session,
     demand: *const mln_frame_demand,
     out_diagnostic: *mut mln_diagnostic,
@@ -400,7 +396,7 @@ pub(crate) fn demand_paced(session: mln_render_session, pacer: &Pacer) {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_set_frame_pacer(
+pub(crate) unsafe extern "C" fn mln_render_session_set_frame_pacer(
     session: mln_render_session,
     pacer: mln_frame_pacer,
     out_diagnostic: *mut mln_diagnostic,
@@ -427,7 +423,7 @@ pub unsafe extern "C" fn mln_render_session_set_frame_pacer(
 
 /// `mln_frame_pacer_release()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {
+pub(crate) extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {
     frame_pacer::release(pacer);
 }
 
@@ -497,7 +493,7 @@ pub(crate) fn frame_projection(projection: &FrameProjection) -> mln_frame_projec
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_drain_frame_results(
+pub(crate) unsafe extern "C" fn mln_render_session_drain_frame_results(
     session: mln_render_session,
     out_batch: *mut mln_render_frame_batch,
     out_view: *mut mln_render_frame_batch_view,
@@ -533,7 +529,7 @@ pub unsafe extern "C" fn mln_render_session_drain_frame_results(
 
 /// `mln_render_frame_batch_release()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_render_frame_batch_release(batch: mln_render_frame_batch) {
+pub(crate) extern "C" fn mln_render_frame_batch_release(batch: mln_render_frame_batch) {
     if batch != handles::NULL {
         let _ = release_batch(batch);
     }
@@ -602,7 +598,7 @@ pub(crate) fn send_then<T: Send + 'static, V: CompletionValue>(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_resize(
+pub(crate) unsafe extern "C" fn mln_render_session_resize(
     session: mln_render_session,
     extent: mln_logical_extent,
     completion: *const mln_completion,
@@ -629,7 +625,7 @@ pub unsafe extern "C" fn mln_render_session_resize(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_release_target(
+pub(crate) unsafe extern "C" fn mln_render_session_release_target(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -646,7 +642,7 @@ pub unsafe extern "C" fn mln_render_session_release_target(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_barrier(
+pub(crate) unsafe extern "C" fn mln_render_session_barrier(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -663,7 +659,7 @@ pub unsafe extern "C" fn mln_render_session_barrier(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_reduce_memory_use(
+pub(crate) unsafe extern "C" fn mln_render_session_reduce_memory_use(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -680,7 +676,7 @@ pub unsafe extern "C" fn mln_render_session_reduce_memory_use(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_clear_data(
+pub(crate) unsafe extern "C" fn mln_render_session_clear_data(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -697,7 +693,7 @@ pub unsafe extern "C" fn mln_render_session_clear_data(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_dump_debug_logs(
+pub(crate) unsafe extern "C" fn mln_render_session_dump_debug_logs(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -774,7 +770,7 @@ fn take_driver_work(session: mln_render_session) -> Result<Rc<DriverWork>, Error
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_service_driver_work(
+pub(crate) unsafe extern "C" fn mln_render_session_service_driver_work(
     session: mln_render_session,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
@@ -822,7 +818,7 @@ fn ended_service(session: mln_render_session, error: Error) -> Result<(), Error>
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_detach(
+pub(crate) unsafe extern "C" fn mln_render_session_detach(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -844,7 +840,7 @@ pub unsafe extern "C" fn mln_render_session_detach(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_abandon(
+pub(crate) unsafe extern "C" fn mln_render_session_abandon(
     session: mln_render_session,
     out_result: *mut mln_render_abandon_result,
     out_diagnostic: *mut mln_diagnostic,
@@ -892,7 +888,7 @@ pub(crate) fn dispose_keeping_graphics(session: mln_render_session) -> Result<()
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_release(
+pub(crate) unsafe extern "C" fn mln_render_session_release(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -921,7 +917,7 @@ pub unsafe extern "C" fn mln_render_session_release(
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_dispose(
+pub(crate) unsafe extern "C" fn mln_render_session_dispose(
     session: mln_render_session,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {

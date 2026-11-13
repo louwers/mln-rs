@@ -210,7 +210,7 @@ impl ResourceProvider for HostProvider {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_set_resource_provider(
+pub(crate) unsafe extern "C" fn mln_runtime_set_resource_provider(
     runtime: mln_runtime,
     provider: *const mln_resource_provider,
     completion: *const mln_completion,
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn mln_runtime_set_resource_provider(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_clear_resource_provider(
+pub(crate) unsafe extern "C" fn mln_runtime_clear_resource_provider(
     runtime: mln_runtime,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -400,7 +400,7 @@ fn answer(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_resource_request_complete(
+pub(crate) unsafe extern "C" fn mln_resource_request_complete(
     handle: mln_resource_request,
     response: *const mln_resource_response,
     out_diagnostic: *mut mln_diagnostic,
@@ -422,7 +422,7 @@ pub unsafe extern "C" fn mln_resource_request_complete(
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_resource_request_pass_through(
+pub(crate) unsafe extern "C" fn mln_resource_request_pass_through(
     handle: mln_resource_request,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
@@ -439,7 +439,7 @@ pub unsafe extern "C" fn mln_resource_request_pass_through(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_resource_request_is_cancelled(
+pub(crate) unsafe extern "C" fn mln_resource_request_is_cancelled(
     handle: mln_resource_request,
     out_cancelled: *mut bool,
     out_diagnostic: *mut mln_diagnostic,
@@ -459,7 +459,7 @@ pub unsafe extern "C" fn mln_resource_request_is_cancelled(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_resource_request_set_cancel_callback(
+pub(crate) unsafe extern "C" fn mln_resource_request_set_cancel_callback(
     handle: mln_resource_request,
     handler: *const mln_resource_request_cancel_handler,
     out_cancelled: *mut bool,
@@ -520,7 +520,7 @@ pub unsafe extern "C" fn mln_resource_request_set_cancel_callback(
 
 /// `mln_resource_request_release()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_resource_request_release(handle: mln_resource_request) {
+pub(crate) extern "C" fn mln_resource_request_release(handle: mln_resource_request) {
     let _ = release(handle);
 }
 

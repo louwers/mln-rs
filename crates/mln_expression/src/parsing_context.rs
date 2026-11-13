@@ -56,21 +56,21 @@ impl std::fmt::Display for ParsingError {
 pub type ParseResult = Option<Box<dyn Expression>>;
 
 /// The bindings of a `let` scope (`std::map<std::string, std::shared_ptr<Expression>>`).
-pub type Bindings = VecMap<String, Arc<dyn Expression>>;
+pub(crate) type Bindings = VecMap<String, Arc<dyn Expression>>;
 
-pub struct Scope {
+pub(crate) struct Scope {
     bindings: Bindings,
     parent: Option<Rc<Scope>>,
 }
 
 impl Scope {
     #[must_use]
-    pub fn new(bindings: Bindings, parent: Option<Rc<Scope>>) -> Self {
+    pub(crate) fn new(bindings: Bindings, parent: Option<Rc<Scope>>) -> Self {
         Scope { bindings, parent }
     }
 
     #[must_use]
-    pub fn get(&self, name: &str) -> Option<Arc<dyn Expression>> {
+    pub(crate) fn get(&self, name: &str) -> Option<Arc<dyn Expression>> {
         if let Some(binding) = self.bindings.get(name) {
             Some(binding.clone())
         } else if let Some(parent) = &self.parent {
@@ -195,7 +195,7 @@ fn expression_registry(name: &str) -> Option<ParseFunction> {
 /// Whether `name` is in the expression registry (not the compound-expression
 /// registry).
 #[must_use]
-pub fn is_expression_name(name: &str) -> bool {
+pub(crate) fn is_expression_name(name: &str) -> bool {
     expression_registry(name).is_some()
 }
 
@@ -205,7 +205,7 @@ impl ParsingContext {
         Self::default()
     }
 
-    pub fn with_key(key: impl Into<String>) -> Self {
+    pub(crate) fn with_key(key: impl Into<String>) -> Self {
         ParsingContext { key: key.into(), ..Default::default() }
     }
 
@@ -224,12 +224,12 @@ impl ParsingContext {
     }
 
     #[must_use]
-    pub fn get_key(&self) -> String {
+    pub(crate) fn get_key(&self) -> String {
         self.key.clone()
     }
 
     #[must_use]
-    pub fn get_expected(&self) -> Option<Type> {
+    pub(crate) fn get_expected(&self) -> Option<Type> {
         self.expected.clone()
     }
 
@@ -239,7 +239,7 @@ impl ParsingContext {
     }
 
     #[must_use]
-    pub fn has_errors(&self) -> bool {
+    pub(crate) fn has_errors(&self) -> bool {
         !self.errors.borrow().is_empty()
     }
 
@@ -291,7 +291,7 @@ impl ParsingContext {
 
     /// Parse a child expression. For use by individual `Expression::parse()`
     /// methods.
-    pub fn parse(
+    pub(crate) fn parse(
         &mut self,
         value: &Convertible<'_>,
         index: usize,
@@ -308,7 +308,7 @@ impl ParsingContext {
     }
 
     /// Parse a child expression with additional bindings in scope.
-    pub fn parse_with_bindings(
+    pub(crate) fn parse_with_bindings(
         &mut self,
         value: &Convertible<'_>,
         index: usize,
@@ -326,7 +326,7 @@ impl ParsingContext {
 
     /// Check whether `t` is a subtype of `expected`, collecting an error if
     /// not.
-    pub fn check_type(&mut self, t: &Type) -> Option<String> {
+    pub(crate) fn check_type(&mut self, t: &Type) -> Option<String> {
         let expected = self.expected.as_ref().expect("check_type without an expected type");
         let err = check_subtype(expected, t);
         if let Some(err) = &err {
@@ -336,30 +336,30 @@ impl ParsingContext {
     }
 
     #[must_use]
-    pub fn get_binding(&self, name: &str) -> Option<Arc<dyn Expression>> {
+    pub(crate) fn get_binding(&self, name: &str) -> Option<Arc<dyn Expression>> {
         self.scope.as_ref()?.get(name)
     }
 
-    pub fn error(&mut self, message: String) {
+    pub(crate) fn error(&mut self, message: String) {
         self.errors.borrow_mut().push(ParsingError { message, key: self.key.clone() });
     }
 
-    pub fn error_at(&mut self, message: String, child: usize) {
+    pub(crate) fn error_at(&mut self, message: String, child: usize) {
         self.errors.borrow_mut().push(ParsingError { message, key: format!("{}[{}]", self.key, child) });
     }
 
-    pub fn error_at2(&mut self, message: String, child: usize, grandchild: usize) {
+    pub(crate) fn error_at2(&mut self, message: String, child: usize, grandchild: usize) {
         self.errors
             .borrow_mut()
             .push(ParsingError { message, key: format!("{}[{}][{}]", self.key, child, grandchild) });
     }
 
-    pub fn append_errors(&mut self, ctx: &ParsingContext) {
+    pub(crate) fn append_errors(&mut self, ctx: &ParsingContext) {
         let mut theirs = ctx.errors.borrow_mut();
         self.errors.borrow_mut().append(&mut theirs);
     }
 
-    pub fn clear_errors(&mut self) {
+    pub(crate) fn clear_errors(&mut self) {
         self.errors.borrow_mut().clear();
     }
 

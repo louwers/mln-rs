@@ -31,12 +31,9 @@ impl OffscreenTarget {
     }
 
     /// The backend the target draws on.
-    pub fn backend(&self) -> &Rc<RendererBackend> {
+    #[cfg(test)]
+    pub(crate) fn backend(&self) -> &Rc<RendererBackend> {
         &self.backend
-    }
-
-    pub fn size(&self) -> Size {
-        self.size.get()
     }
 
     /// Draws the next frame at `size`, and drops the image of the last one.
@@ -72,7 +69,7 @@ impl FrameTarget for OffscreenTarget {
             );
             *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
-        image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
+        image.clone().map(|image| -> Rc<dyn frame::DrawTarget> { image })
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {

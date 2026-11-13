@@ -170,49 +170,4 @@ mod tests {
         let array = serde_json::json!([1]);
         assert!(Convertible::from(&array).array_member(1).is_undefined());
     }
-
-    #[test]
-    fn owned() {
-        struct Wrapped(serde_json::Value);
-        impl ConversionTraits for Wrapped {
-            fn is_undefined(&self) -> bool {
-                self.0.is_undefined()
-            }
-            fn is_array(&self) -> bool {
-                ConversionTraits::is_array(&self.0)
-            }
-            fn array_length(&self) -> usize {
-                self.0.array_length()
-            }
-            fn array_member(&self, i: usize) -> Convertible<'_> {
-                self.0.array_member(i)
-            }
-            fn is_object(&self) -> bool {
-                ConversionTraits::is_object(&self.0)
-            }
-            fn object_member(&self, name: &str) -> Option<Convertible<'_>> {
-                self.0.object_member(name)
-            }
-            fn each_member(&self, f: &mut dyn FnMut(&str, &Convertible<'_>) -> Option<Error>) -> Option<Error> {
-                self.0.each_member(f)
-            }
-            fn to_bool(&self) -> Option<bool> {
-                self.0.to_bool()
-            }
-            fn to_number(&self) -> Option<f32> {
-                self.0.to_number()
-            }
-            fn to_double(&self) -> Option<f64> {
-                self.0.to_double()
-            }
-            fn to_string(&self) -> Option<String> {
-                ConversionTraits::to_string(&self.0)
-            }
-            fn to_value(&self) -> Option<Value> {
-                self.0.to_value()
-            }
-        }
-        let c = Convertible::owned(Wrapped(json!([7])));
-        assert_eq!(c.array_member(0).to_double(), Some(7.0));
-    }
 }

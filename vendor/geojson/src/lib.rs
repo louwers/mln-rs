@@ -7,14 +7,12 @@
 // rapidjson documents become `serde_json::Value`s, as everywhere in the port
 // (`mln_conversion::Convertible`), and stringify writes them with serde_json.
 
-pub mod geojson_impl;
+mod geojson_impl;
 
 pub use feature::{Feature, Identifier, PropertyMap, Value};
 pub use geojson_impl::{
-    convert, convert_feature, convert_feature_collection, convert_geometry, convert_identifier, convert_property_map,
-    convert_value, parse, parse_feature, parse_feature_collection, parse_geometry, stringify, stringify_feature,
-    stringify_feature_collection, stringify_geometry, to_json, to_json_feature, to_json_feature_collection,
-    to_json_geometry,
+    convert, convert_geometry, convert_value, parse, stringify, stringify_feature, stringify_feature_collection,
+    stringify_geometry, to_json, to_json_feature, to_json_geometry,
 };
 pub use geometry::{
     Geometry, GeometryCollection, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
@@ -46,7 +44,7 @@ impl Default for GeoJSON {
 pub struct Error(pub String);
 
 impl Error {
-    pub fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Error(message.into())
     }
 
@@ -55,3 +53,6 @@ impl Error {
         &self.0
     }
 }
+
+#[cfg(test)]
+mod tests;

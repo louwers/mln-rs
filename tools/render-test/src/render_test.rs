@@ -75,23 +75,23 @@ const HELP: &str = "  render-test {OPTIONS}
 /// `--jobs` (jobs.rs).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Arguments {
-    pub recycle_map: bool,
-    pub shuffle: bool,
-    pub online: bool,
-    pub seed: u32,
-    pub manifest_path: String,
-    pub update_results: UpdateResults,
-    pub test_filter: String,
-    pub self_check: bool,
-    pub output: Option<String>,
+    pub(crate) recycle_map: bool,
+    pub(crate) shuffle: bool,
+    pub(crate) online: bool,
+    pub(crate) seed: u32,
+    pub(crate) manifest_path: String,
+    pub(crate) update_results: UpdateResults,
+    pub(crate) test_filter: String,
+    pub(crate) self_check: bool,
+    pub(crate) output: Option<String>,
     /// The per-test wall-clock limit in milliseconds (0: none).
-    pub timeout_millis: u64,
+    pub(crate) timeout_millis: u64,
     /// The number of worker processes that run the tests (1: the tests run
     /// in this process; 0: one per CPU). See jobs.rs.
-    pub jobs: usize,
+    pub(crate) jobs: usize,
     /// The number of worker instances behind the worker codec that run the
     /// maps' tile workers (0: the map's thread pool). See `ImplOptions`.
-    pub tile_worker_codec: usize,
+    pub(crate) tile_worker_codec: usize,
     /// Not an option: the `render-test` executable the workers
     /// run (`None`: this executable). Tests, which run the runner from the
     /// test harness, set the package's binary.

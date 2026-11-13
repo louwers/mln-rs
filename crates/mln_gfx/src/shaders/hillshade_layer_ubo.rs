@@ -3,16 +3,6 @@ use bytemuck::{Pod, Zeroable};
 /// Maximum number of illumination sources supported
 pub const MAX_ILLUMINATION_SOURCES: usize = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum HillshadeMethod {
-    Standard = 0,
-    Combined = 1,
-    Igor = 2,
-    Multidirectional = 3,
-    Basic = 4,
-}
-
 /// The hillshade shader's per-drawable uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -20,7 +10,7 @@ pub struct HillshadeDrawableUBO {
     /*  0 */ pub matrix: [f32; 4 * 4],
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadeDrawableUBO>() == 4 * 16);
+const _: () = assert!(size_of::<HillshadeDrawableUBO>() == 4 * 16);
 
 /// The hillshade shader's per-tile uniform block (32 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -35,7 +25,7 @@ pub struct HillshadeTilePropsUBO {
     /* 28 */ pub pad2: f32,
     /* 32 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadeTilePropsUBO>() == 32);
+const _: () = assert!(size_of::<HillshadeTilePropsUBO>() == 32);
 
 /// Evaluated properties that do not depend on the tile (176 bytes). The
 /// colors are the premultiplied `mln::Color` as r, g, b, a floats.
@@ -49,4 +39,4 @@ pub struct HillshadeEvaluatedPropsUBO {
     /* 112 */ pub highlights: [f32; 16],
     /* 176 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadeEvaluatedPropsUBO>() == 176);
+const _: () = assert!(size_of::<HillshadeEvaluatedPropsUBO>() == 176);

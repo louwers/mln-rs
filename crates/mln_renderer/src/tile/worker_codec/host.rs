@@ -42,7 +42,7 @@ use crate::tile::tile_worker_transport::{InProcessTransport, TileEndpoint, TileW
 /// Where a host's replies go, encoded: back to the map side of its
 /// instance. Their payloads (pixels, vertices, indices) can be transferred
 /// there rather than copied.
-pub type Replies = Arc<dyn Fn(Encoded) + Send + Sync>;
+pub(crate) type Replies = Arc<dyn Fn(Encoded) + Send + Sync>;
 
 /// The tile workers of one worker instance.
 pub struct TileWorkerHost {

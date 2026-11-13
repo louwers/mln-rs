@@ -8,7 +8,7 @@ use mln_tile_id::geometry_tile_data::{FeatureGroups, GeometryTileFeature, Geomet
 /// first use and shared by the filters over the same source layer that read
 /// the same keys.
 #[derive(Default)]
-pub struct FilterGroups {
+pub(crate) struct FilterGroups {
     /// Per source layer and set of keys: its groups, or none when the layer
     /// gave none.
     sets: Vec<(String, Box<[String]>, Option<FeatureGroups>)>,
@@ -21,7 +21,7 @@ impl FilterGroups {
     /// group. `None` if the filter must evaluate each feature: it reads
     /// more of a feature, the layer has no groups, or evaluating a group's
     /// first feature found it malformed.
-    pub fn select(
+    pub(crate) fn select(
         &mut self,
         name: &str,
         layer: &dyn GeometryTileLayer,

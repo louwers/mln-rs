@@ -28,47 +28,45 @@ struct TableRec {
 
 /// The `FT_FaceRec` / `TT_FaceRec` fields the port needs.
 #[derive(Clone, Debug)]
-pub struct Face {
-    pub format_tag: u32,
+pub(crate) struct Face {
+    pub(crate) format_tag: u32,
     tables: Vec<TableRec>,
     /// Units per EM: the `head` value for scalable and `sbix` faces, 0
     /// otherwise.
-    pub units_per_em: u16,
+    pub(crate) units_per_em: u16,
     /// The `maxp` table's `numGlyphs`.
-    pub num_glyphs: u32,
+    pub(crate) num_glyphs: u32,
     /// `FT_FACE_FLAG_SCALABLE`.
-    pub scalable: bool,
+    pub(crate) scalable: bool,
     /// `FT_FACE_FLAG_FIXED_SIZES`.
-    pub fixed_sizes: bool,
+    pub(crate) fixed_sizes: bool,
     /// The CFF driver opened the face (an `OTTO` font).
-    pub is_cff: bool,
+    pub(crate) is_cff: bool,
     number_of_hmetrics: u16,
     hmtx: Option<(usize, usize)>,
     /// The `OS/2` table's version (0xFFFF when missing) and `fsSelection`.
-    pub os2_version: u16,
-    pub os2_fs_selection: u16,
+    pub(crate) os2_version: u16,
+    pub(crate) os2_fs_selection: u16,
     cmap: Option<(usize, usize)>,
-    pub charmaps: Vec<CharMap>,
+    pub(crate) charmaps: Vec<CharMap>,
     /// The selected charmap, an index into `charmaps`.
-    pub charmap: Option<usize>,
+    pub(crate) charmap: Option<usize>,
     /// The scale from font units to 26.6 pixels at the current size (16.16).
-    pub x_scale: i64,
-    pub y_scale: i64,
-    /// Offset of the SFNT header (non-zero in a collection).
-    pub sfnt_offset: usize,
+    pub(crate) x_scale: i64,
+    pub(crate) y_scale: i64,
     /// FreeType would add a synthesized Unicode charmap (not ported).
-    pub needs_synthesized_charmap: bool,
+    pub(crate) needs_synthesized_charmap: bool,
 }
 
 /// Why `FT_New_Memory_Face` failed (only the fact matters to the C++): the
 /// name of the FreeType error, such as `Unknown_File_Format`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("FT_New_Memory_Face failed: {0}")]
-pub struct OpenError(pub &'static str);
+pub(crate) struct OpenError(pub(crate) &'static str);
 
 impl Face {
     /// `FT_New_Memory_Face(library, data, size, 0, &face)`.
-    pub fn open(data: &[u8]) -> Result<Face, OpenError> {
+    pub(crate) fn open(data: &[u8]) -> Result<Face, OpenError> {
         let b = Bytes(data);
         // sfnt_open_font: a TrueType collection selects its first font.
         let mut sfnt_offset = 0usize;
@@ -147,7 +145,6 @@ impl Face {
             charmap: None,
             x_scale: 0,
             y_scale: 0,
-            sfnt_offset,
             needs_synthesized_charmap: false,
         };
         if !is_tt && face.lookup(tag(*b"CFF ")).is_none() && face.lookup(tag(*b"CFF2")).is_none() {
@@ -164,16 +161,10 @@ impl Face {
         self.tables.iter().find(|e| e.tag == t && e.length != 0).copied()
     }
 
-    /// The `(offset, length)` of a table, as `FT_Load_Sfnt_Table` returns it.
-    #[must_use]
-    pub fn table(&self, t: &[u8; 4]) -> Option<(usize, usize)> {
-        self.lookup(tag(*t)).map(|e| (e.offset, e.length))
-    }
-
     /// Every tag of the table directory with what `tt_face_lookup_table`
     /// finds for it.
     #[must_use]
-    pub fn table_entries(&self) -> Vec<([u8; 4], (usize, usize))> {
+    pub(crate) fn table_entries(&self) -> Vec<([u8; 4], (usize, usize))> {
         let mut out: Vec<([u8; 4], (usize, usize))> = Vec::new();
         for e in &self.tables {
             let t = e.tag.to_be_bytes();
@@ -345,12 +336,12 @@ impl Face {
 
     /// The lookup context of `FT_Get_Char_Index` on this face.
     #[must_use]
-    pub fn lookup_context<'a>(&self, data: &'a [u8]) -> LookupContext<'a> {
+    pub(crate) fn lookup_context<'a>(&self, data: &'a [u8]) -> LookupContext<'a> {
         LookupContext { data, cmap_limit: self.cmap.map_or(0, |(o, s)| o + s), num_glyphs: self.num_glyphs }
     }
 
     /// `FT_Set_Charmap`.
-    pub fn set_charmap(&mut self, index: usize) -> Result<(), &'static str> {
+    pub(crate) fn set_charmap(&mut self, index: usize) -> Result<(), &'static str> {
         if self.charmaps[index].format == 14 {
             Err("Invalid_Argument")
         } else {
@@ -361,7 +352,7 @@ impl Face {
 
     /// `FT_Set_Char_Size(face, 0, char_height, 72, 72)` with the C++ core's
     /// arguments: sets `size->metrics.x_scale`/`y_scale`.
-    pub fn set_char_size(&mut self, char_height: i64, resolution: i64) {
+    pub(crate) fn set_char_size(&mut self, char_height: i64, resolution: i64) {
         // FT_Set_Char_Size: width 0 means "same as height".
         let char_width = char_height.max(64);
         let char_height = char_height.max(64);
@@ -390,7 +381,7 @@ impl Face {
     /// `FT_Get_Advance(face, gindex, FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING)`:
     /// the 16.16 advance, or an error (the caller keeps 0).
     #[must_use]
-    pub fn get_advance(&self, data: &[u8], gindex: u32) -> Option<i64> {
+    pub(crate) fn get_advance(&self, data: &[u8], gindex: u32) -> Option<i64> {
         if gindex >= self.num_glyphs {
             return None; // Invalid_Glyph_Index
         }

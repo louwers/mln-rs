@@ -4,9 +4,9 @@
 /// style JSON, filters and expressions recurses once per nesting level, so
 /// a thread gets this much whatever `RUST_MIN_STACK` or the platform's
 /// default would give it.
-pub const STACK_SIZE: usize = 2 * 1024 * 1024;
+pub(crate) const STACK_SIZE: usize = 2 * 1024 * 1024;
 
-/// A builder for a thread named `name` with a [`STACK_SIZE`] stack.
+/// A builder for a thread named `name` with a `STACK_SIZE` stack.
 pub fn builder(name: impl Into<String>) -> std::thread::Builder {
     std::thread::Builder::new().name(name.into()).stack_size(STACK_SIZE)
 }
