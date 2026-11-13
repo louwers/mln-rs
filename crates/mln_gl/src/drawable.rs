@@ -6,12 +6,15 @@
 //   other backends (see upload_pass.rs).
 // - The vertex arrays are kept beside the segments (C++: in a segment
 //   subclass), and are made again when the attribute bindings or the index
-//   buffer change.
+//   buffer change. An index buffer is told apart by a serial number, since
+//   GL can give a new buffer the name of a deleted one.
 // - The uniform blocks are bound by `Context::bind_uniform_blocks`, and the
 //   textures to the units of their ids; neither is unbound after the draw.
 // - No `stencilWriteRef`: the context draws the clip masks.
 // - Instance attributes, which C++'s OpenGL drawables don't have: the
 //   renderer draws fill extrusion walls instanced on every backend.
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use glow::HasContext;
 use mln_gfx::attribute::AttributeBindingArray;
@@ -36,7 +39,6 @@ use crate::context::Context;
 use crate::enums;
 use crate::shaders::shader_program::as_gl_shader;
 use crate::texture2d::Texture2D;
-use crate::types::BufferID;
 use crate::upload_pass::UploadPass;
 use crate::vertex_array::VertexArray;
 use crate::vertex_buffer_resource::IndexBufferResource;
@@ -44,6 +46,16 @@ use crate::vertex_buffer_resource::IndexBufferResource;
 /// `struct IndexBufferGL : gfx::IndexBufferBase`: adapts `gfx::IndexBuffer`.
 struct IndexBuffer {
     buffer: GfxIndexBuffer,
+    /// Tells this buffer apart from one it replaced, whose GL name it may
+    /// have.
+    serial: u64,
+}
+
+impl IndexBuffer {
+    fn new(buffer: GfxIndexBuffer) -> Self {
+        static NEXT_SERIAL: AtomicU64 = AtomicU64::new(0);
+        IndexBuffer { buffer, serial: NEXT_SERIAL.fetch_add(1, Ordering::Relaxed) }
+    }
 }
 
 impl IndexBufferBase for IndexBuffer {}
@@ -53,8 +65,8 @@ struct DrawableImpl {
     segments: Vec<UniqueDrawSegment>,
     /// The vertex array of each segment (`DrawSegmentGL::vertexArray`).
     vertex_arrays: Vec<Option<VertexArray>>,
-    /// The index buffer the vertex arrays have.
-    vertex_array_index_buffer: Option<BufferID>,
+    /// The serial number of the index buffer the vertex arrays have.
+    vertex_array_index_buffer: Option<u64>,
     indexes: Option<IndexVectorBasePtr>,
     vertex_count: usize,
     vertex_type: AttributeDataType,
@@ -128,16 +140,15 @@ impl Drawable {
                 }
                 let resource = upload_pass.create_index_buffer_of(&indexes);
                 let buffer = GfxIndexBuffer::new(indexes.elements(), resource);
-                indexes.set_buffer(Some(Box::new(IndexBuffer { buffer })));
+                indexes.set_buffer(Some(Box::new(IndexBuffer::new(buffer))));
                 indexes.set_dirty(false);
             }
-            indexes
-                .get_buffer()
-                .and_then(|b| b.downcast_ref::<IndexBuffer>())
-                .and_then(|b| b.buffer.get_resource::<IndexBufferResource>())
-                .and_then(IndexBufferResource::get_buffer)
+            indexes.get_buffer().and_then(|b| b.downcast_ref::<IndexBuffer>()).and_then(|b| {
+                let buffer = b.buffer.get_resource::<IndexBufferResource>()?.get_buffer()?;
+                Some((buffer, b.serial))
+            })
         };
-        let Some(index_buffer) = index_buffer else {
+        let Some((index_buffer, index_buffer_serial)) = index_buffer else {
             return;
         };
 
@@ -196,9 +207,9 @@ impl Drawable {
         }
 
         // Bind a VAO for each group of vertexes described by a segment
-        if self.impl_.vertex_array_index_buffer != Some(index_buffer) {
+        if self.impl_.vertex_array_index_buffer != Some(index_buffer_serial) {
             self.impl_.vertex_arrays.clear();
-            self.impl_.vertex_array_index_buffer = Some(index_buffer);
+            self.impl_.vertex_array_index_buffer = Some(index_buffer_serial);
         }
         self.impl_.vertex_arrays.resize_with(self.impl_.segments.len(), || None);
         for (segment, vertex_array) in self.impl_.segments.iter().zip(&mut self.impl_.vertex_arrays) {

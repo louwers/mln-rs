@@ -60,5 +60,11 @@ path = "tests/glsl_compile_test.rs"
 name = "background_test"
 path = "tests/background_test.rs"
 
+# A drawable's vertex arrays follow its index vector to a new buffer, though
+# the new buffer may have the GL name of the one it replaced.
+[[test]]
+name = "drawable_test"
+path = "tests/drawable_test.rs"
+
 [lints]
 workspace = true
