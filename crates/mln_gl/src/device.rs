@@ -454,14 +454,6 @@ impl std::fmt::Debug for Device {
 }
 
 impl Device {
-    /// The library's share group, of OpenGL ES 3.0 contexts on EGL's
-    /// display.
-    ///
-    /// Fails as [`with_options`](Self::with_options) does.
-    pub fn new() -> Result<Device, Error> {
-        Self::with_options(DeviceOptions::default())
-    }
-
     /// The library's device on EGL's display: a share group of contexts of
     /// `options.api`, or one such context. On Windows, a share group of WGL's
     /// desktop OpenGL contexts.
@@ -629,24 +621,6 @@ impl Device {
         }
     }
 
-    /// The API that the device's contexts render with.
-    #[must_use]
-    pub fn api(&self) -> Api {
-        match &*self.kind {
-            Kind::Library(group) => group.api,
-            Kind::Single(single) => single.api,
-            Kind::Host(group) => group.api,
-            #[cfg(windows)]
-            Kind::Wgl(_) => Api::Gl,
-        }
-    }
-
-    /// Whether the device's renderers take turns in one context.
-    #[must_use]
-    pub fn is_single_context(&self) -> bool {
-        matches!(*self.kind, Kind::Single(_))
-    }
-
     /// A context in the share group, current on a 1x1 pbuffer around a
     /// backend's frames, or a turn in the device's one context, and the GL
     /// functions it calls.
@@ -730,19 +704,24 @@ pub(crate) enum SurfaceSwap {
 }
 
 impl SurfaceSwap {
-    pub(crate) fn swap(&self) {
+    /// Presents the frame, and returns whether the surface took it.
+    pub(crate) fn swap(&self) -> bool {
         match self {
-            SurfaceSwap::Egl { egl, display, surface } => {
-                if let Err(e) = egl.swap_buffers(*display, *surface) {
+            SurfaceSwap::Egl { egl, display, surface } => match egl.swap_buffers(*display, *surface) {
+                Ok(()) => true,
+                Err(e) => {
                     Log::error(Event::GraphicsBackend, format!("eglSwapBuffers() failed: {e}"));
+                    false
                 }
-            }
+            },
             #[cfg(windows)]
-            SurfaceSwap::Wgl(dc) => {
-                if let Err(e) = crate::wgl::swap_buffers(*dc) {
+            SurfaceSwap::Wgl(dc) => match crate::wgl::swap_buffers(*dc) {
+                Ok(()) => true,
+                Err(e) => {
                     Log::error(Event::GraphicsBackend, e);
+                    false
                 }
-            }
+            },
         }
     }
 }

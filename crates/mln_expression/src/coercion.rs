@@ -236,7 +236,7 @@ fn get_coerce_function(t: &Type) -> CoerceFunction {
     }
 }
 
-pub struct Coercion {
+pub(crate) struct Coercion {
     base: ExpressionBase,
     coerce_single_value: CoerceFunction,
     inputs: Vec<Box<dyn Expression>>,
@@ -244,7 +244,7 @@ pub struct Coercion {
 
 impl Coercion {
     #[must_use]
-    pub fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
+    pub(crate) fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
         assert_ne!(inputs, Vec::<Box<dyn Expression>>::new());
         // `isRuntimeConstant` does not consider values coerced to `Type`
         // image to be of `Kind` image, so we don't either (no extra
@@ -257,7 +257,7 @@ impl Coercion {
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let length = value.array_length();
 
         if length < 2 {

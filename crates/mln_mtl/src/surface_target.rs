@@ -245,12 +245,6 @@ impl Layer {
         // SAFETY: the caller's contract.
         unsafe { Retained::retain(layer.cast()) }.map(Layer)
     }
-
-    /// The layer, as a pointer for other APIs.
-    #[must_use]
-    pub fn as_ptr(&self) -> *mut std::ffi::c_void {
-        Retained::as_ptr(&self.0).cast_mut().cast()
-    }
 }
 
 impl std::fmt::Debug for Layer {
@@ -349,7 +343,7 @@ impl FrameTarget for SurfaceTarget {
     /// render pass without a color attachment trips the drawables' debug
     /// assertions.
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        autoreleasepool(|_| self.state.acquire_drawable()).then(|| self.image.clone() as Rc<dyn frame::DrawTarget>)
+        autoreleasepool(|_| self.state.acquire_drawable()).then(|| -> Rc<dyn frame::DrawTarget> { self.image.clone() })
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {

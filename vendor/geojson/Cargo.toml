@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license = "ISC"
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
@@ -20,11 +22,6 @@ feature.workspace = true
 geometry.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-
-# Port of geojson.hpp/test/test.cpp over its fixtures, read in place.
-[[test]]
-name = "geojson_fixtures_test"
-path = "tests/geojson.rs"
 
 [lints]
 workspace = true

@@ -197,6 +197,6 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
     assert_eq!(has_stats_view(&test), (false, false));
     assert_eq!(
         changed_pixels(&plain, &render(&test, MapDebugOptions::NO_DEBUG, "stats_disabled")),
-        [] as [(u32, u32); 0]
+        Vec::<(u32, u32)>::new()
     );
 }

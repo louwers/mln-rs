@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']);
         let decoded = decode_image(&png).unwrap();
         assert_eq!(decoded.size, size);
-        let expected = mln_util::premultiply::premultiply(unpremultiply(pre.clone()));
+        let expected = mln_util::premultiply::premultiply(unpremultiply(pre));
         assert_eq!(decoded, expected);
     }
 

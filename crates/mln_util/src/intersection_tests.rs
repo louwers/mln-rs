@@ -11,7 +11,7 @@ use crate::math::{dist_sqr_i16, dist_sqr_i16_f32};
 type GeometryCoordinate = Point<i16>;
 
 #[must_use]
-pub fn polygon_contains_point(ring: &[GeometryCoordinate], p: &GeometryCoordinate) -> bool {
+pub(crate) fn polygon_contains_point(ring: &[GeometryCoordinate], p: GeometryCoordinate) -> bool {
     let mut c = false;
     if ring.is_empty() {
         // C++ dereferences `ring.end() - 1` (undefined for an empty ring);
@@ -144,7 +144,7 @@ pub fn polygon_intersects_buffered_point(
     point: &GeometryCoordinate,
     radius: f32,
 ) -> bool {
-    if polygon_contains_point(polygon, point) {
+    if polygon_contains_point(polygon, *point) {
         return true;
     }
     if point_intersects_buffered_line(*point, polygon, radius) {
@@ -162,7 +162,7 @@ pub fn polygon_intersects_buffered_multi_line(
     for line in multi_line {
         if polygon.len() >= 3 {
             for p in line {
-                if polygon_contains_point(polygon, p) {
+                if polygon_contains_point(polygon, *p) {
                     return true;
                 }
             }
@@ -179,13 +179,13 @@ pub fn polygon_intersects_buffered_multi_line(
 #[must_use]
 pub fn polygon_intersects_polygon(polygon_a: &[GeometryCoordinate], polygon_b: &[GeometryCoordinate]) -> bool {
     for p in polygon_a {
-        if polygon_contains_point(polygon_b, p) {
+        if polygon_contains_point(polygon_b, *p) {
             return true;
         }
     }
 
     for p in polygon_b {
-        if polygon_contains_point(polygon_a, p) {
+        if polygon_contains_point(polygon_a, *p) {
             return true;
         }
     }
@@ -218,8 +218,8 @@ mod tests {
     #[test]
     fn contains_and_intersects() {
         let square = pts(&[(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)]);
-        assert!(polygon_contains_point(&square, &Point::new(5, 5)));
-        assert!(!polygon_contains_point(&square, &Point::new(15, 5)));
+        assert!(polygon_contains_point(&square, Point::new(5, 5)));
+        assert!(!polygon_contains_point(&square, Point::new(15, 5)));
         assert!(polygon_intersects_buffered_point(&square, &Point::new(12, 5), 3.0));
         assert!(!polygon_intersects_buffered_point(&square, &Point::new(12, 5), 1.0));
         let line = vec![pts(&[(-5, 5), (20, 5)])];

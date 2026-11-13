@@ -369,7 +369,7 @@ impl HttpServer {
     }
 
     #[must_use]
-    pub fn port(&self) -> u16 {
+    pub(crate) fn port(&self) -> u16 {
         self.server.port()
     }
 

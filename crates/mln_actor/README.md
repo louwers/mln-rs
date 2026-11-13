@@ -1,9 +1,8 @@
 # mln-rs-actor
 
 > **Warning: this is an internal crate of [mln-rs](https://crates.io/crates/mln-rs).**
-> It is published only because mln-rs depends on it, and its API can change in
-> any release without notice. Depend on [`mln-rs`](https://crates.io/crates/mln-rs)
-> instead: it re-exports this crate as `mln_rs::mln_actor`.
+> It is published only because the other mln-rs crates depend on it, and its API
+> can change in any release without notice. mln-rs doesn't re-export it.
 
 Ports the actor model and threading of the C++ core: `src/mln/actor` and `util/{run_loop,async_task,thread,thread_pool}`, with the default platform's run loop.
 

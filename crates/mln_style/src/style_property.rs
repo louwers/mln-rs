@@ -19,17 +19,13 @@ pub struct StyleProperty {
 
 impl StyleProperty {
     #[must_use]
-    pub fn new(value: Value, kind: Kind) -> Self {
+    pub(crate) fn new(value: Value, kind: Kind) -> Self {
         StyleProperty { value, kind }
     }
 
     #[must_use]
     pub fn get_value(&self) -> &Value {
         &self.value
-    }
-
-    pub fn get_value_mut(&mut self) -> &mut Value {
-        &mut self.value
     }
 
     #[must_use]

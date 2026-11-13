@@ -65,7 +65,7 @@ fn parse_style_fixture(name: &str) -> Result<(), String> {
 #[test]
 fn parse_style() {
     let names = fixture_names();
-    assert_ne!(names, [] as [std::string::String; 0]);
+    assert_ne!(names, Vec::<String>::new());
     let mut failures = Vec::new();
     for name in &names {
         if let Err(failure) = parse_style_fixture(name) {

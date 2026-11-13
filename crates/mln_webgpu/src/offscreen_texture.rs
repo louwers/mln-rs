@@ -41,7 +41,7 @@ fn linear_clamp() -> SamplerState {
     }
 }
 
-pub struct OffscreenTextureResource {
+pub(crate) struct OffscreenTextureResource {
     context: Rc<Context>,
     size: Size,
     type_: TextureChannelDataType,
@@ -58,7 +58,13 @@ pub struct OffscreenTextureResource {
 }
 
 impl OffscreenTextureResource {
-    pub fn new(context: Rc<Context>, size: Size, type_: TextureChannelDataType, depth: bool, stencil: bool) -> Self {
+    pub(crate) fn new(
+        context: Rc<Context>,
+        size: Size,
+        type_: TextureChannelDataType,
+        depth: bool,
+        stencil: bool,
+    ) -> Self {
         debug_assert!(size.width != 0 && size.height != 0);
         let mut res = OffscreenTextureResource {
             context,
@@ -174,7 +180,7 @@ impl OffscreenTextureResource {
 
     /// The color texture's pixels. The copy is the one the last submission
     /// made (`encode_requested_copy`), or else one submitted now.
-    pub fn read_still_image(&self) -> PremultipliedImage {
+    pub(crate) fn read_still_image(&self) -> PremultipliedImage {
         let size = self.size;
         let (row_stride, aligned_row_stride) = self.row_strides();
         let mut data = vec![0u8; row_stride as usize * size.height as usize];
@@ -238,7 +244,7 @@ impl OffscreenTextureResource {
         PremultipliedImage::from_vec(size, data)
     }
 
-    pub fn get_texture(&self) -> Texture2DPtr {
+    pub(crate) fn get_texture(&self) -> Texture2DPtr {
         self.color().expect("offscreen texture without color texture")
     }
 }
@@ -287,13 +293,19 @@ impl TargetResource for OffscreenTextureResource {
     }
 }
 
-pub struct OffscreenTexture {
+pub(crate) struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,
 }
 
 impl OffscreenTexture {
-    pub fn new(context: Rc<Context>, size: Size, type_: TextureChannelDataType, depth: bool, stencil: bool) -> Self {
+    pub(crate) fn new(
+        context: Rc<Context>,
+        size: Size,
+        type_: TextureChannelDataType,
+        depth: bool,
+        stencil: bool,
+    ) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
         OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource }
     }

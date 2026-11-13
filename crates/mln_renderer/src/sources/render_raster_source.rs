@@ -20,14 +20,14 @@ use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
 /// The render source of a raster source.
-pub struct RenderRasterSource {
+pub(crate) struct RenderRasterSource {
     tile_source: RenderTileSource,
     cached_tileset: Option<Tileset>,
 }
 
 impl RenderRasterSource {
     #[must_use]
-    pub fn new(impl_: Arc<tile_source::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<tile_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderRasterSource { tile_source: RenderTileSource::new(impl_), cached_tileset: None }
     }
@@ -63,15 +63,16 @@ impl RenderRasterSource {
             self.tile_source.tile_pyramid.get_rendered_tiles().map(|(id, tile)| (*id, tile)).collect();
         update_tile_masks(&renderables);
     }
+
+    #[cfg(test)]
+    pub(crate) fn tile_source(&self) -> &RenderTileSource {
+        &self.tile_source
+    }
 }
 
 impl RenderSource for RenderRasterSource {
     fn base(&self) -> &RenderSourceBase {
         &self.tile_source.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderSourceBase {
-        &mut self.tile_source.base
     }
 
     fn is_loaded(&self) -> bool {

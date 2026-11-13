@@ -28,7 +28,7 @@ use parking_lot::Mutex;
 use crate::scheduler::{SchedulerPtr, TaggedScheduler, WeakScheduler};
 
 /// A message to a pool actor's object.
-pub type PoolMessage<O> = Box<dyn FnOnce(&mut O) + Send + 'static>;
+pub(crate) type PoolMessage<O> = Box<dyn FnOnce(&mut O) + Send + 'static>;
 
 struct Queue<O> {
     messages: VecDeque<PoolMessage<O>>,
@@ -36,7 +36,7 @@ struct Queue<O> {
 }
 
 /// The `Mailbox` of a pool actor, with its target object.
-pub struct PoolMailbox<O: Send + 'static> {
+pub(crate) struct PoolMailbox<O: Send + 'static> {
     /// The receiving mutex; `None` once closed.
     object: Mutex<Option<O>>,
     /// The pushing mutex and the queue mutex.
@@ -124,7 +124,7 @@ impl<O: Send + 'static> PoolMailbox<O> {
     }
 
     /// Drops pushes from now on, without waiting for a running message.
-    pub fn abandon(&self) {
+    pub(crate) fn abandon(&self) {
         self.abandoned.store(true, Ordering::SeqCst);
     }
 
@@ -223,11 +223,6 @@ impl<O: Send + 'static> Actor<O> {
     #[must_use]
     pub fn self_ref(&self) -> PoolActorRef<O> {
         PoolActorRef { mailbox: Arc::downgrade(&self.mailbox) }
-    }
-
-    /// The mailbox's `abandon()`.
-    pub fn abandon(&self) {
-        self.mailbox.abandon();
     }
 }
 

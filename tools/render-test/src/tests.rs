@@ -150,7 +150,7 @@ fn shuffle_order_depends_only_on_the_seed() {
     assert_eq!(order, shuffled(1));
     assert_ne!(order, original);
     assert_ne!(order, shuffled(2));
-    let (mut sorted, mut original_sorted) = (order.clone(), original);
+    let (mut sorted, mut original_sorted) = (order, original);
     sorted.sort_unstable();
     original_sorted.sort_unstable();
     assert_eq!(sorted, original_sorted);
@@ -516,7 +516,7 @@ impl Suite {
             self.dir.join("out").to_str().unwrap(),
         ]
         .iter()
-        .map(std::string::ToString::to_string)
+        .map(ToString::to_string)
         .collect();
         let arguments: Arguments = parse_arguments(&args).unwrap();
         run_render_tests_with(&arguments, Some(mock_factory()))
@@ -525,7 +525,7 @@ impl Suite {
 
 fn mock_factory() -> ImplFactory {
     Box::new(|_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions| {
-        Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])) as Box<dyn TestRunnerImpl>)
+        Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
     })
 }
 

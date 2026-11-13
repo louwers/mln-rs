@@ -5,12 +5,14 @@
 
 use std::sync::Arc;
 
+#[cfg(test)]
 use mln_conversion::{Convertible, Error};
 use mln_style_types::ProjectionDefinition;
 
+#[cfg(test)]
 use crate::conversion::convert_property_value;
 use crate::conversion_impl::make_style_property;
-pub use crate::projection_impl::Impl;
+pub(crate) use crate::projection_impl::Impl;
 use crate::property_value::PropertyValue;
 use crate::style_property::StyleProperty;
 
@@ -33,16 +35,17 @@ impl Projection {
     }
 
     #[must_use]
-    pub fn from_impl(impl_: Arc<Impl>) -> Self {
+    pub(crate) fn from_impl(impl_: Arc<Impl>) -> Self {
         Projection { impl_ }
     }
 
     #[must_use]
-    pub fn mutable_impl(&self) -> Impl {
+    pub(crate) fn mutable_impl(&self) -> Impl {
         (*self.impl_).clone()
     }
 
-    pub fn set_property(&mut self, name: &str, value: &Convertible<'_>) -> Option<Error> {
+    #[cfg(test)]
+    pub(crate) fn set_property(&mut self, name: &str, value: &Convertible<'_>) -> Option<Error> {
         if name != "type" {
             return Some(Error::new("projection doesn't support this property"));
         }
@@ -55,7 +58,7 @@ impl Projection {
     }
 
     #[must_use]
-    pub fn get_property(&self, name: &str) -> StyleProperty {
+    pub(crate) fn get_property(&self, name: &str) -> StyleProperty {
         if name == "type" {
             return make_style_property(&self.get_type());
         }
@@ -63,7 +66,7 @@ impl Projection {
     }
 
     #[must_use]
-    pub fn get_default_type() -> ProjectionDefinition {
+    pub(crate) fn get_default_type() -> ProjectionDefinition {
         ProjectionDefinition::default()
     }
 

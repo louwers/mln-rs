@@ -46,15 +46,10 @@ impl HBShaper {
     }
 
     pub fn rasterize_glyph(&self, glyph: &GlyphID) -> Glyph {
-        self.impl_.rasterize_glyph(glyph)
+        self.impl_.rasterize_glyph(*glyph)
     }
 
     pub fn valid(&self) -> bool {
         self.impl_.valid()
-    }
-
-    /// The implementation, for tests.
-    pub fn impl_(&self) -> &Impl {
-        &self.impl_
     }
 }

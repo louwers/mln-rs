@@ -22,7 +22,7 @@ use crate::context::Context;
 use crate::pipeline::PipelineInfo;
 use crate::renderer_backend::BackendImpl;
 
-pub struct ShaderProgram {
+pub(crate) struct ShaderProgram {
     shader_program_id: SimpleIdentity,
     shader_name: String,
     backend: Rc<BackendImpl>,
@@ -37,10 +37,10 @@ pub struct ShaderProgram {
 }
 
 impl ShaderProgram {
-    pub const NAME: &'static str = "GenericVulkanShader";
+    pub(crate) const NAME: &'static str = "GenericVulkanShader";
 
     /// A program of two compiled stages, which it owns.
-    pub fn new(
+    pub(crate) fn new(
         name: String,
         context: &Context,
         vertex_shader: vk::ShaderModule,
@@ -60,13 +60,9 @@ impl ShaderProgram {
         }
     }
 
-    pub fn get_shader_name(&self) -> &str {
-        &self.shader_name
-    }
-
     /// The pipeline of the program with the state of `pipeline_info`, made
     /// when first asked for.
-    pub fn get_pipeline(&self, pipeline_info: &PipelineInfo) -> Option<vk::Pipeline> {
+    pub(crate) fn get_pipeline(&self, pipeline_info: &PipelineInfo) -> Option<vk::Pipeline> {
         let hash = pipeline_info.hash();
         if let Some(&pipeline) = self.pipelines.borrow().get(&hash) {
             return Some(pipeline);
@@ -192,11 +188,11 @@ impl ShaderProgram {
         Some(pipeline)
     }
 
-    pub fn has_textures(&self) -> bool {
+    pub(crate) fn has_textures(&self) -> bool {
         self.texture_bindings.iter().any(Option::is_some)
     }
 
-    pub fn init_vertex_attribute(&mut self, info: &AttributeInfo) {
+    pub(crate) fn init_vertex_attribute(&mut self, info: &AttributeInfo) {
         // Indexes must be unique, if there's a conflict check the
         // `attributes` array in the shader.
         #[cfg(debug_assertions)]
@@ -204,13 +200,13 @@ impl ShaderProgram {
         self.vertex_attributes.set(info.id, info.index as i32, info.data_type, 1);
     }
 
-    pub fn init_instance_attribute(&mut self, info: &AttributeInfo) {
+    pub(crate) fn init_instance_attribute(&mut self, info: &AttributeInfo) {
         // Index is the input location of the instance attribute. Indexes
         // must not be reused by regular attributes.
         self.instance_attributes.set(info.id, info.index as i32, info.data_type, 1);
     }
 
-    pub fn init_texture(&mut self, info: &TextureInfo) {
+    pub(crate) fn init_texture(&mut self, info: &TextureInfo) {
         debug_assert!(info.id < self.texture_bindings.len());
         if let Some(binding) = self.texture_bindings.get_mut(info.id) {
             *binding = Some(info.index);
@@ -266,6 +262,6 @@ impl ShaderProgramBase for ShaderProgram {
 }
 
 /// Downcast a shader handle to the Vulkan program (C++ `static_cast`).
-pub fn as_vulkan_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
+pub(crate) fn as_vulkan_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
     shader.downcast_ref::<ShaderProgram>()
 }

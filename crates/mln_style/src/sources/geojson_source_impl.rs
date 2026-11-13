@@ -189,13 +189,13 @@ pub struct Impl {
 
 impl Impl {
     #[must_use]
-    pub fn new(id: String, options: Arc<GeoJSONOptions>) -> Self {
+    pub(crate) fn new(id: String, options: Arc<GeoJSONOptions>) -> Self {
         let synchronous_update = options.synchronous_update;
         Impl { base: ImplBase::new(SourceType::GeoJSON, id), options, data: None, synchronous_update }
     }
 
     #[must_use]
-    pub fn with_data(other: &Impl, data: Option<Arc<dyn GeoJSONData>>) -> Self {
+    pub(crate) fn with_data(other: &Impl, data: Option<Arc<dyn GeoJSONData>>) -> Self {
         Impl {
             base: other.base.clone(),
             options: other.options.clone(),
@@ -220,7 +220,7 @@ impl Impl {
     }
 
     /// Replaces `options.synchronous_update`, on or off.
-    pub fn set_update_synchronous(&mut self, value: bool) {
+    pub(crate) fn set_update_synchronous(&mut self, value: bool) {
         self.synchronous_update = value;
     }
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// The value types a binder keeps statistics for: only `float` tracks a
 /// maximum (the C++ `PaintPropertyStatistics<float>` specialization).
-pub trait StatisticValue {
+pub(crate) trait StatisticValue {
     /// `Some(value)` for `float`, `None` for the types whose statistics are
     /// the empty primary template.
     fn statistic(&self) -> Option<f32>;
@@ -25,7 +25,7 @@ impl StatisticValue for Color {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct PaintPropertyStatistics<T> {
+pub(crate) struct PaintPropertyStatistics<T> {
     max: Option<f32>,
     #[serde(skip)]
     _t: PhantomData<T>,
@@ -41,12 +41,12 @@ impl<T: StatisticValue> PaintPropertyStatistics<T> {
     /// The largest value added; always `None` for value types other than
     /// `f32`.
     #[must_use]
-    pub fn max(&self) -> Option<f32> {
+    pub(crate) fn max(&self) -> Option<f32> {
         self.max
     }
 
     /// `add(value)`: `_max = _max ? std::max(*_max, value) : value`.
-    pub fn add(&mut self, value: &T) {
+    pub(crate) fn add(&mut self, value: &T) {
         if let Some(value) = value.statistic() {
             self.max = Some(match self.max {
                 // std::max(a, b) = (a < b) ? b : a

@@ -63,7 +63,7 @@ fn supercluster_extension(
     })
 }
 
-pub struct RenderGeoJSONSource {
+pub(crate) struct RenderGeoJSONSource {
     tile_source: RenderTileSource,
     data: Option<Weak<dyn GeoJSONData>>,
     /// The mode the tiles in the pyramid were created with.
@@ -72,7 +72,7 @@ pub struct RenderGeoJSONSource {
 
 impl RenderGeoJSONSource {
     #[must_use]
-    pub fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderGeoJSONSource { tile_source: RenderTileSource::new(impl_), data: None, tiles_update_synchronously: false }
     }
@@ -80,19 +80,11 @@ impl RenderGeoJSONSource {
     fn impl_(&self) -> Arc<geojson_source_impl::Impl> {
         downcast_arc::<geojson_source_impl::Impl>(&self.tile_source.base.base_impl)
     }
-
-    pub fn tile_source(&self) -> &RenderTileSource {
-        &self.tile_source
-    }
 }
 
 impl RenderSource for RenderGeoJSONSource {
     fn base(&self) -> &RenderSourceBase {
         &self.tile_source.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderSourceBase {
-        &mut self.tile_source.base
     }
 
     fn is_loaded(&self) -> bool {
@@ -201,7 +193,7 @@ impl RenderSource for RenderGeoJSONSource {
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
+    ) -> Result<crate::geometry::feature_index::QueryResults, Error> {
         self.tile_source.query_rendered_features(geometry, transform_state, layers, options, global_state, proj_matrix)
     }
 
@@ -209,7 +201,7 @@ impl RenderSource for RenderGeoJSONSource {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         self.tile_source.query_source_features(options, global_state)
     }
 
@@ -246,7 +238,7 @@ impl RenderSource for RenderGeoJSONSource {
         self.tile_source.set_feature_state(source_layer_id, feature_id, state);
     }
 
-    fn set_feature_states(&mut self, states: Option<&std::sync::Arc<crate::bucket::LayerFeatureStates>>) {
+    fn set_feature_states(&mut self, states: Option<&Arc<crate::bucket::LayerFeatureStates>>) {
         self.tile_source.feature_state.set_states(states);
     }
 

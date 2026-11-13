@@ -15,18 +15,18 @@ use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
 use crate::paint_parameters::PaintParameters;
 
 #[derive(Clone, Copy, Debug)]
-pub struct HillshadePrepareDrawableData {
-    pub stride: i32,
-    pub encoding: RasterEncoding,
-    pub maxzoom: u8,
+pub(crate) struct HillshadePrepareDrawableData {
+    pub(crate) stride: i32,
+    pub(crate) encoding: RasterEncoding,
+    pub(crate) maxzoom: u8,
 }
 
-pub struct HillshadePrepareLayerTweaker {
+pub(crate) struct HillshadePrepareLayerTweaker {
     base: LayerTweakerBase,
 }
 
 impl HillshadePrepareLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         HillshadePrepareLayerTweaker { base: LayerTweakerBase::new(id, properties) }
     }
 }

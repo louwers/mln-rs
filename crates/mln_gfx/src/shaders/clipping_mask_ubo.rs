@@ -14,4 +14,4 @@ pub struct ClipUBO {
     pub pad2: f32,
     pub pad3: f32,
 }
-const _: () = assert!(std::mem::size_of::<ClipUBO>() == 5 * 16);
+const _: () = assert!(size_of::<ClipUBO>() == 5 * 16);

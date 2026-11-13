@@ -65,7 +65,7 @@ impl ImageExpression {
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let args_length = value.array_length();
         if args_length < 2 {
             ctx.error("Invalid number of arguments for 'image' expression.".to_owned());

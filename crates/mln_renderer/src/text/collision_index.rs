@@ -22,22 +22,22 @@ use crate::layout::symbol_projection::{
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
 
 /// A box's edges: [x1, y1, x2, y2].
-pub type CollisionBoundaries = [f32; 4];
+pub(crate) type CollisionBoundaries = [f32; 4];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct IntersectStatus {
-    pub flags: u8,
+pub(crate) struct IntersectStatus {
+    pub(crate) flags: u8,
     /// Assuming tile border divides box in two sections
-    pub min_section_length: i32,
+    pub(crate) min_section_length: i32,
 }
 
 impl IntersectStatus {
-    pub const NONE: u8 = 0;
-    pub const HORIZONTAL_BORDERS: u8 = 1 << 0;
-    pub const VERTICAL_BORDERS: u8 = 1 << 1;
+    pub(crate) const NONE: u8 = 0;
+    pub(crate) const HORIZONTAL_BORDERS: u8 = 1 << 0;
+    pub(crate) const VERTICAL_BORDERS: u8 = 1 << 1;
 }
 
-pub type CollisionGrid = GridIndex<IndexedSubfeature>;
+pub(crate) type CollisionGrid = GridIndex<IndexedSubfeature>;
 
 /// When a symbol crosses the edge that causes it to be included in
 /// collision detection, it will cause changes in the symbols around
@@ -65,11 +65,11 @@ fn indexed_subfeature(
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PlacedFeatureResult {
-    pub placed: bool,
-    pub offscreen: bool,
+pub(crate) struct PlacedFeatureResult {
+    pub(crate) placed: bool,
+    pub(crate) offscreen: bool,
     /// Behind the planet's horizon: hidden even when overlap is allowed.
-    pub occluded: bool,
+    pub(crate) occluded: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,7 +86,7 @@ struct ProjectedBox {
     all_points_occluded: bool,
 }
 
-pub struct CollisionIndex {
+pub(crate) struct CollisionIndex {
     transform_state: TransformState,
 
     viewport_padding: f32,
@@ -102,7 +102,7 @@ pub struct CollisionIndex {
 }
 
 impl CollisionIndex {
-    pub fn new(transform_state: &TransformState, map_mode: MapMode) -> Self {
+    pub(crate) fn new(transform_state: &TransformState, map_mode: MapMode) -> Self {
         let viewport_padding = find_viewport_padding(transform_state, map_mode);
         let size = transform_state.get_size();
         // `width + 2 * viewportPadding`: uint32_t + float.
@@ -122,11 +122,11 @@ impl CollisionIndex {
         }
     }
 
-    pub fn get_transform_state(&self) -> &TransformState {
+    pub(crate) fn get_transform_state(&self) -> &TransformState {
         &self.transform_state
     }
 
-    pub fn get_viewport_padding(&self) -> f32 {
+    pub(crate) fn get_viewport_padding(&self) -> f32 {
         self.viewport_padding
     }
 
@@ -174,7 +174,7 @@ impl CollisionIndex {
             && boundaries[1] < self.grid_bottom_boundary
     }
 
-    pub fn project_tile_boundaries(&self, pos_matrix: &Mat4) -> CollisionBoundaries {
+    pub(crate) fn project_tile_boundaries(&self, pos_matrix: &Mat4) -> CollisionBoundaries {
         let top_left = self.project_point(pos_matrix, Point::new(0.0, 0.0));
         let bottom_right = self.project_point(pos_matrix, Point::new(EXTENT as f32, EXTENT as f32));
 
@@ -199,7 +199,7 @@ impl CollisionIndex {
             && boundaries[3] > tile_boundaries[1]
     }
 
-    pub fn intersects_tile_edges(
+    pub(crate) fn intersects_tile_edges(
         &self,
         box_: &CollisionBox,
         shift: Point<f32>,
@@ -248,7 +248,7 @@ impl CollisionIndex {
     /// Places a collision feature. `shift` is a variable anchor's offset,
     /// unset when there is none.
     #[allow(clippy::too_many_arguments)]
-    pub fn place_feature(
+    pub(crate) fn place_feature(
         &self,
         feature: &CollisionFeature,
         shift: Option<Point<f32>>,
@@ -263,7 +263,7 @@ impl CollisionIndex {
         pitch_with_map: bool,
         rotate_with_map: bool,
         collision_debug: bool,
-        avoid_edges: &Option<CollisionBoundaries>,
+        avoid_edges: Option<&CollisionBoundaries>,
         collision_group_predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
         projected_boxes: &mut Vec<ProjectedCollisionBox>,
     ) -> PlacedFeatureResult {
@@ -281,7 +281,7 @@ impl CollisionIndex {
                 allow_overlap,
                 pitch_with_map,
                 collision_debug,
-                avoid_edges.as_ref(),
+                avoid_edges,
                 collision_group_predicate,
                 projected_boxes,
             )
@@ -510,7 +510,7 @@ impl CollisionIndex {
         }
     }
 
-    pub fn insert_feature(
+    pub(crate) fn insert_feature(
         &mut self,
         feature: &CollisionFeature,
         projected_boxes: &[ProjectedCollisionBox],
@@ -544,7 +544,10 @@ impl CollisionIndex {
         }
     }
 
-    pub fn query_rendered_symbols(&self, query_geometry: &ScreenLineString) -> HashMap<u32, Vec<IndexedSubfeature>> {
+    pub(crate) fn query_rendered_symbols(
+        &self,
+        query_geometry: &ScreenLineString,
+    ) -> HashMap<u32, Vec<IndexedSubfeature>> {
         let mut result: HashMap<u32, Vec<IndexedSubfeature>> = HashMap::new();
         if query_geometry.is_empty() || (self.collision_grid.empty() && self.ignored_grid.empty()) {
             return result;

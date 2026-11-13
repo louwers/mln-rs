@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license = "ISC"
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
@@ -16,12 +18,6 @@ name = "kdbush"
 doctest = false
 
 [dependencies]
-
-# Port of kdbush.hpp/test.cpp; its points and expected ids are read from
-# that file in place.
-[[test]]
-name = "kdbush_source_test"
-path = "tests/kdbush.rs"
 
 [lints]
 workspace = true

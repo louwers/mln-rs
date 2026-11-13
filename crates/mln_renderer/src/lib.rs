@@ -1,57 +1,58 @@
 //! The map renderer: sources and tiles, layouts and buckets, render layers,
 //! and the orchestrator that turns a style into each frame's render tree.
 
-pub mod algorithm;
+mod algorithm;
 pub mod bucket;
-pub mod bucket_geometry;
-pub mod bucket_parameters;
-pub mod buckets;
-pub mod change_request;
-pub mod frame_projection;
-pub mod geometry;
-pub mod gfx;
-pub mod globe_depth_pass;
-pub mod globe_tile_mesh;
-pub mod group_by_layout;
-pub mod image_manager;
-pub mod layer_group;
-pub mod layer_tweaker;
+mod bucket_geometry;
+mod bucket_parameters;
+mod buckets;
+mod change_request;
+mod frame_projection;
+mod geometry;
+mod gfx;
+mod globe_depth_pass;
+mod globe_tile_mesh;
+mod group_by_layout;
+mod image_manager;
+mod layer_group;
+mod layer_tweaker;
 pub mod layermanager;
-pub mod layers;
-pub mod layout;
-pub mod line_atlas;
-pub mod paint_parameters;
-pub mod paint_property_binder;
-pub mod paint_property_statistics;
-pub mod pattern_atlas;
+mod layers;
+mod layout;
+mod line_atlas;
+mod paint_parameters;
+mod paint_property_binder;
+mod paint_property_statistics;
+mod pattern_atlas;
 pub mod query;
-pub mod render_layer;
-pub mod render_light;
-pub mod render_orchestrator;
-pub mod render_pass;
-pub mod render_sky;
-pub mod render_source;
-pub mod render_static_data;
-pub mod render_target;
-pub mod render_tile;
-pub mod render_tree;
-pub mod renderer;
-pub mod renderer_event;
-pub mod sky_pass;
+mod render_layer;
+mod render_light;
+mod render_orchestrator;
+mod render_pass;
+mod render_sky;
+mod render_source;
+mod render_static_data;
+mod render_target;
+mod render_tile;
+mod render_tree;
+mod renderer;
+mod renderer_event;
+mod sky_pass;
 pub mod source_state;
-pub mod sources;
-pub mod style_diff;
+mod sources;
+mod style_diff;
 pub mod text;
 pub mod tile;
-pub mod tile_mask;
-pub mod tile_parameters;
-pub mod tile_pyramid;
-pub mod tile_render_data;
-pub mod update_parameters;
+mod tile_mask;
+mod tile_parameters;
+mod tile_pyramid;
+mod tile_render_data;
+mod update_parameters;
 pub mod update_slot;
 pub mod util;
 
 pub use frame_projection::{ClipDepthRange, FrameProjection};
+pub(crate) use paint_property_binder::paint_property_binders;
 pub use renderer::Renderer;
 pub use renderer_event::{
     FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, OverscaledTileID,
@@ -59,3 +60,6 @@ pub use renderer_event::{
 };
 pub use update_parameters::UpdateParameters;
 pub use update_slot::{Update, UpdateReader, UpdateSlot};
+
+#[cfg(test)]
+mod tests;

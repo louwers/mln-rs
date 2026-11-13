@@ -7,11 +7,11 @@ use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use parking_lot::Mutex;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LogMessage {
-    pub severity: EventSeverity,
-    pub event: Event,
-    pub code: i64,
-    pub msg: String,
+pub(crate) struct LogMessage {
+    pub(crate) severity: EventSeverity,
+    pub(crate) event: Event,
+    pub(crate) code: i64,
+    pub(crate) msg: String,
 }
 
 struct Recorder(Arc<Mutex<Vec<(LogMessage, bool)>>>);
@@ -24,12 +24,12 @@ impl Observer for Recorder {
 }
 
 /// Records this thread's log messages while alive.
-pub struct FixtureLog {
+pub(crate) struct FixtureLog {
     messages: Arc<Mutex<Vec<(LogMessage, bool)>>>,
 }
 
 impl FixtureLog {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let messages = Arc::new(Mutex::new(Vec::new()));
         let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
@@ -37,7 +37,7 @@ impl FixtureLog {
 
     /// `count(message)`: the number of matching messages, which are then
     /// checked (C++ ignores the code when it is -1 in the pattern).
-    pub fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
+    pub(crate) fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
         let mut messages = self.messages.lock();
         let mut count = 0;
         for (m, checked) in messages.iter_mut() {
@@ -50,15 +50,15 @@ impl FixtureLog {
     }
 
     /// The messages no `count` call has matched.
-    pub fn unchecked(&self) -> Vec<LogMessage> {
+    pub(crate) fn unchecked(&self) -> Vec<LogMessage> {
         self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.messages.lock().is_empty()
     }
 
-    pub fn messages(&self) -> Vec<LogMessage> {
+    pub(crate) fn messages(&self) -> Vec<LogMessage> {
         self.messages.lock().iter().map(|(m, _)| m.clone()).collect()
     }
 }
@@ -71,32 +71,32 @@ impl Drop for FixtureLog {
 
 /// Reads a file of testdata/, the copy of the C++ repository's files that
 /// these tests read, by its path relative to the repository.
-pub fn read_file(relative: &str) -> String {
+pub(crate) fn read_file(relative: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
 /// Reads a file of testdata/ as bytes.
-pub fn read_file_bytes(relative: &str) -> Vec<u8> {
+pub(crate) fn read_file_bytes(relative: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-pub fn parse_json(json: &str) -> serde_json::Value {
+pub(crate) fn parse_json(json: &str) -> serde_json::Value {
     serde_json::from_str(json).expect("test JSON must parse")
 }
 
-pub use mln_conversion::value_to_json;
+pub(super) use mln_conversion::value_to_json;
 
-pub struct StubGeometryTileFeature {
-    pub properties: feature::PropertyMap,
-    pub id: feature::Identifier,
-    pub type_: mln_util::geometry::FeatureType,
-    pub geometry: mln_tile_id::geometry_tile_data::GeometryCollection,
+pub(crate) struct StubGeometryTileFeature {
+    pub(crate) properties: feature::PropertyMap,
+    pub(crate) id: feature::Identifier,
+    pub(crate) type_: mln_util::geometry::FeatureType,
+    pub(crate) geometry: mln_tile_id::geometry_tile_data::GeometryCollection,
 }
 
 impl StubGeometryTileFeature {
-    pub fn new(properties: feature::PropertyMap) -> Self {
+    pub(crate) fn new(properties: feature::PropertyMap) -> Self {
         StubGeometryTileFeature {
             properties,
             id: feature::Identifier::Null,
@@ -105,7 +105,7 @@ impl StubGeometryTileFeature {
         }
     }
 
-    pub fn with_geometry(
+    pub(crate) fn with_geometry(
         type_: mln_util::geometry::FeatureType,
         geometry: mln_tile_id::geometry_tile_data::GeometryCollection,
     ) -> Self {
@@ -118,7 +118,7 @@ impl StubGeometryTileFeature {
     }
 
     /// A feature with an id, a type and properties, and no geometry.
-    pub fn with_id_type(
+    pub(crate) fn with_id_type(
         id: feature::Identifier,
         type_: mln_util::geometry::FeatureType,
         properties: feature::PropertyMap,
@@ -154,6 +154,6 @@ impl mln_tile_id::geometry_tile_data::GeometryTileFeature for StubGeometryTileFe
     }
 }
 
-pub fn property_map(entries: &[(&str, feature::Value)]) -> feature::PropertyMap {
+pub(crate) fn property_map(entries: &[(&str, feature::Value)]) -> feature::PropertyMap {
     entries.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
 }

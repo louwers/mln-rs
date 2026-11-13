@@ -6,7 +6,7 @@
 //! (<https://freetype.org>). All rights reserved. They are under the FreeType
 //! License (LICENSE-FreeType), one of the two licenses FreeType offers.
 
-pub mod calc;
-pub mod cmap;
-pub mod face;
-pub mod grays;
+pub(crate) mod calc;
+pub(crate) mod cmap;
+pub(crate) mod face;
+pub(crate) mod grays;

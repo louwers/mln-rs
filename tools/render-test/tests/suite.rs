@@ -14,14 +14,14 @@ use render_test::runner::ImplFactory;
 
 /// The runner's exit code for `args` (after `--manifestPath`, `--output`
 /// and `--jobs`).
-pub fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
+pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
     let manifest = if cfg!(target_os = "macos") { "manifests/macos-wgpu.json" } else { "manifests/linux-wgpu.json" };
     let output = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let jobs = std::env::var("RENDER_TEST_JOBS").unwrap_or_else(|_| "0".to_string());
     let mut argv =
         vec!["render-test", "--manifestPath", manifest, "--output", output.to_str().unwrap(), "--jobs", &jobs];
     argv.extend(args);
-    match parse_arguments(&argv.iter().map(std::string::ToString::to_string).collect::<Vec<_>>()) {
+    match parse_arguments(&argv.iter().map(ToString::to_string).collect::<Vec<_>>()) {
         Ok(mut arguments) => {
             arguments.worker_program = Some(PathBuf::from(env!("CARGO_BIN_EXE_render-test")));
             run_render_tests_with(&arguments, factory).return_code

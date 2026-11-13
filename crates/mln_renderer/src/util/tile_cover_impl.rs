@@ -15,8 +15,8 @@ use mln_util::geometry::{FeatureType, Geometry, MultiPoint, Polygon, to_feature_
 use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 
-pub type Bounds = Vec<Bound>;
-pub type BoundsMap = VecMap<u32, Bounds>;
+pub(crate) type Bounds = Vec<Bound>;
+pub(crate) type BoundsMap = VecMap<u32, Bounds>;
 
 /// A chain of points from a local minimum to a local maximum. `winding`
 /// indicates the direction of the original geometry.
@@ -25,16 +25,16 @@ pub type BoundsMap = VecMap<u32, Bounds>;
 /// operator that both copy/move all three fields; `Clone` and Rust moves are
 /// the same thing.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Bound {
-    pub points: Vec<Point<f64>>,
-    pub current_point: usize,
-    pub winding: bool,
+pub(crate) struct Bound {
+    pub(crate) points: Vec<Point<f64>>,
+    pub(crate) current_point: usize,
+    pub(crate) winding: bool,
 }
 
 impl Bound {
     /// Compute the interpolated x coordinate at y for the current edge
     #[must_use]
-    pub fn interpolate(&self, y: u32) -> f64 {
+    pub(crate) fn interpolate(&self, y: u32) -> f64 {
         let p0 = &self.points[self.current_point];
         let p1 = &self.points[self.current_point + 1];
 
@@ -354,7 +354,7 @@ type TileSpans = VecDeque<(i32, i32)>;
 /// using `nextRow()` is a list of spans (tileXSpans) of x-coordinates that
 /// includes edges and interiors of polygons. `next()` returns a tileID for each
 /// x-coordinate from (first, second] in each span in tileXSpans.
-pub struct Impl {
+pub(crate) struct Impl {
     zoom: i32,
     is_closed: bool,
 
@@ -374,7 +374,7 @@ impl Impl {
     /// The cover of `geom` at zoom `z`, projecting the geometry if `project`
     /// (C++ defaults it to true). Errors for a point with an out-of-range
     /// latitude while projecting.
-    pub fn new(z: i32, geom: &Geometry<f64>, project: bool) -> Result<Impl, Error> {
+    pub(crate) fn new(z: i32, geom: &Geometry<f64>, project: bool) -> Result<Impl, Error> {
         let is_closed = to_feature_type(geom) == FeatureType::Polygon;
 
         let to_bounds_map = BuildBoundsMap::new(z, project);
@@ -442,7 +442,7 @@ impl Impl {
     }
 
     #[must_use]
-    pub fn has_next(&self) -> bool {
+    pub(crate) fn has_next(&self) -> bool {
         match self.tile_x_spans.front() {
             Some(&(_, second)) => self.tile_x < second && self.tile_y < 1u32.wrapping_shl(self.zoom as u32),
             None => false,

@@ -82,7 +82,8 @@ impl dyn FileSource {
     ///
     /// [`FileSourceManager`]: crate::FileSourceManager
     pub fn downcast_ref<T: FileSource>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 

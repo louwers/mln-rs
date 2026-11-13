@@ -10,7 +10,7 @@ use mln_tile_id::OverscaledTileID;
 
 use crate::tile::tile::{Tile, TileNecessity};
 
-pub struct TileCache {
+pub(crate) struct TileCache {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
     /// The cached tiles' keys, oldest first.
     ordered_keys: Vec<OverscaledTileID>,
@@ -22,7 +22,7 @@ impl TileCache {
     /// A cache of `size` tiles. It takes no thread pool: released tiles are
     /// dropped on the render thread (see the file comment).
     #[must_use]
-    pub fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize) -> Self {
         TileCache { tiles: BTreeMap::new(), ordered_keys: Vec::new(), pending_releases: Vec::new(), size }
     }
 
@@ -32,7 +32,7 @@ impl TileCache {
     }
 
     /// Change the maximum size of the cache.
-    pub fn set_size(&mut self, size: usize) {
+    pub(crate) fn set_size(&mut self, size: usize) {
         self.size = size;
 
         while self.ordered_keys.len() > self.size {
@@ -53,7 +53,7 @@ impl TileCache {
     ///
     /// Unlike C++, which releases a tile that isn't renderable yet, a tile
     /// that is still loading is kept, and goes on loading here.
-    pub fn add(&mut self, key: OverscaledTileID, tile: Box<dyn Tile>) {
+    pub(crate) fn add(&mut self, key: OverscaledTileID, tile: Box<dyn Tile>) {
         if self.size == 0 {
             self.evict(tile);
             return;
@@ -84,7 +84,7 @@ impl TileCache {
         debug_assert!(self.ordered_keys.len() <= self.size);
     }
 
-    pub fn pop(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
+    pub(crate) fn pop(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
         let tile = self.tiles.remove(key);
         if tile.is_some() {
             self.remove_key(key);
@@ -98,7 +98,7 @@ impl TileCache {
     /// Unlike C++, where only renderable tiles reach the cache, the tile may
     /// still be loading (see [`add`](Self::add)); it goes on loading under
     /// its new wrap.
-    pub fn pop_any_wrap(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
+    pub(crate) fn pop_any_wrap(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
         let found = *self
             .tiles
             .keys()
@@ -110,21 +110,34 @@ impl TileCache {
     }
 
     #[must_use]
-    pub fn get(&self, key: &OverscaledTileID) -> Option<&dyn Tile> {
+    pub(crate) fn get(&self, key: &OverscaledTileID) -> Option<&dyn Tile> {
         self.tiles.get(key).map(AsRef::as_ref)
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn has(&self, key: &OverscaledTileID) -> bool {
+    pub(crate) fn has(&self, key: &OverscaledTileID) -> bool {
         self.tiles.contains_key(key)
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         let tiles = std::mem::take(&mut self.tiles);
         for (_, tile) in tiles {
             self.evict(tile);
         }
         self.ordered_keys.clear();
+    }
+
+    /// Releases the tiles still loading here whose id `keep` turns down, so
+    /// that they stop loading. Renderable tiles stay.
+    pub(crate) fn release_loading(&mut self, keep: impl Fn(&OverscaledTileID) -> bool) {
+        let released: Vec<OverscaledTileID> =
+            self.tiles.iter().filter(|(key, tile)| !tile.is_renderable() && !keep(key)).map(|(key, _)| *key).collect();
+        for key in released {
+            if let Some(tile) = self.pop(&key) {
+                self.evict(tile);
+            }
+        }
     }
 
     /// Port-only: releases a tile the cache doesn't keep. One still loading
@@ -138,21 +151,15 @@ impl TileCache {
     }
 
     /// Set aside a tile to be destroyed later, without blocking
-    pub fn deferred_release(&mut self, tile: Box<dyn Tile>) {
+    pub(crate) fn deferred_release(&mut self, tile: Box<dyn Tile>) {
         tile.cancel();
         self.pending_releases.push(tile);
     }
 
     /// Schedule any accumulated deferred tiles to be destroyed (see the
     /// file comment: here they are dropped right away).
-    pub fn defer_pending_releases(&mut self) {
+    pub(crate) fn defer_pending_releases(&mut self) {
         self.pending_releases.clear();
-    }
-
-    /// The cached tile ids (oldest first), for tests.
-    #[must_use]
-    pub fn ordered_keys(&self) -> &[OverscaledTileID] {
-        &self.ordered_keys
     }
 }
 
@@ -296,5 +303,35 @@ mod tests {
         cache.set_size(0);
         assert_eq!(Some(TileNecessity::Optional), loading_necessity.get());
         assert_eq!(None, loaded_necessity.get());
+    }
+
+    /// `release_loading` lets go of the loading tiles that its predicate
+    /// turns down, made optional so that they stop loading, and keeps the
+    /// others and every renderable tile.
+    #[test]
+    fn release_loading_lets_go_of_the_loading_tiles_turned_down() {
+        let mut cache = TileCache::new(3);
+        let (far, near, loaded) = (
+            OverscaledTileID::from_zxy(2, 0, 0),
+            OverscaledTileID::from_zxy(2, 3, 3),
+            OverscaledTileID::from_zxy(2, 1, 0),
+        );
+        let far_tile = VectorTileMock::new(far);
+        far_tile.base.renderable.set(false);
+        let far_necessity = far_tile.necessity.clone();
+        let near_tile = VectorTileMock::new(near);
+        near_tile.base.renderable.set(false);
+        let near_necessity = near_tile.necessity.clone();
+        cache.add(far, Box::new(far_tile));
+        cache.add(near, Box::new(near_tile));
+        cache.add(loaded, Box::new(VectorTileMock::new(loaded)));
+
+        cache.release_loading(|id| *id == near);
+        assert!(!cache.has(&far));
+        assert_eq!(Some(TileNecessity::Optional), far_necessity.get());
+        assert!(cache.has(&near));
+        assert_eq!(None, near_necessity.get());
+        assert!(cache.has(&loaded), "a renderable tile stays");
+        assert_eq!(cache.ordered_keys, [near, loaded]);
     }
 }

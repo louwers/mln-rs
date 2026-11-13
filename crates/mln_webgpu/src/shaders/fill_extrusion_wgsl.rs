@@ -281,7 +281,7 @@ macro_rules! wall {
 }
 
 /// The fill extrusion roofs.
-pub const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionShader",
     name: "FillExtrusionShader",
     vertex: Some(concat!(
@@ -332,7 +332,7 @@ fn main(in: VertexInput) -> VertexOutput {
 };
 
 /// The instanced fill extrusion walls.
-pub const FILL_EXTRUSION_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionInstancedShader",
     name: "FillExtrusionInstancedShader",
     vertex: Some(concat!(
@@ -384,7 +384,7 @@ fn main(in: VertexInput) -> VertexOutput {
 };
 
 /// The fill extrusion pattern roofs.
-pub const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionPatternShader",
     name: "FillExtrusionPatternShader",
     vertex: Some(concat!(
@@ -430,7 +430,7 @@ fn main(in: VertexInput) -> VertexOutput {
 };
 
 /// The instanced fill extrusion pattern walls.
-pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionPatternInstancedShader",
     name: "FillExtrusionPatternInstancedShader",
     vertex: Some(concat!(

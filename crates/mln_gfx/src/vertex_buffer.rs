@@ -10,7 +10,8 @@ pub trait VertexBufferResource: Any {}
 impl dyn VertexBufferResource {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: VertexBufferResource>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 
@@ -20,14 +21,13 @@ pub type UniqueVertexBufferResource = Rc<dyn VertexBufferResource>;
 pub trait IndexBufferResource: Any {}
 
 pub struct IndexBuffer {
-    pub elements: usize,
     resource: Box<dyn IndexBufferResource>,
 }
 
 impl IndexBuffer {
     #[must_use]
-    pub fn new(elements: usize, resource: Box<dyn IndexBufferResource>) -> Self {
-        IndexBuffer { elements, resource }
+    pub fn new(resource: Box<dyn IndexBufferResource>) -> Self {
+        IndexBuffer { resource }
     }
 
     /// The backend resource, if it is a `T`. C++ casts unchecked.

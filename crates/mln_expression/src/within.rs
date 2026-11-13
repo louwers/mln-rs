@@ -332,7 +332,7 @@ fn get_polygon_info(geometry: &Geometry<f64>, ctx: &mut ParsingContext) -> Optio
     None
 }
 
-pub struct Within {
+pub(crate) struct Within {
     base: ExpressionBase,
     geojson_source: geojson::GeoJSON,
     geometries: Geometry<f64>,
@@ -340,7 +340,7 @@ pub struct Within {
 
 impl Within {
     #[must_use]
-    pub fn new(geojson: geojson::GeoJSON, geometries: Geometry<f64>) -> Self {
+    pub(crate) fn new(geojson: geojson::GeoJSON, geometries: Geometry<f64>) -> Self {
         Within {
             base: ExpressionBase::new(Kind::Within, Type::Boolean, Dependency::FEATURE),
             geojson_source: geojson,
@@ -348,7 +348,7 @@ impl Within {
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         if value.is_array() {
             // object value, quoted with ["within", value]
             if value.array_length() != 2 {

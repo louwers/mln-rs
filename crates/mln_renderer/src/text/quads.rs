@@ -10,25 +10,25 @@ use mln_util::constants::ONE_EM;
 use crate::layout::symbol_instance::SymbolContent;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SymbolQuad {
-    pub tl: Point<f32>,
-    pub tr: Point<f32>,
-    pub bl: Point<f32>,
-    pub br: Point<f32>,
-    pub tex: RectU16,
-    pub pixel_offset_tl: Point<f32>,
-    pub pixel_offset_br: Point<f32>,
-    pub glyph_offset: Point<f32>,
-    pub writing_mode: WritingModeType,
-    pub is_sdf: bool,
-    pub section_index: usize,
-    pub min_font_scale: Point<f32>,
+pub(crate) struct SymbolQuad {
+    pub(crate) tl: Point<f32>,
+    pub(crate) tr: Point<f32>,
+    pub(crate) bl: Point<f32>,
+    pub(crate) br: Point<f32>,
+    pub(crate) tex: RectU16,
+    pub(crate) pixel_offset_tl: Point<f32>,
+    pub(crate) pixel_offset_br: Point<f32>,
+    pub(crate) glyph_offset: Point<f32>,
+    pub(crate) writing_mode: WritingModeType,
+    pub(crate) is_sdf: bool,
+    pub(crate) section_index: usize,
+    pub(crate) min_font_scale: Point<f32>,
 }
 
 impl SymbolQuad {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         tl: Point<f32>,
         tr: Point<f32>,
         bl: Point<f32>,
@@ -59,7 +59,7 @@ impl SymbolQuad {
     }
 }
 
-pub type SymbolQuads = Vec<SymbolQuad>;
+pub(crate) type SymbolQuads = Vec<SymbolQuad>;
 
 /// The border around an image in the atlas: its padding.
 const BORDER: u16 = ImagePosition::PADDING;
@@ -85,7 +85,7 @@ fn matrix_multiply(m: &[f32; 4], p: Point<f32>) -> Point<f32> {
 }
 
 #[must_use]
-pub fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
+pub(crate) fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
     let mut sum: f32 = 0.0;
     for stretch in stretches {
         sum += stretch.1 - stretch.0;
@@ -94,7 +94,7 @@ pub fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
 }
 
 #[must_use]
-pub fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
+pub(crate) fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
     let mut sum: f32 = 0.0;
     for stretch in stretches {
         sum += fmaxf(min, fminf(max, stretch.1)) - fmaxf(min, fminf(max, stretch.0));
@@ -104,28 +104,28 @@ pub fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
 
 #[inline]
 #[must_use]
-pub fn get_em_offset(stretch_offset: f32, stretch_size: f32, icon_size: f32, icon_offset: f32) -> f32 {
+pub(crate) fn get_em_offset(stretch_offset: f32, stretch_size: f32, icon_size: f32, icon_offset: f32) -> f32 {
     icon_offset + icon_size * stretch_offset / stretch_size
 }
 
 #[inline]
 #[must_use]
-pub fn get_px_offset(fixed_offset: f32, fixed_size: f32, stretch_offset: f32, stretch_size: f32) -> f32 {
+pub(crate) fn get_px_offset(fixed_offset: f32, fixed_size: f32, stretch_offset: f32, stretch_size: f32) -> f32 {
     fixed_offset - fixed_size * stretch_offset / stretch_size
 }
 
 /// `Cut`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Cut {
-    pub fixed: f32,
-    pub stretch: f32,
+pub(crate) struct Cut {
+    pub(crate) fixed: f32,
+    pub(crate) stretch: f32,
 }
 
 /// `Cuts`.
-pub type Cuts = Vec<Cut>;
+pub(crate) type Cuts = Vec<Cut>;
 
 #[must_use]
-pub fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, stretch_size: f32) -> Cuts {
+pub(crate) fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, stretch_size: f32) -> Cuts {
     // `-border` is the `int` -1.
     let mut cuts: Cuts = vec![Cut { fixed: -i32::from(BORDER) as f32, stretch: 0.0 }];
 
@@ -141,7 +141,7 @@ pub fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, st
 }
 
 #[must_use]
-pub fn get_icon_quads(
+pub(crate) fn get_icon_quads(
     shaped_icon: &PositionedIcon,
     icon_rotate: f32,
     icon_type: SymbolContent,
@@ -294,7 +294,7 @@ pub fn get_icon_quads(
 }
 
 #[must_use]
-pub fn get_glyph_quads(
+pub(crate) fn get_glyph_quads(
     shaped_text: &Shaping,
     text_offset: [f32; 2],
     layout: &SymbolLayoutProperties::Evaluated,

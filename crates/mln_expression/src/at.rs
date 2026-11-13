@@ -8,7 +8,7 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::Value;
 
-pub struct At {
+pub(crate) struct At {
     base: ExpressionBase,
     index: Box<dyn Expression>,
     input: Box<dyn Expression>,
@@ -16,12 +16,12 @@ pub struct At {
 
 impl At {
     #[must_use]
-    pub fn new(index: Box<dyn Expression>, input: Box<dyn Expression>) -> Self {
+    pub(crate) fn new(index: Box<dyn Expression>, input: Box<dyn Expression>) -> Self {
         let item_type = input.get_type().as_array().expect("array input").item_type.clone();
         At { base: ExpressionBase::new(Kind::At, item_type, index.dependencies() | input.dependencies()), index, input }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
         let length = value.array_length();

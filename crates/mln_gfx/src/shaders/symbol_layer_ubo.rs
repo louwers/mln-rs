@@ -32,7 +32,7 @@ pub struct SymbolDrawableUBO {
     /* 284 */ pub pad2: f32,
     /* 288 */
 }
-const _: () = assert!(std::mem::size_of::<SymbolDrawableUBO>() == 18 * 16);
+const _: () = assert!(size_of::<SymbolDrawableUBO>() == 18 * 16);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -43,7 +43,7 @@ pub struct SymbolTilePropsUBO {
     /* 12 */ pub pad1: f32,
     /* 16 */
 }
-const _: () = assert!(std::mem::size_of::<SymbolTilePropsUBO>() == 16);
+const _: () = assert!(size_of::<SymbolTilePropsUBO>() == 16);
 
 /// The symbol shader's evaluated properties uniform block. The colors are
 /// premultiplied r, g, b, a floats.
@@ -64,7 +64,7 @@ pub struct SymbolEvaluatedPropsUBO {
     /* 92 */ pub pad2: f32,
     /* 96 */
 }
-const _: () = assert!(std::mem::size_of::<SymbolEvaluatedPropsUBO>() == 6 * 16);
+const _: () = assert!(size_of::<SymbolEvaluatedPropsUBO>() == 6 * 16);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -72,7 +72,7 @@ pub struct CollisionDrawableUBO {
     /*  0 */ pub matrix: [f32; 4 * 4],
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<CollisionDrawableUBO>() == 4 * 16);
+const _: () = assert!(size_of::<CollisionDrawableUBO>() == 4 * 16);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -82,4 +82,4 @@ pub struct CollisionTilePropsUBO {
     /* 12 */ pub pad1: f32,
     /* 16 */
 }
-const _: () = assert!(std::mem::size_of::<CollisionTilePropsUBO>() == 16);
+const _: () = assert!(size_of::<CollisionTilePropsUBO>() == 16);

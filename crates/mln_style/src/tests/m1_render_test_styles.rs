@@ -50,7 +50,7 @@ fn load(test: &str) -> Impl {
     file_source.set_response(mln_storage::Kind::SpriteJSON, failed);
     file_source.set_response(mln_storage::Kind::SpriteImage, failed);
     let mut style = Impl::with_file_source(
-        Some(std::sync::Arc::new(file_source)),
+        Some(Arc::new(file_source)),
         1.0,
         mln_actor::TaggedScheduler::new(
             mln_actor::scheduler::get_background(),
@@ -207,7 +207,7 @@ fn background_color_transition() {
         assert!(layer.set_property("background-color", &Convertible::from(&white), None).is_none());
     }
     let impl1 = background_impl(&style, "background");
-    assert!(!std::sync::Arc::ptr_eq(&impl0, &impl1));
+    assert!(!Arc::ptr_eq(&impl0, &impl1));
 
     // What Transitioning::evaluate computes: the prior red->red transition
     // started at t0, the red->white one at t1, both 1000 ms long.

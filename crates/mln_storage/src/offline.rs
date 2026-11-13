@@ -3,8 +3,11 @@
 // too large for 64 bits).
 
 use mln_util::error::Error;
-use mln_util::geo::{LatLng, LatLngBounds};
+#[cfg(any(test, feature = "sqlite"))]
+use mln_util::geo::LatLng;
+use mln_util::geo::LatLngBounds;
 use mln_util::geometry::Geometry;
+#[cfg(any(test, feature = "sqlite"))]
 use serde_json::{Map, Value as Json};
 
 use crate::response::ResourceError;
@@ -31,12 +34,12 @@ fn check_definition(min_zoom: f64, max_zoom: f64, pixel_ratio: f32) -> Result<()
 /// pixelRatio must be ≥ 0 and should typically be 1.0 or 2.0.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OfflineTilePyramidRegionDefinition {
-    pub style_url: String,
+    pub(crate) style_url: String,
     pub bounds: LatLngBounds,
-    pub min_zoom: f64,
-    pub max_zoom: f64,
-    pub pixel_ratio: f32,
-    pub include_ideographs: bool,
+    pub(crate) min_zoom: f64,
+    pub(crate) max_zoom: f64,
+    pub(crate) pixel_ratio: f32,
+    pub(crate) include_ideographs: bool,
 }
 
 impl OfflineTilePyramidRegionDefinition {
@@ -74,12 +77,12 @@ impl OfflineTilePyramidRegionDefinition {
 /// pixelRatio must be ≥ 0 and should typically be 1.0 or 2.0.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OfflineGeometryRegionDefinition {
-    pub style_url: String,
+    pub(crate) style_url: String,
     pub geometry: Geometry<f64>,
-    pub min_zoom: f64,
-    pub max_zoom: f64,
-    pub pixel_ratio: f32,
-    pub include_ideographs: bool,
+    pub(crate) min_zoom: f64,
+    pub(crate) max_zoom: f64,
+    pub(crate) pixel_ratio: f32,
+    pub(crate) include_ideographs: bool,
 }
 
 impl OfflineGeometryRegionDefinition {
@@ -172,7 +175,8 @@ impl OfflineRegionDefinition {
 /// Decodes a region definition from JSON. A definition that isn't one fails
 /// with [`ErrorKind::Native`](mln_util::ErrorKind), and one
 /// with invalid values with the constructors' error.
-pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDefinition, Error> {
+#[cfg(any(test, feature = "sqlite"))]
+pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDefinition, Error> {
     let malformed = || Error::native("Malformed offline region definition");
 
     // `doc.Parse<0>(region.c_str())` (stops at the first NUL byte).
@@ -242,8 +246,9 @@ pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDe
     }
 }
 
+#[cfg(any(test, feature = "sqlite"))]
 #[must_use]
-pub fn encode_offline_region_definition(region: &OfflineRegionDefinition) -> String {
+pub(crate) fn encode_offline_region_definition(region: &OfflineRegionDefinition) -> String {
     let mut json = Map::new();
 
     // Encode common properties

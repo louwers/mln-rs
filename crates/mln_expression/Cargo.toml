@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 
 [lib]
@@ -14,7 +16,7 @@ name = "mln_expression"
 doctest = false
 
 [dependencies]
-cheap_ruler.workspace = true
+cheap-ruler.workspace = true
 feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true

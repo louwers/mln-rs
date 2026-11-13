@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license = "ISC"
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
@@ -19,16 +21,6 @@ doctest = false
 feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true
-
-# The fixture-free tests of geojson-vt-cpp/test/test.cpp.
-[[test]]
-name = "geojsonvt_test"
-path = "tests/geojsonvt.rs"
-
-# The fixture tests of geojson-vt-cpp/test/test.cpp, read in place.
-[[test]]
-name = "geojsonvt_fixtures_test"
-path = "tests/fixtures.rs"
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -28,6 +28,7 @@ mod table {
 
     /// Puts `value` in the table, and returns its handle: an
     /// `mln_web_object`, which `mln_web_object_release()` releases.
+    #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebObjectInsert)]
     #[must_use]
     pub fn insert(value: JsValue) -> u32 {
@@ -44,6 +45,7 @@ mod table {
     }
 
     /// The object of a handle, or `undefined` for one that names none.
+    #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebObjectGet)]
     #[must_use]
     pub fn get(handle: u32) -> JsValue {
@@ -99,6 +101,7 @@ mod upcalls {
 
     /// Sets the function that the trampolines call: `dispatcher(name,
     /// ...arguments)`.
+    #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebSetUpcallDispatcher)]
     pub fn set_dispatcher(dispatcher: js_sys::Function) {
         DISPATCHER.with(|cell| *cell.borrow_mut() = Some(dispatcher));
@@ -107,6 +110,7 @@ mod upcalls {
     /// The address of the trampoline of the callback typedef `name`, such as
     /// `"mln_wake_callback"`, for a callback field, or 0 for a name that the
     /// headers don't declare.
+    #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebUpcallPointer)]
     #[must_use]
     pub fn pointer(name: &str) -> u32 {
@@ -138,7 +142,7 @@ use crate::generated::types::mln_web_object;
 
 /// `mln_web_object_release()`. The other builds have no objects to release.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_web_object_release(object: mln_web_object) {
+pub(crate) extern "C" fn mln_web_object_release(object: mln_web_object) {
     #[cfg(target_family = "wasm")]
     table::release(object);
     #[cfg(not(target_family = "wasm"))]
@@ -147,7 +151,7 @@ pub extern "C" fn mln_web_object_release(object: mln_web_object) {
 
 /// `mln_web_alloc()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_web_alloc(size: usize, align: usize) -> *mut c_void {
+pub(crate) extern "C" fn mln_web_alloc(size: usize, align: usize) -> *mut c_void {
     match Layout::from_size_align(size, align) {
         // SAFETY: the layout has a size.
         Ok(layout) if size != 0 => unsafe { std::alloc::alloc(layout) }.cast(),
@@ -162,7 +166,7 @@ pub extern "C" fn mln_web_alloc(size: usize, align: usize) -> *mut c_void {
 /// `pointer` is null or what `mln_web_alloc(size, align)` returned, not freed
 /// yet.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_web_free(pointer: *mut c_void, size: usize, align: usize) {
+pub(crate) unsafe extern "C" fn mln_web_free(pointer: *mut c_void, size: usize, align: usize) {
     if pointer.is_null() {
         return;
     }

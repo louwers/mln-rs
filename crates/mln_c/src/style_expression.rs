@@ -139,7 +139,7 @@ fn parse(json: &str, expected: Option<Type>) -> Result<Box<dyn Expression>, Erro
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_style_expression_create(
+pub(crate) unsafe extern "C" fn mln_style_expression_create(
     expression: mln_buffer_view,
     options: *const mln_style_expression_options,
     out_expression: *mut mln_style_expression,
@@ -160,7 +160,7 @@ pub unsafe extern "C" fn mln_style_expression_create(
 
 /// `mln_style_expression_release()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_style_expression_release(expression: mln_style_expression) {
+pub(crate) extern "C" fn mln_style_expression_release(expression: mln_style_expression) {
     let _ = release(expression);
 }
 
@@ -176,7 +176,7 @@ pub(crate) fn release(expression: mln_style_expression) -> Result<(), Error> {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_style_expression_get_info(
+pub(crate) unsafe extern "C" fn mln_style_expression_get_info(
     expression: mln_style_expression,
     out_info: *mut mln_style_expression_info,
     out_diagnostic: *mut mln_diagnostic,
@@ -321,7 +321,7 @@ fn evaluate(expression: &dyn Expression, inputs: &Inputs) -> Result<String, Erro
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_style_expression_evaluate(
+pub(crate) unsafe extern "C" fn mln_style_expression_evaluate(
     expression: mln_style_expression,
     inputs: *const mln_style_expression_inputs,
     out_json: *mut c_char,

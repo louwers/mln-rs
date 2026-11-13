@@ -10,7 +10,8 @@ use crate::response::{Reason, ResourceError, Response};
 /// The path bytes as they are (POSIX paths are bytes; on other platforms
 /// invalid UTF-8 is an error, as `std::filesystem`'s UTF-8 conversion throws
 /// there).
-pub fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
+#[cfg_attr(unix, expect(clippy::unnecessary_wraps, reason = "only a non-Unix path can fail to convert"))]
+pub(crate) fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -28,7 +29,7 @@ pub fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
 /// header) is `None` too; C++ throws `std::length_error` or `std::bad_alloc`,
 /// uncaught.
 #[must_use]
-pub fn read_file(path: &std::path::Path, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
+pub(crate) fn read_file(path: &std::path::Path, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
     read_range(std::fs::File::open(path).ok()?, data_range)
 }
 
@@ -54,7 +55,7 @@ pub(crate) fn read_range(mut file: impl Read + Seek, data_range: Option<(u64, u6
     }
 }
 
-pub fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestState>, data_range: Option<(u64, u64)>) {
+pub(crate) fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestState>, data_range: Option<(u64, u64)>) {
     let mut response = Response::new();
     let path_display = String::from_utf8_lossy(path).into_owned();
     let path = match path_from_utf8(path) {

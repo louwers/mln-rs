@@ -28,7 +28,7 @@ use crate::buckets::fill_bucket::FillBucket;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
-pub struct FillLayerTweaker {
+pub(crate) struct FillLayerTweaker {
     base: LayerTweakerBase,
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
@@ -36,7 +36,7 @@ pub struct FillLayerTweaker {
 }
 
 impl FillLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         FillLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,
@@ -140,7 +140,7 @@ impl LayerTweaker for FillLayerTweaker {
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                &translation,
+                translation,
                 anchor,
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,

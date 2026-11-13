@@ -43,15 +43,15 @@ const _: () = assert!(
 /// The descriptors of a buffer set: `storage` storage buffers from binding
 /// 0, then `uniform` uniform buffers.
 #[derive(Clone, Copy)]
-pub struct BufferSetShape {
-    pub storage: usize,
-    pub uniform: usize,
+pub(crate) struct BufferSetShape {
+    pub(crate) storage: usize,
+    pub(crate) uniform: usize,
 }
 
 impl DescriptorSetType {
     /// The buffers of the type's sets; none for the image set.
     #[must_use]
-    pub fn buffer_shape(self) -> BufferSetShape {
+    pub(crate) fn buffer_shape(self) -> BufferSetShape {
         match self {
             DescriptorSetType::Global => BufferSetShape { storage: 0, uniform: GLOBAL_UNIFORM_COUNT },
             DescriptorSetType::Layer => BufferSetShape { storage: LAYER_STORAGE_COUNT, uniform: LAYER_UNIFORM_COUNT },
@@ -65,7 +65,7 @@ impl DescriptorSetType {
     /// layer's vertex-only buffer, and all but the vertex stage for its
     /// fragment-only one.
     #[must_use]
-    pub fn buffer_stages(self, binding: u32) -> vk::ShaderStageFlags {
+    pub(crate) fn buffer_stages(self, binding: u32) -> vk::ShaderStageFlags {
         let mut stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;
         if self == DescriptorSetType::Layer {
             if layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO) == Some(binding) {
@@ -78,8 +78,8 @@ impl DescriptorSetType {
     }
 }
 
-pub struct PoolInfo {
-    pub pool: vk::DescriptorPool,
+pub(crate) struct PoolInfo {
+    pub(crate) pool: vk::DescriptorPool,
     remaining_sets: u32,
     /// The sets given back, each a set per frame in flight.
     unused_sets: VecDeque<Vec<vk::DescriptorSet>>,
@@ -87,19 +87,19 @@ pub struct PoolInfo {
 
 /// The pools the sets of a type come from. Each new pool is `grow_factor` times
 /// the last.
-pub struct DescriptorPoolGrowable {
+pub(crate) struct DescriptorPoolGrowable {
     max_sets: u32,
     descriptor_storage_per_set: u32,
     descriptor_uniforms_per_set: u32,
     descriptor_textures_per_set: u32,
     grow_factor: f32,
-    pub pools: Vec<PoolInfo>,
+    pub(crate) pools: Vec<PoolInfo>,
     current_pool_index: Option<usize>,
 }
 
 impl DescriptorPoolGrowable {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         max_sets: u32,
         descriptor_storage_per_set: u32,
         descriptor_uniforms_per_set: u32,
@@ -174,7 +174,7 @@ impl DescriptorPoolGrowable {
     }
 
     /// Takes back the sets of `DescriptorSet::allocate`, for the next one.
-    pub fn give_back(&mut self, pool_index: usize, sets: Vec<vk::DescriptorSet>) {
+    pub(crate) fn give_back(&mut self, pool_index: usize, sets: Vec<vk::DescriptorSet>) {
         if let Some(pool) = self.pools.get_mut(pool_index) {
             pool.unused_sets.push_back(sets);
         }
@@ -285,14 +285,14 @@ struct BufferBinding {
 const NO_BUFFER: BufferBinding = BufferBinding { id: u64::MAX, buffer: vk::Buffer::null(), offset: 0, range: 0 };
 
 /// The descriptor sets of a uniform buffer array.
-pub struct UniformDescriptorSet {
+pub(crate) struct UniformDescriptorSet {
     set: DescriptorSet,
     /// What each frame's set holds, by binding.
     written: Vec<[BufferBinding; MAX_BUFFER_BINDINGS]>,
 }
 
 impl UniformDescriptorSet {
-    pub fn new(context: &Context, type_: DescriptorSetType) -> Self {
+    pub(crate) fn new(context: &Context, type_: DescriptorSetType) -> Self {
         UniformDescriptorSet { set: DescriptorSet::new(context, type_), written: Vec::new() }
     }
 
@@ -310,7 +310,7 @@ impl UniformDescriptorSet {
     /// Points the frame's set at the buffers of `uniforms`, each brought up to
     /// date with the frame before, and binds it. A binding without a buffer
     /// gets the context's placeholder.
-    pub fn bind(&mut self, context: &Context, command_buffer: vk::CommandBuffer, uniforms: &UniformBufferArray) {
+    pub(crate) fn bind(&mut self, context: &Context, command_buffer: vk::CommandBuffer, uniforms: &UniformBufferArray) {
         let type_ = self.set.type_;
         let shape = type_.buffer_shape();
         let count = shape.storage + shape.uniform;
@@ -386,12 +386,12 @@ impl UniformDescriptorSet {
 /// sampler from earlier ones with the same handles
 /// (`buffer_resource::unique_id`).
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct ImageBinding {
-    pub image_id: u64,
-    pub sampler_id: u64,
-    pub image_view: vk::ImageView,
-    pub image_layout: vk::ImageLayout,
-    pub sampler: vk::Sampler,
+pub(crate) struct ImageBinding {
+    pub(crate) image_id: u64,
+    pub(crate) sampler_id: u64,
+    pub(crate) image_view: vk::ImageView,
+    pub(crate) image_layout: vk::ImageLayout,
+    pub(crate) sampler: vk::Sampler,
 }
 
 const NO_IMAGE: ImageBinding = ImageBinding {
@@ -403,21 +403,21 @@ const NO_IMAGE: ImageBinding = ImageBinding {
 };
 
 /// The descriptor sets of a drawable's textures.
-pub struct ImageDescriptorSet {
+pub(crate) struct ImageDescriptorSet {
     set: DescriptorSet,
     /// What each frame's set holds, by the texture's index in the shader.
     written: Vec<[ImageBinding; IMAGE_TEXTURE_COUNT]>,
 }
 
 impl ImageDescriptorSet {
-    pub fn new(context: &Context) -> Self {
+    pub(crate) fn new(context: &Context) -> Self {
         ImageDescriptorSet { set: DescriptorSet::new(context, DescriptorSetType::DrawableImage), written: Vec::new() }
     }
 
     /// `update(textures)` and `bind(encoder)`: points the frame's set at
     /// the textures `shader` samples, and binds it. An index without a
     /// texture gets the context's placeholder.
-    pub fn bind(
+    pub(crate) fn bind(
         &mut self,
         context: &Context,
         command_buffer: vk::CommandBuffer,

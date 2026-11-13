@@ -168,7 +168,7 @@ fn add_subdivided_polygon(
 /// variant the WebGPU fill bucket uses). C++ defaults
 /// `subdivision_granularity` to 1.
 #[allow(clippy::too_many_arguments)]
-pub fn generate_fill_and_outline_buffers(
+pub(crate) fn generate_fill_and_outline_buffers(
     geometry: &GeometryCollection,
     fill_vertices: &mut Vec<FillLayoutVertex>,
     fill_indexes: &mut Vec<u16>,

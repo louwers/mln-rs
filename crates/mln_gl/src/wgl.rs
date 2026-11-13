@@ -536,6 +536,25 @@ impl WindowDc {
     }
 }
 
+/// Whether `window` has no pixel format yet, or the library's: whether
+/// [`WindowDc::new`] takes it with format 0. Sets no pixel format.
+///
+/// # Safety
+///
+/// `window` is a live window.
+pub(crate) unsafe fn takes_library_pixel_format(window: HWND) -> Result<bool, String> {
+    // SAFETY: the caller's contract.
+    let dc = unsafe { GetDC(window) };
+    if dc.is_null() {
+        return Err(last_error("GetDC of the window"));
+    }
+    let dc = WindowDc { window, dc };
+    match pixel_format(dc.dc) {
+        0 => Ok(true),
+        current => Ok(current == choose_pixel_format(dc.dc, 0)?),
+    }
+}
+
 impl Drop for WindowDc {
     fn drop(&mut self) {
         // SAFETY: the device context is this one's, got on this thread.

@@ -44,12 +44,12 @@ impl Stage {
 /// defines (`#define` lines), the stage's prelude, and the shader's own
 /// prelude and source.
 #[must_use]
-pub fn compose(stage: Stage, defines: &str, shader_prelude: &str, source: &str) -> String {
+pub(crate) fn compose(stage: Stage, defines: &str, shader_prelude: &str, source: &str) -> String {
     format!("#version {GLSL_VERSION}\n{defines}\n{}\n{shader_prelude}\n{source}", stage.prelude())
 }
 
 /// Parses a composed source into a naga module.
-pub fn parse(stage: Stage, source: &str) -> Result<naga::Module, String> {
+pub(crate) fn parse(stage: Stage, source: &str) -> Result<naga::Module, String> {
     let mut frontend = glsl::Frontend::default();
     frontend.parse(&glsl::Options::from(stage.naga()), source).map_err(|errors| errors.emit_to_string(source))
 }

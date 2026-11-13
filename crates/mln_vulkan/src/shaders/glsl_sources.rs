@@ -43,7 +43,7 @@ use super::shader_source::GlslShaderSource;
 
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::Vulkan>::vertex`
 /// (common.hpp): the start of every vertex stage.
-pub const PRELUDE_VERTEX: &str = r#"
+pub(crate) const PRELUDE_VERTEX: &str = r#"
 
 #define M_PI 3.1415926535897932384626433832795
 
@@ -308,7 +308,7 @@ void applySurfaceTransform() {
 
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::Vulkan>::fragment`
 /// (common.hpp): the start of every fragment stage.
-pub const PRELUDE_FRAGMENT: &str = r"
+pub(crate) const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
 #define SDF_PX 8.0
@@ -359,14 +359,14 @@ vec2 atlas_pos(const vec2 origin, const vec2 offset) {
 
 ";
 
-pub const BACKGROUND_SHADER_PRELUDE: &str = r"
+pub(crate) const BACKGROUND_SHADER_PRELUDE: &str = r"
 
 #define idBackgroundDrawableUBO     idDrawableReservedVertexOnlyUBO
 #define idBackgroundPropsUBO        layerUBOStartId
 
 ";
 
-pub const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundShader",
     name: "BackgroundShader",
     prelude: BACKGROUND_SHADER_PRELUDE,
@@ -422,7 +422,7 @@ void main() {
 ",
 };
 
-pub const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundPatternShader",
     name: "BackgroundPatternShader",
     prelude: BACKGROUND_SHADER_PRELUDE,
@@ -530,14 +530,14 @@ void main() {
 ",
 };
 
-pub const CIRCLE_SHADER_PRELUDE: &str = r"
+pub(crate) const CIRCLE_SHADER_PRELUDE: &str = r"
 
 #define idCircleDrawableUBO         idDrawableReservedVertexOnlyUBO
 #define idCircleEvaluatedPropsUBO   layerUBOStartId
 
 ";
 
-pub const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CircleShader",
     name: "CircleShader",
     prelude: CIRCLE_SHADER_PRELUDE,
@@ -855,7 +855,7 @@ void main() {
 ",
 };
 
-pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
+pub(crate) const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     built_in: "ClippingMaskProgram",
     name: "ClippingMaskProgram",
     prelude: "",
@@ -905,7 +905,7 @@ pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     ",
 };
 
-pub const COLLISION_SHADER_PRELUDE: &str = r"
+pub(crate) const COLLISION_SHADER_PRELUDE: &str = r"
 
 #define idCollisionDrawableUBO      drawableUBOStartId
 #define idCollisionTilePropsUBO     drawableUBOStartId + 3
@@ -913,7 +913,7 @@ pub const COLLISION_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionBoxShader",
     name: "CollisionBoxShader",
     prelude: COLLISION_SHADER_PRELUDE,
@@ -1000,7 +1000,7 @@ void main() {
 ",
 };
 
-pub const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionCircleShader",
     name: "CollisionCircleShader",
     prelude: COLLISION_SHADER_PRELUDE,
@@ -1110,7 +1110,7 @@ void main() {
 ",
 };
 
-pub const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
+pub(crate) const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
 
 #define idColorReliefDrawableUBO        idDrawableReservedVertexOnlyUBO
 #define idColorReliefTilePropsUBO       drawableReservedUBOCount
@@ -1118,7 +1118,7 @@ pub const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "ColorReliefShader",
     name: "ColorReliefShader",
     prelude: COLOR_RELIEF_SHADER_PRELUDE,
@@ -1268,9 +1268,9 @@ void main() {
 ",
 };
 
-pub const DEBUG_SHADER_PRELUDE: &str = r"#define idDebugUBO  drawableUBOStartId + 3";
+pub(crate) const DEBUG_SHADER_PRELUDE: &str = r"#define idDebugUBO  drawableUBOStartId + 3";
 
-pub const DEBUG_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const DEBUG_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "DebugShader",
     name: "DebugShader",
     prelude: DEBUG_SHADER_PRELUDE,
@@ -1330,7 +1330,7 @@ void main() {
 ",
 };
 
-pub const FILL_SHADER_PRELUDE: &str = r"
+pub(crate) const FILL_SHADER_PRELUDE: &str = r"
 
 #define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
 #define idFillTilePropsUBO          drawableReservedUBOCount
@@ -1338,7 +1338,7 @@ pub const FILL_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub const FILL_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillShader",
     name: "FillShader",
     prelude: FILL_SHADER_PRELUDE,
@@ -1440,7 +1440,7 @@ void main() {
 ",
 };
 
-pub const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineShader",
     name: "FillOutlineShader",
     prelude: FILL_SHADER_PRELUDE,
@@ -1555,7 +1555,7 @@ void main() {
 ",
 };
 
-pub const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillPatternShader",
     name: "FillPatternShader",
     prelude: FILL_SHADER_PRELUDE,
@@ -1802,7 +1802,7 @@ void main() {
 ",
 };
 
-pub const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlinePatternShader",
     name: "FillOutlinePatternShader",
     prelude: FILL_SHADER_PRELUDE,
@@ -2056,7 +2056,7 @@ void main() {
 ",
 };
 
-pub const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
     name: "FillOutlineTriangulatedShader",
     prelude: FILL_SHADER_PRELUDE,
@@ -2167,7 +2167,7 @@ void main() {
 ",
 };
 
-pub const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
+pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 #define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
 #define idFillExtrusionTilePropsUBO             drawableReservedUBOCount
@@ -2175,7 +2175,7 @@ pub const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionShader",
     name: "FillExtrusionShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
@@ -2322,7 +2322,7 @@ void main() {
 ",
 };
 
-pub const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionInstancedShader",
     name: "FillExtrusionInstancedShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
@@ -2491,7 +2491,7 @@ void main() {
 ",
 };
 
-pub const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternShader",
     name: "FillExtrusionPatternShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
@@ -2765,7 +2765,7 @@ void main() {
 ",
 };
 
-pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternInstancedShader",
     name: "FillExtrusionPatternInstancedShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
@@ -3061,7 +3061,7 @@ void main() {
 ",
 };
 
-pub const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "GlobeDepthShader",
     name: "GlobeDepthShader",
     prelude: "",
@@ -3091,14 +3091,14 @@ void main() {
 ",
 };
 
-pub const HEATMAP_SHADER_PRELUDE: &str = r"
+pub(crate) const HEATMAP_SHADER_PRELUDE: &str = r"
 
 #define idHeatmapDrawableUBO        idDrawableReservedVertexOnlyUBO
 #define idHeatmapEvaluatedPropsUBO  layerUBOStartId
 
 ";
 
-pub const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapShader",
     name: "HeatmapShader",
     prelude: HEATMAP_SHADER_PRELUDE,
@@ -3240,9 +3240,9 @@ void main() {
 ",
 };
 
-pub const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r"#define idHeatmapTexturePropsUBO    layerUBOStartId";
+pub(crate) const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r"#define idHeatmapTexturePropsUBO    layerUBOStartId";
 
-pub const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapTextureShader",
     name: "HeatmapTextureShader",
     prelude: HEATMAP_TEXTURE_SHADER_PRELUDE,
@@ -3300,7 +3300,7 @@ void main() {
 ",
 };
 
-pub const HILLSHADE_SHADER_PRELUDE: &str = r"
+pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
 #define idHillshadeTilePropsUBO         idDrawableReservedFragmentOnlyUBO
@@ -3308,7 +3308,7 @@ pub const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadeShader",
     name: "HillshadeShader",
     prelude: HILLSHADE_SHADER_PRELUDE,
@@ -3546,14 +3546,14 @@ void main() {
 ",
 };
 
-pub const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
+pub(crate) const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadePrepareDrawableUBO       drawableUBOStartId
 #define idHillshadePrepareTilePropsUBO      drawableUBOStartId + 3
 
 ";
 
-pub const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadePrepareShader",
     name: "HillshadePrepareShader",
     prelude: HILLSHADE_PREPARE_SHADER_PRELUDE,
@@ -3667,7 +3667,7 @@ void main() {
 ",
 };
 
-pub const LINE_SHADE_PRELUDE: &str = r"
+pub(crate) const LINE_SHADE_PRELUDE: &str = r"
 
 #define idLineDrawableUBO           idDrawableReservedVertexOnlyUBO
 #define idLineTilePropsUBO          idDrawableReservedFragmentOnlyUBO
@@ -3675,7 +3675,7 @@ pub const LINE_SHADE_PRELUDE: &str = r"
 
 ";
 
-pub const LINE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineShader",
     name: "LineShader",
     prelude: LINE_SHADE_PRELUDE,
@@ -3934,7 +3934,7 @@ void main() {
 ",
 };
 
-pub const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientShader",
     name: "LineGradientShader",
     prelude: LINE_SHADE_PRELUDE,
@@ -4181,7 +4181,7 @@ void main() {
 ",
 };
 
-pub const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LinePatternShader",
     name: "LinePatternShader",
     prelude: LINE_SHADE_PRELUDE,
@@ -4532,7 +4532,7 @@ void main() {
 ",
 };
 
-pub const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineSDFShader",
     name: "LineSDFShader",
     prelude: LINE_SHADE_PRELUDE,
@@ -4856,7 +4856,7 @@ void main() {
 ",
 };
 
-pub const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientSDFShader",
     name: "LineGradientSDFShader",
     prelude: LINE_SHADE_PRELUDE,
@@ -5166,14 +5166,14 @@ void main() {
 ",
 };
 
-pub const RASTER_SHADER_PRELUDE: &str = r"
+pub(crate) const RASTER_SHADER_PRELUDE: &str = r"
 
 #define idRasterDrawableUBO         idDrawableReservedVertexOnlyUBO
 #define idRasterEvaluatedPropsUBO   layerUBOStartId
 
 ";
 
-pub const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "RasterShader",
     name: "RasterShader",
     prelude: RASTER_SHADER_PRELUDE,
@@ -5300,14 +5300,14 @@ void main() {
 ",
 };
 
-pub const SKY_SHADER_PRELUDE: &str = r"
+pub(crate) const SKY_SHADER_PRELUDE: &str = r"
 
 #define idSkyPropsUBO layerUBOStartId
 #define idAtmospherePropsUBO layerUBOStartId
 
 ";
 
-pub const SKY_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SKY_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SkyShader",
     name: "SkyShader",
     prelude: SKY_SHADER_PRELUDE,
@@ -5352,7 +5352,7 @@ void main() {
 ",
 };
 
-pub const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "AtmosphereShader",
     name: "AtmosphereShader",
     prelude: SKY_SHADER_PRELUDE,
@@ -5473,7 +5473,7 @@ void main() {
 ",
 };
 
-pub const SYMBOL_SHADER_PRELUDE: &str = r"
+pub(crate) const SYMBOL_SHADER_PRELUDE: &str = r"
 
 #define idSymbolDrawableUBO         idDrawableReservedVertexOnlyUBO
 #define idSymbolTilePropsUBO        idDrawableReservedFragmentOnlyUBO
@@ -5481,7 +5481,7 @@ pub const SYMBOL_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolIconShader",
     name: "SymbolIconShader",
     prelude: SYMBOL_SHADER_PRELUDE,
@@ -5723,7 +5723,7 @@ void main() {
 ",
 };
 
-pub const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolSDFShader",
     name: "SymbolSDFShader",
     prelude: SYMBOL_SHADER_PRELUDE,
@@ -6082,7 +6082,7 @@ void main() {
 ",
 };
 
-pub const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolTextAndIconShader",
     name: "SymbolTextAndIconShader",
     prelude: SYMBOL_SHADER_PRELUDE,
@@ -6461,7 +6461,8 @@ void main() {
 };
 
 /// Every specialisation, in the order of the C++ headers.
-pub const ALL: &[&GlslShaderSource] = &[
+#[cfg(test)]
+pub(crate) const ALL: &[&GlslShaderSource] = &[
     &BACKGROUND_SHADER,
     &BACKGROUND_PATTERN_SHADER,
     &CIRCLE_SHADER,

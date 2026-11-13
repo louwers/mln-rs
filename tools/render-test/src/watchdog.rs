@@ -20,13 +20,13 @@ use parking_lot::{Condvar, Mutex};
 
 /// The panic payload of a test that ran out of time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TestTimedOut {
-    pub limit: Duration,
+pub(crate) struct TestTimedOut {
+    pub(crate) limit: Duration,
 }
 
 impl TestTimedOut {
     #[must_use]
-    pub fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         format!("Test timed out after {} s (--timeout)", self.limit.as_secs_f64())
     }
 }
@@ -53,7 +53,7 @@ struct Shared {
 }
 
 /// The watchdog thread.
-pub struct Watchdog {
+pub(crate) struct Watchdog {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
     limit: Duration,
@@ -61,7 +61,7 @@ pub struct Watchdog {
 
 impl Watchdog {
     #[must_use]
-    pub fn new(limit: Duration) -> Self {
+    pub(crate) fn new(limit: Duration) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State::default()),
             wakeup: Condvar::new(),
@@ -78,7 +78,7 @@ impl Watchdog {
     /// Starts the limit for the test about to run on this thread; the
     /// returned guard stops it.
     #[must_use]
-    pub fn arm(&self) -> WatchdogGuard<'_> {
+    pub(crate) fn arm(&self) -> WatchdogGuard<'_> {
         let generation = self.shared.current.fetch_add(1, Ordering::SeqCst) + 1;
         let mut state = self.shared.state.lock();
         state.armed = Some(Armed {
@@ -114,7 +114,7 @@ impl Drop for Watchdog {
 }
 
 /// Stops the limit when dropped.
-pub struct WatchdogGuard<'a> {
+pub(crate) struct WatchdogGuard<'a> {
     watchdog: &'a Watchdog,
 }
 

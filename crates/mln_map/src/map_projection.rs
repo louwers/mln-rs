@@ -3,9 +3,9 @@
 
 use mln_map_types::{Camera, CameraOptions, MapView, TransformState};
 use mln_util::error::Error;
-use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
+use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 
-use crate::map::{Map, camera_for_lat_lngs};
+use crate::map::Map;
 use crate::transform::Transform;
 
 /// Converts coordinates for one camera and size, without a map. It holds only
@@ -24,7 +24,7 @@ impl MapProjection {
         Self::from_state(map.get_transform_state())
     }
 
-    pub fn from_state(state: TransformState) -> Self {
+    pub(crate) fn from_state(state: TransformState) -> Self {
         MapProjection { state }
     }
 
@@ -67,22 +67,6 @@ impl MapProjection {
     /// The camera, with its center in the copy of the world that it is in.
     pub fn camera(&self) -> Camera {
         self.state.camera()
-    }
-
-    /// Set the underneath camera so the requested coordinates are visible
-    /// with the inset.
-    /// Fails as [`Map::camera_for_lat_lngs`](crate::Map::camera_for_lat_lngs)
-    /// does.
-    pub fn set_visible_coordinates(&mut self, lat_lngs: &[LatLng], padding: &EdgeInsets) -> Result<(), Error> {
-        let mut transform = self.transform();
-        let camera = CameraOptions {
-            bearing: Some(mln_math::rad2deg(-transform.get_bearing())),
-            pitch: Some(mln_math::rad2deg(transform.get_pitch())),
-            ..camera_for_lat_lngs(lat_lngs, &transform, padding)?
-        };
-        transform.jump_to(&camera);
-        self.state = transform.get_state().clone();
-        Ok(())
     }
 
     /// A transform over a copy of the state, to move its camera as a map

@@ -29,7 +29,7 @@ use crate::tile::geometry_tile_worker::SharedTileData;
 /// The `shared::Kind` of tile data: what it is made from
 /// (`GeometryTileData::encoded`), which the other side makes it from again.
 /// A layout's feature index refers to the data it indexes by key.
-pub struct SharedTileDataKind;
+pub(crate) struct SharedTileDataKind;
 
 impl Kind for SharedTileDataKind {
     type Value = dyn mln_tile_id::GeometryTileData + Send + Sync;
@@ -53,15 +53,15 @@ impl Kind for SharedTileDataKind {
 }
 
 /// `#[serde(with)]` for an `Option<SharedTileData>`.
-pub mod tile_data {
+pub(crate) mod tile_data {
     use super::{Deserializer, Serializer, SharedTileData, SharedTileDataKind, shared};
 
     #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
-    pub fn serialize<S: Serializer>(data: &Option<SharedTileData>, serializer: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(data: &Option<SharedTileData>, serializer: S) -> Result<S::Ok, S::Error> {
         shared::serialize_option::<SharedTileDataKind, S>(data, serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SharedTileData>, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SharedTileData>, D::Error> {
         shared::deserialize_option::<SharedTileDataKind, D>(deserializer)
     }
 }
@@ -69,7 +69,7 @@ pub mod tile_data {
 /// The `shared::Kind` of the textures of a worker instance's atlas, which
 /// come from the instance: the map side keeps a copy of each
 /// (`map_side.rs`, `AtlasMirror`), made from its size and pixel type.
-pub struct SharedTexture;
+pub(crate) struct SharedTexture;
 
 impl Kind for SharedTexture {
     type Value = DynamicTexture;
@@ -86,31 +86,41 @@ impl Kind for SharedTexture {
 }
 
 /// `#[serde(with)]` for an `Option<DynamicTexturePtr>`.
-pub mod texture {
+pub(crate) mod texture {
     use super::{Arc, Deserializer, DynamicTexture, Serializer, SharedTexture, shared};
 
     #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
-    pub fn serialize<S: Serializer>(texture: &Option<Arc<DynamicTexture>>, serializer: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(
+        texture: &Option<Arc<DynamicTexture>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         shared::serialize_option::<SharedTexture, S>(texture, serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Arc<DynamicTexture>>, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Arc<DynamicTexture>>, D::Error> {
         shared::deserialize_option::<SharedTexture, D>(deserializer)
     }
 }
 
 /// `#[serde(with)]` for the layers of a `setLayers`.
-pub mod layers {
+pub(crate) mod layers {
     use super::{Arc, Deserialize, Deserializer, LayerProperties, Serialize, Serializer, shared_layer_properties};
 
     #[derive(Serialize, Deserialize)]
     struct Layer(#[serde(with = "shared_layer_properties")] Arc<dyn LayerProperties>);
 
-    pub fn serialize<S: Serializer>(layers: &[Arc<dyn LayerProperties>], serializer: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(
+        layers: &[Arc<dyn LayerProperties>],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         layers.iter().cloned().map(Layer).collect::<Vec<_>>().serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Arc<dyn LayerProperties>>, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<Arc<dyn LayerProperties>>, D::Error> {
         Ok(Vec::<Layer>::deserialize(deserializer)?.into_iter().map(|layer| layer.0).collect())
     }
 }

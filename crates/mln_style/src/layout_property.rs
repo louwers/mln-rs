@@ -3,7 +3,6 @@
 // Every C++ layout property tag also has `static constexpr const char*
 // name()`; the macros give the tag an inherent `name()`.
 
-#[macro_export]
 macro_rules! layout_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr, name = $prop_name:literal) => {
         $(#[$meta])*
@@ -38,8 +37,8 @@ macro_rules! layout_property {
         }
     };
 }
+pub(crate) use layout_property;
 
-#[macro_export]
 macro_rules! data_driven_layout_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr, name = $prop_name:literal) => {
         $(#[$meta])*
@@ -80,12 +79,12 @@ macro_rules! data_driven_layout_property {
         }
     };
 }
+pub(crate) use data_driven_layout_property;
 
 /// Declares a layout property set: `Properties<Ps...>` where every `P` is a
 /// layout property. Generates `mod $module` with the `Unevaluated` (a
 /// `PropertyValue<T>` per property), `PossiblyEvaluated` and `Evaluated`
 /// structs and the C++ member functions layout properties use.
-#[macro_export]
 macro_rules! layout_properties {
     ($(#[$meta:meta])* $vis:vis mod $module:ident { $($field:ident: $prop:ty),+ $(,)? }) => {
         $(#[$meta])*
@@ -206,3 +205,4 @@ macro_rules! layout_properties {
         }
     };
 }
+pub(crate) use layout_properties;

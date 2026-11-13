@@ -15,43 +15,27 @@ use std::sync::Arc;
 use parking_lot::{Mutex, MutexGuard};
 use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::fallible_streaming_iterator::FallibleStreamingIterator;
-use rusqlite::types::{ToSql, ValueRef};
+#[cfg(test)]
+use rusqlite::types::ToSql;
+use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, Row, Rows};
 
 /// SQLite result codes (`SQLITE_*`).
-pub mod result_code {
-    pub const OK: i32 = 0;
-    pub const ERROR: i32 = 1;
-    pub const INTERNAL: i32 = 2;
-    pub const PERM: i32 = 3;
-    pub const ABORT: i32 = 4;
-    pub const BUSY: i32 = 5;
-    pub const LOCKED: i32 = 6;
-    pub const NO_MEM: i32 = 7;
-    pub const READ_ONLY: i32 = 8;
-    pub const INTERRUPT: i32 = 9;
-    pub const IO_ERR: i32 = 10;
-    pub const CORRUPT: i32 = 11;
-    pub const NOT_FOUND: i32 = 12;
-    pub const FULL: i32 = 13;
-    pub const CANT_OPEN: i32 = 14;
-    pub const PROTOCOL: i32 = 15;
-    pub const SCHEMA: i32 = 17;
-    pub const TOO_BIG: i32 = 18;
-    pub const CONSTRAINT: i32 = 19;
-    pub const MISMATCH: i32 = 20;
-    pub const MISUSE: i32 = 21;
-    pub const NO_LFS: i32 = 22;
-    pub const AUTH: i32 = 23;
-    pub const RANGE: i32 = 25;
-    pub const NOT_A_DB: i32 = 26;
+pub(crate) mod result_code {
+    pub(crate) const ERROR: i32 = 1;
+    pub(crate) const READ_ONLY: i32 = 8;
+    pub(crate) const CORRUPT: i32 = 11;
+    #[cfg(test)]
+    pub(crate) const CANT_OPEN: i32 = 14;
+    #[cfg(test)]
+    pub(crate) const CONSTRAINT: i32 = 19;
+    pub(crate) const NOT_A_DB: i32 = 26;
 }
 
 /// SQLite extended result codes, without the primary code (`err >> 8`).
-pub mod extended_result_code {
-    pub const UNKNOWN: i32 = 0;
+pub(crate) mod extended_result_code {
     /// `SQLITE_READONLY_DBMOVED >> 8`.
-    pub const READ_ONLY_DB_MOVED: i32 = 4;
+    pub(crate) const READ_ONLY_DB_MOVED: i32 = 4;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,13 +49,13 @@ pub enum OpenFlag {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct SqliteError {
-    pub code: i32,
-    pub extended_code: i32,
-    pub message: String,
+    pub(crate) code: i32,
+    pub(crate) extended_code: i32,
+    pub(crate) message: String,
 }
 
 impl SqliteError {
-    pub fn new(err: i32, message: impl Into<String>) -> Self {
+    pub(crate) fn new(err: i32, message: impl Into<String>) -> Self {
         SqliteError { code: err & 0xff, extended_code: (err >> 8) & 0xff, message: message.into() }
     }
 }
@@ -101,29 +85,29 @@ impl Database {
     }
 
     /// The same as `try_open`.
-    pub fn open(filename: &str, flags: OpenFlag) -> Result<Database, SqliteError> {
+    pub(crate) fn open(filename: &str, flags: OpenFlag) -> Result<Database, SqliteError> {
         Self::try_open(filename, flags)
     }
 
     #[must_use]
-    pub fn get_filename(&self) -> String {
+    pub(crate) fn get_filename(&self) -> String {
         self.conn().path().unwrap_or("").to_owned()
     }
 
     /// Sets the busy timeout, clamped to `0..=i32::MAX` milliseconds.
-    pub fn set_busy_timeout(&self, timeout_ms: i64) -> Result<(), SqliteError> {
+    pub(crate) fn set_busy_timeout(&self, timeout_ms: i64) -> Result<(), SqliteError> {
         let ms = timeout_ms.clamp(0, i64::from(i32::MAX)) as u64;
         self.conn().busy_timeout(std::time::Duration::from_millis(ms))?;
         Ok(())
     }
 
     /// `exec(sql)`.
-    pub fn exec(&self, sql: &str) -> Result<(), SqliteError> {
+    pub(crate) fn exec(&self, sql: &str) -> Result<(), SqliteError> {
         exec(&self.conn(), sql)
     }
 
     /// The connection.
-    pub fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.connection.lock()
     }
 }
@@ -141,25 +125,23 @@ fn exec(conn: &Connection, sql: &str) -> Result<(), SqliteError> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransactionMode {
+pub(crate) enum TransactionMode {
     Deferred,
     Immediate,
-    Exclusive,
 }
 
 /// A transaction that rolls back on drop unless committed or rolled back.
-pub struct Transaction {
+pub(crate) struct Transaction {
     connection: Arc<Mutex<Connection>>,
     need_rollback: bool,
 }
 
 impl Transaction {
     /// `Transaction(Database&, Mode = Deferred)`.
-    pub fn new(db: &Database, mode: TransactionMode) -> Result<Transaction, SqliteError> {
+    pub(crate) fn new(db: &Database, mode: TransactionMode) -> Result<Transaction, SqliteError> {
         let sql = match mode {
             TransactionMode::Deferred => "BEGIN DEFERRED TRANSACTION",
             TransactionMode::Immediate => "BEGIN IMMEDIATE TRANSACTION",
-            TransactionMode::Exclusive => "BEGIN EXCLUSIVE TRANSACTION",
         };
         // C++ throws from the constructor: no destructor, no rollback.
         db.exec(sql)?;
@@ -170,12 +152,12 @@ impl Transaction {
         exec(&self.connection.lock(), sql)
     }
 
-    pub fn commit(&mut self) -> Result<(), SqliteError> {
+    pub(crate) fn commit(&mut self) -> Result<(), SqliteError> {
         self.need_rollback = false;
         self.exec("COMMIT TRANSACTION")
     }
 
-    pub fn rollback(&mut self) -> Result<(), SqliteError> {
+    pub(crate) fn rollback(&mut self) -> Result<(), SqliteError> {
         self.need_rollback = false;
         self.exec("ROLLBACK TRANSACTION")
     }
@@ -192,7 +174,7 @@ impl Drop for Transaction {
 
 /// A prepared statement that can be run repeatedly with a `Query`. Borrows
 /// the connection guard it was prepared on (`db.conn()`).
-pub struct Statement<'conn> {
+pub(crate) struct Statement<'conn> {
     stmt: rusqlite::Statement<'conn>,
     conn: &'conn Connection,
     last_insert_row_id: i64,
@@ -201,13 +183,13 @@ pub struct Statement<'conn> {
 
 impl<'conn> Statement<'conn> {
     /// `Statement(Database&, const char* sql)` (`sqlite3_prepare_v2`).
-    pub fn new(conn: &'conn Connection, sql: &str) -> Result<Statement<'conn>, SqliteError> {
+    pub(crate) fn new(conn: &'conn Connection, sql: &str) -> Result<Statement<'conn>, SqliteError> {
         Ok(Statement { stmt: conn.prepare(sql)?, conn, last_insert_row_id: 0, changes: 0 })
     }
 }
 
 /// Binds and runs a `Statement` one row at a time.
-pub struct Query<'s, 'conn> {
+pub(crate) struct Query<'s, 'conn> {
     stmt: Option<&'s mut rusqlite::Statement<'conn>>,
     rows: Option<Rows<'s>>,
     conn: &'conn Connection,
@@ -217,20 +199,21 @@ pub struct Query<'s, 'conn> {
 
 impl<'s, 'conn> Query<'s, 'conn> {
     /// `Query(Statement&)`.
-    pub fn new(statement: &'s mut Statement<'conn>) -> Self {
+    pub(crate) fn new(statement: &'s mut Statement<'conn>) -> Self {
         let Statement { stmt, conn, last_insert_row_id, changes } = statement;
         Query { stmt: Some(stmt), rows: None, conn, last_insert_row_id, changes }
     }
 
     /// `bind(offset, value)` (before the first `run()`).
-    pub fn bind<T: ToSql>(&mut self, offset: usize, value: T) -> Result<(), SqliteError> {
+    #[cfg(test)]
+    pub(crate) fn bind<T: ToSql>(&mut self, offset: usize, value: T) -> Result<(), SqliteError> {
         let stmt = self.stmt.as_mut().expect("Query::bind after run()");
         stmt.raw_bind_parameter(offset, value)?;
         Ok(())
     }
 
     /// Steps once; true when a row is available.
-    pub fn run(&mut self) -> Result<bool, SqliteError> {
+    pub(crate) fn run(&mut self) -> Result<bool, SqliteError> {
         if self.rows.is_none() {
             let stmt = self.stmt.take().expect("statement");
             self.rows = Some(stmt.raw_query());
@@ -245,42 +228,46 @@ impl<'s, 'conn> Query<'s, 'conn> {
         self.rows.as_ref().and_then(|rows| rows.get()).expect("Query::get without a row")
     }
 
-    pub fn get_i64(&self, offset: usize) -> Result<i64, SqliteError> {
+    #[cfg(test)]
+    pub(crate) fn get_i64(&self, offset: usize) -> Result<i64, SqliteError> {
         get_i64(self.row(), offset)
     }
 
-    pub fn get_i32(&self, offset: usize) -> Result<i32, SqliteError> {
+    #[cfg(test)]
+    pub(crate) fn get_i32(&self, offset: usize) -> Result<i32, SqliteError> {
         get_i32(self.row(), offset)
     }
 
     /// The column at `offset` as bytes (see the free `get_bytes`).
-    pub fn get_bytes(&self, offset: usize) -> Result<Vec<u8>, SqliteError> {
+    pub(crate) fn get_bytes(&self, offset: usize) -> Result<Vec<u8>, SqliteError> {
         get_bytes(self.row(), offset)
     }
 
     /// The column at `offset` as bytes; `None` for NULL.
-    pub fn get_optional_bytes(&self, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
+    pub(crate) fn get_optional_bytes(&self, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
         get_optional_bytes(self.row(), offset)
     }
 
     /// The column at `offset` as text, lossy for invalid UTF-8.
-    pub fn get_string(&self, offset: usize) -> Result<String, SqliteError> {
+    pub(crate) fn get_string(&self, offset: usize) -> Result<String, SqliteError> {
         Ok(String::from_utf8_lossy(&get_bytes(self.row(), offset)?).into_owned())
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn last_insert_row_id(&self) -> i64 {
+    pub(crate) fn last_insert_row_id(&self) -> i64 {
         *self.last_insert_row_id
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn changes(&self) -> u64 {
+    pub(crate) fn changes(&self) -> u64 {
         (*self.changes).max(0) as u64
     }
 }
 
 /// `sqlite3_column_int64`.
-pub fn get_i64(row: &Row<'_>, offset: usize) -> Result<i64, SqliteError> {
+pub(crate) fn get_i64(row: &Row<'_>, offset: usize) -> Result<i64, SqliteError> {
     Ok(match row.get_ref(offset)? {
         ValueRef::Null => 0,
         ValueRef::Integer(i) => i,
@@ -290,16 +277,16 @@ pub fn get_i64(row: &Row<'_>, offset: usize) -> Result<i64, SqliteError> {
 }
 
 /// `sqlite3_column_int` (the low 32 bits of the 64-bit value).
-pub fn get_i32(row: &Row<'_>, offset: usize) -> Result<i32, SqliteError> {
+pub(crate) fn get_i32(row: &Row<'_>, offset: usize) -> Result<i32, SqliteError> {
     Ok(get_i64(row, offset)? as i32)
 }
 
 /// Whether the column's `i32` value is nonzero.
-pub fn get_bool(row: &Row<'_>, offset: usize) -> Result<bool, SqliteError> {
+pub(crate) fn get_bool(row: &Row<'_>, offset: usize) -> Result<bool, SqliteError> {
     Ok(get_i32(row, offset)? != 0)
 }
 
-pub fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, SqliteError> {
+pub(crate) fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, SqliteError> {
     if matches!(row.get_ref(offset)?, ValueRef::Null) {
         return Ok(None);
     }
@@ -308,7 +295,7 @@ pub fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, Sql
 
 /// The bytes of a text or blob value, or a number's text form, as
 /// `sqlite3_column_blob` gives them; empty for NULL.
-pub fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, SqliteError> {
+pub(crate) fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, SqliteError> {
     Ok(match row.get_ref(offset)? {
         ValueRef::Null => Vec::new(),
         ValueRef::Integer(i) => i.to_string().into_bytes(),
@@ -320,7 +307,7 @@ pub fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, SqliteError> {
 }
 
 /// The value as bytes (see `get_bytes`); `None` for NULL.
-pub fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
+pub(crate) fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
     if matches!(row.get_ref(offset)?, ValueRef::Null) {
         return Ok(None);
     }
@@ -329,7 +316,7 @@ pub fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>
 
 /// The value as text; `None` for NULL. Lossy for invalid UTF-8, which C++
 /// would keep.
-pub fn get_optional_string(row: &Row<'_>, offset: usize) -> Result<Option<String>, SqliteError> {
+pub(crate) fn get_optional_string(row: &Row<'_>, offset: usize) -> Result<Option<String>, SqliteError> {
     Ok(get_optional_bytes(row, offset)?.map(|bytes| match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),

@@ -26,15 +26,15 @@ use crate::types::ProgramID;
 
 /// A uniform block of a program.
 #[derive(Clone, Copy, Debug)]
-pub struct UniformBlock {
+pub(crate) struct UniformBlock {
     /// The block's binding point: the id of its uniform buffer.
-    pub id: usize,
+    pub(crate) id: usize,
     /// `GL_UNIFORM_BLOCK_DATA_SIZE`
-    pub size: usize,
-    pub element_size: usize,
+    pub(crate) size: usize,
+    pub(crate) element_size: usize,
 }
 
-pub struct ShaderProgram {
+pub(crate) struct ShaderProgram {
     shader_program_id: SimpleIdentity,
     context: Weak<Context>,
     program: ProgramID,
@@ -65,11 +65,11 @@ fn map_type(attribute_type: u32) -> AttributeDataType {
 }
 
 impl ShaderProgram {
-    pub const NAME: &'static str = "GenericGLShader";
+    pub(crate) const NAME: &'static str = "GenericGLShader";
 
     /// Compiles and links `source` with the program's defines and
     /// `additional_defines`, or logs why it couldn't (C++ throws).
-    pub fn create(
+    pub(crate) fn create(
         context: &Context,
         name: &str,
         program_parameters: &ProgramParameters,
@@ -191,13 +191,13 @@ impl ShaderProgram {
     }
 
     #[must_use]
-    pub fn get_gl_program_id(&self) -> ProgramID {
+    pub(crate) fn get_gl_program_id(&self) -> ProgramID {
         self.program
     }
 
     /// The uniform blocks this variant of the program reads.
     #[must_use]
-    pub fn uniform_blocks(&self) -> &[UniformBlock] {
+    pub(crate) fn uniform_blocks(&self) -> &[UniformBlock] {
         &self.uniform_blocks
     }
 }
@@ -232,6 +232,6 @@ impl ShaderProgramBase for ShaderProgram {
 }
 
 /// Downcast a shader handle to the GL program (C++ `static_cast`).
-pub fn as_gl_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
+pub(crate) fn as_gl_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
     shader.downcast_ref::<ShaderProgram>()
 }

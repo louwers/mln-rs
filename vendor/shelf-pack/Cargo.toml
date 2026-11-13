@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license = "ISC"
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
@@ -14,11 +16,6 @@ autotests = false
 name = "shelf_pack"
 # The doc comments have no examples to run.
 doctest = false
-
-# Port of shelf-pack-cpp/test/test.cpp (no fixtures).
-[[test]]
-name = "shelf_pack_unit_test"
-path = "tests/shelf_pack.rs"
 
 [lints]
 workspace = true

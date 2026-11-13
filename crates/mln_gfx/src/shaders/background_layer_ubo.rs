@@ -7,7 +7,7 @@ pub struct BackgroundDrawableUBO {
     /*  0 */ pub matrix: [f32; 4 * 4],
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<BackgroundDrawableUBO>() == 4 * 16);
+const _: () = assert!(size_of::<BackgroundDrawableUBO>() == 4 * 16);
 
 /// Evaluated properties that do not depend on the tile (32 bytes).
 /// `color` is the premultiplied `mln::Color` as r, g, b, a floats.
@@ -21,7 +21,7 @@ pub struct BackgroundPropsUBO {
     /* 28 */ pub pad3: f32,
     /* 32 */
 }
-const _: () = assert!(std::mem::size_of::<BackgroundPropsUBO>() == 2 * 16);
+const _: () = assert!(size_of::<BackgroundPropsUBO>() == 2 * 16);
 
 /// The background pattern shader's per-drawable uniform block (96 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -36,7 +36,7 @@ pub struct BackgroundPatternDrawableUBO {
     /* 92 */ pub pad3: f32,
     /* 96 */
 }
-const _: () = assert!(std::mem::size_of::<BackgroundPatternDrawableUBO>() == 6 * 16);
+const _: () = assert!(size_of::<BackgroundPatternDrawableUBO>() == 6 * 16);
 
 /// Evaluated properties that do not depend on the tile (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -54,7 +54,7 @@ pub struct BackgroundPatternPropsUBO {
     /* 60 */ pub opacity: f32,
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<BackgroundPatternPropsUBO>() == 4 * 16);
+const _: () = assert!(size_of::<BackgroundPatternPropsUBO>() == 4 * 16);
 
 /// Either background per-drawable uniform block, for consolidated UBOs: a C++
 /// union, the size of the larger member, 96 bytes. Write either member with
@@ -65,7 +65,7 @@ const _: () = assert!(std::mem::size_of::<BackgroundPatternPropsUBO>() == 4 * 16
 pub struct BackgroundDrawableUnionUBO {
     bytes: [u8; 96],
 }
-const _: () = assert!(std::mem::size_of::<BackgroundDrawableUnionUBO>() == 6 * 16);
+const _: () = assert!(size_of::<BackgroundDrawableUnionUBO>() == 6 * 16);
 
 impl Default for BackgroundDrawableUnionUBO {
     fn default() -> Self {

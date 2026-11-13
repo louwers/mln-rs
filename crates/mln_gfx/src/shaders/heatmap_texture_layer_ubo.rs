@@ -11,4 +11,4 @@ pub struct HeatmapTexturePropsUBO {
     /* 76 */ pub pad3: f32,
     /* 80 */
 }
-const _: () = assert!(std::mem::size_of::<HeatmapTexturePropsUBO>() == 5 * 16);
+const _: () = assert!(size_of::<HeatmapTexturePropsUBO>() == 5 * 16);

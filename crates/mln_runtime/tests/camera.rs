@@ -84,7 +84,7 @@ fn a_fit_moves_the_camera_where_the_query_fits() {
         CameraFitOptions { padding: EdgeInsets { left: 128.0, right: 128.0, ..EdgeInsets::default() }, ..fit };
     let refused =
         CameraFitUpdate { fit: crowded, animation: recorded(&ends, Duration::from_secs(1)), ..Default::default() };
-    let error = wait_err(map.fit_camera(area.clone(), refused));
+    let error = wait_err(map.fit_camera(area, refused));
     assert_eq!(error.kind, ErrorKind::InvalidArgument);
     assert!(error.message.contains("padding"), "{}", error.message);
     assert_eq!(ends.lock()[0].outcome, TransitionOutcome::Cancelled);

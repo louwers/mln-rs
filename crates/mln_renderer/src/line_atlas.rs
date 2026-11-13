@@ -12,24 +12,24 @@ use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct LinePatternPos {
-    pub width: f32,
-    pub height: f32,
-    pub y: f32,
+pub(crate) struct LinePatternPos {
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) y: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum LinePatternCap {
+pub(crate) enum LinePatternCap {
     Square = 0,
     Round = 1,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DashRange {
-    pub left: f32,
-    pub right: f32,
-    pub is_dash: bool,
-    pub is_zero_length: bool,
+pub(crate) struct DashRange {
+    pub(crate) left: f32,
+    pub(crate) right: f32,
+    pub(crate) is_dash: bool,
+    pub(crate) is_zero_length: bool,
 }
 
 fn get_dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
@@ -199,7 +199,7 @@ enum DashTexture {
     Texture(Texture2DPtr),
 }
 
-pub struct DashPatternTexture {
+pub(crate) struct DashPatternTexture {
     from: LinePatternPos,
     to: LinePatternPos,
     texture: DashTexture,
@@ -207,7 +207,7 @@ pub struct DashPatternTexture {
 
 impl DashPatternTexture {
     #[must_use]
-    pub fn new(from: &[f32], to: &[f32], cap: LinePatternCap) -> Self {
+    pub(crate) fn new(from: &[f32], to: &[f32], cap: LinePatternCap) -> Self {
         let patterns_identical = from == to;
         let pattern_height: u32 = if cap == LinePatternCap::Round { 15 } else { 1 };
         let height: u32 = (if patterns_identical { 1 } else { 2 }) * pattern_height;
@@ -227,7 +227,7 @@ impl DashPatternTexture {
     /// Uploads the texture to the GPU to be available when we need it. This
     /// is a lazy operation; the texture is only bound when the data is
     /// uploaded for the first time.
-    pub fn upload(&mut self, upload_pass: &dyn UploadPass) {
+    pub(crate) fn upload(&mut self, upload_pass: &dyn UploadPass) {
         if let DashTexture::Image(image) = &self.texture {
             let temp_texture = upload_pass.get_context().create_texture_2d();
             {
@@ -249,7 +249,7 @@ impl DashPatternTexture {
 
     /// The uploaded texture, if `upload` ran.
     #[must_use]
-    pub fn get_texture(&self) -> Option<Texture2DPtr> {
+    pub(crate) fn get_texture(&self) -> Option<Texture2DPtr> {
         match &self.texture {
             DashTexture::Texture(texture) => Some(texture.clone()),
             DashTexture::Image(_) => None,
@@ -258,7 +258,7 @@ impl DashPatternTexture {
 
     /// Returns the size of the texture image.
     #[must_use]
-    pub fn get_size(&self) -> Size {
+    pub(crate) fn get_size(&self) -> Size {
         match &self.texture {
             DashTexture::Image(image) => image.size,
             DashTexture::Texture(texture) => texture.borrow().get_size(),
@@ -266,22 +266,13 @@ impl DashPatternTexture {
     }
 
     #[must_use]
-    pub fn get_from(&self) -> &LinePatternPos {
+    pub(crate) fn get_from(&self) -> &LinePatternPos {
         &self.from
     }
 
     #[must_use]
-    pub fn get_to(&self) -> &LinePatternPos {
+    pub(crate) fn get_to(&self) -> &LinePatternPos {
         &self.to
-    }
-
-    /// The pattern image while it is not uploaded (for tests).
-    #[must_use]
-    pub fn get_image(&self) -> Option<&AlphaImage> {
-        match &self.texture {
-            DashTexture::Image(image) => Some(image),
-            DashTexture::Texture(_) => None,
-        }
     }
 }
 
@@ -292,7 +283,7 @@ fn dash_key(from: &[f32], to: &[f32], cap: LinePatternCap) -> DashKey {
 }
 
 #[derive(Default)]
-pub struct LineAtlas {
+pub(crate) struct LineAtlas {
     textures: VecMap<DashKey, DashPatternTexture>,
     /// Stores a list of the texture objects that need uploading.
     needs_upload: Vec<DashKey>,
@@ -300,12 +291,12 @@ pub struct LineAtlas {
 
 impl LineAtlas {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Obtains or creates a texture that has both line patterns in it
-    pub fn get_dash_pattern_texture(
+    pub(crate) fn get_dash_pattern_texture(
         &mut self,
         from: &[f32],
         to: &[f32],
@@ -320,7 +311,7 @@ impl LineAtlas {
     }
 
     /// Uploads the textures to the GPU to be available when we need it.
-    pub fn upload(&mut self, upload_pass: &dyn UploadPass) {
+    pub(crate) fn upload(&mut self, upload_pass: &dyn UploadPass) {
         for key in std::mem::take(&mut self.needs_upload) {
             if let Some(texture) = self.textures.get_mut(&key) {
                 texture.upload(upload_pass);
@@ -329,7 +320,7 @@ impl LineAtlas {
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.textures.is_empty()
     }
 }

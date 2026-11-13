@@ -42,7 +42,6 @@ pub mod upload_pass;
 pub mod vertex_buffer_resource;
 
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, PendingReads};
-pub use context::Context;
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
 pub use exported_target::ExportedTarget;

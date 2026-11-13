@@ -129,7 +129,7 @@ pub(super) mod display_link {
             perform: Some(perform),
         };
         // SAFETY: a version 0 context whose callbacks take no `info`.
-        let Some(source) = (unsafe { CFRunLoopSource::new(None, 0, &mut context) }) else {
+        let Some(source) = (unsafe { CFRunLoopSource::new(None, 0, &raw mut context) }) else {
             return;
         };
         // SAFETY: a constant of Core Foundation's.

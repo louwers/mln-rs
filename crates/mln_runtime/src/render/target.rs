@@ -309,10 +309,9 @@ impl BorrowedRing {
                 == Some(mln_mtl::objc2_metal::MTLPixelFormat::Depth32Float_Stencil8))
             .then_some(DepthStencilFormat::Depth32FloatStencil8),
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            RingKind::WebGpu(textures) => textures
-                .depth_textures
-                .first()
-                .and_then(|texture| mln_webgpu::borrowed_target::depth_stencil_format(texture.format())),
+            RingKind::WebGpu(textures) => {
+                textures.depth_textures.first().and_then(|texture| mln_webgpu::depth_stencil_format(texture.format()))
+            }
             #[allow(unreachable_patterns)]
             _ => None,
         }
@@ -608,6 +607,25 @@ impl Surface {
         Ok(())
     }
 
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Win32 window whose pixel format isn't the library's when OpenGL
+    /// presents to it: on `device`, or without a device, in a build whose
+    /// first backend is OpenGL. Windows doesn't let a pixel format change.
+    /// A session that falls back to OpenGL because Vulkan is missing finds
+    /// out as it starts.
+    #[cfg_attr(not(all(feature = "gl", windows)), allow(clippy::unnecessary_wraps))]
+    pub(crate) fn check_pixel_format(&self, device: Option<&Device>) -> Result<(), Error> {
+        #[cfg(all(feature = "gl", windows))]
+        if let SurfaceKind::Window(window) = &self.kind
+            && device.map_or(cfg!(not(feature = "vulkan")), |device| device.backend() == BackendType::OpenGL)
+        {
+            mln_gl::SurfaceTarget::check_window(&**window)?;
+        }
+        #[cfg(not(all(feature = "gl", windows)))]
+        let _ = (self, device);
+        Ok(())
+    }
+
     /// The window, for a surface of one.
     #[allow(clippy::match_wildcard_for_single_variants)]
     pub(crate) fn host_window(&self) -> Option<Arc<dyn Window>> {
@@ -900,7 +918,8 @@ impl Device {
     /// Apple's platforms, and Vulkan elsewhere, or OpenGL where there is no
     /// Vulkan. WebGPU (wgpu) takes the place of a native backend that isn't
     /// there. A backend that can't name the GPU that `options` names is
-    /// skipped: OpenGL names none, and only Vulkan names one by UUID or LUID.
+    /// skipped: only Vulkan names one by UUID or LUID. OpenGL lists one GPU,
+    /// the one its display renders on, at index 0.
     /// So is OpenGL where it can't render with `options.gl_api`.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
@@ -959,8 +978,13 @@ impl Device {
             .map(Device::Vulkan),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             BackendType::OpenGL => {
-                if adapter.is_some() {
-                    return Err(Error::unsupported("OpenGL picks no GPU"));
+                // An OpenGL device renders on the one GPU of its display, so
+                // its list of GPUs holds that one.
+                match index(adapter)? {
+                    None | Some(0) => {}
+                    Some(index) => {
+                        return Err(Error::not_found(format!("adapter_index {index} is past OpenGL's one GPU")));
+                    }
                 }
                 let api = match gl_api {
                     GlApi::Gles => mln_gl::Api::Gles,
