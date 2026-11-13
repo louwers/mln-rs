@@ -36,8 +36,9 @@ jobs:
         with:
           validation-layer: true
 
-      - uses: taiki-e/install-action@v2
-        with: { tool: just }
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
 
       - name: Test
         run: just test-asan "$MINUTES"

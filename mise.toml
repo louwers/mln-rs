@@ -16,6 +16,11 @@ idiomatic_version_file_enable_tools = ["rust"]
 "aqua:casey/just" = "1.59.0"
 # The test runner, which ends a test that hangs (.config/nextest.toml).
 "github:nextest-rs/nextest" = { version = "0.9.151", version_prefix = "cargo-nextest-" }
+# Cargo subcommands: the tests' coverage, the packages' licenses
+# (deny.toml) and unused dependencies.
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+"github:est31/cargo-udeps" = "0.1.61"
 # The browser build: wasm-bindgen must match the wasm-bindgen crate in
 # Cargo.lock, and binaryen's wasm-opt shrinks the release build.
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
@@ -23,8 +28,10 @@ idiomatic_version_file_enable_tools = ["rust"]
 # The browser build's page (examples/web) and its check.
 "core:node" = "24.22.2"
 "aqua:pnpm/pnpm" = "12.18.0"
-# The justfile's scripts that generate tables and fixtures.
+# The justfile's scripts that generate tables and fixtures, and the jq that
+# reads Cargo's JSON output.
 "core:python" = "3.15.2"
+"aqua:jqlang/jq" = "1.8.2"
 
 [deps.pnpm]
 auto = true

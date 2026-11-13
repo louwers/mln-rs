@@ -39,11 +39,9 @@ jobs:
       - name: Install lavapipe
         uses: ./.github/actions/lavapipe
 
-      - uses: taiki-e/install-action@v2
-        with: { tool: just }
-
-      - name: Install Rust
-        run: rustup toolchain install --profile minimal --no-self-update
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
 
       # Saves from main only, as in ci.yml.
       - uses: Swatinem/rust-cache@v2

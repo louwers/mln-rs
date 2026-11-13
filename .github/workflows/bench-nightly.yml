@@ -53,13 +53,10 @@ jobs:
         if: steps.base.outputs.changed == 'true'
         uses: ./.github/actions/lavapipe
 
-      - uses: taiki-e/install-action@v2
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
         if: steps.base.outputs.changed == 'true'
-        with: { tool: just }
-
-      - name: Install Rust
-        if: steps.base.outputs.changed == 'true'
-        run: rustup toolchain install --profile minimal --no-self-update
 
       - uses: Swatinem/rust-cache@v2
         if: steps.base.outputs.changed == 'true'
