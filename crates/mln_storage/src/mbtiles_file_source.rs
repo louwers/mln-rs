@@ -242,6 +242,16 @@ impl MBTilesFileSourceThread {
     }
 
     fn tile(&self, resource: &Resource) -> Result<Response, String> {
+        // The etag is the tile's URL, so a matching one means the loader
+        // already has this tile: skip the re-read and its re-decode.
+        if resource.prior_etag.as_deref() == Some(resource.url.as_str()) {
+            let mut response = Response::new();
+            response.not_modified = true;
+            response.expires = Some(Timestamp::from_secs(i64::MAX));
+            response.etag = Some(resource.url.clone());
+            return Ok(response);
+        }
+
         let base_path = url_to_path(&resource.url);
         let path = db_path(&base_path).to_vec();
 
