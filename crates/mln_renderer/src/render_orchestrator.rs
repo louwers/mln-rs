@@ -1585,8 +1585,8 @@ impl RenderOrchestrator {
         for source in self.render_sources.values_mut() {
             source.reduce_memory_use();
         }
-        // TODO(port): imageManager->reduceMemoryUse(), observer->onInvalidate()
-        // as C++ does afterwards.
+        self.image_manager.reduce_memory_use();
+        self.events.emit(RendererEvent::Invalidate);
     }
 
     pub fn get_tile_cache_enabled(&self) -> bool {
