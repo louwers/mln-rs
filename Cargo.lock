@@ -2654,6 +2654,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "tempfile",
 ]
 
 [[package]]
