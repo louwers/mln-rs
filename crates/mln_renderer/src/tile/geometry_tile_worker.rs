@@ -626,9 +626,6 @@ impl GeometryTileWorker {
         // handled before the image request goes out can't finalize the layout
         // with an empty icon map.
         self.pending_image_dependencies = image_dependencies;
-        // An empty image name means no image, as in the style spec, so don't
-        // request it.
-        self.pending_image_dependencies.remove("");
 
         if !self.pending_glyph_dependencies.glyphs.is_empty() {
             self.parent.send(TileMessage::GetGlyphs(self.pending_glyph_dependencies.clone()));

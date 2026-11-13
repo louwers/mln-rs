@@ -1923,6 +1923,7 @@ fn empty_image_name_is_no_image() {
         let missing = missing.clone();
         test.observer.on_style_image_missing_callback.set(move |id| missing.borrow_mut().push(id));
     }
+    test.file_source.set_response(Kind::Glyphs, |_| Some(no_content()));
 
     test.load_json(
         r#"{
@@ -1933,7 +1934,8 @@ fn empty_image_name_is_no_image() {
       },
       "layers": [
         {"id": "fill", "type": "fill", "source": "polygon", "paint": {"fill-pattern": ["get", "image"]}},
-        {"id": "symbol", "type": "symbol", "source": "polygon", "layout": {"icon-image": ["get", "image"]}}
+        {"id": "symbol", "type": "symbol", "source": "polygon", "layout": {"icon-image": ["get", "image"]}},
+        {"id": "text", "type": "symbol", "source": "polygon", "layout": {"text-field": [["a"], [["image", ""]]]}}
       ]
     }"#,
     );

@@ -227,9 +227,13 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                                 S::pattern_default(),
                             );
 
-                            image_dependencies.entry(min.to.id().to_owned()).or_insert(ImageType::Pattern);
-                            image_dependencies.entry(mid.to.id().to_owned()).or_insert(ImageType::Pattern);
-                            image_dependencies.entry(max.to.id().to_owned()).or_insert(ImageType::Pattern);
+                            // An empty pattern name means no pattern, so it is not an
+                            // image dependency.
+                            for pattern in [&min, &mid, &max] {
+                                if !pattern.to.empty() {
+                                    image_dependencies.entry(pattern.to.id().to_owned()).or_insert(ImageType::Pattern);
+                                }
+                            }
                             pattern_dependency_map.entry(layer_id.clone()).or_insert(PatternDependency {
                                 min: min.to.id().to_owned(),
                                 mid: mid.to.id().to_owned(),

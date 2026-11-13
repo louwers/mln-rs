@@ -438,7 +438,14 @@ impl SymbolLayout {
 
                 for (section_index, section) in formatted.sections.iter().enumerate() {
                     if let Some(image) = &section.image {
-                        layout_parameters.image_dependencies.entry(image.id().to_owned()).or_insert(ImageType::Icon);
+                        // An empty image name means no image, so it is not an image
+                        // dependency.
+                        if !image.empty() {
+                            layout_parameters
+                                .image_dependencies
+                                .entry(image.id().to_owned())
+                                .or_insert(ImageType::Icon);
+                        }
                         formatted_text.add_image_section(image.id());
                         continue;
                     }
@@ -556,8 +563,12 @@ impl SymbolLayout {
                     layout_parameters.available_images,
                     &canonical_id,
                 );
-                layout_parameters.image_dependencies.entry(icon.id().to_owned()).or_insert(ImageType::Icon);
-                ft.icon = Some(icon);
+                // An empty icon name means no icon, so it is not an image
+                // dependency.
+                if !icon.empty() {
+                    layout_parameters.image_dependencies.entry(icon.id().to_owned()).or_insert(ImageType::Icon);
+                    ft.icon = Some(icon);
+                }
             }
 
             if ft.formatted_text.is_some() || ft.icon.is_some() {
