@@ -5,7 +5,7 @@
 #![cfg_attr(target_family = "wasm", allow(unreachable_code, unused_variables))]
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -376,6 +376,9 @@ pub(crate) struct Worker {
     /// The `still_image_request_id` of the last still image that the
     /// session rendered.
     still_rendered: u64,
+    /// The `still_image_request_id` of the still image that a resource error
+    /// on its way to the map fails. The session draws no frame for it.
+    still_failing: Cell<u64>,
     /// Whether the target holds a frame since it attached or resized.
     has_frame: bool,
     /// The sources of the last render.
@@ -530,6 +533,7 @@ impl Worker {
             rendered_generation: 0,
             still: None,
             still_rendered: 0,
+            still_failing: Cell::new(0),
             has_frame: false,
             sources: None,
             torn_down: false,
@@ -659,6 +663,12 @@ impl Worker {
     }
 
     fn forward(&self, events: Vec<RendererEvent>) {
+        // The map fails the still image that waits when it takes a resource
+        // error, so a frame for that image drawn before the map says so would
+        // show a failed image.
+        if events.iter().any(|event| matches!(event, RendererEvent::ResourceError(_))) {
+            self.still_failing.set(self.pending_still_image());
+        }
         if let Some(map_events) = &self.map_events {
             for event in events {
                 map_events.push(event);
@@ -870,6 +880,10 @@ impl Worker {
             }
             self.still = Some(StillDemand { tried: None });
         }
+        // The demand ends once the map fails the image.
+        if pending == self.still_failing.get() {
+            return;
+        }
         let Some(update) = self.latest() else { return };
         // The update that asks for the image comes before the map says that
         // the image waits.
@@ -893,7 +907,17 @@ impl Worker {
             RingPick::Slot(slot) => Some(slot),
         };
         let frame = self.render(None, &update, slot);
+        // A tile that failed during the frame counts as loaded, so the frame
+        // drew the map without it, but the map fails the image on the error.
+        let fails = frame.events.iter().any(|event| matches!(event, RendererEvent::ResourceError(_)));
         match frame.result.disposition {
+            FrameDisposition::Rendered if fails => {
+                self.still_failing.set(pending);
+                if let Some((slot, _)) = frame.slot {
+                    self.end_slot(slot, None);
+                }
+                self.forward(frame.events);
+            }
             FrameDisposition::Rendered => {
                 self.still = None;
                 self.still_rendered = pending;
