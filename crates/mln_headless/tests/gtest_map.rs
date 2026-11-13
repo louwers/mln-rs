@@ -2746,6 +2746,55 @@ fn invalid_utf8_in_tile() {
     assert!(error.to_string().contains("invalid UTF-8"), "{error}");
 }
 
+// A continuous map whose tiles all fail still finishes loading, even when
+// the tiles fail after the map has stopped repainting.
+#[test]
+fn continuous_map_finishes_loading_when_its_tiles_fail() {
+    let _log = FixtureLog::new();
+
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
+    let test = MapTest::create(RunLoop::new(), file_source, 1.0, MapMode::Continuous);
+    test.file_source
+        .set_response(Kind::Tile, |_| Some(file_response("test/fixtures/map/invalid_utf8/invalidutf8feature.mvt")));
+
+    test.map().jump_to(&cam().with_zoom(Some(11.0)));
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "invalidutf8": {
+          "type": "vector",
+          "tiles": ["http://example.com/{z}-{x}-{y}.vector.pbf"]
+        }
+      },
+      "layers": [{
+        "id": "mountain_peak",
+        "type": "symbol",
+        "source": "invalidutf8",
+        "source-layer": "points",
+        "layout": {
+            "text-field": "{name}"
+        }
+      }]
+    }"#,
+    );
+
+    // The tiles are answered only once a frame needs no repaint, so no
+    // frame is coming when they fail.
+    {
+        let file_source = test.file_source.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |status| {
+            if !status.needs_repaint {
+                file_source.respond_to_all();
+            }
+        });
+    }
+    let run_loop = test.run_loop.clone();
+    test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
+
+    run_with_timeout(&test.run_loop, 60);
+}
+
 // gtest: Map.ObserveTileLifecycle
 // TODO(port): the half of the gtest that checks the pre/post compile events
 // of the fill and fill-outline shaders (MapObserver has no shader callbacks).

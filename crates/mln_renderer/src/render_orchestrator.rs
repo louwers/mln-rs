@@ -160,6 +160,11 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
     fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: Error) {
         Log::error(Event::Style, format!("Failed to load tile {tile_id} for source {source_id}: {error}"));
         self.events.emit(RendererEvent::ResourceError(error));
+        // A failed tile is done loading, and its parents or children may
+        // stand in for it, as when it changes: a continuous map needs a frame
+        // to see that, or it never reports that it finished loading. The
+        // error goes first, so the still image it fails isn't rendered again.
+        self.events.emit(RendererEvent::Invalidate);
     }
 
     /// `onTileAction(RenderSource&, TileOperation, const OverscaledTileID&,
