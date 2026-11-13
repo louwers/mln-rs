@@ -63,7 +63,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (function_count, stub_count) = (functions.len(), stubs.len());
     fs::create_dir_all(&out_dir)?;
     write(&out_dir.join("types.rs"), "", types)?;
-    write(&out_dir.join("stubs.rs"), "use super::types::*;\n\n", stubs)?;
+    // Without a stub, the import would be unused.
+    let stubs_prelude = if stubs.is_empty() { "" } else { "use super::types::*;\n\n" };
+    write(&out_dir.join("stubs.rs"), stubs_prelude, stubs)?;
     write(&out_dir.join("signatures.rs"), "use super::types::*;\n\n", checks)?;
     println!(
         "{function_count} functions from {} headers: {} defined, {stub_count} stubs",

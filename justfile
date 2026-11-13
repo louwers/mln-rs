@@ -50,12 +50,12 @@ bench-fixtures:
     python3 -I tools/bench/fixtures.py target/bench-fixtures
 
 # Configures and builds tools/c-abi-test in target/c-abi-test-<backend>, against crates/mln_c's shared library, then runs it
-# with tools/c-abi-test/run.py, whose arguments follow: `--update` rewrites the backend's list, `-v` prints each failure. The
-# backend is MLN_C_TEST_BACKEND's: vulkan by default, whose list is expected-failures.txt, or opengl, on EGL, whose list is
-# expected-failures-opengl.txt and which runs on llvmpipe as CI does with LIBGL_ALWAYS_SOFTWARE=1. Needs CMake, a C23 and
-# C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as lavapipe (VK_DRIVER_FILES), libwayland-server and
-# libwayland-client, which the Wayland cases load, and for opengl the EGL and OpenGL ES headers and libraries.
-[doc("Run maplibre-native-ffi's ABI suite against crates/mln_c, and compare its failures with the backend's list in tools/c-abi-test")]
+# with tools/c-abi-test/run.py, whose arguments follow, such as `--jobs`. It fails when any case fails. The backend is
+# MLN_C_TEST_BACKEND's: vulkan by default, or opengl, on EGL, which runs on llvmpipe as CI does with
+# LIBGL_ALWAYS_SOFTWARE=1. Needs CMake, a C23 and C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as
+# lavapipe (VK_DRIVER_FILES), libwayland-server and libwayland-client, which the Wayland cases load, and for opengl the
+# EGL and OpenGL ES headers and libraries.
+[doc("Run maplibre-native-ffi's ABI suite against crates/mln_c")]
 [positional-arguments]
 c-abi-test *args:  _dev-shell
     #!/usr/bin/env bash
@@ -68,7 +68,7 @@ c-abi-test *args:  _dev-shell
     cargo tree -p mln-rs-c -e features --prefix none | grep -q '^mln-rs-renderer feature "font-face-shaper"'
     {{dev_shell}} cmake -S tools/c-abi-test -B "$build" -DMLN_C_LIBRARY="$PWD/$target/debug/libmaplibre_native_c.so" -DMLN_C_TEST_BACKEND="$backend"
     {{dev_shell}} cmake --build "$build" --parallel
-    {{dev_shell}} python3 -I tools/c-abi-test/run.py --backend "$backend" "$build/mln_native_abi_tests" "$@"
+    {{dev_shell}} python3 -I tools/c-abi-test/run.py "$build/mln_native_abi_tests" "$@"
 
 # Build every package and test target
 build:  _dev-shell
@@ -360,18 +360,17 @@ update-testdata checkout=cpp:
     done
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
-# The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
-# builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then the declarations are
-# regenerated. The copies are from maplibre/maplibre-native-ffi's t3/gpu-device-targets branch at 4b07678a7978, which
-# reshapes the API around mln-rs ahead of its merge (maplibre/maplibre-native-ffi#1799).
+# The headers go to crates/mln_c/include and the ABI suite, with the support files, fixtures and GPU fixtures it builds
+# with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then the declarations are
+# regenerated. The copies are from maplibre/maplibre-native-ffi's t3/build-on-mln-rs branch at 385c24b2bb56, which
+# reshapes the API around mln-rs and builds the C library from it, ahead of its merge (maplibre/maplibre-native-ffi#1801).
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash
     set -euo pipefail
     rsync -a --delete {{quote(checkout)}}/include/maplibre_native_c/ crates/mln_c/include/maplibre_native_c/
-    rsync -a --delete {{quote(checkout)}}/include/mln/ crates/mln_c/include/mln/
     cp {{quote(checkout)}}/include/maplibre_native_c.h {{quote(checkout)}}/LICENSE crates/mln_c/include/
-    for dir in tests/native/abi tests/native/support tests/native/plugin tests/native/fixtures tests/graphics; do
+    for dir in tests/native/abi tests/native/support tests/native/fixtures tests/graphics; do
         mkdir -p "tools/c-abi-test/testdata/$dir"
         rsync -a --delete {{quote(checkout)}}/"$dir"/ "tools/c-abi-test/testdata/$dir"/
     done
