@@ -4,18 +4,24 @@
 //! JSON and the expressions built from it recurse as deep as the input
 //! nests, and a host's thread may have little stack: musl's default is 128
 //! KiB. The work runs here instead, on a stack of a known size, one job at a
-//! time and in the order the callers send them.
+//! time and in the order the callers send them. The browser build runs it on
+//! the caller's thread, its only one.
 
+#[cfg(not(target_family = "wasm"))]
 use std::sync::{Mutex, mpsc};
 
 use crate::error::Error;
+#[cfg(not(target_family = "wasm"))]
 use crate::lock;
 
+#[cfg(not(target_family = "wasm"))]
 type Job = Box<dyn FnOnce() + Send>;
 
 /// The thread's queue, once it has started.
+#[cfg(not(target_family = "wasm"))]
 static JOBS: Mutex<Option<mpsc::Sender<Job>>> = Mutex::new(None);
 
+#[cfg(not(target_family = "wasm"))]
 fn jobs() -> Result<mpsc::Sender<Job>, Error> {
     let mut jobs = lock(&JOBS);
     if let Some(jobs) = &*jobs {
@@ -33,7 +39,16 @@ fn jobs() -> Result<mpsc::Sender<Job>, Error> {
     Ok(sender)
 }
 
+/// Runs `work` on this thread: the browser's instance has no other, and
+/// links with a stack that the parse limits fit in (build.rs).
+#[cfg(target_family = "wasm")]
+#[expect(clippy::unnecessary_wraps, reason = "the other builds' thread can fail to start")]
+pub(crate) fn run<R: Send + 'static>(work: impl FnOnce() -> R + Send + 'static) -> Result<R, Error> {
+    Ok(work())
+}
+
 /// Runs `work` on the parse thread and waits for its result.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn run<R: Send + 'static>(work: impl FnOnce() -> R + Send + 'static) -> Result<R, Error> {
     let (reply, result) = mpsc::sync_channel(1);
     let job: Job = Box::new(move || {

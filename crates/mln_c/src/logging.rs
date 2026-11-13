@@ -98,6 +98,10 @@ static LOG_THREAD: Mutex<Option<mpsc::Sender<Record>>> = Mutex::new(None);
 /// Sends `record` to the log thread, or returns it when the thread can't
 /// start.
 fn deliver_later(record: Record) -> Result<(), Record> {
+    // The browser's instance has no other thread.
+    if cfg!(target_family = "wasm") {
+        return Err(record);
+    }
     let mut thread = lock(&LOG_THREAD);
     if thread.is_none() {
         let (sender, receiver) = mpsc::channel::<Record>();

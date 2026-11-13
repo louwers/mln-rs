@@ -17,6 +17,13 @@
 //! `completion`s, the event batches that handlers receive (`events`), the
 //! headers' geometry values (`geo`), and the
 //! `parse_thread` that parses for callers that wait.
+//!
+//! In the browser, the library is a wasm-bindgen package per backend (`just
+//! c-web webgpu` or `gl`): its instance's exports are the raw functions and
+//! its memory, and `web` holds what a JavaScript host needs beside them, such
+//! as the object handles of `web.h` and the callback trampolines that
+//! tools/c-abi-gen generates. Everything runs on the thread that loaded the
+//! module, and nothing waits.
 
 // Every export takes raw pointers from C callers.
 #![allow(unsafe_code)]
@@ -58,6 +65,7 @@ mod style_expression;
 mod texture;
 mod transforms;
 mod url_rules;
+mod web;
 #[cfg(all(test, windows))]
 mod wgl_tests;
 
@@ -67,6 +75,8 @@ mod generated {
     pub mod types;
     mod stubs;
     mod signatures;
+    #[cfg(target_family = "wasm")]
+    pub mod trampolines;
 }
 
 use std::sync::{Mutex, MutexGuard, PoisonError};

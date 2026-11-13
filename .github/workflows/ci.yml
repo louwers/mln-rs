@@ -216,11 +216,12 @@ jobs:
   # its cache database to the page with its tile workers in Web Workers, each
   # frame compared with the native runner's render of the same view
   # (lavapipe). Twice: the module that draws with WebGPU, and the one that
-  # draws with WebGL2 for browsers without it. The Chromium is Playwright's
-  # build, pinned, and runs both on the SwiftShader it bundles.
+  # draws with WebGL2 for browsers without it. Then the C library's browser
+  # packages. The Chromium is Playwright's build, pinned, and runs them all on
+  # the SwiftShader it bundles.
   web:
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
 
@@ -273,6 +274,12 @@ jobs:
       # The build and the native runner are the ones the step above made.
       - name: Check the WebGL2 module
         run: node examples/web/check/check.mjs --backend webgl2 --out "$RUNNER_TEMP/web-check-webgl2"
+
+      # The C library's browser package, one per backend, driven through its
+      # raw C ABI from a Web Worker (crates/mln_c/web-check). The dev profile:
+      # the check needs no release build, and two more would outlast the job.
+      - name: Check the C library's packages
+        run: just c-web-check webgpu && just c-web-check gl
 
       # The page's TypeScript, against the modules' wasm-bindgen typings that
       # the check's build wrote.

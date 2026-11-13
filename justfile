@@ -86,7 +86,9 @@ check:
 # they share, and the map's module with its `webgl` feature. The check fails if anything turns SQLite back on in the
 # browser build, or brings in a C build (`cc`) that would need that clang, or if the module that draws with WebGPU gets
 # the OpenGL backend (mln_gl and its GL bindings), which only the `webgl` module needs, or if the browser build brings
-# in ICU4X: it takes its locale services from the browser's `Intl`.
+# in ICU4X: it takes its locale services from the browser's `Intl`. Then the C library (crates/mln_c, with mln_runtime) as
+# its browser package builds it, once per backend, with the same checks on what it brings in, and neither backend's
+# package may carry the other's.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:  _dev-shell
     {{dev_shell}} cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
@@ -96,6 +98,13 @@ check-wasm:  _dev-shell
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal,build --prefix none | grep -q '^cc '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^(mln-rs-gl|glow) '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^icu_'
+    for backend in webgpu gl; do \
+      cargo clippy --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features "$backend" && \
+      ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features "$backend" --edges normal --prefix none | grep -Eq '^(rusqlite|icu_) ' && \
+      ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features "$backend" --edges normal,build --prefix none | grep -q '^cc ' || exit 1; \
+    done
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features webgpu --edges normal --prefix none | grep -Eq '^(mln-rs-gl|glow) '
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features gl --edges normal --prefix none | grep -Eq '^(mln-rs-webgpu|wgpu) '
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))
@@ -229,6 +238,41 @@ web:
     bind mln_web "$pkg/webgl"
     pnpm -C examples/web install --frozen-lockfile
     pnpm -C examples/web build
+
+# maplibre-native-ffi's C ABI (crates/mln_c) as a browser package for a JavaScript host, one per backend: `webgpu` or `gl`
+# (WebGL2), each with that backend only. Into target/c-web/<backend>: wasm-bindgen's bindings of the module
+# (maplibre_native_c.js, whose instance's exports are the raw `mln_*` functions and its memory, beside the JavaScript
+# contract in crates/mln_c/src/web.rs), the tile worker script and shaper loader under snippets/, and the font-face
+# shaper module (mln_web_shaper.js). Built with the Cargo profile in `profile`, as `web` builds.
+[doc("Build crates/mln_c's browser package for one backend (webgpu or gl) into target/c-web/<backend>")]
+c-web backend="webgpu":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ {{quote(profile)}} == release ]]; then
+      export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+    fi
+    target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
+    pkg="${CARGO_TARGET_DIR:-target}/c-web/{{backend}}"
+    # The tile worker script imports the bindings beside it, so it stays a file (`--split-linked-modules`).
+    bind() {
+      wasm-bindgen --target web --split-linked-modules --out-dir "$pkg" "$target/$1.wasm"
+      if [[ {{quote(profile)}} != dev ]]; then
+        wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
+          --strip-debug --strip-producers --strip-target-features "$pkg/$1_bg.wasm" -o "$pkg/$1_bg.wasm"
+      fi
+    }
+    rm -rf "$pkg"
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-c -p mln-rs-web-shaper \
+      --no-default-features --features mln-rs-c/{{backend}}
+    bind maplibre_native_c
+    bind mln_web_shaper
+
+# Loads the package in headless Chromium and drives its raw C ABI from a Web Worker, as a JavaScript host does, until a
+# map with a GeoJSON layer that the tile workers lay out shows on an OffscreenCanvas (crates/mln_c/web-check). Needs Node
+# 24 and Playwright's Chromium (`npx playwright@1.61.1 install chromium`), as `web-check` does.
+[doc("Check crates/mln_c's browser package for one backend in headless Chromium")]
+c-web-check backend="webgpu":  (c-web backend)
+    node crates/mln_c/web-check/check.mjs "${CARGO_TARGET_DIR:-target}/c-web/{{backend}}" {{backend}}
 
 # Vite's dev server, which reloads the page's scripts as they change; `just web` again rebuilds the modules.
 [doc("Serve the browser build's page from its sources (examples/web/web) at http://localhost:5173/")]

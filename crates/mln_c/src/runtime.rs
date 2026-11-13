@@ -78,6 +78,8 @@ pub unsafe extern "C" fn mln_runtime_create(
         };
         // SAFETY: the caller's contract.
         let out_runtime = unsafe { handles::out_handle(out_runtime, "out_runtime") }?;
+        #[cfg(target_family = "wasm")]
+        crate::web::set_defaults();
         let runtime = Runtime::new(&options)?;
         *out_runtime =
             RUNTIMES.insert(Arc::new(RuntimeObject { runtime, maps: Arc::new(Mutex::new(HashMap::new())) }))?;

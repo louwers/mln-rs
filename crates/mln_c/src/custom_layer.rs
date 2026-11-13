@@ -112,7 +112,7 @@ mod native {
 
     use super::{Any, mln_custom_layer_encoder_data, mln_custom_layer_pass_data, mln_render_backend};
 
-    #[allow(unused_variables, clippy::needless_pass_by_ref_mut)]
+    #[allow(unused_variables, unused_mut, clippy::needless_pass_by_ref_mut)]
     pub(super) fn encoder(encoder: &mut dyn Any) -> Option<(mln_render_backend, mln_custom_layer_encoder_data)> {
         // SAFETY: zeros are a valid union of pointers and integers.
         let mut data: mln_custom_layer_encoder_data = unsafe { core::mem::zeroed() };
@@ -132,14 +132,14 @@ mod native {
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_METAL, data));
         }
-        #[cfg(all(unix, not(target_vendor = "apple")))]
+        #[cfg(any(all(unix, not(target_vendor = "apple")), all(target_family = "wasm", feature = "gl")))]
         if encoder.is::<mln_gl::CustomLayerEncoder>() {
             return Some((crate::generated::types::MLN_RENDER_BACKEND_OPEN_GL, data));
         }
         None
     }
 
-    #[allow(unused_variables, clippy::needless_pass_by_ref_mut)]
+    #[allow(unused_variables, unused_mut, clippy::needless_pass_by_ref_mut)]
     pub(super) fn pass(pass: &mut dyn Any) -> Option<(mln_render_backend, mln_custom_layer_pass_data)> {
         // SAFETY: zeros are a valid union of pointers and integers.
         let mut data: mln_custom_layer_pass_data = unsafe { core::mem::zeroed() };
@@ -172,10 +172,15 @@ mod native {
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_METAL, data));
         }
-        #[cfg(all(unix, not(target_vendor = "apple")))]
+        #[cfg(any(all(unix, not(target_vendor = "apple")), all(target_family = "wasm", feature = "gl")))]
         if let Some(pass) = pass.downcast_ref::<mln_gl::CustomLayerPass>() {
             data.open_gl = crate::generated::types::mln_open_gl_custom_layer_pass {
+                // A browser session draws into its canvas: the default
+                // framebuffer.
+                #[cfg(not(target_family = "wasm"))]
                 framebuffer: pass.framebuffer.map_or(0, |framebuffer| framebuffer.0.get()),
+                #[cfg(target_family = "wasm")]
+                framebuffer: 0,
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_OPEN_GL, data));
         }

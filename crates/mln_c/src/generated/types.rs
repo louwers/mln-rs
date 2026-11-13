@@ -1891,6 +1891,17 @@ pub struct mln_camera_query_result {
     pub generation: u64,
     pub camera: mln_camera,
 }
+/** A JavaScript object that you lent the library, as a handle into the object
+ table of the module instance that you loaded. 0 names no object.
+
+ Make one with the module's JavaScript export `mlnWebObjectInsert(value)`. A
+ handle is valid only in the instance that made it.
+
+ A call that takes a handle takes its own reference to the object before it
+ returns, so you may release the handle right after the call. A handle that
+ the library gives you is valid until the release of the object that it came
+ from, such as an acquired frame. Don't release those.*/
+pub type mln_web_object = u32;
 /** Tells the caller that work is ready for it.
 
  One call can stand for several pieces of ready work, so take all of it each
@@ -2020,11 +2031,11 @@ pub type mln_gpu_export_kind_flag = u32;
 pub type mln_gpu_export_kind_flags = u32;
 /** 24-bit normalized depth and 8-bit stencil: VK_FORMAT_D24_UNORM_S8_UINT,
  MTLPixelFormatDepth24Unorm_Stencil8, GL_DEPTH24_STENCIL8, or
- WGPUTextureFormat_Depth24PlusStencil8.*/
+ WGPUTextureFormat_Depth24PlusStencil8 (`depth24plus-stencil8`).*/
 pub const MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH24_STENCIL8: mln_depth_stencil_format_flag = 1;
 /** 32-bit float depth and 8-bit stencil: VK_FORMAT_D32_SFLOAT_S8_UINT,
  MTLPixelFormatDepth32Float_Stencil8, GL_DEPTH32F_STENCIL8, or
- WGPUTextureFormat_Depth32FloatStencil8.*/
+ WGPUTextureFormat_Depth32FloatStencil8 (`depth32float-stencil8`).*/
 pub const MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH32_FLOAT_STENCIL8: mln_depth_stencil_format_flag = 2;
 /// A format of depth and stencil textures, as a bit in a set.
 pub type mln_depth_stencil_format_flag = u32;
@@ -2038,10 +2049,14 @@ pub struct mln_render_session_attach_options {
     /** The thread that runs the session's graphics work, which depends on the
  target:
 
- - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a WebGPU surface, or a
-   borrowed ring of WebGPU textures.
- - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, an HTML
-   canvas, or an exported ring.
+ - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a borrowed ring of WebGPU
+   textures.
+ - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, or an
+   exported ring.
+ - Either one for a web canvas. In a browser both run on the thread that
+   loaded the library: MLN_RENDER_DRIVER_CORE_WORKER in the library's own
+   tasks, and MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD when you service the
+   session.
  - Either one for a Metal layer, a Vulkan surface, an OpenGL surface, or a
    borrowed ring of Metal, Vulkan, or OpenGL textures. A build may drive
    these on MLN_RENDER_DRIVER_CORE_WORKER only, and fails an attach with
@@ -2139,12 +2154,8 @@ pub struct mln_vulkan_context_descriptor {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_context_descriptor {
-    /// A `WGPUInstance`, or null.
-    pub instance: *mut ::core::ffi::c_void,
-    /// A `WGPUDevice`.
-    pub device: *mut ::core::ffi::c_void,
-    /// A `WGPUQueue`, or null to use the device's queue.
-    pub queue: *mut ::core::ffi::c_void,
+    /// Your `GPUDevice`. Sessions submit to its `queue`.
+    pub device: mln_web_object,
 }
 pub const MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WGL: mln_open_gl_context_provider_flag = 1;
 pub const MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL: mln_open_gl_context_provider_flag = 2;
@@ -2191,23 +2202,12 @@ pub struct mln_egl_context_descriptor {
     /// Your `eglGetProcAddress`, or null to use the system's.
     pub get_proc_address: *mut ::core::ffi::c_void,
 }
-/** The session uses a context that you created with
- `emscripten_webgl_create_context()`.*/
-pub const MLN_WEB_GL_CONTEXT_EXISTING: mln_web_gl_context_kind = 0;
-/** The library transfers the canvas that `canvas_selector` names to a worker
- and creates the context there.*/
-pub const MLN_WEB_GL_CONTEXT_TRANSFERRED_CANVAS: mln_web_gl_context_kind = 1;
-/// How a render session gets its WebGL context.
-pub type mln_web_gl_context_kind = u32;
-/// The WebGL context or canvas that a render session uses.
+/// The WebGL2 context that an OpenGL device wraps.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gl_context_descriptor {
-    pub kind: mln_web_gl_context_kind,
-    /// Your `EMSCRIPTEN_WEBGL_CONTEXT_HANDLE`, for an existing context.
-    pub context: i32,
-    /// The canvas's CSS selector, for a transferred canvas.
-    pub canvas_selector: mln_buffer_view,
+    /// Your `WebGL2RenderingContext`.
+    pub context: mln_web_object,
 }
 /// The WGL, EGL, or WebGL part of an OpenGL context descriptor.
 #[repr(C)]
@@ -2239,10 +2239,6 @@ pub const MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE: mln_render_target_kind = 5;
 pub const MLN_RENDER_TARGET_KIND_ANDROID_WINDOW: mln_render_target_kind = 6;
 /// An OpenHarmony `OHNativeWindow`.
 pub const MLN_RENDER_TARGET_KIND_OHOS_WINDOW: mln_render_target_kind = 7;
-/// A WebGPU surface on the device that you wrapped.
-pub const MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE: mln_render_target_kind = 8;
-/// An HTML canvas in the page.
-pub const MLN_RENDER_TARGET_KIND_HTML_CANVAS: mln_render_target_kind = 9;
 /// A `VkSurfaceKHR` on the instance of a Vulkan device.
 pub const MLN_RENDER_TARGET_KIND_VULKAN_SURFACE: mln_render_target_kind = 10;
 /// An `EGLSurface` or `HDC` for the context that an OpenGL device wraps.
@@ -2257,6 +2253,8 @@ pub const MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES: mln_render_target_ki
 pub const MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES: mln_render_target_kind = 15;
 /// A ring of textures that the session allocates and shares with you.
 pub const MLN_RENDER_TARGET_KIND_EXPORTED_RING: mln_render_target_kind = 16;
+/// A canvas to present to, with the device's backend.
+pub const MLN_RENDER_TARGET_KIND_WEB_CANVAS: mln_render_target_kind = 17;
 /// The kind of a render target, which says what its descriptor holds.
 pub type mln_render_target_kind = u32;
 pub const MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN: mln_render_target_kind_flag = 1;
@@ -2266,8 +2264,6 @@ pub const MLN_RENDER_TARGET_KIND_FLAG_XLIB_WINDOW: mln_render_target_kind_flag =
 pub const MLN_RENDER_TARGET_KIND_FLAG_WAYLAND_SURFACE: mln_render_target_kind_flag = 16;
 pub const MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW: mln_render_target_kind_flag = 32;
 pub const MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW: mln_render_target_kind_flag = 64;
-pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_GPU_SURFACE: mln_render_target_kind_flag = 128;
-pub const MLN_RENDER_TARGET_KIND_FLAG_HTML_CANVAS: mln_render_target_kind_flag = 256;
 pub const MLN_RENDER_TARGET_KIND_FLAG_VULKAN_SURFACE: mln_render_target_kind_flag = 512;
 pub const MLN_RENDER_TARGET_KIND_FLAG_OPEN_GL_SURFACE: mln_render_target_kind_flag = 1024;
 pub const MLN_RENDER_TARGET_KIND_FLAG_METAL_BORROWED_TEXTURES: mln_render_target_kind_flag = 2048;
@@ -2275,6 +2271,7 @@ pub const MLN_RENDER_TARGET_KIND_FLAG_VULKAN_BORROWED_TEXTURES: mln_render_targe
 pub const MLN_RENDER_TARGET_KIND_FLAG_OPEN_GL_BORROWED_TEXTURES: mln_render_target_kind_flag = 8192;
 pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_GPU_BORROWED_TEXTURES: mln_render_target_kind_flag = 16384;
 pub const MLN_RENDER_TARGET_KIND_FLAG_EXPORTED_RING: mln_render_target_kind_flag = 32768;
+pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_CANVAS: mln_render_target_kind_flag = 65536;
 /// A render target kind, as a bit in a set.
 pub type mln_render_target_kind_flag = u32;
 /// A set of mln_render_target_kind_flag bits.
@@ -2364,29 +2361,27 @@ pub struct mln_ohos_window_target {
     /// Your `OHNativeWindow*`.
     pub window: *mut ::core::ffi::c_void,
 }
-/** A WebGPU surface to present to, which the session configures.
+/** A canvas to present to.
 
- Make it with the instance of the device that mln_gpu_device_wrap_web_gpu()
- wrapped, and attach on that device.*/
+ The session makes the canvas's "webgpu" or "webgl2" context with the
+ device's backend, and sets the canvas's size to `logical_size` at the map's
+ scale factor. Attached without a device, it renders with the build's
+ backend: a WebGPU build asks the browser for a device, and attaches once it
+ has one. For an OpenGL device that wraps your WebGL2 context, the canvas must
+ be the context's own.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct mln_web_gpu_surface_target {
+pub struct mln_web_canvas_target {
     pub logical_size: mln_logical_size,
-    /// Your `WGPUSurface`.
-    pub surface: *mut ::core::ffi::c_void,
-    /// The `WGPUTextureFormat` to configure the surface with.
-    pub format: u32,
-}
-/** An HTML canvas to present to.
-
- The library transfers the canvas to a worker, and makes its context there
- with the device's backend.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_html_canvas_target {
-    pub logical_size: mln_logical_size,
-    /// The canvas's CSS selector, such as `#map`.
-    pub selector: mln_buffer_view,
+    /** An `OffscreenCanvas`, such as one from
+ `HTMLCanvasElement.transferControlToOffscreen()` that you posted to the
+ library's Web Worker, or an `HTMLCanvasElement` when the library runs on
+ the page's thread.*/
+    pub canvas: mln_web_object,
+    /** For a WebGPU device, the `GPUTextureFormat` to configure the canvas with,
+ such as `bgra8unorm`. Empty for a format that the device's adapter
+ prefers.*/
+    pub format: mln_buffer_view,
 }
 /** Your Vulkan surface to present to.
 
@@ -2545,10 +2540,8 @@ pub struct mln_open_gl_borrowed_textures_target {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_borrowed_texture {
-    /// Your `WGPUTexture`.
-    pub texture: *mut ::core::ffi::c_void,
-    /// A `WGPUTextureView` of `texture`.
-    pub texture_view: *mut ::core::ffi::c_void,
+    /// Your `GPUTexture`.
+    pub texture: mln_web_object,
 }
 /** A ring of your WebGPU textures to render into, on a WebGPU device that wraps
  yours.
@@ -2556,7 +2549,7 @@ pub struct mln_web_gpu_borrowed_texture {
  `physical_width` and `physical_height` give the textures' size in pixels,
  which is usually `logical_size` times the map's scale factor. Each texture
  must be 2D with that size, `format`, one layer, one mip level, one sample,
- and `WGPUTextureUsage_RenderAttachment`. The ring holds up to
+ and `GPUTextureUsage.RENDER_ATTACHMENT`. The ring holds up to
  MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
 
  Give the ring `depth_textures` to draw into each frame depth-tested against
@@ -2564,8 +2557,10 @@ pub struct mln_web_gpu_borrowed_texture {
  same index, or none. Each frame clears the one at its slot, renders the
  map's depth and stencil into it, and stores them. They must be 2D with the
  size of `textures`, `depth_format`, one layer, one mip level, one sample, and
- `WGPUTextureUsage_RenderAttachment`, and their views both the depth and the
- stencil aspect.*/
+ `GPUTextureUsage.RENDER_ATTACHMENT`.
+
+ The ring renders on a device from mln_gpu_device_wrap_web_gpu(), which no
+ build has yet: an attach with it fails with MLN_STATUS_UNSUPPORTED.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_borrowed_textures_target {
@@ -2574,13 +2569,13 @@ pub struct mln_web_gpu_borrowed_textures_target {
     pub physical_height: u32,
     pub textures: *const mln_web_gpu_borrowed_texture,
     pub texture_count: usize,
-    /// The textures' `WGPUTextureFormat`.
-    pub format: u32,
+    /// The textures' `GPUTextureFormat`, such as `rgba8unorm`.
+    pub format: mln_buffer_view,
     pub depth_textures: *const mln_web_gpu_borrowed_texture,
     pub depth_texture_count: usize,
-    /** The depth textures' `WGPUTextureFormat`, of
+    /** The depth textures' `GPUTextureFormat`, of
  mln_gpu_device_capabilities.depth_stencil_formats.*/
-    pub depth_format: u32,
+    pub depth_format: mln_buffer_view,
 }
 /// A DRM format and modifier that you can import.
 #[repr(C)]
@@ -2674,8 +2669,6 @@ pub union mln_render_target_data {
     pub wayland_surface: mln_wayland_surface_target,
     pub android_window: mln_android_window_target,
     pub ohos_window: mln_ohos_window_target,
-    pub web_gpu_surface: mln_web_gpu_surface_target,
-    pub html_canvas: mln_html_canvas_target,
     pub vulkan_surface: mln_vulkan_surface_target,
     pub open_gl_surface: mln_open_gl_surface_target,
     pub metal_borrowed_textures: mln_metal_borrowed_textures_target,
@@ -2683,6 +2676,7 @@ pub union mln_render_target_data {
     pub open_gl_borrowed_textures: mln_open_gl_borrowed_textures_target,
     pub web_gpu_borrowed_textures: mln_web_gpu_borrowed_textures_target,
     pub exported_ring: mln_exported_ring_target,
+    pub web_canvas: mln_web_canvas_target,
 }
 /** What a render session renders into: one kind of target, and its
  descriptor.
@@ -3095,10 +3089,10 @@ pub struct mln_vulkan_custom_layer_encoder {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_custom_layer_encoder {
-    /// The `WGPUDevice` that the session renders on.
-    pub device: *mut ::core::ffi::c_void,
-    /// The frame's `WGPUCommandEncoder`, with no pass open.
-    pub encoder: *mut ::core::ffi::c_void,
+    /// The `GPUDevice` that the session renders on.
+    pub device: mln_web_object,
+    /// The frame's `GPUCommandEncoder`, with no pass open.
+    pub encoder: mln_web_object,
 }
 /** The GPU commands of a frame outside the map's render pass, by the backend
  that the session renders with.
@@ -3202,15 +3196,15 @@ pub struct mln_open_gl_custom_layer_pass {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_custom_layer_pass {
-    /// The `WGPUDevice` that the session renders on.
-    pub device: *mut ::core::ffi::c_void,
-    /// The pass's `WGPURenderPassEncoder`.
-    pub encoder: *mut ::core::ffi::c_void,
-    /// The `WGPUTextureFormat` of the pass's color attachment.
-    pub color_format: u32,
-    /** The `WGPUTextureFormat` of the pass's depth-stencil attachment, or
- `WGPUTextureFormat_Undefined` when it has none.*/
-    pub depth_stencil_format: u32,
+    /// The `GPUDevice` that the session renders on.
+    pub device: mln_web_object,
+    /// The pass's `GPURenderPassEncoder`.
+    pub encoder: mln_web_object,
+    /// The `GPUTextureFormat` of the pass's color attachment.
+    pub color_format: mln_buffer_view,
+    /** The `GPUTextureFormat` of the pass's depth-stencil attachment, or empty
+ when it has none.*/
+    pub depth_stencil_format: mln_buffer_view,
     /// The sample count of the pass's attachments.
     pub sample_count: u32,
 }
@@ -3306,7 +3300,9 @@ pub type mln_custom_layer_session_end_callback = ::core::option::Option<
 
  A session runs the callbacks only when it can hand you its commands as one
  of mln_custom_layer_pass_data's variants, so a session on another backend,
- such as WebGPU outside a browser, doesn't draw the layer. Leave unset the
+ such as WebGPU outside a browser, doesn't draw the layer. Nor does a browser
+ WebGPU session yet: the library's WebGPU (wgpu) exposes no command encoder
+ or render pass to hand you. Leave unset the
  callbacks that you don't need.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3353,8 +3349,8 @@ pub struct mln_gpu_device_options {
     pub fields: mln_gpu_device_option_fields,
     /** The backend that the device renders with. By default, the platform's own:
  Metal on Apple platforms, Vulkan elsewhere, or OpenGL where the system has
- no Vulkan driver, and WebGPU in a browser, or WebGL where the browser has
- no WebGPU.*/
+ no Vulkan driver, and in a browser the build's one backend: WebGPU or
+ OpenGL (WebGL2).*/
     pub backend: mln_render_backend,
     /// The GPU to use, as an index into the backend's list of GPUs.
     pub adapter_index: u32,
@@ -3909,20 +3905,16 @@ pub struct mln_web_gpu_texture_frame {
     pub scale_factor: f64,
     /// The texture's index in the descriptor's `textures`.
     pub slot: u32,
-    /// The WGPUTexture.
-    pub texture: *mut ::core::ffi::c_void,
-    /// The WGPUTextureView.
-    pub texture_view: *mut ::core::ffi::c_void,
-    /// The texture's WGPUDevice.
-    pub device: *mut ::core::ffi::c_void,
-    /// The texture's WGPUTextureFormat.
-    pub format: u32,
-    /// The WGPUTexture that holds the frame's depth and stencil.
-    pub depth_texture: *mut ::core::ffi::c_void,
-    /// A WGPUTextureView of the depth texture.
-    pub depth_texture_view: *mut ::core::ffi::c_void,
-    /// The depth texture's WGPUTextureFormat.
-    pub depth_format: u32,
+    /// The `GPUTexture`.
+    pub texture: mln_web_object,
+    /// The texture's `GPUDevice`.
+    pub device: mln_web_object,
+    /// The texture's `GPUTextureFormat`.
+    pub format: mln_buffer_view,
+    /// The `GPUTexture` that holds the frame's depth and stencil.
+    pub depth_texture: mln_web_object,
+    /// The depth texture's `GPUTextureFormat`.
+    pub depth_format: mln_buffer_view,
 }
 /** The OpenGL texture of an acquired frame.
 

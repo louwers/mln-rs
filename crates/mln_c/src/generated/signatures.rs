@@ -1107,3 +1107,6 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::style_expression::mln_style_expression_get_info;
 const _: unsafe extern "C" fn(mln_style_expression) = crate::style_expression::mln_style_expression_release;
 const _: unsafe extern "C" fn() -> mln_render_backend_flags = crate::base::mln_supported_render_backend_mask;
+const _: unsafe extern "C" fn(usize, usize) -> *mut ::core::ffi::c_void = crate::web::mln_web_alloc;
+const _: unsafe extern "C" fn(*mut ::core::ffi::c_void, usize, usize) = crate::web::mln_web_free;
+const _: unsafe extern "C" fn(mln_web_object) = crate::web::mln_web_object_release;
