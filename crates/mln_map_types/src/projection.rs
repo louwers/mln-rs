@@ -1,22 +1,16 @@
-// Ports src/mln/map/projection_base.hpp.
-//
-// C++ `TransformState` holds its projection as a
-// `std::shared_ptr<const ProjectionBase>`; here it is an
-// `Arc<dyn ProjectionBase>`, so a `TransformState` stays cheap to clone and
-// `Send`.
-
-use std::fmt;
+// Ports src/mln/map/projection_base.hpp and
+// src/mln/map/mercator_projection.cpp: C++'s `ProjectionBase` subclasses are
+// the variants of `Projection`.
 
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, WrapMode};
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::projection::Projection;
+use mln_util::projection::Projection as WebMercator;
 use mln_util::vectors::{Vec2, Vec3, Vec4};
 
 use crate::transform_state::TransformState;
+use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectionData {
@@ -48,7 +42,7 @@ pub struct ProjectedTilePoint {
 /// The tile-to-world matrix of a tile, the same on every projection.
 pub fn mercator_tile_matrix(matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64) {
     let tile_scale: u64 = 1u64 << tile_id.canonical.z;
-    let s = Projection::world_size(scale) / tile_scale as f64;
+    let s = WebMercator::world_size(scale) / tile_scale as f64;
 
     matrix::identity(matrix);
     let a = *matrix;
@@ -75,62 +69,117 @@ pub fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> Vec4 {
     ]
 }
 
-pub trait ProjectionBase: fmt::Debug + Send + Sync {
-    fn project(&self, lat_lng: &LatLng, scale: f64) -> Point<f64>;
+/// How a [`TransformState`] places tiles on the screen. Both variants
+/// project locations onto the same Mercator plane, so the tile-to-world matrix
+/// is [`mercator_tile_matrix`] on either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Projection {
+    #[default]
+    Mercator,
+    /// The globe, also while it hands over to or from Mercator.
+    VerticalPerspective,
+}
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when
-    /// the point unprojects to an invalid `LatLng`.
-    fn unproject(&self, point: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, Error>;
-
-    fn tile_matrix(&self, matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64);
-
+impl Projection {
     /// The per-tile projection contract, given the Mercator tile-to-clip
     /// matrix the renderer already computed.
-    fn get_projection_data(
-        &self,
+    #[must_use]
+    pub fn get_projection_data(
+        self,
         state: &TransformState,
         tile_id: &UnwrappedTileID,
         mercator_matrix: &Mat4,
-    ) -> ProjectionData;
+    ) -> ProjectionData {
+        match self {
+            Projection::Mercator => ProjectionData {
+                main_matrix: *mercator_matrix,
+                tile_mercator_coords: mercator_tile_coords(tile_id),
+                clipping_plane: [0.0, 0.0, 0.0, 0.0],
+                projection_transition: 0.0,
+                fallback_matrix: *mercator_matrix,
+                ..ProjectionData::default()
+            },
+            Projection::VerticalPerspective => {
+                VerticalPerspectiveProjection::projection_data(state, tile_id, mercator_matrix)
+            }
+        }
+    }
 
     /// The clip-space position of a tile point, `elevation` meters above the
     /// surface, computed the way the vertex shaders do it.
-    fn project_tile_point(
-        &self,
-        data: &ProjectionData,
-        tile_id: &UnwrappedTileID,
-        point: &Point<f64>,
-        elevation: f64,
-    ) -> ProjectedTilePoint;
-
-    /// Where the vertex shaders draw a tile point: `project_tile_point`,
-    /// except while one projection hands over to another.
-    fn drawn_tile_point(
-        &self,
+    #[must_use]
+    pub fn project_tile_point(
+        self,
         data: &ProjectionData,
         tile_id: &UnwrappedTileID,
         point: &Point<f64>,
         elevation: f64,
     ) -> ProjectedTilePoint {
-        self.project_tile_point(data, tile_id, point, elevation)
+        match self {
+            Projection::Mercator => {
+                let mut pos: Vec4 = [point.x, point.y, elevation, 1.0];
+                let a = pos;
+                matrix::transform_mat4(&mut pos, &a, &data.main_matrix);
+                ProjectedTilePoint {
+                    point: Point::new(pos[0] / pos[3], pos[1] / pos[3]),
+                    signed_distance_from_camera: pos[3],
+                    occluded: false,
+                }
+            }
+            Projection::VerticalPerspective => {
+                VerticalPerspectiveProjection::project_tile_point(data, tile_id, point, elevation)
+            }
+        }
+    }
+
+    /// Where the vertex shaders draw a tile point: `project_tile_point`,
+    /// except while one projection hands over to another.
+    #[must_use]
+    pub fn drawn_tile_point(
+        self,
+        data: &ProjectionData,
+        tile_id: &UnwrappedTileID,
+        point: &Point<f64>,
+        elevation: f64,
+    ) -> ProjectedTilePoint {
+        match self {
+            Projection::Mercator => self.project_tile_point(data, tile_id, point, elevation),
+            Projection::VerticalPerspective => {
+                VerticalPerspectiveProjection::drawn_tile_point(data, tile_id, point, elevation)
+            }
+        }
     }
 
     /// Scale that keeps map-aligned circles and pitched text the size they
     /// have on Mercator at the map center, blended with Mercator's 1 through
     /// the projection transition as GL JS blends it.
-    fn circle_radius_correction(&self, _state: &TransformState) -> f64 {
-        1.0
+    #[must_use]
+    pub fn circle_radius_correction(self, state: &TransformState) -> f64 {
+        match self {
+            Projection::Mercator => 1.0,
+            Projection::VerticalPerspective => VerticalPerspectiveProjection::circle_radius_correction(state),
+        }
     }
 
     /// Ratio of a screen pixel at the map center to one at the same zoom on
     /// Mercator, blended the same way.
-    fn pixel_scale(&self, _state: &TransformState) -> f64 {
-        1.0
+    #[must_use]
+    pub fn pixel_scale(self, state: &TransformState) -> f64 {
+        match self {
+            Projection::Mercator => 1.0,
+            Projection::VerticalPerspective => VerticalPerspectiveProjection::pixel_scale(state),
+        }
     }
 
     /// `circle_radius_correction` extended to a point away from the center,
     /// by its latitude, blended the same way.
-    fn pitched_text_correction(&self, _state: &TransformState, _point: &Point<f64>, _tile_id: &UnwrappedTileID) -> f64 {
-        1.0
+    #[must_use]
+    pub fn pitched_text_correction(self, state: &TransformState, point: &Point<f64>, tile_id: &UnwrappedTileID) -> f64 {
+        match self {
+            Projection::Mercator => 1.0,
+            Projection::VerticalPerspective => {
+                VerticalPerspectiveProjection::pitched_text_correction(state, point, tile_id)
+            }
+        }
     }
 }

@@ -10,7 +10,7 @@
 // with the same message.
 
 use std::f64::consts::PI;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use geometry::Point;
 use mln_style_types::ProjectionDefinition;
@@ -30,9 +30,8 @@ use mln_util::vectors::{Vec3, Vec4};
 
 use crate::camera::{CameraOptions, FreeCameraOptions};
 use crate::map_view::Camera as MapCamera;
-use crate::mercator_projection::MercatorProjection;
 use crate::mode::{ConstrainMode, ViewportMode};
-use crate::projection_base::{ProjectionBase, ProjectionData};
+use crate::projection::{ProjectionData, mercator_tile_matrix};
 use crate::tile_coordinate::TileCoordinate;
 use crate::util_camera::Camera;
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
@@ -224,7 +223,6 @@ pub struct TransformState {
     size: Size,
     frustum_offset: EdgeInsets,
 
-    projection: Arc<dyn ProjectionBase>,
     /// The style's projection that the state draws, as it was last set.
     projection_definition: ProjectionDefinition,
     projection_transition: f64,
@@ -295,7 +293,6 @@ impl TransformState {
             orientation: NorthOrientation::Upwards,
             size: Size::default(),
             frustum_offset: EdgeInsets::default(),
-            projection: Arc::new(MercatorProjection),
             projection_definition: ProjectionDefinition::default(),
             projection_transition: 0.0,
             constrain_mode,
@@ -394,13 +391,6 @@ impl TransformState {
             return;
         }
         let leaves_globe = transition == 0.0 && self.projection_transition > 0.0;
-        if (transition > 0.0) != (self.projection_transition > 0.0) {
-            if transition > 0.0 {
-                self.projection = Arc::new(VerticalPerspectiveProjection);
-            } else {
-                self.projection = Arc::new(MercatorProjection);
-            }
-        }
         self.projection_transition = transition;
         self.invalidate_matrices();
         // As GL JS's `migrateProjection` does: the globe allows lower zooms,
@@ -433,20 +423,22 @@ impl TransformState {
     // MARK: - Matrix
 
     pub fn matrix_for(&self, matrix: &mut Mat4, tile_id: &UnwrappedTileID) {
-        self.projection.tile_matrix(matrix, tile_id, self.scale);
+        mercator_tile_matrix(matrix, tile_id, self.scale);
     }
 
-    pub fn get_projection(&self) -> &dyn ProjectionBase {
-        self.projection.as_ref()
+    /// The globe while [`is_globe_rendering`](Self::is_globe_rendering),
+    /// Mercator otherwise.
+    pub fn get_projection(&self) -> crate::Projection {
+        if self.is_globe_rendering() { crate::Projection::VerticalPerspective } else { crate::Projection::Mercator }
     }
 
     /// `getProjectionData(const UnwrappedTileID&, const mat4& projMatrix)`.
     pub fn get_projection_data_with(&self, tile_id: &UnwrappedTileID, proj_matrix: &Mat4) -> ProjectionData {
         let mut mercator_matrix: Mat4 = [0.0; 16];
-        self.projection.tile_matrix(&mut mercator_matrix, tile_id, self.scale);
+        mercator_tile_matrix(&mut mercator_matrix, tile_id, self.scale);
         let a = mercator_matrix;
         matrix::multiply(&mut mercator_matrix, proj_matrix, &a);
-        self.projection.get_projection_data(self, tile_id, &mercator_matrix)
+        self.get_projection().get_projection_data(self, tile_id, &mercator_matrix)
     }
 
     /// `getProjectionData(const UnwrappedTileID&)`.
@@ -455,7 +447,7 @@ impl TransformState {
     }
 
     pub fn get_projection_data_for_matrix(&self, tile_id: &UnwrappedTileID, mercator_matrix: &Mat4) -> ProjectionData {
-        self.projection.get_projection_data(self, tile_id, mercator_matrix)
+        self.get_projection().get_projection_data(self, tile_id, mercator_matrix)
     }
 
     /// The distance from the camera to the far plane of
@@ -1297,7 +1289,7 @@ impl TransformState {
             return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng, p);
         }
 
-        let pt = self.projection.project(lat_lng, self.scale);
+        let pt = Projection::project(lat_lng, self.scale);
         let pt = Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D);
         let c: Vec4 = [pt.x, pt.y, 0.0, 1.0];
         matrix::transform_mat4(p, &c, &self.get_coord_matrix());
@@ -1379,7 +1371,7 @@ impl TransformState {
             return Ok(VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode));
         }
         let coord = self.screen_coordinate_to_tile_coordinate(point, 0);
-        self.projection.unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
+        Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
     }
 
     fn coordinate_point_matrix(&self, proj_matrix: &Mat4) -> Mat4 {
@@ -1751,7 +1743,7 @@ impl TransformState {
         );
         // A point on the screen has a LatLng unless the state holds NaN,
         // where C++ throws; the port renders without the pitch factor.
-        let Ok(lat_lng) = self.projection.unproject(&corner.p, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
+        let Ok(lat_lng) = Projection::unproject(&corner.p, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
             return 0.0;
         };
 
