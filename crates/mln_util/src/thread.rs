@@ -4,9 +4,9 @@
 //! starts, and a [`Joined`] waits for one to end when it drops. On a host's
 //! thread it waits at once. On a library thread it waits once that thread's
 //! work returns, since in the middle of its work the thread could be what
-//! the other one waits for. Two library threads that would each wait at
-//! their ends for the other don't: the second to start waiting leaves the
-//! first to end alone.
+//! the other one waits for. A library thread joins another with [`join`],
+//! which leaves a thread to end alone instead of closing a cycle of threads
+//! that wait for each other.
 
 use std::cell::{Cell, RefCell};
 use std::thread::{JoinHandle, ThreadId};
@@ -50,8 +50,7 @@ thread_local! {
     static AT_END: RefCell<Vec<JoinHandle<()>>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The library threads that wait at their ends, and the thread each waits
-/// for.
+/// The threads that wait in [`join`], and the thread that each waits for.
 static WAITING: Mutex<Vec<(ThreadId, ThreadId)>> = Mutex::new(Vec::new());
 
 /// Marks this thread as a library thread, and at its drop waits for the
@@ -70,33 +69,36 @@ impl Drop for LibraryThread {
         // Waiting leaves this thread nothing more, since it runs no work.
         let left = AT_END.with(|left| std::mem::take(&mut *left.borrow_mut()));
         for thread in left {
-            wait_at_end(thread);
+            join(thread);
         }
     }
 }
 
-/// Waits at this library thread's end for `thread`, unless `thread` waits for
-/// this one, through the threads it waits for.
-fn wait_at_end(thread: JoinHandle<()>) {
+/// Waits for `thread` to end and returns its result, unless `thread` is
+/// this one or waits for it, through the threads that it waits for with
+/// this or at its end: then `thread` is left to end alone, and this returns
+/// `None`. A library thread that waits for another with this is seen as
+/// waiting meanwhile, so that the other leaves it at its end instead.
+pub fn join<T>(thread: JoinHandle<T>) -> Option<std::thread::Result<T>> {
     let this = std::thread::current().id();
     {
         let mut waiting = WAITING.lock();
         let mut next = Some(thread.thread().id());
         while let Some(id) = next {
             if id == this {
-                return;
+                return None;
             }
             next = waiting.iter().find(|(waiter, _)| *waiter == id).map(|(_, awaited)| *awaited);
         }
         waiting.push((this, thread.thread().id()));
     }
-    let _ = thread.join();
+    let result = thread.join();
     WAITING.lock().retain(|(waiter, _)| *waiter != this);
+    Some(result)
 }
 
 /// A library thread that ends by itself once its owner lets go of it, which
-/// this waits for when it drops, as the module describes. A drop on the
-/// thread itself leaves it to end alone.
+/// this waits for with [`join`] when it drops, as the module describes.
 #[derive(Debug)]
 pub struct Joined(Option<JoinHandle<()>>);
 
@@ -106,33 +108,23 @@ impl Joined {
     pub fn new(thread: JoinHandle<()>) -> Joined {
         Joined(Some(thread))
     }
-
-    /// The thread's ID.
-    #[must_use]
-    pub fn id(&self) -> Option<ThreadId> {
-        self.0.as_ref().map(|thread| thread.thread().id())
-    }
 }
 
 impl Drop for Joined {
     fn drop(&mut self) {
         let Some(thread) = self.0.take() else { return };
-        if thread.thread().id() == std::thread::current().id() {
-            return;
-        }
         // A thread whose locals are gone is past its work: it waits at once.
         if LIBRARY.try_with(Cell::get).unwrap_or(false) {
             let mut thread = Some(thread);
-            let left = AT_END.try_with(|left| left.borrow_mut().extend(thread.take()));
-            if left.is_ok() {
+            if AT_END.try_with(|left| left.borrow_mut().extend(thread.take())).is_ok() {
                 return;
             }
             if let Some(thread) = thread {
-                let _ = thread.join();
+                join(thread);
             }
             return;
         }
-        let _ = thread.join();
+        join(thread);
     }
 }
 
@@ -234,6 +226,32 @@ mod tests {
         let ended = [flag.recv().unwrap(), flag.recv().unwrap()];
         first_joined.send(Joined::new(second)).unwrap();
         second_joined.send(Joined::new(first)).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !ended.iter().all(|ended| ended.load(Ordering::SeqCst)) {
+            assert!(std::time::Instant::now() < deadline, "the threads wait for each other");
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn a_join_and_a_wait_at_an_end_that_wait_for_each_other_end() {
+        let (joiner_gets, joiner_here) = mpsc::channel::<JoinHandle<()>>();
+        let (left_gets, left_here) = mpsc::channel::<Joined>();
+        let (flags, flag) = mpsc::channel();
+        let joiner_flags = flags.clone();
+        let joiner = spawn("joiner", move || {
+            joiner_flags.send(ended_flag()).unwrap();
+            join(joiner_here.recv().unwrap());
+        })
+        .unwrap();
+        let left = spawn("left", move || {
+            flags.send(ended_flag()).unwrap();
+            drop(left_here.recv().unwrap());
+        })
+        .unwrap();
+        let ended = [flag.recv().unwrap(), flag.recv().unwrap()];
+        left_gets.send(Joined::new(joiner)).unwrap();
+        joiner_gets.send(left).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !ended.iter().all(|ended| ended.load(Ordering::SeqCst)) {
             assert!(std::time::Instant::now() < deadline, "the threads wait for each other");
