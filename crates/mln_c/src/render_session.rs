@@ -18,7 +18,7 @@ use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
 use crate::callback::Wake;
-use crate::completion::{CompletionValue, Generations, PendingCompletion};
+use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
 use crate::error::Error;
 use crate::frame_pacer::{self, Pacer, SessionPacing};
 use crate::generated::types::{
@@ -574,7 +574,8 @@ pub(crate) unsafe fn operation<T: Send + 'static, V: CompletionValue>(
 /// generations. The session's driver delivers the completion inside its
 /// driver call, even when the command runs before this returns: a
 /// completion attached after the send returned would run on this thread
-/// then. A send that fails leaves `pending` unaccepted.
+/// then. A send that fails leaves `pending` unaccepted. Without `pending`,
+/// a failure is logged, as [`completion::forward`] logs one.
 pub(crate) fn send_then<T: Send + 'static, V: CompletionValue>(
     session: &RenderSession,
     send: impl FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<T>, mln_util::Error>,
@@ -584,10 +585,8 @@ pub(crate) fn send_then<T: Send + 'static, V: CompletionValue>(
     // The callback runs once when the send succeeds, and is dropped unrun,
     // with the completion unaccepted, when it fails.
     session.send_then(send, move |result| {
-        if let Some(pending) = pending {
-            let (result, generations) = finish(result);
-            pending.accept().complete(result, generations);
-        }
+        let (result, generations) = finish(result);
+        completion::complete_or_log(pending.map(PendingCompletion::accept), result, generations);
     })?;
     Ok(())
 }
@@ -934,11 +933,13 @@ pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+    use crate::completion::tests::Warnings;
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
-        MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, mln_completion_result,
-        mln_logical_size, mln_map, mln_map_snapshot, mln_offscreen_target, mln_render_target, mln_render_target_data,
-        mln_runtime, mln_texture_readback_result, mln_wake,
+        MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE,
+        MLN_STATUS_TARGET_LOST, mln_completion_result, mln_logical_size, mln_map, mln_map_snapshot,
+        mln_offscreen_target, mln_render_target, mln_render_target_data, mln_runtime, mln_texture_readback_result,
+        mln_wake,
     };
     use crate::map::tests::{create_map, options, release_map, view};
     use crate::map::{mln_map_dispose, mln_map_get_snapshot, mln_map_release, mln_map_set_style_json};
@@ -1137,6 +1138,31 @@ pub(crate) mod tests {
         );
         assert_eq!(released.status(), MLN_STATUS_OK);
         assert_eq!(snapshot(session).unwrap_err(), MLN_STATUS_INVALID_STATE);
+        release_map(map);
+        release(runtime);
+    }
+
+    #[test]
+    fn a_session_command_without_a_completion_logs_its_failure_as_a_warning() {
+        let (runtime, map, session) = rendered_session();
+        let object = resolve(session).unwrap();
+        let warnings = Arc::new(Mutex::new(Vec::new()));
+        let previous = mln_util::logging::Log::set_thread_observer(Some(Box::new(Warnings(Arc::clone(&warnings)))));
+        let finish = |result: Result<(), mln_util::Error>| (result.map_err(Error::from), Generations::default());
+        // A command that fails without the session's thread completes on
+        // this one, which the observer watches.
+        let fail = |_: &RenderSession| {
+            let lost = mln_util::Error::new(ErrorKind::TargetLost, "the target is gone");
+            Ok(::mln_runtime::Completion::ready(Err(lost)))
+        };
+        assert!(send_then(&object.session, fail, None, finish).is_ok());
+        drop(mln_util::logging::Log::set_thread_observer(previous));
+        assert_eq!(
+            [format!("discarded command failed (status {MLN_STATUS_TARGET_LOST}): the target is gone")],
+            warnings.lock().as_slice()
+        );
+        drop(object);
+        release_session(session);
         release_map(map);
         release(runtime);
     }
