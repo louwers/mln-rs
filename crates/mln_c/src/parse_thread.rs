@@ -10,10 +10,11 @@
 #[cfg(not(target_family = "wasm"))]
 use std::sync::mpsc;
 
+#[cfg(not(target_family = "wasm"))]
 use parking_lot::Mutex;
 
 use crate::error::Error;
-#[cfg(not(target_family = "wasm"))]
+
 #[cfg(not(target_family = "wasm"))]
 type Job = Box<dyn FnOnce() + Send>;
 
