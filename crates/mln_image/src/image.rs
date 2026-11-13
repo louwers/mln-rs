@@ -3,7 +3,7 @@ use mln_util::image::PremultipliedImage;
 
 /// The image formats `decode_image` recognizes, by their magic bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ImageType {
+pub(crate) enum ImageType {
     Png,
     Webp,
     Jpeg,
@@ -12,7 +12,7 @@ pub enum ImageType {
 /// The magic-byte dispatch of `mln::decodeImage`: the type of the image in
 /// `data`, if it is one of the three.
 #[must_use]
-pub fn image_type(data: &[u8]) -> Option<ImageType> {
+pub(crate) fn image_type(data: &[u8]) -> Option<ImageType> {
     let read_uint = |offset: usize| -> u32 {
         let ptr = &data[offset..offset + 4];
         (u32::from(ptr[0]) << 24) | (u32::from(ptr[1]) << 16) | (u32::from(ptr[2]) << 8) | u32::from(ptr[3])
@@ -47,7 +47,7 @@ pub fn image_type(data: &[u8]) -> Option<ImageType> {
 }
 
 /// The message of the error for data of no type `decode_image` recognizes.
-pub const UNSUPPORTED: &str = "unsupported image type";
+pub(crate) const UNSUPPORTED: &str = "unsupported image type";
 
 /// Decodes `data`, choosing the format by its magic bytes. Data of no type
 /// it recognizes fails with

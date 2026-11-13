@@ -34,16 +34,16 @@ use parking_lot::{Mutex, MutexGuard};
 use crate::AsyncRequest;
 
 /// A `std::unique_ptr<AsyncRequest>` that a request's own callback can reset.
-pub type Req = Rc<RefCell<Option<Box<dyn AsyncRequest>>>>;
+pub(crate) type Req = Rc<RefCell<Option<Box<dyn AsyncRequest>>>>;
 
-pub fn req() -> Req {
+pub(crate) fn req() -> Req {
     Rc::new(RefCell::new(None))
 }
 
 /// Serializes the tests that use process-wide state (`NetworkStatus`, the
 /// log observer): gtest runs one test at a time, the Rust harness runs them
 /// in parallel.
-pub fn serial() -> MutexGuard<'static, ()> {
+pub(crate) fn serial() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
     LOCK.lock()
 }
@@ -52,7 +52,7 @@ pub fn serial() -> MutexGuard<'static, ()> {
 /// it, until the returned guard drops. It returns once the thread is held, so
 /// the messages sent meanwhile queue up and run in one go after the drop. Drop
 /// the guard before the actor's `Thread`, whose drop waits for its queue.
-pub fn pause<O: 'static>(actor: &ActorRef<O>) -> Paused {
+pub(crate) fn pause<O: 'static>(actor: &ActorRef<O>) -> Paused {
     let (paused, is_paused) = mpsc::channel();
     let (resume, resumed) = mpsc::channel::<()>();
     actor.invoke(move |_| {
@@ -65,13 +65,13 @@ pub fn pause<O: 'static>(actor: &ActorRef<O>) -> Paused {
 }
 
 /// Resumes the thread that [`pause`] holds when it drops.
-pub struct Paused {
+pub(crate) struct Paused {
     _resume: mpsc::Sender<()>,
 }
 
 /// A path of the C++ repository, in the copy of its files these tests read
 /// (testdata/).
-pub fn cpp_path(relative: &str) -> PathBuf {
+pub(crate) fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
 }
 
@@ -80,7 +80,7 @@ pub fn cpp_path(relative: &str) -> PathBuf {
 /// directory is unique to this process, so concurrent test runs never share
 /// a file, and dropping the guard removes it with everything SQLite wrote
 /// beside the path.
-pub fn temp_path(name: &str) -> TempPath {
+pub(crate) fn temp_path(name: &str) -> TempPath {
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("mln-storage-test-{}-{n}", std::process::id()));
@@ -90,7 +90,7 @@ pub fn temp_path(name: &str) -> TempPath {
 }
 
 /// A path from [`temp_path`], usable as a `&str`.
-pub struct TempPath {
+pub(crate) struct TempPath {
     dir: PathBuf,
     path: String,
 }
@@ -128,11 +128,11 @@ impl Drop for TempPath {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Message {
-    pub severity: EventSeverity,
-    pub event: Event,
-    pub code: i64,
-    pub msg: String,
+pub(crate) struct Message {
+    pub(crate) severity: EventSeverity,
+    pub(crate) event: Event,
+    pub(crate) code: i64,
+    pub(crate) msg: String,
 }
 
 struct Recorder(Arc<Mutex<Vec<(Message, bool)>>>);
@@ -145,19 +145,19 @@ impl Observer for Recorder {
 }
 
 /// Records the calling thread's log messages for a test to check.
-pub struct FixtureLog {
+pub(crate) struct FixtureLog {
     messages: Arc<Mutex<Vec<(Message, bool)>>>,
 }
 
 impl FixtureLog {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let messages = Arc::new(Mutex::new(Vec::new()));
         let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
     /// `count(message, substring)`: marks the matches checked.
-    pub fn count(&self, message: &Message, substring: bool) -> usize {
+    pub(crate) fn count(&self, message: &Message, substring: bool) -> usize {
         let mut messages = self.messages.lock();
         let mut count = 0;
         for (m, checked) in messages.iter_mut() {
@@ -174,11 +174,11 @@ impl FixtureLog {
         count
     }
 
-    pub fn unchecked_count(&self) -> usize {
+    pub(crate) fn unchecked_count(&self) -> usize {
         self.messages.lock().iter().filter(|(_, checked)| !checked).count()
     }
 
-    pub fn unchecked(&self) -> Vec<Message> {
+    pub(crate) fn unchecked(&self) -> Vec<Message> {
         self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
     }
 }
@@ -189,23 +189,23 @@ impl Drop for FixtureLog {
     }
 }
 
-pub fn error(code: i32, msg: &str) -> Message {
+pub(crate) fn error(code: i32, msg: &str) -> Message {
     Message { severity: EventSeverity::Error, event: Event::Database, code: i64::from(code), msg: msg.to_owned() }
 }
 
-pub fn warning(code: i64, msg: &str) -> Message {
+pub(crate) fn warning(code: i64, msg: &str) -> Message {
     Message { severity: EventSeverity::Warning, event: Event::Database, code, msg: msg.to_owned() }
 }
 
 /// A Mersenne Twister (`std::mt19937`, default seed 5489), so `random_string`
 /// gives the C++ tests' strings.
-pub struct Mt19937 {
+pub(crate) struct Mt19937 {
     mt: [u32; 624],
     index: usize,
 }
 
 impl Mt19937 {
-    pub fn new(seed: u32) -> Self {
+    pub(crate) fn new(seed: u32) -> Self {
         let mut mt = [0u32; 624];
         mt[0] = seed;
         for i in 1..624 {
@@ -214,7 +214,7 @@ impl Mt19937 {
         Mt19937 { mt, index: 624 }
     }
 
-    pub fn next_u32(&mut self) -> u32 {
+    pub(crate) fn next_u32(&mut self) -> u32 {
         if self.index >= 624 {
             for i in 0..624 {
                 let y = (self.mt[i] & 0x8000_0000) | (self.mt[(i + 1) % 624] & 0x7fff_ffff);
@@ -236,25 +236,25 @@ impl Mt19937 {
 }
 
 /// `size` pseudo-random bytes: the low byte of each `Mt19937` draw.
-pub fn random_string(size: usize) -> crate::response::Data {
+pub(crate) fn random_string(size: usize) -> crate::response::Data {
     let mut random = Mt19937::new(5489);
     Arc::new((0..size).map(|_| random.next_u32() as u8).collect())
 }
 
 /// Copies `source` to `destination`. A directory as the source copies
 /// nothing, as in C++.
-pub fn copy_file(destination: &str, source: &std::path::Path) {
+pub(crate) fn copy_file(destination: &str, source: &std::path::Path) {
     let mut src = std::fs::File::open(source).unwrap_or_else(|e| panic!("Cannot read file {}: {e}", source.display()));
     let mut dst = std::fs::File::create(destination).unwrap_or_else(|e| panic!("Cannot write file {destination}: {e}"));
     let _ = std::io::copy(&mut src, &mut dst);
 }
 
 /// Deletes `filename` for test cleanup; a missing file is fine.
-pub fn delete_file(filename: &str) {
+pub(crate) fn delete_file(filename: &str) {
     let _ = std::fs::remove_file(filename);
 }
 
-pub fn file_size(filename: &str) -> usize {
+pub(crate) fn file_size(filename: &str) -> usize {
     std::fs::read(filename).unwrap_or_else(|e| panic!("Cannot read file {filename}: {e}")).len()
 }
 
@@ -279,7 +279,7 @@ thread_local! {
 /// C++ tests pass callbacks that capture references to `forward`, which runs
 /// them on the calling thread (`Scheduler::bindOnce`); the Rust signature
 /// requires `Send`, so the closure stays here and the handle finds it.
-pub fn local_callback(f: impl FnOnce() + 'static) -> Box<dyn FnOnce() + Send> {
+pub(crate) fn local_callback(f: impl FnOnce() + 'static) -> Box<dyn FnOnce() + Send> {
     static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     LOCAL_CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(id, Box::new(f)));
@@ -292,3 +292,5 @@ pub fn local_callback(f: impl FnOnce() + 'static) -> Box<dyn FnOnce() + Send> {
         }
     })
 }
+// Ports test/util/http_timeout.test.cpp (marker `// gtest: Group.Name`).
+mod gtest_http_timeout;

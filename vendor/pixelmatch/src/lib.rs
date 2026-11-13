@@ -9,7 +9,7 @@
 //! same `size_t` neighbourhood logic. Images are RGBA, 4 bytes per pixel,
 //! row-major, `width * height * 4` bytes.
 
-pub mod detail {
+mod detail {
     /// Blend semi-transparent color with white.
     ///
     /// C++: `uint8_t blend(uint8_t c, double a) { return 255 + (c - 255) * a; }`
@@ -17,7 +17,7 @@ pub mod detail {
     /// truncated to `uint8_t`).
     #[inline]
     #[must_use]
-    pub fn blend(c: u8, a: f64) -> u8 {
+    pub(crate) fn blend(c: u8, a: f64) -> u8 {
         (255.0 + f64::from(i32::from(c) - 255) * a) as u8
     }
 
@@ -30,19 +30,19 @@ pub mod detail {
 
     #[inline]
     #[must_use]
-    pub fn rgb2y(r: u8, g: u8, b: u8) -> f64 {
+    pub(crate) fn rgb2y(r: u8, g: u8, b: u8) -> f64 {
         f64::from(r) * 0.298_895_31 + f64::from(g) * 0.586_622_47 + f64::from(b) * 0.114_482_23
     }
 
     #[inline]
     #[must_use]
-    pub fn rgb2i(r: u8, g: u8, b: u8) -> f64 {
+    pub(crate) fn rgb2i(r: u8, g: u8, b: u8) -> f64 {
         f64::from(r) * 0.595_977_99 - f64::from(g) * 0.274_176_10 - f64::from(b) * 0.321_801_89
     }
 
     #[inline]
     #[must_use]
-    pub fn rgb2q(r: u8, g: u8, b: u8) -> f64 {
+    pub(crate) fn rgb2q(r: u8, g: u8, b: u8) -> f64 {
         f64::from(r) * 0.211_470_17 - f64::from(g) * 0.522_617_11 + f64::from(b) * 0.311_146_94
     }
 
@@ -50,7 +50,7 @@ pub mod detail {
     /// color difference using YIQ NTSC transmission color space in mobile
     /// applications" by Y. Kotsarenko and F. Ramos.
     #[must_use]
-    pub fn color_delta(img1: &[u8], img2: &[u8], k: usize, m: usize, y_only: bool) -> f64 {
+    pub(crate) fn color_delta(img1: &[u8], img2: &[u8], k: usize, m: usize, y_only: bool) -> f64 {
         let a1 = f64::from(img1[k + 3]) / 255.0;
         let a2 = f64::from(img2[m + 3]) / 255.0;
 
@@ -75,7 +75,7 @@ pub mod detail {
     }
 
     #[inline]
-    pub fn draw_pixel(output: &mut [u8], pos: usize, r: u8, g: u8, b: u8) {
+    pub(crate) fn draw_pixel(output: &mut [u8], pos: usize, r: u8, g: u8, b: u8) {
         output[pos] = r;
         output[pos + 1] = g;
         output[pos + 2] = b;
@@ -83,7 +83,7 @@ pub mod detail {
     }
 
     #[must_use]
-    pub fn gray_pixel(img: &[u8], i: usize) -> f64 {
+    pub(crate) fn gray_pixel(img: &[u8], i: usize) -> f64 {
         let a = f64::from(img[i + 3]) / 255.0;
         let r = blend(img[i], a);
         let g = blend(img[i + 1], a);
@@ -97,7 +97,14 @@ pub mod detail {
     ///
     /// `img2` is `nullptr` in the C++ recursive calls.
     #[must_use]
-    pub fn antialiased(img: &[u8], x1: usize, y1: usize, width: usize, height: usize, img2: Option<&[u8]>) -> bool {
+    pub(crate) fn antialiased(
+        img: &[u8],
+        x1: usize,
+        y1: usize,
+        width: usize,
+        height: usize,
+        img2: Option<&[u8]>,
+    ) -> bool {
         let x0 = if x1 > 0 { x1 - 1 } else { 0 };
         let y0 = if y1 > 0 { y1 - 1 } else { 0 };
         // `std::min(x1 + 1, width - 1)` on `size_t`.

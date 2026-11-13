@@ -11,7 +11,7 @@ use crate::transition_options::TransitionOptions;
 /// Makes a `Value` from a style value, and gives the style property kind of a
 /// constant (`Color`, `Padding` and `VariableAnchorOffsetCollection`
 /// constants are reported as expressions, as in C++).
-pub trait ValueFactory {
+pub(crate) trait ValueFactory {
     fn make_value(&self) -> Value;
 
     #[must_use]
@@ -163,11 +163,11 @@ enum_value_factory!(
     mln_style_types::VisibilityType,
 );
 
-pub fn make_value<T: ValueFactory>(arg: &T) -> Value {
+pub(crate) fn make_value<T: ValueFactory>(arg: &T) -> Value {
     arg.make_value()
 }
 
-pub fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> StyleProperty {
+pub(crate) fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> StyleProperty {
     match value {
         PropertyValue::Undefined => StyleProperty::default(),
         PropertyValue::Constant(t) => StyleProperty::new(make_value(t), T::constant_kind()),
@@ -176,7 +176,7 @@ pub fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> StylePr
 }
 
 #[must_use]
-pub fn make_transition_style_property(value: &TransitionOptions) -> StyleProperty {
+pub(crate) fn make_transition_style_property(value: &TransitionOptions) -> StyleProperty {
     if !value.is_defined() {
         return StyleProperty::default();
     }
@@ -184,7 +184,7 @@ pub fn make_transition_style_property(value: &TransitionOptions) -> StylePropert
 }
 
 #[must_use]
-pub fn make_color_ramp_style_property(value: &ColorRampPropertyValue) -> StyleProperty {
+pub(crate) fn make_color_ramp_style_property(value: &ColorRampPropertyValue) -> StyleProperty {
     if value.is_undefined() {
         return StyleProperty::default();
     }

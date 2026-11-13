@@ -2,10 +2,8 @@
 // can wrap rapidjson values, NSDictionary, QVariant, JNI values, ... The Rust
 // equivalent is a trait object: `ConversionTraits` is the C++
 // `ConversionTraits<T>` specialization (one impl per front end), and
-// `Convertible` holds either a borrowed or an owned `dyn ConversionTraits`.
-// Front ends whose members are views into the parent (serde_json) return
-// borrowed members; front ends that create new handles per member (JNI) can
-// return owned ones.
+// `Convertible` borrows a `dyn ConversionTraits`: a front end's members are
+// views into their parent, as serde_json's are.
 
 use feature::Value;
 
@@ -24,7 +22,7 @@ impl Error {
 /// The per-front-end operations (`ConversionTraits<T>` in C++). The
 /// preconditions are the C++ ones: `array_length`/`array_member` only if
 /// `is_array`, `object_member`/`each_member` only if `is_object`.
-pub trait ConversionTraits {
+pub(crate) trait ConversionTraits {
     /// Whether the value is undefined or a JSON null.
     fn is_undefined(&self) -> bool;
 
@@ -57,32 +55,19 @@ pub trait ConversionTraits {
     }
 }
 
-enum Inner<'a> {
-    Borrowed(&'a dyn ConversionTraits),
-    Owned(Box<dyn ConversionTraits + 'a>),
-}
-
 /// A type-erased, read-only view of a JSON-like value.
 pub struct Convertible<'a> {
-    inner: Inner<'a>,
+    value: &'a dyn ConversionTraits,
 }
 
 impl<'a> Convertible<'a> {
     /// Wraps a borrowed front-end value.
-    pub fn new(value: &'a dyn ConversionTraits) -> Self {
-        Convertible { inner: Inner::Borrowed(value) }
-    }
-
-    /// Wraps an owned front-end value (a handle the front end created).
-    pub fn owned(value: impl ConversionTraits + 'a) -> Self {
-        Convertible { inner: Inner::Owned(Box::new(value)) }
+    pub(crate) fn new(value: &'a dyn ConversionTraits) -> Self {
+        Convertible { value }
     }
 
     fn traits(&self) -> &dyn ConversionTraits {
-        match &self.inner {
-            Inner::Borrowed(v) => *v,
-            Inner::Owned(v) => v.as_ref(),
-        }
+        self.value
     }
 
     #[must_use]

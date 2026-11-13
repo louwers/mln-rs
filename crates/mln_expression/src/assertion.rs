@@ -10,7 +10,7 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
 use crate::value::{Value, type_of};
 
-pub struct Assertion {
+pub(crate) struct Assertion {
     base: ExpressionBase,
     inputs: Vec<Box<dyn Expression>>,
 }
@@ -28,12 +28,12 @@ fn assertion_type(name: &str) -> Option<Type> {
 
 impl Assertion {
     #[must_use]
-    pub fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
+    pub(crate) fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
         assert_ne!(inputs, Vec::<Box<dyn Expression>>::new());
         Assertion { base: ExpressionBase::new(Kind::Assertion, type_, collect_dependencies(&inputs)), inputs }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let length = value.array_length();
 
         if length < 2 {

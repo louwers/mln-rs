@@ -25,18 +25,18 @@ use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
 
-pub type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
+pub(crate) type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
 
 /// The data members of `LayerTweaker`.
 pub struct LayerTweakerBase {
-    pub id: String,
-    pub evaluated_properties: Arc<dyn LayerProperties>,
-    pub properties_updated: bool,
-    pub projection_uniform_buffer: Option<UniformBufferPtr>,
+    pub(crate) id: String,
+    pub(crate) evaluated_properties: Arc<dyn LayerProperties>,
+    pub(crate) properties_updated: bool,
+    pub(crate) projection_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl LayerTweakerBase {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         LayerTweakerBase {
             id,
             evaluated_properties: properties,
@@ -47,7 +47,7 @@ impl LayerTweakerBase {
 
     /// Uploads the per-drawable projection blocks of this layer, indexed like
     /// the drawable UBO array.
-    pub fn upload_projection_ubos(
+    pub(crate) fn upload_projection_ubos(
         &mut self,
         layer_uniforms: &mut UniformBufferArray,
         ubos: &[ProjectionUBO],
@@ -82,15 +82,16 @@ pub trait LayerTweaker {
 
 /// The value for `Drawable::set_layer_tweaker` (C++
 /// `drawable->setLayerTweaker(layerTweaker)`).
-pub fn layer_tweaker_slot(tweaker: &LayerTweakerPtr) -> Option<Rc<dyn Any>> {
+#[expect(clippy::unnecessary_wraps, reason = "the value of a `Drawable` setter, which takes an `Option`")]
+pub(crate) fn layer_tweaker_slot(tweaker: &LayerTweakerPtr) -> Option<Rc<dyn Any>> {
     Some(Rc::new(tweaker.clone()) as Rc<dyn Any>)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn get_tile_matrix(
+pub(crate) fn get_tile_matrix(
     tile_id: &UnwrappedTileID,
     parameters: &PaintParameters<'_>,
-    translation: &[f32; 2],
+    translation: [f32; 2],
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
@@ -113,10 +114,10 @@ pub fn get_tile_matrix(
 /// The projection data for this tile: the tile matrix plus the per-tile
 /// projection fields.
 #[allow(clippy::too_many_arguments)]
-pub fn get_projection_data(
+pub(crate) fn get_projection_data(
     tile_id: &UnwrappedTileID,
     parameters: &PaintParameters<'_>,
-    translation: &[f32; 2],
+    translation: [f32; 2],
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
@@ -146,7 +147,7 @@ pub fn get_projection_data(
 }
 
 #[must_use]
-pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
+pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     ProjectionUBO {
         matrix: cast_matrix(&data.main_matrix),
         fallback_matrix: cast_matrix(&data.fallback_matrix),
@@ -162,7 +163,7 @@ pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
 /// `latitude_scale` is the cosine of the center latitude on the globe and 1
 /// on Mercator.
 #[must_use]
-pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
+pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
     (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
         * M2PI
         * latitude_scale) as f32
@@ -171,11 +172,11 @@ pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale:
 /// The static `getTileMatrix(tileID, transformState, transformParams, ...)`
 /// overload.
 #[allow(clippy::too_many_arguments)]
-pub fn get_tile_matrix_for(
+pub(crate) fn get_tile_matrix_for(
     tile_id: &UnwrappedTileID,
     transform_state: &TransformState,
     transform_params: &TransformParameters,
-    translation: &[f32; 2],
+    translation: [f32; 2],
     anchor: TranslateAnchorType,
     origin: Option<Point<f64>>,
     near_clipped: bool,
@@ -192,7 +193,7 @@ pub fn get_tile_matrix_for(
     translate_vtx_matrix(tile_id, &tile_matrix, translation, anchor, transform_state, in_viewport_pixel_units)
 }
 
-pub fn multiply_with_projection_matrix(
+pub(crate) fn multiply_with_projection_matrix(
     matrix: &mut Mat4,
     transform_params: &TransformParameters,
     near_clipped: bool,
@@ -211,10 +212,10 @@ pub fn multiply_with_projection_matrix(
     matrix::multiply(matrix, proj_matrix_ref, &b);
 }
 
-pub fn translate_vtx_matrix(
+pub(crate) fn translate_vtx_matrix(
     id: &UnwrappedTileID,
     tile_matrix: &Mat4,
-    translation: &[f32; 2],
+    translation: [f32; 2],
     anchor: TranslateAnchorType,
     state: &TransformState,
     in_viewport_pixel_units: bool,

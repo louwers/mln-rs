@@ -12,7 +12,7 @@ use crate::glyph::FontData;
 /// Why a WOFF or WOFF2 file didn't decode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum WoffError {
+pub(crate) enum WoffError {
     /// The WOFF file is malformed (its decoder gives no detail).
     #[error("invalid WOFF file")]
     InvalidWoff,
@@ -22,14 +22,15 @@ pub enum WoffError {
 }
 
 /// Whether `data` starts with the WOFF or WOFF2 signature.
+#[cfg(test)]
 #[must_use]
-pub fn is_woff(data: &[u8]) -> bool {
+pub(crate) fn is_woff(data: &[u8]) -> bool {
     matches!(data.get(..4), Some(b"wOFF" | b"wOF2"))
 }
 
 /// `data` as an SFNT font: decoded when it is a WOFF or WOFF2 file, else
 /// `data` itself, uncopied and unchecked.
-pub fn to_sfnt(data: FontData) -> Result<FontData, WoffError> {
+pub(crate) fn to_sfnt(data: FontData) -> Result<FontData, WoffError> {
     match data.as_bytes().get(..4) {
         Some(b"wOFF") => decode_woff(data.as_bytes()).map(FontData::from),
         Some(b"wOF2") => decode_woff2(data.as_bytes()).map(FontData::from),
@@ -38,13 +39,13 @@ pub fn to_sfnt(data: FontData) -> Result<FontData, WoffError> {
 }
 
 /// Decodes a WOFF2 file. A collection decodes to a TrueType collection.
-pub fn decode_woff2(data: &[u8]) -> Result<Vec<u8>, WoffError> {
+pub(crate) fn decode_woff2(data: &[u8]) -> Result<Vec<u8>, WoffError> {
     wuff::decompress_woff2(data).map_err(|_| WoffError::InvalidWoff2)
 }
 
 /// Decodes a WOFF file: its tables, uncompressed, behind an SFNT header and
 /// table directory. The checksums and the metadata aren't checked.
-pub fn decode_woff(data: &[u8]) -> Result<Vec<u8>, WoffError> {
+pub(crate) fn decode_woff(data: &[u8]) -> Result<Vec<u8>, WoffError> {
     if !tables_are_disjoint(data) {
         return Err(WoffError::InvalidWoff);
     }

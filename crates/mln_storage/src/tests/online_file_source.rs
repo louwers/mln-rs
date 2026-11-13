@@ -151,7 +151,16 @@ fn connection_error() {
 
     let start = Instant::now();
     let counter = Cell::new(0);
-    let wait = Cell::new(CONNECTION_TIMEOUT);
+    // The earliest the next failure can arrive, in seconds since `start`.
+    // Each backoff starts when an attempt fails, before the failure reaches
+    // this thread, so the backoffs add up from the start however long the
+    // failures take to arrive.
+    let earliest = Cell::new(CONNECTION_TIMEOUT);
+    // The latest it should arrive. The next backoff has started by the time
+    // a failure arrives, so it is timed from the failure: a slow failure
+    // (NSURLSession's, on GitHub's macOS runners) would otherwise count
+    // again against every later attempt.
+    let latest = Cell::new(CONNECTION_TIMEOUT + 0.3);
 
     let req = req();
     let (r, stop) = (req.clone(), run_loop.clone());
@@ -159,8 +168,8 @@ fn connection_error() {
         &Resource::new(Kind::Unknown, closed_port_url("/")),
         Box::new(move |res: Response| {
             let duration = seconds_since(start);
-            assert!(wait.get() - 0.01 < duration, "Backoff timer didn't wait 1 second");
-            assert!(wait.get() + 0.3 > duration, "Backoff timer fired too late");
+            assert!(earliest.get() - 0.01 < duration, "Backoff timer didn't wait 1 second");
+            assert!(latest.get() > duration, "Backoff timer fired too late");
             let error = res.error.as_ref().expect("error");
             assert_eq!(Reason::Connection, error.reason);
             assert!(res.data.is_none());
@@ -173,11 +182,9 @@ fn connection_error() {
                 r.borrow_mut().take();
                 stop.stop();
             }
-            // Timed from this failure (C++ adds to `wait`), since the next
-            // backoff starts when it arrives: a slow failure (NSURLSession's,
-            // on GitHub's macOS runners) would otherwise count again against
-            // every later attempt.
-            wait.set(duration + f64::from(1 << counter.get()) + CONNECTION_TIMEOUT);
+            let backoff = f64::from(1 << counter.get()) + CONNECTION_TIMEOUT;
+            earliest.set(earliest.get() + backoff);
+            latest.set(duration + backoff + 0.3);
             counter.set(counter.get() + 1);
         }),
     ));

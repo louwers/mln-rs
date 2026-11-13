@@ -34,17 +34,17 @@ pub struct Array {
 
 impl Array {
     #[must_use]
-    pub fn new(item_type: Type) -> Self {
+    pub(crate) fn new(item_type: Type) -> Self {
         Array { item_type, n: None }
     }
 
     #[must_use]
-    pub fn with_n(item_type: Type, n: Option<usize>) -> Self {
+    pub(crate) fn with_n(item_type: Type, n: Option<usize>) -> Self {
         Array { item_type, n }
     }
 
     #[must_use]
-    pub fn get_name(&self) -> String {
+    pub(crate) fn get_name(&self) -> String {
         if let Some(n) = self.n {
             format!("array<{}, {}>", to_string(&self.item_type), n)
         } else if self.item_type == Type::Value {
@@ -73,12 +73,12 @@ impl Type {
     }
 
     #[must_use]
-    pub fn is_array(&self) -> bool {
+    pub(crate) fn is_array(&self) -> bool {
         matches!(self, Type::Array(_))
     }
 
     #[must_use]
-    pub fn as_array(&self) -> Option<&Array> {
+    pub(crate) fn as_array(&self) -> Option<&Array> {
         match self {
             Type::Array(a) => Some(a),
             _ => None,
@@ -86,7 +86,7 @@ impl Type {
     }
 
     #[must_use]
-    pub fn get_name(&self) -> String {
+    pub(crate) fn get_name(&self) -> String {
         match self {
             Type::Null => "null".to_owned(),
             Type::Number => "number".to_owned(),

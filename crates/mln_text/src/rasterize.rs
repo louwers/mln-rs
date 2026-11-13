@@ -93,7 +93,7 @@ fn pix_round(x: i64) -> i64 {
     (x + 32) & !63
 }
 
-pub fn rasterize_glyph(face: &FreeTypeFace, glyph: GlyphID) -> Glyph {
+pub(crate) fn rasterize_glyph(face: &FreeTypeFace, glyph: GlyphID) -> Glyph {
     let border = u32::from(Glyph::BORDER_SIZE);
     let mut fixed_metrics = Glyph { id: glyph, ..Glyph::default() };
 

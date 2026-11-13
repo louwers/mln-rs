@@ -42,7 +42,7 @@ use crate::resource_transform::{ResourceTransform, TransformResult};
 use crate::response::{Reason, ResourceError, Response};
 
 /// For testing only
-pub const ONLINE_STATUS_KEY: &str = "online-status";
+pub(crate) const ONLINE_STATUS_KEY: &str = "online-status";
 
 struct OnlineFileRequest {
     id: u64,
@@ -153,7 +153,7 @@ struct ThreadState {
     tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
 }
 
-pub struct OnlineFileSourceThread {
+pub(crate) struct OnlineFileSourceThread {
     state: Rc<ThreadState>,
     _reachability: AsyncTask,
     reachability_id: u64,
@@ -513,7 +513,7 @@ impl OnlineFileSourceThread {
         OnlineFileSourceThread { state, _reachability: reachability, reachability_id }
     }
 
-    pub fn request(&self, req: u64, resource: Resource, r: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request(&self, req: u64, resource: Resource, r: &ActorRef<FileSourceRequestState>) {
         let r = r.clone();
         let callback = move |res: Response| {
             r.invoke(move |request: &FileSourceRequestState| request.set_response(res));
@@ -537,7 +537,7 @@ impl OnlineFileSourceThread {
         self.state.add(&request);
     }
 
-    pub fn cancel(&self, req: u64) {
+    pub(crate) fn cancel(&self, req: u64) {
         self.state.remove(req);
         let task = self.state.tasks.borrow_mut().remove(&req);
         drop(task);

@@ -19,11 +19,11 @@ use crate::paint_parameters::PaintParameters;
 /// Per-tile DEM properties that are set during drawable creation and read by
 /// the tweaker during rendering.
 #[derive(Clone, Copy, Debug)]
-pub struct ColorReliefDrawableData {
-    pub tile_props: ColorReliefTilePropsUBO,
+pub(crate) struct ColorReliefDrawableData {
+    pub(crate) tile_props: ColorReliefTilePropsUBO,
 }
 
-pub struct ColorReliefLayerTweaker {
+pub(crate) struct ColorReliefLayerTweaker {
     base: LayerTweakerBase,
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
@@ -31,7 +31,7 @@ pub struct ColorReliefLayerTweaker {
 }
 
 impl ColorReliefLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         ColorReliefLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

@@ -20,17 +20,17 @@ pub trait TargetResource: Any {
 }
 
 /// The `gfx::DrawTarget` of every Metal target.
-pub struct DrawTarget {
+pub(crate) struct DrawTarget {
     size: Cell<Size>,
     resource: Rc<dyn TargetResource>,
 }
 
 impl DrawTarget {
-    pub fn new(size: Size, resource: Rc<dyn TargetResource>) -> Self {
+    pub(crate) fn new(size: Size, resource: Rc<dyn TargetResource>) -> Self {
         DrawTarget { size: Cell::new(size), resource }
     }
 
-    pub fn resource(&self) -> &dyn TargetResource {
+    pub(crate) fn resource(&self) -> &dyn TargetResource {
         &*self.resource
     }
 
@@ -46,7 +46,7 @@ impl frame::DrawTarget for DrawTarget {
 }
 
 /// `target` as a Metal draw target.
-pub fn as_mtl(target: &dyn frame::DrawTarget) -> Option<&DrawTarget> {
+pub(crate) fn as_mtl(target: &dyn frame::DrawTarget) -> Option<&DrawTarget> {
     target.downcast_ref::<DrawTarget>()
 }
 

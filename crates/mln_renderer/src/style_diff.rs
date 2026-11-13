@@ -11,16 +11,16 @@ use mln_util::longest_common_subsequence::longest_common_subsequence;
 use mln_vec_map::VecMap;
 
 #[derive(Clone, Debug)]
-pub struct StyleChange<T: ?Sized> {
-    pub before: Arc<T>,
-    pub after: Arc<T>,
+pub(crate) struct StyleChange<T: ?Sized> {
+    pub(crate) before: Arc<T>,
+    pub(crate) after: Arc<T>,
 }
 
 #[derive(Clone, Debug)]
-pub struct StyleDifference<T: ?Sized> {
-    pub added: VecMap<String, Arc<T>>,
-    pub removed: VecMap<String, Arc<T>>,
-    pub changed: VecMap<String, StyleChange<T>>,
+pub(crate) struct StyleDifference<T: ?Sized> {
+    pub(crate) added: VecMap<String, Arc<T>>,
+    pub(crate) removed: VecMap<String, Arc<T>>,
+    pub(crate) changed: VecMap<String, StyleChange<T>>,
 }
 
 impl<T: ?Sized> Default for StyleDifference<T> {
@@ -71,17 +71,20 @@ fn diff<T: ?Sized>(
     result
 }
 
-pub type ImageDifference = StyleDifference<image::Impl>;
-pub type SourceDifference = StyleDifference<dyn source::Impl>;
-pub type LayerDifference = StyleDifference<dyn layer::Impl>;
+pub(crate) type ImageDifference = StyleDifference<image::Impl>;
+pub(crate) type SourceDifference = StyleDifference<dyn source::Impl>;
+pub(crate) type LayerDifference = StyleDifference<dyn layer::Impl>;
 
 #[must_use]
-pub fn diff_images(a: &Arc<Vec<Arc<image::Impl>>>, b: &Arc<Vec<Arc<image::Impl>>>) -> ImageDifference {
+pub(crate) fn diff_images(a: &Arc<Vec<Arc<image::Impl>>>, b: &Arc<Vec<Arc<image::Impl>>>) -> ImageDifference {
     diff(a, b, |i| i.id.clone(), |lhs, rhs| lhs.id == rhs.id)
 }
 
 #[must_use]
-pub fn diff_sources(a: &ImmutableVector<dyn source::Impl>, b: &ImmutableVector<dyn source::Impl>) -> SourceDifference {
+pub(crate) fn diff_sources(
+    a: &ImmutableVector<dyn source::Impl>,
+    b: &ImmutableVector<dyn source::Impl>,
+) -> SourceDifference {
     diff(
         a,
         b,
@@ -91,12 +94,15 @@ pub fn diff_sources(a: &ImmutableVector<dyn source::Impl>, b: &ImmutableVector<d
 }
 
 #[must_use]
-pub fn diff_layers(a: &ImmutableVector<dyn layer::Impl>, b: &ImmutableVector<dyn layer::Impl>) -> LayerDifference {
+pub(crate) fn diff_layers(
+    a: &ImmutableVector<dyn layer::Impl>,
+    b: &ImmutableVector<dyn layer::Impl>,
+) -> LayerDifference {
     diff(a, b, |l| l.id.clone(), |lhs, rhs| lhs.id == rhs.id && std::ptr::eq(lhs.get_type_info(), rhs.get_type_info()))
 }
 
 #[must_use]
-pub fn has_layout_difference(layer_diff: &LayerDifference, layer_id: &str) -> bool {
+pub(crate) fn has_layout_difference(layer_diff: &LayerDifference, layer_id: &str) -> bool {
     if layer_diff.added.contains_key(layer_id) {
         return true;
     }

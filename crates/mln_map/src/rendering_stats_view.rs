@@ -18,13 +18,13 @@ use mln_util::range::Range;
 use mln_util::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RenderingStatsViewOptions {
+pub(crate) struct RenderingStatsViewOptions {
     /// The least time between two updates of the text.
-    pub update_interval: Duration,
+    pub(crate) update_interval: Duration,
     /// Also show the totals and the update counts.
-    pub verbose: bool,
-    pub text_color: Color,
-    pub text_size: f32,
+    pub(crate) verbose: bool,
+    pub(crate) text_color: Color,
+    pub(crate) text_size: f32,
 }
 
 impl Default for RenderingStatsViewOptions {
@@ -39,7 +39,7 @@ impl Default for RenderingStatsViewOptions {
 }
 
 /// Keeps a layer of the rendering stats in the style.
-pub struct RenderingStatsView {
+pub(crate) struct RenderingStatsView {
     options: RenderingStatsViewOptions,
     last_update: Option<Instant>,
     frame_count: u32,
@@ -48,19 +48,19 @@ pub struct RenderingStatsView {
 }
 
 /// The id of the view's symbol layer.
-pub const RENDERING_STATS_LAYER_ID: &str = "rendering-stats";
+pub(crate) const RENDERING_STATS_LAYER_ID: &str = "rendering-stats";
 /// The id of the view's source, a point that the layer labels.
-pub const RENDERING_STATS_SOURCE_ID: &str = "rendering-stats-source";
+pub(crate) const RENDERING_STATS_SOURCE_ID: &str = "rendering-stats-source";
 
 impl RenderingStatsView {
     #[must_use]
-    pub fn new(options: RenderingStatsViewOptions) -> Self {
+    pub(crate) fn new(options: RenderingStatsViewOptions) -> Self {
         RenderingStatsView { options, last_update: None, frame_count: 0, encoding_time: 0.0, rendering_time: 0.0 }
     }
 
     /// `create(style)`: adds the source and the layer, if the style lacks
     /// them.
-    pub fn create(&self, style: &mut Style) {
+    pub(crate) fn create(&self, style: &mut Style) {
         if style.get_source(RENDERING_STATS_SOURCE_ID).is_none() {
             let handle: Arc<OnceLock<CustomGeometrySourceHandle>> = Arc::new(OnceLock::new());
             let fetch_handle = handle.clone();
@@ -106,7 +106,8 @@ impl RenderingStatsView {
     }
 
     /// `destroy(style)`: removes the layer and the source.
-    pub fn destroy(&self, style: &mut Style) {
+    #[expect(clippy::unused_self, reason = "the view removes what it added, as its `create` does")]
+    pub(crate) fn destroy(&self, style: &mut Style) {
         style.remove_layer(RENDERING_STATS_LAYER_ID);
         style.remove_source(RENDERING_STATS_SOURCE_ID);
     }
@@ -114,7 +115,7 @@ impl RenderingStatsView {
     /// `update(style, stats)`: counts a frame, and shows the stats of the
     /// frame and the mean times since the last update once the update
     /// interval has passed. Adds the layer back if the style lost it.
-    pub fn update(&mut self, style: &mut Style, stats: &RenderingStats) {
+    pub(crate) fn update(&mut self, style: &mut Style, stats: &RenderingStats) {
         if style.get_layer(RENDERING_STATS_LAYER_ID).is_none() {
             self.create(style);
         }

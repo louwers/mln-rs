@@ -9,7 +9,7 @@ use crate::type_::{self, Type};
 use crate::utf8_op_helpers::{get_unicode_character_offset_on_validated_utf8, unicode_length_on_validated_utf8};
 use crate::value::{Value, type_of};
 
-pub struct IndexOf {
+pub(crate) struct IndexOf {
     base: ExpressionBase,
     keyword: Box<dyn Expression>,
     input: Box<dyn Expression>,
@@ -18,7 +18,7 @@ pub struct IndexOf {
 
 impl IndexOf {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         keyword: Box<dyn Expression>,
         input: Box<dyn Expression>,
         from_index: Option<Box<dyn Expression>>,
@@ -62,7 +62,7 @@ impl IndexOf {
         Value::Number(index as f64)
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
         let length = value.array_length();

@@ -8,7 +8,7 @@ use crate::step::Step;
 
 /// The alternatives of `variant<const Interpolate*, const Step*, ParsingError>`.
 #[derive(Clone)]
-pub enum ZoomCurve<'a> {
+pub(crate) enum ZoomCurve<'a> {
     Interpolate(&'a Interpolate),
     Step(&'a Step),
     Error(ParsingError),
@@ -35,7 +35,7 @@ impl std::fmt::Debug for ZoomCurve<'_> {
     }
 }
 
-pub type ZoomCurveOrError<'a> = Option<ZoomCurve<'a>>;
+pub(crate) type ZoomCurveOrError<'a> = Option<ZoomCurve<'a>>;
 
 /// The zoom curve of an expression: none, an interpolate or a step.
 #[derive(Clone, Copy)]
@@ -59,7 +59,7 @@ fn zoom_input(input: &dyn Expression) -> bool {
 
 /// Find a zoom curve in the expression tree: the relevant step or
 /// interpolate item, or the error if the expression represents an error.
-pub fn find_zoom_curve(e: &dyn Expression) -> ZoomCurveOrError<'_> {
+pub(crate) fn find_zoom_curve(e: &dyn Expression) -> ZoomCurveOrError<'_> {
     let mut result: ZoomCurveOrError<'_> = None;
 
     match e.get_kind() {

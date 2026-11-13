@@ -14,17 +14,17 @@ use crate::util::triangulate::triangulate;
 
 /// Pole vertices carry these Y coordinates; the globe vertex shader maps them
 /// to the poles.
-pub const NORTH_POLE_Y: i16 = -32768;
-pub const SOUTH_POLE_Y: i16 = 32767;
+pub(crate) const NORTH_POLE_Y: i16 = -32768;
+pub(crate) const SOUTH_POLE_Y: i16 = 32767;
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct SubdivisionResult {
+pub(crate) struct SubdivisionResult {
     /// Flattened `x, y, x, y, ...` positions; every index below refers into
     /// this buffer.
-    pub vertices: Vec<i16>,
-    pub triangle_indices: Vec<u32>,
+    pub(crate) vertices: Vec<i16>,
+    pub(crate) triangle_indices: Vec<u32>,
     /// One line list per input ring, as index pairs.
-    pub line_index_lists: Vec<Vec<u32>>,
+    pub(crate) line_index_lists: Vec<Vec<u32>>,
 }
 
 struct Subdivider {
@@ -448,7 +448,7 @@ impl Subdivider {
 /// are counter-clockwise in tile space. (C++ defaults
 /// `generate_outline_lines` to true.)
 #[must_use]
-pub fn subdivide_polygon(
+pub(crate) fn subdivide_polygon(
     polygon: &GeometryCollection,
     canonical: &CanonicalTileID,
     granularity: u32,
@@ -460,7 +460,11 @@ pub fn subdivide_polygon(
 /// Inserts a vertex wherever the line crosses a cell boundary; `is_ring`
 /// closes the line first. (C++ defaults `is_ring` to false.)
 #[must_use]
-pub fn subdivide_vertex_line(line: &GeometryCoordinates, granularity: u32, is_ring: bool) -> GeometryCoordinates {
+pub(crate) fn subdivide_vertex_line(
+    line: &GeometryCoordinates,
+    granularity: u32,
+    is_ring: bool,
+) -> GeometryCoordinates {
     if line.len() < 2 {
         return GeometryCoordinates::new();
     }
@@ -551,7 +555,7 @@ pub fn subdivide_vertex_line(line: &GeometryCoordinates, granularity: u32, is_ri
 
 /// Reorders every triangle to counter-clockwise winding in tile space.
 #[must_use]
-pub fn fix_winding_order(vertices: &[i16], indices: &[u32]) -> Vec<u32> {
+pub(crate) fn fix_winding_order(vertices: &[i16], indices: &[u32]) -> Vec<u32> {
     let mut corrected = Vec::with_capacity(indices.len());
     for triangle in indices.as_chunks::<3>().0 {
         let (i0, i1, i2) = (triangle[0], triangle[1], triangle[2]);
@@ -571,7 +575,7 @@ pub fn fix_winding_order(vertices: &[i16], indices: &[u32]) -> Vec<u32> {
 
 /// Triangulates an ordered convex ring of vertex indices by walking outward
 /// from its leftmost vertex.
-pub fn scanline_triangulate_vertex_ring(vertices: &[i16], ring: &[u32], out_indices: &mut Vec<u32>) {
+pub(crate) fn scanline_triangulate_vertex_ring(vertices: &[i16], ring: &[u32], out_indices: &mut Vec<u32>) {
     if ring.is_empty() {
         panic!("Subdivision vertex ring is empty.");
     }

@@ -38,17 +38,17 @@ impl NetworkStatus {
 
     /// Sends to `sender` when the network becomes reachable. Returns the id
     /// for `unsubscribe`.
-    pub fn subscribe(sender: AsyncTaskSender) -> u64 {
+    pub(crate) fn subscribe(sender: AsyncTaskSender) -> u64 {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         OBSERVERS.lock().insert(id, sender);
         id
     }
 
-    pub fn unsubscribe(id: u64) {
+    pub(crate) fn unsubscribe(id: u64) {
         OBSERVERS.lock().remove(&id);
     }
 
-    pub fn reachable() {
+    pub(crate) fn reachable() {
         if !ONLINE.load(Ordering::SeqCst) {
             return;
         }

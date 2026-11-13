@@ -4,33 +4,28 @@
 // `VecMap<u32, LayerRenderItem>`.
 
 use mln_gfx::{LayerGroupBasePtr, UploadPass}; // layers: debug
-use mln_map_types::{MapDebugOptions, MapMode, TransformState};
+use mln_map_types::{MapDebugOptions, TransformState};
 use mln_util::Color;
-use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::RenderLayerPtr;
-use crate::render_pass::RenderPass; // layers: debug
 
 /// The kinds of debug drawables (layers: debug).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DebugType {
+pub(crate) enum DebugType {
     TextOutline,
     Text,
     Border,
 }
 
 /// The debug layer groups, by debug type (layers: debug).
-pub type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
+pub(crate) type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
 
 /// The render item of a source. The layer render items are the concrete
 /// `LayerRenderItem`.
-pub trait RenderItem {
+pub(crate) trait RenderItem {
     fn upload(&self, upload_pass: &dyn UploadPass);
-    fn render(&self, _parameters: &mut PaintParameters<'_>) {}
-    fn has_render_pass(&self, pass: RenderPass) -> bool;
-    fn get_name(&self) -> &str;
     /// Updates the item's debug drawables; a no-op for the items that have
     /// none (`LayerRenderItem`, the image source). The orchestrator gives
     /// each debug layer group its tweaker (layers: debug).
@@ -38,56 +33,40 @@ pub trait RenderItem {
 }
 
 #[derive(Clone)]
-pub struct LayerRenderItem {
-    pub layer: RenderLayerPtr,
+pub(crate) struct LayerRenderItem {
+    pub(crate) layer: RenderLayerPtr,
     /// The id of the orchestrator's render source, `None` for layers without
     /// a source.
-    pub source: Option<String>,
-    pub index: u32,
+    pub(crate) source: Option<String>,
 }
 
 impl LayerRenderItem {
-    pub fn new(layer: RenderLayerPtr, source: Option<String>, index: u32) -> Self {
-        LayerRenderItem { layer, source, index }
-    }
-
-    #[must_use]
-    pub fn get_name(&self) -> String {
-        self.layer.borrow().get_id().to_owned()
+    pub(crate) fn new(layer: RenderLayerPtr, source: Option<String>) -> Self {
+        LayerRenderItem { layer, source }
     }
 }
 
-pub struct RenderTreeParameters {
-    pub transform_params: TransformParameters,
-    pub map_mode: MapMode,
-    pub debug_options: MapDebugOptions,
-    /// As in [`UpdateParameters::time_point`](crate::update_parameters::UpdateParameters::time_point).
-    pub time_point: Option<Instant>,
+pub(crate) struct RenderTreeParameters {
+    pub(crate) transform_params: TransformParameters,
+    pub(crate) debug_options: MapDebugOptions,
     /// conformance: `EvaluatedLight light`.
-    pub light: crate::render_light::EvaluatedLight,
-    pub sky: Option<crate::render_sky::EvaluatedSky>,
-    pub has_3d: bool,
-    pub opaque_pass_cut_off: u32,
+    pub(crate) light: crate::render_light::EvaluatedLight,
+    pub(crate) sky: Option<crate::render_sky::EvaluatedSky>,
+    pub(crate) has_3d: bool,
+    pub(crate) opaque_pass_cut_off: u32,
     /// Transparent black unless the style has a solid background.
-    pub background_color: Color,
-    pub symbol_fade_change: f32,
-    pub needs_repaint: bool,
-    pub loaded: bool,
-    pub placement_changed: bool,
+    pub(crate) background_color: Color,
+    pub(crate) symbol_fade_change: f32,
+    pub(crate) needs_repaint: bool,
+    pub(crate) loaded: bool,
+    pub(crate) placement_changed: bool,
 }
 
 impl RenderTreeParameters {
-    pub fn new(
-        state: &TransformState,
-        map_mode: MapMode,
-        debug_options: MapDebugOptions,
-        time_point: Option<Instant>,
-    ) -> Self {
+    pub(crate) fn new(state: &TransformState, debug_options: MapDebugOptions) -> Self {
         RenderTreeParameters {
             transform_params: TransformParameters::new(state),
-            map_mode,
             debug_options,
-            time_point,
             light: crate::render_light::EvaluatedLight::default(),
             sky: None,
             has_3d: false,
@@ -148,7 +127,7 @@ impl RenderTree {
 
     /// Updates the symbol buckets of the layers that need placement, then the
     /// positions of the layers that draw buckets other layers place.
-    pub fn prepare(&mut self) {
+    pub(crate) fn prepare(&mut self) {
         let Some(placement) = &self.placement else {
             return;
         };
@@ -165,23 +144,23 @@ impl RenderTree {
     }
 
     #[must_use]
-    pub fn get_layer_render_item_map(&self) -> &VecMap<u32, LayerRenderItem> {
+    pub(crate) fn get_layer_render_item_map(&self) -> &VecMap<u32, LayerRenderItem> {
         &self.layer_render_items
     }
 
     #[must_use]
-    pub fn get_source_render_items(&self) -> &[Box<dyn RenderItem>] {
+    pub(crate) fn get_source_render_items(&self) -> &[Box<dyn RenderItem>] {
         &self.source_render_items
     }
 
     #[must_use]
-    pub fn get_parameters(&self) -> &RenderTreeParameters {
+    pub(crate) fn get_parameters(&self) -> &RenderTreeParameters {
         &self.parameters
     }
 
     /// The time since the render tree was created, in seconds.
     #[must_use]
-    pub fn get_elapsed_time(&self) -> f64 {
+    pub(crate) fn get_elapsed_time(&self) -> f64 {
         self.start_time.elapsed().as_secs_f64()
     }
 }

@@ -15,7 +15,7 @@ use crate::types::{EvaluatedType, camelize, evaluated_type, evaluated_type_unnam
 
 /// A C++ initializer as `defaultValue` writes it.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Init {
+pub(crate) enum Init {
     /// A float literal: the decimal text before the `f` suffix
     /// (`formatNumber`).
     FloatLiteral(String),
@@ -37,7 +37,7 @@ pub enum Init {
 
 impl Init {
     /// The C++ spelling, as the template writes it (for error messages).
-    pub fn cpp(&self) -> String {
+    pub(crate) fn cpp(&self) -> String {
         match self {
             Init::FloatLiteral(text) => format!("{text}{}f", if text.contains('.') { "" } else { "." }),
             Init::Raw(value) => value.to_string(),
@@ -57,7 +57,7 @@ impl Init {
 /// Formats `value` as JS `Number.prototype.toString()` does (shortest
 /// round-trip digits, JS exponent rules), for the doubles the JS prints.
 #[must_use]
-pub fn js_number(value: f64) -> String {
+pub(crate) fn js_number(value: f64) -> String {
     if value.is_nan() {
         return "NaN".into();
     }
@@ -249,7 +249,7 @@ fn default_of(q: &DefaultQuery<'_>) -> Init {
 }
 
 #[must_use]
-pub fn default_value(property: &Property) -> Init {
+pub(crate) fn default_value(property: &Property) -> Init {
     default_of(&DefaultQuery {
         property: Some(property),
         type_: Some(property.type_()),
@@ -298,7 +298,7 @@ fn as_f64(init: &Init) -> f64 {
 /// The Rust expression for `T x = <init>;` (copy-initialization, as in
 /// `static T defaultValue() { return <init>; }`).
 #[must_use]
-pub fn rust_value(init: &Init, t: &EvaluatedType) -> String {
+pub(crate) fn rust_value(init: &Init, t: &EvaluatedType) -> String {
     match (t, init) {
         (_, Init::Empty) => rust_value_initialized(t),
         (EvaluatedType::Bool, Init::Raw(Value::Bool(b))) => b.to_string(),

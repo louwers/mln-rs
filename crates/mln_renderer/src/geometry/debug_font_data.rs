@@ -1,13 +1,13 @@
 /// A glyph: its advance and its strokes, as x, y pairs in font units with
 /// y up. A `-1, -1` pair ends a stroke.
-pub struct Glyph {
-    pub width: u8,
-    pub data: &'static [i8],
+pub(crate) struct Glyph {
+    pub(crate) width: u8,
+    pub(crate) data: &'static [i8],
 }
 
 /// The glyphs of the printable ASCII characters, from `' '` (32) to `'~'`
 /// (126).
-pub static SIMPLEX: [Glyph; 95] = [
+pub(crate) static SIMPLEX: [Glyph; 95] = [
     // 32 ' '
     Glyph { width: 16, data: &[] },
     // 33 '!'

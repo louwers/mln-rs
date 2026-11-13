@@ -225,35 +225,36 @@ impl Kind for SharedExpression {
 }
 
 /// Parses an expression's serialized form, expecting `type_`.
-pub fn parse(json: &Value, type_: Type) -> Result<Box<dyn Expression>, String> {
+pub(crate) fn parse(json: &Value, type_: Type) -> Result<Box<dyn Expression>, String> {
     let mut context = ParsingContext::with_expected(type_);
     context.parse_expression(&Convertible::from(json), None).ok_or_else(|| context.get_combined_errors())
 }
 
 /// `#[serde(with)]` for an `Arc<dyn Expression>`.
-pub mod shared_expression {
+pub(crate) mod shared_expression {
     use super::{Arc, Deserializer, Expression, Serializer, SharedExpression, shared};
 
-    pub fn serialize<S: Serializer>(expression: &Arc<dyn Expression>, serializer: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(expression: &Arc<dyn Expression>, serializer: S) -> Result<S::Ok, S::Error> {
         shared::serialize::<SharedExpression, S>(expression, serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<dyn Expression>, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<dyn Expression>, D::Error> {
         shared::deserialize::<SharedExpression, D>(deserializer)
     }
 
     /// `#[serde(with)]` for an `Option<Arc<dyn Expression>>`.
-    pub mod option {
+    pub(crate) mod option {
         use super::{Arc, Deserializer, Expression, Serializer, SharedExpression, shared};
 
-        pub fn serialize<S: Serializer>(
+        #[expect(clippy::ref_option, reason = "`#[serde(with)]` passes the field by reference")]
+        pub(crate) fn serialize<S: Serializer>(
             expression: &Option<Arc<dyn Expression>>,
             serializer: S,
         ) -> Result<S::Ok, S::Error> {
             shared::serialize_option::<SharedExpression, S>(expression, serializer)
         }
 
-        pub fn deserialize<'de, D: Deserializer<'de>>(
+        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
             deserializer: D,
         ) -> Result<Option<Arc<dyn Expression>>, D::Error> {
             shared::deserialize_option::<SharedExpression, D>(deserializer)

@@ -77,7 +77,7 @@ pub(crate) fn activate_render_target(
     }
 }
 
-pub struct RenderHeatmapLayer {
+pub(crate) struct RenderHeatmapLayer {
     base: RenderLayerBase,
     // Paint properties
     unevaluated: HeatmapPaintProperties::Unevaluated,
@@ -100,7 +100,7 @@ pub struct RenderHeatmapLayer {
 }
 
 impl RenderHeatmapLayer {
-    pub fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(HeatmapLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -399,7 +399,7 @@ impl RenderLayer for RenderHeatmapLayer {
             let update_existing = |drawable: &mut dyn Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
-                drawable_has_layer_tweaker(drawable, &layer_tweaker)
+                drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
             };
             if self.update_tile(&tile_layer_group, render_pass, &tile_id, update_existing) {
                 continue;
@@ -466,7 +466,7 @@ impl RenderLayer for RenderHeatmapLayer {
                 );
             }
 
-            let mut heatmap_builder = context.create_drawable_builder("heatmap".to_owned());
+            let mut heatmap_builder = context.create_drawable_builder();
             heatmap_builder.set_shader(heatmap_shader.clone());
             heatmap_builder.set_enable_depth(false);
             heatmap_builder.set_color_mode(&ColorMode::additive());
@@ -552,7 +552,7 @@ impl RenderLayer for RenderHeatmapLayer {
             );
         }
 
-        let mut heatmap_texture_builder = context.create_drawable_builder("heatmapTexture".to_owned());
+        let mut heatmap_texture_builder = context.create_drawable_builder();
         heatmap_texture_builder.set_shader(Some(heatmap_texture_shader));
         heatmap_texture_builder.set_enable_depth(false);
         heatmap_texture_builder.set_color_mode(&ColorMode::alpha_blended());

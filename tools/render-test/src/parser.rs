@@ -26,7 +26,7 @@ use crate::metadata::{
 };
 use crate::runner::{CameraOptions, MapError, TestContext, TestOperation, TestOperations};
 
-pub type ErrorMessage = String;
+pub(crate) type ErrorMessage = String;
 
 static NULL: serde_json::Value = serde_json::Value::Null;
 
@@ -98,12 +98,12 @@ fn value_to_json(value: &Value) -> serde_json::Value {
 }
 
 #[must_use]
-pub fn to_json_value(value: &Value) -> String {
+pub(crate) fn to_json_value(value: &Value) -> String {
     serde_json::to_string_pretty(&value_to_json(value)).expect("JSON value serializes")
 }
 
 #[must_use]
-pub fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
+pub(crate) fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     let mut array = Vec::with_capacity(features.len());
     for feature in features {
         // type, id, geometry, properties (mapbox::geojson::convert), then
@@ -121,14 +121,14 @@ pub fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     serde_json::to_string_pretty(&serde_json::Value::Array(array)).expect("JSON value serializes")
 }
 
-pub fn read_json(json_path: &str) -> Result<serde_json::Value, ErrorMessage> {
+pub(crate) fn read_json(json_path: &str) -> Result<serde_json::Value, ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
 /// Reads the JSON document at `json_path`, keeping the text, for documents
 /// the runner hands on unchanged (style.json).
-pub fn read_json_with_text(json_path: &str) -> Result<(serde_json::Value, String), ErrorMessage> {
+pub(crate) fn read_json_with_text(json_path: &str) -> Result<(serde_json::Value, String), ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     let value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let text = String::from_utf8(bytes).map_err(|e| e.to_string())?;
@@ -161,14 +161,14 @@ impl<'de> Deserialize<'de> for ObjectMembers {
 
 /// Reads the JSON document at `json_path`, whose top level is an object, as
 /// its members in document order.
-pub fn read_json_object_members(json_path: &str) -> Result<Vec<(String, serde_json::Value)>, ErrorMessage> {
+pub(crate) fn read_json_object_members(json_path: &str) -> Result<Vec<(String, serde_json::Value)>, ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     serde_json::from_slice::<ObjectMembers>(&bytes).map(|members| members.0).map_err(|e| e.to_string())
 }
 
 /// `value` as compact JSON, as rapidjson's `Writer` writes it.
 #[must_use]
-pub fn serialize_json_value(value: &serde_json::Value) -> String {
+pub(crate) fn serialize_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).expect("serde_json::Value serializes")
 }
 
@@ -194,17 +194,17 @@ static EXPECTED_METRIC_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(
 static EXPECTED_JSON_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:.*[/\\]expected.*.json)$").unwrap());
 
 #[must_use]
-pub fn read_expected_image_entries(base: &str) -> Vec<String> {
+pub(crate) fn read_expected_image_entries(base: &str) -> Vec<String> {
     read_expected_entries(&EXPECTED_IMAGE_REGEX, base)
 }
 
 #[must_use]
-pub fn read_expected_metric_entries(base: &str) -> Vec<String> {
+pub(crate) fn read_expected_metric_entries(base: &str) -> Vec<String> {
     read_expected_entries(&EXPECTED_METRIC_REGEX, base)
 }
 
 #[must_use]
-pub fn read_expected_json_entries(base: &str) -> Vec<String> {
+pub(crate) fn read_expected_json_entries(base: &str) -> Vec<String> {
     read_expected_entries(&EXPECTED_JSON_REGEX, base)
 }
 
@@ -239,7 +239,7 @@ fn array_size(v: &serde_json::Value) -> usize {
 }
 
 #[must_use]
-pub fn read_expected_metrics(path: &str) -> TestMetrics {
+pub(crate) fn read_expected_metrics(path: &str) -> TestMetrics {
     let mut result = TestMetrics::default();
 
     let Ok(document) = read_json(path) else {
@@ -309,7 +309,7 @@ pub fn read_expected_metrics(path: &str) -> TestMetrics {
 }
 
 #[must_use]
-pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
+pub(crate) fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     let mut metadata = TestMetadata { paths: paths.clone(), ..TestMetadata::default() };
 
     let Ok((document, text)) = read_json_with_text(&paths.style_path) else {
@@ -471,48 +471,48 @@ impl FromStr for TileLodMode {
     }
 }
 
-pub mod test_operation_names {
-    pub const WAIT_OP: &str = "wait";
-    pub const SLEEP_OP: &str = "sleep";
-    pub const ADD_IMAGE_OP: &str = "addImage";
-    pub const UPDATE_IMAGE_OP: &str = "updateImage";
-    pub const REMOVE_IMAGE_OP: &str = "removeImage";
-    pub const SET_STYLE_OP: &str = "setStyle";
-    pub const SET_CENTER_OP: &str = "setCenter";
-    pub const SET_ZOOM_OP: &str = "setZoom";
-    pub const SET_BEARING_OP: &str = "setBearing";
-    pub const SET_PITCH_OP: &str = "setPitch";
-    pub const SET_ROLL_OP: &str = "setRoll";
-    pub const SET_CENTER_ALTITUDE_OP: &str = "setCenterElevation";
-    pub const SET_FILTER_OP: &str = "setFilter";
-    pub const SET_LAYER_ZOOM_RANGE_OP: &str = "setLayerZoomRange";
-    pub const SET_LIGHT_OP: &str = "setLight";
-    pub const ADD_LAYER_OP: &str = "addLayer";
-    pub const REMOVE_LAYER_OP: &str = "removeLayer";
-    pub const ADD_SOURCE_OP: &str = "addSource";
-    pub const REMOVE_SOURCE_OP: &str = "removeSource";
-    pub const SET_PAINT_PROPERTY_OP: &str = "setPaintProperty";
-    pub const SET_LAYOUT_PROPERTY_OP: &str = "setLayoutProperty";
-    pub const SET_GLOBAL_STATE_PROPERTY_OP: &str = "setGlobalStateProperty";
-    pub const FILE_SIZE_PROBE_OP: &str = "probeFileSize";
-    pub const MEMORY_PROBE_OP: &str = "probeMemory";
-    pub const MEMORY_PROBE_START_OP: &str = "probeMemoryStart";
-    pub const MEMORY_PROBE_END_OP: &str = "probeMemoryEnd";
-    pub const NETWORK_PROBE_OP: &str = "probeNetwork";
-    pub const NETWORK_PROBE_START_OP: &str = "probeNetworkStart";
-    pub const NETWORK_PROBE_END_OP: &str = "probeNetworkEnd";
-    pub const SET_FEATURE_STATE_OP: &str = "setFeatureState";
-    pub const GET_FEATURE_STATE_OP: &str = "getFeatureState";
-    pub const REMOVE_FEATURE_STATE_OP: &str = "removeFeatureState";
-    pub const PAN_GESTURE_OP: &str = "panGesture";
-    pub const GFX_PROBE_OP: &str = "probeGFX";
-    pub const GFX_PROBE_START_OP: &str = "probeGFXStart";
-    pub const GFX_PROBE_END_OP: &str = "probeGFXEnd";
-    pub const SET_TILE_LOD_MIN_RADIUS_OP: &str = "setTileLodMinRadius";
-    pub const SET_TILE_LOD_SCALE_OP: &str = "setTileLodScale";
-    pub const SET_TILE_LOD_PITCH_THRESHOLD_OP: &str = "setTileLodPitchThreshold";
-    pub const SET_TILE_LOD_ZOOM_SHIFT_OP: &str = "setTileLodZoomShift";
-    pub const SET_TILE_LOD_MODE_OP: &str = "setTileLodMode";
+pub(crate) mod test_operation_names {
+    pub(crate) const WAIT_OP: &str = "wait";
+    pub(crate) const SLEEP_OP: &str = "sleep";
+    pub(crate) const ADD_IMAGE_OP: &str = "addImage";
+    pub(crate) const UPDATE_IMAGE_OP: &str = "updateImage";
+    pub(crate) const REMOVE_IMAGE_OP: &str = "removeImage";
+    pub(crate) const SET_STYLE_OP: &str = "setStyle";
+    pub(crate) const SET_CENTER_OP: &str = "setCenter";
+    pub(crate) const SET_ZOOM_OP: &str = "setZoom";
+    pub(crate) const SET_BEARING_OP: &str = "setBearing";
+    pub(crate) const SET_PITCH_OP: &str = "setPitch";
+    pub(crate) const SET_ROLL_OP: &str = "setRoll";
+    pub(crate) const SET_CENTER_ALTITUDE_OP: &str = "setCenterElevation";
+    pub(crate) const SET_FILTER_OP: &str = "setFilter";
+    pub(crate) const SET_LAYER_ZOOM_RANGE_OP: &str = "setLayerZoomRange";
+    pub(crate) const SET_LIGHT_OP: &str = "setLight";
+    pub(crate) const ADD_LAYER_OP: &str = "addLayer";
+    pub(crate) const REMOVE_LAYER_OP: &str = "removeLayer";
+    pub(crate) const ADD_SOURCE_OP: &str = "addSource";
+    pub(crate) const REMOVE_SOURCE_OP: &str = "removeSource";
+    pub(crate) const SET_PAINT_PROPERTY_OP: &str = "setPaintProperty";
+    pub(crate) const SET_LAYOUT_PROPERTY_OP: &str = "setLayoutProperty";
+    pub(crate) const SET_GLOBAL_STATE_PROPERTY_OP: &str = "setGlobalStateProperty";
+    pub(crate) const FILE_SIZE_PROBE_OP: &str = "probeFileSize";
+    pub(crate) const MEMORY_PROBE_OP: &str = "probeMemory";
+    pub(crate) const MEMORY_PROBE_START_OP: &str = "probeMemoryStart";
+    pub(crate) const MEMORY_PROBE_END_OP: &str = "probeMemoryEnd";
+    pub(crate) const NETWORK_PROBE_OP: &str = "probeNetwork";
+    pub(crate) const NETWORK_PROBE_START_OP: &str = "probeNetworkStart";
+    pub(crate) const NETWORK_PROBE_END_OP: &str = "probeNetworkEnd";
+    pub(crate) const SET_FEATURE_STATE_OP: &str = "setFeatureState";
+    pub(crate) const GET_FEATURE_STATE_OP: &str = "getFeatureState";
+    pub(crate) const REMOVE_FEATURE_STATE_OP: &str = "removeFeatureState";
+    pub(crate) const PAN_GESTURE_OP: &str = "panGesture";
+    pub(crate) const GFX_PROBE_OP: &str = "probeGFX";
+    pub(crate) const GFX_PROBE_START_OP: &str = "probeGFXStart";
+    pub(crate) const GFX_PROBE_END_OP: &str = "probeGFXEnd";
+    pub(crate) const SET_TILE_LOD_MIN_RADIUS_OP: &str = "setTileLodMinRadius";
+    pub(crate) const SET_TILE_LOD_SCALE_OP: &str = "setTileLodScale";
+    pub(crate) const SET_TILE_LOD_PITCH_THRESHOLD_OP: &str = "setTileLodPitchThreshold";
+    pub(crate) const SET_TILE_LOD_ZOOM_SHIFT_OP: &str = "setTileLodZoomShift";
+    pub(crate) const SET_TILE_LOD_MODE_OP: &str = "setTileLodMode";
 }
 
 use test_operation_names::{
@@ -637,7 +637,7 @@ fn infallible(ctx: &mut TestContext<'_>, result: Result<(), MapError>) -> bool {
     }
 }
 
-pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
+pub(crate) fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
     let mut result: TestOperations = Vec::new();
     let Some(operations) = metadata.test_value().and_then(|t| t.get("operations")).cloned() else {
         return result;
@@ -1070,7 +1070,7 @@ fn camera_operation(camera: CameraOptions) -> TestOperation {
 /// which emits the last partial sextet zero-padded and no `=` padding, with
 /// a `\n` after every 72 characters (none at the end).
 #[must_use]
-pub fn encode_base64(data: &[u8]) -> String {
+pub(crate) fn encode_base64(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len() * 4 / 3 + data.len() / 54 + 4);
     let mut count = 0usize;
@@ -1099,7 +1099,7 @@ fn to_string_u32(v: u32) -> String {
 
 /// A test's entry in the report, with its images or its error message.
 #[must_use]
-pub fn create_result_item(metadata: &TestMetadata) -> String {
+pub(crate) fn create_result_item(metadata: &TestMetadata) -> String {
     let mut html = String::new();
     let _ = writeln!(html, "<div class=\"test {}\">", metadata.status);
     let _ = write!(
@@ -1166,7 +1166,12 @@ pub fn create_result_item(metadata: &TestMetadata) -> String {
 /// The HTML report of a run, with entries for the failed and errored tests
 /// only.
 #[must_use]
-pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], shuffle: bool, seed: u32) -> String {
+pub(crate) fn create_result_page(
+    stats: &TestStatistics,
+    metadatas: &[TestMetadata],
+    shuffle: bool,
+    seed: u32,
+) -> String {
     let failed_or_errored = |metadata: &&TestMetadata| metadata.status == "failed" || metadata.status == "errored";
     let unsuccessful = stats.errored_tests + stats.failed_tests;
     let mut results_page = String::new();

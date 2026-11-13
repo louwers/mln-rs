@@ -152,7 +152,7 @@ impl<D: Clone> CustomTileLoader<D> {
 
     /// Whether a tile still needs the canonical tile's data, so that an
     /// answer from the host would be used.
-    pub fn is_required(&self, tile_id: &CanonicalTileID) -> bool {
+    pub(crate) fn is_required(&self, tile_id: &CanonicalTileID) -> bool {
         self.tile_states.get(tile_id).is_some_and(TileState::required)
     }
 

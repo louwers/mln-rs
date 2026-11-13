@@ -110,7 +110,7 @@ fn with_live_frame<R>(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_acquire_frame(
+pub(crate) unsafe extern "C" fn mln_render_session_acquire_frame(
     session: mln_render_session,
     out_frame: *mut mln_acquired_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -147,7 +147,7 @@ pub unsafe extern "C" fn mln_render_session_acquire_frame(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_result(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_result(
     frame: mln_acquired_frame,
     out_result: *mut mln_render_frame_result,
     out_diagnostic: *mut mln_diagnostic,
@@ -169,7 +169,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_result(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_producer_sync(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_producer_sync(
     frame: mln_acquired_frame,
     out_sync: *mut mln_gpu_sync,
     out_diagnostic: *mut mln_diagnostic,
@@ -239,7 +239,7 @@ unsafe fn consumer_sync(sync: GpuSync) -> ConsumerSync {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_release(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_release(
     frame: mln_acquired_frame,
     consumer_completion: *const mln_gpu_sync,
     out_diagnostic: *mut mln_diagnostic,
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn mln_acquired_frame_release(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_discard(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_discard(
     frame: mln_acquired_frame,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
@@ -315,7 +315,7 @@ struct ViewScope(Arc<FrameObject>, FrameView);
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_view_begin(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_view_begin(
     frame: mln_acquired_frame,
     out_scope: *mut *mut c_void,
     out_diagnostic: *mut mln_diagnostic,
@@ -348,7 +348,7 @@ pub unsafe extern "C" fn mln_acquired_frame_view_begin(
 /// `scope` is null or a scope that `mln_acquired_frame_view_begin()` gave
 /// and no call ended yet.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_view_end(scope: *mut c_void) {
+pub(crate) unsafe extern "C" fn mln_acquired_frame_view_end(scope: *mut c_void) {
     if scope.is_null() {
         return;
     }
@@ -385,7 +385,7 @@ fn different_backend() -> Error {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_vulkan_texture(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_vulkan_texture(
     frame: mln_acquired_frame,
     out_frame: *mut mln_vulkan_texture_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -440,7 +440,7 @@ fn other_backend<T: abi::Versioned>(frame: mln_acquired_frame, out_frame: *mut T
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_metal_texture(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_metal_texture(
     frame: mln_acquired_frame,
     out_frame: *mut mln_metal_texture_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -482,7 +482,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_metal_texture(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_open_gl_texture(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_open_gl_texture(
     frame: mln_acquired_frame,
     out_frame: *mut mln_open_gl_texture_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -523,7 +523,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_open_gl_texture(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_web_gpu_texture(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_web_gpu_texture(
     frame: mln_acquired_frame,
     out_frame: *mut mln_web_gpu_texture_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -553,7 +553,7 @@ fn other_export() -> Error {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_io_surface(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_io_surface(
     frame: mln_acquired_frame,
     out_frame: *mut mln_io_surface_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -584,7 +584,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_io_surface(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_dma_buf(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_dma_buf(
     frame: mln_acquired_frame,
     out_frame: *mut mln_dma_buf_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -619,7 +619,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_dma_buf(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
     frame: mln_acquired_frame,
     out_frame: *mut mln_opaque_fd_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -666,7 +666,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_android_hardware_buffer(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_android_hardware_buffer(
     frame: mln_acquired_frame,
     out_frame: *mut mln_android_hardware_buffer_frame,
     out_diagnostic: *mut mln_diagnostic,
@@ -697,7 +697,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_android_hardware_buffer(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_dxgi_shared_texture(
+pub(crate) unsafe extern "C" fn mln_acquired_frame_get_dxgi_shared_texture(
     frame: mln_acquired_frame,
     out_frame: *mut mln_dxgi_shared_texture_frame,
     out_diagnostic: *mut mln_diagnostic,

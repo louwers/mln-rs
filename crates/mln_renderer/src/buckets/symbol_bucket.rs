@@ -63,70 +63,70 @@ crate::paint_property_binders!(
 /// origin.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct SymbolLayoutVertex {
-    pub a1: [i16; 4],
-    pub a2: [u16; 4],
-    pub a3: [i16; 4],
+pub(crate) struct SymbolLayoutVertex {
+    pub(crate) a1: [i16; 4],
+    pub(crate) a2: [u16; 4],
+    pub(crate) a3: [i16; 4],
     /// Port-only: the top-left of the quad's atlas rectangle, the same on all
     /// four of its vertices. The shaders interpolate the texture coordinate
     /// relative to it and add it back per fragment, as interpolating the
     /// absolute coordinate rounds differently at different atlas positions,
     /// and which tile reserves an image first, and so its position, varies
     /// from run to run.
-    pub a4: [u16; 2],
+    pub(crate) a4: [u16; 2],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct SymbolDynamicLayoutVertex {
-    pub a1: [f32; 3],
+pub(crate) struct SymbolDynamicLayoutVertex {
+    pub(crate) a1: [f32; 3],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct SymbolOpacityVertex {
-    pub a1: [f32; 1],
+pub(crate) struct SymbolOpacityVertex {
+    pub(crate) a1: [f32; 1],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct CollisionBoxLayoutVertex {
-    pub a1: [i16; 2],
-    pub a2: [i16; 2],
-    pub a3: [i16; 2],
+pub(crate) struct CollisionBoxLayoutVertex {
+    pub(crate) a1: [i16; 2],
+    pub(crate) a2: [i16; 2],
+    pub(crate) a3: [i16; 2],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct CollisionBoxDynamicVertex {
-    pub a1: [u16; 2],
-    pub a2: [f32; 2],
+pub(crate) struct CollisionBoxDynamicVertex {
+    pub(crate) a1: [u16; 2],
+    pub(crate) a2: [f32; 2],
 }
 
-pub const MAX_GLYPH_ICON_SIZE: u16 = 255;
-pub const SIZE_PACK_FACTOR: u16 = 128;
-pub const MAX_PACKED_SIZE: u16 = MAX_GLYPH_ICON_SIZE * SIZE_PACK_FACTOR;
+pub(crate) const MAX_GLYPH_ICON_SIZE: u16 = 255;
+pub(crate) const SIZE_PACK_FACTOR: u16 = 128;
+pub(crate) const MAX_PACKED_SIZE: u16 = MAX_GLYPH_ICON_SIZE * SIZE_PACK_FACTOR;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SortKeyRange {
-    pub sort_key: f32,
-    pub start: usize,
-    pub end: usize,
+pub(crate) struct SortKeyRange {
+    pub(crate) sort_key: f32,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ZoomEvaluatedSize {
-    pub is_zoom_constant: bool,
-    pub is_feature_constant: bool,
-    pub size_t: f32,
-    pub size: f32,
-    pub layout_size: f32,
+pub(crate) struct ZoomEvaluatedSize {
+    pub(crate) is_zoom_constant: bool,
+    pub(crate) is_feature_constant: bool,
+    pub(crate) size_t: f32,
+    pub(crate) size: f32,
+    pub(crate) layout_size: f32,
 }
 
 /// Evaluates a symbol's `text-size` or `icon-size`: a constant, a source
 /// function or a composite function.
 #[derive(Debug, Serialize, Deserialize)]
-pub enum SymbolSizeBinder {
+pub(crate) enum SymbolSizeBinder {
     Constant {
         layout_size: f32,
         covering_ranges: Option<(Range<f32>, Range<f32>)>,
@@ -146,7 +146,7 @@ pub enum SymbolSizeBinder {
 
 impl SymbolSizeBinder {
     #[must_use]
-    pub fn create(tile_zoom: f32, size_property: &PropertyValue<f32>, default_value: f32) -> Self {
+    pub(crate) fn create(tile_zoom: f32, size_property: &PropertyValue<f32>, default_value: f32) -> Self {
         if size_property.is_undefined() {
             return SymbolSizeBinder::Constant { layout_size: default_value, covering_ranges: None, expression: None };
         }
@@ -188,7 +188,7 @@ impl SymbolSizeBinder {
         }
     }
 
-    pub fn get_vertex_size_data(&self, feature: &dyn GeometryTileFeature) -> Range<f32> {
+    pub(crate) fn get_vertex_size_data(&self, feature: &dyn GeometryTileFeature) -> Range<f32> {
         match self {
             SymbolSizeBinder::Constant { .. } => Range { min: 0.0, max: 0.0 },
             SymbolSizeBinder::SourceFunction { expression, default_value } => {
@@ -203,7 +203,7 @@ impl SymbolSizeBinder {
     }
 
     #[must_use]
-    pub fn evaluate_for_zoom(&self, current_zoom: f32) -> ZoomEvaluatedSize {
+    pub(crate) fn evaluate_for_zoom(&self, current_zoom: f32) -> ZoomEvaluatedSize {
         let unused = 0.0_f32;
         match self {
             SymbolSizeBinder::Constant { layout_size, covering_ranges, expression } => {
@@ -253,34 +253,34 @@ impl SymbolSizeBinder {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PlacedSymbol {
-    pub anchor_point: Point<f32>,
-    pub segment: usize,
-    pub lower_size: f32,
-    pub upper_size: f32,
-    pub line_offset: [f32; 2],
-    pub writing_modes: WritingModeType,
-    pub line: GeometryCoordinates,
-    pub tile_distances: Vec<f32>,
-    pub glyph_offsets: Vec<f32>,
-    pub hidden: bool,
-    pub start_index: usize,
+pub(crate) struct PlacedSymbol {
+    pub(crate) anchor_point: Point<f32>,
+    pub(crate) segment: usize,
+    pub(crate) lower_size: f32,
+    pub(crate) upper_size: f32,
+    pub(crate) line_offset: [f32; 2],
+    pub(crate) writing_modes: WritingModeType,
+    pub(crate) line: GeometryCoordinates,
+    pub(crate) tile_distances: Vec<f32>,
+    pub(crate) glyph_offsets: Vec<f32>,
+    pub(crate) hidden: bool,
+    pub(crate) start_index: usize,
     /// The crossTileID is only filled/used on the foreground for variable
     /// text anchors
-    pub cross_tile_id: u32,
+    pub(crate) cross_tile_id: u32,
     /// The placedOrientation is only used when symbol layer's property is
     /// set to support placement for orientation variants.
-    pub placed_orientation: Option<TextWritingModeType>,
-    pub angle: f32,
+    pub(crate) placed_orientation: Option<TextWritingModeType>,
+    pub(crate) angle: f32,
     /// Reference to placed icon, only applicable for text symbols.
-    pub placed_icon_index: Option<usize>,
-    pub feature_id: Option<String>,
+    pub(crate) placed_icon_index: Option<usize>,
+    pub(crate) feature_id: Option<String>,
 }
 
 impl PlacedSymbol {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         anchor_point: Point<f32>,
         segment: usize,
         lower_size: f32,
@@ -314,43 +314,43 @@ impl PlacedSymbol {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Buffer {
-    pub attribute_data: GeometryVec<SymbolLayoutVertex>,
+pub(crate) struct Buffer {
+    pub(crate) attribute_data: GeometryVec<SymbolLayoutVertex>,
     #[serde(with = "pod")]
-    pub dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
+    pub(crate) dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
     /// Positions for each layer that shares the bucket at another
     /// translation than its leader's. A layer keeps them for the bucket's
     /// life: drawables moved back to the shared positions would keep
     /// bindings to these. Placement makes them once the bucket is on the
     /// map side, so they don't cross with it from a worker.
     #[serde(skip)]
-    pub layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
+    pub(crate) layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
     #[serde(with = "pod")]
-    pub opacity_attribute_data: Vec<SymbolOpacityVertex>,
+    pub(crate) opacity_attribute_data: Vec<SymbolOpacityVertex>,
     /// Three indices per triangle.
     #[serde(with = "pod")]
-    pub triangles: Vec<u16>,
-    pub segments: Vec<SegmentBase>,
-    pub placed_symbols: Vec<PlacedSymbol>,
+    pub(crate) triangles: Vec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
+    pub(crate) placed_symbols: Vec<PlacedSymbol>,
     /// Bumped by `updateModified` (the drawables re-read changed vectors).
-    pub modified: u64,
+    pub(crate) modified: u64,
 }
 
 impl Buffer {
-    pub fn update_modified(&mut self) {
+    pub(crate) fn update_modified(&mut self) {
         self.modified += 1;
     }
 
     /// The positions `layer_id` draws: its own when it has them, the
     /// leader's otherwise.
-    pub fn dynamic_attribute_data_for(&self, layer_id: &str) -> &Vec<SymbolDynamicLayoutVertex> {
+    pub(crate) fn dynamic_attribute_data_for(&self, layer_id: &str) -> &Vec<SymbolDynamicLayoutVertex> {
         self.layer_dynamic_attribute_data.get(layer_id).unwrap_or(&self.dynamic_attribute_data)
     }
 
     /// The positions placement lays out, the leader's or, with a layer ID,
     /// that layer's (made on first use), with the placed symbols they are
     /// for (C++ `positions(buffer)` in `updateBucketDynamicAttributeData`).
-    pub fn positions_and_symbols(
+    pub(crate) fn positions_and_symbols(
         &mut self,
         layer_id: Option<&str>,
     ) -> (&mut Vec<SymbolDynamicLayoutVertex>, &[PlacedSymbol]) {
@@ -363,7 +363,7 @@ impl Buffer {
 
     /// Whether any of the `count` opacity vertices from `offset` can draw. A
     /// range that placement hasn't filled yet counts as visible.
-    pub fn has_visible_vertices(&self, offset: usize, count: usize) -> bool {
+    pub(crate) fn has_visible_vertices(&self, offset: usize, count: usize) -> bool {
         let Some(range) = offset.checked_add(count).and_then(|end| self.opacity_attribute_data.get(offset..end)) else {
             return true;
         };
@@ -374,7 +374,7 @@ impl Buffer {
 
     /// Whether the drawable of `segment` (one segment, or `None` for the
     /// whole buffer) has any vertex that can draw.
-    pub fn segment_has_visible_vertices(&self, segment: Option<usize>) -> bool {
+    pub(crate) fn segment_has_visible_vertices(&self, segment: Option<usize>) -> bool {
         match segment {
             Some(i) => self
                 .segments
@@ -387,55 +387,55 @@ impl Buffer {
 
 /// The vertices and indices of a symbol bucket's collision boxes or circles.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct CollisionBuffer {
+pub(crate) struct CollisionBuffer {
     #[serde(with = "pod")]
-    pub vertices: Vec<CollisionBoxLayoutVertex>,
+    pub(crate) vertices: Vec<CollisionBoxLayoutVertex>,
     #[serde(with = "pod")]
-    pub dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
-    pub segments: Vec<SegmentBase>,
+    pub(crate) dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
+    pub(crate) segments: Vec<SegmentBase>,
     /// `lines` (box buffers: 2 per line) or `triangles` (circle buffers: 3
     /// per triangle).
     #[serde(with = "pod")]
-    pub indices: Vec<u16>,
+    pub(crate) indices: Vec<u16>,
 }
 
 /// The paint property binders of one layer (`SymbolBucket::PaintProperties`).
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PaintProperties {
-    pub icon_binders: SymbolIconBinders,
-    pub text_binders: SymbolTextBinders,
+pub(crate) struct PaintProperties {
+    pub(crate) icon_binders: SymbolIconBinders,
+    pub(crate) text_binders: SymbolTextBinders,
 }
 
 /// The state of a `SymbolBucket` that placement and sorting change after the
 /// bucket is shared.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct SymbolBucketState {
-    pub sorted_angle: f32,
+pub(crate) struct SymbolBucketState {
+    pub(crate) sorted_angle: f32,
     // Set and used by placement.
-    pub just_reloaded: bool,
-    pub has_variable_placement: bool,
-    pub has_uninitialized_symbols: bool,
+    pub(crate) just_reloaded: bool,
+    pub(crate) has_variable_placement: bool,
+    pub(crate) has_uninitialized_symbols: bool,
     /// The tile-unit translations the leader's dynamic positions carry,
     /// which layers sharing the bucket compare.
-    pub dynamic_text_translation: Point<f32>,
-    pub dynamic_icon_translation: Point<f32>,
+    pub(crate) dynamic_text_translation: Point<f32>,
+    pub(crate) dynamic_icon_translation: Point<f32>,
 
-    pub symbol_instances: Vec<SymbolInstance>,
+    pub(crate) symbol_instances: Vec<SymbolInstance>,
 
-    pub text: Buffer,
-    pub icon: Buffer,
-    pub sdf_icon: Buffer,
+    pub(crate) text: Buffer,
+    pub(crate) icon: Buffer,
+    pub(crate) sdf_icon: Buffer,
 
-    pub icon_collision_box: Option<CollisionBuffer>,
-    pub text_collision_box: Option<CollisionBuffer>,
-    pub icon_collision_circle: Option<CollisionBuffer>,
-    pub text_collision_circle: Option<CollisionBuffer>,
+    pub(crate) icon_collision_box: Option<CollisionBuffer>,
+    pub(crate) text_collision_box: Option<CollisionBuffer>,
+    pub(crate) icon_collision_circle: Option<CollisionBuffer>,
+    pub(crate) text_collision_circle: Option<CollisionBuffer>,
 
-    pub feature_sort_order: Option<Arc<Vec<usize>>>,
+    pub(crate) feature_sort_order: Option<Arc<Vec<usize>>>,
 }
 
 impl SymbolBucketState {
-    pub fn has_layer_dynamic_attribute_data(&self, layer_id: &str) -> bool {
+    pub(crate) fn has_layer_dynamic_attribute_data(&self, layer_id: &str) -> bool {
         self.text.layer_dynamic_attribute_data.contains_key(layer_id)
             || self.icon.layer_dynamic_attribute_data.contains_key(layer_id)
             || self.sdf_icon.layer_dynamic_attribute_data.contains_key(layer_id)
@@ -449,49 +449,49 @@ fn next_bucket_instance_id() -> u32 {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct SymbolBucket {
-    pub base: BucketBase,
-    pub layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-    pub bucket_leader_id: String,
+pub(crate) struct SymbolBucket {
+    pub(crate) base: BucketBase,
+    pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
+    pub(crate) bucket_leader_id: String,
 
     // Flags
-    pub icons_need_linear: bool,
-    pub sort_features_by_y: bool,
-    pub icons_in_text: bool,
+    pub(crate) icons_need_linear: bool,
+    pub(crate) sort_features_by_y: bool,
+    pub(crate) icons_in_text: bool,
 
-    pub sort_key_ranges: Vec<SortKeyRange>,
+    pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 
-    pub paint_properties: VecMap<String, RwLock<PaintProperties>>,
+    pub(crate) paint_properties: VecMap<String, RwLock<PaintProperties>>,
 
-    pub text_size_binder: SymbolSizeBinder,
-    pub icon_size_binder: SymbolSizeBinder,
+    pub(crate) text_size_binder: SymbolSizeBinder,
+    pub(crate) icon_size_binder: SymbolSizeBinder,
 
-    pub tile_pixel_ratio: f32,
+    pub(crate) tile_pixel_ratio: f32,
     /// Port-only: a bucket another side made gets an id of this side's.
     #[serde(skip, default = "next_bucket_instance_id")]
-    pub bucket_instance_id: u32,
-    pub allow_vertical_placement: bool,
-    pub placement_modes: Vec<TextWritingModeType>,
+    pub(crate) bucket_instance_id: u32,
+    pub(crate) allow_vertical_placement: bool,
+    pub(crate) placement_modes: Vec<TextWritingModeType>,
     #[serde(skip)]
     has_format_section_overrides: OnceLock<bool>,
 
     /// Bumped whenever the vertex data changes after the bucket is shared
     /// (placement, sorting), so drawables can refresh their attributes.
     #[serde(skip)]
-    pub version: AtomicU32,
+    pub(crate) version: AtomicU32,
     /// What changed (the C++ shared vectors' `updateModified`): the
     /// opacity vertices (placement), the dynamic vertices (line labels,
     /// variable anchors), the triangle order (sortFeatures) and the paint
     /// property binders (feature state). `RenderSymbolLayer` refreshes only
     /// those in its drawables.
     #[serde(skip)]
-    pub opacity_version: AtomicU32,
+    pub(crate) opacity_version: AtomicU32,
     #[serde(skip)]
-    pub dynamic_version: AtomicU32,
+    pub(crate) dynamic_version: AtomicU32,
     #[serde(skip)]
-    pub sort_version: AtomicU32,
+    pub(crate) sort_version: AtomicU32,
     #[serde(skip)]
-    pub binder_version: AtomicU32,
+    pub(crate) binder_version: AtomicU32,
 
     state: Mutex<SymbolBucketState>,
 }
@@ -505,7 +505,7 @@ impl std::fmt::Debug for SymbolBucket {
 impl SymbolBucket {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
         paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         text_size: &PropertyValue<f32>,
@@ -559,48 +559,48 @@ impl SymbolBucket {
     }
 
     /// The mutable state (render thread, after sharing).
-    pub fn state(&self) -> MutexGuard<'_, SymbolBucketState> {
+    pub(crate) fn state(&self) -> MutexGuard<'_, SymbolBucketState> {
         self.state.lock()
     }
 
     /// The mutable state while the bucket is still owned (worker thread).
-    pub fn state_mut(&mut self) -> &mut SymbolBucketState {
+    pub(crate) fn state_mut(&mut self) -> &mut SymbolBucketState {
         self.state.get_mut()
     }
 
-    pub fn bump_version(&self) {
+    pub(crate) fn bump_version(&self) {
         self.version.fetch_add(1, Ordering::SeqCst);
     }
 
-    pub fn has_text_data(&self) -> bool {
+    pub(crate) fn has_text_data(&self) -> bool {
         !self.state().text.segments.is_empty()
     }
-    pub fn has_icon_data(&self) -> bool {
+    pub(crate) fn has_icon_data(&self) -> bool {
         !self.state().icon.segments.is_empty()
     }
-    pub fn has_sdf_icon_data(&self) -> bool {
+    pub(crate) fn has_sdf_icon_data(&self) -> bool {
         !self.state().sdf_icon.segments.is_empty()
     }
-    pub fn has_icon_collision_box_data(&self) -> bool {
+    pub(crate) fn has_icon_collision_box_data(&self) -> bool {
         self.state().icon_collision_box.as_ref().is_some_and(|b| !b.segments.is_empty())
     }
-    pub fn has_icon_collision_circle_data(&self) -> bool {
+    pub(crate) fn has_icon_collision_circle_data(&self) -> bool {
         self.state().icon_collision_circle.as_ref().is_some_and(|b| !b.segments.is_empty())
     }
-    pub fn has_text_collision_box_data(&self) -> bool {
+    pub(crate) fn has_text_collision_box_data(&self) -> bool {
         self.state().text_collision_box.as_ref().is_some_and(|b| !b.segments.is_empty())
     }
-    pub fn has_text_collision_circle_data(&self) -> bool {
+    pub(crate) fn has_text_collision_circle_data(&self) -> bool {
         self.state().text_collision_circle.as_ref().is_some_and(|b| !b.segments.is_empty())
     }
 
-    pub fn has_format_section_overrides(&self) -> bool {
+    pub(crate) fn has_format_section_overrides(&self) -> bool {
         *self
             .has_format_section_overrides
             .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(self.layout.get::<TextField>()))
     }
 
-    pub fn has_variable_text_anchors(&self) -> bool {
+    pub(crate) fn has_variable_text_anchors(&self) -> bool {
         let tvao = self.layout.get::<TextVariableAnchorOffset>();
         let has_text_variable_anchor_offset = if tvao.is_constant() {
             tvao.constant().is_some_and(|c: VariableAnchorOffsetCollection| !c.is_empty())
@@ -611,7 +611,7 @@ impl SymbolBucket {
         has_text_variable_anchor_offset || !self.layout.get::<TextVariableAnchor>().is_empty()
     }
 
-    pub fn sort_features(&self, angle: f32) {
+    pub(crate) fn sort_features(&self, angle: f32) {
         if !self.sort_features_by_y {
             return;
         }
@@ -682,7 +682,8 @@ impl SymbolBucket {
 
     /// The indices into `symbol_instances` of a sort key range, or all
     /// `count` of them if `range` is `None` or invalid.
-    pub fn get_symbols(&self, range: Option<&SortKeyRange>, count: usize) -> std::ops::Range<usize> {
+    #[expect(clippy::unused_self, reason = "the bucket's view of its sort key ranges")]
+    pub(crate) fn get_symbols(&self, range: Option<&SortKeyRange>, count: usize) -> std::ops::Range<usize> {
         match range {
             Some(range) if range.start < range.end && range.end <= count => range.start..range.end,
             _ => 0..count,
@@ -691,7 +692,7 @@ impl SymbolBucket {
 
     /// The end of `upload`/`updateVertices` bookkeeping: `uploaded = false`
     /// and the buffers' `updateModified`.
-    pub fn mark_vertices_updated(&self, update_opacities: bool, dynamic_updated: bool) {
+    pub(crate) fn mark_vertices_updated(&self, update_opacities: bool, dynamic_updated: bool) {
         let mut state = self.state();
         if update_opacities {
             self.base.uploaded.store(false, Ordering::SeqCst);
@@ -713,14 +714,14 @@ impl SymbolBucket {
     /// (`tex_origin`, see [`SymbolLayoutVertex::a4`]).
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn layout_attributes(
+    pub(crate) fn layout_attributes(
         label_anchor: Point<f32>,
         o: Point<f32>,
         glyph_offset_y: f32,
         tx: u16,
         ty: u16,
         tex_origin: [u16; 2],
-        size_data: &Range<f32>,
+        size_data: Range<f32>,
         is_sdf: bool,
         pixel_offset: Point<f32>,
         min_font_scale: Point<f32>,
@@ -749,17 +750,21 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub fn dynamic_layout_attributes(anchor_point: Point<f32>, label_angle: f32) -> SymbolDynamicLayoutVertex {
+    pub(crate) fn dynamic_layout_attributes(anchor_point: Point<f32>, label_angle: f32) -> SymbolDynamicLayoutVertex {
         SymbolDynamicLayoutVertex { a1: [anchor_point.x, anchor_point.y, label_angle] }
     }
 
     #[must_use]
-    pub fn opacity_attributes(placed: bool, opacity: f32) -> SymbolOpacityVertex {
+    pub(crate) fn opacity_attributes(placed: bool, opacity: f32) -> SymbolOpacityVertex {
         SymbolOpacityVertex { a1: [((u32::from((opacity * 127.0) as u8) << 1) | u32::from(placed)) as f32] }
     }
 
     #[must_use]
-    pub fn collision_layout_vertex(a: Point<f32>, anchor: Point<f32>, o: Point<f32>) -> CollisionBoxLayoutVertex {
+    pub(crate) fn collision_layout_vertex(
+        a: Point<f32>,
+        anchor: Point<f32>,
+        o: Point<f32>,
+    ) -> CollisionBoxLayoutVertex {
         CollisionBoxLayoutVertex {
             a1: [a.x as i16, a.y as i16],
             a2: [anchor.x as i16, anchor.y as i16],
@@ -768,7 +773,11 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub fn collision_dynamic_vertex(placed: bool, not_used: bool, shift: Point<f32>) -> CollisionBoxDynamicVertex {
+    pub(crate) fn collision_dynamic_vertex(
+        placed: bool,
+        not_used: bool,
+        shift: Point<f32>,
+    ) -> CollisionBoxDynamicVertex {
         CollisionBoxDynamicVertex { a1: [u16::from(placed), u16::from(not_used)], a2: [shift.x, shift.y] }
     }
 }
@@ -787,7 +796,7 @@ fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
 /// `angle`, then by descending data feature index. Equal keys keep their
 /// index order.
 #[must_use]
-pub fn get_sorted_symbols(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
+pub(crate) fn get_sorted_symbols(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
     let mut result: Vec<usize> = (0..symbol_instances.len()).collect();
     let sin = angle.sin();
     let cos = angle.cos();

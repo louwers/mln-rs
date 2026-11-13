@@ -75,13 +75,13 @@ impl Shared {
     }
 }
 
-pub struct RenderCustomLayer {
+pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
     shared: Rc<Shared>,
 }
 
 impl RenderCustomLayer {
-    pub fn new(impl_: Arc<CustomLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<CustomLayerImpl>) -> Self {
         let host = impl_.host();
         let properties: Arc<dyn LayerProperties> = Arc::new(CustomLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -98,7 +98,7 @@ impl RenderCustomLayer {
     }
 
     /// Tells the host that its graphics objects are lost, and lets go of it.
-    pub fn lose_context(&mut self) {
+    pub(crate) fn lose_context(&mut self) {
         self.shared.end(true);
     }
 }

@@ -12,26 +12,26 @@
 
 #[cfg(target_os = "android")]
 pub mod android;
-pub mod asset_file_source;
-pub mod async_request;
+mod asset_file_source;
+mod async_request;
 #[cfg(feature = "sqlite")]
 pub mod database_file_source;
 #[cfg(target_family = "wasm")]
 mod fetch_transport;
 pub mod file_source;
-pub mod file_source_manager;
-pub mod file_source_request;
-pub mod http_file_source;
+mod file_source_manager;
+mod file_source_request;
+mod http_file_source;
 pub mod http_header_transform;
-pub mod http_timeout;
+mod http_timeout;
 mod json_document;
-pub mod local_file_request;
-pub mod local_file_source;
-pub mod main_resource_loader;
+mod local_file_request;
+mod local_file_source;
+mod main_resource_loader;
 #[cfg(feature = "sqlite")]
-pub mod mbtiles_file_source;
+mod mbtiles_file_source;
 #[cfg(feature = "sqlite")]
-pub mod merge_sideloaded;
+mod merge_sideloaded;
 pub mod network_status;
 #[cfg(target_vendor = "apple")]
 mod nsurlsession_transport;
@@ -39,37 +39,32 @@ pub mod offline;
 #[cfg(feature = "sqlite")]
 pub mod offline_database;
 #[cfg(feature = "sqlite")]
-pub mod offline_schema;
+mod offline_schema;
 pub mod online_file_source;
-pub mod pmtiles_file_source;
+mod pmtiles_file_source;
 pub mod resource;
-pub mod resource_options;
+mod resource_options;
 pub mod resource_transform;
 pub mod response;
 #[cfg(feature = "sqlite")]
 pub mod sqlite3;
+#[cfg(any(test, feature = "test-support"))]
 pub mod stub_file_source;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
 mod ureq_transport;
 
-pub use asset_file_source::AssetFileSource;
 pub use async_request::AsyncRequest;
 #[cfg(feature = "sqlite")]
 pub use database_file_source::DatabaseFileSource;
 #[cfg(target_family = "wasm")]
 pub use fetch_transport::set_fetch_preloads;
 pub use file_source::{Callback, FileSource, FileSourceType, READ_ONLY_MODE_KEY};
-pub use file_source_manager::{FileSourceFactory, FileSourceManager};
-pub use file_source_request::{FileSourceRequest, FileSourceRequestState};
-pub use local_file_source::LocalFileSource;
+pub use file_source_manager::FileSourceManager;
 pub use main_resource_loader::MainResourceLoader;
-#[cfg(feature = "sqlite")]
-pub use mbtiles_file_source::MBTilesFileSource;
 #[cfg(feature = "sqlite")]
 pub use offline_database::OfflineDatabase;
 pub use online_file_source::OnlineFileSource;
-pub use pmtiles_file_source::PMTilesFileSource;
-pub use resource::{Kind, LoadingMethod, Resource, StoragePolicy, TileData};
+pub use resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 pub use resource_options::ResourceOptions;
 pub use response::{Data, ResourceError, Response};
 

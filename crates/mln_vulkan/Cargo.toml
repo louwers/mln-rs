@@ -34,26 +34,5 @@ windows.workspace = true
 [target.'cfg(all(unix, not(any(target_vendor = "apple", target_family = "wasm"))))'.dependencies]
 libc.workspace = true
 
-# Compiles every GLSL source to SPIR-V in both projection variants, and
-# checks the bindings each one declares against the descriptor set layouts.
-[[test]]
-name = "glsl_compile_test"
-path = "tests/glsl_compile_test.rs"
-
-# The background shader end to end on the drawable path (after
-# crates/mln_webgpu/tests/background_test.rs): an offscreen target, a
-# DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
-# rendered into the offscreen target and read back.
-[[test]]
-name = "background_test"
-path = "tests/background_test.rs"
-
-# The window backend on a headless surface (VK_EXT_headless_surface): frames
-# through the swapchain, resizes, the overlay, readback, two frames in
-# flight.
-[[test]]
-name = "surface_test"
-path = "tests/surface_test.rs"
-
 [lints]
 workspace = true

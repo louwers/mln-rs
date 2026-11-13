@@ -70,11 +70,11 @@ mod web;
 mod wgl_tests;
 
 #[rustfmt::skip]
-#[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unused_variables, clippy::all, clippy::pedantic)]
+#[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unreachable_pub, unused_variables, clippy::all, clippy::pedantic)]
 mod generated {
-    pub mod types;
+    pub(crate) mod types;
     mod stubs;
     mod signatures;
     #[cfg(target_family = "wasm")]
-    pub mod trampolines;
+    pub(crate) mod trampolines;
 }

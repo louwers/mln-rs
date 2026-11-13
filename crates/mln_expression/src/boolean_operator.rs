@@ -31,7 +31,7 @@ impl Any {
         Any { base: ExpressionBase::new(Kind::Any, Type::Boolean, collect_dependencies(&inputs)), inputs }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         Some(Box::new(Any::new(parse_boolean_op(value, ctx)?)))
     }
 }
@@ -85,7 +85,7 @@ impl All {
         All { base: ExpressionBase::new(Kind::All, Type::Boolean, collect_dependencies(&inputs)), inputs }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         Some(Box::new(All::new(parse_boolean_op(value, ctx)?)))
     }
 }

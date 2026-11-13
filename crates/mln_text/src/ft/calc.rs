@@ -20,7 +20,7 @@ fn neg_long(x: i64) -> i64 {
 
 /// `(a * b + c / 2) / c`, rounding the magnitude.
 #[must_use]
-pub fn mul_div(a: i64, b: i64, c: i64) -> i64 {
+pub(crate) fn mul_div(a: i64, b: i64, c: i64) -> i64 {
     let mut s = 1;
     let a = move_sign(a, &mut s);
     let b = move_sign(b, &mut s);
@@ -32,7 +32,7 @@ pub fn mul_div(a: i64, b: i64, c: i64) -> i64 {
 
 /// `(a << 16 + b / 2) / b`.
 #[must_use]
-pub fn div_fix(a: i64, b: i64) -> i64 {
+pub(crate) fn div_fix(a: i64, b: i64) -> i64 {
     let mut s = 1;
     let a = move_sign(a, &mut s);
     let b = move_sign(b, &mut s);
@@ -44,8 +44,9 @@ pub fn div_fix(a: i64, b: i64) -> i64 {
 /// `(a * b + 0x8000) >> 16`, rounding the magnitude, as FreeType's C version
 /// computes it (its x86-64 inline assembly computes the same, truncated to 32
 /// bits).
+#[cfg(test)]
 #[must_use]
-pub fn mul_fix(a: i64, b: i64) -> i64 {
+pub(crate) fn mul_fix(a: i64, b: i64) -> i64 {
     let ab = i64::from(a as i32).wrapping_mul(i64::from(b as i32));
     i64::from(((ab + 0x8000 - i64::from(ab < 0)) >> 16) as i32)
 }

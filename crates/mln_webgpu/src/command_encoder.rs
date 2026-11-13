@@ -21,7 +21,7 @@ use crate::draw_target::TargetResource;
 use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
 
-pub struct CommandEncoder {
+pub(crate) struct CommandEncoder {
     context: Rc<Context>,
     encoder: RefCell<Option<wgpu::CommandEncoder>>,
 }
@@ -32,16 +32,16 @@ fn new_encoder(context: &Context) -> wgpu::CommandEncoder {
 }
 
 impl CommandEncoder {
-    pub fn new(context: Rc<Context>) -> Self {
+    pub(crate) fn new(context: Rc<Context>) -> Self {
         let encoder = new_encoder(&context);
         CommandEncoder { context, encoder: RefCell::new(Some(encoder)) }
     }
 
-    pub fn get_context(&self) -> &Rc<Context> {
+    pub(crate) fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
 
-    pub fn get_encoder(&self) -> RefMut<'_, Option<wgpu::CommandEncoder>> {
+    pub(crate) fn get_encoder(&self) -> RefMut<'_, Option<wgpu::CommandEncoder>> {
         self.encoder.borrow_mut()
     }
 

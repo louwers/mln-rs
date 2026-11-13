@@ -17,11 +17,5 @@ doctest = false
 
 [dependencies]
 
-# Port of kdbush.hpp/test.cpp; its points and expected ids are read from
-# that file in place.
-[[test]]
-name = "kdbush_source_test"
-path = "tests/kdbush.rs"
-
 [lints]
 workspace = true

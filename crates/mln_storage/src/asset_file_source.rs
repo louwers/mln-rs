@@ -20,12 +20,12 @@ fn accepts_url(url: &str) -> bool {
     url.starts_with(ASSET_PROTOCOL)
 }
 
-pub struct AssetFileSourceThread {
+pub(crate) struct AssetFileSourceThread {
     root: String,
 }
 
 impl AssetFileSourceThread {
-    pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         if !accepts_url(&resource.url) {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Other, "Invalid asset URL")));
@@ -50,14 +50,14 @@ impl AssetFileSourceThread {
 /// The `Asset` file source: `asset://` URLs, relative to the resource
 /// options' asset path. On Android, the files under
 /// `mln_storage::android::APP_ASSETS` are the app's assets.
-pub struct AssetFileSource {
+pub(crate) struct AssetFileSource {
     thread: Thread<AssetFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
 }
 
 impl AssetFileSource {
     #[must_use]
-    pub fn new(resource_options: &ResourceOptions) -> Self {
+    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
         let root = resource_options.asset_path.clone();
         AssetFileSource {
             thread: Thread::new("AssetFileSource", move |_| AssetFileSourceThread { root }),

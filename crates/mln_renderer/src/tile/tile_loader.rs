@@ -26,7 +26,7 @@ fn get_cant_load_tile_error() -> Error {
 /// The tile data encoding of a vector tile: `VectorMVTTile` or `VectorMLTTile`
 /// (raster tiles ignore it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VectorTileEncoding {
+pub(crate) enum VectorTileEncoding {
     Mvt,
     /// MLT, decoded with `fast_pfor_enabled`.
     Mlt {
@@ -35,7 +35,7 @@ pub enum VectorTileEncoding {
 }
 
 /// What a loader does with the tile it loads (`T` in C++).
-pub trait LoaderTile {
+pub(crate) trait LoaderTile {
     fn set_error(&self, err: Error);
     /// Makes the tile wait for data again.
     fn set_loading(&self);
@@ -122,7 +122,7 @@ struct State {
     update_parameters: TileUpdateParameters,
 }
 
-pub struct TileLoader {
+pub(crate) struct TileLoader {
     state: Rc<RefCell<State>>,
 }
 
@@ -131,7 +131,7 @@ fn tile_of(state: &Rc<RefCell<State>>) -> Option<Rc<dyn LoaderTile>> {
 }
 
 impl TileLoader {
-    pub fn new(
+    pub(crate) fn new(
         tile: Weak<dyn LoaderTile>,
         encoding: VectorTileEncoding,
         id: &OverscaledTileID,
@@ -191,7 +191,7 @@ impl TileLoader {
         loader
     }
 
-    pub fn set_necessity(&self, new_necessity: TileNecessity) {
+    pub(crate) fn set_necessity(&self, new_necessity: TileNecessity) {
         let changed = {
             let mut state = self.state.borrow_mut();
             if new_necessity == state.necessity {
@@ -210,7 +210,7 @@ impl TileLoader {
         }
     }
 
-    pub fn set_update_parameters(&self, params: &TileUpdateParameters) {
+    pub(crate) fn set_update_parameters(&self, params: &TileUpdateParameters) {
         let reload = {
             let mut state = self.state.borrow_mut();
             if state.update_parameters == *params {
@@ -233,7 +233,7 @@ impl TileLoader {
 
     /// Requests a required tile whose last response was an error again, and
     /// makes it wait for the answer.
-    pub fn retry_failed_load(&self) {
+    pub(crate) fn retry_failed_load(&self) {
         {
             let mut state = self.state.borrow_mut();
             if !state.failed || state.request.is_some() || state.necessity != TileNecessity::Required {

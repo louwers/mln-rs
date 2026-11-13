@@ -52,7 +52,7 @@ pub struct ViewportOptions {
 }
 
 /// How the map picks the tiles to load, as its snapshot's
-/// [`TileSettings`](mln_map::TileSettings) report it. A setting that is
+/// `TileSettings` report it. A setting that is
 /// `None` keeps its value.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TileOptions {

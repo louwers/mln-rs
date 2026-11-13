@@ -52,7 +52,7 @@ impl Drop for PendingRequest {
 /// A file source that loads everything cache-only from the database while
 /// offline and maps the test URLs (`local://`, `http://localhost:2900/`) to
 /// the `http://` URLs the cache stores.
-pub struct ProxyFileSource {
+pub(crate) struct ProxyFileSource {
     default_resource_loader: Arc<dyn FileSource>,
     resource_options: Mutex<ResourceOptions>,
 }
@@ -60,7 +60,7 @@ pub struct ProxyFileSource {
 impl ProxyFileSource {
     /// A proxy over `default_resource_loader`. While offline, it makes
     /// `file_sources`' database for these options read-only.
-    pub fn new(
+    pub(crate) fn new(
         default_resource_loader: Arc<dyn FileSource>,
         file_sources: &FileSourceManager,
         resource_options: &ResourceOptions,
@@ -74,35 +74,35 @@ impl ProxyFileSource {
     }
 
     /// Flag to change the networking mode of the file source.
-    pub fn set_offline(status: bool) {
+    pub(crate) fn set_offline(status: bool) {
         OFFLINE.store(status, Ordering::SeqCst);
     }
 
     /// Starts/stops metrics tracking.
-    pub fn set_tracking_active(active: bool) {
+    pub(crate) fn set_tracking_active(active: bool) {
         ACTIVE.store(active, Ordering::SeqCst);
         REQUEST_COUNT.store(0, Ordering::SeqCst);
         TRANSFERRED_SIZE.store(0, Ordering::SeqCst);
     }
 
     /// Returns metrics tracking status.
-    pub fn is_tracking_active() -> bool {
+    pub(crate) fn is_tracking_active() -> bool {
         ACTIVE.load(Ordering::SeqCst)
     }
 
     /// Returns the total amount of requests.
-    pub fn get_request_count() -> usize {
+    pub(crate) fn get_request_count() -> usize {
         REQUEST_COUNT.load(Ordering::SeqCst)
     }
 
     /// Returns the size of transferred data (in bytes).
-    pub fn get_transferred_size() -> usize {
+    pub(crate) fn get_transferred_size() -> usize {
         TRANSFERRED_SIZE.load(Ordering::SeqCst)
     }
 
     /// Port-only: the URLs of the requests that are neither answered nor
     /// cancelled, oldest first, with how long ago each was made.
-    pub fn pending_requests() -> Vec<(String, Duration)> {
+    pub(crate) fn pending_requests() -> Vec<(String, Duration)> {
         let now = Instant::now();
         PENDING.lock().values().map(|(url, since)| (url.clone(), now - *since)).collect()
     }
@@ -188,7 +188,7 @@ impl FileSource for ProxyFileSource {
     }
 }
 
-/// File sources whose `ResourceLoader` is a [`ProxyFileSource`] over the
+/// File sources whose `ResourceLoader` is a `ProxyFileSource` over the
 /// default one (`TestRunner::registerProxyFileSource()`).
 #[must_use]
 pub fn proxy_file_sources() -> FileSourceManager {

@@ -79,7 +79,7 @@ struct DrawableImpl {
     image_descriptor_set: Option<ImageDescriptorSet>,
 }
 
-pub struct Drawable {
+pub(crate) struct Drawable {
     base: DrawableBase,
     impl_: DrawableImpl,
 }
@@ -106,7 +106,7 @@ fn same_textures(a: &Textures, b: &Textures) -> bool {
 
 impl Drawable {
     #[must_use]
-    pub fn new(name: String) -> Self {
+    pub(crate) fn new(name: String) -> Self {
         Drawable {
             base: DrawableBase::new(name),
             impl_: DrawableImpl {
@@ -129,19 +129,19 @@ impl Drawable {
         }
     }
 
-    pub fn set_vertex_attr_id(&mut self, id: usize) {
+    pub(crate) fn set_vertex_attr_id(&mut self, id: usize) {
         self.impl_.vertex_attr_id = id;
     }
 
-    pub fn set_depth_mode_for_3d(&mut self, value: &DepthMode) {
+    pub(crate) fn set_depth_mode_for_3d(&mut self, value: &DepthMode) {
         self.impl_.depth_for_3d = Some(*value);
     }
 
-    pub fn set_stencil_mode_for_3d(&mut self, value: &StencilMode) {
+    pub(crate) fn set_stencil_mode_for_3d(&mut self, value: &StencilMode) {
         self.impl_.stencil_for_3d = Some(*value);
     }
 
-    pub fn upload(&mut self, upload_pass: &UploadPass) {
+    pub(crate) fn upload(&mut self, upload_pass: &UploadPass) {
         let Some(shader_ptr) = self.base.shader.clone() else {
             Log::warning(
                 Event::General,
@@ -173,7 +173,7 @@ impl Drawable {
                 // existing buffer because it may still be in use by the
                 // previous frame.
                 let resource = upload_pass.create_index_buffer_of(&indexes);
-                let buffer = GfxIndexBuffer::new(indexes.elements(), resource);
+                let buffer = GfxIndexBuffer::new(resource);
                 indexes.set_buffer(Some(Box::new(IndexBuffer { buffer })));
                 indexes.set_dirty(false);
             }
@@ -496,7 +496,7 @@ impl drawable::Drawable for Drawable {
             let segment = seg.get_segment();
 
             // update pipeline info with per segment modifiers
-            pipeline_info.set_draw_mode(seg.get_mode());
+            pipeline_info.set_draw_mode(*seg.get_mode());
             pipeline_info.set_scissor_rect(&parameters.scissor_rect());
             pipeline_info.set_dynamic_values(backend, command_buffer);
 
@@ -616,7 +616,7 @@ impl drawable::Drawable for Drawable {
 
     fn set_cull_face_mode(&mut self, value: &CullFaceMode) {
         self.base.cull_face_mode = *value;
-        self.impl_.pipeline_info.set_cull_mode(value);
+        self.impl_.pipeline_info.set_cull_mode(*value);
     }
 
     fn set_textures(&mut self, textures: Textures) {

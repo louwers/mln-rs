@@ -4,13 +4,13 @@
 
 /// The median; NaN for no values.
 #[must_use]
-pub fn median(values: &[f64]) -> f64 {
+pub(crate) fn median(values: &[f64]) -> f64 {
     percentile(values, 50.0)
 }
 
 /// The `p`th percentile, interpolating linearly between the nearest ranks;
 /// NaN for no values.
-pub fn percentile(values: &[f64], p: f64) -> f64 {
+pub(crate) fn percentile(values: &[f64], p: f64) -> f64 {
     if values.is_empty() {
         return f64::NAN;
     }
@@ -26,7 +26,7 @@ pub fn percentile(values: &[f64], p: f64) -> f64 {
 /// otherwise the normal approximation with the tie correction and a
 /// continuity correction. 1 when either side is empty.
 #[must_use]
-pub fn mann_whitney(a: &[f64], b: &[f64]) -> f64 {
+pub(crate) fn mann_whitney(a: &[f64], b: &[f64]) -> f64 {
     let (n1, n2) = (a.len(), b.len());
     if n1 == 0 || n2 == 0 {
         return 1.0;
@@ -111,7 +111,7 @@ fn erfc(x: f64) -> f64 {
 
 /// Holm's step-down correction of a family of p-values, in their order.
 #[must_use]
-pub fn holm(p_values: &[f64]) -> Vec<f64> {
+pub(crate) fn holm(p_values: &[f64]) -> Vec<f64> {
     let mut order: Vec<usize> = (0..p_values.len()).collect();
     order.sort_by(|&x, &y| p_values[x].total_cmp(&p_values[y]));
     let mut adjusted = vec![0.0; p_values.len()];

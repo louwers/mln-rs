@@ -40,7 +40,7 @@ pub(crate) fn unique_id() -> u64 {
 }
 
 /// A buffer and its memory, mapped.
-pub struct BufferAllocation {
+pub(crate) struct BufferAllocation {
     id: u64,
     backend: Rc<BackendImpl>,
     buffer: vk::Buffer,
@@ -51,7 +51,7 @@ pub struct BufferAllocation {
 impl BufferAllocation {
     /// Creates a buffer of `size` bytes in host-visible memory, written
     /// (`MemoryLocation::CpuToGpu`) or read (`GpuToCpu`) by the CPU.
-    pub fn create(
+    pub(crate) fn create(
         backend: &Rc<BackendImpl>,
         size: usize,
         usage: vk::BufferUsageFlags,
@@ -104,18 +104,18 @@ impl BufferAllocation {
     }
 
     #[must_use]
-    pub fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> u64 {
         self.id
     }
 
     #[must_use]
-    pub fn buffer(&self) -> vk::Buffer {
+    pub(crate) fn buffer(&self) -> vk::Buffer {
         self.buffer
     }
 
     /// The buffer's memory, or null if the allocator couldn't map it.
     #[must_use]
-    pub fn mapped_buffer(&self) -> *mut u8 {
+    pub(crate) fn mapped_buffer(&self) -> *mut u8 {
         self.mapped_buffer
     }
 }
@@ -131,7 +131,7 @@ impl Drop for BufferAllocation {
     }
 }
 
-pub type VersionType = u16;
+pub(crate) type VersionType = u16;
 
 pub struct BufferResource {
     context: Weak<Context>,
@@ -167,7 +167,7 @@ impl BufferResource {
     /// A uniform or storage buffer has a copy of its contents for each frame
     /// in flight, so that writing the next frame's doesn't change what the
     /// GPU is still reading.
-    pub fn new(
+    pub(crate) fn new(
         context: &Context,
         data: Option<&[u8]>,
         size: usize,
@@ -231,11 +231,11 @@ impl BufferResource {
     }
 
     /// The context, unless it is gone.
-    pub fn context(&self) -> Option<Rc<Context>> {
+    pub(crate) fn context(&self) -> Option<Rc<Context>> {
         self.context.upgrade()
     }
 
-    pub fn get_size_in_bytes(&self) -> usize {
+    pub(crate) fn get_size_in_bytes(&self) -> usize {
         self.size
     }
 
@@ -254,7 +254,7 @@ impl BufferResource {
     }
 
     /// The id of the buffer's allocation (`unique_id`), 0 without one.
-    pub fn allocation_id(&self) -> u64 {
+    pub(crate) fn allocation_id(&self) -> u64 {
         self.buffer_allocation.as_ref().map_or(0, |allocation| allocation.id())
     }
 
@@ -264,11 +264,11 @@ impl BufferResource {
     }
 
     /// Where the current frame's copy starts.
-    pub fn get_vulkan_buffer_offset(&self) -> usize {
+    pub(crate) fn get_vulkan_buffer_offset(&self) -> usize {
         self.get_vulkan_buffer_offset_of(self.current_frame())
     }
 
-    pub fn get_vulkan_buffer_offset_of(&self, resource_index: u8) -> usize {
+    pub(crate) fn get_vulkan_buffer_offset_of(&self, resource_index: u8) -> usize {
         usize::from(resource_index) * self.buffer_window_size
     }
 
@@ -276,16 +276,11 @@ impl BufferResource {
         self.buffer_allocation.is_some()
     }
 
-    /// Used to detect whether buffer contents have changed.
-    pub fn get_version(&self) -> VersionType {
-        self.version.get()
-    }
-
     /// Writes `data` at `offset` of the buffer. The current frame's copy of
     /// a uniform or storage buffer holds the new contents afterwards, and
     /// the other frames' copies when they are next brought up to date
     /// (`update_vulkan_buffer`).
-    pub fn update(&self, data: &[u8], offset: usize) {
+    pub(crate) fn update(&self, data: &[u8], offset: usize) {
         debug_assert!(data.len() + offset <= self.size);
         let update_size = data.len().min(self.size.saturating_sub(offset));
         let Some(allocation) = &self.buffer_allocation else {
@@ -338,7 +333,7 @@ impl BufferResource {
 
     /// Brings the copy of the frame `frame` up to date with the buffer's
     /// contents.
-    pub fn update_vulkan_buffer(&self, frame: u8) {
+    pub(crate) fn update_vulkan_buffer(&self, frame: u8) {
         if self.buffer_window_size == 0 {
             return;
         }

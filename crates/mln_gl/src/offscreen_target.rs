@@ -98,10 +98,6 @@ impl OffscreenTarget {
         OffscreenTarget { backend, size: Cell::new(size), image: RefCell::new(None) }
     }
 
-    pub fn size(&self) -> Size {
-        self.size.get()
-    }
-
     /// Draws the next frame at `size`, and drops the framebuffer of the last
     /// one.
     pub fn resize(&self, size: Size) {

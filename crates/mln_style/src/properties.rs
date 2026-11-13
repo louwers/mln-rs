@@ -59,7 +59,7 @@ pub trait PropertyValueLike: Clone + Default + Debug {
 
 /// Whether the value reads one of the global-state keys in `changed_keys`;
 /// `None` means the keys are unknown, and every reference counts as changed.
-pub fn reads_global_state<V: PropertyValueLike>(value: &V, changed_keys: Option<&VecSet<String>>) -> bool {
+pub(crate) fn reads_global_state<V: PropertyValueLike>(value: &V, changed_keys: Option<&VecSet<String>>) -> bool {
     value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
         && global_state_refs_intersect(value.get_global_state_refs(), changed_keys)
 }
@@ -130,13 +130,18 @@ enum Stage {
 }
 
 impl<V: PropertyValueLike> Transitioning<V> {
-    pub fn new(value: V) -> Self {
+    pub(crate) fn new(value: V) -> Self {
         Transitioning { prior: RefCell::new(None), start: None, delay: Duration::ZERO, duration: Duration::ZERO, value }
     }
 
     /// A transition from `prior` that starts at `now`, or one that has
     /// already ended for `None`.
-    pub fn with_prior(value: V, prior: Transitioning<V>, transition: &TransitionOptions, now: Option<Instant>) -> Self {
+    pub(crate) fn with_prior(
+        value: V,
+        prior: Transitioning<V>,
+        transition: &TransitionOptions,
+        now: Option<Instant>,
+    ) -> Self {
         Transitioning {
             prior: RefCell::new(if transition.is_defined() { Some(Box::new(prior)) } else { None }),
             start: now,
@@ -157,7 +162,7 @@ impl<V: PropertyValueLike> Transitioning<V> {
     }
 
     /// The value at `now`; `None` evaluates it as after every transition.
-    pub fn evaluate<E>(&self, evaluator: &E, now: Option<Instant>) -> E::ResultType
+    pub(crate) fn evaluate<E>(&self, evaluator: &E, now: Option<Instant>) -> E::ResultType
     where
         E: Evaluator<V::Type>,
         E::ResultType: Interpolate,
@@ -192,12 +197,8 @@ impl<V: PropertyValueLike> Transitioning<V> {
         }
     }
 
-    pub fn has_transition(&self) -> bool {
+    pub(crate) fn has_transition(&self) -> bool {
         self.prior.borrow().is_some()
-    }
-
-    pub fn is_transitioning(&self, now: Option<Instant>) -> bool {
-        self.has_transition() && matches!(self.stage(now), Stage::Running(_)) && !self.value.is_data_driven()
     }
 
     pub fn is_undefined(&self) -> bool {
@@ -206,7 +207,7 @@ impl<V: PropertyValueLike> Transitioning<V> {
 
     /// Keeps every step that reads a key changed by `change` on the state from
     /// before it, so that a new transition starts from what this one shows.
-    pub fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
+    pub(crate) fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
         self.value.retain_prior_global_state(change);
         if let Some(prior) = self.prior.get_mut() {
             prior.retain_prior_global_state(change);
@@ -216,20 +217,16 @@ impl<V: PropertyValueLike> Transitioning<V> {
     pub fn get_value(&self) -> &V {
         &self.value
     }
-
-    pub fn get_value_mut(&mut self) -> &mut V {
-        &mut self.value
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transitionable<V> {
     pub value: V,
-    pub options: TransitionOptions,
+    pub(crate) options: TransitionOptions,
 }
 
 impl<V: PropertyValueLike> Transitionable<V> {
-    pub fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
+    pub(crate) fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
         if let Some(change) = &params.global_state_change {
             prior.retain_prior_global_state(change);
             if change.state_only && !self.value.transitions_on_global_state_change(Some(&change.changed_keys)) {
@@ -304,7 +301,7 @@ pub enum FeatureEvaluationExtra<'a> {
 /// Evaluates a plain value for a feature: the value itself. C++ has no
 /// overload for a plain value with feature state or images: such a call does
 /// not compile, so it does not happen here either.
-pub fn evaluate_constant<T: Clone>(value: &T, extra: FeatureEvaluationExtra<'_>) -> T {
+pub(crate) fn evaluate_constant<T: Clone>(value: &T, extra: FeatureEvaluationExtra<'_>) -> T {
     match extra {
         FeatureEvaluationExtra::None | FeatureEvaluationExtra::Canonical(_) => value.clone(),
         _ => unreachable!("C++ PossiblyEvaluated::evaluate has no overload for a constant with this argument"),
@@ -313,7 +310,7 @@ pub fn evaluate_constant<T: Clone>(value: &T, extra: FeatureEvaluationExtra<'_>)
 
 /// The `PossiblyEvaluatedPropertyValue<T>` overloads of
 /// `PossiblyEvaluated::evaluate`.
-pub fn evaluate_possibly_evaluated_property_value<T: Clone + ValueConverter>(
+pub(crate) fn evaluate_possibly_evaluated_property_value<T: Clone + ValueConverter>(
     value: &PossiblyEvaluatedPropertyValue<T>,
     z: f32,
     feature: &dyn GeometryTileFeature,
@@ -342,7 +339,7 @@ pub fn evaluate_possibly_evaluated_property_value<T: Clone + ValueConverter>(
 /// them; the renderer evaluates them on the value
 /// (`PossiblyEvaluatedFadedPropertyValue::evaluate`).
 #[must_use]
-pub fn evaluate_cross_faded<T>() -> T {
+pub(crate) fn evaluate_cross_faded<T>() -> T {
     unreachable!("C++ PossiblyEvaluated::evaluate<P> does not compile for a cross-faded property")
 }
 
@@ -356,7 +353,7 @@ pub trait Field<P> {
 
 /// Evaluates the property if necessary, or copies the previous value where
 /// that is appropriate.
-pub fn maybe_evaluate<P: Property>(
+pub(crate) fn maybe_evaluate<P: Property>(
     property: &Transitioning<P::Value>,
     parameters: &PropertyEvaluationParameters,
     old_result: &P::PossiblyEvaluatedType,
@@ -389,7 +386,6 @@ where
 ///
 /// This is what a Rust port of scripts/generate-style-code.mjs will emit,
 /// one invocation per layer type.
-#[macro_export]
 macro_rules! paint_properties {
     ($(#[$meta:meta])* $vis:vis mod $module:ident { $($field:ident: $prop:ty),+ $(,)? }) => {
         $(#[$meta])*
@@ -527,11 +523,10 @@ macro_rules! paint_properties {
         }
     };
 }
+pub(crate) use paint_properties;
 
 /// Defines `PossiblyEvaluated::evaluate::<P>(z, feature, ...)` and its
 /// variants, which evaluate one property for a feature.
-#[doc(hidden)]
-#[macro_export]
 macro_rules! __possibly_evaluated_feature_methods {
     () => {
         pub fn evaluate<P>(
@@ -630,9 +625,8 @@ macro_rules! __possibly_evaluated_feature_methods {
         }
     };
 }
+pub(crate) use __possibly_evaluated_feature_methods;
 
-#[doc(hidden)]
-#[macro_export]
 macro_rules! __properties_field_impls {
     (Transitionable; $($field:ident: $prop:ty),+) => {
         $crate::__properties_field_impls!(@impl Transitionable;
@@ -679,6 +673,7 @@ macro_rules! __properties_field_impls {
         }
     };
 }
+pub(crate) use __properties_field_impls;
 
 /// What an overridable property's `hasOverride(const T& t)` reads
 /// (`!!t.textColor`): C++ calls it on both `expression::FormattedSection` and

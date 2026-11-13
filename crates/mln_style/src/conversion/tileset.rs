@@ -6,12 +6,12 @@ use super::{Converter, Convertible, Error};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SourceOptions {
-    pub raster_encoding: Option<RasterEncoding>,
-    pub vector_encoding: Option<VectorEncoding>,
+    pub(crate) raster_encoding: Option<RasterEncoding>,
+    pub(crate) vector_encoding: Option<VectorEncoding>,
     /// The style's inline zoom range, which wins over a fetched TileJSON's, as in maplibre-gl-js:
     /// <https://github.com/maplibre/maplibre-gl-js/blob/32e555b2c114d6b60da4acd824d272182c656bbe/src/source/load_tilejson.ts#L39>
-    pub minzoom: Option<u8>,
-    pub maxzoom: Option<u8>,
+    pub(crate) minzoom: Option<u8>,
+    pub(crate) maxzoom: Option<u8>,
 }
 
 /// The zoom level member `name`, if present. `Err(())` means it is invalid.

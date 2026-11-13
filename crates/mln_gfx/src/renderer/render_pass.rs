@@ -38,11 +38,3 @@ impl BitAnd for RenderPass {
         RenderPass(self.0 & rhs.0)
     }
 }
-
-/// Defines whether the overdraw shaders should be used instead of the
-/// regular shaders.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PaintMode {
-    Regular = 0,
-    Overdraw = 1,
-}

@@ -8,23 +8,23 @@ use mln_gfx::frame;
 use mln_util::size::Size;
 
 /// What a GL draw target is made of.
-pub trait TargetResource: Any {
+pub(crate) trait TargetResource: Any {
     /// Binds the resource's framebuffer, to draw all of it.
     fn bind(&self);
 }
 
 /// The `gfx::DrawTarget` of every GL target.
-pub struct DrawTarget {
+pub(crate) struct DrawTarget {
     size: Cell<Size>,
     resource: Rc<dyn TargetResource>,
 }
 
 impl DrawTarget {
-    pub fn new(size: Size, resource: Rc<dyn TargetResource>) -> Self {
+    pub(crate) fn new(size: Size, resource: Rc<dyn TargetResource>) -> Self {
         DrawTarget { size: Cell::new(size), resource }
     }
 
-    pub fn resource(&self) -> &dyn TargetResource {
+    pub(crate) fn resource(&self) -> &dyn TargetResource {
         &*self.resource
     }
 
@@ -41,12 +41,13 @@ impl frame::DrawTarget for DrawTarget {
 }
 
 /// `target` as a GL draw target.
-pub fn as_gl(target: &dyn frame::DrawTarget) -> Option<&DrawTarget> {
+pub(crate) fn as_gl(target: &dyn frame::DrawTarget) -> Option<&DrawTarget> {
     target.downcast_ref::<DrawTarget>()
 }
 
 /// The resource of `target`, if it is a `T`.
-pub fn downcast_resource<T: 'static>(target: &dyn frame::DrawTarget) -> Option<&T> {
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn downcast_resource<T: 'static>(target: &dyn frame::DrawTarget) -> Option<&T> {
     let resource: &dyn Any = as_gl(target)?.resource();
     resource.downcast_ref()
 }

@@ -31,14 +31,14 @@ thread_local! {
     static OWNING_THREAD_POOL: Cell<usize> = const { Cell::new(0) };
 }
 
-pub struct ThreadedScheduler {
+pub(crate) struct ThreadedScheduler {
     shared: Arc<Shared>,
     threads: Vec<JoinHandle<()>>,
 }
 
 impl ThreadedScheduler {
     #[must_use]
-    pub fn new(n: usize) -> Self {
+    pub(crate) fn new(n: usize) -> Self {
         let shared = Arc::new(Shared {
             unique_id: SimpleIdentity::new(),
             cv_available: Condvar::new(),
@@ -179,7 +179,7 @@ impl Drop for ThreadedScheduler {
 }
 
 /// A scheduler with four worker threads.
-pub struct ThreadPool {
+pub(crate) struct ThreadPool {
     scheduler: ThreadedScheduler,
 }
 
@@ -191,7 +191,7 @@ impl Default for ThreadPool {
 
 impl ThreadPool {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ThreadPool { scheduler: ThreadedScheduler::new(1 + 3) }
     }
 }
@@ -212,7 +212,7 @@ impl Scheduler for ThreadPool {
 }
 
 /// A scheduler with one worker thread, so its tasks run in order.
-pub struct SequencedScheduler {
+pub(crate) struct SequencedScheduler {
     scheduler: ThreadedScheduler,
 }
 
@@ -224,7 +224,7 @@ impl Default for SequencedScheduler {
 
 impl SequencedScheduler {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         SequencedScheduler { scheduler: ThreadedScheduler::new(1) }
     }
 }

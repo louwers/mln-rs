@@ -296,11 +296,6 @@ impl BorrowedTarget {
         Ok(BorrowedTarget { backend, resource, target, producer, event, event_value: Cell::new(0) })
     }
 
-    /// How many textures the ring has.
-    pub fn depth(&self) -> usize {
-        self.resource.textures.borrow().textures.len()
-    }
-
     /// Has the next frame draw into the texture at `slot`.
     pub fn select(&self, slot: usize) {
         self.resource.selected.set(slot);

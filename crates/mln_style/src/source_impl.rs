@@ -27,15 +27,15 @@ fn warn_if_overscale_factor_caps_prefetch_delta(overscale: Option<u8>, prefetch:
 pub struct ImplBase {
     pub type_: SourceType,
     pub id: String,
-    pub prefetch_zoom_delta: Option<u8>,
-    pub max_overscale_factor: Option<u8>,
-    pub minimum_tile_update_interval: Duration,
-    pub volatile_flag: bool,
+    pub(crate) prefetch_zoom_delta: Option<u8>,
+    pub(crate) max_overscale_factor: Option<u8>,
+    pub(crate) minimum_tile_update_interval: Duration,
+    pub(crate) volatile_flag: bool,
 }
 
 impl ImplBase {
     #[must_use]
-    pub fn new(type_: SourceType, id: String) -> Self {
+    pub(crate) fn new(type_: SourceType, id: String) -> Self {
         ImplBase {
             type_,
             id,
@@ -46,7 +46,7 @@ impl ImplBase {
         }
     }
 
-    pub fn set_prefetch_zoom_delta(&mut self, delta: Option<u8>) {
+    pub(crate) fn set_prefetch_zoom_delta(&mut self, delta: Option<u8>) {
         self.prefetch_zoom_delta = delta;
         warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
     }
@@ -56,7 +56,7 @@ impl ImplBase {
         self.prefetch_zoom_delta
     }
 
-    pub fn set_minimum_tile_update_interval(&mut self, interval: Duration) {
+    pub(crate) fn set_minimum_tile_update_interval(&mut self, interval: Duration) {
         self.minimum_tile_update_interval = interval;
     }
 
@@ -65,7 +65,7 @@ impl ImplBase {
         self.minimum_tile_update_interval
     }
 
-    pub fn set_max_overscale_factor_for_parent_tiles(&mut self, overscale_factor: Option<u8>) {
+    pub(crate) fn set_max_overscale_factor_for_parent_tiles(&mut self, overscale_factor: Option<u8>) {
         self.max_overscale_factor = overscale_factor;
         warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
     }
@@ -80,7 +80,7 @@ impl ImplBase {
         self.volatile_flag
     }
 
-    pub fn set_volatile(&mut self, set: bool) {
+    pub(crate) fn set_volatile(&mut self, set: bool) {
         self.volatile_flag = set;
     }
 }

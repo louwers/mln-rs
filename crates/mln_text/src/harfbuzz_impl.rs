@@ -39,7 +39,7 @@ fn get_default_language() -> Language {
 /// code units, as in C++ (surrogates are classified on their own). Uses the
 /// Unicode version of HarfRust's own tables.
 #[must_use]
-pub fn get_unicode_script(u: u32) -> [u8; 4] {
+pub(crate) fn get_unicode_script(u: u32) -> [u8; 4] {
     if char::from_u32(u).is_some_and(|c| c.general_category() == GeneralCategory::NonspacingMark) {
         return Script::INHERITED.tag().to_be_bytes();
     }
@@ -49,7 +49,7 @@ pub fn get_unicode_script(u: u32) -> [u8; 4] {
 /// Shape plans by script tag and right-to-left direction.
 type ShapePlans = HashMap<([u8; 4], bool), Arc<ShapePlan>>;
 
-pub struct Impl {
+pub(crate) struct Impl {
     type_: GlyphIDType,
     face: FreeTypeFace,
     /// `hb_font_t *font` (its face: the `HB_TINY` view of the tables).
@@ -114,23 +114,18 @@ fn hb_tiny_font(face: &FreeTypeFace) -> Option<Font> {
 impl Impl {
     /// A shaper for the font in `font_file_data`, whose glyphs have type
     /// `type_`.
-    pub fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, lib: &FreeTypeLibrary) -> Self {
+    pub(crate) fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, lib: &FreeTypeLibrary) -> Self {
         let face = FreeTypeFace::from_memory(font_file_data, lib);
         let font = if face.is_valid() { hb_tiny_font(&face) } else { None };
         Impl { type_, face, font, plans: Mutex::new(HashMap::new()) }
     }
 
-    pub fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.face.is_valid()
     }
 
-    pub fn rasterize_glyph(&self, glyph: &GlyphID) -> Glyph {
+    pub(crate) fn rasterize_glyph(&self, glyph: GlyphID) -> Glyph {
         self.face.rasterize_glyph(glyph)
-    }
-
-    /// The face, for the rasterizer and tests.
-    pub fn face(&self) -> &FreeTypeFace {
-        &self.face
     }
 
     fn plan(
@@ -150,7 +145,7 @@ impl Impl {
             .clone()
     }
 
-    pub fn create_complex_glyph_ids(
+    pub(crate) fn create_complex_glyph_ids(
         &self,
         text: &[u16],
         rtl: bool,

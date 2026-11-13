@@ -32,7 +32,7 @@ struct ThreadInner {
     tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
 
-pub struct MainResourceLoaderThread {
+pub(crate) struct MainResourceLoaderThread {
     inner: Rc<ThreadInner>,
 }
 
@@ -99,7 +99,7 @@ impl MainResourceLoaderThread {
         }
     }
 
-    pub fn request(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let inner = &self.inner;
         let callback = make_callback(r);
 
@@ -182,7 +182,7 @@ impl MainResourceLoaderThread {
         }
     }
 
-    pub fn cancel(&self, req: u64) {
+    pub(crate) fn cancel(&self, req: u64) {
         let task = self.inner.tasks.borrow_mut().remove(&req);
         drop(task);
     }

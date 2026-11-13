@@ -10,30 +10,30 @@ use crate::parsing_context::{ParseResult, ParsingContext, TypeAnnotationOption};
 use crate::type_::Type;
 use crate::value::{Value, from_expression_value};
 
-pub type Args = Vec<Box<dyn Expression>>;
+pub(crate) type Args = Vec<Box<dyn Expression>>;
 
-pub struct Coalesce {
+pub(crate) struct Coalesce {
     base: ExpressionBase,
     args: Args,
 }
 
 impl Coalesce {
     #[must_use]
-    pub fn new(type_: Type, args: Args) -> Self {
+    pub(crate) fn new(type_: Type, args: Args) -> Self {
         Coalesce { base: ExpressionBase::new(Kind::Coalesce, type_, collect_dependencies(&args)), args }
     }
 
     #[must_use]
-    pub fn get_length(&self) -> usize {
+    pub(crate) fn get_length(&self) -> usize {
         self.args.len()
     }
 
     #[must_use]
-    pub fn get_child(&self, i: usize) -> &dyn Expression {
+    pub(crate) fn get_child(&self, i: usize) -> &dyn Expression {
         &*self.args[i]
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
         let length = value.array_length();
         if length < 2 {

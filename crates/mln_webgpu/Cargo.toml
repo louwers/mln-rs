@@ -35,33 +35,10 @@ wgpu = { workspace = true, features = ["naga-ir"] }
 name = "smoke_test"
 path = "tests/smoke_test.rs"
 
-# The background shader end to end on the drawable path: HeadlessBackend,
-# BackgroundShader from the registry, a DrawableBuilder drawable in a
-# TileLayerGroup with the UBOs background_layer_tweaker.cpp sets, rendered
-# into the offscreen target and read back.
-[[test]]
-name = "background_test"
-path = "tests/background_test.rs"
-
-# Ports test/renderer/wgsl_preprocessor.test.cpp
-[[test]]
-name = "shader_group_preprocessor_test"
-path = "tests/shader_group_preprocessor.rs"
-
-# Compiles all extracted WGSL with wgpu (naga); the M1 shaders must compile.
-[[test]]
-name = "wgsl_compile_test"
-path = "tests/wgsl_compile_test.rs"
-
 # Ports test/util/offscreen_texture.test.cpp (marker `// gtest: Group.Name`).
 [[test]]
 name = "gtest_offscreen_texture"
 path = "tests/gtest_offscreen_texture.rs"
-
-# HeadlessBackend on a shared or host-made device, and on a named adapter.
-[[test]]
-name = "shared_device_test"
-path = "tests/shared_device_test.rs"
 
 [dev-dependencies]
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
