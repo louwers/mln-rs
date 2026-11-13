@@ -55,6 +55,23 @@ fn resolve_locale(tag: &str) -> Retained<NSLocale> {
     NSLocale::currentLocale()
 }
 
+/// A locale's language, script and region as a language tag, without its
+/// keywords, which its identifier may carry after `@` or, since macOS 26, as
+/// a `-u-` extension.
+fn base_tag(locale: &NSLocale) -> String {
+    let mut tag = locale.languageCode().to_string();
+    if let Some(script) = locale.scriptCode() {
+        tag.push('-');
+        tag.push_str(&script.to_string());
+    }
+    #[expect(deprecated, reason = "regionCode needs macOS 13 and iOS 16")]
+    if let Some(region) = locale.countryCode() {
+        tag.push('-');
+        tag.push_str(&region.to_string());
+    }
+    tag
+}
+
 /// A Foundation collator: a locale without keywords and the comparison's
 /// options.
 pub(crate) struct Collator {
@@ -66,10 +83,8 @@ pub(crate) struct Collator {
 impl Collator {
     #[expect(clippy::unnecessary_wraps, reason = "the other platforms' collators can fail")]
     pub(crate) fn new(tag: &str, sensitivity: Sensitivity) -> Result<Self, String> {
-        let identifier = resolve_locale(tag).localeIdentifier().to_string();
-        let identifier = identifier.split('@').next().unwrap_or_default();
-        let locale = NSLocale::localeWithLocaleIdentifier(&NSString::from_str(identifier));
-        let language = NSLocale::canonicalLanguageIdentifierFromString(&NSString::from_str(identifier)).to_string();
+        let language = base_tag(&resolve_locale(tag));
+        let locale = NSLocale::localeWithLocaleIdentifier(&NSString::from_str(&language));
 
         let numeric = CollationKeywords::parse(tag).numeric;
         let mut options = NSStringCompareOptions::empty();
