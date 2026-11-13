@@ -62,12 +62,13 @@ c-abi-test *args:  _dev-shell
     #!/usr/bin/env bash
     set -euo pipefail
     target="${CARGO_TARGET_DIR:-target}"
+    [[ $target == /* ]] || target="$PWD/$target"
     backend="${MLN_C_TEST_BACKEND:-vulkan}"
     build="$target/c-abi-test-$backend"
     {{dev_shell}} cargo build -p mln-rs-c
     # Built alone, as hosts build it, the library still shapes font faces.
     cargo tree -p mln-rs-c -e features --prefix none | grep -q '^mln-rs-renderer feature "font-face-shaper"'
-    {{dev_shell}} cmake -S tools/c-abi-test -B "$build" -DMLN_C_LIBRARY="$PWD/$target/debug/libmaplibre_native_c.so" -DMLN_C_TEST_BACKEND="$backend"
+    {{dev_shell}} cmake -S tools/c-abi-test -B "$build" -DMLN_C_LIBRARY="$target/debug/libmaplibre_native_c.so" -DMLN_C_TEST_BACKEND="$backend"
     {{dev_shell}} cmake --build "$build" --parallel
     {{dev_shell}} python3 -I tools/c-abi-test/run.py "$build/mln_native_abi_tests" --exit-programs "$build/exit" "$@"
 
