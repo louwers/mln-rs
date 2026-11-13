@@ -2719,6 +2719,79 @@ fn still_image_retries_failed_glyph_range() {
     assert_eq!(requests.get(), 2);
 }
 
+/// Answers every tile request with a server error.
+fn fail_tiles(test: &MapTest) {
+    test.file_source.set_response(Kind::Tile, |_| {
+        let mut response = Response::new();
+        response.error = Some(Box::new(ResourceError::new(Reason::Server, "Tile failed")));
+        Some(response)
+    });
+}
+
+const FAILING_VECTOR_STYLE: &str = r#"{
+  "version": 8,
+  "sources": {
+    "mapbox": {"type": "vector", "tiles": ["http://example.com/{z}-{x}-{y}.vector.pbf"]}
+  },
+  "layers": [{"id": "water", "type": "fill", "source": "mapbox", "source-layer": "water"}]
+}"#;
+
+// gtest: Map.StillImageAfterTileError
+#[test]
+fn still_image_after_tile_error() {
+    let test = MapTest::new();
+    fail_tiles(&test);
+    test.load_json(FAILING_VECTOR_STYLE);
+    assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("Tile failed"));
+
+    // A new layer relays the errored tile out. The next still image finishes,
+    // and as it retries the tile, it reports the tile's error again.
+    test.map().style_mut().add_layer(Box::new(LineLayer::new("line", "mapbox")), None).unwrap();
+    let result: Rc<RefCell<Option<Result<(), mln_util::Error>>>> = Rc::new(RefCell::new(None));
+    {
+        let result = result.clone();
+        let run_loop = test.run_loop.clone();
+        test.map().render_still(Box::new(move |outcome| {
+            *result.borrow_mut() = Some(outcome);
+            run_loop.stop();
+        }));
+    }
+    let timeout = Timer::new();
+    {
+        let run_loop = test.run_loop.clone();
+        timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
+    }
+    test.run_loop.run();
+    let result = result.borrow_mut().take().expect("the still image did not finish");
+    assert_eq!(result.err().map(|e| e.message).as_deref(), Some("Tile failed"));
+}
+
+// A continuous map whose vector tile requests fail finishes loading, and
+// renders fully again after a new layer relays the failed tiles out.
+#[test]
+fn continuous_map_finishes_loading_when_its_tile_requests_fail() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    fail_tiles(&test);
+    test.load_json(FAILING_VECTOR_STYLE);
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
+    }
+    run_with_timeout(&test.run_loop, 60);
+    test.observer.did_finish_loading_map_callback.clear();
+
+    test.map().style_mut().add_layer(Box::new(LineLayer::new("line", "mapbox")), None).unwrap();
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |status: RenderFrameStatus| {
+            if status.mode == RenderMode::Full {
+                run_loop.stop();
+            }
+        });
+    }
+    run_with_timeout(&test.run_loop, 60);
+}
+
 // gtest: Map.StencilOverflow
 #[test]
 fn stencil_overflow() {

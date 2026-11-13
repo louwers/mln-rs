@@ -235,6 +235,8 @@ pub struct GeometryTileInner {
     mailbox: Arc<Mailbox>,
 
     correlation_id: Cell<u64>,
+    /// The worker has data to parse: set by `set_data`, cleared by `reset`.
+    has_data: Cell<bool>,
     /// The tileset has no tile here (`LoaderTile::set_missing`): the tile
     /// lays out without data but isn't renderable.
     pub(crate) missing: Cell<bool>,
@@ -272,6 +274,11 @@ impl GeometryTileInner {
     /// `setError(std::exception_ptr)`.
     pub fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
+        // Without data, the worker has nothing to parse, so the tile is
+        // complete.
+        if !self.has_data.get() {
+            self.base.pending.set(false);
+        }
         self.base.observer().on_tile_error(&self.base, err);
     }
 
@@ -289,6 +296,7 @@ impl GeometryTileInner {
         // prevent signaling a complete state despite pending parse
         // operations.
         self.base.pending.set(true);
+        self.has_data.set(true);
 
         self.correlation_id.set(self.correlation_id.get() + 1);
         let correlation_id = self.correlation_id.get();
@@ -309,6 +317,7 @@ impl GeometryTileInner {
         // Reset the tile to an unloaded state to avoid signaling completion
         // after clearing the tile's pending status.
         self.base.loaded.set(false);
+        self.has_data.set(false);
 
         // Reset the worker to the `NeedsParse` state.
         self.correlation_id.set(self.correlation_id.get() + 1);
@@ -537,6 +546,7 @@ impl GeometryTile {
                 worker: parameters.tile_worker_transport.create(worker_parameters, tile),
                 mailbox: mailbox.clone(),
                 correlation_id: Cell::new(0),
+                has_data: Cell::new(false),
                 missing: Cell::new(false),
                 layout_result: RefCell::new(None),
                 bucket_geometry: RefCell::default(),
@@ -627,8 +637,8 @@ impl Tile for GeometryTile {
         let inner = &self.inner;
         // Mark the tile as pending again if it was complete before to
         // prevent signaling a complete state despite pending parse
-        // operations.
-        if !inner.base.pending.get() {
+        // operations. A tile whose data failed to load has nothing to parse.
+        if !inner.base.pending.get() && (inner.has_data.get() || !inner.base.loaded.get()) {
             inner.base.pending.set(true);
             inner.base.on_tile_action(TileOperation::StartParse);
         }
