@@ -1930,6 +1930,96 @@ fn reduce_memory_use_removes_unused_requested_images() {
     assert_eq!(reduce_memory_use(), [true, false, true]);
 }
 
+/// Once the images the map was given for missing-image events take more than
+/// the cache limit, rendering removes those no layer uses anymore and keeps
+/// those still in use.
+#[test]
+fn rendering_trims_unused_requested_images_past_the_cache_limit() {
+    let test = MapTest::new();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "points": {"type": "geojson", "data": {"type": "Feature", "properties": {},
+          "geometry": {"type": "Point", "coordinates": [0, 0]}}}
+      },
+      "layers": [
+        {"id": "used", "type": "symbol", "source": "points", "layout": {"icon-image": "used-icon"}},
+        {"id": "unused", "type": "symbol", "source": "points", "layout": {"icon-image": "unused-icon"}}
+      ]
+    }"#,
+    );
+    test.render();
+    // Together more than the limit of 819200 bytes.
+    test.map().style_mut().add_image(style_image("used-icon", red_image(330, 330), 1.0));
+    test.map().style_mut().add_image(style_image("unused-icon", red_image(330, 330), 1.0));
+    test.render();
+    let images = || {
+        let map = test.map();
+        ["used-icon", "unused-icon"].map(|id| map.style().get_image(id).is_some())
+    };
+    assert_eq!(images(), [true, true]);
+
+    {
+        let mut map = test.map();
+        let mut layer = map.style_mut().get_layer_mut("unused").expect("the layer");
+        let symbol = layer.downcast_mut::<SymbolLayer>().expect("SymbolLayer");
+        symbol.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("used-icon")));
+    }
+    test.render();
+    assert_eq!(images(), [true, false]);
+}
+
+/// Switching styles drops the glyphs of the font stacks the new style no
+/// longer uses, so switching back requests them again, and keeps the glyphs
+/// of those it still uses.
+#[test]
+fn style_switch_evicts_the_glyphs_of_unused_font_stacks() {
+    let test = MapTest::new();
+    let requested = Rc::new(RefCell::new(Vec::<String>::new()));
+    {
+        let requested = Rc::clone(&requested);
+        test.file_source.set_response(Kind::Glyphs, move |resource| {
+            requested.borrow_mut().push(resource.url.clone());
+            Some(file_response("test/fixtures/resources/glyphs.pbf"))
+        });
+    }
+    let style = |fonts: &[&str]| {
+        let layers: Vec<String> = fonts
+            .iter()
+            .map(|font| {
+                format!(
+                    r#"{{"id": "{font}", "type": "symbol", "source": "point",
+                        "layout": {{"text-field": "a", "text-font": ["{font}"]}}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{
+                "version": 8,
+                "glyphs": "test://glyphs/{{fontstack}}/{{range}}.pbf",
+                "sources": {{
+                    "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [0, 0]}}}}
+                }},
+                "layers": [{}]
+            }}"#,
+            layers.join(", ")
+        )
+    };
+
+    test.load_json(&style(&["Kept", "Dropped"]));
+    test.render();
+    assert_eq!(requested.borrow().len(), 2, "{:?}", requested.borrow());
+    test.load_json(&style(&["Kept"]));
+    test.render();
+    requested.borrow_mut().clear();
+
+    test.load_json(&style(&["Kept", "Dropped"]));
+    test.render();
+
+    assert_eq!(*requested.borrow(), ["test://glyphs/Dropped/0-255.pbf"]);
+}
+
 // gtest: Map.EmptyImageNameIsNoImage
 #[test]
 fn empty_image_name_is_no_image() {

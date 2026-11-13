@@ -505,6 +505,31 @@ fn releases_the_glyphs_of_evicted_font_stacks() {
     assert_eq!(0, cache.size());
 }
 
+// Evicting a font stack a requestor still waits for keeps its request, so
+// the requestor still gets the glyphs.
+#[test]
+fn evict_keeps_the_font_stacks_requestors_wait_for() {
+    let mut test = GlyphManagerTest::new();
+    test.file_source.set_response(Kind::Glyphs, glyphs_response("test/fixtures/resources/glyphs.pbf"));
+    test.glyph_manager.set_url("test/fixtures/resources/glyphs.pbf");
+    test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
+
+    test.glyph_manager.evict(&VecSet::new());
+
+    let available = Rc::new(Cell::new(false));
+    let (a, run_loop) = (Rc::clone(&available), test.run_loop.clone());
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| {
+        a.set(true);
+        run_loop.stop();
+    }));
+    let timeout = Timer::new();
+    let run_loop = test.run_loop.clone();
+    timeout.start(Duration::from_millis(1000), Duration::ZERO, move || run_loop.stop());
+    test.run_loop.run();
+
+    assert!(available.get());
+}
+
 // gtest: GlyphManager.DoesNotKeepTheRangeGlyphsItDrawsLocally
 #[test]
 fn does_not_keep_the_range_glyphs_it_draws_locally() {
