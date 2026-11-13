@@ -220,22 +220,30 @@ pub(crate) fn forward<T: Send + 'static, V: CompletionValue>(
 ) {
     completion.on_complete(move |result| {
         let (result, generations) = finish(result);
-        match sink {
-            Some(sink) => sink.complete(result, generations),
-            None => {
-                if let Err(error) = result {
-                    log_discarded(&error);
-                }
-            }
-        }
+        complete_or_log(sink, result, generations);
     });
 }
 
-/// Logs the failure of a command whose caller passed no completion.
-fn log_discarded(error: &Error) {
-    let status = error.status();
-    if status != MLN_STATUS_CANCELLED {
-        Log::warning(Event::General, format!("discarded command failed (status {status}): {}", error.message()));
+/// Delivers a command's result to `sink`. Without a sink, a failure that
+/// isn't a cancellation is logged as one warning, so it isn't lost.
+pub(crate) fn complete_or_log<V: CompletionValue>(
+    sink: Option<Completion>,
+    result: Result<V, Error>,
+    generations: Generations,
+) {
+    match sink {
+        Some(sink) => sink.complete(result, generations),
+        None => {
+            if let Err(error) = result {
+                let status = error.status();
+                if status != MLN_STATUS_CANCELLED {
+                    Log::warning(
+                        Event::General,
+                        format!("discarded command failed (status {status}): {}", error.message()),
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -249,7 +257,7 @@ impl Drop for Completion {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use parking_lot::Mutex;
 
     use super::*;
@@ -372,7 +380,7 @@ mod tests {
     }
 
     /// Collects the warnings logged on this thread.
-    struct Warnings(Arc<Mutex<Vec<String>>>);
+    pub(crate) struct Warnings(pub(crate) Arc<Mutex<Vec<String>>>);
 
     impl mln_util::logging::Observer for Warnings {
         fn on_record(&self, severity: mln_util::logging::EventSeverity, event: Event, _: i64, msg: &str) -> bool {

@@ -813,6 +813,30 @@ fn load_url_answered_without_a_style_fails() {
 }
 
 #[test]
+fn load_url_ignores_no_content_and_not_modified_after_a_style() {
+    let (mut style, observer, run_loop) = stub_with_style_response(|_| {
+        let mut response = mln_storage::Response::new();
+        response.data = Some(Arc::new(br#"{"version": 8, "name": "Remote", "sources": {}, "layers": []}"#.to_vec()));
+        Some(response)
+    });
+    style.load_url("http://some-url");
+    run_loop.run_once();
+    style.process_style_responses();
+    assert!(style.is_loaded());
+    // A revalidation that confirms the style the first response brought.
+    for (no_content, not_modified) in [(true, false), (false, true)] {
+        let mut response = mln_storage::Response::new();
+        response.no_content = no_content;
+        response.not_modified = not_modified;
+        style.push_style_response(response);
+        style.process_style_responses();
+    }
+    assert!(observer.errors.borrow().is_empty(), "{:?}", observer.errors.borrow());
+    assert!(style.is_loaded());
+    assert_eq!("Remote", style.get_name());
+}
+
+#[test]
 fn load_json_parse_error() {
     let (mut style, observer, _run_loop) = stub_with_style_response(|_| None);
     style.load_json("[]");

@@ -51,16 +51,15 @@ impl<O: 'static> Thread<O> {
         }
         let mailbox = std::sync::Arc::clone(&object.mailbox);
         let (running_tx, running_rx) = mpsc::channel::<RunLoopHandle>();
-        let thread = mln_util::thread::builder(name)
-            .spawn(move || {
-                let run_loop = RunLoop::new();
-                let parent = AspiringActor::<O>::with_mailbox(mailbox);
-                let established_actor = EstablishedActor::new(&scheduler::get_current(), &parent, make);
-                let _ = running_tx.send(run_loop.handle());
-                run_loop.run();
-                drop(established_actor);
-            })
-            .expect("failed to spawn thread");
+        let thread = mln_util::thread::spawn(name, move || {
+            let run_loop = RunLoop::new();
+            let parent = AspiringActor::<O>::with_mailbox(mailbox);
+            let established_actor = EstablishedActor::new(&scheduler::get_current(), &parent, make);
+            let _ = running_tx.send(run_loop.handle());
+            run_loop.run();
+            drop(established_actor);
+        })
+        .expect("failed to spawn thread");
         Thread { object, backing: Backing::Spawned { thread: Some(thread), running: Mutex::new(running_rx) } }
     }
 
@@ -86,7 +85,7 @@ impl<O: 'static> Drop for Thread<O> {
         let _ = stoppable_rx.recv();
         run_loop.stop();
         if let Some(thread) = thread.take() {
-            let _ = thread.join();
+            mln_util::thread::join(thread);
         }
     }
 }

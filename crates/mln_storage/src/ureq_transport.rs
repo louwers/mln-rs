@@ -19,7 +19,9 @@
 //! once a redirect leaves their origin.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use mln_util::chrono::rfc1123;
@@ -122,7 +124,7 @@ fn start_attempt<A: Connector>(
     let run_connector = Arc::clone(&details.run_connector);
     let register_shutdown = Arc::clone(&details.register_shutdown);
     let per_address = Arc::clone(per_address);
-    mln_util::thread::builder("HTTPFileSource connect").spawn(move || {
+    mln_util::thread::spawn("HTTPFileSource connect", move || {
         // TcpConnector doesn't resolve; a resolver is only required.
         let resolver = DefaultResolver::default();
         let mut addrs = resolver.empty();
@@ -151,47 +153,112 @@ fn start_attempt<A: Connector>(
 }
 
 /// The ureq transport: requests wait in a queue for the next free one
-/// of its worker threads, which runs the transfer. The workers exit when
-/// the transport is dropped, each after its current transfer.
+/// of its worker threads, which runs the transfer.
+///
+/// Dropping it ends the workers: their transfers fail at once, except a
+/// name lookup or a TCP connect, which nothing interrupts. It waits up to
+/// `STOP_TIMEOUT` for them, and a worker still in one after that ends alone
+/// once it returns, without finishing its request.
 pub(crate) struct Transport {
-    requests: mpsc::Sender<TransferRequest>,
+    requests: Option<mpsc::Sender<TransferRequest>>,
+    client: Arc<OnceLock<Client>>,
+    stopping: Arc<AtomicBool>,
+    workers: Vec<JoinHandle<()>>,
+    /// Disconnects once every worker has returned.
+    ended: Mutex<mpsc::Receiver<()>>,
 }
+
+/// How long dropping a [`Transport`] waits for its workers. Shutting the
+/// agent down ends their reads, writes and TLS handshakes at once, so only
+/// a name lookup or a TCP connect lasts longer, which the operating system
+/// gives up on after tens of seconds or minutes: a bound that long would
+/// hold up a host that drops its runtime, and a second covers a lookup or
+/// connect that is merely slow.
+const STOP_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl Transport {
     /// Starts as many workers as the online file source's default
     /// maximum of concurrent requests. Their client is made with the first
     /// transfer.
     pub(crate) fn new() -> Self {
+        Self::with_client(Client::new)
+    }
+
+    /// `new`, with the workers' client from `make` (tests).
+    fn with_client(make: fn() -> Client) -> Self {
         let client = Arc::new(OnceLock::new());
+        let stopping = Arc::new(AtomicBool::new(false));
         let (requests, receiver) = mpsc::channel::<TransferRequest>();
+        let (running, ended) = mpsc::channel::<()>();
         let receiver = Arc::new(Mutex::new(receiver));
-        for i in 0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS {
-            let client = Arc::clone(&client);
-            let receiver = Arc::clone(&receiver);
-            // Detached: a worker exits when the channel closes.
-            let _ = mln_util::thread::builder(format!("HTTPFileSource {i}")).spawn(move || worker(&client, &receiver));
+        let workers = (0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS)
+            .filter_map(|i| {
+                let worker = Worker {
+                    client: Arc::clone(&client),
+                    make,
+                    requests: Arc::clone(&receiver),
+                    stopping: Arc::clone(&stopping),
+                    _running: running.clone(),
+                };
+                mln_util::thread::spawn(format!("HTTPFileSource {i}"), move || worker.run()).ok()
+            })
+            .collect();
+        Transport { requests: Some(requests), client, stopping, workers, ended: Mutex::new(ended) }
+    }
+}
+
+impl Drop for Transport {
+    fn drop(&mut self) {
+        // Set first: a worker that checks it unset has its client made
+        // already, which the shutdown below reaches.
+        self.stopping.store(true, Ordering::SeqCst);
+        self.requests = None;
+        if let Some(client) = self.client.get() {
+            client.agent.clone().shutdown();
         }
-        Transport { requests }
+        if matches!(self.ended.get_mut().recv_timeout(STOP_TIMEOUT), Err(mpsc::RecvTimeoutError::Disconnected)) {
+            for worker in self.workers.drain(..) {
+                mln_util::thread::join(worker);
+            }
+        }
     }
 }
 
 impl HttpTransport for Transport {
     fn start(&self, request: TransferRequest) {
-        let _ = self.requests.send(request);
+        if let Some(requests) = &self.requests {
+            let _ = requests.send(request);
+        }
     }
 }
 
-fn worker(client: &OnceLock<Client>, requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
-    loop {
-        let request = requests.lock().recv();
-        let Ok(request) = request else {
-            return; // the transport is gone
-        };
-        if request.is_cancelled() {
-            continue;
+/// A worker thread of a [`Transport`].
+struct Worker {
+    client: Arc<OnceLock<Client>>,
+    make: fn() -> Client,
+    requests: Arc<Mutex<mpsc::Receiver<TransferRequest>>>,
+    stopping: Arc<AtomicBool>,
+    /// Tells the transport that the worker returned, when it drops.
+    _running: mpsc::Sender<()>,
+}
+
+impl Worker {
+    fn run(self) {
+        loop {
+            let request = self.requests.lock().recv();
+            let Ok(request) = request else {
+                return; // the transport is gone
+            };
+            if request.is_cancelled() {
+                continue;
+            }
+            let client = self.client.get_or_init(self.make);
+            if self.stopping.load(Ordering::SeqCst) {
+                return;
+            }
+            let transfer = client.transfer(request.resource(), request.headers());
+            request.finish(transfer);
         }
-        let transfer = client.get_or_init(Client::new).transfer(request.resource(), request.headers());
-        request.finish(transfer);
     }
 }
 
@@ -430,9 +497,58 @@ mod tests {
         assert_eq!([dropped[0], server], attempts.lock()[..2]);
     }
 
+    /// Takes one connection on a loopback port and never answers it.
+    /// Returns the port and what tells of the connection.
+    fn never_answer() -> (SocketAddr, mpsc::Receiver<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (accepted, was_accepted) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            accepted.send(()).unwrap();
+            let mut buffer = [0; 1024];
+            while stream.read(&mut buffer).is_ok_and(|read| read != 0) {}
+        });
+        (addr, was_accepted)
+    }
+
+    #[test]
+    fn dropping_the_transport_ends_a_transfer_that_waits_for_its_response() {
+        let (addr, accepted) = never_answer();
+        let transport = Transport::new();
+        let client = Arc::downgrade(&transport.client);
+        transport.start(TransferRequest::unanswered(Resource::style(&format!("http://{addr}/style.json"))));
+        accepted.recv_timeout(Duration::from_secs(10)).unwrap();
+        let started = Instant::now();
+        drop(transport);
+        assert!(started.elapsed() < STOP_TIMEOUT, "took {:?}", started.elapsed());
+        assert!(client.upgrade().is_none(), "a worker still runs");
+    }
+
+    #[test]
+    fn dropping_the_transport_waits_for_a_connect_until_its_timeout() {
+        const HANGING: SocketAddr =
+            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)), 80);
+        static ATTEMPTS: std::sync::LazyLock<Arc<Mutex<Vec<SocketAddr>>>> = std::sync::LazyLock::new(Arc::default);
+        let transport = Transport::with_client(|| {
+            Client::with_parts(
+                DroppingConnector { dropped: vec![HANGING], attempts: Arc::clone(&ATTEMPTS) },
+                FixedResolver(vec![HANGING]),
+            )
+        });
+        transport.start(TransferRequest::unanswered(Resource::style("http://hanging.test/style.json")));
+        while ATTEMPTS.lock().is_empty() {
+            std::thread::yield_now();
+        }
+        let started = Instant::now();
+        drop(transport);
+        let waited = started.elapsed();
+        assert!(waited >= STOP_TIMEOUT && waited < STOP_TIMEOUT * 5, "took {waited:?}");
+    }
+
     /// Answers one request on a loopback port with 200 and returns the
     /// port and the request's head.
-    fn serve_one() -> (SocketAddr, std::thread::JoinHandle<String>) {
+    fn serve_one() -> (SocketAddr, JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {

@@ -429,8 +429,8 @@ pub(crate) struct Worker {
     /// The releases and replacements that wait for the host's reads of the
     /// textures that they let go of.
     settling: Vec<Settling>,
-    /// Stops the thread that has the session's thread poll `settling`.
-    ticker: Option<Arc<AtomicBool>>,
+    /// The thread that has the session's thread poll `settling`.
+    ticker: Option<Ticker>,
 }
 
 /// The longest that a release or replacement waits for the host's reads of
@@ -451,12 +451,31 @@ struct Settling {
 /// What runs once a release or replacement has settled, with its result.
 type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
 
+/// What has the session's thread poll the host's reads, until it drops,
+/// which waits for its thread to end.
+struct Ticker {
+    stop: Arc<AtomicBool>,
+    #[cfg(not(target_family = "wasm"))]
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for Ticker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        // It sleeps for no longer than `SETTLE_POLL`.
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(thread) = self.thread.take() {
+            mln_util::thread::join(thread);
+        }
+    }
+}
+
 /// Starts a thread that has the session's thread poll the host's reads on
-/// its later turns, until the returned flag stops it. It posts to the
+/// its later turns, until the returned ticker drops. It posts to the
 /// session's loop, so a caller-driven session's host gets a wake for each
 /// poll.
 #[cfg(target_family = "wasm")]
-fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
+fn start_ticker(run_loop: RunLoopHandle) -> Ticker {
     // The browser's one thread polls in the pump's slices instead, which it
     // asks for meanwhile.
     let stop = Arc::new(AtomicBool::new(false));
@@ -471,15 +490,15 @@ fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
         true
     })
     .detach();
-    stop
+    Ticker { stop }
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
+fn start_ticker(run_loop: RunLoopHandle) -> Ticker {
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = Arc::clone(&stop);
     let deadline = Instant::now() + SETTLE_TIMEOUT * 2;
-    let spawned = mln_util::thread::builder("RenderSessionSettle").spawn(move || {
+    let spawned = mln_util::thread::spawn("RenderSessionSettle", move || {
         while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
             std::thread::sleep(SETTLE_POLL);
             post(&run_loop, Worker::poll_settling);
@@ -488,7 +507,7 @@ fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
     if spawned.is_err() {
         Log::error(Event::Render, "Can't start the thread that polls the host's reads of released textures");
     }
-    stop
+    Ticker { stop, thread: spawned.ok() }
 }
 
 impl Drop for Worker {
@@ -1514,9 +1533,7 @@ impl Worker {
     }
 
     fn stop_ticker(&mut self) {
-        if let Some(ticker) = self.ticker.take() {
-            ticker.store(true, Ordering::SeqCst);
-        }
+        self.ticker = None;
     }
 
     /// Ends the releases and replacements that wait for the host's reads,

@@ -306,6 +306,24 @@ fn cache_operations_change_what_the_ambient_cache_serves() {
     wait(runtime.release());
 }
 
+/// A provider that holds the thread that drops it, the runtime's, until its
+/// gate opens.
+struct Gate {
+    entered: std::sync::mpsc::Sender<()>,
+    gate: parking_lot::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl ResourceProvider for Gate {
+    fn request(&self, _request: ResourceRequest) {}
+}
+
+impl Drop for Gate {
+    fn drop(&mut self) {
+        let _ = self.entered.send(());
+        let _ = self.gate.lock().recv_timeout(support::TIMEOUT);
+    }
+}
+
 #[test]
 fn an_offline_operation_sent_before_a_release_completes_first() {
     let dir = TempDir::new();
@@ -316,13 +334,12 @@ fn an_offline_operation_sent_before_a_release_completes_first() {
     let runtime =
         Runtime::new(&RuntimeOptions { cache_path: Some(cache.clone()), ..RuntimeOptions::default() }).unwrap();
     // The gate holds the runtime's thread until the release is sent, so the
-    // release reaches the thread before the database's answer.
+    // release reaches the thread before the database's answer: a replaced
+    // provider is dropped there.
     let (open, gate) = std::sync::mpsc::channel::<()>();
     let (entered, parked) = std::sync::mpsc::channel::<()>();
-    runtime.clear_resource_provider().unwrap().on_complete(move |_| {
-        let _ = entered.send(());
-        let _ = gate.recv_timeout(support::TIMEOUT);
-    });
+    wait(runtime.set_resource_provider(Gate { entered, gate: parking_lot::Mutex::new(gate) }));
+    let cleared = runtime.clear_resource_provider();
     parked.recv_timeout(support::TIMEOUT).unwrap();
     let (record, order) = std::sync::mpsc::channel();
     let record_created = record.clone();
@@ -331,6 +348,7 @@ fn an_offline_operation_sent_before_a_release_completes_first() {
     let released = runtime.release().unwrap();
     released.on_complete(move |result| drop(record.send(result.map(|()| "released").map_err(|e| e.message))));
     drop(open);
+    wait(cleared);
     let next = || order.recv_timeout(support::TIMEOUT).unwrap();
     assert_eq!([Ok("created"), Ok("released")], [next(), next()]);
 

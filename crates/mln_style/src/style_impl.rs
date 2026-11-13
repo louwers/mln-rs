@@ -376,6 +376,13 @@ impl Impl {
         ));
     }
 
+    /// Queues a later response to the style request, as a file source that
+    /// revalidates the style answers the same request again.
+    #[cfg(test)]
+    pub(crate) fn push_style_response(&self, response: Response) {
+        self.style_responses.borrow_mut().push_back(response);
+    }
+
     /// The body of the `loadURL` response lambda, for each response queued
     /// since the last call (see the file comment).
     pub fn process_style_responses(&mut self) {

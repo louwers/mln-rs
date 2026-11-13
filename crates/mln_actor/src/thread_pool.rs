@@ -56,60 +56,59 @@ impl ThreadedScheduler {
 }
 
 fn make_scheduler_thread(shared: Arc<Shared>, index: usize) -> JoinHandle<()> {
-    mln_util::thread::builder(format!("Worker {}", index + 1))
-        .spawn(move || {
-            OWNING_THREAD_POOL.with(|p| p.set(Arc::as_ptr(&shared) as usize));
-            loop {
-                {
-                    let mut terminated = shared.worker_mutex.lock();
-                    if !*terminated && shared.task_count.load(Ordering::SeqCst) == 0 {
-                        shared.cv_available.wait(&mut terminated);
-                    }
-                    if *terminated {
-                        break;
-                    }
-                    // Let other threads run
+    mln_util::thread::spawn(format!("Worker {}", index + 1), move || {
+        OWNING_THREAD_POOL.with(|p| p.set(Arc::as_ptr(&shared) as usize));
+        loop {
+            {
+                let mut terminated = shared.worker_mutex.lock();
+                if !*terminated && shared.task_count.load(Ordering::SeqCst) == 0 {
+                    shared.cv_available.wait(&mut terminated);
                 }
+                if *terminated {
+                    break;
+                }
+                // Let other threads run
+            }
 
-                // 1. Gather buckets for us to visit this iteration
-                let pending: Vec<Arc<Queue>> = shared.tagged_queue.lock().values().cloned().collect();
+            // 1. Gather buckets for us to visit this iteration
+            let pending: Vec<Arc<Queue>> = shared.tagged_queue.lock().values().cloned().collect();
 
-                // 2. Visit a task from each
-                for q in pending {
-                    let tasklet = {
-                        let mut queue = q.queue.lock();
-                        let tasklet = queue.pop_front();
-                        if tasklet.is_some() {
-                            q.running_count.fetch_add(1, Ordering::SeqCst);
-                        }
-                        tasklet
-                    };
-                    let Some(tasklet) = tasklet else {
-                        continue;
-                    };
-
-                    shared.task_count.fetch_sub(1, Ordering::SeqCst);
-
-                    // A task that panics still counts as done, so that
-                    // `waitForEmpty` returns before the panic ends this
-                    // worker.
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(tasklet));
-
-                    // The function and its captures are gone before
-                    // unblocking `waitForEmpty`.
-                    if q.running_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-                        let queue = q.queue.lock();
-                        if queue.is_empty() {
-                            q.cv.notify_all();
-                        }
+            // 2. Visit a task from each
+            for q in pending {
+                let tasklet = {
+                    let mut queue = q.queue.lock();
+                    let tasklet = queue.pop_front();
+                    if tasklet.is_some() {
+                        q.running_count.fetch_add(1, Ordering::SeqCst);
                     }
-                    if let Err(payload) = result {
-                        std::panic::resume_unwind(payload);
+                    tasklet
+                };
+                let Some(tasklet) = tasklet else {
+                    continue;
+                };
+
+                shared.task_count.fetch_sub(1, Ordering::SeqCst);
+
+                // A task that panics still counts as done, so that
+                // `waitForEmpty` returns before the panic ends this
+                // worker.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(tasklet));
+
+                // The function and its captures are gone before
+                // unblocking `waitForEmpty`.
+                if q.running_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+                    let queue = q.queue.lock();
+                    if queue.is_empty() {
+                        q.cv.notify_all();
                     }
+                }
+                if let Err(payload) = result {
+                    std::panic::resume_unwind(payload);
                 }
             }
-        })
-        .expect("failed to spawn worker thread")
+        }
+    })
+    .expect("failed to spawn worker thread")
 }
 
 impl Scheduler for ThreadedScheduler {
@@ -173,7 +172,7 @@ impl Drop for ThreadedScheduler {
         *self.shared.worker_mutex.lock() = true;
         self.shared.cv_available.notify_all();
         for thread in self.threads.drain(..) {
-            let _ = thread.join();
+            mln_util::thread::join(thread);
         }
     }
 }

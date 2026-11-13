@@ -16,6 +16,7 @@ use mln_util::feature::Feature;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use mln_util::thread::Joined;
 use parking_lot::Mutex;
 
 use super::driver::DriverWork;
@@ -689,6 +690,13 @@ pub(crate) fn physical_size(size: Size, pixel_ratio: f32) -> Size {
 /// its map until then. A call that sends work to a session that no longer
 /// takes it fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind), or
 /// with the failure of a session that failed.
+///
+/// Unless the session was released or disposed, the last drop of its
+/// handles, [`AcquiredFrame`]s and [`FrameView`]s waits for a core worker's
+/// thread to end, once the session has let go of its graphics objects and
+/// its map. A drop on a thread of the library, such as in a callback or a
+/// wake that the library runs, doesn't wait: that thread waits for the
+/// session's at its own end.
 #[derive(Clone)]
 pub struct RenderSession {
     handle: Arc<SessionHandle>,
@@ -697,9 +705,18 @@ pub struct RenderSession {
 /// Disposes of the session when the last handle drops.
 struct SessionHandle {
     shared: Arc<SessionShared>,
+    thread_end: ThreadEnd,
 }
 
+/// A core worker's thread, which the last of the host's handles, frames and
+/// views of the session to drop waits for. A caller-driven session has no
+/// thread, and in the browser the thread is the host's.
+type ThreadEnd = Option<Arc<Joined>>;
+
 impl Drop for SessionHandle {
+    /// Disposes of the session, which ends its thread once the frames and
+    /// views of it end too, then waits for the thread as `thread_end` drops,
+    /// unless they hold it.
     fn drop(&mut self) {
         let _ = self.shared.dispose(None);
     }
@@ -875,12 +892,14 @@ fn attach_unlocked<R>(
     // Held until `then` returns: the session's thread delivers the attach's
     // result after, inside its driver call.
     let sending = Arc::clone(&shared);
-    let _sending = sending.hold_sending();
+    let held = sending.hold_sending();
     map.claim_session(id, Arc::downgrade(&shared))?;
+    let mut thread_end = None;
     if options.driver == Driver::CoreWorker {
         match start_thread(Arc::clone(&shared)) {
-            Ok(thread) => {
+            Ok((thread, end)) => {
                 let _ = shared.thread.set(thread);
+                thread_end = end.map(Arc::new);
             }
             Err(error) => {
                 map.release_session_claim(id);
@@ -888,9 +907,11 @@ fn attach_unlocked<R>(
             }
         }
     }
-    let session = RenderSession { handle: Arc::new(SessionHandle { shared }) };
+    let session = RenderSession { handle: Arc::new(SessionHandle { shared, thread_end }) };
     if let Err(error) = map.bind_session(id, run_loop, Arc::clone(&session.shared().awaited_command), size) {
-        // The map was released meanwhile: the session lets go of it.
+        // The map was released meanwhile: the session lets go of it. Its
+        // drop waits for its thread, which waits for the sending lock.
+        drop(held);
         drop(session);
         return Err(error);
     }
@@ -902,32 +923,34 @@ fn attach_unlocked<R>(
         // from the runtime's thread, woke it already.
         session.shared().run_loop.invoke(|| {});
     }
-    Ok(then(&session, completion))
+    let attached = then(&session, completion);
+    // Before the session, whose drop may wait for its thread, which waits
+    // for the sending lock.
+    drop(held);
+    Ok(attached)
 }
 
 /// Starts a core worker's thread, which builds the session's renderer, then
 /// runs the session's loop until the session ends.
 #[cfg(not(target_family = "wasm"))]
-fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
-    let thread = mln_util::thread::builder("RenderSession")
-        .spawn(move || {
-            let Some(run_loop) = RunLoop::adopt(&shared.run_loop) else { return };
-            let _current = run_loop.enter();
-            let slot = worker::Slot::default();
-            let entered = worker::enter(&slot);
-            worker::build(&shared, &slot);
-            // The worker holds the session from here on.
-            drop(shared);
-            run_loop.run();
-            let worker = slot.borrow_mut().take();
-            drop(worker);
-            drop(entered);
-        })
-        .map_err(|error| Error::native(format!("can't start the render session's thread: {error}")))?;
+fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>), Error> {
+    let thread = mln_util::thread::spawn("RenderSession", move || {
+        let Some(run_loop) = RunLoop::adopt(&shared.run_loop) else { return };
+        let _current = run_loop.enter();
+        let slot = worker::Slot::default();
+        let entered = worker::enter(&slot);
+        worker::build(&shared, &slot);
+        // The worker holds the session from here on.
+        drop(shared);
+        run_loop.run();
+        let worker = slot.borrow_mut().take();
+        drop(worker);
+        drop(entered);
+    })
+    .map_err(|error| Error::native(format!("can't start the render session's thread: {error}")))?;
     let thread_id = thread.thread().id();
-    // The thread ends by itself once the session ends, so nothing joins it.
-    drop(thread);
-    Ok(thread_id)
+    // The thread ends by itself once the session ends.
+    Ok((thread_id, Some(Joined::new(thread))))
 }
 
 /// Runs a core worker on this thread, the browser's one, in the instance's
@@ -936,7 +959,7 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
 /// the session ends.
 #[cfg(target_family = "wasm")]
 #[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
-fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
+fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>), Error> {
     let prepared = worker::prepare(&shared);
     wasm_bindgen_futures::spawn_local(async move {
         prepared.await;
@@ -961,7 +984,7 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
             }
         });
     });
-    Ok(std::thread::current().id())
+    Ok((std::thread::current().id(), None))
 }
 
 /// In the browser, asks for the device that a caller-driven session's build
@@ -1146,7 +1169,13 @@ impl RenderSession {
         let Some(frame) = slot.frame.take() else { return Ok(None) };
         slot.acquired = true;
         state.acquired_frames += 1;
-        Ok(Some(AcquiredFrame { shared: Arc::clone(shared), slot: index, frame, done: false }))
+        Ok(Some(AcquiredFrame {
+            shared: Arc::clone(shared),
+            thread_end: self.handle.thread_end.clone(),
+            slot: index,
+            frame,
+            done: false,
+        }))
     }
 
     /// Gives a borrowed ring new textures, of `size` logical pixels: as many
@@ -1586,7 +1615,8 @@ impl RenderSession {
 
     /// Releases the session, detaching it first when it is attached. The
     /// completion reports when the session has let go of its map and its
-    /// graphics objects. Every call on the session fails with
+    /// graphics objects, and nothing waits for its thread to end after
+    /// that. Every call on the session fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
     ///
     /// A caller-driven session detaches at the host's next service, so keep
@@ -1603,21 +1633,36 @@ impl RenderSession {
         }
         let (completion, resolver) = self.shared().completion();
         self.shared().dispose(Some(resolver))?;
+        self.detach_thread();
         Ok(completion)
     }
 
-    /// Releases the session in any state, without waiting. Dropping the last
-    /// handle does the same.
+    /// Releases the session in any state, without waiting, and nothing waits
+    /// for its thread to end. Dropping the last handle does the same, then
+    /// waits for the thread.
     pub fn dispose(&self) -> Result<(), Error> {
-        self.shared().dispose(None)
+        self.shared().dispose(None)?;
+        self.detach_thread();
+        Ok(())
     }
 
     /// Releases the session in any state, without waiting and without a
     /// graphics call past the one in progress. A session that hasn't ended
     /// is abandoned, keeping its graphics objects until the process exits,
     /// as [`abandon_keeping_graphics`](Self::abandon_keeping_graphics) does.
+    /// Nothing waits for its thread to end.
     pub fn dispose_keeping_graphics(&self) -> Result<(), Error> {
-        self.shared().dispose_keeping_graphics()
+        self.shared().dispose_keeping_graphics()?;
+        self.detach_thread();
+        Ok(())
+    }
+
+    /// Leaves a core worker's thread to end alone, for a release or
+    /// disposal, which don't wait for it.
+    fn detach_thread(&self) {
+        if let Some(thread) = &self.handle.thread_end {
+            thread.detach();
+        }
     }
 }
 
@@ -1637,6 +1682,8 @@ impl Drop for RetargetGuard {
 /// [`SyncKind::CpuComplete`] does.
 pub struct AcquiredFrame {
     shared: Arc<SessionShared>,
+    /// Dropped after the frame is given back.
+    thread_end: ThreadEnd,
     slot: usize,
     frame: Published,
     done: bool,
@@ -1698,7 +1745,7 @@ impl AcquiredFrame {
             return Err(Error::target_lost("the render session failed, or was detached, abandoned, or disposed"));
         }
         state.views += 1;
-        Ok(FrameView { shared: Arc::clone(&self.shared) })
+        Ok(FrameView { shared: Arc::clone(&self.shared), _thread_end: self.thread_end.clone() })
     }
 
     /// Whether the session can still render: the frame's objects stay valid
@@ -1744,6 +1791,8 @@ impl AcquiredFrame {
 /// it drops.
 pub struct FrameView {
     shared: Arc<SessionShared>,
+    /// Dropped after the view ends.
+    _thread_end: ThreadEnd,
 }
 
 impl std::fmt::Debug for FrameView {

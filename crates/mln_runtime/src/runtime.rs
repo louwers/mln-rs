@@ -19,6 +19,7 @@ use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
+use mln_util::thread::Joined;
 use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
@@ -52,6 +53,16 @@ pub struct RuntimeOptions {
 /// [`dispose`](Self::dispose), or until its last handle and its last map
 /// are dropped. A handler or provider that holds a handle keeps it alive
 /// until then.
+///
+/// Unless the runtime was released or disposed, the drop of the last of its
+/// handles and maps returns once the runtime's threads have ended: its own
+/// and its file sources'. A worker that loads over HTTP and is stuck in a
+/// name lookup or a TCP connect is waited for up to a second, then left to
+/// end alone. The host's handlers, providers and transforms that the runtime
+/// holds are dropped on its thread meanwhile, so they mustn't wait for the
+/// thread that drops it. A drop on a thread of the library, such as in a
+/// handler or callback that the library runs, doesn't wait: that thread
+/// waits for the runtime's at its own end.
 #[derive(Clone)]
 pub struct Runtime {
     pub(crate) shared: Arc<RuntimeShared>,
@@ -79,6 +90,10 @@ pub(crate) struct RuntimeShared {
     /// The glyphs that the renderers of the runtime's maps parse, which they
     /// share.
     pub(crate) glyph_cache: Arc<GlyphCache>,
+    /// The runtime's thread, which the drop waits for after the shutdown
+    /// unless a release or disposal detached it, except in the browser,
+    /// where the thread is the host's.
+    thread_end: Option<Joined>,
 }
 
 impl RuntimeShared {
@@ -118,6 +133,14 @@ impl RuntimeShared {
         Completion::new(Some(self.thread))
     }
 
+    /// Leaves the runtime's thread to end alone, for a release or disposal,
+    /// which don't wait for it.
+    fn detach_thread(&self) {
+        if let Some(thread) = &self.thread_end {
+            thread.detach();
+        }
+    }
+
     fn check_live(&self) -> Result<(), Error> {
         if self.lifecycle.lock().released { Err(released()) } else { Ok(()) }
     }
@@ -154,6 +177,8 @@ impl RuntimeShared {
 }
 
 impl Drop for RuntimeShared {
+    /// Shuts the runtime down unless it has, then waits for its thread as
+    /// `thread_end` drops.
     fn drop(&mut self) {
         if !self.lifecycle.get_mut().shut_down {
             self.shut_down(None);
@@ -402,7 +427,7 @@ impl Runtime {
     pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
         let queued = Arc::new(AtomicUsize::new(0));
-        let (run_loop, thread) = Self::start(resource_options, Arc::clone(&queued))?;
+        let (run_loop, thread, thread_end) = Self::start(resource_options, Arc::clone(&queued))?;
         Ok(Runtime {
             shared: Arc::new(RuntimeShared {
                 run_loop,
@@ -411,6 +436,7 @@ impl Runtime {
                 lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
                 next_map_id: AtomicU64::new(1),
                 glyph_cache: Arc::default(),
+                thread_end,
             }),
         })
     }
@@ -418,32 +444,36 @@ impl Runtime {
     /// Builds the runtime's state on a thread of its own, which runs its loop
     /// until the runtime shuts down.
     #[cfg(not(target_family = "wasm"))]
-    fn start(resource_options: ResourceOptions, queued: Arc<AtomicUsize>) -> Result<(RunLoopHandle, ThreadId), Error> {
+    fn start(
+        resource_options: ResourceOptions,
+        queued: Arc<AtomicUsize>,
+    ) -> Result<(RunLoopHandle, ThreadId, Option<Joined>), Error> {
         let (started, start) = mpsc::channel();
         let core_queued = queued;
-        let thread = mln_util::thread::builder("Runtime")
-            .spawn(move || {
-                let run_loop = RunLoop::new();
-                let core = RuntimeCore::new(resource_options, run_loop.handle(), core_queued);
-                CORE.with(|cell| *cell.borrow_mut() = Some(core));
-                let _ = started.send(run_loop.handle());
-                run_loop.run();
-                let core = CORE.with(|cell| cell.borrow_mut().take());
-                drop(core);
-            })
-            .map_err(|error| Error::native(format!("can't start the runtime's thread: {error}")))?;
+        let thread = mln_util::thread::spawn("Runtime", move || {
+            let run_loop = RunLoop::new();
+            let core = RuntimeCore::new(resource_options, run_loop.handle(), core_queued);
+            CORE.with(|cell| *cell.borrow_mut() = Some(core));
+            let _ = started.send(run_loop.handle());
+            run_loop.run();
+            let core = CORE.with(|cell| cell.borrow_mut().take());
+            drop(core);
+        })
+        .map_err(|error| Error::native(format!("can't start the runtime's thread: {error}")))?;
         let thread_id = thread.thread().id();
-        // The thread ends by itself once the runtime shuts down, so nothing
-        // joins it: a runtime may shut down from its own thread.
-        drop(thread);
+        // The thread ends by itself once the runtime shuts down.
+        let thread = Joined::new(thread);
         let run_loop = start.recv().map_err(|_| Error::native("the runtime's thread stopped as it started"))?;
-        Ok((run_loop, thread_id))
+        Ok((run_loop, thread_id, Some(thread)))
     }
 
     /// Builds the runtime's state on this thread, under a loop of its own
     /// that the instance's pump runs until the runtime shuts down.
     #[cfg(target_family = "wasm")]
-    fn start(resource_options: ResourceOptions, queued: Arc<AtomicUsize>) -> Result<(RunLoopHandle, ThreadId), Error> {
+    fn start(
+        resource_options: ResourceOptions,
+        queued: Arc<AtomicUsize>,
+    ) -> Result<(RunLoopHandle, ThreadId, Option<Joined>), Error> {
         crate::web::install();
         let handle = RunLoopHandle::new();
         let run_loop = RunLoop::adopt(&handle).ok_or_else(|| Error::native("the runtime's loop runs already"))?;
@@ -458,7 +488,7 @@ impl Runtime {
             run();
             CORE.with(|cell| std::mem::swap(&mut *cell.borrow_mut(), &mut core));
         });
-        Ok((handle, std::thread::current().id()))
+        Ok((handle, std::thread::current().id(), None))
     }
 
     /// Sends a command to the runtime's thread.
@@ -673,7 +703,8 @@ impl Runtime {
     }
 
     /// Shuts the runtime down. The completion reports when its thread has
-    /// let go of its maps' resources and its file sources.
+    /// let go of its maps' resources and its file sources, and nothing waits
+    /// for the thread to end after that.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
     /// runtime has maps that aren't released, or when the runtime was
@@ -690,14 +721,16 @@ impl Runtime {
             lifecycle.released = true;
             lifecycle.shut_down = true;
         }
+        self.shared.detach_thread();
         let (completion, resolver) = self.shared.completion();
         self.shared.shut_down(Some(resolver));
         Ok(completion)
     }
 
     /// Releases the runtime whatever its state, without waiting: it shuts
-    /// down once its last map is released. Every call on the runtime fails
-    /// with [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
+    /// down once its last map is released, and nothing waits for its thread
+    /// to end. Every call on the runtime fails with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
     pub fn dispose(&self) -> Result<(), Error> {
         let shut_down = {
             let mut lifecycle = self.shared.lifecycle.lock();
@@ -709,6 +742,7 @@ impl Runtime {
             lifecycle.shut_down |= shut_down;
             shut_down
         };
+        self.shared.detach_thread();
         if shut_down {
             self.shared.shut_down(None);
         }
