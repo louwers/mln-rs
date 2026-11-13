@@ -187,6 +187,15 @@ pub(crate) struct CollisionGroups {
     cross_source_collisions: bool,
 }
 
+impl std::fmt::Debug for CollisionGroups {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CollisionGroups")
+            .field("max_group_id", &self.max_group_id)
+            .field("cross_source_collisions", &self.cross_source_collisions)
+            .finish_non_exhaustive()
+    }
+}
+
 impl CollisionGroups {
     #[must_use]
     pub(crate) fn new(cross_source_collisions: bool) -> Self {
@@ -325,6 +334,35 @@ pub(crate) struct PlacementContext {
     pub(crate) avoid_edges: Option<CollisionBoundaries>,
 }
 
+impl std::fmt::Debug for PlacementContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlacementContext")
+            .field("tile_owner", &self.tile_owner)
+            .field("tile_index", &self.tile_index)
+            .field("bearing", &self.bearing)
+            .field("pixels_to_tile_units", &self.pixels_to_tile_units)
+            .field("scale", &self.scale)
+            .field("pixel_ratio", &self.pixel_ratio)
+            .field("rotate_text_with_map", &self.rotate_text_with_map)
+            .field("pitch_text_with_map", &self.pitch_text_with_map)
+            .field("rotate_icon_with_map", &self.rotate_icon_with_map)
+            .field("pitch_icon_with_map", &self.pitch_icon_with_map)
+            .field("placement_type", &self.placement_type)
+            .field("tile_projection", &self.tile_projection)
+            .field("text_translation", &self.text_translation)
+            .field("icon_translation", &self.icon_translation)
+            .field("partially_evaluated_text_size", &self.partially_evaluated_text_size)
+            .field("partially_evaluated_icon_size", &self.partially_evaluated_icon_size)
+            .field("text_allow_overlap", &self.text_allow_overlap)
+            .field("icon_allow_overlap", &self.icon_allow_overlap)
+            .field("always_show_text", &self.always_show_text)
+            .field("always_show_icon", &self.always_show_icon)
+            .field("has_icon_text_fit", &self.has_icon_text_fit)
+            .field("avoid_edges", &self.avoid_edges)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PlacementContext {
     /// The context for placing `bucket`'s symbols, with the translations from
     /// `params`. Locks the bucket's state briefly; call it without holding the
@@ -446,6 +484,7 @@ impl PlacementContext {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct PlacementController {
     empty_placement: Rc<Placement>,
     placement: Rc<Placement>,
@@ -521,6 +560,7 @@ impl PlacementController {
 }
 
 /// `Intersection` (`TilePlacement`).
+#[derive(Debug)]
 struct Intersection {
     ctx: Rc<PlacementContext>,
     /// Index of the symbol instance in the context's bucket.
@@ -533,7 +573,7 @@ struct Intersection {
 }
 
 /// The data members of `TilePlacement`.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct TilePlacementState {
     tile_borders: Option<CollisionBoundaries>,
     seen_cross_tile_ids: BTreeSet<u32>,
@@ -545,6 +585,7 @@ struct TilePlacementState {
 }
 
 /// The subclass of a `Placement`.
+#[derive(Debug)]
 enum PlacementKind {
     /// `Placement` (continuous map mode).
     Continuous,
@@ -567,6 +608,7 @@ fn elapsed(now: Option<Instant>, since: Option<Instant>) -> Duration {
 }
 
 /// `Placement`.
+#[derive(Debug)]
 pub(crate) struct Placement {
     kind: PlacementKind,
 

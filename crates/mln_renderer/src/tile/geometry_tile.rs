@@ -76,6 +76,15 @@ pub(crate) struct LayoutAtlases {
     pub(crate) dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
 }
 
+impl std::fmt::Debug for LayoutAtlases {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayoutAtlases")
+            .field("glyph_atlas", &self.glyph_atlas)
+            .field("image_atlas", &self.image_atlas)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Drop for LayoutAtlases {
     fn drop(&mut self) {
         if let Some(atlas) = &self.dynamic_texture_atlas {
@@ -85,7 +94,7 @@ impl Drop for LayoutAtlases {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LayoutResult {
     pub(crate) layer_render_data: HashMap<String, LayerRenderData>,
     pub(crate) feature_index: Arc<FeatureIndex>,

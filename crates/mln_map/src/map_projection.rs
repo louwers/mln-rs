@@ -10,6 +10,7 @@ use crate::transform::Transform;
 
 /// Converts coordinates for one camera and size, without a map. It holds only
 /// a transform state, so it can move to another thread.
+#[derive(Debug)]
 pub struct MapProjection {
     state: TransformState,
 }

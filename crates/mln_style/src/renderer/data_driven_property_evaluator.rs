@@ -7,6 +7,7 @@ use crate::renderer::possibly_evaluated_property_value::{
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::property_evaluator::Evaluator;
 
+#[derive(Debug)]
 pub struct DataDrivenPropertyEvaluator<'a, T, const USE_INTEGER_ZOOM: bool = false> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,
@@ -66,6 +67,7 @@ impl<T: Clone + ValueConverter, const USE_INTEGER_ZOOM: bool> Evaluator<T>
 }
 
 /// The data-driven evaluator of cross-faded values.
+#[derive(Debug)]
 pub struct DataDrivenFadedPropertyEvaluator<'a, T> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,

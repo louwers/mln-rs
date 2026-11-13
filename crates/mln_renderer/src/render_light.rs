@@ -6,6 +6,7 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 pub(crate) type TransitioningLight = LightProperties::Unevaluated;
 pub(crate) type EvaluatedLight = LightProperties::PossiblyEvaluated;
 
+#[derive(Debug)]
 pub(crate) struct RenderLight {
     pub(crate) impl_: Arc<light::Impl>,
     transitioning: TransitioningLight,

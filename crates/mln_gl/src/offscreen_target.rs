@@ -85,6 +85,7 @@ impl TargetResource for OffscreenResource {
 
 /// Frames drawn into a framebuffer of a color renderbuffer and a depth and
 /// stencil one, which [`read_image`](Self::read_image) reads back.
+#[derive(Debug)]
 pub struct OffscreenTarget {
     backend: Rc<RendererBackend>,
     size: Cell<Size>,

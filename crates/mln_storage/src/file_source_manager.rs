@@ -28,6 +28,7 @@ use crate::resource_options::ResourceOptions;
 pub(crate) type FileSourceFactory =
     Arc<dyn Fn(&FileSourceManager, &ResourceOptions) -> Arc<dyn FileSource> + Send + Sync>;
 
+#[derive(Debug)]
 struct FileSourceInfo {
     type_: FileSourceType,
     options: ResourceOptions,
@@ -40,6 +41,12 @@ struct Registry {
     factories: VecMap<FileSourceType, FileSourceFactory>,
 }
 
+impl std::fmt::Debug for Registry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Registry").field("file_sources", &self.file_sources).finish_non_exhaustive()
+    }
+}
+
 /// The file sources of one owner (a map's host, a runtime).
 ///
 /// [`get_file_source`](Self::get_file_source) shares one live file source
@@ -47,7 +54,7 @@ struct Registry {
 /// released it. Separate managers never share a file source, so a resource
 /// transform, a header transform or a factory one owner installs never
 /// reaches another. `Clone` is another handle to the same file sources.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FileSourceManager {
     registry: Arc<Mutex<Registry>>,
 }

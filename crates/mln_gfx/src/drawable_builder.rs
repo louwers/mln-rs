@@ -46,6 +46,7 @@ pub(crate) struct LineLayoutVertex {
     pub(crate) a2: [u8; 4],
 }
 
+#[derive(Debug)]
 pub struct DrawableBuilderImpl {
     pub vertices: VertexVector<VT>,
     pub raw_vertices: Vec<u8>,
@@ -165,6 +166,29 @@ pub struct DrawableBuilderBase {
     pub(crate) instance_attrs: Option<VertexAttributeArrayPtr>,
     pub(crate) origin: Option<Point<f64>>,
     pub impl_: DrawableBuilderImpl,
+}
+
+impl std::fmt::Debug for DrawableBuilderBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrawableBuilderBase")
+            .field("drawable_name", &self.drawable_name)
+            .field("vertex_attr_id", &self.vertex_attr_id)
+            .field("render_pass", &self.render_pass)
+            .field("enabled", &self.enabled)
+            .field("enable_color", &self.enable_color)
+            .field("enable_stencil", &self.enable_stencil)
+            .field("enable_depth", &self.enable_depth)
+            .field("is_3d", &self.is_3d)
+            .field("line_width", &self.line_width)
+            .field("draw_priority", &self.draw_priority)
+            .field("sub_layer_index", &self.sub_layer_index)
+            .field("depth_type", &self.depth_type)
+            .field("vertex_attrs", &self.vertex_attrs)
+            .field("instance_attrs", &self.instance_attrs)
+            .field("origin", &self.origin)
+            .field("impl_", &self.impl_)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for DrawableBuilderBase {

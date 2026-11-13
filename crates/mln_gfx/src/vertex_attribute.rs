@@ -27,6 +27,23 @@ pub struct VertexAttribute {
     buffer: Option<UniqueVertexBufferResource>,
 }
 
+impl std::fmt::Debug for VertexAttribute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VertexAttribute")
+            .field("index", &self.index)
+            .field("stride", &self.stride)
+            .field("dirty", &self.dirty)
+            .field("data_type", &self.data_type)
+            .field("count", &self.count)
+            .field("raw_data", &self.raw_data)
+            .field("shared_type", &self.shared_type)
+            .field("shared_offset", &self.shared_offset)
+            .field("shared_vertex_offset", &self.shared_vertex_offset)
+            .field("shared_stride", &self.shared_stride)
+            .finish_non_exhaustive()
+    }
+}
+
 impl VertexAttribute {
     #[must_use]
     pub(crate) fn with_stride(index: i32, data_type: AttributeDataType, count: usize, stride: usize) -> Self {
@@ -153,7 +170,7 @@ impl VertexAttribute {
 pub(crate) type UniqueVertexAttribute = Box<VertexAttribute>;
 
 /// Vertex attributes by id.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct VertexAttributeArray {
     attrs: [Option<UniqueVertexAttribute>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
 }

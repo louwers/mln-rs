@@ -78,6 +78,7 @@ impl DescriptorSetType {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct PoolInfo {
     pub(crate) pool: vk::DescriptorPool,
     remaining_sets: u32,
@@ -87,6 +88,7 @@ pub(crate) struct PoolInfo {
 
 /// The pools the sets of a type come from. Each new pool is `grow_factor` times
 /// the last.
+#[derive(Debug)]
 pub(crate) struct DescriptorPoolGrowable {
     max_sets: u32,
     descriptor_storage_per_set: u32,
@@ -182,6 +184,7 @@ impl DescriptorPoolGrowable {
 }
 
 /// A descriptor set for each frame in flight.
+#[derive(Debug)]
 struct DescriptorSet {
     context: Weak<Context>,
     type_: DescriptorSetType,
@@ -274,7 +277,7 @@ impl Drop for DescriptorSet {
 
 /// What a buffer descriptor points at. The id tells a buffer from an earlier
 /// one with the same handle (`buffer_resource::unique_id`).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct BufferBinding {
     id: u64,
     buffer: vk::Buffer,
@@ -285,6 +288,7 @@ struct BufferBinding {
 const NO_BUFFER: BufferBinding = BufferBinding { id: u64::MAX, buffer: vk::Buffer::null(), offset: 0, range: 0 };
 
 /// The descriptor sets of a uniform buffer array.
+#[derive(Debug)]
 pub(crate) struct UniformDescriptorSet {
     set: DescriptorSet,
     /// What each frame's set holds, by binding.

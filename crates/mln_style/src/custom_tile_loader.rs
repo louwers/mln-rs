@@ -43,6 +43,13 @@ struct Subscriber<D> {
     required: bool,
 }
 
+impl<D> std::fmt::Debug for Subscriber<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Subscriber").finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
 struct TileState<D> {
     subscribers: Vec<Subscriber<D>>,
     /// Whether the host was asked for the data and hasn't answered yet.
@@ -74,6 +81,12 @@ pub struct CustomTileLoader<D: Clone> {
     /// Keep around a cache of tile data to serve back for wrapped and
     /// over-zoomed tiles.
     data_cache: HashMap<CanonicalTileID, D>,
+}
+
+impl<D: Clone> std::fmt::Debug for CustomTileLoader<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomTileLoader").finish_non_exhaustive()
+    }
 }
 
 impl<D: Clone> CustomTileLoader<D> {

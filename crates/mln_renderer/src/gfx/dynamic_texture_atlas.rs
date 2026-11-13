@@ -61,7 +61,7 @@ fn rect_without_extra_padding(rect: RectU16) -> RectU16 {
 
 /// Where a tile's glyphs are in the dynamic texture. Serde writes the
 /// texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub(crate) struct GlyphAtlas {
     pub(crate) glyph_positions: GlyphPositions,
     pub(crate) texture_handles: Vec<TextureHandle>,
@@ -71,7 +71,7 @@ pub(crate) struct GlyphAtlas {
 
 /// Where a tile's icons and patterns are in the dynamic texture. Serde
 /// writes the texture by key, as the worker instance's (`tile/worker_codec`).
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub(crate) struct ImageAtlas {
     #[serde(with = "sorted::map")]
     pub(crate) icon_positions: ImagePositions,
@@ -137,6 +137,12 @@ struct State {
 #[derive(Default)]
 pub(crate) struct DynamicTextureAtlas {
     state: Mutex<State>,
+}
+
+impl std::fmt::Debug for DynamicTextureAtlas {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynamicTextureAtlas").finish_non_exhaustive()
+    }
 }
 
 impl Drop for DynamicTextureAtlas {

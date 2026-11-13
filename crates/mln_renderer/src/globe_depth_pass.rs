@@ -35,6 +35,12 @@ pub(crate) struct GlobeDepthPass {
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
 }
 
+impl std::fmt::Debug for GlobeDepthPass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlobeDepthPass").field("meshes", &self.meshes).finish_non_exhaustive()
+    }
+}
+
 impl GlobeDepthPass {
     /// `needed` is whether any layer draws 3D geometry this frame; without
     /// one the planet's depth is never read.

@@ -34,7 +34,7 @@ pub(crate) enum Reply {
 }
 
 /// The worker type of a tile.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum WorkerType {
     Geometry,
     Raster,
@@ -42,6 +42,7 @@ enum WorkerType {
 }
 
 /// The map side of one worker instance.
+#[derive(Debug)]
 pub(crate) struct MapCodec {
     /// The keys of what the instance has of this side's: layers, their
     /// properties and expressions, images and tile data; and the copies of
@@ -60,6 +61,15 @@ struct TileState {
     worker_type: WorkerType,
     layers: Vec<(u64, Vec<Arc<dyn LayerProperties>>)>,
     data: Vec<(u64, Option<SharedTileData>)>,
+}
+
+impl std::fmt::Debug for TileState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileState")
+            .field("worker_type", &self.worker_type)
+            .field("layers", &self.layers)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Drops the entries a layout for `correlation_id` makes stale: all but the
@@ -275,7 +285,7 @@ fn error(message: impl Into<String>, correlation_id: u64) -> TileMessage {
 /// bin's pixels never change while a layout here uses them. The textures
 /// are this side's copies of the instance's (`SharedTexture`), which upload
 /// the pixels the instance queued for them.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct AtlasMirror {
     released: Mutex<Vec<(DynamicTexturePtr, Vec<TextureHandle>)>>,
 }

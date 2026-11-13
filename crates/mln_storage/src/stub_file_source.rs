@@ -42,6 +42,17 @@ struct State {
     properties: HashMap<String, Value>,
 }
 
+impl std::fmt::Debug for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("State")
+            .field("next_id", &self.next_id)
+            .field("timer", &self.timer)
+            .field("properties", &self.properties)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
 pub struct StubFileSource {
     type_: ResponseType,
     state: LocalObject<RefCell<State>>,

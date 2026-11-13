@@ -375,6 +375,15 @@ pub(crate) struct PolylineLayerTweaker {
     expression_uniform_buffer: Option<UniformBufferPtr>,
 }
 
+impl std::fmt::Debug for PolylineLayerTweaker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PolylineLayerTweaker")
+            .field("base", &self.base)
+            .field("props_ubo", &self.props_ubo)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PolylineLayerTweaker {
     #[must_use]
     pub(crate) fn new(properties: LineEvaluatedPropsUBO) -> Self {

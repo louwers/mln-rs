@@ -21,6 +21,7 @@ impl HBShapeAdjust {
 }
 
 /// `HBShaper`.
+#[derive(Debug)]
 pub struct HBShaper {
     impl_: Impl,
 }

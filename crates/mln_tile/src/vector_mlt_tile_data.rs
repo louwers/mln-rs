@@ -262,7 +262,7 @@ impl GeometryTileLayer for VectorMLTTileLayer {
 }
 
 /// `VectorMLTTileData::Impl`'s mutable state.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 struct State {
     data: Option<Arc<Vec<u8>>>,
     tile: Option<Arc<MapLibreTile>>,
@@ -271,6 +271,7 @@ struct State {
 /// MapLibre Tile data. The tile is decoded on the first layer lookup (or
 /// `layer_names`); a decoding error is logged and leaves
 /// it without layers.
+#[derive(Debug)]
 pub struct VectorMLTTileData {
     state: Mutex<State>,
     fast_pfor_enabled: bool,

@@ -222,6 +222,12 @@ pub struct TaggedScheduler {
     scheduler: SchedulerPtr,
 }
 
+impl std::fmt::Debug for TaggedScheduler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaggedScheduler").field("tag", &self.tag).finish_non_exhaustive()
+    }
+}
+
 impl TaggedScheduler {
     pub fn new(scheduler: SchedulerPtr, tag: SimpleIdentity) -> Self {
         TaggedScheduler { tag, scheduler }

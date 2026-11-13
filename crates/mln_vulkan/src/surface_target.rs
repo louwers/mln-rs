@@ -79,6 +79,12 @@ pub struct OverlayTarget<'a> {
     pub size: Size,
 }
 
+impl std::fmt::Debug for OverlayTarget<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OverlayTarget").finish_non_exhaustive()
+    }
+}
+
 /// Port-only: draws over a frame (`SurfaceTarget::set_overlay`).
 pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
@@ -102,6 +108,7 @@ pub(crate) fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR
 
 /// `GLFWVulkanBackend`'s swapchain without the window: frames presented to
 /// a window's surface.
+#[derive(Debug)]
 pub struct SurfaceTarget {
     backend: Rc<RendererBackend>,
     resource: Rc<SurfaceResource>,

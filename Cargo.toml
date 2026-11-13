@@ -343,6 +343,8 @@ unreachable_pub = "warn"
 trivial_casts = "warn"
 trivial_numeric_casts = "warn"
 unused_qualifications = "warn"
+# Every public type can be printed with `{:?}`.
+missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -47,6 +47,7 @@ pub(crate) fn remove(id: u64) -> Option<Rc<dyn Any>> {
 /// it. Only that thread can reach the value. Dropping the handle on that
 /// thread drops the value (unless it was taken); dropped elsewhere, the
 /// value lives until its thread exits.
+#[derive(Debug)]
 pub struct LocalObject<T: 'static> {
     id: u64,
     thread: ThreadId,

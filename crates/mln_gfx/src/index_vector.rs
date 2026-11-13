@@ -32,6 +32,17 @@ pub struct IndexVectorBase {
     freed_count: usize,
 }
 
+impl std::fmt::Debug for IndexVectorBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IndexVectorBase")
+            .field("v", &self.v)
+            .field("dirty", &self.dirty)
+            .field("released", &self.released)
+            .field("freed_count", &self.freed_count)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A shared index vector. The upload pass attaches the buffer through the
 /// shared handle, hence the `RefCell`.
 pub type IndexVectorBasePtr = Rc<RefCell<IndexVectorBase>>;

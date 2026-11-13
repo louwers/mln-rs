@@ -86,6 +86,7 @@ struct ProjectedBox {
     all_points_occluded: bool,
 }
 
+#[derive(Debug)]
 pub(crate) struct CollisionIndex {
     transform_state: TransformState,
 

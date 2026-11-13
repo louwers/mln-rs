@@ -47,6 +47,12 @@ pub(crate) struct LayerRenderData {
     pub(crate) layer_properties: Arc<dyn LayerProperties>,
 }
 
+impl std::fmt::Debug for LayerRenderData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayerRenderData").field("layer_properties", &self.layer_properties).finish_non_exhaustive()
+    }
+}
+
 // symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
 // bucket and the render tile; here the bucket is shared and the tile is
 // kept alive by the vector that owns it.
@@ -77,6 +83,20 @@ pub struct BucketPlacementData {
     pub(crate) icon_translate: SymbolTranslate,
 }
 
+impl std::fmt::Debug for BucketPlacementData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BucketPlacementData")
+            .field("tile_owner", &self.tile_owner)
+            .field("tile_index", &self.tile_index)
+            .field("feature_index", &self.feature_index)
+            .field("source_id", &self.source_id)
+            .field("sort_key_range", &self.sort_key_range)
+            .field("text_translate", &self.text_translate)
+            .field("icon_translate", &self.icon_translate)
+            .finish_non_exhaustive()
+    }
+}
+
 impl BucketPlacementData {
     /// `tile`.
     #[must_use]
@@ -93,6 +113,12 @@ pub struct LayerPrepareParameters<'a> {
     pub(crate) image_manager: &'a crate::image_manager::ImageManager,
     pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
     pub(crate) line_atlas: &'a RefCell<LineAtlas>,
+}
+
+impl std::fmt::Debug for LayerPrepareParameters<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayerPrepareParameters").finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -466,6 +492,26 @@ pub struct RenderLayerBase {
     pub(crate) follower_data: LayerPlacementData,
     /// The projection variant this layer's drawables are built with.
     pub(crate) projection_variant: ProjectionVariant,
+}
+
+impl std::fmt::Debug for RenderLayerBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderLayerBase")
+            .field("evaluated_properties", &self.evaluated_properties)
+            .field("base_impl", &self.base_impl)
+            .field("passes", &self.passes)
+            .field("layer_index", &self.layer_index)
+            .field("style_dependencies", &self.style_dependencies)
+            .field("is_renderable", &self.is_renderable)
+            .field("stats", &self.stats)
+            .field("render_tiles", &self.render_tiles)
+            .field("render_tiles_owner", &self.render_tiles_owner)
+            .field("render_tile_ids", &self.render_tile_ids)
+            .field("placement_data", &self.placement_data)
+            .field("follower_data", &self.follower_data)
+            .field("projection_variant", &self.projection_variant)
+            .finish_non_exhaustive()
+    }
 }
 
 impl RenderLayerBase {

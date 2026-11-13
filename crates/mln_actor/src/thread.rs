@@ -22,12 +22,14 @@ use crate::local_object::LocalObject;
 use crate::run_loop::{RunLoop, RunLoopHandle};
 use crate::scheduler;
 
+#[derive(Debug)]
 pub struct Thread<O: 'static> {
     object: AspiringActor<O>,
     backing: Backing<O>,
 }
 
 /// Where the object lives.
+#[derive(Debug)]
 enum Backing<O: 'static> {
     /// On a thread of its own (C++).
     Spawned {

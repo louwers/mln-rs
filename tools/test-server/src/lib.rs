@@ -139,6 +139,12 @@ pub struct HttpServer {
     server: MockServer,
 }
 
+impl std::fmt::Debug for HttpServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpServer").finish_non_exhaustive()
+    }
+}
+
 impl HttpServer {
     /// Starts a server with the routes, on a free port.
     #[must_use]

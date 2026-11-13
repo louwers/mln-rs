@@ -17,6 +17,7 @@ pub trait Evaluator<T> {
     fn expression(&self, expression: &PropertyExpression<T>) -> Self::ResultType;
 }
 
+#[derive(Debug)]
 pub struct PropertyEvaluator<'a, T> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,

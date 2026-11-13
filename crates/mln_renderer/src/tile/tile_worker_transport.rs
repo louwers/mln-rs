@@ -48,7 +48,7 @@ use crate::tile::raster_tile::{RasterTileInner, RasterTileMessage, RasterTileWor
 /// Serde writes them for a worker in another worker instance (`worker_codec`),
 /// without what can't cross: there, the instance's host gives the worker an
 /// `obsolete` flag and an atlas of its own, and the worker runs as an actor.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct WorkerParameters {
     pub(crate) id: OverscaledTileID,
     /// Set by the tile when it no longer needs the worker's results.
@@ -134,6 +134,7 @@ impl TileEndpoint for SynchronousTile {
 }
 
 /// Workers on the map's thread pool, as in C++.
+#[derive(Debug)]
 pub(crate) struct InProcessTransport {
     thread_pool: TaggedScheduler,
 }

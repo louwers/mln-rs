@@ -28,6 +28,7 @@ use crate::context::Context;
 use crate::mtl_fwd::{MTLBufferPtr, MTLSamplerStatePtr, MTLTexturePtr};
 use crate::render_pass::RenderPass;
 
+#[derive(Debug)]
 pub(crate) struct Texture2D {
     context: Rc<Context>,
     metal_texture: Option<MTLTexturePtr>,

@@ -69,6 +69,7 @@ impl MatchLabel for i64 {
 /// The output of each label, sorted by label (C++ uses an unordered map).
 pub(crate) type Branches<T> = VecMap<T, Arc<dyn Expression>>;
 
+#[derive(Debug)]
 pub struct Match<T: MatchLabel> {
     base: ExpressionBase,
     input: Box<dyn Expression>,

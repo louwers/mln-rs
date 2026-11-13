@@ -1212,6 +1212,7 @@ impl Map {
 }
 
 /// A command group of a map that ends when it drops.
+#[derive(Debug)]
 #[must_use = "the group ends when it drops"]
 pub struct CommandGroup {
     map: Option<Map>,

@@ -20,17 +20,18 @@ const MIN_SWEEP: usize = 4096;
 /// references, so it never keeps a glyph alive. Renderers given the same
 /// cache share the glyphs they parse from glyph PBFs, across maps and font
 /// stacks. Thread-safe.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct GlyphCache {
     inner: Mutex<Inner>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Inner {
     glyphs: Table<Glyph>,
     ranges: Table<GlyphCacheRange>,
 }
 
+#[derive(Debug)]
 struct Table<T> {
     buckets: HashMap<u64, Vec<Weak<T>>>,
     /// Entries in `buckets`, expired or not.

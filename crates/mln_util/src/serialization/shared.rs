@@ -161,6 +161,12 @@ impl<T: ?Sized + Send + Sync + 'static> Table for Copies<T> {
 #[derive(Default)]
 pub struct Tables(Vec<(&'static str, Box<dyn Table>)>);
 
+impl std::fmt::Debug for Tables {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tables").finish_non_exhaustive()
+    }
+}
+
 thread_local! {
     /// The tables of the session `Tables::open` runs.
     static SESSION: RefCell<Option<Tables>> = const { RefCell::new(None) };

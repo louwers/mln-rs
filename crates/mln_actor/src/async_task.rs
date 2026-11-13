@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::run_loop::{AsyncHandle, Core, RunLoop};
 
+#[derive(Debug)]
 pub struct AsyncTask {
     handle: Rc<AsyncHandle>,
 }
@@ -48,7 +49,7 @@ impl Drop for AsyncTask {
 }
 
 /// See `AsyncTask::sender`. Sending after the task is gone does nothing.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AsyncTaskSender {
     pending: Arc<AtomicBool>,
     core: Arc<Core>,

@@ -58,6 +58,7 @@ pub type ParseResult = Option<Box<dyn Expression>>;
 /// The bindings of a `let` scope (`std::map<std::string, std::shared_ptr<Expression>>`).
 pub(crate) type Bindings = VecMap<String, Arc<dyn Expression>>;
 
+#[derive(Debug)]
 pub(crate) struct Scope {
     bindings: Bindings,
     parent: Option<Rc<Scope>>,
@@ -102,6 +103,7 @@ pub enum TypeAnnotationOption {
     Omit,
 }
 
+#[derive(Debug)]
 pub struct ParsingContext {
     key: String,
     expected: Option<Type>,

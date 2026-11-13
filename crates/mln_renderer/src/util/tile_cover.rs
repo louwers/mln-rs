@@ -174,6 +174,7 @@ fn tile_cover_points(
 }
 
 /// Helper class to stream tile-cover results per row
+#[derive(Debug)]
 pub struct TileCover {
     impl_: Box<Impl>,
 }

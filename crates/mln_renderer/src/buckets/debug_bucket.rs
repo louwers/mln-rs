@@ -11,6 +11,7 @@ use mln_util::chrono::{Timestamp, iso8601};
 use crate::geometry::debug_font_data::SIMPLEX;
 
 /// The tile's parse status and timestamps, as text in tile coordinates.
+#[derive(Debug)]
 pub(crate) struct DebugBucket {
     pub(crate) renderable: bool,
     pub(crate) complete: bool,

@@ -70,6 +70,7 @@ const BUFFER_USAGE: MTLResourceOptions = MTLResourceOptions::StorageModeShared;
 /// The size of the buffer bound where an attribute has no data.
 const EMPTY_VERTEX_BUFFER_SIZE: usize = 32;
 
+#[derive(Debug)]
 pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
@@ -91,6 +92,7 @@ pub(crate) struct Context {
 }
 
 /// A tile's pole-capped mesh for its globe clip mask.
+#[derive(Debug)]
 struct GlobeClipMesh {
     vertices: MTLBufferPtr,
     indices: MTLBufferPtr,

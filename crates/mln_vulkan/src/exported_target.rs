@@ -334,6 +334,18 @@ struct DepthMemory {
     export: Option<ExportedImage>,
 }
 
+impl std::fmt::Debug for DepthMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DepthMemory")
+            .field("image", &self.image)
+            .field("view", &self.view)
+            .field("memory", &self.memory)
+            .field("format", &self.format)
+            .field("export", &self.export)
+            .finish_non_exhaustive()
+    }
+}
+
 impl DepthMemory {
     fn new(device: &Device, extent: vk::Extent2D, format: vk::Format, exported: bool) -> Result<DepthMemory, Error> {
         fn native(what: &'static str) -> impl Fn(vk::Result) -> Error {
@@ -493,6 +505,17 @@ struct ExportedMemory {
     #[cfg(windows)]
     _texture: Option<crate::win32::SharedTexture>,
     export: ExportedImage,
+}
+
+impl std::fmt::Debug for ExportedMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExportedMemory")
+            .field("image", &self.image)
+            .field("view", &self.view)
+            .field("memory", &self.memory)
+            .field("export", &self.export)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ExportedMemory {
@@ -850,6 +873,7 @@ pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
 
 /// One generation of a ring's images, of one size, and the borrowed ring
 /// target that draws into them.
+#[derive(Debug)]
 struct Generation {
     // Before the images: dropping it waits for the frames that drew into
     // them.
@@ -910,6 +934,7 @@ impl Generation {
 
 /// Frames drawn into images of the target's own, which it exports, and
 /// queued for the host to acquire.
+#[derive(Debug)]
 pub struct ExportedTarget {
     backend: Rc<RendererBackend>,
     layout: Layout,

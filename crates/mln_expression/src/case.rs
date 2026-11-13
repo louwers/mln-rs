@@ -7,6 +7,7 @@ use crate::value::Value;
 
 pub(crate) type Branch = (Box<dyn Expression>, Box<dyn Expression>);
 
+#[derive(Debug)]
 pub struct Case {
     base: ExpressionBase,
     branches: Vec<Branch>,

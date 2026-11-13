@@ -289,7 +289,7 @@ pub trait Property: 'static {
 
 /// The extra arguments of the `PossiblyEvaluated::evaluate<P>(z, feature, ...)`
 /// overloads.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum FeatureEvaluationExtra<'a> {
     None,
     Canonical(&'a CanonicalTileID),

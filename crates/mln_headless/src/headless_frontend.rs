@@ -18,6 +18,7 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
+#[derive(Debug)]
 pub struct RenderResult {
     pub image: PremultipliedImage,
     pub stats: RenderingStats,
@@ -38,6 +39,21 @@ struct Shared {
     updates: RefCell<Option<UpdateReader>>,
 }
 
+impl std::fmt::Debug for Shared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shared")
+            .field("size", &self.size)
+            .field("pixel_ratio", &self.pixel_ratio)
+            .field("target", &self.target)
+            .field("async_invalidate", &self.async_invalidate)
+            .field("invalidate_on_update", &self.invalidate_on_update)
+            .field("glyph_cache", &self.glyph_cache)
+            .field("renderer", &self.renderer)
+            .field("updates", &self.updates)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Renders a map into an offscreen texture on the calling thread.
 ///
 /// The frontend draws the latest update of the map it is attached to
@@ -46,7 +62,7 @@ struct Shared {
 /// thread's `RunLoop`. When the map goes, the frontend drops its renderer
 /// and what it held on the `RunLoop`, and makes another when next used.
 /// Clones share the renderer.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HeadlessFrontend {
     shared: Rc<Shared>,
 }

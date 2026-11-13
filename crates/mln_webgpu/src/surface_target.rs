@@ -69,6 +69,7 @@ fn surface_options(capabilities: &wgpu::SurfaceCapabilities) -> (wgpu::TextureUs
 }
 /// Port-only: what an overlay draws into (`SurfaceTarget::set_overlay`):
 /// the frame's swapchain texture, after the map and before it is presented.
+#[derive(Debug)]
 pub struct OverlayTarget<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
@@ -84,6 +85,7 @@ pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
 /// The current swapchain texture and its view (`currentTexture`,
 /// `currentTextureView`).
+#[derive(Debug)]
 struct CurrentTexture {
     texture: wgpu::SurfaceTexture,
     view: wgpu::TextureView,
@@ -126,7 +128,35 @@ struct SurfaceState {
     overlay: RefCell<Option<Overlay>>,
 }
 
+impl std::fmt::Debug for SurfaceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SurfaceState")
+            .field("surface", &self.surface)
+            .field("device", &self.device)
+            .field("queue", &self.queue)
+            .field("swap_chain_format", &self.swap_chain_format)
+            .field("surface_usage", &self.surface_usage)
+            .field("depth_stencil_format", &self.depth_stencil_format)
+            .field("current", &self.current)
+            .field("depth_stencil", &self.depth_stencil)
+            .field("frame_presented", &self.frame_presented)
+            .field("surface_configured", &self.surface_configured)
+            .field("surface_needs_reconfigure", &self.surface_needs_reconfigure)
+            .field("last_configured_size", &self.last_configured_size)
+            .field("consecutive_errors", &self.consecutive_errors)
+            .field("enable_vsync", &self.enable_vsync)
+            .field("vsync_present_mode", &self.vsync_present_mode)
+            .field("framebuffer_size", &self.framebuffer_size)
+            .field("last_swap_time", &self.last_swap_time)
+            .field("readback_requested", &self.readback_requested)
+            .field("pending_readback", &self.pending_readback)
+            .field("readback", &self.readback)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Port-only: a frame copied into a buffer, waiting to be mapped.
+#[derive(Debug)]
 struct PendingReadback {
     buffer: wgpu::Buffer,
     bytes_per_row: u32,
@@ -490,6 +520,7 @@ impl Default for SurfaceOptions {
 
 /// `GLFWWebGPUBackend`'s surface without the window: frames presented to a
 /// `wgpu::Surface`.
+#[derive(Debug)]
 pub struct SurfaceTarget {
     #[expect(
         dead_code,

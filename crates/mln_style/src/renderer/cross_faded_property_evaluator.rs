@@ -18,6 +18,7 @@ impl<T: Clone> Interpolate for Faded<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct CrossFadedPropertyEvaluator<'a, T> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,

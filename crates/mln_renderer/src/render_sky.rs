@@ -6,6 +6,7 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 pub(crate) type TransitioningSky = SkyProperties::Unevaluated;
 pub(crate) type EvaluatedSky = SkyProperties::PossiblyEvaluated;
 
+#[derive(Debug)]
 pub(crate) struct RenderSky {
     pub(crate) impl_: Arc<sky::Impl>,
     transitioning: TransitioningSky,

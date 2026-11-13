@@ -173,6 +173,23 @@ pub struct OfflineDatabase {
     accessed_callback: Option<Box<dyn FnMut() + Send>>,
 }
 
+impl std::fmt::Debug for OfflineDatabase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OfflineDatabase")
+            .field("path", &self.path)
+            .field("db", &self.db)
+            .field("maximum_ambient_cache_size", &self.maximum_ambient_cache_size)
+            .field("current_ambient_cache_size", &self.current_ambient_cache_size)
+            .field("autopack", &self.autopack)
+            .field("read_only", &self.read_only)
+            .field("pending_resource_accessed", &self.pending_resource_accessed)
+            .field("pending_tile_accessed", &self.pending_tile_accessed)
+            .field("pending_applied_for_eviction", &self.pending_applied_for_eviction)
+            .field("accessed_flush_failed", &self.accessed_flush_failed)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Drop for OfflineDatabase {
     fn drop(&mut self) {
         self.cleanup();

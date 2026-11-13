@@ -63,6 +63,7 @@ pub(crate) trait SurfaceProvider {
 
 /// What a backend makes on its device, which the backend, its context and
 /// their resources share.
+#[derive(Debug)]
 pub(crate) struct BackendImpl {
     device: Device,
     command_pool: vk::CommandPool,
@@ -269,6 +270,7 @@ impl Drop for BackendImpl {
 }
 
 /// A renderer's instance, device and context.
+#[derive(Debug)]
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,

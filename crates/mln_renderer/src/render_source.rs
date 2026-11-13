@@ -36,7 +36,7 @@ pub(crate) struct SourcePrepareParameters<'a> {
 
 /// A shared selection of the render tiles of an `Rc<Vec<RenderTile>>`,
 /// which it keeps alive.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct RenderTiles {
     owner: Rc<Vec<RenderTile>>,
     indices: Rc<Vec<usize>>,

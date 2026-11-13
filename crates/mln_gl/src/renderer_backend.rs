@@ -50,6 +50,12 @@ pub(crate) struct BackendImpl {
     platform: Box<dyn PlatformContext>,
 }
 
+impl std::fmt::Debug for BackendImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackendImpl").field("gl", &self.gl).finish_non_exhaustive()
+    }
+}
+
 impl BackendImpl {
     #[must_use]
     pub(crate) fn gl(&self) -> &Gl {
@@ -87,6 +93,7 @@ impl BackendImpl {
 }
 
 /// A renderer's GL context.
+#[derive(Debug)]
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,

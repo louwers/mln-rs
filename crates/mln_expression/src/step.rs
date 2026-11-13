@@ -11,6 +11,7 @@ use crate::stops::{Stops, get_covering_stops};
 use crate::type_::Type;
 use crate::value::Value;
 
+#[derive(Debug)]
 pub struct Step {
     base: ExpressionBase,
     input: Box<dyn Expression>,

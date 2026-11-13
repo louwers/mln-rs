@@ -18,6 +18,7 @@ fn shelf_pack_options() -> ShelfPackOptions {
     ShelfPackOptions { auto_resize: true }
 }
 
+#[derive(Debug)]
 struct Pattern {
     bin: BinRef,
     position: ImagePosition,
@@ -29,6 +30,17 @@ pub(crate) struct PatternAtlas {
     atlas_image: PremultipliedImage,
     atlas_texture_2d: Option<Texture2DPtr>,
     dirty: bool,
+}
+
+impl std::fmt::Debug for PatternAtlas {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PatternAtlas")
+            .field("shelf_pack", &self.shelf_pack)
+            .field("patterns", &self.patterns)
+            .field("atlas_image", &self.atlas_image)
+            .field("dirty", &self.dirty)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for PatternAtlas {

@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use crate::expression::Expression;
 use crate::range::Range;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Stops {
     stops: Vec<(f64, Box<dyn Expression>)>,
 }

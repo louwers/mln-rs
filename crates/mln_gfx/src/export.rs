@@ -257,6 +257,7 @@ pub struct FrameDepth {
 /// older ones that frames the host held at a resize keep alive, each with
 /// the slots still held. A generation goes once the host gives back each of
 /// its held slots.
+#[derive(Debug)]
 pub struct Generations<G> {
     current: G,
     retired: Vec<(G, Vec<usize>)>,

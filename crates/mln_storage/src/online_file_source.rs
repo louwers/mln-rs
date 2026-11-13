@@ -74,6 +74,24 @@ struct OnlineFileRequest {
     mailbox: RefCell<Option<Arc<Mailbox>>>,
 }
 
+impl std::fmt::Debug for OnlineFileRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OnlineFileRequest")
+            .field("id", &self.id)
+            .field("state", &self.state)
+            .field("resource", &self.resource)
+            .field("timer", &self.timer)
+            .field("expired_requests", &self.expired_requests)
+            .field("failed_requests", &self.failed_requests)
+            .field("failed_request_reason", &self.failed_request_reason)
+            .field("retry_after", &self.retry_after)
+            .field("transforming", &self.transforming)
+            .field("transform_failed", &self.transform_failed)
+            .field("mailbox", &self.mailbox)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The target of an `OnlineFileRequest`'s mailbox.
 struct OnlineFileRequestRef {
     state: Weak<ThreadState>,
@@ -99,7 +117,7 @@ impl Drop for OnlineFileRequest {
 }
 
 /// A FIFO preferring regular over low priority requests.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct PendingRequests {
     regular: VecDeque<u64>,
     low: VecDeque<u64>,
@@ -153,6 +171,22 @@ struct ThreadState {
     tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
 }
 
+impl std::fmt::Debug for ThreadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThreadState")
+            .field("resource_options", &self.resource_options)
+            .field("all_requests", &self.all_requests)
+            .field("pending_requests", &self.pending_requests)
+            .field("active_requests", &self.active_requests)
+            .field("online", &self.online)
+            .field("maximum_concurrent_requests", &self.maximum_concurrent_requests)
+            .field("http_file_source", &self.http_file_source)
+            .field("tasks", &self.tasks)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct OnlineFileSourceThread {
     state: Rc<ThreadState>,
     _reachability: AsyncTask,
@@ -576,6 +610,7 @@ impl Drop for OnlineFileSourceThread {
 }
 
 /// The `Network` file source.
+#[derive(Debug)]
 pub struct OnlineFileSource {
     cached_resource_options: Mutex<ResourceOptions>,
     cached_maximum_concurrent_requests: Mutex<u32>,

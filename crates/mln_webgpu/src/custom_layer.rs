@@ -5,6 +5,7 @@
 /// The frame's command encoder outside the map's render pass, for a custom
 /// layer's prerender. End each pass begun on `encoder` before the call
 /// returns, and leave the encoder in place.
+#[derive(Debug)]
 pub struct CustomLayerEncoder {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -16,6 +17,7 @@ pub struct CustomLayerEncoder {
 /// Set your own pipeline, bind groups, buffers, viewport, scissor rectangle
 /// and stencil reference on `pass`: the map sets what its next draws need
 /// again. Leave `pass` in place.
+#[derive(Debug)]
 pub struct CustomLayerPass {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,

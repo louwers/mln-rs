@@ -136,6 +136,7 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
 }
 
 /// The `RenderSourceObserver` half of `RenderOrchestrator`.
+#[derive(Debug)]
 struct OrchestratorSourceObserver {
     events: EventSink,
 }
@@ -240,6 +241,43 @@ pub(crate) struct RenderOrchestrator {
 
     /// The features the layers rendered in the last `update_layers`.
     frame_rendered_features: FrameRenderedFeaturesMap,
+}
+
+impl std::fmt::Debug for RenderOrchestrator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderOrchestrator")
+            .field("events", &self.events)
+            .field("source_observer", &self.source_observer)
+            .field("zoom_history", &self.zoom_history)
+            .field("still_image_request_id", &self.still_image_request_id)
+            .field("transform_state", &self.transform_state)
+            .field("glyph_manager", &self.glyph_manager)
+            .field("image_manager", &self.image_manager)
+            .field("dynamic_texture_atlas", &self.dynamic_texture_atlas)
+            .field("line_atlas", &self.line_atlas)
+            .field("pattern_atlas", &self.pattern_atlas)
+            .field("image_impls", &self.image_impls)
+            .field("source_impls", &self.source_impls)
+            .field("layer_impls", &self.layer_impls)
+            .field("render_light", &self.render_light)
+            .field("render_sky", &self.render_sky)
+            .field("cross_tile_symbol_index", &self.cross_tile_symbol_index)
+            .field("placement_controller", &self.placement_controller)
+            .field("background_layer_as_color", &self.background_layer_as_color)
+            .field("placed_symbol_data_collected", &self.placed_symbol_data_collected)
+            .field("tile_cache_enabled", &self.tile_cache_enabled)
+            .field("remake_render_layers", &self.remake_render_layers)
+            .field("filtered_layers_for_source", &self.filtered_layers_for_source)
+            .field("thread_pool", &self.thread_pool)
+            .field("global_state", &self.global_state)
+            .field("layer_group_tweakers", &self.layer_group_tweakers)
+            .field("render_targets", &self.render_targets)
+            .field("pending_changes", &self.pending_changes)
+            .field("globe_depth_pass", &self.globe_depth_pass)
+            .field("sky_pass", &self.sky_pass)
+            .field("frame_rendered_features", &self.frame_rendered_features)
+            .finish_non_exhaustive()
+    }
 }
 
 impl RenderOrchestrator {

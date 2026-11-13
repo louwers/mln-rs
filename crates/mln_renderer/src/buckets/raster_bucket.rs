@@ -33,6 +33,7 @@ pub(crate) struct RasterLayoutVertex {
 
 /// The masked geometry of a raster bucket (C++ `mask`, `vertices`,
 /// `indices`, `segments`).
+#[derive(Debug)]
 pub(crate) struct RasterBucketGeometry {
     pub(crate) mask: TileMask,
     pub(crate) vertices: Vec<RasterLayoutVertex>,
@@ -62,7 +63,7 @@ fn full_mask() -> TileMask {
 /// A raster tile's image and the geometry that draws it. Serde writes the
 /// image, which is what a worker sets (`tile/worker_codec`); the geometry is
 /// the tile's (`set_mask`).
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RasterBucket {
     pub(crate) base: BucketBase,
     pub(crate) image: Option<Arc<PremultipliedImage>>,

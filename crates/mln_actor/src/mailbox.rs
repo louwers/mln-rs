@@ -32,7 +32,18 @@ struct State {
     scheduler_tag: Option<SimpleIdentity>,
 }
 
+impl std::fmt::Debug for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("State")
+            .field("closed", &self.closed)
+            .field("scheduler", &self.scheduler)
+            .field("scheduler_tag", &self.scheduler_tag)
+            .finish_non_exhaustive()
+    }
+}
+
 /// `Mailbox`.
+#[derive(Debug)]
 pub struct Mailbox {
     state: Mutex<State>,
     /// The registry key of the target object on the receiving thread.

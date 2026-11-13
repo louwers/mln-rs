@@ -99,6 +99,39 @@ pub struct DrawableBase {
     pub(crate) render_tile: Option<Rc<dyn Any>>,
 }
 
+impl std::fmt::Debug for DrawableBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrawableBase")
+            .field("enabled", &self.enabled)
+            .field("enable_color", &self.enable_color)
+            .field("enable_stencil", &self.enable_stencil)
+            .field("enable_depth", &self.enable_depth)
+            .field("is_3d", &self.is_3d)
+            .field("name", &self.name)
+            .field("unique_id", &self.unique_id)
+            .field("render_pass", &self.render_pass)
+            .field("tile_id", &self.tile_id)
+            .field("draw_priority", &self.draw_priority)
+            .field("line_width", &self.line_width)
+            .field("sub_layer_index", &self.sub_layer_index)
+            .field("depth_type", &self.depth_type)
+            .field("drawable_data", &self.drawable_data)
+            .field("vertex_attributes", &self.vertex_attributes)
+            .field("instance_attributes", &self.instance_attributes)
+            .field("attribute_update_time", &self.attribute_update_time)
+            .field("layer_tweaker", &self.layer_tweaker)
+            .field("type_", &self.type_)
+            .field("origin", &self.origin)
+            .field("ubo_index", &self.ubo_index)
+            .field("create_time", &self.create_time)
+            .field("color_mode", &self.color_mode)
+            .field("cull_face_mode", &self.cull_face_mode)
+            .field("binders", &self.binders)
+            .field("render_tile", &self.render_tile)
+            .finish_non_exhaustive()
+    }
+}
+
 impl DrawableBase {
     #[must_use]
     pub fn new(name: String) -> Self {

@@ -48,6 +48,7 @@ impl ProjectedMeters {
 
 /// Spherical Mercator projection
 /// <https://github.com/openlayers/docs/blob/c7ab69156e17bedc1059d64d7a864b7868e354c1/library/spherical_mercator.rst>
+#[derive(Debug)]
 pub struct Projection;
 
 impl Projection {

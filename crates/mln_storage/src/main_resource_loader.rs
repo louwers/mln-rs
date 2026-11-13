@@ -32,6 +32,13 @@ struct ThreadInner {
     tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
 
+impl std::fmt::Debug for ThreadInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThreadInner").finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct MainResourceLoaderThread {
     inner: Rc<ThreadInner>,
 }
@@ -201,6 +208,16 @@ pub struct MainResourceLoader {
     pmtiles_file_source: FileSourcePtr,
     supports_cache_only_requests: bool,
     resource_options: Mutex<ResourceOptions>,
+}
+
+impl std::fmt::Debug for MainResourceLoader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MainResourceLoader")
+            .field("thread", &self.thread)
+            .field("supports_cache_only_requests", &self.supports_cache_only_requests)
+            .field("resource_options", &self.resource_options)
+            .finish_non_exhaustive()
+    }
 }
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);

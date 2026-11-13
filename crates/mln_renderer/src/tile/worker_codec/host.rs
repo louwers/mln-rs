@@ -53,6 +53,16 @@ pub struct TileWorkerHost {
     hosted: RefCell<HashMap<u64, Hosted>>,
 }
 
+impl std::fmt::Debug for TileWorkerHost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileWorkerHost")
+            .field("codec", &self.codec)
+            .field("workers", &self.workers)
+            .field("hosted", &self.hosted)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A message for a worker, decoded as its type's.
 enum Decoded {
     Geometry(WorkerMessage),
@@ -74,6 +84,12 @@ enum Hosted {
     RasterDEM(Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>>),
 }
 
+impl std::fmt::Debug for Hosted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hosted").finish_non_exhaustive()
+    }
+}
+
 /// The layers, global state, available images, subdivision granularity and
 /// pixel ratio a geometry tile's worker got with its layers.
 type SentLayers = (
@@ -91,9 +107,15 @@ struct Sent {
     layers: Kept<SentLayers>,
 }
 
+impl std::fmt::Debug for Sent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sent").field("layers", &self.layers).finish_non_exhaustive()
+    }
+}
+
 /// The tile's data or its layers, as the worker last got them, with the
 /// available images of that message.
-#[derive(Default)]
+#[derive(Default, Debug)]
 enum Kept<T> {
     #[default]
     Nothing,

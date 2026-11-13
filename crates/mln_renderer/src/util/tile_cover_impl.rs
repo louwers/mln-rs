@@ -354,6 +354,7 @@ type TileSpans = VecDeque<(i32, i32)>;
 /// using `nextRow()` is a list of spans (tileXSpans) of x-coordinates that
 /// includes edges and interiors of polygons. `next()` returns a tileID for each
 /// x-coordinate from (first, second] in each span in tileXSpans.
+#[derive(Debug)]
 pub(crate) struct Impl {
     zoom: i32,
     is_closed: bool,

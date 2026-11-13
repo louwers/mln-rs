@@ -20,6 +20,7 @@ fn parse_boolean_op(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option
     Some(parsed_inputs)
 }
 
+#[derive(Debug)]
 pub struct Any {
     base: ExpressionBase,
     inputs: Vec<Box<dyn Expression>>,
@@ -74,6 +75,7 @@ impl Expression for Any {
     }
 }
 
+#[derive(Debug)]
 pub struct All {
     base: ExpressionBase,
     inputs: Vec<Box<dyn Expression>>,

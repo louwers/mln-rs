@@ -102,6 +102,12 @@ pub(crate) struct SkyPass {
     atmosphere_shader: Option<ShaderProgramBasePtr>,
 }
 
+impl std::fmt::Debug for SkyPass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SkyPass").finish_non_exhaustive()
+    }
+}
+
 impl SkyPass {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn update(

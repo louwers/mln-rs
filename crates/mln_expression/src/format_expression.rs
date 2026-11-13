@@ -15,7 +15,7 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::{Value, from_expression_value, to_string, type_of};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FormatExpressionSection {
     /// Content can be expression that evaluates to String or Image.
     pub(crate) content: Arc<dyn Expression>,
@@ -55,6 +55,7 @@ impl FormatExpressionSection {
     }
 }
 
+#[derive(Debug)]
 pub struct FormatExpression {
     base: ExpressionBase,
     sections: Vec<FormatExpressionSection>,

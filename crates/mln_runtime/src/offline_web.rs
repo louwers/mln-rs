@@ -14,6 +14,7 @@ use crate::runtime::Runtime;
 
 /// The offline regions in a runtime's cache database, from
 /// [`Runtime::offline`]: none in the browser.
+#[derive(Debug)]
 pub struct Offline<'a> {
     runtime: &'a Runtime,
 }

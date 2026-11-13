@@ -28,6 +28,17 @@ pub struct VertexVectorBaseData {
     last_modified: Cell<Instant>,
 }
 
+impl std::fmt::Debug for VertexVectorBaseData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VertexVectorBaseData")
+            .field("dirty", &self.dirty)
+            .field("released", &self.released)
+            .field("raw_freed", &self.raw_freed)
+            .field("last_modified", &self.last_modified)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for VertexVectorBaseData {
     fn default() -> Self {
         VertexVectorBaseData {
@@ -103,6 +114,7 @@ pub type VertexVectorBasePtr = Rc<dyn VertexVectorBase>;
 /// Vertices of a plain-old-data type, and the backend buffer they were
 /// uploaded to. The vertices sit in a `RefCell` so that `set_buffer` can free
 /// them through the shared pointer.
+#[derive(Debug)]
 pub struct VertexVector<V: bytemuck::Pod> {
     base: VertexVectorBaseData,
     v: RefCell<Vec<V>>,

@@ -38,7 +38,7 @@ impl std::fmt::Debug for ZoomCurve<'_> {
 pub(crate) type ZoomCurveOrError<'a> = Option<ZoomCurve<'a>>;
 
 /// The zoom curve of an expression: none, an interpolate or a step.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum ZoomCurvePtr<'a> {
     Null,
     Interpolate(&'a Interpolate),

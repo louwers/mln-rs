@@ -34,6 +34,7 @@ pub fn open_face(type_: u16, data: Vec<u8>) -> Option<Face> {
 }
 
 /// A font file `openFace` opened.
+#[derive(Debug)]
 #[wasm_bindgen]
 pub struct Face {
     shaper: HBShaper,

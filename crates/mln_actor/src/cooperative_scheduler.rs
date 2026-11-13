@@ -33,6 +33,15 @@ pub struct CooperativeScheduler {
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
+impl std::fmt::Debug for CooperativeScheduler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CooperativeScheduler")
+            .field("unique_id", &self.unique_id)
+            .field("task_count", &self.task_count)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for CooperativeScheduler {
     fn default() -> Self {
         Self::new()

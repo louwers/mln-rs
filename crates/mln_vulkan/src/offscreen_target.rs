@@ -17,6 +17,7 @@ use crate::surface_resource::SurfaceResource;
 
 /// Frames drawn into images with depth and stencil, which
 /// [`read_image`](Self::read_image) reads back.
+#[derive(Debug)]
 pub struct OffscreenTarget {
     backend: Rc<RendererBackend>,
     size: Cell<Size>,

@@ -45,6 +45,20 @@ pub(crate) struct RenderTile {
     needs_rendering: bool,
 }
 
+impl std::fmt::Debug for RenderTile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderTile")
+            .field("id", &self.id)
+            .field("projection", &self.projection)
+            .field("matrix", &self.matrix)
+            .field("debug_bucket", &self.debug_bucket)
+            .field("tile_id", &self.tile_id)
+            .field("tile_hold_for_fade", &self.tile_hold_for_fade)
+            .field("needs_rendering", &self.needs_rendering)
+            .finish_non_exhaustive()
+    }
+}
+
 impl RenderTile {
     pub(crate) fn new(id: UnwrappedTileID, tile: &dyn Tile) -> Self {
         RenderTile {

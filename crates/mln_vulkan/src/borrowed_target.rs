@@ -100,6 +100,7 @@ impl BorrowedImages {
 
 /// The render pass and framebuffers over the ring's images, and their depth
 /// and stencil attachments: the host's, or one of the target's own.
+#[derive(Debug)]
 struct Resource {
     backend: Rc<BackendImpl>,
     extent: vk::Extent2D,
@@ -250,6 +251,7 @@ impl Drop for Resource {
 }
 
 /// What the next frame drawn into a slot's image waits for.
+#[derive(Debug)]
 enum ConsumerWait {
     /// The host's timeline, until it reaches the value.
     Timeline(vk::Semaphore, u64),
@@ -313,7 +315,7 @@ impl Drop for ImportedFence {
 }
 
 /// What a slot of the ring waits for, and what it handed the host.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Slot {
     consumer_wait: Option<ConsumerWait>,
     /// The sync file of the slot's last frame, which the host may read until
@@ -323,6 +325,7 @@ struct Slot {
 }
 
 /// Frames drawn into the host's images, each given back to the host.
+#[derive(Debug)]
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
     images: RefCell<BorrowedImages>,
@@ -808,6 +811,7 @@ impl Drop for BorrowedTarget {
 /// The host's reads of images that a ring let go of, which the ring waits
 /// for before the host may use or destroy the images. Dropping it stops
 /// waiting.
+#[derive(Debug)]
 pub struct PendingReads {
     backend: Rc<RendererBackend>,
     waits: Vec<ConsumerWait>,

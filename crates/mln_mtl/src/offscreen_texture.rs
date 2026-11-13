@@ -47,6 +47,7 @@ fn render_target_texture(
     texture
 }
 
+#[derive(Debug)]
 pub struct OffscreenTextureResource {
     context: Rc<Context>,
     size: Size,

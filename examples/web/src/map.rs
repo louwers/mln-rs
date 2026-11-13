@@ -42,6 +42,18 @@ struct Frontend {
     redraw: bool,
 }
 
+impl std::fmt::Debug for Frontend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Frontend")
+            .field("renderer", &self.renderer)
+            .field("target", &self.target)
+            .field("updates", &self.updates)
+            .field("drawn_update", &self.drawn_update)
+            .field("redraw", &self.redraw)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Frontend {
     /// Draws the latest update if it is new; returns whether it drew.
     fn render(&mut self) -> bool {
@@ -80,6 +92,7 @@ pub fn set_preloads(take: js_sys::Function) {
 
 /// A continuous map in an `OffscreenCanvas`, in the Web Worker that runs it
 /// (web/map-worker.ts).
+#[derive(Debug)]
 #[wasm_bindgen]
 pub struct WebMap {
     // Dropped first, before the map.

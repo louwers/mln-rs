@@ -87,6 +87,7 @@ impl WebCanvas {
 }
 
 /// Frames drawn into a canvas, which the browser presents.
+#[derive(Debug)]
 pub struct CanvasTarget {
     backend: Rc<RendererBackend>,
     canvas: WebCanvas,

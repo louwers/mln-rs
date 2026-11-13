@@ -112,6 +112,7 @@ layer_types! {
 }
 
 /// The `shared::Kind` of `Layer::Impl`s.
+#[derive(Debug)]
 pub struct SharedLayer;
 
 impl Kind for SharedLayer {
@@ -131,6 +132,7 @@ impl Kind for SharedLayer {
 }
 
 /// The `shared::Kind` of `LayerProperties`.
+#[derive(Debug)]
 pub struct SharedLayerProperties;
 
 impl Kind for SharedLayerProperties {
@@ -181,6 +183,7 @@ pub mod shared_layer_properties {
 }
 
 /// The `shared::Kind` of the expressions behind `Arc`s.
+#[derive(Debug)]
 pub struct SharedExpression;
 
 /// What an expression crosses as.

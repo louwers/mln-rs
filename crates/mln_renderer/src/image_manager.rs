@@ -78,6 +78,7 @@ pub(crate) fn requestor_key<T: ?Sized>(requestor: &Rc<T>) -> RequestorKey {
 
 type RequestorEntry = (Weak<dyn ImageRequestor>, ImageRequestPair);
 
+#[derive(Debug)]
 struct State {
     loaded: bool,
     requestors: VecMap<RequestorKey, RequestorEntry>,
@@ -102,6 +103,15 @@ pub(crate) struct ImageManager {
     self_weak: Weak<ImageManager>,
     state: RefCell<State>,
     observer: RefCell<Rc<dyn ImageManagerObserver>>,
+}
+
+impl std::fmt::Debug for ImageManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageManager")
+            .field("self_weak", &self.self_weak)
+            .field("state", &self.state)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ImageManager {

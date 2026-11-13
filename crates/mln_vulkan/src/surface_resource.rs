@@ -55,6 +55,7 @@ pub(crate) fn surface_extent(backend: &BackendImpl, surface: vk::SurfaceKHR) -> 
     (extent.width != u32::MAX || extent.height != u32::MAX).then_some(extent)
 }
 
+#[derive(Debug)]
 struct SurfaceState {
     surface: vk::SurfaceKHR,
     swapchain: vk::SwapchainKHR,
@@ -101,6 +102,18 @@ pub(crate) struct SurfaceResource {
     read_every_frame: bool,
     state: RefCell<SurfaceState>,
     overlay: RefCell<Option<Overlay>>,
+}
+
+impl std::fmt::Debug for SurfaceResource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SurfaceResource")
+            .field("backend", &self.backend)
+            .field("context", &self.context)
+            .field("owns_surface", &self.owns_surface)
+            .field("read_every_frame", &self.read_every_frame)
+            .field("state", &self.state)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SurfaceResource {

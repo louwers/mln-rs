@@ -39,6 +39,7 @@ pub(crate) enum WorkerAction {
 }
 
 /// A worker instance's side.
+#[derive(Debug)]
 pub(crate) struct WorkerCodec {
     /// The values the map side defined, by key, and the keys of the textures
     /// of the instance's atlas.

@@ -16,6 +16,12 @@ pub struct RenderPassDescriptor<'a> {
     pub clear_stencil: Option<i32>,
 }
 
+impl std::fmt::Debug for RenderPassDescriptor<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderPassDescriptor").finish_non_exhaustive()
+    }
+}
+
 /// A pass that draws into a target. All methods take `&self` so that a pass
 /// can be used while the owning `PaintParameters` is borrowed elsewhere;
 /// backends keep their encoder state behind a `RefCell`.

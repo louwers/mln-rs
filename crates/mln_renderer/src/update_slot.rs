@@ -20,14 +20,14 @@ use parking_lot::Mutex;
 use crate::update_parameters::UpdateParameters;
 
 /// An update that a slot published.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Update {
     /// Counts the updates that the slot published, this one included.
     pub generation: u64,
     pub parameters: Arc<UpdateParameters>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct State {
     generation: u64,
     latest: Option<Arc<UpdateParameters>>,
@@ -46,6 +46,15 @@ struct Shared {
     next_reader: AtomicU64,
 }
 
+impl std::fmt::Debug for Shared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shared")
+            .field("state", &self.state)
+            .field("next_reader", &self.next_reader)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Shared {
     fn reader(self: &Arc<Self>) -> UpdateReader {
         UpdateReader { shared: self.clone(), id: self.next_reader.fetch_add(1, Ordering::Relaxed) }
@@ -62,7 +71,7 @@ impl Shared {
 
 /// The writing side, which the map owns. Dropping it closes the slot: its
 /// readers see no update from then on.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct UpdateSlot {
     shared: Arc<Shared>,
 }
@@ -195,6 +204,7 @@ impl Drop for UpdateSlot {
 
 /// The reading side of an [`UpdateSlot`], for the renderer that draws the
 /// map. Clones read the same slot, each with a waker of its own.
+#[derive(Debug)]
 pub struct UpdateReader {
     shared: Arc<Shared>,
     id: u64,

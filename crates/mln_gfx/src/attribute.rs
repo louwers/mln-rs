@@ -20,6 +20,17 @@ pub struct AttributeBinding {
     pub buffer_index: u32,
 }
 
+impl std::fmt::Debug for AttributeBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AttributeBinding")
+            .field("attribute", &self.attribute)
+            .field("vertex_stride", &self.vertex_stride)
+            .field("vertex_offset", &self.vertex_offset)
+            .field("buffer_index", &self.buffer_index)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PartialEq for AttributeBinding {
     fn eq(&self, rhs: &Self) -> bool {
         let same_resource = match (&self.vertex_buffer_resource, &rhs.vertex_buffer_resource) {

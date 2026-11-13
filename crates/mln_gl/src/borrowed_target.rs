@@ -166,6 +166,7 @@ impl TargetResource for Resource {
 }
 
 /// Frames drawn into the host's textures, each given back to the host.
+#[derive(Debug)]
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
     textures: RefCell<BorrowedTextures>,
@@ -372,6 +373,7 @@ impl TargetResource for SurfaceResource {
 
 /// Frames presented to the host's EGL surface, through a context in the
 /// host's share group current on it.
+#[derive(Debug)]
 pub struct HostSurfaceTarget {
     backend: Rc<RendererBackend>,
     swap: SurfaceSwap,

@@ -11,6 +11,7 @@ use crate::mailbox::Mailbox;
 use crate::scheduler::SchedulerPtr;
 
 /// The mailbox and the `ActorRef` handed out before the object exists.
+#[derive(Debug)]
 pub(crate) struct AspiringActor<O: 'static> {
     pub(crate) mailbox: Arc<Mailbox>,
     _object: std::marker::PhantomData<fn(&O)>,
@@ -33,6 +34,7 @@ impl<O: 'static> AspiringActor<O> {
 }
 
 /// Owns the object on its thread.
+#[derive(Debug)]
 pub(crate) struct EstablishedActor<O: 'static> {
     mailbox: Arc<Mailbox>,
     object: Option<Rc<O>>,
