@@ -1,21 +1,5 @@
 use bytemuck::{Pod, Zeroable};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum AttributeSource {
-    Constant,
-    PerVertex,
-    Computed,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum ExpressionFunction {
-    Constant,
-    Linear,
-    Exponential,
-}
-
 /// The global paint parameters uniform block (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -31,7 +15,7 @@ pub struct GlobalPaintParamsUBO {
     /* 44 */ pub pad1: f32,
     /* 48 */
 }
-const _: () = assert!(std::mem::size_of::<GlobalPaintParamsUBO>() == 3 * 16);
+const _: () = assert!(size_of::<GlobalPaintParamsUBO>() == 3 * 16);
 
 /// The per-drawable projection uniform block (176 bytes); see
 /// `ProjectionData`.
@@ -50,4 +34,4 @@ pub struct ProjectionUBO {
     pub translate: [f32; 2],
     /* 176 */
 }
-const _: () = assert!(std::mem::size_of::<ProjectionUBO>() == 11 * 16);
+const _: () = assert!(size_of::<ProjectionUBO>() == 11 * 16);

@@ -21,7 +21,7 @@ struct OwnerToken {
 /// `mln_binding_owner_token_create()`. The allocation can't fail: running out
 /// of memory aborts the process.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_binding_owner_token_create(handle: u64) -> *mut c_void {
+pub(crate) extern "C" fn mln_binding_owner_token_create(handle: u64) -> *mut c_void {
     Box::into_raw(Box::new(OwnerToken { handle })).cast()
 }
 
@@ -32,7 +32,7 @@ pub extern "C" fn mln_binding_owner_token_create(handle: u64) -> *mut c_void {
 /// `token` is null, or a token from [`mln_binding_owner_token_create`] that
 /// wasn't destroyed or finalized.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_owner_token_destroy(token: *mut c_void) {
+pub(crate) unsafe extern "C" fn mln_binding_owner_token_destroy(token: *mut c_void) {
     // SAFETY: the caller's contract.
     drop(unsafe { take(token) });
 }
@@ -43,7 +43,7 @@ pub unsafe extern "C" fn mln_binding_owner_token_destroy(token: *mut c_void) {
 ///
 /// As for [`mln_binding_owner_token_destroy`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_owner_finalize(token: *mut c_void) {
+pub(crate) unsafe extern "C" fn mln_binding_owner_finalize(token: *mut c_void) {
     // SAFETY: the caller's contract.
     let Some(token) = (unsafe { take(token) }) else { return };
     if let Err(error) = dispose_owner(token.handle) {
@@ -101,7 +101,7 @@ fn dispose_owner(handle: u64) -> Result<(), Error> {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_render_session_abandon_at_exit(
+pub(crate) unsafe extern "C" fn mln_binding_render_session_abandon_at_exit(
     session: mln_render_session,
     out_result: *mut mln_render_abandon_result,
     out_diagnostic: *mut mln_diagnostic,
@@ -177,7 +177,7 @@ unsafe extern "C" fn dart_wake_release(user_data: *mut c_void) {
 /// `post_cobject` is null or Dart's `NativeApi.postCObject`, and each other
 /// pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_dart_wake_create(
+pub(crate) unsafe extern "C" fn mln_binding_dart_wake_create(
     post_cobject: *mut c_void,
     port: i64,
     out_wake: *mut mln_wake,
@@ -231,7 +231,8 @@ mod tests {
 
     #[test]
     fn a_dart_wake_posts_zero_per_wake_and_one_on_release() {
-        let post = record_post as DartPost as *mut c_void;
+        let post: DartPost = record_post;
+        let post = post as *mut c_void;
         let mut wake = mln_wake { callback: None, user_data: core::ptr::null_mut(), release_user_data: None, queue: 0 };
         let mut out = diagnostic();
         // SAFETY: each pointer is null or to a local.
@@ -302,7 +303,7 @@ mod tests {
         let again = unsafe { mln_binding_render_session_abandon_at_exit(session, &raw mut result, NO_DIAGNOSTIC) };
         assert_eq!(again, MLN_STATUS_INVALID_STATE);
         render_session::tests::release_session(session);
-        crate::map::tests::release_map(map);
+        map::tests::release_map(map);
         runtime::tests::release(runtime);
     }
 
@@ -312,7 +313,7 @@ mod tests {
         // SAFETY: a token from `mln_binding_owner_token_create`, used once.
         unsafe { mln_binding_owner_finalize(mln_binding_owner_token_create(session)) };
         assert_eq!(render_session::tests::snapshot(session).unwrap_err(), MLN_STATUS_INVALID_STATE);
-        crate::map::tests::release_map(map);
+        map::tests::release_map(map);
         runtime::tests::release(runtime);
     }
 }

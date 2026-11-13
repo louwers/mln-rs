@@ -6,13 +6,13 @@ use mln_util::time::Instant;
 
 use crate::buffer_resource::BufferResource;
 
-pub struct VertexBufferResource {
+pub(crate) struct VertexBufferResource {
     buffer: BufferResource,
     last_updated: Cell<Option<Instant>>,
 }
 
 impl VertexBufferResource {
-    pub fn new(buffer: BufferResource) -> Self {
+    pub(crate) fn new(buffer: BufferResource) -> Self {
         if buffer.is_valid()
             && let Some(context) = buffer.context()
         {
@@ -23,19 +23,19 @@ impl VertexBufferResource {
         VertexBufferResource { buffer, last_updated: Cell::new(None) }
     }
 
-    pub fn get(&self) -> &BufferResource {
+    pub(crate) fn get(&self) -> &BufferResource {
         &self.buffer
     }
 
-    pub fn get_size_in_bytes(&self) -> usize {
+    pub(crate) fn get_size_in_bytes(&self) -> usize {
         self.buffer.get_size_in_bytes()
     }
 
-    pub fn get_last_updated(&self) -> Option<Instant> {
+    pub(crate) fn get_last_updated(&self) -> Option<Instant> {
         self.last_updated.get()
     }
 
-    pub fn set_last_updated(&self, time: Instant) {
+    pub(crate) fn set_last_updated(&self, time: Instant) {
         self.last_updated.set(Some(time));
     }
 }
@@ -54,12 +54,12 @@ impl Drop for VertexBufferResource {
 
 impl vertex_buffer::VertexBufferResource for VertexBufferResource {}
 
-pub struct IndexBufferResource {
+pub(crate) struct IndexBufferResource {
     buffer: BufferResource,
 }
 
 impl IndexBufferResource {
-    pub fn new(buffer: BufferResource) -> Self {
+    pub(crate) fn new(buffer: BufferResource) -> Self {
         if buffer.is_valid()
             && let Some(context) = buffer.context()
         {
@@ -70,7 +70,7 @@ impl IndexBufferResource {
         IndexBufferResource { buffer }
     }
 
-    pub fn get(&self) -> &BufferResource {
+    pub(crate) fn get(&self) -> &BufferResource {
         &self.buffer
     }
 }

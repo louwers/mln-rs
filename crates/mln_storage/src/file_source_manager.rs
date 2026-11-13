@@ -25,7 +25,8 @@ use crate::resource_options::ResourceOptions;
 /// Creates the file source of one type. It gets the manager that asked, so
 /// a file source built on others (the `ResourceLoader`) takes them from the
 /// same owner.
-pub type FileSourceFactory = Arc<dyn Fn(&FileSourceManager, &ResourceOptions) -> Arc<dyn FileSource> + Send + Sync>;
+pub(crate) type FileSourceFactory =
+    Arc<dyn Fn(&FileSourceManager, &ResourceOptions) -> Arc<dyn FileSource> + Send + Sync>;
 
 struct FileSourceInfo {
     type_: FileSourceType,
@@ -65,53 +66,45 @@ impl FileSourceManager {
         manager.register_file_source_factory(
             FileSourceType::ResourceLoader,
             Arc::new(|manager: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(MainResourceLoader::new(manager, options)) as Arc<dyn FileSource>
+                Arc::new(MainResourceLoader::new(manager, options))
             }),
         );
         manager.register_file_source_factory(
             FileSourceType::Asset,
-            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(AssetFileSource::new(options)) as Arc<dyn FileSource>
-            }),
+            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| Arc::new(AssetFileSource::new(options))),
         );
         #[cfg(feature = "sqlite")]
         manager.register_file_source_factory(
             FileSourceType::Database,
             Arc::new(|manager: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(DatabaseFileSource::new(manager, options)) as Arc<dyn FileSource>
+                Arc::new(DatabaseFileSource::new(manager, options))
             }),
         );
         manager.register_file_source_factory(
             FileSourceType::FileSystem,
-            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(LocalFileSource::new(options)) as Arc<dyn FileSource>
-            }),
+            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| Arc::new(LocalFileSource::new(options))),
         );
         #[cfg(feature = "sqlite")]
         manager.register_file_source_factory(
             FileSourceType::Mbtiles,
-            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(MBTilesFileSource::new(options)) as Arc<dyn FileSource>
-            }),
+            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| Arc::new(MBTilesFileSource::new(options))),
         );
         manager.register_file_source_factory(
             FileSourceType::Pmtiles,
             Arc::new(|manager: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(PMTilesFileSource::new(manager, options)) as Arc<dyn FileSource>
+                Arc::new(PMTilesFileSource::new(manager, options))
             }),
         );
         manager.register_file_source_factory(
             FileSourceType::Network,
-            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(OnlineFileSource::new(options)) as Arc<dyn FileSource>
-            }),
+            Arc::new(|_: &FileSourceManager, options: &ResourceOptions| Arc::new(OnlineFileSource::new(options))),
         );
         manager
     }
 
     /// A manager without factories.
     #[must_use]
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         FileSourceManager { registry: Arc::new(Mutex::new(Registry::default())) }
     }
 

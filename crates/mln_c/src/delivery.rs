@@ -242,7 +242,7 @@ pub(crate) fn resolve(queue: mln_delivery_queue) -> Result<Arc<Queue>, Error> {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_delivery_queue_create(
+pub(crate) unsafe extern "C" fn mln_delivery_queue_create(
     options: *const mln_delivery_queue_options,
     out_queue: *mut mln_delivery_queue,
     out_diagnostic: *mut mln_diagnostic,
@@ -278,7 +278,7 @@ pub unsafe extern "C" fn mln_delivery_queue_create(
 
 /// `mln_delivery_queue_release()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_delivery_queue_release(queue: mln_delivery_queue) {
+pub(crate) extern "C" fn mln_delivery_queue_release(queue: mln_delivery_queue) {
     let _ = release(queue);
 }
 
@@ -294,7 +294,7 @@ pub(crate) fn release(queue: mln_delivery_queue) -> Result<(), Error> {
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_delivery_queue_dispatch(
+pub(crate) unsafe extern "C" fn mln_delivery_queue_dispatch(
     queue: mln_delivery_queue,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
@@ -615,7 +615,7 @@ pub(crate) mod tests {
         within_deadline(|| {
             let log = Log::new();
             let (queue, _) = queue_with_abandon(Some(Log::abandon));
-            let other = super::tests::queue();
+            let other = tests::queue();
             let tag = log.user_data('c');
             push(queue, move || {
                 // Push to, dispatch and release queues from inside a call.
@@ -623,7 +623,7 @@ pub(crate) mod tests {
                 push(other, move || Log::record(tag, 'o'));
                 assert_eq!(dispatch(other), MLN_STATUS_OK);
                 mln_delivery_queue_release(other);
-                let _ = super::tests::queue();
+                let _ = tests::queue();
                 Log::record(tag, 'c');
             });
             assert_eq!(dispatch(queue), MLN_STATUS_OK);

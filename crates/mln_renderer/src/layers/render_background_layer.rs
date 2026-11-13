@@ -47,7 +47,7 @@ fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
     }
 }
 
-pub struct RenderBackgroundLayer {
+pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     unevaluated: BackgroundPaintProperties::Unevaluated,
     plain_shader: Option<ShaderProgramBasePtr>,
@@ -55,7 +55,7 @@ pub struct RenderBackgroundLayer {
 }
 
 impl RenderBackgroundLayer {
-    pub fn new(impl_: Arc<BackgroundLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<BackgroundLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(BackgroundLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -241,7 +241,7 @@ impl RenderLayer for RenderBackgroundLayer {
         let tile_vertices = RenderStaticData::tile_vertices();
         let vertex_count = tile_vertices.len();
         // sizeof(a1): short2
-        let vert_size = std::mem::size_of::<[i16; 2]>();
+        let vert_size = size_of::<[i16; 2]>();
         let mut raw_vertices: Vec<u8> = vec![0; vertex_count * vert_size];
         for (i, vertex) in tile_vertices.iter().enumerate() {
             raw_vertices[i * vert_size..(i + 1) * vert_size].copy_from_slice(bytemuck::bytes_of(vertex));
@@ -274,7 +274,7 @@ impl RenderLayer for RenderBackgroundLayer {
             // We actually need to build things, so set up a builder if we
             // haven't already
             let builder = builder.get_or_insert_with(|| {
-                let mut b = context.create_drawable_builder("background".to_owned());
+                let mut b = context.create_drawable_builder();
                 b.set_render_pass(draw_passes);
                 b.set_shader(cur_shader.clone());
                 b.set_depth_type(DepthMaskType::ReadWrite);
@@ -290,7 +290,7 @@ impl RenderLayer for RenderBackgroundLayer {
             if self.base.projection_variant == ProjectionVariant::Globe {
                 // The background is not depth tested, so it needs no tile
                 // border.
-                let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, &SubdivisionGranularitySetting::globe().tile);
+                let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
                 builder.set_raw_vertices(mesh.vertices, mesh.vertex_count, AttributeDataType::Short2);
                 builder.set_segments(DrawMode::Triangles(), mesh.indices, &mesh.segments);
             } else {

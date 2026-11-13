@@ -24,13 +24,13 @@ fn data_address(data: &Arc<dyn GeoJSONData>) -> *const () {
     Arc::as_ptr(data).cast::<()>()
 }
 
-pub struct GeoJSONTile {
+pub(crate) struct GeoJSONTile {
     tile: GeometryTile,
     data: Rc<RefCell<Option<Arc<dyn GeoJSONData>>>>,
 }
 
 impl GeoJSONTile {
-    pub fn new(
+    pub(crate) fn new(
         overscaled_tile_id: OverscaledTileID,
         source_id: String,
         parameters: &TileParameters<'_>,
@@ -45,7 +45,7 @@ impl GeoJSONTile {
         tile
     }
 
-    pub fn update_data(&self, data: Arc<dyn GeoJSONData>, needs_relayout: bool, run_synchronously: bool) {
+    pub(crate) fn update_data(&self, data: Arc<dyn GeoJSONData>, needs_relayout: bool, run_synchronously: bool) {
         let requested = data.clone();
         *self.data.borrow_mut() = Some(data);
         if needs_relayout {
@@ -71,8 +71,9 @@ impl GeoJSONTile {
         );
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn geometry_tile(&self) -> &GeometryTile {
+    pub(crate) fn geometry_tile(&self) -> &GeometryTile {
         &self.tile
     }
 }
@@ -86,6 +87,7 @@ impl Tile for GeoJSONTile {
         self.tile.create_render_data()
     }
 
+    #[cfg(test)]
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         self.tile.set_observer(observer);
     }

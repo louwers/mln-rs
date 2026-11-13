@@ -14,17 +14,17 @@ use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, 
 use crate::paint_parameters::PaintParameters;
 
 #[derive(Clone, Copy, Debug)]
-pub struct CollisionDrawableData {
-    pub translate: [f32; 2],
-    pub translate_anchor: TranslateAnchorType,
+pub(crate) struct CollisionDrawableData {
+    pub(crate) translate: [f32; 2],
+    pub(crate) translate_anchor: TranslateAnchorType,
 }
 
-pub struct CollisionLayerTweaker {
+pub(crate) struct CollisionLayerTweaker {
     base: LayerTweakerBase,
 }
 
 impl CollisionLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         CollisionLayerTweaker { base: LayerTweakerBase::new(id, properties) }
     }
 }
@@ -66,7 +66,7 @@ impl LayerTweaker for CollisionLayerTweaker {
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                &data.translate,
+                data.translate,
                 data.translate_anchor,
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,

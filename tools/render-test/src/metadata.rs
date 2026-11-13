@@ -8,7 +8,7 @@ use mln_util::size::Size;
 /// convert.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u32)]
-pub enum MapMode {
+pub(crate) enum MapMode {
     /// continually updating map
     Continuous = 0,
     /// a once-off still image of an arbitrary viewport
@@ -20,17 +20,13 @@ pub enum MapMode {
 
 /// The map's debug overlays, a bit set.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct MapDebugOptions(pub u32);
+pub(crate) struct MapDebugOptions(pub(crate) u32);
 
 impl MapDebugOptions {
-    pub const NO_DEBUG: MapDebugOptions = MapDebugOptions(0);
-    pub const TILE_BORDERS: MapDebugOptions = MapDebugOptions(1 << 1);
-    pub const PARSE_STATUS: MapDebugOptions = MapDebugOptions(1 << 2);
-    pub const TIMESTAMPS: MapDebugOptions = MapDebugOptions(1 << 3);
-    pub const COLLISION: MapDebugOptions = MapDebugOptions(1 << 4);
-    pub const OVERDRAW: MapDebugOptions = MapDebugOptions(1 << 5);
-    pub const STENCIL_CLIP: MapDebugOptions = MapDebugOptions(1 << 6);
-    pub const DEPTH_BUFFER: MapDebugOptions = MapDebugOptions(1 << 7);
+    pub(crate) const NO_DEBUG: MapDebugOptions = MapDebugOptions(0);
+    pub(crate) const TILE_BORDERS: MapDebugOptions = MapDebugOptions(1 << 1);
+    pub(crate) const COLLISION: MapDebugOptions = MapDebugOptions(1 << 4);
+    pub(crate) const OVERDRAW: MapDebugOptions = MapDebugOptions(1 << 5);
 }
 
 impl std::ops::BitOrAssign for MapDebugOptions {
@@ -41,146 +37,146 @@ impl std::ops::BitOrAssign for MapDebugOptions {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScreenBox {
-    pub min: Point<f64>,
-    pub max: Point<f64>,
+    pub(crate) min: Point<f64>,
+    pub(crate) max: Point<f64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenderedQueryOptions {
-    pub layer_ids: Option<Vec<String>>,
+    pub(crate) layer_ids: Option<Vec<String>>,
     // The raw JSON; the map converts it to a filter.
-    pub filter: Option<serde_json::Value>,
+    pub(crate) filter: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TestStatistics {
-    pub ignore_failed_tests: u32,
+    pub(crate) ignore_failed_tests: u32,
     pub ignore_passed_tests: u32,
     pub errored_tests: u32,
-    pub failed_tests: u32,
+    pub(crate) failed_tests: u32,
     pub passed_tests: u32,
 }
 
 /// Paths are strings: the runner derives test ids from them by offset.
 /// Serialized for the workers of `--jobs` (jobs.rs).
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TestPaths {
-    pub style_path: String,
-    pub expectations: Vec<String>,
-    pub expected_metrics: Vec<String>,
+pub(crate) struct TestPaths {
+    pub(crate) style_path: String,
+    pub(crate) expectations: Vec<String>,
+    pub(crate) expected_metrics: Vec<String>,
 }
 
 impl TestPaths {
     #[must_use]
-    pub fn new(style_path: String, expectations: Vec<String>, expected_metrics: Vec<String>) -> Self {
+    pub(crate) fn new(style_path: String, expectations: Vec<String>, expected_metrics: Vec<String>) -> Self {
         TestPaths { style_path, expectations, expected_metrics }
     }
 
     #[must_use]
-    pub fn default_expectations(&self) -> &str {
+    pub(crate) fn default_expectations(&self) -> &str {
         assert_ne!(self.expectations, Vec::<String>::new());
         &self.expectations[0]
     }
 }
 
 #[must_use]
-pub fn check_value(expected: f32, actual: f32, tolerance: f32) -> (bool, f32) {
+pub(crate) fn check_value(expected: f32, actual: f32, tolerance: f32) -> (bool, f32) {
     let delta = expected * tolerance;
     debug_assert!(delta >= 0.0);
     ((expected - actual).abs() <= delta, delta)
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct FileSizeProbe {
-    pub path: String,
-    pub size: u64,
-    pub tolerance: f32,
+pub(crate) struct FileSizeProbe {
+    pub(crate) path: String,
+    pub(crate) size: u64,
+    pub(crate) tolerance: f32,
 }
 
 impl FileSizeProbe {
     #[must_use]
-    pub fn new(path: String, size: u64, tolerance: f32) -> Self {
+    pub(crate) fn new(path: String, size: u64, tolerance: f32) -> Self {
         FileSizeProbe { path, size, tolerance }
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MemoryProbe {
-    pub peak: usize,
-    pub allocations: usize,
-    pub tolerance: f32,
+pub(crate) struct MemoryProbe {
+    pub(crate) peak: usize,
+    pub(crate) allocations: usize,
+    pub(crate) tolerance: f32,
 }
 
 impl MemoryProbe {
     #[must_use]
-    pub fn new(peak: usize, allocations: usize) -> Self {
+    pub(crate) fn new(peak: usize, allocations: usize) -> Self {
         MemoryProbe { peak, allocations, tolerance: 0.0 }
     }
 
     #[must_use]
-    pub fn check_peak(expected: &MemoryProbe, actual: &MemoryProbe) -> (bool, f32) {
+    pub(crate) fn check_peak(expected: &MemoryProbe, actual: &MemoryProbe) -> (bool, f32) {
         check_value(expected.peak as f32, actual.peak as f32, actual.tolerance)
     }
 
     #[must_use]
-    pub fn check_allocations(expected: &MemoryProbe, actual: &MemoryProbe) -> (bool, f32) {
+    pub(crate) fn check_allocations(expected: &MemoryProbe, actual: &MemoryProbe) -> (bool, f32) {
         check_value(expected.allocations as f32, actual.allocations as f32, actual.tolerance)
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct FpsProbe {
-    pub average: f32,
-    pub min_one_pc: f32,
-    pub tolerance: f32,
+pub(crate) struct FpsProbe {
+    pub(crate) average: f32,
+    pub(crate) min_one_pc: f32,
+    pub(crate) tolerance: f32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NetworkProbe {
-    pub requests: usize,
-    pub transferred: usize,
+pub(crate) struct NetworkProbe {
+    pub(crate) requests: usize,
+    pub(crate) transferred: usize,
 }
 
 impl NetworkProbe {
     #[must_use]
-    pub fn new(requests: usize, transferred: usize) -> Self {
+    pub(crate) fn new(requests: usize, transferred: usize) -> Self {
         NetworkProbe { requests, transferred }
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct GfxProbeMemory {
-    pub allocated: i32,
-    pub peak: i32,
+pub(crate) struct GfxProbeMemory {
+    pub(crate) allocated: i32,
+    pub(crate) peak: i32,
 }
 
 /// Graphics resource counts. The runner never fills them, since
 /// `probeGFX` is unsupported.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct GfxProbe {
-    pub num_buffers: i32,
-    pub num_draw_calls: i32,
-    pub num_frame_buffers: i32,
-    pub num_textures: i32,
-    pub mem_index_buffers: GfxProbeMemory,
-    pub mem_vertex_buffers: GfxProbeMemory,
-    pub mem_textures: GfxProbeMemory,
+pub(crate) struct GfxProbe {
+    pub(crate) num_buffers: i32,
+    pub(crate) num_draw_calls: i32,
+    pub(crate) num_frame_buffers: i32,
+    pub(crate) num_textures: i32,
+    pub(crate) mem_index_buffers: GfxProbeMemory,
+    pub(crate) mem_vertex_buffers: GfxProbeMemory,
+    pub(crate) mem_textures: GfxProbeMemory,
 }
 
 /// A test's metrics, by probe kind and name. The maps are `BTreeMap`s to
 /// keep the key order of C++'s `std::map`.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct TestMetrics {
-    pub file_size: BTreeMap<String, FileSizeProbe>,
-    pub memory: BTreeMap<String, MemoryProbe>,
-    pub network: BTreeMap<String, NetworkProbe>,
-    pub fps: BTreeMap<String, FpsProbe>,
-    pub gfx: BTreeMap<String, GfxProbe>,
+pub(crate) struct TestMetrics {
+    pub(crate) file_size: BTreeMap<String, FileSizeProbe>,
+    pub(crate) memory: BTreeMap<String, MemoryProbe>,
+    pub(crate) network: BTreeMap<String, NetworkProbe>,
+    pub(crate) fps: BTreeMap<String, FpsProbe>,
+    pub(crate) gfx: BTreeMap<String, GfxProbe>,
 }
 
 impl TestMetrics {
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.file_size.is_empty()
             && self.memory.is_empty()
             && self.network.is_empty()
@@ -191,70 +187,66 @@ impl TestMetrics {
 
 #[derive(Clone, Debug)]
 pub struct TestMetadata {
-    pub paths: TestPaths,
+    pub(crate) paths: TestPaths,
     /// The parsed style.json (`mln::JSDocument`; `Null` when it did not parse).
-    pub document: serde_json::Value,
+    pub(crate) document: serde_json::Value,
     /// The style JSON handed to `Style::loadJSON`. C++ re-serializes
     /// `document`; the port passes the file text, which parses to the same
     /// values in the same member order (and keeps duplicate members, as
     /// rapidjson does). Re-serialized from `document` when the runner edits
     /// it (`source-replace`).
-    pub document_json: String,
-    pub render_test: bool,
-    pub outputs_image: bool,
-    pub ignored_test: bool,
+    pub(crate) document_json: String,
+    pub(crate) render_test: bool,
+    pub(crate) outputs_image: bool,
+    pub(crate) ignored_test: bool,
     /// If unit test hasn't metric.json, the unit test will end with error
     /// message: "Failed to find expectations for...", to prevent unit test
     /// error by missing metric.json, can turn on 'ignoreProbing' to prevent
     /// the unit test fail, and just verify the render result.
-    pub ignore_probing: bool,
+    pub(crate) ignore_probing: bool,
 
-    pub size: Size,
-    pub max_pitch: Option<f32>,
-    pub pixel_ratio: f32,
+    pub(crate) size: Size,
+    pub(crate) max_pitch: Option<f32>,
+    pub(crate) pixel_ratio: f32,
     /// diff
-    pub allowed: f64,
-    pub description: String,
-    pub map_mode: MapMode,
-    pub debug: MapDebugOptions,
-    pub cross_source_collisions: bool,
-    pub axonometric: bool,
-    pub x_skew: f64,
-    pub y_skew: f64,
-    pub query_geometry: Point<f64>,
-    pub query_geometry_box: ScreenBox,
-    pub query_options: RenderedQueryOptions,
-
-    // TODO
-    pub fade_duration: u32,
-    pub add_fake_canvas: bool,
+    pub(crate) allowed: f64,
+    pub(crate) description: String,
+    pub(crate) map_mode: MapMode,
+    pub(crate) debug: MapDebugOptions,
+    pub(crate) cross_source_collisions: bool,
+    pub(crate) axonometric: bool,
+    pub(crate) x_skew: f64,
+    pub(crate) y_skew: f64,
+    pub(crate) query_geometry: Point<f64>,
+    pub(crate) query_geometry_box: ScreenBox,
+    pub(crate) query_options: RenderedQueryOptions,
 
     // HTML
     pub id: String,
     pub status: String,
-    pub color: String,
+    pub(crate) color: String,
 
     /// PNG bytes (C++ keeps binary data in `std::string`).
-    pub actual: Vec<u8>,
-    pub actual_json: String,
+    pub(crate) actual: Vec<u8>,
+    pub(crate) actual_json: String,
     /// PNG bytes.
-    pub expected: Vec<u8>,
+    pub(crate) expected: Vec<u8>,
     /// PNG bytes for render tests; the HTML diff text for query tests.
-    pub diff: Vec<u8>,
+    pub(crate) diff: Vec<u8>,
 
-    pub metrics: TestMetrics,
-    pub expected_metrics: TestMetrics,
+    pub(crate) metrics: TestMetrics,
+    pub(crate) expected_metrics: TestMetrics,
 
     // Results
-    pub metrics_errored: u32,
-    pub metrics_failed: u32,
-    pub render_errored: u32,
-    pub render_failed: u32,
-    pub label_cut_off_found: u32,
-    pub duplications_count: u32,
+    pub(crate) metrics_errored: u32,
+    pub(crate) metrics_failed: u32,
+    pub(crate) render_errored: u32,
+    pub(crate) render_failed: u32,
+    pub(crate) label_cut_off_found: u32,
+    pub(crate) duplications_count: u32,
 
     pub error_message: String,
-    pub difference: f64,
+    pub(crate) difference: f64,
 }
 
 impl Default for TestMetadata {
@@ -281,8 +273,6 @@ impl Default for TestMetadata {
             query_geometry: Point::new(0.0, 0.0),
             query_geometry_box: ScreenBox::default(),
             query_options: RenderedQueryOptions::default(),
-            fade_duration: 0,
-            add_fake_canvas: false,
             id: String::new(),
             status: String::new(),
             color: String::new(),
@@ -308,7 +298,7 @@ impl TestMetadata {
     /// Whether the document has no members. A document that did not parse is
     /// `Null` here (a zero-member value in rapidjson), and counts as empty.
     #[must_use]
-    pub fn document_object_empty(&self) -> bool {
+    pub(crate) fn document_object_empty(&self) -> bool {
         match &self.document {
             serde_json::Value::Object(map) => map.is_empty(),
             _ => true,
@@ -317,7 +307,7 @@ impl TestMetadata {
 
     /// `document["metadata"]["test"]`, if present.
     #[must_use]
-    pub fn test_value(&self) -> Option<&serde_json::Value> {
+    pub(crate) fn test_value(&self) -> Option<&serde_json::Value> {
         self.document.get("metadata")?.get("test")
     }
 }

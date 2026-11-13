@@ -30,7 +30,7 @@ impl VertexBufferBase for VertexBuffer {}
 impl UploadPass {
     /// Starts an upload pass. C++ pushes the encoder's debug groups and
     /// `name` on the pass; WebGPU upload-pass debug groups are no-ops.
-    pub fn new(command_encoder: &CommandEncoder, _name: &str) -> Self {
+    pub(crate) fn new(command_encoder: &CommandEncoder, _name: &str) -> Self {
         UploadPass { context: command_encoder.get_context().clone() }
     }
 
@@ -56,7 +56,7 @@ impl UploadPass {
     /// An index buffer of `indexes`, written from the JS array they're in,
     /// if they are.
     #[must_use]
-    pub fn create_index_buffer_of(
+    pub(crate) fn create_index_buffer_of(
         &self,
         indexes: &IndexVectorBase,
         usage: BufferUsageType,
@@ -135,7 +135,7 @@ impl UploadPass {
         buffer
     }
 
-    pub fn get_attribute_buffer(
+    pub(crate) fn get_attribute_buffer(
         &self,
         attrib: &mut VertexAttribute,
         usage: BufferUsageType,

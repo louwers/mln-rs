@@ -17,14 +17,14 @@ use crate::paint_parameters::TransformParameters;
 
 /// The clip depth convention of `backend`'s API.
 #[must_use]
-pub fn clip_depth_range(backend: BackendType) -> ClipDepthRange {
+pub(crate) fn clip_depth_range(backend: BackendType) -> ClipDepthRange {
     if backend == BackendType::OpenGL { ClipDepthRange::NegativeOneToOne } else { ClipDepthRange::ZeroToOne }
 }
 
 /// The projection of a frame that drew with `transform`, its 3D layers into
 /// the depth range from 0 to `depth_range_size`, on `backend`.
 #[must_use]
-pub fn compute(transform: &TransformParameters, depth_range_size: f32, backend: BackendType) -> FrameProjection {
+pub(crate) fn compute(transform: &TransformParameters, depth_range_size: f32, backend: BackendType) -> FrameProjection {
     let state = &transform.state;
     let world_size = Projection::world_size(state.get_scale());
     let mut world_to_clip: Mat4 = [0.0; 16];
@@ -58,7 +58,7 @@ pub fn compute(transform: &TransformParameters, depth_range_size: f32, backend: 
 /// and WebGPU do with it: clip z from -w to w becomes `2z - w`, so that
 /// OpenGL clips what was below 0 and writes the depth range times the old z
 /// over w.
-pub fn zero_to_one_clip_z(matrix: &mut Mat4) {
+pub(crate) fn zero_to_one_clip_z(matrix: &mut Mat4) {
     for column in 0..4 {
         matrix[column * 4 + 2] = 2.0 * matrix[column * 4 + 2] - matrix[column * 4 + 3];
     }

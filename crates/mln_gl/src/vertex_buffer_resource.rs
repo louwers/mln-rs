@@ -10,7 +10,7 @@ use crate::context::Context;
 use crate::enums;
 use crate::types::BufferID;
 
-pub struct VertexBufferResource {
+pub(crate) struct VertexBufferResource {
     context: Weak<Context>,
     buffer: Option<BufferID>,
     byte_size: usize,
@@ -19,14 +19,18 @@ pub struct VertexBufferResource {
 
 impl VertexBufferResource {
     /// A vertex buffer holding `data`.
-    pub fn new(context: &Context, data: &[u8], usage: BufferUsageType) -> Self {
+    pub(crate) fn new(context: &Context, data: &[u8], usage: BufferUsageType) -> Self {
         let buffer = context.create_buffer(glow::ARRAY_BUFFER, data, enums::buffer_usage(usage));
         Self::of(context, buffer, data.len())
     }
 
     /// A vertex buffer holding `data`, written from the JS array it is in.
     #[cfg(target_family = "wasm")]
-    pub fn new_from_host(context: &Context, data: &mln_util::host_bytes::HostBytes, usage: BufferUsageType) -> Self {
+    pub(crate) fn new_from_host(
+        context: &Context,
+        data: &mln_util::host_bytes::HostBytes,
+        usage: BufferUsageType,
+    ) -> Self {
         let buffer = context.create_buffer_from_host(glow::ARRAY_BUFFER, data, enums::buffer_usage(usage));
         Self::of(context, buffer, data.len())
     }
@@ -40,24 +44,24 @@ impl VertexBufferResource {
         VertexBufferResource { context: context.weak(), buffer, byte_size, last_updated: Cell::new(None) }
     }
 
-    pub fn get_buffer(&self) -> Option<BufferID> {
+    pub(crate) fn get_buffer(&self) -> Option<BufferID> {
         self.buffer
     }
 
-    pub fn get_size_in_bytes(&self) -> usize {
+    pub(crate) fn get_size_in_bytes(&self) -> usize {
         self.byte_size
     }
 
-    pub fn get_last_updated(&self) -> Option<Instant> {
+    pub(crate) fn get_last_updated(&self) -> Option<Instant> {
         self.last_updated.get()
     }
 
-    pub fn set_last_updated(&self, time: Instant) {
+    pub(crate) fn set_last_updated(&self, time: Instant) {
         self.last_updated.set(Some(time));
     }
 
     /// Replaces the start of the buffer with `data`, which fits in it.
-    pub fn update(&self, context: &Context, data: &[u8]) {
+    pub(crate) fn update(&self, context: &Context, data: &[u8]) {
         debug_assert!(data.len() <= self.byte_size);
         if let Some(buffer) = self.buffer
             && data.len() <= self.byte_size
@@ -85,7 +89,7 @@ impl Drop for VertexBufferResource {
 
 impl vertex_buffer::VertexBufferResource for VertexBufferResource {}
 
-pub struct IndexBufferResource {
+pub(crate) struct IndexBufferResource {
     context: Weak<Context>,
     buffer: Option<BufferID>,
     byte_size: usize,
@@ -93,14 +97,18 @@ pub struct IndexBufferResource {
 
 impl IndexBufferResource {
     /// An index buffer holding `data`.
-    pub fn new(context: &Context, data: &[u8], usage: BufferUsageType) -> Self {
+    pub(crate) fn new(context: &Context, data: &[u8], usage: BufferUsageType) -> Self {
         let buffer = context.create_buffer(glow::ELEMENT_ARRAY_BUFFER, data, enums::buffer_usage(usage));
         Self::of(context, buffer, data.len())
     }
 
     /// An index buffer holding `data`, written from the JS array it is in.
     #[cfg(target_family = "wasm")]
-    pub fn new_from_host(context: &Context, data: &mln_util::host_bytes::HostBytes, usage: BufferUsageType) -> Self {
+    pub(crate) fn new_from_host(
+        context: &Context,
+        data: &mln_util::host_bytes::HostBytes,
+        usage: BufferUsageType,
+    ) -> Self {
         let buffer = context.create_buffer_from_host(glow::ELEMENT_ARRAY_BUFFER, data, enums::buffer_usage(usage));
         Self::of(context, buffer, data.len())
     }
@@ -115,7 +123,7 @@ impl IndexBufferResource {
     }
 
     #[must_use]
-    pub fn get_buffer(&self) -> Option<BufferID> {
+    pub(crate) fn get_buffer(&self) -> Option<BufferID> {
         self.buffer
     }
 }

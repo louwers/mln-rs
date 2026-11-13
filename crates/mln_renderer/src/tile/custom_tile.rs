@@ -4,7 +4,6 @@
 // own for the loader's messages, separate from the GeometryTile's mailbox
 // for its worker's replies.
 
-use std::any::Any;
 use std::cell::Cell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -89,7 +88,7 @@ impl<D: Clone + Send + 'static> CustomTileSubscriber<D> for Subscriber<D> {
 }
 
 /// A tile of a custom source.
-pub struct CustomTile<D: Clone + Send + 'static> {
+pub(crate) struct CustomTile<D: Clone + Send + 'static> {
     tile: GeometryTile,
     link: Rc<Link<D>>,
     mailbox: Arc<Mailbox>,
@@ -98,9 +97,9 @@ pub struct CustomTile<D: Clone + Send + 'static> {
     single_layer: bool,
 }
 
-pub type CustomGeometryTile = CustomTile<Arc<TileFeatures>>;
+pub(crate) type CustomGeometryTile = CustomTile<Arc<TileFeatures>>;
 
-pub type CustomVectorTile = CustomTile<CustomVectorTileData>;
+pub(crate) type CustomVectorTile = CustomTile<CustomVectorTileData>;
 
 impl<D: Clone + Send + 'static> CustomTile<D> {
     fn with_converter(
@@ -122,28 +121,14 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
             loader,
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), link.clone() as Rc<dyn Any>);
+        let mailbox = Mailbox::with_target(&scheduler::get_current(), link.clone());
         CustomTile { tile, link, mailbox, single_layer }
     }
 
     /// Sets the tile's data, as the loader's message does.
-    pub fn set_tile_data(&self, data: D) {
+    #[cfg(test)]
+    pub(crate) fn set_tile_data(&self, data: D) {
         self.link.set_tile_data(data);
-    }
-
-    /// Sets the tile's error, as the loader's message does.
-    pub fn set_tile_error(&self, error: Error) {
-        self.link.set_tile_error(error);
-    }
-
-    /// Invalidates the tile data, as the loader's message does.
-    pub fn invalidate_tile_data(&self) {
-        self.link.invalidate_tile_data();
-    }
-
-    #[must_use]
-    pub fn geometry_tile(&self) -> &GeometryTile {
-        &self.tile
     }
 
     fn subscriber(&self) -> Box<dyn CustomTileSubscriber<D>> {
@@ -155,7 +140,7 @@ impl CustomGeometryTile {
     /// A custom geometry tile. It takes no tile options: the loader cuts the
     /// tile's features.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         overscaled_tile_id: OverscaledTileID,
         source_id: String,
         parameters: &TileParameters<'_>,
@@ -178,7 +163,7 @@ impl CustomVectorTile {
     /// A custom vector tile, whose MLT data is decoded with
     /// `fast_pfor_enabled`.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         overscaled_tile_id: OverscaledTileID,
         source_id: String,
         parameters: &TileParameters<'_>,
@@ -193,10 +178,10 @@ impl CustomVectorTile {
             loader,
             observer,
             Box::new(move |(data, format): CustomVectorTileData| {
-                data.map(|data| match format {
-                    TileDataFormat::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)) as SharedTileData,
-                    TileDataFormat::Mlt => {
-                        Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled)) as SharedTileData
+                data.map(|data| -> SharedTileData {
+                    match format {
+                        TileDataFormat::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)),
+                        TileDataFormat::Mlt => Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled)),
                     }
                 })
             }),
@@ -223,6 +208,7 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         self.tile.create_render_data()
     }
 
+    #[cfg(test)]
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         self.tile.set_observer(observer);
     }

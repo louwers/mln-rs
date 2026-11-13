@@ -3,8 +3,8 @@
 //! porting them again.
 
 pub mod cross_faded_property_evaluator;
-pub mod data_driven_property_evaluator;
+pub(crate) mod data_driven_property_evaluator;
 pub mod possibly_evaluated_property_value;
 pub mod property_evaluation_parameters;
-pub mod property_evaluator;
+pub(crate) mod property_evaluator;
 pub mod transition_parameters;

@@ -65,11 +65,6 @@ impl ExportKinds {
     }
 
     #[must_use]
-    pub fn union(self, other: ExportKinds) -> ExportKinds {
-        ExportKinds(self.0 | other.0)
-    }
-
-    #[must_use]
     pub fn intersection(self, other: ExportKinds) -> ExportKinds {
         ExportKinds(self.0 & other.0)
     }

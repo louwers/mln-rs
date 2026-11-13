@@ -23,7 +23,6 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::bucket::Bucket;
 use crate::buckets::raster_bucket::RasterBucket;
-use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::render_tree::RenderItem;
 use crate::tile_parameters::TileParameters;
@@ -163,16 +162,15 @@ fn build_image_mesh(bucket: &RasterBucket, corners: &GeometryCoordinates, cells:
     bucket.set_geometry(vertices, indices, segments);
 }
 
-pub struct ImageSourceRenderData {
-    pub bucket: Option<Arc<RasterBucket>>,
-    pub tile_ids: Vec<UnwrappedTileID>,
-    name: String,
+pub(crate) struct ImageSourceRenderData {
+    pub(crate) bucket: Option<Arc<RasterBucket>>,
+    pub(crate) tile_ids: Vec<UnwrappedTileID>,
 }
 
 impl ImageSourceRenderData {
     #[must_use]
-    pub fn new(bucket: Option<Arc<RasterBucket>>, tile_ids: Vec<UnwrappedTileID>, name: String) -> Self {
-        ImageSourceRenderData { bucket, tile_ids, name }
+    pub(crate) fn new(bucket: Option<Arc<RasterBucket>>, tile_ids: Vec<UnwrappedTileID>) -> Self {
+        ImageSourceRenderData { bucket, tile_ids }
     }
 }
 
@@ -184,14 +182,6 @@ impl RenderItem for ImageSourceRenderData {
             bucket.upload(upload_pass);
         }
     }
-
-    fn has_render_pass(&self, _pass: RenderPass) -> bool {
-        false
-    }
-
-    fn get_name(&self) -> &str {
-        &self.name
-    }
 }
 
 /// The render tree's handle on the source's render data.
@@ -201,17 +191,9 @@ impl RenderItem for ImageSourceRenderItem {
     fn upload(&self, upload_pass: &dyn UploadPass) {
         self.0.upload(upload_pass);
     }
-
-    fn has_render_pass(&self, pass: RenderPass) -> bool {
-        self.0.has_render_pass(pass)
-    }
-
-    fn get_name(&self) -> &str {
-        self.0.get_name()
-    }
 }
 
-pub struct RenderImageSource {
+pub(crate) struct RenderImageSource {
     base: RenderSourceBase,
     bucket: Option<Arc<RasterBucket>>,
     render_data: Option<Rc<ImageSourceRenderData>>,
@@ -222,7 +204,7 @@ pub struct RenderImageSource {
 
 impl RenderImageSource {
     #[must_use]
-    pub fn new(impl_: Arc<image_source::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<image_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderImageSource {
             base: RenderSourceBase::new(impl_),
@@ -242,10 +224,6 @@ impl RenderImageSource {
 impl RenderSource for RenderImageSource {
     fn base(&self) -> &RenderSourceBase {
         &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderSourceBase {
-        &mut self.base
     }
 
     fn is_loaded(&self) -> bool {
@@ -406,7 +384,6 @@ impl RenderSource for RenderImageSource {
         self.render_data = Some(Rc::new(ImageSourceRenderData::new(
             self.bucket.clone(),
             if self.is_loaded() { self.tile_ids.clone() } else { Vec::new() },
-            self.base.base_impl.id.clone(),
         )));
     }
 

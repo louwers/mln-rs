@@ -4,7 +4,7 @@ use std::rc::Rc;
 use mln_util::identity::SimpleIdentity;
 
 use crate::shader::Shader;
-use crate::vertex_attribute::{ElementType, VertexAttributeArray};
+use crate::vertex_attribute::VertexAttributeArray;
 
 pub trait ShaderProgramBase: Shader {
     /// The program id assigned at construction.
@@ -20,22 +20,12 @@ pub trait ShaderProgramBase: Shader {
 impl dyn ShaderProgramBase {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: ShaderProgramBase>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 
 pub type ShaderProgramBasePtr = Rc<dyn ShaderProgramBase>;
-
-/// The protected `set<T>(attrs, id, i, value)` helper.
-pub fn set_attribute(attrs: &mut VertexAttributeArray, id: usize, i: usize, value: ElementType) -> bool {
-    if let Some(item) = attrs.get_mut(id)
-        && i < item.get_count()
-    {
-        item.set(i, value);
-        return true;
-    }
-    false
-}
 
 /// Pointer equality for shader handles (`shader == value` in C++).
 #[must_use]

@@ -49,7 +49,7 @@ pub fn set_font_face_engine(engine: Arc<dyn FontFaceEngine>) {
 }
 
 /// The engine `set_font_face_engine` set, else the default.
-pub fn font_face_engine() -> Arc<dyn FontFaceEngine> {
+pub(crate) fn font_face_engine() -> Arc<dyn FontFaceEngine> {
     if let Some(engine) = ENGINE.lock().clone() {
         return engine;
     }
@@ -99,7 +99,7 @@ mod in_process {
         /// `loadHBShaper`'s `HBShaper(type, data, ftLibrary)` and `valid()`.
         fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
             let shaper = HBShaper::new(type_, data, &FreeTypeLibrary::new());
-            shaper.valid().then(|| Box::new(shaper) as Box<dyn FontFaceShaper>)
+            shaper.valid().then(|| -> Box<dyn FontFaceShaper> { Box::new(shaper) })
         }
     }
 

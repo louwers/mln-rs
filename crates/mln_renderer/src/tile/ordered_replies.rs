@@ -19,7 +19,7 @@ use crate::tile::tile_worker_transport::TileEndpoint;
 
 /// A worker's tile, which gets the replies of the worker's `ReplySlot`s in
 /// the order they were taken.
-pub struct OrderedReplies<M> {
+pub(crate) struct OrderedReplies<M> {
     state: Arc<Mutex<State<M>>>,
 }
 
@@ -39,7 +39,7 @@ enum Slot<M> {
 }
 
 /// The place of one reply among its worker's.
-pub struct ReplySlot<M> {
+pub(crate) struct ReplySlot<M> {
     /// Gone once the worker is: its replies go nowhere, as a closed
     /// mailbox's.
     state: Weak<Mutex<State<M>>>,
@@ -49,12 +49,12 @@ pub struct ReplySlot<M> {
 
 impl<M> OrderedReplies<M> {
     #[must_use]
-    pub fn new(parent: Box<dyn TileEndpoint<M>>) -> Self {
+    pub(crate) fn new(parent: Box<dyn TileEndpoint<M>>) -> Self {
         OrderedReplies { state: Arc::new(Mutex::new(State { parent, slots: VecDeque::new(), first: 0 })) }
     }
 
     /// The slot of the next reply.
-    pub fn slot(&self) -> ReplySlot<M> {
+    pub(crate) fn slot(&self) -> ReplySlot<M> {
         let mut state = self.state.lock();
         let number = state.first + state.slots.len() as u64;
         state.slots.push_back(Slot::Waiting);
@@ -64,7 +64,7 @@ impl<M> OrderedReplies<M> {
 
 impl<M> ReplySlot<M> {
     /// Sends `message` to the tile once the replies before it have gone.
-    pub fn send(mut self, message: M) {
+    pub(crate) fn send(mut self, message: M) {
         self.fill(Slot::Ready(message));
     }
 

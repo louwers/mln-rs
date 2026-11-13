@@ -237,7 +237,7 @@ impl RunLoop {
 
     /// The current thread's loop, if it has one.
     #[must_use]
-    pub fn try_get() -> Option<RunLoop> {
+    pub(crate) fn try_get() -> Option<RunLoop> {
         CURRENT.with(|c| c.borrow().clone()).map(|inner| RunLoop { inner })
     }
 
@@ -489,17 +489,17 @@ mod tests {
     fn a_mailbox_opened_in_an_entered_loop_receives_after_the_guard_drops() {
         let run_loop = RunLoop::adopt(&RunLoopHandle::new()).unwrap();
         let mailbox = crate::mailbox::Mailbox::new();
-        let received = Rc::new(std::cell::Cell::new(false));
+        let received = Rc::new(Cell::new(false));
         {
             let _entered = run_loop.enter();
-            mailbox.open(&scheduler::get_current(), received.clone() as Rc<dyn std::any::Any>);
+            mailbox.open(&scheduler::get_current(), received.clone());
         }
         // Another thread sends while the loop isn't entered, and the loop
         // delivers once it is again.
         let sender = mailbox.clone();
         std::thread::spawn(move || {
             sender.push(Box::new(|target: &dyn std::any::Any| {
-                if let Some(received) = target.downcast_ref::<std::cell::Cell<bool>>() {
+                if let Some(received) = target.downcast_ref::<Cell<bool>>() {
                     received.set(true);
                 }
             }));

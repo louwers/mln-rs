@@ -20,9 +20,9 @@ impl RenderedQueryOptions {
 #[derive(Clone, Debug, Default)]
 pub struct SourceQueryOptions {
     /// Required for `VectorSource`, ignored for `GeoJSONSource`
-    pub source_layers: Option<Vec<String>>,
+    pub(crate) source_layers: Option<Vec<String>>,
 
-    pub filter: Option<Filter>,
+    pub(crate) filter: Option<Filter>,
 }
 
 impl SourceQueryOptions {

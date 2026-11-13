@@ -8,15 +8,15 @@ use std::path::PathBuf;
 
 /// A path of the C++ repository, in the copy of its files these tests read
 /// (testdata/).
-pub fn cpp_path(relative: &str) -> PathBuf {
+pub(crate) fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
 }
 
 /// A new empty temporary directory, deleted when dropped.
-pub struct TempDir(PathBuf);
+pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!("mln-storage-offline-test-{}-{n}", std::process::id()));
@@ -26,7 +26,7 @@ impl TempDir {
     }
 
     /// The path of `name` in the directory.
-    pub fn path(&self, name: &str) -> String {
+    pub(crate) fn path(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
     }
 }

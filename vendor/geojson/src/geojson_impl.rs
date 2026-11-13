@@ -194,7 +194,7 @@ pub fn convert_geometry(json: &Json) -> Result<Geometry<f64>> {
 }
 
 /// `convert<prop_map>`
-pub fn convert_property_map(json: &Json) -> Result<PropertyMap> {
+pub(crate) fn convert_property_map(json: &Json) -> Result<PropertyMap> {
     let Some(object) = json.as_object() else {
         return Err(error("properties must be an object"));
     };
@@ -233,7 +233,7 @@ pub fn convert_value(json: &Json) -> Value {
 }
 
 /// `convert<identifier>`
-pub fn convert_identifier(json: &Json) -> Result<Identifier> {
+pub(crate) fn convert_identifier(json: &Json) -> Result<Identifier> {
     match json {
         Json::String(s) => Ok(Identifier::String(s.clone())),
         Json::Number(n) => Ok(match number_value(n) {
@@ -247,7 +247,7 @@ pub fn convert_identifier(json: &Json) -> Result<Identifier> {
 }
 
 /// `convert<feature>`
-pub fn convert_feature(json: &Json) -> Result<Feature<f64>> {
+pub(crate) fn convert_feature(json: &Json) -> Result<Feature<f64>> {
     let Some(object) = json.as_object() else {
         return Err(error("Feature must be an object"));
     };
@@ -276,12 +276,6 @@ pub fn convert_feature(json: &Json) -> Result<Feature<f64>> {
     }
 
     Ok(result)
-}
-
-/// `convert<feature_collection>`: the generic container conversion, i.e. a
-/// JSON array of features (not a "`FeatureCollection`" object).
-pub fn convert_feature_collection(json: &Json) -> Result<FeatureCollection<f64>> {
-    convert_container(json, convert_feature)
 }
 
 /// `convert<geojson>` / `convert(const rapidjson_value&)`
@@ -328,21 +322,6 @@ fn parse_document(json: &str) -> Result<Json> {
 /// `parse(const std::string&)` = `parse<geojson>`
 pub fn parse(json: &str) -> Result<GeoJSON> {
     convert(&parse_document(json)?)
-}
-
-/// `parse<geometry>`
-pub fn parse_geometry(json: &str) -> Result<Geometry<f64>> {
-    convert_geometry(&parse_document(json)?)
-}
-
-/// `parse<feature>`
-pub fn parse_feature(json: &str) -> Result<Feature<f64>> {
-    convert_feature(&parse_document(json)?)
-}
-
-/// `parse<feature_collection>`
-pub fn parse_feature_collection(json: &str) -> Result<FeatureCollection<f64>> {
-    convert_feature_collection(&parse_document(json)?)
 }
 
 // --- stringify ---
@@ -471,7 +450,7 @@ pub fn to_json_feature(feature: &Feature<f64>) -> Json {
 }
 
 /// `convert<feature_collection>(collection, allocator)`
-pub fn to_json_feature_collection(collection: &[Feature<f64>]) -> Json {
+pub(crate) fn to_json_feature_collection(collection: &[Feature<f64>]) -> Json {
     let mut result = serde_json::Map::new();
     result.insert("type".to_owned(), Json::String("FeatureCollection".to_owned()));
     result.insert("features".to_owned(), Json::Array(collection.iter().map(to_json_feature).collect()));

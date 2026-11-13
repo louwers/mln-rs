@@ -15,7 +15,7 @@ const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
 /// The DEM unpack vector for an encoding (`DEMData::getUnpackVector`): the
 /// red, green and blue factors and the base shift.
 #[must_use]
-pub fn get_unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
+pub(crate) fn get_unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     match encoding {
         RasterEncoding::Mapbox => UNPACK_MAPBOX,
         RasterEncoding::Terrarium => UNPACK_TERRARIUM,
@@ -28,10 +28,10 @@ pub fn get_unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
 /// Port-only: serde reads back only what `new` can make (`from_parts`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "DEMDataParts")]
-pub struct DEMData {
-    pub dim: i32,
-    pub stride: i32,
-    pub encoding: RasterEncoding,
+pub(crate) struct DEMData {
+    pub(crate) dim: i32,
+    pub(crate) stride: i32,
+    pub(crate) encoding: RasterEncoding,
     image: PremultipliedImage,
 }
 
@@ -63,7 +63,7 @@ fn set_pixel(data: &mut [u8], i: usize, value: [u8; 4]) {
 
 impl DEMData {
     /// Decodes a DEM image with `encoding`; `Err` if the image isn't square.
-    pub fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
+    pub(crate) fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
         let dim = image.size.height as i32;
         // extra two pixels per row for border backfilling on either edge
         let stride = dim + 2;
@@ -146,7 +146,7 @@ impl DEMData {
     /// the hillshade formula calculates the dx/dz, dy/dz derivatives at each
     /// pixel of the tile by querying the 8 surrounding pixels, and if we
     /// don't have the pixel buffer we get seams at tile boundaries.
-    pub fn backfill_border(&mut self, border_tile_data: &DEMData, dx: i8, dy: i8) {
+    pub(crate) fn backfill_border(&mut self, border_tile_data: &DEMData, dx: i8, dy: i8) {
         let o = border_tile_data;
 
         // Tiles from the same source should always be of the same dimensions.
@@ -194,8 +194,9 @@ impl DEMData {
     }
 
     /// `get(x, y)`.
+    #[cfg(test)]
     #[must_use]
-    pub fn get(&self, x: i32, y: i32) -> i32 {
+    pub(crate) fn get(&self, x: i32, y: i32) -> i32 {
         let unpack = self.get_unpack_vector();
         let value = pixel(&self.image.data, self.idx(x, y));
         (f32::from(value[0]) * unpack[0] + f32::from(value[1]) * unpack[1] + f32::from(value[2]) * unpack[2]
@@ -203,12 +204,12 @@ impl DEMData {
     }
 
     #[must_use]
-    pub fn get_unpack_vector(&self) -> [f32; 4] {
+    pub(crate) fn get_unpack_vector(&self) -> [f32; 4] {
         get_unpack_vector(self.encoding)
     }
 
     #[must_use]
-    pub fn get_image(&self) -> &PremultipliedImage {
+    pub(crate) fn get_image(&self) -> &PremultipliedImage {
         &self.image
     }
 }

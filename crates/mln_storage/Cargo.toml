@@ -37,6 +37,15 @@ default = ["sqlite"]
 # source, so it serves no cache-only requests and no mbtiles:// URLs (as the
 # C++ MainResourceLoader without them).
 sqlite = ["dep:rusqlite"]
+# StubFileSource, the file source that the tests of mln_storage's dependents
+# answer requests with.
+test-support = []
+
+# Apple's platforms come with SQLite, and an app that links its own copy uses
+# its filesystem probes, which Apple counts as disk-space APIs whose use an
+# app's privacy manifest must give a reason for. Elsewhere SQLite is built in.
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+rusqlite = { workspace = true, optional = true, features = ["bundled"] }
 
 # The HTTP transport: the platform's HTTP stack where it has one (NSURLSession
 # on Apple platforms, the browser's fetch on wasm), else ureq, with the
@@ -63,11 +72,6 @@ js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true
-
-# Ports test/util/http_timeout.test.cpp (marker `// gtest: Group.Name`).
-[[test]]
-name = "gtest_http_timeout"
-path = "tests/gtest_http_timeout.rs"
 
 # test/storage/sync_file_source.test.cpp: needs a Map (mln_map,
 # mln_headless depend on this crate, so not in the unit tests).

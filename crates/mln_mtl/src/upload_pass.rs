@@ -24,7 +24,7 @@ use crate::context::Context;
 use crate::draw_target::as_mtl;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
-pub struct UploadPass {
+pub(crate) struct UploadPass {
     context: Rc<Context>,
 }
 
@@ -36,16 +36,11 @@ struct VertexBuffer {
 impl VertexBufferBase for VertexBuffer {}
 
 impl UploadPass {
-    pub fn new(target: &dyn DrawTarget, command_encoder: &CommandEncoder, _name: &str) -> Self {
+    pub(crate) fn new(target: &dyn DrawTarget, command_encoder: &CommandEncoder, _name: &str) -> Self {
         if let Some(target) = as_mtl(target) {
             target.resource().bind();
         }
         UploadPass { context: command_encoder.get_context().clone() }
-    }
-
-    #[must_use]
-    pub fn mtl_context(&self) -> &Rc<Context> {
-        &self.context
     }
 
     fn create_vertex_buffer(&self, data: &[u8], persistent: bool) -> Rc<VertexBufferResource> {
@@ -54,7 +49,10 @@ impl UploadPass {
 
     /// An index buffer of `indexes`.
     #[must_use]
-    pub fn create_index_buffer_of(&self, indexes: &IndexVectorBase) -> Box<dyn vertex_buffer::IndexBufferResource> {
+    pub(crate) fn create_index_buffer_of(
+        &self,
+        indexes: &IndexVectorBase,
+    ) -> Box<dyn vertex_buffer::IndexBufferResource> {
         upload_pass::UploadPass::create_index_buffer_resource(
             self,
             bytemuck::cast_slice(indexes.data()),
@@ -64,7 +62,7 @@ impl UploadPass {
     }
 
     #[must_use]
-    pub fn get_buffer(
+    pub(crate) fn get_buffer(
         &self,
         vec: Option<&VertexVectorBasePtr>,
         _usage: BufferUsageType,
@@ -101,7 +99,7 @@ impl UploadPass {
         None
     }
 
-    pub fn get_attribute_buffer(
+    pub(crate) fn get_attribute_buffer(
         &self,
         attrib: &mut VertexAttribute,
         usage: BufferUsageType,

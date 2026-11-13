@@ -24,7 +24,7 @@ pub struct CrossFadedPropertyEvaluator<'a, T> {
 }
 
 impl<'a, T: Clone> CrossFadedPropertyEvaluator<'a, T> {
-    pub fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
+    pub(crate) fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
         CrossFadedPropertyEvaluator { parameters, default_value }
     }
 

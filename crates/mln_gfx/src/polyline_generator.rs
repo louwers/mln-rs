@@ -62,7 +62,7 @@ impl PolylineGeneratorDistances {
 
     /// Scale line distance from tile units to [0, 2^15).
     #[must_use]
-    pub fn scale_to_max_line_distance(&self, tile_distance: f64) -> f64 {
+    pub(crate) fn scale_to_max_line_distance(&self, tile_distance: f64) -> f64 {
         let mut relative_tile_distance = tile_distance / self.total;
         if relative_tile_distance.is_infinite() || relative_tile_distance.is_nan() {
             debug_assert!(false);
@@ -101,11 +101,11 @@ impl Default for PolylineGeneratorOptions {
 }
 
 /// `(p, e, round, up, dir, linesofar) -> vertex`.
-pub type LayoutVertexFunc<V> = fn(Point<i16>, Point<f64>, bool, bool, i8, i32) -> V;
+pub(crate) type LayoutVertexFunc<V> = fn(Point<i16>, Point<f64>, bool, bool, i8, i32) -> V;
 /// `(vertex_offset, index_offset) -> segment`. A closure, because the
 /// drawable builder's captures the builder.
-pub type CreateSegmentFunc<'a, S> = &'a dyn Fn(usize, usize) -> S;
-pub type GetSegmentFunc<S> = fn(&mut S) -> &mut SegmentBase;
+pub(crate) type CreateSegmentFunc<'a, S> = &'a dyn Fn(usize, usize) -> S;
+pub(crate) type GetSegmentFunc<S> = fn(&mut S) -> &mut SegmentBase;
 
 #[derive(Clone, Copy)]
 struct TriangleElement {

@@ -22,7 +22,7 @@ use unicode_bidi::utf16::BidiInfo;
 
 use crate::icu::ubidi_props::{ubidi_get_class, ubidi_get_mirror};
 use crate::icu::ushape::u_shape_arabic;
-pub use crate::tagged_string::StyledText;
+pub(crate) use crate::tagged_string::StyledText;
 
 /// Takes UTF16 input in logical order and applies Arabic shaping to the
 /// input while maintaining logical order. Output won't be intelligible
@@ -151,7 +151,8 @@ impl BiDi {
     /// Given text in logical ordering and a set of line break points,
     /// return a set of lines in visual order with bidi and line breaking
     /// applied.
-    pub fn process_text(
+    #[expect(clippy::unused_self, reason = "the shaper threads one `BiDi` through, as the C++ shaping API does")]
+    pub(crate) fn process_text(
         &mut self,
         input: &[u16],
         mut line_break_points: VecSet<usize>,
@@ -179,7 +180,7 @@ impl BiDi {
 
     /// Same as processText but preserves per-code-point formatting
     /// information.
-    pub fn process_styled_text(
+    pub(crate) fn process_styled_text(
         &mut self,
         input: &StyledText,
         line_break_points: VecSet<usize>,
@@ -189,7 +190,9 @@ impl BiDi {
 
     /// Splits text in logical order into lines at the line break points and
     /// at the ends of paragraphs, without reordering it.
-    pub fn split_styled_text(
+    #[expect(clippy::unused_self, reason = "the shaper threads one `BiDi` through, as the C++ shaping API does")]
+    #[expect(clippy::unnecessary_wraps, reason = "fails as the other line splitters do, which its callers treat alike")]
+    pub(crate) fn split_styled_text(
         &mut self,
         input: &StyledText,
         mut line_break_points: VecSet<usize>,
@@ -215,7 +218,8 @@ impl BiDi {
     /// a right-to-left run keeps the order of the text in the styles that
     /// `block_styles` marks, which a shaper already laid out in visual
     /// order.
-    pub fn process_styled_text_with_blocks(
+    #[expect(clippy::unused_self, reason = "the shaper threads one `BiDi` through, as the C++ shaping API does")]
+    pub(crate) fn process_styled_text_with_blocks(
         &mut self,
         input: &StyledText,
         mut line_break_points: VecSet<usize>,

@@ -7,7 +7,7 @@ use crate::writer::{MAX_WIDTH, Writer, imports_for, layer_file_name};
 
 /// Layer types whose `LayerProperties` hold a `CrossfadeParameters`.
 #[must_use]
-pub fn has_crossfade(type_: &str) -> bool {
+pub(crate) fn has_crossfade(type_: &str) -> bool {
     matches!(type_, "background" | "fill" | "line" | "fill-extrusion")
 }
 
@@ -95,7 +95,7 @@ fn emit_set(w: &mut Writer, macro_name: &str, class: &str, properties: &[Propert
     w.blank();
 }
 
-pub fn emit(layer: &LayerSpec) -> String {
+pub(crate) fn emit(layer: &LayerSpec) -> String {
     let t = camelize(&layer.type_);
     let file = layer_file_name(&layer.type_);
     let crossfade = has_crossfade(&layer.type_);

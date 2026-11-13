@@ -29,7 +29,7 @@ fn strip_number(num: f64) -> f64 {
 
 /// Strip precision for numbers, so that we can compare evaluated results with
 /// fixtures. Copied from JS expression harness.
-pub fn strip_precision(value: &Value) -> Value {
+pub(crate) fn strip_precision(value: &Value) -> Value {
     if let Some(num) = numeric_value(value) {
         if num == 0.0 {
             return Value::Double(num);
@@ -45,7 +45,7 @@ pub fn strip_precision(value: &Value) -> Value {
 }
 
 /// `tokenize`: split at newlines.
-pub fn tokenize(s: &str) -> Vec<String> {
+pub(crate) fn tokenize(s: &str) -> Vec<String> {
     s.split('\n').map(str::to_owned).collect()
 }
 
@@ -68,7 +68,7 @@ fn stod(s: &str) -> Option<f64> {
 }
 
 #[must_use]
-pub fn deep_equal(a: &Value, b: &Value) -> bool {
+pub(crate) fn deep_equal(a: &Value, b: &Value) -> bool {
     let anum = numeric_value(a);
     let bnum = numeric_value(b);
     if let (Some(anum), Some(bnum)) = (anum, bnum) {
@@ -124,13 +124,13 @@ pub fn deep_equal(a: &Value, b: &Value) -> bool {
 /// converts Lab and Oklab colors in f32, so a channel can land a couple of
 /// 1e-6 away and truncate to a different 6th digit. A difference of one 8-bit
 /// step, 1/255, is far outside the tolerance.
-pub const COLOR_CHANNEL_TOLERANCE: f64 = 1e-5;
+pub(crate) const COLOR_CHANNEL_TOLERANCE: f64 = 1e-5;
 
 /// `deep_equal` for an output of a color expression, an `[r, g, b, a]` array
 /// or an error, except that channels within `COLOR_CHANNEL_TOLERANCE` of each
 /// other are equal.
 #[must_use]
-pub fn color_output_equal(a: &Value, b: &Value) -> bool {
+pub(crate) fn color_output_equal(a: &Value, b: &Value) -> bool {
     let close = |x: &Value, y: &Value| {
         numeric_value(x).zip(numeric_value(y)).is_some_and(|(x, y)| (x - y).abs() <= COLOR_CHANNEL_TOLERANCE)
     };
@@ -143,7 +143,7 @@ pub fn color_output_equal(a: &Value, b: &Value) -> bool {
 }
 
 #[must_use]
-pub fn deep_equal_opt(a: &Option<Value>, b: &Option<Value>) -> bool {
+pub(crate) fn deep_equal_opt(a: Option<&Value>, b: Option<&Value>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => deep_equal(a, b),
         (None, None) => true,

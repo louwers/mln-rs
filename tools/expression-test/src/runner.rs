@@ -12,10 +12,10 @@ use crate::test_runner_common::{color_output_equal, deep_equal, deep_equal_opt, 
 #[derive(Clone, Debug, Default)]
 pub struct TestRunOutput {
     pub id: String,
-    pub passed: bool,
+    pub(crate) passed: bool,
     pub text: String,
-    pub expression: String,
-    pub serialized: String,
+    pub(crate) expression: String,
+    pub(crate) serialized: String,
     /// When the test fails only because some inputs evaluate differently,
     /// their indices in the fixture's `inputs`; empty otherwise.
     pub failed_inputs: Vec<usize>,
@@ -28,7 +28,7 @@ pub struct TestStats {
     pub errored: Vec<TestRunOutput>,
     pub ignore_passed: Vec<TestRunOutput>,
     pub ignore_failed: Vec<TestRunOutput>,
-    pub ids: Vec<String>,
+    pub(crate) ids: Vec<String>,
 }
 
 impl TestStats {
@@ -118,7 +118,7 @@ fn evaluate_expression(data_inputs: &[crate::parser::Input], expression: &dyn Ex
                 outputs.push(Value::Object(error));
             }
             Ok(v) => {
-                let value = expression_value_to_value(&v).expect("output value");
+                let value = expression_value_to_value(&v);
                 outputs.push(value);
             }
         }
@@ -126,12 +126,12 @@ fn evaluate_expression(data_inputs: &[crate::parser::Input], expression: &dyn Ex
     result.outputs = Some(Value::Array(outputs));
 }
 
-pub fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
+pub(crate) fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
     let mut output = TestRunOutput { id: id.to_owned(), ..Default::default() };
 
     // Parse expression
     let document_expression = data.document["expression"].clone();
-    let parsed_expression = parse_expression(&document_expression, &data.spec, &mut data.result);
+    let parsed_expression = parse_expression(&document_expression, data.spec.as_ref(), &mut data.result);
     output.expression = to_json(data.result.expression.as_ref().unwrap_or(&Value::Null));
 
     // Evaluate expression
@@ -141,7 +141,7 @@ pub fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
 
         // round trip
         let document = to_document(data.result.serialized.as_ref().expect("serialized"));
-        let recompiled_expression = parse_expression(&document, &data.spec, &mut data.recompiled);
+        let recompiled_expression = parse_expression(&document, data.spec.as_ref(), &mut data.recompiled);
         if let Some(recompiled) = &recompiled_expression {
             evaluate_expression(&data.inputs, &**recompiled, &mut data.recompiled);
             rewrite_roundtripped_type(
@@ -164,7 +164,8 @@ pub fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
     let mut round_trip_diff = Some(Vec::new());
 
     if data.expected.compiled.success {
-        serialization_ok = compile_ok && deep_equal_opt(&data.result.serialized, &data.expected.serialized);
+        serialization_ok =
+            compile_ok && deep_equal_opt(data.result.serialized.as_ref(), data.expected.serialized.as_ref());
         recompile_ok = compile_ok && data.recompiled.compiled == data.expected.compiled;
         round_trip_diff = differing_inputs(data.recompiled.outputs.as_ref(), data.expected.outputs.as_ref(), is_color);
         round_trip_ok = recompile_ok && round_trip_diff.as_ref().is_some_and(Vec::is_empty);

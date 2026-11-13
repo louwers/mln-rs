@@ -22,7 +22,7 @@ impl Filter {
         Filter { expression, legacy_filter, property_keys: OnceLock::new() }
     }
 
-    pub fn is_set(&self) -> bool {
+    pub(crate) fn is_set(&self) -> bool {
         self.expression.is_some() || self.legacy_filter.is_some()
     }
 
@@ -50,7 +50,7 @@ impl Filter {
         keys.as_deref()
     }
 
-    pub fn serialize(&self) -> Value {
+    pub(crate) fn serialize(&self) -> Value {
         if let Some(legacy_filter) = &self.legacy_filter {
             legacy_filter.clone()
         } else if let Some(expression) = &self.expression {

@@ -7,18 +7,18 @@
 //! image as the rendered one.
 
 pub mod file_source;
-pub mod filesystem;
-pub mod jobs;
-pub mod log;
-pub mod manifest_parser;
+mod filesystem;
+mod jobs;
+mod log;
+mod manifest_parser;
 pub mod map;
-pub mod metadata;
-pub mod parser;
+mod metadata;
+mod parser;
 pub mod render_test;
 pub mod runner;
-pub mod style_ops;
-pub mod test_runner_common;
-pub mod watchdog;
+mod style_ops;
+mod test_runner_common;
+mod watchdog;
 
 pub use render_test::run_render_tests;
 

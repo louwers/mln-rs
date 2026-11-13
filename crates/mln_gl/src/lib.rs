@@ -37,38 +37,38 @@
 // OpenGL through glow is the FFI here.
 #![allow(unsafe_code)]
 
-pub mod command_encoder;
-pub mod context;
-pub mod custom_layer;
-pub mod draw_target;
-pub mod drawable;
-pub mod drawable_builder;
-pub mod enums;
-pub mod layer_group;
-pub mod offscreen_texture;
-pub mod render_pass;
-pub mod renderer_backend;
-pub mod shaders;
-pub mod state;
-pub mod texture2d;
-pub mod types;
-pub mod uniform_buffer;
-pub mod upload_pass;
-pub mod vertex_array;
-pub mod vertex_buffer_resource;
+mod command_encoder;
+mod context;
+mod custom_layer;
+mod draw_target;
+mod drawable;
+mod drawable_builder;
+mod enums;
+mod layer_group;
+mod offscreen_texture;
+mod render_pass;
+mod renderer_backend;
+mod shaders;
+mod state;
+mod texture2d;
+mod types;
+mod uniform_buffer;
+mod upload_pass;
+mod vertex_array;
+mod vertex_buffer_resource;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod borrowed_target;
+mod borrowed_target;
 #[cfg(target_arch = "wasm32")]
 pub mod canvas_target;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod device;
+mod device;
 #[cfg(not(target_arch = "wasm32"))]
 mod egl;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod exported_target;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod offscreen_target;
+mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
 #[cfg(windows)]
@@ -80,7 +80,6 @@ pub mod wgl_surface_target;
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSurfaceTarget};
 #[cfg(target_arch = "wasm32")]
 pub use canvas_target::{CanvasTarget, WebCanvas};
-pub use context::Context;
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 #[cfg(not(target_arch = "wasm32"))]
 pub use device::{Api, Device, DeviceOptions};
@@ -93,3 +92,6 @@ pub use renderer_backend::RendererBackend;
 pub use surface_target::SurfaceTarget;
 #[cfg(windows)]
 pub use wgl_surface_target::SurfaceTarget;
+
+#[cfg(test)]
+mod tests;

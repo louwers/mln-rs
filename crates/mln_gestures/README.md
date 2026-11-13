@@ -34,7 +34,8 @@ Sources were read at: ffi `9cbe0b9` (`include/maplibre_native_c`,
 Compose UI 1.12.1 for the web (`WebVelocityTracker`,
 `PointerVelocityTracker1D`), and GL JS v5.13.0 (`src/ui/handler*`,
 `src/ui/camera.ts`). n/a: the reference has no such mechanism; unverified: not
-read in its source.
+read in its source. One row names WhirlyGlobe-Maply, read at `b836eaa`
+(`GlobePanDelegate.mm`).
 
 ### Releases and momentum
 
@@ -59,6 +60,7 @@ read in its source.
 | Gesture phases | Begin cancels animations, Update keeps them, End may carry momentum, Cancel cancels animations; a press begins | Begin, Update, End | `mln_gesture_phase`, the same | n/a | Gesture sessions | n/a | ffi C API |
 | A gesture through its momentum | In progress until the momentum ends, unless a newer gesture began | Yes, through the C API | Yes, with a serial guard | unverified | Yes: the session lasts through momentum | `isMoving` through inertia | ffi C API |
 | Taps, keys and box zooms | Eased steps that end a gesture of their own: reported as `Gesture`, not held in progress, other animations untouched | Commands (phase `None`) | n/a (the host's) | User changes | unverified | Carry their `originalEvent` | Compose's and GL JS's sense that the user made them; ffi's demo reports them as programmatic |
+| A drag on the globe, north up | The camera keeps the location the drag's first step grabbed, and each step takes the center that puts it under the pointer (`Transform::move_by_with_anchor`). Step by step, without holding, where no such center serves: the pointer at the planet's edge or off it, the center near a pole, a location that would turn the planet over 2.5 times as fast as the pointer moves. The step after grabs anew, so neither change jumps; so does a step after anything else moved the camera, as a pinch's zoom does | unverified | unverified | unverified | unverified | unverified | WhirlyGlobe-Maply's pan, which turns the globe from its orientation and the point touched when the pan began, not from the frame before: steps that each drop the turn they would give the bearing let the location slip from under the pointer |
 | When animations sample | On the host's frame time (`Map::set_frame_time`): a command starts at the latest frame, and the map samples at each frame; one older than 100 ms counts as unset | n/a | `Clock::now()` when the map updates | From the first frame after the call | The frame clock (`withFrameNanos`) | `browser.now()` at each frame | Orbis's frame clock, starting at the latest frame rather than the next, which would stall a glide for a frame at release |
 
 ### Recognition

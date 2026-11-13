@@ -6,14 +6,14 @@ use crate::expression::{
 use crate::type_::Type;
 use crate::value::Value;
 
-pub struct Error {
+pub(crate) struct Error {
     base: ExpressionBase,
     message: String,
 }
 
 impl Error {
     #[must_use]
-    pub fn new(message: String) -> Self {
+    pub(crate) fn new(message: String) -> Self {
         Error { base: ExpressionBase::new(Kind::Error, Type::Error, Dependency::NONE), message }
     }
 }

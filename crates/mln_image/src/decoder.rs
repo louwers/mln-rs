@@ -12,13 +12,15 @@ use mln_util::image::PremultipliedImage;
 use crate::image::{ImageType, UNSUPPORTED, image_type};
 
 /// What `decode_image` returns.
-pub type DecodeResult = Result<PremultipliedImage, Error>;
+pub(crate) type DecodeResult = Result<PremultipliedImage, Error>;
 
 /// Where a decoder's result goes.
-pub type DecodeDone = Box<dyn FnOnce(DecodeResult)>;
+#[cfg(target_family = "wasm")]
+pub(crate) type DecodeDone = Box<dyn FnOnce(DecodeResult)>;
 
 /// A platform's image decoder.
-pub trait ImageDecoder: Send + Sync {
+#[cfg(target_family = "wasm")]
+pub(crate) trait ImageDecoder: Send + Sync {
     /// Decodes `data`, an image of type `kind`, as `decode_image` does
     /// (premultiplied RGBA8, a WebP that can't be decoded an empty image),
     /// and calls `done` with the result exactly once: before returning, or

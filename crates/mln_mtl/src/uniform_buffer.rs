@@ -11,12 +11,12 @@ use crate::buffer_resource::BufferResource;
 use crate::context::Context;
 use crate::render_pass::RenderPass;
 
-pub struct UniformBuffer {
+pub(crate) struct UniformBuffer {
     buffer: BufferResource,
 }
 
 impl UniformBuffer {
-    pub fn new(buffer: BufferResource) -> Self {
+    pub(crate) fn new(buffer: BufferResource) -> Self {
         if let Some(context) = buffer.context() {
             let mut stats = context.rendering_stats();
             stats.num_uniform_buffers += 1;
@@ -25,7 +25,7 @@ impl UniformBuffer {
         UniformBuffer { buffer }
     }
 
-    pub fn create(context: &Context, data: &[u8], persistent: bool) -> Self {
+    pub(crate) fn create(context: &Context, data: &[u8], persistent: bool) -> Self {
         UniformBuffer::new(BufferResource::new(
             context,
             Some(data),
@@ -36,7 +36,7 @@ impl UniformBuffer {
         ))
     }
 
-    pub fn get_buffer_resource(&self) -> &BufferResource {
+    pub(crate) fn get_buffer_resource(&self) -> &BufferResource {
         &self.buffer
     }
 }
@@ -77,7 +77,7 @@ impl uniform_buffer::UniformBuffer for UniformBuffer {
 
 /// Binds each buffer of `array` at its id, to the vertex and fragment functions
 /// both except for the reserved vertex-only and fragment-only ids.
-pub fn bind_uniform_buffer_array(array: &UniformBufferArray, render_pass: &RenderPass) {
+pub(crate) fn bind_uniform_buffer_array(array: &UniformBufferArray, render_pass: &RenderPass) {
     for id in 0..array.allocated_size() {
         let Some(uniform_buffer) = array.get(id) else {
             continue;

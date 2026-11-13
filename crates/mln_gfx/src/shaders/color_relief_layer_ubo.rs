@@ -7,7 +7,7 @@ pub struct ColorReliefDrawableUBO {
     /*  0 */ pub matrix: [f32; 4 * 4],
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<ColorReliefDrawableUBO>() == 64);
+const _: () = assert!(size_of::<ColorReliefDrawableUBO>() == 64);
 
 /// The color relief shader's per-tile uniform block (32 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -19,7 +19,7 @@ pub struct ColorReliefTilePropsUBO {
     /* 28 */ pub pad_tile0: f32, // Padding for alignment
                         /* 32 */
 }
-const _: () = assert!(std::mem::size_of::<ColorReliefTilePropsUBO>() == 32);
+const _: () = assert!(size_of::<ColorReliefTilePropsUBO>() == 32);
 
 /// The color relief shader's evaluated properties uniform block (16 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -31,4 +31,4 @@ pub struct ColorReliefEvaluatedPropsUBO {
     /* 12 */ pub pad_eval2: f32,
     /* 16 */
 }
-const _: () = assert!(std::mem::size_of::<ColorReliefEvaluatedPropsUBO>() == 16);
+const _: () = assert!(size_of::<ColorReliefEvaluatedPropsUBO>() == 16);

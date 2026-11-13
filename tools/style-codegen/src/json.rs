@@ -7,7 +7,7 @@ use crate::defaults::js_number;
 
 /// `JSON.stringify(value)`: compact, object members in document order, JS
 /// number formatting.
-pub fn js_stringify(value: &Value) -> String {
+pub(crate) fn js_stringify(value: &Value) -> String {
     match value {
         Value::Null => "null".into(),
         Value::Bool(b) => b.to_string(),

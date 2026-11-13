@@ -79,14 +79,8 @@ impl Device {
 
     /// Whether the queue is the host's, so that frames handed to the host can
     /// be ordered by the queue alone.
-    pub fn has_host_queue(&self) -> bool {
+    pub(crate) fn has_host_queue(&self) -> bool {
         self.host_queue
-    }
-
-    /// Whether `self` and `other` are the same device and queue.
-    pub fn same_as(&self, other: &Device) -> bool {
-        Retained::as_ptr(&self.device) == Retained::as_ptr(&other.device)
-            && Retained::as_ptr(&self.queue) == Retained::as_ptr(&other.queue)
     }
 
     #[must_use]
@@ -95,13 +89,13 @@ impl Device {
     }
 
     #[must_use]
-    pub fn queue(&self) -> &MTLCommandQueuePtr {
+    pub(crate) fn queue(&self) -> &MTLCommandQueuePtr {
         &self.queue
     }
 
     /// The kinds of exported ring that sessions on the device share their
     /// images in: those it exported an image of, once, when first asked.
-    pub fn export_kinds(&self) -> ExportKinds {
+    pub(crate) fn export_kinds(&self) -> ExportKinds {
         *self.export_kinds.get_or_init(|| crate::exported_target::probe(self))
     }
 

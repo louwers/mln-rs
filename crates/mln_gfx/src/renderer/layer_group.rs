@@ -34,16 +34,16 @@ pub enum Type {
 
 /// The data members of `LayerGroupBase` (and `util::SimpleIdentifiable`).
 pub struct LayerGroupBaseData {
-    pub unique_id: SimpleIdentity,
-    pub type_: Type,
+    pub(crate) unique_id: SimpleIdentity,
+    pub(crate) type_: Type,
     pub enabled: bool,
-    pub layer_index: i32,
+    pub(crate) layer_index: i32,
     pub name: String,
 }
 
 impl LayerGroupBaseData {
     #[must_use]
-    pub fn new(layer_index: i32, name: String, type_: Type) -> Self {
+    pub(crate) fn new(layer_index: i32, name: String, type_: Type) -> Self {
         LayerGroupBaseData { unique_id: SimpleIdentity::new(), type_, enabled: true, layer_index, name }
     }
 }
@@ -115,9 +115,9 @@ fn init_drawable_tweakers(drawable: &mut dyn Drawable) {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct TileLayerGroupTileKey {
-    pub render_pass: RenderPass,
-    pub tile_id: OverscaledTileID,
+pub(crate) struct TileLayerGroupTileKey {
+    pub(crate) render_pass: RenderPass,
+    pub(crate) tile_id: OverscaledTileID,
 }
 
 /// The `DrawableLessByPriority` key: (draw priority, id).
@@ -252,21 +252,6 @@ impl LayerGroup {
             f(drawable.as_mut());
         }
         self.drawables.len()
-    }
-
-    /// Removes the drawables for which `f` returns true and returns how many
-    /// it removed. The kept ones are re-keyed, so a raised priority is
-    /// re-sorted.
-    pub fn remove_drawables_if(&mut self, mut f: impl FnMut(&mut dyn Drawable) -> bool) -> usize {
-        let old_size = self.drawables.len();
-        let old = std::mem::take(&mut self.drawables);
-        for (_, mut drawable) in old {
-            if !f(drawable.as_mut()) {
-                let key = sort_key(drawable.as_ref());
-                self.drawables.insert(key, drawable);
-            }
-        }
-        old_size - self.drawables.len()
     }
 
     pub fn clear_drawables(&mut self) -> usize {

@@ -197,7 +197,7 @@ unsafe fn request(options: *const mln_gpu_device_options) -> Result<Request, Err
     let backend = fields
         .get(MLN_GPU_DEVICE_OPTION_BACKEND, options.backend)
         .map(|backend| match backend {
-            crate::generated::types::MLN_RENDER_BACKEND_METAL => Ok(BackendType::Metal),
+            types::MLN_RENDER_BACKEND_METAL => Ok(BackendType::Metal),
             MLN_RENDER_BACKEND_VULKAN => Ok(BackendType::Vulkan),
             MLN_RENDER_BACKEND_OPEN_GL => Ok(BackendType::OpenGL),
             MLN_RENDER_BACKEND_WEB_GPU => Ok(BackendType::WebGPU),
@@ -298,7 +298,7 @@ fn create(request: Request) -> Result<(Device, Option<std::sync::Arc<HostQueueLo
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_create(
+pub(crate) unsafe extern "C" fn mln_gpu_device_create(
     options: *const mln_gpu_device_options,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -435,7 +435,7 @@ fn depth_stencil_flags(formats: ::mln_runtime::DepthStencilFormats) -> types::ml
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_get_capabilities(
+pub(crate) unsafe extern "C" fn mln_gpu_device_get_capabilities(
     device: mln_gpu_device,
     out_capabilities: *mut mln_gpu_device_capabilities,
     out_diagnostic: *mut mln_diagnostic,
@@ -454,7 +454,7 @@ pub unsafe extern "C" fn mln_gpu_device_get_capabilities(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
     context: *const mln_web_gpu_context_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -481,7 +481,7 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
     descriptor: *const mln_vulkan_device_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -522,7 +522,7 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
                 )
             };
             let lock = lock.map(std::sync::Arc::new);
-            let queue_lock = lock.clone().map(|lock| lock as std::sync::Arc<dyn mln_vulkan::QueueLock>);
+            let queue_lock = lock.clone().map(|lock| -> std::sync::Arc<dyn mln_vulkan::QueueLock> { lock });
             let host = mln_vulkan::HostDevice {
                 get_instance_proc_addr,
                 get_device_proc_addr,
@@ -560,7 +560,7 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
 /// `extensions` is null or points to `count` readable views, whose data is
 /// readable.
 unsafe fn vulkan_extensions(
-    extensions: *const crate::generated::types::mln_buffer_view,
+    extensions: *const types::mln_buffer_view,
     count: usize,
 ) -> Result<Vec<std::ffi::CString>, Error> {
     let name = "mln_vulkan_device_descriptor.enabled_extensions";
@@ -576,7 +576,7 @@ unsafe fn vulkan_extensions(
         .iter()
         .map(|view| {
             // SAFETY: the caller's contract.
-            let text = unsafe { crate::buffer::text(*view, name) }?;
+            let text = unsafe { buffer::text(*view, name) }?;
             std::ffi::CString::new(text)
                 .map_err(|_| Error::invalid_argument(format!("{name} must not hold a NUL character")))
         })
@@ -589,7 +589,7 @@ unsafe fn vulkan_extensions(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_metal(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_metal(
     descriptor: *const mln_metal_device_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -624,7 +624,7 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_metal(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_open_gl(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_open_gl(
     context: *const mln_open_gl_context_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -730,7 +730,7 @@ fn open_gl_platform(context: &mln_open_gl_context_descriptor) -> Result<&'static
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_get_vulkan_context(
+pub(crate) unsafe extern "C" fn mln_gpu_device_get_vulkan_context(
     device: mln_gpu_device,
     out_result: *mut mln_gpu_device_vulkan_context_result,
     out_diagnostic: *mut mln_diagnostic,
@@ -765,7 +765,7 @@ pub unsafe extern "C" fn mln_gpu_device_get_vulkan_context(
 /// `mln_gpu_device_release()`. Sessions on the device hold it until they
 /// end.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_gpu_device_release(device: mln_gpu_device) {
+pub(crate) extern "C" fn mln_gpu_device_release(device: mln_gpu_device) {
     if device != handles::NULL {
         let _ = release(device);
     }
@@ -851,7 +851,7 @@ mod tests {
     fn the_mask_names_each_backend_once() {
         let mask = supported_backend_mask();
         assert_eq!(mask.count_ones() as usize, BACKENDS.len());
-        let metal = crate::generated::types::MLN_RENDER_BACKEND_FLAG_METAL;
+        let metal = types::MLN_RENDER_BACKEND_FLAG_METAL;
         assert_eq!(mask & metal != 0, cfg!(target_vendor = "apple"));
     }
 }

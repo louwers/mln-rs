@@ -14,7 +14,7 @@ thread_local! {
 /// The indices point into the polygon's rings concatenated in order. A ring
 /// may repeat its first point at the end. A polygon whose outer ring is
 /// empty has no triangles.
-pub fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(polygon: &[R]) -> Vec<u32> {
+pub(crate) fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(polygon: &[R]) -> Vec<u32> {
     // earcut indexes out of bounds on an empty outer ring with holes.
     if polygon.first().is_none_or(|ring| ring.as_ref().is_empty()) {
         return Vec::new();

@@ -37,7 +37,7 @@ fn prepare_copy_data(pixel_data: &[u8], region_size: Size, pixel_stride: usize) 
     Some(UploadCopyData { data: pixel_data[..data_size].to_vec(), bytes_per_row: row_stride as u32 })
 }
 
-pub struct Texture2D {
+pub(crate) struct Texture2D {
     context: Rc<Context>,
     texture: Option<wgpu::Texture>,
     texture_view: Option<wgpu::TextureView>,
@@ -55,7 +55,7 @@ pub struct Texture2D {
 }
 
 impl Texture2D {
-    pub fn new(context: Rc<Context>) -> Self {
+    pub(crate) fn new(context: Rc<Context>) -> Self {
         Texture2D {
             context,
             texture: None,
@@ -85,28 +85,28 @@ impl Texture2D {
         }
     }
 
-    pub fn set_usage(&mut self, usage_flags: wgpu::TextureUsages) {
+    pub(crate) fn set_usage(&mut self, usage_flags: wgpu::TextureUsages) {
         self.usage_flags = usage_flags;
     }
 
     #[must_use]
-    pub fn get_native_format(&self) -> Option<wgpu::TextureFormat> {
+    pub(crate) fn get_native_format(&self) -> Option<wgpu::TextureFormat> {
         self.native_format
     }
     #[must_use]
-    pub fn get_texture(&self) -> Option<&wgpu::Texture> {
+    pub(crate) fn get_texture(&self) -> Option<&wgpu::Texture> {
         self.texture.as_ref()
     }
     #[must_use]
-    pub fn get_texture_view(&self) -> Option<&wgpu::TextureView> {
+    pub(crate) fn get_texture_view(&self) -> Option<&wgpu::TextureView> {
         self.texture_view.as_ref()
     }
     #[must_use]
-    pub fn get_sampler(&self) -> Option<&wgpu::Sampler> {
+    pub(crate) fn get_sampler(&self) -> Option<&wgpu::Sampler> {
         self.sampler.as_ref()
     }
     #[must_use]
-    pub fn get_sampler_state(&self) -> &SamplerState {
+    pub(crate) fn get_sampler_state(&self) -> &SamplerState {
         &self.sampler_state
     }
 

@@ -47,25 +47,5 @@ js-sys.workspace = true
 wasm-bindgen.workspace = true
 web-sys = { workspace = true, features = ["HtmlCanvasElement", "WebGl2RenderingContext", "WebGlContextAttributes"] }
 
-# Compiles and links every GLSL program, in both projection variants, and
-# checks its uniform blocks against the UBOs the renderer writes.
-[[test]]
-name = "glsl_compile_test"
-path = "tests/glsl_compile_test.rs"
-
-# The background shader end to end on the drawable path (after
-# crates/mln_webgpu/tests/background_test.rs): an offscreen target, a
-# DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
-# rendered into the offscreen target and read back.
-[[test]]
-name = "background_test"
-path = "tests/background_test.rs"
-
-# A drawable's vertex arrays follow its index vector to a new buffer, though
-# the new buffer may have the GL name of the one it replaced.
-[[test]]
-name = "drawable_test"
-path = "tests/drawable_test.rs"
-
 [lints]
 workspace = true

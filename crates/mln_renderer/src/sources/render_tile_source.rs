@@ -34,8 +34,8 @@ use mln_style::layer::{LayerTypeInfo, layer_type_info};
 use mln_style::layer_properties::{LayerProperties, LayerPropertiesBase};
 use mln_style::{layer, source};
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
+use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
@@ -49,18 +49,17 @@ use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSourceBase, RenderTiles, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem};
-use crate::tile::tile::Tile;
 use crate::tile_pyramid::TilePyramid;
 use crate::util::subdivision::subdivide_vertex_line;
 
-pub struct TileSourceRenderItem {
+pub(crate) struct TileSourceRenderItem {
     render_tiles: Rc<Vec<RenderTile>>,
     name: String,
 }
 
 impl TileSourceRenderItem {
     #[must_use]
-    pub fn new(render_tiles: Rc<Vec<RenderTile>>, name: String) -> Self {
+    pub(crate) fn new(render_tiles: Rc<Vec<RenderTile>>, name: String) -> Self {
         TileSourceRenderItem { render_tiles, name }
     }
 }
@@ -68,7 +67,7 @@ impl TileSourceRenderItem {
 /// The line properties of a debug layer group's polylines: red tile
 /// borders, and black text over a white outline (layers: debug).
 #[must_use]
-pub fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
+pub(crate) fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
     let (color, width) = match type_ {
         DebugType::TextOutline => (Color::white(), 4.0),
         DebugType::Text => (Color::black(), 2.0),
@@ -92,14 +91,6 @@ impl RenderItem for TileSourceRenderItem {
         for tile in self.render_tiles.iter() {
             tile.upload(upload_pass);
         }
-    }
-
-    fn has_render_pass(&self, _pass: RenderPass) -> bool {
-        false
-    }
-
-    fn get_name(&self) -> &str {
-        &self.name
     }
 
     // layers: debug
@@ -154,7 +145,7 @@ impl RenderItem for TileSourceRenderItem {
                                          options: &PolylineGeneratorOptions,
                                          data: Option<Box<dyn Any>>| {
             let builder = polyline_builder.get_or_insert_with(|| {
-                let mut builder = context.create_drawable_builder("debug-polyline-builder".to_owned());
+                let mut builder = context.create_drawable_builder();
                 builder.set_shader(Some(polyline_shader.clone()));
                 builder.set_render_pass(render_pass);
                 builder.set_enable_depth(false);
@@ -375,7 +366,7 @@ impl LayerProperties for PolylineLayerProperties {
 }
 
 /// Sets the uniforms of a debug layer group's polylines.
-pub struct PolylineLayerTweaker {
+pub(crate) struct PolylineLayerTweaker {
     base: LayerTweakerBase,
     props_ubo: LineEvaluatedPropsUBO,
     /// `MLN_UBO_CONSOLIDATION`
@@ -386,7 +377,7 @@ pub struct PolylineLayerTweaker {
 
 impl PolylineLayerTweaker {
     #[must_use]
-    pub fn new(properties: LineEvaluatedPropsUBO) -> Self {
+    pub(crate) fn new(properties: LineEvaluatedPropsUBO) -> Self {
         let layer_impl: Arc<dyn layer::Impl> =
             Arc::new(PolylineLayerImpl { base: layer::ImplBase::new(String::new(), String::new()) });
         let layer_properties: Arc<dyn LayerProperties> =
@@ -448,7 +439,7 @@ impl LayerTweaker for PolylineLayerTweaker {
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                &[0.0, 0.0],
+                [0.0, 0.0],
                 TranslateAnchorType::Viewport,
                 false,
                 false,
@@ -491,22 +482,22 @@ fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
 }
 
 /// The base of the render sources that provide render tiles.
-pub struct RenderTileSource {
-    pub base: RenderSourceBase,
-    pub tile_pyramid: TilePyramid,
-    pub render_tiles: Rc<Vec<RenderTile>>,
+pub(crate) struct RenderTileSource {
+    pub(crate) base: RenderSourceBase,
+    pub(crate) tile_pyramid: TilePyramid,
+    pub(crate) render_tiles: Rc<Vec<RenderTile>>,
     filtered_render_tiles: RefCell<Option<RenderTiles>>,
     render_tiles_sorted_by_y: RefCell<Option<RenderTiles>>,
 
     bearing: f32,
     // layers: feature state
-    pub feature_state: crate::source_state::SourceFeatureState,
+    pub(crate) feature_state: crate::source_state::SourceFeatureState,
 }
 
 impl RenderTileSource {
     /// A render tile source for `impl_`. Takes no thread pool (see
     /// `TileCache::new`).
-    pub fn new(impl_: Arc<dyn source::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<dyn source::Impl>) -> Self {
         let base = RenderSourceBase::new(impl_);
         let mut tile_pyramid = TilePyramid::new();
         tile_pyramid.set_observer(base.tile_observer());
@@ -522,7 +513,7 @@ impl RenderTileSource {
     }
 
     // layers: feature state
-    pub fn set_feature_state(
+    pub(crate) fn set_feature_state(
         &mut self,
         source_layer_id: Option<&str>,
         feature_id: &str,
@@ -531,7 +522,7 @@ impl RenderTileSource {
         self.feature_state.update_state(source_layer_id, feature_id, state);
     }
 
-    pub fn get_feature_state(
+    pub(crate) fn get_feature_state(
         &self,
         source_layer_id: Option<&str>,
         feature_id: &str,
@@ -539,7 +530,7 @@ impl RenderTileSource {
         self.feature_state.get_state(source_layer_id, feature_id)
     }
 
-    pub fn remove_feature_state(
+    pub(crate) fn remove_feature_state(
         &mut self,
         source_layer_id: Option<&str>,
         feature_id: Option<&str>,
@@ -549,7 +540,7 @@ impl RenderTileSource {
     }
 
     // query
-    pub fn query_rendered_features(
+    pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         transform_state: &mln_map_types::TransformState,
@@ -569,7 +560,7 @@ impl RenderTileSource {
         )
     }
 
-    pub fn query_source_features(
+    pub(crate) fn query_source_features(
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
@@ -577,15 +568,15 @@ impl RenderTileSource {
         self.tile_pyramid.query_source_features(options, global_state)
     }
 
-    pub fn is_loaded(&self) -> bool {
+    pub(crate) fn is_loaded(&self) -> bool {
         self.tile_pyramid.is_loaded()
     }
 
-    pub fn create_render_item(&mut self) -> Box<dyn RenderItem> {
+    pub(crate) fn create_render_item(&mut self) -> Box<dyn RenderItem> {
         Box::new(TileSourceRenderItem::new(self.render_tiles.clone(), self.base.base_impl.id.clone()))
     }
 
-    pub fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>) {
+    pub(crate) fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>) {
         self.bearing = parameters.transform.state.get_bearing() as f32;
         *self.filtered_render_tiles.borrow_mut() = None;
         *self.render_tiles_sorted_by_y.borrow_mut() = None;
@@ -602,7 +593,7 @@ impl RenderTileSource {
         self.render_tiles = Rc::new(tiles);
     }
 
-    pub fn release_render_data(&mut self) {
+    pub(crate) fn release_render_data(&mut self) {
         if !self.render_tiles.is_empty() {
             *self.filtered_render_tiles.borrow_mut() = None;
             *self.render_tiles_sorted_by_y.borrow_mut() = None;
@@ -610,15 +601,15 @@ impl RenderTileSource {
         }
     }
 
-    pub fn update_fading_tiles(&mut self) {
+    pub(crate) fn update_fading_tiles(&mut self) {
         self.tile_pyramid.update_fading_tiles();
     }
 
-    pub fn has_fading_tiles(&self) -> bool {
+    pub(crate) fn has_fading_tiles(&self) -> bool {
         self.tile_pyramid.has_fading_tiles()
     }
 
-    pub fn get_render_tiles(&self) -> Option<RenderTiles> {
+    pub(crate) fn get_render_tiles(&self) -> Option<RenderTiles> {
         let mut filtered = self.filtered_render_tiles.borrow_mut();
         if filtered.is_none() {
             let indices: Vec<usize> = self
@@ -633,7 +624,7 @@ impl RenderTileSource {
         filtered.clone()
     }
 
-    pub fn get_render_tiles_sorted_by_y_position(&self) -> Option<RenderTiles> {
+    pub(crate) fn get_render_tiles_sorted_by_y_position(&self) -> Option<RenderTiles> {
         let mut sorted = self.render_tiles_sorted_by_y.borrow_mut();
         if sorted.is_none() {
             let source_bearing = self.bearing;
@@ -656,27 +647,23 @@ impl RenderTileSource {
         sorted.clone()
     }
 
-    pub fn get_rendered_tile(&self, tile_id: &UnwrappedTileID) -> Option<&dyn Tile> {
-        self.tile_pyramid.get_rendered_tile(tile_id)
-    }
-
-    pub fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
+    pub(crate) fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
         self.render_tiles.clone()
     }
 
-    pub fn set_cache_enabled(&mut self, enable: bool) {
+    pub(crate) fn set_cache_enabled(&mut self, enable: bool) {
         self.tile_pyramid.set_cache_enabled(enable);
     }
 
-    pub fn reduce_memory_use(&mut self) {
+    pub(crate) fn reduce_memory_use(&mut self) {
         self.tile_pyramid.reduce_memory_use();
     }
 
-    pub fn retry_failed_tiles(&self) {
+    pub(crate) fn retry_failed_tiles(&self) {
         self.tile_pyramid.retry_failed_tiles();
     }
 
-    pub fn dump_debug_logs(&self) {
+    pub(crate) fn dump_debug_logs(&self) {
         self.tile_pyramid.dump_debug_logs();
     }
 }

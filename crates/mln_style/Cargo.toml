@@ -38,6 +38,7 @@ supercluster.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+mln_storage = { workspace = true, features = ["test-support"] }
 mln_tile = { package = "mln-rs-tile", path = "../mln_tile" }
 postcard.workspace = true
 

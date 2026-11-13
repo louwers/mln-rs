@@ -9,22 +9,23 @@ use geometry::Point;
 /// `vt_point`: a `point<double>` plus the simplification tolerance `z`.
 /// `==` is `point<double>`'s (x and y only), as in C++.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct VtPoint {
-    pub x: f64,
-    pub y: f64,
+pub(crate) struct VtPoint {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
     /// simplification tolerance
-    pub z: f64,
+    pub(crate) z: f64,
 }
 
 impl VtPoint {
     #[must_use]
-    pub const fn new(x: f64, y: f64, z: f64) -> Self {
+    pub(crate) const fn new(x: f64, y: f64, z: f64) -> Self {
         VtPoint { x, y, z }
     }
 
     /// `vt_point(x, y)`
+    #[cfg(test)]
     #[must_use]
-    pub const fn xy(x: f64, y: f64) -> Self {
+    pub(crate) const fn xy(x: f64, y: f64) -> Self {
         VtPoint { x, y, z: 0.0 }
     }
 }
@@ -38,28 +39,28 @@ impl PartialEq for VtPoint {
 /// `get<I>(p)`: the coordinate on axis `I` (0 = x, 1 = y).
 #[inline]
 #[must_use]
-pub fn get<const I: u8>(p: &VtPoint) -> f64 {
+pub(crate) fn get<const I: u8>(p: &VtPoint) -> f64 {
     if I == 0 { p.x } else { p.y }
 }
 
 /// `get<I>(const point<double>&)`
 #[inline]
 #[must_use]
-pub fn get_point<const I: u8>(p: &Point<f64>) -> f64 {
+pub(crate) fn get_point<const I: u8>(p: &Point<f64>) -> f64 {
     if I == 0 { p.x } else { p.y }
 }
 
 /// `calc_progress<I>(a, b, k)`
 #[inline]
 #[must_use]
-pub fn calc_progress<const I: u8>(a: &VtPoint, b: &VtPoint, k: f64) -> f64 {
+pub(crate) fn calc_progress<const I: u8>(a: &VtPoint, b: &VtPoint, k: f64) -> f64 {
     if I == 0 { (k - a.x) / (b.x - a.x) } else { (k - a.y) / (b.y - a.y) }
 }
 
 /// `intersect<I>(a, b, k, t)`
 #[inline]
 #[must_use]
-pub fn intersect<const I: u8>(a: &VtPoint, b: &VtPoint, k: f64, t: f64) -> VtPoint {
+pub(crate) fn intersect<const I: u8>(a: &VtPoint, b: &VtPoint, k: f64, t: f64) -> VtPoint {
     if I == 0 {
         let y = (b.y - a.y) * t + a.y;
         VtPoint::new(k, y, 1.0)
@@ -69,22 +70,23 @@ pub fn intersect<const I: u8>(a: &VtPoint, b: &VtPoint, k: f64, t: f64) -> VtPoi
     }
 }
 
-pub type VtMultiPoint = Vec<VtPoint>;
+pub(crate) type VtMultiPoint = Vec<VtPoint>;
 
 /// `vt_line_string`; `==` compares the points only (`std::vector`'s).
 #[derive(Clone, Debug, Default)]
-pub struct VtLineString {
-    pub points: Vec<VtPoint>,
+pub(crate) struct VtLineString {
+    pub(crate) points: Vec<VtPoint>,
     /// line length
-    pub dist: f64,
+    pub(crate) dist: f64,
     /// distance along a line in tile units, when lineMetrics = true
-    pub seg_start: f64,
-    pub seg_end: f64,
+    pub(crate) seg_start: f64,
+    pub(crate) seg_end: f64,
 }
 
 impl VtLineString {
+    #[cfg(test)]
     #[must_use]
-    pub fn new(points: Vec<VtPoint>) -> Self {
+    pub(crate) fn new(points: Vec<VtPoint>) -> Self {
         VtLineString { points, ..Default::default() }
     }
 }
@@ -110,15 +112,16 @@ impl DerefMut for VtLineString {
 
 /// `vt_linear_ring`; `==` compares the points only.
 #[derive(Clone, Debug, Default)]
-pub struct VtLinearRing {
-    pub points: Vec<VtPoint>,
+pub(crate) struct VtLinearRing {
+    pub(crate) points: Vec<VtPoint>,
     /// polygon ring area
-    pub area: f64,
+    pub(crate) area: f64,
 }
 
 impl VtLinearRing {
+    #[cfg(test)]
     #[must_use]
-    pub fn new(points: Vec<VtPoint>) -> Self {
+    pub(crate) fn new(points: Vec<VtPoint>) -> Self {
         VtLinearRing { points, area: 0.0 }
     }
 }
@@ -142,14 +145,14 @@ impl DerefMut for VtLinearRing {
     }
 }
 
-pub type VtMultiLineString = Vec<VtLineString>;
-pub type VtPolygon = Vec<VtLinearRing>;
-pub type VtMultiPolygon = Vec<VtPolygon>;
-pub type VtGeometryCollection = Vec<VtGeometry>;
+pub(crate) type VtMultiLineString = Vec<VtLineString>;
+pub(crate) type VtPolygon = Vec<VtLinearRing>;
+pub(crate) type VtMultiPolygon = Vec<VtPolygon>;
+pub(crate) type VtGeometryCollection = Vec<VtGeometry>;
 
 /// `vt_geometry`, alternatives in the C++ variant order.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub enum VtGeometry {
+pub(crate) enum VtGeometry {
     #[default]
     Empty,
     Point(VtPoint),
@@ -163,7 +166,7 @@ pub enum VtGeometry {
 
 impl VtGeometry {
     /// `mapbox::geometry::for_each_point(geometry, f)`
-    pub fn for_each_point(&self, f: &mut impl FnMut(&VtPoint)) {
+    pub(crate) fn for_each_point(&self, f: &mut impl FnMut(&VtPoint)) {
         match self {
             VtGeometry::Empty => {}
             VtGeometry::Point(p) => f(p),
@@ -183,7 +186,7 @@ impl VtGeometry {
     }
 
     /// `mapbox::geometry::for_each_point` with a mutable point.
-    pub fn for_each_point_mut(&mut self, f: &mut impl FnMut(&mut VtPoint)) {
+    pub(crate) fn for_each_point_mut(&mut self, f: &mut impl FnMut(&mut VtPoint)) {
         match self {
             VtGeometry::Empty => {}
             VtGeometry::Point(p) => f(p),
@@ -205,32 +208,32 @@ impl VtGeometry {
 
 /// `mapbox::geometry::box<double>`
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BoxD {
-    pub min: Point<f64>,
-    pub max: Point<f64>,
+pub(crate) struct BoxD {
+    pub(crate) min: Point<f64>,
+    pub(crate) max: Point<f64>,
 }
 
 impl BoxD {
     /// `{ { 2, 1 }, { -1, 0 } }`, the initial (inverted) feature and tile
     /// bounding box.
-    pub const INITIAL: BoxD = BoxD { min: Point::new(2.0, 1.0), max: Point::new(-1.0, 0.0) };
+    pub(crate) const INITIAL: BoxD = BoxD { min: Point::new(2.0, 1.0), max: Point::new(-1.0, 0.0) };
 }
 
 /// `vt_feature`
 #[derive(Clone, Debug)]
-pub struct VtFeature {
-    pub geometry: VtGeometry,
-    pub properties: Arc<PropertyMap>,
-    pub id: Identifier,
+pub(crate) struct VtFeature {
+    pub(crate) geometry: VtGeometry,
+    pub(crate) properties: Arc<PropertyMap>,
+    pub(crate) id: Identifier,
 
-    pub bbox: BoxD,
-    pub num_points: u32,
+    pub(crate) bbox: BoxD,
+    pub(crate) num_points: u32,
 }
 
 impl VtFeature {
     /// `vt_feature(geom, shared_ptr<const property_map>, id)`
     #[must_use]
-    pub fn new(geometry: VtGeometry, properties: Arc<PropertyMap>, id: Identifier) -> Self {
+    pub(crate) fn new(geometry: VtGeometry, properties: Arc<PropertyMap>, id: Identifier) -> Self {
         let mut feature = VtFeature { geometry, properties, id, bbox: BoxD::INITIAL, num_points: 0 };
         feature.process_geometry();
         feature
@@ -238,7 +241,7 @@ impl VtFeature {
 
     /// `vt_feature(geom, const property_map&, id)`
     #[must_use]
-    pub fn with_properties(geometry: VtGeometry, properties: &PropertyMap, id: Identifier) -> Self {
+    pub(crate) fn with_properties(geometry: VtGeometry, properties: &PropertyMap, id: Identifier) -> Self {
         Self::new(geometry, Arc::new(properties.clone()), id)
     }
 
@@ -255,4 +258,4 @@ impl VtFeature {
     }
 }
 
-pub type VtFeatures = Vec<VtFeature>;
+pub(crate) type VtFeatures = Vec<VtFeature>;

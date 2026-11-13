@@ -16,7 +16,7 @@ fn until(timestamp: Timestamp) -> Duration {
 /// How long to wait before retrying a failed request; `None` when the
 /// failure doesn't call for a retry.
 #[must_use]
-pub fn error_retry_timeout(
+pub(crate) fn error_retry_timeout(
     failed_request_reason: Reason,
     failed_requests: u32,
     retry_after: Option<Timestamp>,
@@ -44,7 +44,7 @@ pub fn error_retry_timeout(
 /// How long until a response expires, or, after it came back expired, the
 /// backoff before asking again; `None` when it never expires.
 #[must_use]
-pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Option<Duration> {
+pub(crate) fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Option<Duration> {
     if expired_requests > 0 {
         return Some(Duration::from_secs(1 << (expired_requests - 1).min(31)));
     }

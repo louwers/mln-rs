@@ -1,7 +1,6 @@
 //! How a runtime loads resources: a host's resource provider in front of the
 //! network, and the transforms of request URLs and headers.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -197,7 +196,7 @@ fn unsupported_scheme(scheme: &str, url: &str, declined: bool) -> Response {
 /// the request has been returned.
 fn respond_later(response: Response, callback: Callback) -> Box<dyn AsyncRequest> {
     let target = Rc::new(Immediate(RefCell::new(Some(callback))));
-    let mailbox = Mailbox::with_target(&scheduler::get_current(), target as Rc<dyn Any>);
+    let mailbox = Mailbox::with_target(&scheduler::get_current(), target);
     ActorRef::<Immediate>::new(&mailbox).invoke(move |target| {
         let callback = target.0.borrow_mut().take();
         if let Some(mut callback) = callback {
@@ -236,7 +235,7 @@ impl FileSource for ProviderFileSource {
             resource: resource.clone(),
             request: RefCell::new(None),
         });
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), target as Rc<dyn Any>);
+        let mailbox = Mailbox::with_target(&scheduler::get_current(), target);
         let shared =
             Arc::new(RequestShared { state: Mutex::new(RequestState::default()), target: ActorRef::new(&mailbox) });
         let request = ResourceRequest { resource: resource.clone(), shared: Some(shared.clone()) };

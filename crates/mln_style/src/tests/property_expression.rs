@@ -178,7 +178,7 @@ fn issue8460() {
 fn image_expression() {
     let empty_set = VecSet::new();
     let available_images: VecSet<String> =
-        ["maki-11", "airport-11", "bicycle-15"].iter().map(std::string::ToString::to_string).collect();
+        ["maki-11", "airport-11", "bicycle-15"].iter().map(ToString::to_string).collect();
 
     // evaluation test without available images
     {

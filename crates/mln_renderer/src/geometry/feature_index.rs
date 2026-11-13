@@ -29,63 +29,44 @@ use crate::render_layer::RenderLayer;
 use crate::source_state::SourceFeatureState;
 
 /// The render layers a query looks at, by id.
-pub type QueryLayers<'a> = HashMap<String, &'a dyn RenderLayer>;
+pub(crate) type QueryLayers<'a> = HashMap<String, &'a dyn RenderLayer>;
 
 /// The features a query found, by layer id.
-pub type QueryResults = HashMap<String, Vec<Feature>>;
+pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
 
 /// An indexed element within a feature index, referring to the index's copy
 /// of its strings.
 #[derive(Clone, Debug, PartialEq)]
-pub struct RefIndexedSubfeature {
-    pub index: usize,
-    pub sort_index: usize,
-    pub source_layer_name: Arc<str>,
-    pub bucket_leader_id: Arc<str>,
+pub(crate) struct RefIndexedSubfeature {
+    pub(crate) index: usize,
+    pub(crate) sort_index: usize,
+    pub(crate) source_layer_name: Arc<str>,
+    pub(crate) bucket_leader_id: Arc<str>,
     // Only used for symbol features
-    pub bucket_instance_id: u32,
-    pub collision_group_id: u16,
+    pub(crate) bucket_instance_id: u32,
+    pub(crate) collision_group_id: u16,
 }
 
 /// This version of an indexed feature has copies of the necessary strings,
 /// so that it can be used outside the index.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct IndexedSubfeature {
-    pub index: usize,
-    pub source_layer_name: String,
-    pub bucket_leader_id: String,
-    pub sort_index: usize,
+pub(crate) struct IndexedSubfeature {
+    pub(crate) index: usize,
+    pub(crate) source_layer_name: String,
+    pub(crate) bucket_leader_id: String,
+    pub(crate) sort_index: usize,
     // Only used for symbol features
-    pub bucket_instance_id: u32,
-    pub collision_group_id: u16,
-}
-
-impl IndexedSubfeature {
-    #[must_use]
-    pub fn from_ref(other: &RefIndexedSubfeature) -> Self {
-        IndexedSubfeature {
-            index: other.index,
-            source_layer_name: other.source_layer_name.to_string(),
-            bucket_leader_id: other.bucket_leader_id.to_string(),
-            sort_index: other.sort_index,
-            bucket_instance_id: other.bucket_instance_id,
-            collision_group_id: other.collision_group_id,
-        }
-    }
-
-    #[must_use]
-    pub fn from_ref_with(other: &RefIndexedSubfeature, bucket_instance_id: u32, collision_group_id: u16) -> Self {
-        IndexedSubfeature { bucket_instance_id, collision_group_id, ..IndexedSubfeature::from_ref(other) }
-    }
+    pub(crate) bucket_instance_id: u32,
+    pub(crate) collision_group_id: u16,
 }
 
 /// A shared order of feature indices that queries sort symbol features by.
-pub type FeatureSortOrder = Option<Arc<Vec<usize>>>;
+pub(crate) type FeatureSortOrder = Option<Arc<Vec<usize>>>;
 
 const EXPECTED_UNIQUE_LAYER_IDS: usize = 10;
 const EXPECTED_UNIQUE_LEADER_IDS: usize = 30;
 
-pub struct FeatureIndex {
+pub(crate) struct FeatureIndex {
     grid: GridIndex<RefIndexedSubfeature>,
     sort_index: usize,
 
@@ -120,7 +101,7 @@ fn envelope(points: impl IntoIterator<Item = GeometryCoordinate>) -> Option<(Geo
 impl FeatureIndex {
     /// An empty index of `tile_data`'s features, sharing the tile data.
     #[must_use]
-    pub fn new(tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>) -> Self {
+    pub(crate) fn new(tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>) -> Self {
         FeatureIndex {
             // 16x16 grid -> 32px cell
             grid: GridIndex::new(constants::EXTENT as f32, constants::EXTENT as f32, (constants::EXTENT / 16) as u32),
@@ -132,13 +113,13 @@ impl FeatureIndex {
     }
 
     #[must_use]
-    pub fn get_data(&self) -> Option<&(dyn GeometryTileData + Send + Sync)> {
+    pub(crate) fn get_data(&self) -> Option<&(dyn GeometryTileData + Send + Sync)> {
         self.tile_data.as_deref()
     }
 
     /// Set the expected number of elements per cell to avoid small
     /// re-allocations for populated cells.
-    pub fn reserve(&mut self, value: usize) {
+    pub(crate) fn reserve(&mut self, value: usize) {
         self.grid.reserve(value);
     }
 
@@ -166,7 +147,7 @@ impl FeatureIndex {
         id
     }
 
-    pub fn insert(
+    pub(crate) fn insert(
         &mut self,
         geometries: &GeometryCollection,
         index: usize,
@@ -205,7 +186,7 @@ impl FeatureIndex {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn query(
+    pub(crate) fn query(
         &self,
         result: &mut QueryResults,
         query_geometry: &GeometryCoordinates,
@@ -277,7 +258,7 @@ impl FeatureIndex {
         Ok(())
     }
 
-    pub fn lookup_symbol_features(
+    pub(crate) fn lookup_symbol_features(
         &self,
         symbol_features: &[IndexedSubfeature],
         query_options: &RenderedQueryOptions,
@@ -434,9 +415,9 @@ impl FeatureIndex {
     }
 
     #[must_use]
-    pub fn translate_query_geometry(
+    pub(crate) fn translate_query_geometry(
         query_geometry: &GeometryCoordinates,
-        translate: &[f32; 2],
+        translate: [f32; 2],
         anchor_type: TranslateAnchorType,
         bearing: f32,
         pixels_to_tile_units: f32,
@@ -461,14 +442,14 @@ impl FeatureIndex {
         )
     }
 
-    pub fn set_bucket_layer_ids(&mut self, bucket_leader_id: &str, layer_ids: &[String]) {
+    pub(crate) fn set_bucket_layer_ids(&mut self, bucket_leader_id: &str, layer_ids: &[String]) {
         let key = self.intern_leader_id(bucket_leader_id);
         self.bucket_layer_ids.insert(key, layer_ids.to_vec());
     }
 
     /// The bucket leaders and their layer ids (sorted, for inspection).
     #[must_use]
-    pub fn bucket_layer_ids(&self) -> VecMap<String, Vec<String>> {
+    pub(crate) fn bucket_layer_ids(&self) -> VecMap<String, Vec<String>> {
         self.bucket_layer_ids.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
     }
 }
@@ -595,18 +576,18 @@ mod tests {
     fn translate_query_geometry() {
         let query: GeometryCoordinates = vec![Point::new(10, 10), Point::new(20, 20)];
         assert_eq!(
-            FeatureIndex::translate_query_geometry(&query, &[0.0, 0.0], TranslateAnchorType::Map, 0.0, 8.0),
+            FeatureIndex::translate_query_geometry(&query, [0.0, 0.0], TranslateAnchorType::Map, 0.0, 8.0),
             None
         );
         assert_eq!(
-            FeatureIndex::translate_query_geometry(&query, &[1.0, -2.0], TranslateAnchorType::Map, 1.0, 8.0),
+            FeatureIndex::translate_query_geometry(&query, [1.0, -2.0], TranslateAnchorType::Map, 1.0, 8.0),
             Some(vec![Point::new(2, 26), Point::new(12, 36)])
         );
         // Viewport anchor: the translation is rotated by -bearing.
         assert_eq!(
             FeatureIndex::translate_query_geometry(
                 &query,
-                &[1.0, 0.0],
+                [1.0, 0.0],
                 TranslateAnchorType::Viewport,
                 std::f32::consts::FRAC_PI_2,
                 8.0

@@ -24,7 +24,7 @@ use shelf_pack::{ShelfPack, ShelfPackOptions};
 
 /// A bin of a dynamic texture.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct TextureHandle {
+pub(crate) struct TextureHandle {
     id: i32,
     rectangle: RectU16,
     needs_upload: bool,
@@ -40,17 +40,17 @@ impl TextureHandle {
     }
 
     #[must_use]
-    pub fn get_id(&self) -> i32 {
+    pub(crate) fn get_id(&self) -> i32 {
         self.id
     }
 
     #[must_use]
-    pub fn get_rectangle(&self) -> &RectU16 {
+    pub(crate) fn get_rectangle(&self) -> &RectU16 {
         &self.rectangle
     }
 
     #[must_use]
-    pub fn is_upload_needed(&self) -> bool {
+    pub(crate) fn is_upload_needed(&self) -> bool {
         self.needs_upload
     }
 }
@@ -71,7 +71,7 @@ struct Inner {
     images_to_upload: HashMap<i32, (RectU16, Vec<u8>)>,
 }
 
-pub type DynamicTexturePtr = Arc<DynamicTexture>;
+pub(crate) type DynamicTexturePtr = Arc<DynamicTexture>;
 
 static NEXT_DYNAMIC_TEXTURE_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -80,7 +80,7 @@ type GpuTexture = LocalObject<RefCell<Option<Texture2DPtr>>>;
 
 /// A texture shelf-packed with images or glyphs. Workers reserve bins and
 /// queue images; the render thread uploads them.
-pub struct DynamicTexture {
+pub(crate) struct DynamicTexture {
     id: usize,
     size: Size,
     pixel_format: TexturePixelType,
@@ -102,7 +102,7 @@ fn pixel_stride(pixel_type: TexturePixelType) -> usize {
 }
 
 impl DynamicTexture {
-    pub fn new(size: Size, pixel_type: TexturePixelType) -> Self {
+    pub(crate) fn new(size: Size, pixel_type: TexturePixelType) -> Self {
         DynamicTexture {
             id: NEXT_DYNAMIC_TEXTURE_ID.fetch_add(1, Ordering::Relaxed),
             size,
@@ -120,30 +120,30 @@ impl DynamicTexture {
         }
     }
 
-    pub fn id(&self) -> usize {
+    pub(crate) fn id(&self) -> usize {
         self.id
     }
 
-    pub fn get_size(&self) -> Size {
+    pub(crate) fn get_size(&self) -> Size {
         self.size
     }
 
     /// The GPU texture, once `upload_deferred_images` has created it. Render
     /// thread only.
-    pub fn get_texture(&self) -> Option<Texture2DPtr> {
+    pub(crate) fn get_texture(&self) -> Option<Texture2DPtr> {
         let gpu_texture = self.gpu_texture.lock();
         gpu_texture.as_ref().and_then(LocalObject::get).and_then(|t| t.borrow().clone())
     }
 
-    pub fn get_pixel_format(&self) -> TexturePixelType {
+    pub(crate) fn get_pixel_format(&self) -> TexturePixelType {
         self.pixel_format
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.inner.lock().num_textures == 0
     }
 
-    pub fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
+    pub(crate) fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
         let mut inner = self.inner.lock();
         let bin_ref = inner.shelf_pack.pack_one(unique_id, size.width as i32, size.height as i32)?;
         let bin = *inner.shelf_pack.bin(bin_ref);
@@ -153,7 +153,7 @@ impl DynamicTexture {
         Some(TextureHandle::from_bin(&bin))
     }
 
-    pub fn add_image(&self, pixel_data: &[u8], image_size: Size, unique_id: i32) -> Option<TextureHandle> {
+    pub(crate) fn add_image(&self, pixel_data: &[u8], image_size: Size, unique_id: i32) -> Option<TextureHandle> {
         let mut tex_handle = self.reserve_size(image_size, unique_id)?;
         if tex_handle.is_upload_needed() {
             self.upload_image(pixel_data, &mut tex_handle);
@@ -162,7 +162,7 @@ impl DynamicTexture {
     }
 
     /// Queues the pixels of the handle's rectangle for the next upload pass.
-    pub fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
+    pub(crate) fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
         let mut inner = self.inner.lock();
         let rect = tex_handle.rectangle;
         let byte_size = rect.w as usize * rect.h as usize * pixel_stride(self.pixel_format);
@@ -173,7 +173,7 @@ impl DynamicTexture {
 
     /// Creates the texture on first use and uploads the queued images. Runs
     /// on the render thread.
-    pub fn upload_deferred_images(&self, context: &dyn Context) {
+    pub(crate) fn upload_deferred_images(&self, context: &dyn Context) {
         let mut inner = self.inner.lock();
         let texture = if let Some(texture) = self.get_texture() {
             texture
@@ -204,7 +204,7 @@ impl DynamicTexture {
     /// Port-only: takes the queued images (handle id, rectangle, pixels),
     /// in handle order, for a mirror of this texture in another wasm
     /// instance (`tile/worker_codec`), which uploads them instead.
-    pub fn take_uploads(&self) -> Vec<(i32, RectU16, Vec<u8>)> {
+    pub(crate) fn take_uploads(&self) -> Vec<(i32, RectU16, Vec<u8>)> {
         let mut inner = self.inner.lock();
         let mut uploads: Vec<_> = inner.images_to_upload.drain().map(|(id, (rect, data))| (id, rect, data)).collect();
         uploads.sort_by_key(|(id, _, _)| *id);
@@ -217,7 +217,7 @@ impl DynamicTexture {
     /// space again only after freeing it, so pixels queued there before
     /// belong to a bin that is gone, and would otherwise be uploaded over
     /// these in whatever order the queue is drained.
-    pub fn queue_upload(&self, id: i32, rect: RectU16, data: Vec<u8>) {
+    pub(crate) fn queue_upload(&self, id: i32, rect: RectU16, data: Vec<u8>) {
         let span = |start: u16, length: u16| u32::from(start)..u32::from(start) + u32::from(length);
         let intersect = |a: std::ops::Range<u32>, b: std::ops::Range<u32>| a.start < b.end && b.start < a.end;
         let overlaps = |other: &RectU16| {
@@ -230,7 +230,7 @@ impl DynamicTexture {
     }
 
     /// Releases `tex_handle`'s bin; true when that was its last reference.
-    pub fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
+    pub(crate) fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
         let mut inner = self.inner.lock();
         let Some(bin) = inner.shelf_pack.get_bin(tex_handle.id) else {
             return false;

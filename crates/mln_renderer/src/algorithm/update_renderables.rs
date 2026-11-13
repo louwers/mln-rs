@@ -11,7 +11,7 @@ use mln_util::range::Range;
 use crate::tile::tile::TileNecessity;
 
 /// The tile storage and the callbacks `updateRenderables` works with.
-pub trait RenderablesContext {
+pub(crate) trait RenderablesContext {
     /// Returns the key of the existing tile with this id, if there is one.
     fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID>;
     /// Creates and stores the tile with this id and returns its key; `None`
@@ -29,12 +29,12 @@ pub trait RenderablesContext {
 }
 
 /// A `PrefetchedTileMap` entry: a tile's id, and its key in the storage.
-pub type PrefetchedTile = (OverscaledTileID, OverscaledTileID);
+pub(crate) type PrefetchedTile = (OverscaledTileID, OverscaledTileID);
 
-pub fn update_renderables<C: RenderablesContext>(
+pub(crate) fn update_renderables<C: RenderablesContext>(
     ctx: &mut C,
     ideal_tile_ids: &[OverscaledTileID],
-    zoom_range: &Range<u8>,
+    zoom_range: Range<u8>,
     max_parent_overscale_factor: Option<u8>,
 ) {
     let mut checked: HashSet<OverscaledTileID> = HashSet::new();

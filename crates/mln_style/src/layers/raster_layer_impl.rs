@@ -5,13 +5,13 @@ use crate::layers::raster_layer_properties::RasterPaintProperties;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
-    pub base: ImplBase,
+    pub(crate) base: ImplBase,
     pub paint: RasterPaintProperties::Transitionable,
 }
 
 impl Impl {
     #[must_use]
-    pub fn new(layer_id: String, source_id: String) -> Self {
+    pub(crate) fn new(layer_id: String, source_id: String) -> Self {
         Impl { base: ImplBase::new(layer_id, source_id), paint: RasterPaintProperties::Transitionable::default() }
     }
 }

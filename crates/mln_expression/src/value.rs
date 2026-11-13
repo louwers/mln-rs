@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::collator::Collator;
 use crate::formatted::Formatted;
 use crate::image::Image;
-use crate::type_::{self, Type};
+use crate::type_::Type;
 
 /// The object alternative of `expression::Value`.
 // C++ uses std::unordered_map, whose iteration order is libstdc++-hash
@@ -42,35 +42,30 @@ pub enum Value {
 impl Value {
     /// Javascript's `Number.MAX_SAFE_INTEGER`.
     #[must_use]
-    pub const fn max_safe_integer() -> u64 {
+    pub(crate) const fn max_safe_integer() -> u64 {
         9_007_199_254_740_991
     }
 
     #[must_use]
-    pub const fn is_safe_integer_u64(x: u64) -> bool {
+    pub(crate) const fn is_safe_integer_u64(x: u64) -> bool {
         x <= Self::max_safe_integer()
     }
 
     #[must_use]
-    pub const fn is_safe_integer_i64(x: i64) -> bool {
+    pub(crate) const fn is_safe_integer_i64(x: i64) -> bool {
         // `-x` wraps for INT64_MIN as the C++ compiles.
         (if x > 0 { x } else { x.wrapping_neg() }) as u64 <= Self::max_safe_integer()
     }
 
     #[must_use]
-    pub fn is_safe_integer_f64(x: f64) -> bool {
+    pub(crate) fn is_safe_integer_f64(x: f64) -> bool {
         // `static_cast<uint64_t>` of |x| >= 2^64 is UB in C++;
         // `as` saturates.
         ((if x > 0.0 { x } else { -x }) as u64) <= Self::max_safe_integer()
     }
 
     #[must_use]
-    pub fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
-    }
-
-    #[must_use]
-    pub fn as_number(&self) -> Option<f64> {
+    pub(crate) fn as_number(&self) -> Option<f64> {
         match self {
             Value::Number(n) => Some(*n),
             _ => None,
@@ -78,7 +73,7 @@ impl Value {
     }
 
     #[must_use]
-    pub fn as_bool(&self) -> Option<bool> {
+    pub(crate) fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,
@@ -86,7 +81,7 @@ impl Value {
     }
 
     #[must_use]
-    pub fn as_str(&self) -> Option<&str> {
+    pub(crate) fn as_str(&self) -> Option<&str> {
         match self {
             Value::String(s) => Some(s),
             _ => None,
@@ -94,17 +89,9 @@ impl Value {
     }
 
     #[must_use]
-    pub fn as_array(&self) -> Option<&Vec<Value>> {
+    pub(crate) fn as_array(&self) -> Option<&Vec<Value>> {
         match self {
             Value::Array(a) => Some(a),
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    pub fn as_object(&self) -> Option<&ObjectType> {
-        match self {
-            Value::Object(o) => Some(o),
             _ => None,
         }
     }
@@ -177,7 +164,7 @@ impl From<ObjectType> for Value {
 }
 
 #[must_use]
-pub fn type_of(value: &Value) -> Type {
+pub(crate) fn type_of(value: &Value) -> Type {
     match value {
         Value::Bool(_) => Type::Boolean,
         Value::Number(_) => Type::Number,
@@ -214,7 +201,7 @@ pub fn type_of(value: &Value) -> Type {
 /// numbers and booleans as `String(value)`, colors as `rgba(...)`, `null` as
 /// `""`, and every other value as [`stringify()`] writes it.
 #[must_use]
-pub fn to_string(value: &Value) -> String {
+pub(crate) fn to_string(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::Number(n) => to_string_double(*n),
@@ -294,7 +281,7 @@ pub fn from_mbgl_value(value: &MbglValue) -> Value {
 
 /// [`from_mbgl_value`] for an owned value, moving its strings, arrays and
 /// objects instead of cloning them.
-pub fn from_mbgl_value_owned(value: MbglValue) -> Value {
+pub(crate) fn from_mbgl_value_owned(value: MbglValue) -> Value {
     match value {
         MbglValue::Array(v) => Value::Array(v.into_iter().map(from_mbgl_value_owned).collect()),
         MbglValue::Object(v) => Value::Object(v.into_iter().map(|(k, v)| (k, from_mbgl_value_owned(v))).collect()),
@@ -378,18 +365,9 @@ pub trait ValueConverter: Sized {
     }
 }
 
-pub fn to_expression_value<T: ValueConverter>(value: &T) -> Value {
-    value.to_expression_value()
-}
-
 #[must_use]
 pub fn from_expression_value<T: ValueConverter>(value: &Value) -> Option<T> {
     T::from_expression_value(value)
-}
-
-#[must_use]
-pub fn value_type_to_expression_type<T: ValueConverter>() -> Type {
-    T::expression_type()
 }
 
 #[must_use]
@@ -597,12 +575,6 @@ enum_value_converter!(
     TranslateAnchorType,
     VisibilityType,
 );
-
-/// The name of `t`, as `type_::to_string` writes it.
-#[must_use]
-pub fn type_to_string(t: &Type) -> String {
-    type_::to_string(t)
-}
 
 #[cfg(test)]
 mod tests {

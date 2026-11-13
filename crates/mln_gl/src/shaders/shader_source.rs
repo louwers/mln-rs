@@ -101,52 +101,50 @@ use super::glsl_sources;
 /// desktop OpenGL, the program's defines, the prelude's source of that stage
 /// and the shader's.
 #[derive(Debug)]
-pub struct GlslShaderSource {
-    /// The `BuiltIn` enumerator name.
-    pub built_in: &'static str,
-    pub name: &'static str,
-    pub vertex: &'static str,
-    pub fragment: &'static str,
+pub(crate) struct GlslShaderSource {
+    pub(crate) vertex: &'static str,
+    pub(crate) fragment: &'static str,
 }
 
 /// The uniform block `name` binds to the binding point `id`, where the
 /// buffer of that id is bound.
 #[derive(Clone, Copy, Debug)]
-pub struct UniformBlockInfo {
-    pub name: &'static str,
-    pub id: usize,
+pub(crate) struct UniformBlockInfo {
+    pub(crate) name: &'static str,
+    pub(crate) id: usize,
     /// The size of the block's UBO.
-    pub size: usize,
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests check it against the block the shader declares"))]
+    pub(crate) size: usize,
     /// The size of an element of the layer's buffer that holds this block for
     /// each of its drawables, or 0 if the renderer writes no such buffer.
-    pub element_size: usize,
+    pub(crate) element_size: usize,
 }
 
 /// The vertex attribute `name` reads attribute `id`.
 #[derive(Clone, Copy, Debug)]
-pub struct AttributeInfo {
-    pub name: &'static str,
-    pub id: usize,
+pub(crate) struct AttributeInfo {
+    pub(crate) name: &'static str,
+    pub(crate) id: usize,
 }
 
 /// The sampler `name` reads texture `id`.
 #[derive(Clone, Copy, Debug)]
-pub struct TextureInfo {
-    pub name: &'static str,
-    pub id: usize,
+pub(crate) struct TextureInfo {
+    pub(crate) name: &'static str,
+    pub(crate) id: usize,
 }
 
 /// A complete specialisation: GLSL plus the `uniformBlocks`, `attributes`,
 /// `instanceAttributes` and `textures` tables.
 #[derive(Debug)]
-pub struct ShaderSource {
-    pub glsl: &'static GlslShaderSource,
-    pub name: &'static str,
-    pub uniform_blocks: &'static [UniformBlockInfo],
-    pub attributes: &'static [AttributeInfo],
+pub(crate) struct ShaderSource {
+    pub(crate) glsl: &'static GlslShaderSource,
+    pub(crate) name: &'static str,
+    pub(crate) uniform_blocks: &'static [UniformBlockInfo],
+    pub(crate) attributes: &'static [AttributeInfo],
     /// The attributes that step once an instance.
-    pub instance_attributes: &'static [AttributeInfo],
-    pub textures: &'static [TextureInfo],
+    pub(crate) instance_attributes: &'static [AttributeInfo],
+    pub(crate) textures: &'static [TextureInfo],
 }
 
 /// A block whose UBO is a `T`.
@@ -827,7 +825,7 @@ shader_source!(
 /// The OpenGL source of `shader_id`, for the shaders the renderer draws
 /// with.
 #[must_use]
-pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
+pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
         BuiltIn::BackgroundShader => Some(&BACKGROUND_SHADER),
         BuiltIn::BackgroundPatternShader => Some(&BACKGROUND_PATTERN_SHADER),
@@ -868,7 +866,7 @@ pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
 
 /// The shaders `shader_source` has, in the order `initShaders` registers
 /// them.
-pub const REGISTERED_SHADERS: &[BuiltIn] = &[
+pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
     BuiltIn::SkyShader,

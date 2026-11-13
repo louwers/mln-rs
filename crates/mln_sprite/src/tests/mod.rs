@@ -12,11 +12,11 @@ use parking_lot::Mutex;
 
 /// A path of the C++ repository, in the copy of its files these tests read
 /// (testdata/).
-pub fn cpp_path(relative: &str) -> PathBuf {
+pub(crate) fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
 }
 
-pub fn read_file(relative: &str) -> Vec<u8> {
+pub(crate) fn read_file(relative: &str) -> Vec<u8> {
     let path = cpp_path(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
@@ -33,18 +33,18 @@ impl Observer for Recorder {
 }
 
 /// Captures the log records of the calling thread while it lives.
-pub struct FixtureLog {
+pub(crate) struct FixtureLog {
     messages: Records,
 }
 
 impl FixtureLog {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let messages: Records = Arc::new(Mutex::new(Vec::new()));
         let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
-    pub fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
+    pub(crate) fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
         let mut count = 0;
         for (m, checked) in self.messages.lock().iter_mut() {
             if !*checked && m.0 == severity && m.1 == event && m.2 == code && m.3 == msg {
@@ -55,7 +55,7 @@ impl FixtureLog {
         count
     }
 
-    pub fn unchecked_count(&self) -> usize {
+    pub(crate) fn unchecked_count(&self) -> usize {
         self.messages.lock().iter().filter(|(_, checked)| !checked).count()
     }
 }

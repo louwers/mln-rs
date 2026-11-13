@@ -7,7 +7,7 @@ pub struct RasterDrawableUBO {
     /*  0 */ pub matrix: [f32; 4 * 4],
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<RasterDrawableUBO>() == 4 * 16);
+const _: () = assert!(size_of::<RasterDrawableUBO>() == 4 * 16);
 
 /// Evaluated properties that do not depend on the tile (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -27,4 +27,4 @@ pub struct RasterEvaluatedPropsUBO {
     /* 60 */ pub pad2: f32,
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<RasterEvaluatedPropsUBO>() == 4 * 16);
+const _: () = assert!(size_of::<RasterEvaluatedPropsUBO>() == 4 * 16);

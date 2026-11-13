@@ -237,7 +237,7 @@ impl Tables {
     }
 
     fn table<K: Kind>(&mut self) -> Option<&mut dyn Any> {
-        self.0.iter_mut().find(|(name, _)| *name == K::NAME).map(|(_, table)| &mut **table as &mut dyn Any)
+        self.0.iter_mut().find(|(name, _)| *name == K::NAME).map(|(_, table)| -> &mut dyn Any { &mut **table })
     }
 }
 

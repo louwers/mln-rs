@@ -14,14 +14,14 @@ use crate::render_pass::RenderPass;
 use crate::uniform_buffer::bind_uniform_buffer_array;
 use crate::upload_pass::UploadPass;
 
-pub struct TileLayerGroup {
+pub(crate) struct TileLayerGroup {
     inner: layer_group::TileLayerGroup,
     uniform_buffers: UniformBufferArray,
 }
 
 impl TileLayerGroup {
     #[must_use]
-    pub fn new(layer_index: i32, initial_capacity: usize, name: String) -> Self {
+    pub(crate) fn new(layer_index: i32, initial_capacity: usize, name: String) -> Self {
         TileLayerGroup {
             inner: layer_group::TileLayerGroup::new(layer_index, initial_capacity, name),
             uniform_buffers: UniformBufferArray::new(),

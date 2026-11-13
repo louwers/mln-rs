@@ -43,7 +43,7 @@ fn data(res: &Response) -> &[u8] {
 }
 
 /// The seconds since `start`.
-fn seconds_since(start: mln_util::time::Instant) -> f64 {
+fn seconds_since(start: Instant) -> f64 {
     start.elapsed().as_secs_f64()
 }
 
@@ -151,7 +151,16 @@ fn connection_error() {
 
     let start = Instant::now();
     let counter = Cell::new(0);
-    let wait = Cell::new(CONNECTION_TIMEOUT);
+    // The earliest the next failure can arrive, in seconds since `start`.
+    // Each backoff starts when an attempt fails, before the failure reaches
+    // this thread, so the backoffs add up from the start however long the
+    // failures take to arrive.
+    let earliest = Cell::new(CONNECTION_TIMEOUT);
+    // The latest it should arrive. The next backoff has started by the time
+    // a failure arrives, so it is timed from the failure: a slow failure
+    // (NSURLSession's, on GitHub's macOS runners) would otherwise count
+    // again against every later attempt.
+    let latest = Cell::new(CONNECTION_TIMEOUT + 0.3);
 
     let req = req();
     let (r, stop) = (req.clone(), run_loop.clone());
@@ -159,8 +168,8 @@ fn connection_error() {
         &Resource::new(Kind::Unknown, closed_port_url("/")),
         Box::new(move |res: Response| {
             let duration = seconds_since(start);
-            assert!(wait.get() - 0.01 < duration, "Backoff timer didn't wait 1 second");
-            assert!(wait.get() + 0.3 > duration, "Backoff timer fired too late");
+            assert!(earliest.get() - 0.01 < duration, "Backoff timer didn't wait 1 second");
+            assert!(latest.get() > duration, "Backoff timer fired too late");
             let error = res.error.as_ref().expect("error");
             assert_eq!(Reason::Connection, error.reason);
             assert!(res.data.is_none());
@@ -173,11 +182,9 @@ fn connection_error() {
                 r.borrow_mut().take();
                 stop.stop();
             }
-            // Timed from this failure (C++ adds to `wait`), since the next
-            // backoff starts when it arrives: a slow failure (NSURLSession's,
-            // on GitHub's macOS runners) would otherwise count again against
-            // every later attempt.
-            wait.set(duration + f64::from(1 << counter.get()) + CONNECTION_TIMEOUT);
+            let backoff = f64::from(1 << counter.get()) + CONNECTION_TIMEOUT;
+            earliest.set(earliest.get() + backoff);
+            latest.set(duration + backoff + 0.3);
             counter.set(counter.get() + 1);
         }),
     ));
@@ -692,6 +699,58 @@ fn low_high_priority_requests_many() {
     NetworkStatus::set(Status::Online);
     drop(paused);
     run_loop.run();
+}
+
+/// Waiting requests start by their resources' order as it is when a
+/// connection frees up, which the requester may have changed since it made
+/// the request, and one cancelled meanwhile doesn't start.
+#[test]
+fn pending_requests_start_by_order() {
+    let _serial = serial();
+    let server = HttpServer::new();
+    let run_loop = RunLoop::new();
+    let fs = online_file_source();
+    let answered: Rc<RefCell<Vec<usize>>> = Rc::default();
+
+    NetworkStatus::set(Status::Offline);
+    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    let paused = fs.pause();
+
+    // The first request starts at once; the others wait for it.
+    let resources: Vec<Resource> = [0, 1, 2, 3, 4]
+        .into_iter()
+        .map(|order| {
+            let resource = Resource::new(Kind::Unknown, server.url(&format!("/load/{order}")));
+            resource.order.set(order);
+            resource
+        })
+        .collect();
+    let mut requests: Vec<Option<Box<dyn crate::AsyncRequest>>> = resources
+        .iter()
+        .enumerate()
+        .map(|(index, resource)| {
+            let (answered, stop) = (answered.clone(), run_loop.clone());
+            Some(fs.request(
+                resource,
+                Box::new(move |_: Response| {
+                    answered.borrow_mut().push(index);
+                    if answered.borrow().len() == 4 {
+                        stop.stop();
+                    }
+                }),
+            ))
+        })
+        .collect();
+
+    resources[4].order.set(1);
+    resources[1].order.set(5);
+    requests[2] = None;
+
+    // Online before resuming, as in LowHighPriorityRequests.
+    NetworkStatus::set(Status::Online);
+    drop(paused);
+    run_loop.run();
+    assert_eq!(*answered.borrow(), [0, 4, 3, 1]);
 }
 
 // gtest: OnlineFileSource.MaximumConcurrentRequests

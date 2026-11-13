@@ -9,9 +9,9 @@ use crate::glyph::GlyphIDType;
 use crate::harfbuzz::HBShapeAdjust;
 
 /// Each UTF-16 code unit with the index of its section.
-pub type StyledText = (Vec<u16>, Vec<u8>);
+pub(crate) type StyledText = (Vec<u16>, Vec<u8>);
 
-pub type FontStackHash = u64;
+pub(crate) type FontStackHash = u64;
 
 /// A key for a font stack in the glyph maps: [`std::hash`] of its font
 /// names. Every thread and worker of one build computes the same key.
@@ -26,15 +26,15 @@ pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
 pub struct SectionOptions {
     pub scale: f64,
     pub font_stack: FontStack,
-    pub font_stack_hash: FontStackHash,
+    pub(crate) font_stack_hash: FontStackHash,
     pub type_: GlyphIDType,
-    pub adjusts: Option<Arc<Vec<HBShapeAdjust>>>,
-    pub start_index: i32,
+    pub(crate) adjusts: Option<Arc<Vec<HBShapeAdjust>>>,
+    pub(crate) start_index: i32,
     pub key_section: bool,
     /// Whether a section of text that HarfBuzz shaped runs right to left.
     /// Its glyphs are in visual order, so bidi reorders the section as one
     /// block.
-    pub rtl: bool,
+    pub(crate) rtl: bool,
     pub image_id: Option<String>,
     pub text_color: Option<Color>,
 }
@@ -66,7 +66,7 @@ impl SectionOptions {
     /// The options of an image section. The font stack hash and start index
     /// are 0 (C++ leaves them uninitialized).
     #[must_use]
-    pub fn image(image_id: String) -> Self {
+    pub(crate) fn image(image_id: String) -> Self {
         SectionOptions {
             scale: 1.0,
             font_stack: FontStack::new(),
@@ -113,7 +113,7 @@ impl TaggedString {
     }
 
     #[must_use]
-    pub fn from_styled_text(styled_text: StyledText, sections: Vec<SectionOptions>) -> Self {
+    pub(crate) fn from_styled_text(styled_text: StyledText, sections: Vec<SectionOptions>) -> Self {
         TaggedString { styled_text, sections, ..Default::default() }
     }
 
@@ -123,18 +123,18 @@ impl TaggedString {
     }
 
     #[must_use]
-    pub fn section_count(&self) -> usize {
+    pub(crate) fn section_count(&self) -> usize {
         self.sections.len()
     }
 
     #[must_use]
-    pub fn empty(&self) -> bool {
+    pub(crate) fn empty(&self) -> bool {
         self.styled_text.0.is_empty()
     }
 
     /// The section of the code unit at `index`. Panics when out of range.
     #[must_use]
-    pub fn get_section(&self, index: usize) -> &SectionOptions {
+    pub(crate) fn get_section(&self, index: usize) -> &SectionOptions {
         &self.sections[self.styled_text.1[index] as usize]
     }
 
@@ -234,7 +234,7 @@ impl TaggedString {
 
     /// The largest section scale, compared with `fmax`.
     #[must_use]
-    pub fn get_max_scale(&self) -> f64 {
+    pub(crate) fn get_max_scale(&self) -> f64 {
         let mut max_scale = 0.0;
         for i in 0..self.styled_text.0.len() {
             max_scale = mln_math::fmax(max_scale, self.get_section(i).scale);
@@ -244,7 +244,7 @@ impl TaggedString {
 
     /// `trim`: removes leading and trailing " \t\n\v\f\r", but not from
     /// sections that need shaping.
-    pub fn trim(&mut self) {
+    pub(crate) fn trim(&mut self) {
         let text = &self.styled_text.0;
         // find_first_not_of (npos = None)
         let mut beginning_whitespace = text.iter().position(|&c| !is_trim_whitespace(c));

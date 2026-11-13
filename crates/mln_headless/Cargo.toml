@@ -105,7 +105,7 @@ geojson = { package = "mln-rs-geojson", path = "../../vendor/geojson" }
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 mln_math = { package = "mln-rs-math", path = "../mln_math" }
-mln_storage = { workspace = true, features = ["sqlite"] }
+mln_storage = { workspace = true, features = ["sqlite", "test-support"] }
 mln_style_types.workspace = true
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_actor::RunLoop;
 
 use super::serial;
-use crate::file_source::{FileSource, FileSourceType};
+use crate::file_source::FileSourceType;
 use crate::file_source_manager::FileSourceManager;
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Resource};
@@ -23,7 +23,7 @@ fn count_network_factory(manager: &FileSourceManager) -> Arc<AtomicUsize> {
         FileSourceType::Network,
         Arc::new(move |_: &FileSourceManager, options: &ResourceOptions| {
             counter.fetch_add(1, Ordering::SeqCst);
-            Arc::new(OnlineFileSource::new(options)) as Arc<dyn FileSource>
+            Arc::new(OnlineFileSource::new(options))
         }),
     );
     calls

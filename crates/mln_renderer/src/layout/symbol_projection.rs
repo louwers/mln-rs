@@ -15,7 +15,7 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::render_tile::RenderTile;
 
-pub fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
+pub(crate) fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
     let cos_roll = state.get_roll().cos();
     let sin_roll = state.get_roll().sin();
     let cos_pitch = state.get_pitch().cos();
@@ -46,7 +46,7 @@ pub fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
     (vec_east, vec_south)
 }
 
-pub fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
+pub(crate) fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
     let (vec_east, vec_south) = get_tile_skew_vectors(state);
     let mut m: Mat4 = [0.0; 16];
     matrix::identity(&mut m);
@@ -60,7 +60,7 @@ pub fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
 /// A matrix for converting to the label coordinate space, from tile units
 /// when pitched with the map and from clip space otherwise; the shaders apply
 /// the tile's projection themselves.
-pub fn get_label_plane_matrix(
+pub(crate) fn get_label_plane_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
     state: &TransformState,
@@ -91,7 +91,7 @@ pub fn get_label_plane_matrix(
 
 /// A matrix for converting from the label coordinate space back to tile
 /// units when pitched with the map, and to GL coordinates otherwise.
-pub fn get_gl_coord_matrix(
+pub(crate) fn get_gl_coord_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
     state: &TransformState,
@@ -120,33 +120,33 @@ pub fn get_gl_coord_matrix(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TileDistance {
-    pub prev_tile_distance: f32,
-    pub last_segment_viewport_distance: f32,
+pub(crate) struct TileDistance {
+    pub(crate) prev_tile_distance: f32,
+    pub(crate) last_segment_viewport_distance: f32,
 }
 
 impl TileDistance {
     #[must_use]
-    pub fn new(prev_tile_distance: f32, last_segment_viewport_distance: f32) -> Self {
+    pub(crate) fn new(prev_tile_distance: f32, last_segment_viewport_distance: f32) -> Self {
         TileDistance { prev_tile_distance, last_segment_viewport_distance }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PlacedGlyph {
-    pub point: Point<f32>,
-    pub angle: f32,
-    pub tile_distance: Option<TileDistance>,
+pub(crate) struct PlacedGlyph {
+    pub(crate) point: Point<f32>,
+    pub(crate) angle: f32,
+    pub(crate) tile_distance: Option<TileDistance>,
 }
 
 impl PlacedGlyph {
     #[must_use]
-    pub fn new(point: Point<f32>, angle: f32, tile_distance: Option<TileDistance>) -> Self {
+    pub(crate) fn new(point: Point<f32>, angle: f32, tile_distance: Option<TileDistance>) -> Self {
         PlacedGlyph { point, angle, tile_distance }
     }
 }
 
-pub type PointAndCameraDistance = (Point<f32>, f32);
+pub(crate) type PointAndCameraDistance = (Point<f32>, f32);
 
 fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
     Point::new(a.x + b.x, a.y + b.y)
@@ -189,7 +189,7 @@ fn convert_point(p: Point<i16>) -> Point<f32> {
 
 /// `project(point, matrix)`.
 #[must_use]
-pub fn project(point: Point<f32>, matrix: &Mat4) -> PointAndCameraDistance {
+pub(crate) fn project(point: Point<f32>, matrix: &Mat4) -> PointAndCameraDistance {
     let mut pos: Vec4 = [f64::from(point.x), f64::from(point.y), 0.0, 1.0];
     let a = pos;
     matrix::transform_mat4(&mut pos, &a, matrix);
@@ -197,7 +197,7 @@ pub fn project(point: Point<f32>, matrix: &Mat4) -> PointAndCameraDistance {
 }
 
 #[must_use]
-pub fn evaluate_size_for_feature(zoom_evaluated_size: &ZoomEvaluatedSize, placed_symbol: &PlacedSymbol) -> f32 {
+pub(crate) fn evaluate_size_for_feature(zoom_evaluated_size: &ZoomEvaluatedSize, placed_symbol: &PlacedSymbol) -> f32 {
     if zoom_evaluated_size.is_feature_constant {
         zoom_evaluated_size.size
     } else if zoom_evaluated_size.is_zoom_constant {
@@ -217,7 +217,7 @@ enum PlacementResult {
 
 /// Projects tile points to the label plane a symbol is laid out in, through
 /// the tile's projection.
-pub struct LabelPlaneProjector<'a> {
+pub(crate) struct LabelPlaneProjector<'a> {
     tile: TileProjector<'a>,
     pitch_with_map: bool,
     translation: Point<f32>,
@@ -231,7 +231,7 @@ impl<'a> LabelPlaneProjector<'a> {
     /// A projector into the label plane. C++ defaults `translation` to
     /// (0, 0).
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         tile: &TileProjector<'a>,
         pitch_with_map: bool,
         rotate_with_map: bool,
@@ -265,7 +265,7 @@ impl<'a> LabelPlaneProjector<'a> {
     /// Tile units to the label plane; distance and occlusion come from the
     /// projection.
     #[must_use]
-    pub fn project(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
+    pub(crate) fn project(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
         let translated = add(tile_point, self.translation);
         if self.pitch_with_map {
             let projected = project(translated, &self.pitched_label_plane_matrix);
@@ -285,7 +285,7 @@ impl<'a> LabelPlaneProjector<'a> {
 
     /// Label plane to clip space, for orientation checks.
     #[must_use]
-    pub fn to_clip_space(&self, label_plane_point: Point<f32>) -> Point<f32> {
+    pub(crate) fn to_clip_space(&self, label_plane_point: Point<f32>) -> Point<f32> {
         if self.pitch_with_map {
             let tile_point = project(label_plane_point, &self.pitched_label_plane_matrix_inverse).0;
             let projected = self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), 0.0);
@@ -296,7 +296,7 @@ impl<'a> LabelPlaneProjector<'a> {
 
     /// Tile units straight to clip space.
     #[must_use]
-    pub fn to_clip_space_from_tile(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
+    pub(crate) fn to_clip_space_from_tile(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
         self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), 0.0)
     }
 }
@@ -304,19 +304,19 @@ impl<'a> LabelPlaneProjector<'a> {
 /// The projections of one symbol's line vertices, so each vertex is
 /// projected once however many glyphs walk it.
 #[derive(Debug, Default)]
-pub struct LineProjectionCache {
+pub(crate) struct LineProjectionCache {
     points: Vec<Option<ProjectedTilePoint>>,
     occluded: bool,
 }
 
 impl LineProjectionCache {
-    pub fn reset(&mut self, vertex_count: usize) {
+    pub(crate) fn reset(&mut self, vertex_count: usize) {
         self.points.clear();
         self.points.resize(vertex_count, None);
         self.occluded = false;
     }
 
-    pub fn get(
+    pub(crate) fn get(
         &mut self,
         index: usize,
         line: &GeometryCoordinates,
@@ -333,7 +333,7 @@ impl LineProjectionCache {
 
     /// Whether any vertex projected so far is behind the globe's horizon.
     #[must_use]
-    pub fn any_occluded(&self) -> bool {
+    pub(crate) fn any_occluded(&self) -> bool {
         self.occluded
     }
 }
@@ -346,7 +346,7 @@ fn is_visible(anchor_pos: &Point<f64>, clipping_buffer: &[f64; 2]) -> bool {
     x >= -clipping_buffer[0] && x <= clipping_buffer[0] && y >= -clipping_buffer[1] && y <= clipping_buffer[1]
 }
 
-pub fn add_dynamic_attributes(
+pub(crate) fn add_dynamic_attributes(
     anchor_point: Point<f32>,
     angle: f32,
     dynamic_attribute_data: &mut Vec<SymbolDynamicLayoutVertex>,
@@ -358,7 +358,7 @@ pub fn add_dynamic_attributes(
     dynamic_attribute_data.push(dynamic_attributes);
 }
 
-pub fn hide_glyphs(num_glyphs: usize, dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>) {
+pub(crate) fn hide_glyphs(num_glyphs: usize, dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>) {
     let count = 4;
     let offscreen_point = Point::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
     if dynamic_vertex_array.is_empty() {
@@ -498,7 +498,7 @@ fn place_glyph_along_line(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn place_first_and_last_glyph(
+pub(crate) fn place_first_and_last_glyph(
     font_scale: f32,
     line_offset_x: f32,
     line_offset_y: f32,
@@ -717,7 +717,7 @@ fn place_glyphs_along_line(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn reproject_line_labels(
+pub(crate) fn reproject_line_labels(
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
     placed_symbols: &[PlacedSymbol],
     tile_projector: &TileProjector<'_>,
