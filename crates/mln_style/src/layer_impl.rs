@@ -111,7 +111,8 @@ impl std::ops::Deref for dyn Impl {
 impl dyn Impl {
     /// The impl as a `T`, if it is one.
     pub fn downcast_ref<T: Impl>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 

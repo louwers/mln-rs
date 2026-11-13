@@ -10,7 +10,8 @@ pub trait VertexBufferResource: Any {}
 impl dyn VertexBufferResource {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: VertexBufferResource>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 

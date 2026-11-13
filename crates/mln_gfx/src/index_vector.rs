@@ -11,7 +11,8 @@ pub trait IndexBufferBase: Any {}
 impl dyn IndexBufferBase {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: IndexBufferBase>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 

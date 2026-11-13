@@ -327,6 +327,7 @@ pub(crate) trait Tile: Any {
 impl dyn Tile {
     /// The concrete type behind this trait object, if it is a `T`.
     pub(crate) fn downcast_ref<T: Tile>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }

@@ -339,7 +339,8 @@ impl fmt::Debug for dyn Expression {
 
 /// `e` as a `T`, if it is one.
 pub fn downcast<T: Expression>(e: &dyn Expression) -> Option<&T> {
-    (e as &dyn Any).downcast_ref()
+    let any: &dyn Any = e;
+    any.downcast_ref()
 }
 
 /// The union of the dependencies of `container`'s expressions.

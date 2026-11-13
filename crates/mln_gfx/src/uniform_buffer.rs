@@ -15,7 +15,8 @@ pub trait UniformBuffer: Any {
 impl dyn UniformBuffer {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: UniformBuffer>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 

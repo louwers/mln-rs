@@ -136,7 +136,8 @@ pub trait Context: Any {
 impl dyn Context {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: Context>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 
     /// `emplace_or_update_uniform_buffer` with the bytes of a `Pod` UBO.

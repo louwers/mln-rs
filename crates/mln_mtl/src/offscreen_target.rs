@@ -69,10 +69,10 @@ impl FrameTarget for OffscreenTarget {
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
         let image = self.image.borrow();
-        match image
-            .as_deref()
-            .and_then(|image| (image.resource() as &dyn Any).downcast_ref::<OffscreenTextureResource>())
-        {
+        match image.as_deref().and_then(|image| {
+            let resource: &dyn Any = image.resource();
+            resource.downcast_ref::<OffscreenTextureResource>()
+        }) {
             Some(resource) => {
                 // Nothing presents the frame, so waiting for it here is what
                 // paces continuous rendering.

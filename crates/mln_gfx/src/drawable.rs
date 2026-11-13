@@ -329,7 +329,8 @@ pub trait Drawable: Any {
 impl dyn Drawable {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_mut<T: Drawable>(&mut self) -> Option<&mut T> {
-        (self as &mut dyn Any).downcast_mut()
+        let any: &mut dyn Any = self;
+        any.downcast_mut()
     }
 }
 

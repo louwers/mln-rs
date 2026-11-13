@@ -234,11 +234,13 @@ pub trait Layer: Any + Send + Sync {
 impl dyn Layer {
     /// `layer->as<FooLayer>()`-style checked downcast.
     pub fn downcast_ref<T: Layer>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 
     pub fn downcast_mut<T: Layer>(&mut self) -> Option<&mut T> {
-        (self as &mut dyn Any).downcast_mut()
+        let any: &mut dyn Any = self;
+        any.downcast_mut()
     }
 }
 
