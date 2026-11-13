@@ -1,6 +1,8 @@
 // Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
 // backend) and test/renderer/fill_bucket.test.cpp.
 mod bucket_test;
+// Cameras that move faster than the network answers.
+mod fast_camera_test;
 // Ports test/layout/sort_key.test.cpp.
 mod gtest_sky;
 mod gtest_subdivision;

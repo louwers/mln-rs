@@ -1036,3 +1036,172 @@ fn a_drag_on_the_globe_turns_it_around_the_cursor() {
         "{dragged:?} {around_the_center:?}"
     );
 }
+
+/// A rig on the globe, centered at `latitude`.
+fn globe_rig(latitude: f64, zoom: f64, pitch: f64) -> Rig {
+    let mut rig = Rig::new();
+    rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    rig.camera.jump_to(&CameraOptions {
+        center: Some(LatLng::new(latitude, 20.0).unwrap()),
+        zoom: Some(zoom),
+        pitch: Some(pitch),
+        ..Default::default()
+    });
+    rig
+}
+
+/// The points from `from` to `to`, at most `step` px apart.
+fn line(from: ScreenCoordinate, to: ScreenCoordinate, step: f64) -> Vec<ScreenCoordinate> {
+    let steps = (distance(from, to) / step).ceil();
+    (0..=steps as u32)
+        .map(|i| {
+            let t = f64::from(i) / steps;
+            p(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)
+        })
+        .collect()
+}
+
+/// `turns` times around a circle of `radius` px that starts and ends at
+/// `start`, its points at most `step` px apart.
+fn circles(start: ScreenCoordinate, radius: f64, turns: f64, step: f64) -> Vec<ScreenCoordinate> {
+    let steps = (turns * std::f64::consts::TAU * radius / step).ceil();
+    (0..=steps as u32)
+        .map(|i| {
+            let angle = turns * std::f64::consts::TAU * f64::from(i) / steps;
+            p(start.x - radius + radius * angle.cos(), start.y + radius * angle.sin())
+        })
+        .collect()
+}
+
+/// Drags the mouse along `path`, without releasing it; returns the farthest
+/// the location under the press got from the pointer, in px.
+fn drag_drift(rig: &mut Rig, path: &[ScreenCoordinate]) -> f64 {
+    let ground = rig.unproject(path[0]);
+    rig.down(1, PointerKind::Mouse, path[0].x, path[0].y);
+    let mut drift = 0.0f64;
+    for at in &path[1..] {
+        rig.now += 16.0;
+        rig.to(1, at.x, at.y);
+        drift = drift.max(distance(rig.project(ground), *at));
+    }
+    drift
+}
+
+// Port-only: with the bearing held, each step of a drag on the globe loses
+// the turn its rotation would give the bearing. Left at that, the location
+// grabbed ends these drags tens to hundreds of pixels from the pointer at
+// zoom 2, and up to 50 px at zoom 6. The zoom follows the center's latitude
+// through the drag, to keep the planet's size; the location is held at that
+// zoom.
+#[test]
+fn a_drag_on_the_globe_holds_the_location_it_grabbed() {
+    let paths = [
+        ("across", line(p(250.0, 300.0), p(550.0, 300.0), 4.0)),
+        ("across, above the center", line(p(250.0, 220.0), p(550.0, 220.0), 4.0)),
+        ("diagonal", line(p(300.0, 200.0), p(520.0, 420.0), 4.0)),
+        ("north", line(p(400.0, 250.0), p(430.0, 500.0), 4.0)),
+        ("circles", circles(p(460.0, 300.0), 60.0, 3.0, 4.0)),
+        ("wide circles", circles(p(520.0, 300.0), 120.0, 5.0, 4.0)),
+        ("wide circles, coarse steps", circles(p(520.0, 300.0), 120.0, 5.0, 20.0)),
+    ];
+    // At zoom 2 with a pitch, the pointer of most of these is at the planet's
+    // edge or off it, where the drag doesn't hold.
+    for (zoom, pitch) in [(2.0, 0.0), (6.0, 0.0), (6.0, 45.0)] {
+        for (name, path) in &paths {
+            if zoom == 2.0 && *name == "north" {
+                // Ends with the center near the pole.
+                continue;
+            }
+            let mut rig = globe_rig(30.0, zoom, pitch);
+            let drift = drag_drift(&mut rig, path);
+            assert!(drift < 0.01, "{name} at zoom {zoom}, pitch {pitch}: {drift} px");
+            assert!(rig.bearing().abs() < 1e-9, "{name}: bearing {}", rig.bearing());
+        }
+    }
+    let mut rig = globe_rig(60.0, 2.0, 0.0);
+    let drift = drag_drift(&mut rig, &paths[5].1);
+    assert!(drift < 0.01, "at latitude 60: {drift} px");
+    // A drag that returns to its press returns the camera.
+    let center = rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+    assert!((center.latitude() - 60.0).abs() < 1e-6 && (center.longitude() - 20.0).abs() < 1e-6, "{center:?}");
+    assert!((rig.zoom() - 2.0).abs() < 1e-6, "{}", rig.zoom());
+}
+
+// Port-only: where a drag on the globe can't hold its location (the pointer
+// at the planet's edge or off it, the center near a pole, a location that
+// would turn the planet much faster than the pointer moves), it carries on
+// as a drag that doesn't, and takes hold again when it can. Neither change
+// jumps: the center moves no more than a few px along the surface per px of
+// pointer travel.
+#[test]
+fn a_drag_on_the_globe_changes_how_it_holds_without_a_jump() {
+    let cases = [
+        ("off the planet", 30.0, 1.0, 0.0, p(400.0, 300.0), p(720.0, 300.0)),
+        ("off the planet, diagonal", 30.0, 1.0, 0.0, p(380.0, 320.0), p(640.0, 80.0)),
+        ("a high-latitude location sideways", 50.0, 2.0, 0.0, p(400.0, 130.0), p(700.0, 130.0)),
+        ("a location near the pole sideways", 40.0, 2.0, 0.0, p(430.0, 60.0), p(100.0, 100.0)),
+        ("to the pole", 60.0, 2.0, 0.0, p(380.0, 200.0), p(420.0, 520.0)),
+        ("pitched, to the horizon", 30.0, 2.0, 45.0, p(400.0, 450.0), p(520.0, 230.0)),
+        ("pitched, sideways", 30.0, 2.0, 45.0, p(200.0, 400.0), p(700.0, 330.0)),
+        ("to the south pole", -60.0, 3.0, 30.0, p(380.0, 400.0), p(420.0, 20.0)),
+    ];
+    for (name, latitude, zoom, pitch, from, to) in cases {
+        let mut rig = globe_rig(latitude, zoom, pitch);
+        // There and back.
+        let mut path = line(from, to, 1.0);
+        path.extend(line(to, from, 1.0).into_iter().skip(1));
+        rig.down(1, PointerKind::Mouse, from.x, from.y);
+        // The first step that moves the map is the jump past the click
+        // tolerance, from the press.
+        let mut last = from;
+        let mut fastest = 0.0f64;
+        for at in &path[1..] {
+            rig.now += 16.0;
+            let before = rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+            let radius = 512.0 * rig.zoom().exp2()
+                / std::f64::consts::TAU
+                / before.latitude().to_radians().cos().max(85.051_129f64.to_radians().cos());
+            rig.to(1, at.x, at.y);
+            let after = rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+            if after == before {
+                continue;
+            }
+            let (a, b) = (before.latitude().to_radians(), after.latitude().to_radians());
+            let turn = (a.sin() * b.sin()
+                + a.cos() * b.cos() * (after.longitude() - before.longitude()).to_radians().cos())
+            .clamp(-1.0, 1.0)
+            .acos();
+            fastest = fastest.max(turn * radius / distance(*at, last));
+            last = *at;
+        }
+        assert!(fastest > 0.5, "{name}: {fastest}");
+        assert!(fastest < 5.0, "{name}: the center moved {fastest} px per px");
+    }
+}
+
+// Port-only: a second finger landing, and the pinch that follows, take the
+// drag's hold over without moving the map back to where the first finger
+// grabbed it.
+#[test]
+fn a_finger_landing_in_a_globe_drag_doesnt_jump() {
+    let mut rig = globe_rig(30.0, 2.0, 0.0);
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    for i in 1..=20 {
+        rig.now += 16.0;
+        rig.to(1, 300.0 + 4.0 * f64::from(i), 300.0);
+    }
+    rig.down(2, PointerKind::Touch, 500.0, 200.0);
+    let ground = rig.unproject(p(440.0, 250.0));
+    for i in 1..=20 {
+        rig.now += 16.0;
+        let shift = 4.0 * f64::from(i);
+        let before = rig.project(ground);
+        rig.to(1, 380.0 + shift, 300.0);
+        rig.to(2, 500.0 + shift, 200.0);
+        let step = distance(rig.project(ground), before);
+        assert!(step < 6.0, "step {i}: {step} px");
+    }
+    // The pan of two fingers holds the location under their middle.
+    let drift = distance(rig.project(ground), p(520.0, 250.0));
+    assert!(drift < 0.5, "{drift} px");
+}
