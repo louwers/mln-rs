@@ -10,6 +10,7 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::context::Context;
@@ -22,7 +23,6 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
-use mln_util::immutable::Immutable;
 use mln_util::mat4::{Mat4, matrix};
 
 use crate::layers::cast_matrix;
@@ -34,13 +34,13 @@ pub type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
 /// The data members of `LayerTweaker`.
 pub struct LayerTweakerBase {
     pub id: String,
-    pub evaluated_properties: Immutable<dyn LayerProperties>,
+    pub evaluated_properties: Arc<dyn LayerProperties>,
     pub properties_updated: bool,
     pub projection_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl LayerTweakerBase {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         LayerTweakerBase {
             id,
             evaluated_properties: properties,
@@ -78,7 +78,7 @@ pub trait LayerTweaker {
         &self.base().id
     }
 
-    fn update_properties(&mut self, new_props: Immutable<dyn LayerProperties>) {
+    fn update_properties(&mut self, new_props: Arc<dyn LayerProperties>) {
         let base = self.base_mut();
         base.evaluated_properties = new_props;
         base.properties_updated = true;

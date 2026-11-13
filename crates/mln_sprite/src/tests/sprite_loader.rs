@@ -12,13 +12,12 @@ use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 
 use super::{FixtureLog, cpp_path};
 use crate::sprite_loader::SpriteLoader;
 use crate::sprite_loader_observer::SpriteLoaderObserver;
 
-type Loaded = Box<dyn FnMut(Vec<Immutable<Impl>>)>;
+type Loaded = Box<dyn FnMut(Vec<Arc<Impl>>)>;
 type Failed = Box<dyn FnMut(Error)>;
 
 #[derive(Default)]
@@ -28,7 +27,7 @@ struct StubSpriteLoaderObserver {
 }
 
 impl SpriteLoaderObserver for StubSpriteLoaderObserver {
-    fn on_sprite_loaded(&self, _sprite: Option<Sprite>, images: Vec<Immutable<Impl>>) {
+    fn on_sprite_loaded(&self, _sprite: Option<Sprite>, images: Vec<Arc<Impl>>) {
         if let Some(f) = self.sprite_loaded.borrow_mut().as_mut() {
             f(images);
         }

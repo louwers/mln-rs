@@ -5,10 +5,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_style::layer_properties::LayerProperties;
-use mln_style::source::{self, static_immutable_cast};
+use mln_style::source::{self, downcast_arc};
 use mln_style::source_impl::Impl as _;
 use mln_style::sources::custom_geometry_source;
-use mln_util::immutable::Immutable;
 
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
@@ -27,13 +26,13 @@ impl RenderCustomGeometrySource {
     /// `RenderCustomGeometrySource(Immutable<style::CustomGeometrySource::Impl>, const TaggedScheduler&)`.
     #[must_use]
     pub fn new(impl_: Arc<custom_geometry_source::Impl>) -> Self {
-        let impl_: Immutable<dyn source::Impl> = impl_;
+        let impl_: Arc<dyn source::Impl> = impl_;
         RenderCustomGeometrySource { tile_source: RenderTileSource::new(impl_) }
     }
 
     /// `impl()`.
     fn impl_(&self) -> Arc<custom_geometry_source::Impl> {
-        static_immutable_cast::<custom_geometry_source::Impl>(&self.tile_source.base.base_impl)
+        downcast_arc::<custom_geometry_source::Impl>(&self.tile_source.base.base_impl)
     }
 
     pub fn tile_source(&self) -> &RenderTileSource {
@@ -56,8 +55,8 @@ impl RenderSource for RenderCustomGeometrySource {
 
     fn update(
         &mut self,
-        base_impl: Immutable<dyn source::Impl>,
-        layers: &[Immutable<dyn LayerProperties>],
+        base_impl: Arc<dyn source::Impl>,
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,

@@ -18,7 +18,6 @@ use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Duration, Timestamp};
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -231,7 +230,7 @@ pub trait Tile: Any {
     /// Returns `true` if the corresponding render layer data is present in
     /// this tile (and i.e. it was successfully updated); returns `false`
     /// otherwise.
-    fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool;
+    fn layer_properties_updated(&self, layer_properties: &Arc<dyn LayerProperties>) -> bool;
 
     fn set_show_collision_boxes(&self, _show: bool) {}
 
@@ -246,7 +245,7 @@ pub trait Tile: Any {
         false
     }
 
-    fn set_layers(&self, _layers: &[Immutable<dyn LayerProperties>], _global_state: Option<Arc<GlobalStateMap>>) {}
+    fn set_layers(&self, _layers: &[Arc<dyn LayerProperties>], _global_state: Option<Arc<GlobalStateMap>>) {}
 
     fn set_mask(&self, _mask: TileMask) {}
 

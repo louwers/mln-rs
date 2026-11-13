@@ -17,7 +17,6 @@ use mln_storage::{AsyncRequest, Data, FileSource, Resource, Response};
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecMap;
 
 use crate::sprite_loader_observer::{NullSpriteLoaderObserver, SpriteLoaderObserver};
@@ -51,7 +50,7 @@ pub struct SpriteLoader {
 
 /// The result `parseSprite` hands back from the thread pool.
 struct ParseResult {
-    images: Vec<Immutable<Impl>>,
+    images: Vec<Arc<Impl>>,
     error: Option<Error>,
 }
 

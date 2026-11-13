@@ -10,7 +10,6 @@ use std::sync::Arc;
 use mln_style_types::SourceType;
 use mln_util::chrono::Duration;
 use mln_util::constants;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
 /// `WarnIfOverscaleFactorCapsPrefetchDelta`.
@@ -116,9 +115,12 @@ impl std::ops::Deref for dyn Impl {
     }
 }
 
-/// `staticImmutableCast<T>(impl)` for source impls. C++ uses `static_cast`; this
-/// panics on a type mismatch.
-pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Arc<T> {
+/// Returns a new handle to `impl_` as its concrete source impl type.
+///
+/// # Panics
+///
+/// If `impl_` is not a `T`.
+pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
     let any: Arc<dyn Any + Send + Sync> = impl_.clone();
     any.downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
 }

@@ -9,8 +9,8 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
 use mln_style_types::ResamplingType;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::color_ramp_property!(
     /// `struct ColorReliefColor : ColorRampProperty {};`
@@ -49,7 +49,7 @@ pub struct ColorReliefLayerProperties {
 
 impl ColorReliefLayerProperties {
     /// `explicit ColorReliefLayerProperties(Immutable<ColorReliefLayer::Impl>)`.
-    pub fn new(impl_: Immutable<ColorReliefLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<ColorReliefLayerImpl>) -> Self {
         ColorReliefLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             evaluated: ColorReliefPaintProperties::PossiblyEvaluated::default(),
@@ -58,7 +58,7 @@ impl ColorReliefLayerProperties {
 
     /// `ColorReliefLayerProperties(Immutable<ColorReliefLayer::Impl>, ColorReliefPaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<ColorReliefLayerImpl>,
+        impl_: Arc<ColorReliefLayerImpl>,
         evaluated: ColorReliefPaintProperties::PossiblyEvaluated,
     ) -> Self {
         ColorReliefLayerProperties {

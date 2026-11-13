@@ -15,7 +15,6 @@ use mln_renderer::image_manager::{ImageManager, ImageManagerObserver, ImageReque
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
 
@@ -62,7 +61,7 @@ impl Drop for FixtureLog {
 }
 
 /// `makeMutable<style::Image::Impl>(id, PremultipliedImage(size), pixelRatio, sdf)`.
-fn make_image(id: &str, size: Size, pixel_ratio: f32, sdf: bool) -> Immutable<ImageImpl> {
+fn make_image(id: &str, size: Size, pixel_ratio: f32, sdf: bool) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
             id.to_owned(),

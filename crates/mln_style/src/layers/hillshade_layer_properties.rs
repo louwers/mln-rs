@@ -10,8 +10,8 @@ use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase
 use crate::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::paint_property!(
     /// `struct HillshadeAccentColor : PaintProperty<Color>`:
@@ -93,7 +93,7 @@ pub struct HillshadeLayerProperties {
 
 impl HillshadeLayerProperties {
     /// `explicit HillshadeLayerProperties(Immutable<HillshadeLayer::Impl>)`.
-    pub fn new(impl_: Immutable<HillshadeLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<HillshadeLayerImpl>) -> Self {
         HillshadeLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             evaluated: HillshadePaintProperties::PossiblyEvaluated::default(),
@@ -102,7 +102,7 @@ impl HillshadeLayerProperties {
 
     /// `HillshadeLayerProperties(Immutable<HillshadeLayer::Impl>, HillshadePaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<HillshadeLayerImpl>,
+        impl_: Arc<HillshadeLayerImpl>,
         evaluated: HillshadePaintProperties::PossiblyEvaluated,
     ) -> Self {
         HillshadeLayerProperties {

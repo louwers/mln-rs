@@ -15,7 +15,6 @@ use mln_gfx::types::TexturePixelType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{Glyph, GlyphMap, GlyphPosition, GlyphPositions};
 use mln_util::image::{AlphaImage, PremultipliedImage};
-use mln_util::immutable::Immutable;
 use mln_util::serialization::sorted;
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
@@ -100,7 +99,7 @@ struct ImageAllocationKey {
 struct ImageAllocation {
     // Keeps the revision alive so its address can't be reused by another
     // image while the bin exists.
-    _image: Immutable<ImageImpl>,
+    _image: Arc<ImageImpl>,
     bin_id: i32,
 }
 
@@ -118,7 +117,7 @@ struct GlyphAllocationKey {
 struct GlyphAllocation {
     // Keeps the glyph alive so its address can't be reused by another glyph
     // while the bin exists.
-    _glyph: Immutable<Glyph>,
+    _glyph: Arc<Glyph>,
     bin_id: i32,
 }
 
@@ -188,7 +187,7 @@ impl DynamicTextureAtlas {
 
         let mut dyn_tex_index = 0usize;
         let mut dyn_tex_size = START_SIZE;
-        let mut glyphs_to_upload: Vec<(TextureHandle, Immutable<Glyph>, u64)> = Vec::new();
+        let mut glyphs_to_upload: Vec<(TextureHandle, Arc<Glyph>, u64)> = Vec::new();
 
         while glyph_atlas.dynamic_texture.is_none() {
             let texture = if dyn_tex_index < state.dynamic_textures.len() {
@@ -290,8 +289,8 @@ impl DynamicTextureAtlas {
 
         let mut dyn_tex_index = 0usize;
         let mut dyn_tex_size = START_SIZE;
-        let mut icons_to_upload: Vec<(TextureHandle, Immutable<ImageImpl>)> = Vec::with_capacity(icons.len());
-        let mut patterns_to_upload: Vec<(TextureHandle, Immutable<ImageImpl>)> = Vec::with_capacity(patterns.len());
+        let mut icons_to_upload: Vec<(TextureHandle, Arc<ImageImpl>)> = Vec::with_capacity(icons.len());
+        let mut patterns_to_upload: Vec<(TextureHandle, Arc<ImageImpl>)> = Vec::with_capacity(patterns.len());
 
         while image_atlas.dynamic_texture.is_none() {
             let texture = if dyn_tex_index < state.dynamic_textures.len() {
@@ -438,7 +437,7 @@ impl DynamicTextureAtlas {
     fn reserve_image(
         state: &mut State,
         dynamic_texture: &DynamicTexturePtr,
-        image: &Immutable<ImageImpl>,
+        image: &Arc<ImageImpl>,
         type_: ImageType,
     ) -> Option<TextureHandle> {
         let size = Size::new(
@@ -467,7 +466,7 @@ impl DynamicTextureAtlas {
     fn reserve_glyph(
         state: &mut State,
         dynamic_texture: &DynamicTexturePtr,
-        glyph: &Immutable<Glyph>,
+        glyph: &Arc<Glyph>,
     ) -> Option<TextureHandle> {
         let size = Size::new(
             glyph.bitmap.size.width + 2 * u32::from(PADDING),

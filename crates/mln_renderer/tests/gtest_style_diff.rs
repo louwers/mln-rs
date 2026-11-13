@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use mln_renderer::style_diff::diff_layers;
 use mln_style::layer::{Impl, ImplBase, LayerTypeInfo, layer_type_info};
-use mln_util::immutable::Immutable;
 
 #[derive(Debug)]
 struct TestLayerImpl {
@@ -12,7 +11,7 @@ struct TestLayerImpl {
 }
 
 impl TestLayerImpl {
-    fn create(layer_id: &str, source_id: &str) -> Immutable<dyn Impl> {
+    fn create(layer_id: &str, source_id: &str) -> Arc<dyn Impl> {
         Arc::new(TestLayerImpl { base: ImplBase::new(layer_id.to_owned(), source_id.to_owned()) })
     }
 }
@@ -45,7 +44,7 @@ impl Impl for TestLayerImpl {
     }
 }
 
-type ImmutableLayer = Immutable<dyn Impl>;
+type ImmutableLayer = Arc<dyn Impl>;
 
 // gtest: StyleDiff.Empty
 #[test]

@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/symbol_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
 // branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
@@ -18,7 +20,6 @@ use mln_style::layers::symbol_layer_properties::{
 };
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
-use mln_util::immutable::Immutable;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::sync::RwLockExt;
 
@@ -38,7 +39,7 @@ pub struct SymbolLayerTweaker {
 }
 
 impl SymbolLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         SymbolLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

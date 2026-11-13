@@ -46,7 +46,6 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 // layers: debug
@@ -398,9 +397,9 @@ pub struct PolylineLayerTweaker {
 impl PolylineLayerTweaker {
     #[must_use]
     pub fn new(properties: LineEvaluatedPropsUBO) -> Self {
-        let layer_impl: Immutable<dyn layer::Impl> =
+        let layer_impl: Arc<dyn layer::Impl> =
             Arc::new(PolylineLayerImpl { base: layer::ImplBase::new(String::new(), String::new()) });
-        let layer_properties: Immutable<dyn LayerProperties> =
+        let layer_properties: Arc<dyn LayerProperties> =
             Arc::new(PolylineLayerProperties { base: LayerPropertiesBase::new(layer_impl) });
         PolylineLayerTweaker {
             base: LayerTweakerBase::new("debug-polyline".to_owned(), layer_properties),
@@ -519,7 +518,7 @@ pub struct RenderTileSource {
 impl RenderTileSource {
     /// `RenderTileSource(Immutable<style::Source::Impl>, const TaggedScheduler&)`,
     /// without the thread pool (see `TileCache::new`).
-    pub fn new(impl_: Immutable<dyn source::Impl>) -> Self {
+    pub fn new(impl_: Arc<dyn source::Impl>) -> Self {
         let base = RenderSourceBase::new(impl_);
         let mut tile_pyramid = TilePyramid::new();
         tile_pyramid.set_observer(base.tile_observer());

@@ -1,7 +1,7 @@
 // Ports src/mln/renderer/buckets/line_bucket.hpp and line_bucket.cpp
 
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -23,7 +23,6 @@ use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::sync::RwLockExt;
@@ -90,7 +89,7 @@ impl LineBucket {
     #[must_use]
     pub fn new(
         layout: LineLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self {

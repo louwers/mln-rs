@@ -6,9 +6,10 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_style::layer;
-use mln_style::layer::{layer_type_info, static_immutable_cast};
+use mln_style::layer::{downcast_arc, layer_type_info};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
@@ -19,7 +20,6 @@ use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style::layers::symbol_layer_impl::Impl as SymbolLayerImpl;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::Bucket;
@@ -38,75 +38,73 @@ use crate::layout::pattern_layout::{
 use crate::render_layer::RenderLayerPtr;
 
 /// `LayerManager::createRenderLayer(Immutable<style::Layer::Impl>)`.
-pub fn create_render_layer(impl_: &Immutable<dyn layer::Impl>) -> Option<RenderLayerPtr> {
+pub fn create_render_layer(impl_: &Arc<dyn layer::Impl>) -> Option<RenderLayerPtr> {
     let type_info = impl_.get_type_info();
     if std::ptr::eq(type_info, CustomLayerImpl::static_type_info()) {
         let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(RenderCustomLayer::new(static_immutable_cast::<CustomLayerImpl>(impl_))));
+            Rc::new(RefCell::new(RenderCustomLayer::new(downcast_arc::<CustomLayerImpl>(impl_))));
         return Some(layer);
     }
     if std::ptr::eq(type_info, BackgroundLayerImpl::static_type_info()) {
         let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(RenderBackgroundLayer::new(static_immutable_cast::<BackgroundLayerImpl>(impl_))));
+            Rc::new(RefCell::new(RenderBackgroundLayer::new(downcast_arc::<BackgroundLayerImpl>(impl_))));
         return Some(layer);
     }
     if std::ptr::eq(type_info, CircleLayerImpl::static_type_info()) {
         let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(RenderCircleLayer::new(static_immutable_cast::<CircleLayerImpl>(impl_))));
+            Rc::new(RefCell::new(RenderCircleLayer::new(downcast_arc::<CircleLayerImpl>(impl_))));
         return Some(layer);
     }
     if std::ptr::eq(type_info, FillLayerImpl::static_type_info()) {
-        let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(RenderFillLayer::new(static_immutable_cast::<FillLayerImpl>(impl_))));
+        let layer: RenderLayerPtr = Rc::new(RefCell::new(RenderFillLayer::new(downcast_arc::<FillLayerImpl>(impl_))));
         return Some(layer);
     }
     if std::ptr::eq(type_info, LineLayerImpl::static_type_info()) {
-        let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(RenderLineLayer::new(static_immutable_cast::<LineLayerImpl>(impl_))));
+        let layer: RenderLayerPtr = Rc::new(RefCell::new(RenderLineLayer::new(downcast_arc::<LineLayerImpl>(impl_))));
         return Some(layer);
     }
     if std::ptr::eq(type_info, FillExtrusionLayerImpl::static_type_info()) {
         // conformance: FillExtrusionLayerFactory::createRenderLayer
-        let layer: RenderLayerPtr = Rc::new(RefCell::new(RenderFillExtrusionLayer::new(static_immutable_cast::<
-            FillExtrusionLayerImpl,
-        >(impl_))));
+        let layer: RenderLayerPtr =
+            Rc::new(RefCell::new(RenderFillExtrusionLayer::new(downcast_arc::<FillExtrusionLayerImpl>(impl_))));
         return Some(layer);
     }
     if std::ptr::eq(type_info, RasterLayerImpl::static_type_info()) {
         // conformance: RasterLayerFactory::createRenderLayer
         let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(RenderRasterLayer::new(static_immutable_cast::<RasterLayerImpl>(impl_))));
+            Rc::new(RefCell::new(RenderRasterLayer::new(downcast_arc::<RasterLayerImpl>(impl_))));
         return Some(layer);
     }
     // dem-heatmap: HeatmapLayerFactory::createRenderLayer
     if std::ptr::eq(type_info, mln_style::layers::heatmap_layer_impl::Impl::static_type_info()) {
         let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(crate::layers::render_heatmap_layer::RenderHeatmapLayer::new(
-                static_immutable_cast::<mln_style::layers::heatmap_layer_impl::Impl>(impl_),
-            )));
+            Rc::new(RefCell::new(crate::layers::render_heatmap_layer::RenderHeatmapLayer::new(downcast_arc::<
+                mln_style::layers::heatmap_layer_impl::Impl,
+            >(impl_))));
         return Some(layer);
     }
     // dem-heatmap: ColorReliefLayerFactory::createRenderLayer
     if std::ptr::eq(type_info, mln_style::layers::color_relief_layer_impl::Impl::static_type_info()) {
         let layer: RenderLayerPtr =
             Rc::new(RefCell::new(crate::layers::render_color_relief_layer::RenderColorReliefLayer::new(
-                static_immutable_cast::<mln_style::layers::color_relief_layer_impl::Impl>(impl_),
+                downcast_arc::<mln_style::layers::color_relief_layer_impl::Impl>(impl_),
             )));
         return Some(layer);
     }
     // dem-heatmap: HillshadeLayerFactory::createRenderLayer
     if std::ptr::eq(type_info, mln_style::layers::hillshade_layer_impl::Impl::static_type_info()) {
         let layer: RenderLayerPtr =
-            Rc::new(RefCell::new(crate::layers::render_hillshade_layer::RenderHillshadeLayer::new(
-                static_immutable_cast::<mln_style::layers::hillshade_layer_impl::Impl>(impl_),
-            )));
+            Rc::new(RefCell::new(crate::layers::render_hillshade_layer::RenderHillshadeLayer::new(downcast_arc::<
+                mln_style::layers::hillshade_layer_impl::Impl,
+            >(
+                impl_
+            ))));
         return Some(layer);
     }
     if std::ptr::eq(type_info, SymbolLayerImpl::static_type_info()) {
         // symbols: SymbolLayerFactory::createRenderLayer
-        let layer: RenderLayerPtr = Rc::new(RefCell::new(crate::layers::RenderSymbolLayer::new(
-            static_immutable_cast::<SymbolLayerImpl>(impl_),
-        )));
+        let layer: RenderLayerPtr =
+            Rc::new(RefCell::new(crate::layers::RenderSymbolLayer::new(downcast_arc::<SymbolLayerImpl>(impl_))));
         return Some(layer);
     }
     // TODO(port): the other layer types (each arrives with its RenderLayer).
@@ -116,10 +114,7 @@ pub fn create_render_layer(impl_: &Immutable<dyn layer::Impl>) -> Option<RenderL
 
 /// `LayerManager::createBucket(parameters, layers)`: the layer types without
 /// a layout.
-pub fn create_bucket(
-    parameters: &BucketParameters,
-    layers: &[Immutable<dyn LayerProperties>],
-) -> Option<Box<dyn Bucket>> {
+pub fn create_bucket(parameters: &BucketParameters, layers: &[Arc<dyn LayerProperties>]) -> Option<Box<dyn Bucket>> {
     debug_assert!(!layers.is_empty());
     debug_assert_eq!(parameters.layer_type.layout, layer_type_info::Layout::NotRequired);
     // dem-heatmap: HeatmapLayerFactory::createBucket
@@ -134,7 +129,7 @@ pub fn create_bucket(
 pub fn create_layout(
     parameters: &mut LayoutParameters<'_>,
     tile_layer: SourceLayer,
-    layers: &[Immutable<dyn LayerProperties>],
+    layers: &[Arc<dyn LayerProperties>],
 ) -> Result<Option<Box<dyn Layout>>, Error> {
     debug_assert!(!layers.is_empty());
     debug_assert_eq!(parameters.bucket_parameters.layer_type.layout, layer_type_info::Layout::Required);

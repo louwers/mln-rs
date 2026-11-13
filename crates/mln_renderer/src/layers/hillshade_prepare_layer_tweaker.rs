@@ -2,13 +2,14 @@
 // src/mln/renderer/layers/hillshade_prepare_layer_tweaker.cpp and
 // src/mln/gfx/hillshade_prepare_drawable_data.hpp.
 
+use std::sync::Arc;
+
 use mln_gfx::LayerGroupBase;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use mln_gfx::shaders::shader_defines::{ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO};
 use mln_style::layer_properties::LayerProperties;
 use mln_util::constants::EXTENT;
-use mln_util::immutable::Immutable;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::tileset::RasterEncoding;
 
@@ -30,7 +31,7 @@ pub struct HillshadePrepareLayerTweaker {
 }
 
 impl HillshadePrepareLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         HillshadePrepareLayerTweaker { base: LayerTweakerBase::new(id, properties) }
     }
 }

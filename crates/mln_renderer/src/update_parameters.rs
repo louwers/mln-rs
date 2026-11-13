@@ -8,7 +8,6 @@ use mln_style::expression::GlobalStateMap;
 use mln_style::transition_options::TransitionOptions;
 use mln_style::{image, layer, light, sky, source};
 use mln_util::chrono::TimePoint;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[derive(Clone)]
@@ -25,9 +24,9 @@ pub struct UpdateParameters {
     pub font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
     pub sprite_loaded: bool,
     pub transition_options: TransitionOptions,
-    pub light: Immutable<light::Impl>,
-    pub sky: Option<Immutable<sky::Impl>>,
-    pub images: Immutable<Vec<Immutable<image::Impl>>>,
+    pub light: Arc<light::Impl>,
+    pub sky: Option<Arc<sky::Impl>>,
+    pub images: Arc<Vec<Arc<image::Impl>>>,
     pub sources: ImmutableVector<dyn source::Impl>,
     pub layers: ImmutableVector<dyn layer::Impl>,
     /// The style's global state, used by "global-state" expressions.

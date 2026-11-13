@@ -10,6 +10,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
 use mln_style::layer_properties::LayerProperties;
@@ -19,7 +20,6 @@ use mln_style_types::SourceType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 
 use crate::image_manager::ImageManager;
 use crate::paint_parameters::TransformParameters;
@@ -125,7 +125,7 @@ impl TileObserver for RenderSourceTileObserver {
 
 /// The data members of `RenderSource`.
 pub struct RenderSourceBase {
-    pub base_impl: Immutable<dyn source::Impl>,
+    pub base_impl: Arc<dyn source::Impl>,
     pub enabled: bool,
     /// `this` as the `TileObserver` of the source's tiles.
     tile_observer: Rc<RenderSourceTileObserver>,
@@ -133,7 +133,7 @@ pub struct RenderSourceBase {
 
 impl RenderSourceBase {
     /// `RenderSource(Immutable<style::Source::Impl>)`.
-    pub fn new(impl_: Immutable<dyn source::Impl>) -> Self {
+    pub fn new(impl_: Arc<dyn source::Impl>) -> Self {
         let source_id = impl_.id.clone();
         RenderSourceBase {
             base_impl: impl_,
@@ -162,8 +162,8 @@ pub trait RenderSource {
 
     fn update(
         &mut self,
-        impl_: Immutable<dyn source::Impl>,
-        layers: &[Immutable<dyn LayerProperties>],
+        impl_: Arc<dyn source::Impl>,
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
@@ -310,35 +310,33 @@ pub trait RenderSource {
 
 /// `RenderSource::create(impl, threadPool)`, without the thread pool (see
 /// `TileCache::new`).
-pub fn create(impl_: &Immutable<dyn source::Impl>) -> Option<Box<dyn RenderSource>> {
+pub fn create(impl_: &Arc<dyn source::Impl>) -> Option<Box<dyn RenderSource>> {
     match impl_.type_ {
         // the TileSet isn't available yet, so we can't make different
         // sources by format
-        SourceType::Vector => {
-            Some(Box::new(RenderVectorSource::new(source::static_immutable_cast::<tile_source::Impl>(impl_))))
-        }
-        SourceType::Raster => {
-            Some(Box::new(RenderRasterSource::new(source::static_immutable_cast::<tile_source::Impl>(impl_))))
-        }
+        SourceType::Vector => Some(Box::new(RenderVectorSource::new(source::downcast_arc::<tile_source::Impl>(impl_)))),
+        SourceType::Raster => Some(Box::new(RenderRasterSource::new(source::downcast_arc::<tile_source::Impl>(impl_)))),
         // dem-heatmap
         SourceType::RasterDEM => Some(Box::new(crate::sources::render_raster_dem_source::RenderRasterDEMSource::new(
-            source::static_immutable_cast::<tile_source::Impl>(impl_),
+            source::downcast_arc::<tile_source::Impl>(impl_),
         ))),
         SourceType::GeoJSON => {
-            Some(Box::new(RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(impl_))))
+            Some(Box::new(RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(impl_))))
         }
         // conformance
-        SourceType::Image => Some(Box::new(crate::sources::render_image_source::RenderImageSource::new(
-            source::static_immutable_cast::<mln_style::sources::image_source::Impl>(impl_),
-        ))),
+        SourceType::Image => {
+            Some(Box::new(crate::sources::render_image_source::RenderImageSource::new(source::downcast_arc::<
+                mln_style::sources::image_source::Impl,
+            >(impl_))))
+        }
         SourceType::CustomVector => {
             Some(Box::new(crate::sources::render_custom_geometry_source::RenderCustomGeometrySource::new(
-                source::static_immutable_cast::<mln_style::sources::custom_geometry_source::Impl>(impl_),
+                source::downcast_arc::<mln_style::sources::custom_geometry_source::Impl>(impl_),
             )))
         }
         SourceType::CustomMVTVector => {
             Some(Box::new(crate::sources::render_custom_vector_source::RenderCustomVectorSource::new(
-                source::static_immutable_cast::<mln_style::sources::custom_vector_source::Impl>(impl_),
+                source::downcast_arc::<mln_style::sources::custom_vector_source::Impl>(impl_),
             )))
         }
     }

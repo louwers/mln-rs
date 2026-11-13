@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
 use mln_style_types::ProjectionDefinition;
-use mln_util::immutable::Immutable;
 
 use crate::conversion::convert_property_value;
 use crate::conversion_impl::make_style_property;
@@ -20,7 +19,7 @@ use crate::style_property::StyleProperty;
 /// The style's root `projection` object.
 #[derive(Clone, Debug)]
 pub struct Projection {
-    pub impl_: Immutable<Impl>,
+    pub impl_: Arc<Impl>,
 }
 
 impl Default for Projection {
@@ -38,7 +37,7 @@ impl Projection {
 
     /// `explicit Projection(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(impl_: Immutable<Impl>) -> Self {
+    pub fn from_impl(impl_: Arc<Impl>) -> Self {
         Projection { impl_ }
     }
 

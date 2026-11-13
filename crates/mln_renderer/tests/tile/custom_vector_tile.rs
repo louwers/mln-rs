@@ -13,7 +13,7 @@ use mln_renderer::query::SourceQueryOptions;
 use mln_renderer::tile::custom_tile::CustomVectorTile;
 use mln_renderer::tile::tile::{Tile, TileNecessity};
 use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, TileFunction};
-use mln_style::layer::{Layer, static_immutable_cast};
+use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::fill_layer::Impl as FillLayerImpl;
 use mln_style::layers::{FillLayer, FillLayerProperties};
@@ -21,7 +21,6 @@ use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVecto
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::immutable::Immutable;
 
 use super::RasterTileTest;
 
@@ -207,8 +206,8 @@ fn set_mlt_tile_data() {
 
     let mut layer = FillLayer::new("water", "source");
     layer.set_source_layer("water");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(FillLayerProperties::new(static_immutable_cast::<FillLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(FillLayerProperties::new(downcast_arc::<FillLayerImpl>(&layer.base_impl())));
     tile.set_layers(&[layer_properties], None);
 
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mlt");

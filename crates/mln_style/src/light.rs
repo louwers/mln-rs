@@ -17,14 +17,13 @@ use crate::transition_options::TransitionOptions;
 use mln_conversion::{Convertible, Error};
 use mln_style_types::{LightAnchorType, Position};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
 pub use crate::light_impl::{Impl, LightAnchor, LightColor, LightIntensity, LightPosition, LightProperties};
 
 #[derive(Clone, Debug)]
 pub struct Light {
-    pub impl_: Immutable<Impl>,
+    pub impl_: Arc<Impl>,
 }
 
 impl Default for Light {
@@ -71,7 +70,7 @@ impl Light {
 
     /// `explicit Light(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(impl_: Immutable<Impl>) -> Self {
+    pub fn from_impl(impl_: Arc<Impl>) -> Self {
         Light { impl_ }
     }
 

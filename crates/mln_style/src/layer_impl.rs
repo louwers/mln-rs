@@ -10,7 +10,6 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_style_types::VisibilityType;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -120,12 +119,15 @@ impl dyn Impl {
     }
 }
 
-/// `staticImmutableCast<FooLayer::Impl>(impl)`. C++ asserts the type info;
-/// this panics on a type mismatch.
-pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Immutable<T> {
+/// Returns a new handle to `impl_` as its concrete layer impl type.
+///
+/// # Panics
+///
+/// If `impl_` is not a `T`.
+pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
     let any: Arc<dyn Any + Send + Sync> = impl_.clone();
     let Ok(typed) = any.downcast::<T>() else {
-        panic!("static_immutable_cast: layer impl type mismatch");
+        panic!("downcast_arc: layer impl type mismatch");
     };
     typed
 }

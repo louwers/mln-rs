@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/hillshade_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
 // branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
@@ -22,7 +24,6 @@ use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, Tran
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::geo::LatLng;
-use mln_util::immutable::Immutable;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -139,7 +140,7 @@ pub struct HillshadeLayerTweaker {
 }
 
 impl HillshadeLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         HillshadeLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

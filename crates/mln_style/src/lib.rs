@@ -11,7 +11,7 @@
 //! - `style::Style`, `Style::Impl` -> `style::Style`, `style::Impl`
 //! - `Layer`, `Layer::Impl` -> `layer::Layer` (trait), `layer::Impl` (trait) +
 //!   `layer::ImplBase` (its data members); `Immutable<Layer::Impl>` ->
-//!   `Immutable<dyn layer::Impl>`
+//!   `Arc<dyn layer::Impl>`
 //! - `BackgroundLayer`, `BackgroundLayer::Impl` ->
 //!   `layers::background_layer::{BackgroundLayer, Impl}`
 //! - `BackgroundPaintProperties::Unevaluated` etc. ->

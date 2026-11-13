@@ -9,7 +9,6 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_style_types::image::SharedImage;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::{payload, shared};
 use serde::Serialize;
@@ -58,7 +57,7 @@ pub struct MapCodec {
 /// need keep them (the render layers evaluate their layers again, say).
 struct TileState {
     worker_type: WorkerType,
-    layers: Vec<(u64, Vec<Immutable<dyn LayerProperties>>)>,
+    layers: Vec<(u64, Vec<Arc<dyn LayerProperties>>)>,
     data: Vec<(u64, Option<SharedTileData>)>,
 }
 

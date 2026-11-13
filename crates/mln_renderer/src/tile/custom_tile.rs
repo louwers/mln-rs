@@ -24,7 +24,6 @@ use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVecto
 use mln_style::sources::geojson_source::TileFeatures;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 
 use crate::tile::geojson_tile_data::GeoJSONTileData;
 use crate::tile::geometry_tile::{GeometryTile, GeometryTileInner};
@@ -266,7 +265,7 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         self.tile.cancel();
     }
 
-    fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+    fn layer_properties_updated(&self, layer_properties: &Arc<dyn LayerProperties>) -> bool {
         self.tile.layer_properties_updated(layer_properties)
     }
 
@@ -283,7 +282,7 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         self.tile.set_feature_state(states);
     }
 
-    fn set_layers(&self, layers: &[Immutable<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
+    fn set_layers(&self, layers: &[Arc<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
         self.tile.set_layers(layers, global_state);
     }
 

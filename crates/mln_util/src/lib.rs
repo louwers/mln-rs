@@ -32,7 +32,6 @@ pub mod http_header;
 pub mod i18n;
 pub mod identity;
 pub mod image;
-pub mod immutable;
 pub mod intersection_tests;
 pub mod logging;
 pub mod longest_common_subsequence;

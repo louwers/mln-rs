@@ -154,7 +154,7 @@ impl Kind for SharedLayerProperties {
     }
 }
 
-/// `#[serde(with)]` for an `Immutable<dyn Layer::Impl>`.
+/// `#[serde(with)]` for an `Arc<dyn layer::Impl>`.
 pub mod shared_layer {
     use super::{Arc, Deserializer, Impl, Serializer, SharedLayer, shared};
 
@@ -167,7 +167,7 @@ pub mod shared_layer {
     }
 }
 
-/// `#[serde(with)]` for an `Immutable<dyn LayerProperties>`.
+/// `#[serde(with)]` for an `Arc<dyn LayerProperties>`.
 pub mod shared_layer_properties {
     use super::{Arc, Deserializer, LayerProperties, Serializer, SharedLayerProperties, shared};
 

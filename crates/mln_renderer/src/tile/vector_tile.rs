@@ -9,7 +9,6 @@ use std::sync::Arc;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
 
@@ -93,7 +92,7 @@ impl Tile for VectorTile {
         self.tile.cancel();
     }
 
-    fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+    fn layer_properties_updated(&self, layer_properties: &Arc<dyn LayerProperties>) -> bool {
         self.tile.layer_properties_updated(layer_properties)
     }
 
@@ -114,7 +113,7 @@ impl Tile for VectorTile {
         self.tile.set_feature_state(states);
     }
 
-    fn set_layers(&self, layers: &[Immutable<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
+    fn set_layers(&self, layers: &[Arc<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
         self.tile.set_layers(layers, global_state);
     }
 

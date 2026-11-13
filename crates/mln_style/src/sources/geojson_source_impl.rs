@@ -15,7 +15,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::sync::MutexExt;
@@ -123,7 +122,7 @@ fn evaluate_feature(f: &Feature<f64>, expression: &Arc<dyn Expression>, accumula
 pub(super) fn create(
     geojson: &GeoJSON,
     sequenced_scheduler: SchedulerPtr,
-    options: &Immutable<GeoJSONOptions>,
+    options: &Arc<GeoJSONOptions>,
 ) -> Result<Arc<dyn GeoJSONData>, Error> {
     let scale: f64 = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
     if options.cluster
@@ -192,7 +191,7 @@ pub(super) fn create(
 #[derive(Debug)]
 pub struct Impl {
     base: ImplBase,
-    options: Immutable<GeoJSONOptions>,
+    options: Arc<GeoJSONOptions>,
     data: Option<Arc<dyn GeoJSONData>>,
     /// Replaces `options.synchronous_update` once set: `OVERRIDE_UNSET`,
     /// `OVERRIDE_OFF` or `OVERRIDE_ON`.
@@ -219,7 +218,7 @@ impl Clone for Impl {
 impl Impl {
     /// `Impl(std::string id, Immutable<GeoJSONOptions>)`.
     #[must_use]
-    pub fn new(id: String, options: Immutable<GeoJSONOptions>) -> Self {
+    pub fn new(id: String, options: Arc<GeoJSONOptions>) -> Self {
         Impl {
             base: ImplBase::new(SourceType::GeoJSON, id),
             options,
@@ -247,7 +246,7 @@ impl Impl {
         self.data.as_ref().map(Arc::downgrade)
     }
 
-    pub fn get_options(&self) -> &Immutable<GeoJSONOptions> {
+    pub fn get_options(&self) -> &Arc<GeoJSONOptions> {
         &self.options
     }
 

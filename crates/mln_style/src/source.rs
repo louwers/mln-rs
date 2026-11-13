@@ -17,20 +17,20 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_storage::FileSource;
 use mln_style_types::SourceType;
 use mln_util::chrono::Duration;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
 use crate::layer::LayerTypeInfo;
 use crate::observer::SourceObserver;
-pub use crate::source_impl::{Impl, ImplBase, static_immutable_cast};
+pub use crate::source_impl::{Impl, ImplBase, downcast_arc};
 
 /// The data members of `Source`.
 pub struct SourceBase {
-    base_impl: RefCell<Immutable<dyn Impl>>,
+    base_impl: RefCell<Arc<dyn Impl>>,
     /// `SourceObserver* observer` (default `&nullObserver`).
     observer: RefCell<Option<Rc<dyn SourceObserver>>>,
     loaded: Cell<bool>,
@@ -51,16 +51,16 @@ impl SourceObserver for NullSourceObserver {}
 
 impl SourceBase {
     /// `Source(Immutable<Impl>)`.
-    pub fn new(impl_: Immutable<dyn Impl>) -> Self {
+    pub fn new(impl_: Arc<dyn Impl>) -> Self {
         SourceBase { base_impl: RefCell::new(impl_), observer: RefCell::new(None), loaded: Cell::new(false) }
     }
 
-    pub fn base_impl(&self) -> Immutable<dyn Impl> {
+    pub fn base_impl(&self) -> Arc<dyn Impl> {
         self.base_impl.borrow().clone()
     }
 
     /// `baseImpl = std::move(newImpl)`.
-    pub fn set_base_impl(&self, impl_: Immutable<dyn Impl>) {
+    pub fn set_base_impl(&self, impl_: Arc<dyn Impl>) {
         *self.base_impl.borrow_mut() = impl_;
     }
 
@@ -99,7 +99,7 @@ pub trait Source: Any {
     // Non-virtual members of the C++ class.
 
     /// The `baseImpl` member.
-    fn base_impl(&self) -> Immutable<dyn Impl> {
+    fn base_impl(&self) -> Arc<dyn Impl> {
         self.base().base_impl()
     }
 
@@ -165,7 +165,7 @@ pub fn same_source(a: &dyn Source, b: &dyn Source) -> bool {
 fn mutate_impl(source: &dyn Source, f: impl FnOnce(&mut dyn Impl)) {
     let mut new_impl = source.create_mutable();
     f(new_impl.as_mut());
-    source.base().set_base_impl(Immutable::from(new_impl));
+    source.base().set_base_impl(Arc::from(new_impl));
     source.base().observer().on_source_changed(source);
 }
 

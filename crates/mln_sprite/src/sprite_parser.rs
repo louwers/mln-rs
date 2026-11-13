@@ -7,12 +7,13 @@
 // every member, serde_json keeps the last value; rapidjson does not
 // validate UTF-8, serde_json rejects invalid UTF-8.
 
+use std::sync::Arc;
+
 use geometry::Point;
 use mln_image::decode_image;
 use mln_style_types::image::{Image, ImageContent, ImageStretches, Impl, TextFit};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::string::to_string_double;
@@ -222,7 +223,7 @@ fn get_text_fit(value: &JSValue, property: &str, name: &str) -> Option<TextFit> 
 /// `parseSprite(id, image, json)`: parses an image and an associated JSON
 /// file and returns the sprite objects. C++ throws `std::runtime_error` (or
 /// the image decoder's exception).
-pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<Immutable<Impl>>, Error> {
+pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
     let raster = decode_image(encoded_image)?;
     parse_sprite_images(id, &raster, json)
 }
@@ -230,7 +231,7 @@ pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<I
 /// Port-only: `parseSprite` after its `decodeImage`, for an image decoded
 /// elsewhere (the `SpriteLoader` decodes through `mln_image`'s
 /// `decoder`, which may answer later).
-pub fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -> Result<Vec<Immutable<Impl>>, Error> {
+pub fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
     // `doc.Parse<0>(json.c_str())`: the string ends at the first NUL.
     let json = match json.iter().position(|&b| b == 0) {
         Some(nul) => &json[..nul],

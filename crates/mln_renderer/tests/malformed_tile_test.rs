@@ -14,7 +14,7 @@ use mln_renderer::tile_parameters::TileParameters;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::{
     CircleLayerProperties, FillExtrusionLayerProperties, FillLayerProperties, LineLayerProperties,
@@ -28,7 +28,6 @@ use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{Tileset, VectorEncoding};
@@ -74,23 +73,23 @@ struct AnswerMissingImages;
 impl ImageManagerObserver for AnswerMissingImages {}
 
 /// A layer of the given style JSON, as the worker gets it.
-fn layer(json: &serde_json::Value) -> Immutable<dyn LayerProperties> {
+fn layer(json: &serde_json::Value) -> Arc<dyn LayerProperties> {
     let mut error = ConversionError::default();
     let layer = convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
-        "line" => Arc::new(LineLayerProperties::new(static_immutable_cast(&base_impl))),
-        "fill" => Arc::new(FillLayerProperties::new(static_immutable_cast(&base_impl))),
-        "fill-extrusion" => Arc::new(FillExtrusionLayerProperties::new(static_immutable_cast(&base_impl))),
-        "circle" => Arc::new(CircleLayerProperties::new(static_immutable_cast(&base_impl))),
-        "symbol" => Arc::new(SymbolLayerProperties::new(static_immutable_cast(&base_impl))),
+        "line" => Arc::new(LineLayerProperties::new(downcast_arc(&base_impl))),
+        "fill" => Arc::new(FillLayerProperties::new(downcast_arc(&base_impl))),
+        "fill-extrusion" => Arc::new(FillExtrusionLayerProperties::new(downcast_arc(&base_impl))),
+        "circle" => Arc::new(CircleLayerProperties::new(downcast_arc(&base_impl))),
+        "symbol" => Arc::new(SymbolLayerProperties::new(downcast_arc(&base_impl))),
         other => panic!("no properties for {other}"),
     }
 }
 
 /// Loads the z0 tile of a vector source whose tiles are `tile`, with
 /// `layers`, and returns what the render source reports.
-fn load(tile: Vec<u8>, layers: &[Immutable<dyn LayerProperties>]) -> Outcome {
+fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
     let run_loop = RunLoop::new();
     let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
@@ -265,11 +264,11 @@ fn tile_with_bad_value() -> Vec<u8> {
     tile(&[feature(1, &[1, 1, 0, 7], POLYGON, &polygon)])
 }
 
-fn fill_layer() -> Immutable<dyn LayerProperties> {
+fn fill_layer() -> Arc<dyn LayerProperties> {
     layer(&json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" }))
 }
 
-fn line_layer(filter: Option<serde_json::Value>) -> Immutable<dyn LayerProperties> {
+fn line_layer(filter: Option<serde_json::Value>) -> Arc<dyn LayerProperties> {
     let mut json = json!({ "id": "line", "type": "line", "source": "source", "source-layer": "l" });
     if let Some(filter) = filter {
         json["filter"] = filter;
@@ -279,7 +278,7 @@ fn line_layer(filter: Option<serde_json::Value>) -> Immutable<dyn LayerPropertie
 
 /// A layer of each type that has a worker path, reading values in filters,
 /// sort keys and layout properties.
-fn all_layers() -> Vec<Immutable<dyn LayerProperties>> {
+fn all_layers() -> Vec<Arc<dyn LayerProperties>> {
     vec![
         line_layer(Some(json!(["==", ["get", "k"], "v"]))),
         layer(&json!({

@@ -7,15 +7,15 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
 use mln_style::conversion::convert_layer;
 use mln_style::layer_impl::Impl;
-use mln_util::immutable::Immutable;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-struct Crossing(#[serde(with = "mln_style::serialization::shared_layer")] Immutable<dyn Impl>);
+struct Crossing(#[serde(with = "mln_style::serialization::shared_layer")] Arc<dyn Impl>);
 
 fn styles(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {

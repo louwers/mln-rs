@@ -321,7 +321,6 @@ mod tests {
     use feature::Value;
     use mln_style::layer_properties::LayerProperties;
     use mln_tile_id::OverscaledTileID;
-    use mln_util::immutable::Immutable;
 
     use super::*;
     use crate::tile::tile::{Kind, TileBase};
@@ -394,7 +393,7 @@ mod tests {
             unreachable!()
         }
         fn cancel(&self) {}
-        fn layer_properties_updated(&self, _layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+        fn layer_properties_updated(&self, _layer_properties: &Arc<dyn LayerProperties>) -> bool {
             false
         }
         fn set_feature_state(&self, states: &LayerFeatureStates) {

@@ -1,8 +1,9 @@
 // Ports include/mln/style/style.hpp + src/mln/style/style.cpp.
 
+use std::sync::Arc;
+
 use feature::Value;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 
 use crate::expression::GlobalStateMap;
 use crate::image;
@@ -193,11 +194,11 @@ impl Style {
 
     // Images
     #[must_use]
-    pub fn get_image(&self, name: &str) -> Option<Immutable<image::Impl>> {
+    pub fn get_image(&self, name: &str) -> Option<Arc<image::Impl>> {
         self.impl_.get_image(name)
     }
 
-    pub fn add_image(&mut self, image: Immutable<image::Impl>) {
+    pub fn add_image(&mut self, image: Arc<image::Impl>) {
         self.impl_.mutated = true;
         self.impl_.add_image(image);
     }

@@ -11,11 +11,10 @@ use mln_renderer::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphAtlas, 
 use mln_style_types::image::{ImageMap, Impl as ImageImpl};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
 
 /// `makeGlyph(code)`.
-fn make_glyph(code: char) -> Immutable<Glyph> {
+fn make_glyph(code: char) -> Arc<Glyph> {
     Arc::new(Glyph {
         id: GlyphID::new(code as u32),
         bitmap: AlphaImage::new(Size::new(8, 8)),
@@ -24,12 +23,12 @@ fn make_glyph(code: char) -> Immutable<Glyph> {
 }
 
 /// `{{glyph->id, glyph}}`.
-fn glyphs(glyph: &Immutable<Glyph>) -> Glyphs {
+fn glyphs(glyph: &Arc<Glyph>) -> Glyphs {
     Glyphs::from([(glyph.id, Some(glyph.clone()))])
 }
 
 /// `makeImage(id, sdf, size = {16, 16})`.
-fn make_image(id: &str, sdf: bool) -> Immutable<ImageImpl> {
+fn make_image(id: &str, sdf: bool) -> Arc<ImageImpl> {
     let size = Size::new(16, 16);
     Arc::new(
         ImageImpl::new(
@@ -48,7 +47,7 @@ fn make_image(id: &str, sdf: bool) -> Immutable<ImageImpl> {
 }
 
 /// `{{image->id, image}}`.
-fn image_map(image: &Immutable<ImageImpl>) -> ImageMap {
+fn image_map(image: &Arc<ImageImpl>) -> ImageMap {
     ImageMap::from([(image.id.clone(), image.clone())])
 }
 
@@ -70,7 +69,7 @@ impl DynamicTextureAtlasTest {
         self.glyph_atlases.last().unwrap()
     }
 
-    fn upload_pattern(&mut self, image: &Immutable<ImageImpl>) -> &ImageAtlas {
+    fn upload_pattern(&mut self, image: &Arc<ImageImpl>) -> &ImageAtlas {
         let image_atlas =
             self.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(image), &ImageVersionMap::new());
         self.atlases.push(image_atlas);
@@ -174,7 +173,7 @@ fn font_stacks_share_the_allocation_of_the_same_glyph() {
 
 impl DynamicTextureAtlasTest {
     /// Uploads `image` as an icon at `version`, keeping its atlas alive.
-    fn upload_icon(&mut self, image: &Immutable<ImageImpl>, version: u32) -> &ImageAtlas {
+    fn upload_icon(&mut self, image: &Arc<ImageImpl>, version: u32) -> &ImageAtlas {
         let version_map = ImageVersionMap::from([(image.id.clone(), version)]);
         let image_atlas = self.atlas.upload_icons_and_patterns(&image_map(image), &ImageMap::new(), &version_map);
         self.atlases.push(image_atlas);

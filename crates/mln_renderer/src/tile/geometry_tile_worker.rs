@@ -40,7 +40,6 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
@@ -86,7 +85,7 @@ pub enum WorkerMessage {
     SetData {
         #[serde(with = "fields::tile_data")]
         data: Option<SharedTileData>,
-        available_images: Immutable<VecSet<String>>,
+        available_images: Arc<VecSet<String>>,
         correlation_id: u64,
     },
     /// `setLayers(layers, globalState, availableImages,
@@ -94,16 +93,16 @@ pub enum WorkerMessage {
     /// the layers out for.
     SetLayers {
         #[serde(with = "fields::layers")]
-        layers: Vec<Immutable<dyn LayerProperties>>,
+        layers: Vec<Arc<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
-        available_images: Immutable<VecSet<String>>,
+        available_images: Arc<VecSet<String>>,
         subdivision_granularity: SubdivisionGranularitySetting,
         pixel_ratio: f32,
         correlation_id: u64,
     },
     /// `setAvailableImages(availableImages, correlationID)`: parse again
     /// with images added since the last parse.
-    SetAvailableImages { available_images: Immutable<VecSet<String>>, correlation_id: u64 },
+    SetAvailableImages { available_images: Arc<VecSet<String>>, correlation_id: u64 },
     /// `reset(correlationID)`.
     Reset { correlation_id: u64 },
     /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
@@ -188,7 +187,7 @@ pub struct GeometryTileWorker {
     image_correlation_id: u64,
 
     // `None` until the worker has received the layers.
-    layers: Option<Vec<Immutable<dyn LayerProperties>>>,
+    layers: Option<Vec<Arc<dyn LayerProperties>>>,
     data: ReceivedData,
 
     // The style's global state, used by "global-state" expressions during
@@ -207,7 +206,7 @@ pub struct GeometryTileWorker {
     icon_map: ImageMap,
     pattern_map: ImageMap,
     version_map: ImageVersionMap,
-    available_images: Immutable<VecSet<String>>,
+    available_images: Arc<VecSet<String>>,
 
     show_collision_boxes: bool,
     subdivision_granularity: SubdivisionGranularitySetting,
@@ -344,7 +343,7 @@ impl GeometryTileWorker {
     pub fn set_data(
         &mut self,
         data: Option<SharedTileData>,
-        available_images: Immutable<VecSet<String>>,
+        available_images: Arc<VecSet<String>>,
         correlation_id: u64,
     ) {
         self.guarded(|this| {
@@ -369,9 +368,9 @@ impl GeometryTileWorker {
     /// subdivisionGranularity, correlationID)`.
     pub fn set_layers(
         &mut self,
-        layers: Vec<Immutable<dyn LayerProperties>>,
+        layers: Vec<Arc<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
-        available_images: Immutable<VecSet<String>>,
+        available_images: Arc<VecSet<String>>,
         subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     ) {
@@ -397,7 +396,7 @@ impl GeometryTileWorker {
     }
 
     /// `setAvailableImages(availableImages, correlationID)`.
-    pub fn set_available_images(&mut self, available_images: Immutable<VecSet<String>>, correlation_id: u64) {
+    pub fn set_available_images(&mut self, available_images: Arc<VecSet<String>>, correlation_id: u64) {
         self.guarded(|this| {
             this.available_images = available_images;
             this.correlation_id = correlation_id;

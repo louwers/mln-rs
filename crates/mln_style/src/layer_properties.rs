@@ -5,8 +5,8 @@
 // is the `LayerProperties` trait. `dyn LayerProperties` derefs to its base.
 
 use std::any::Any;
+use std::sync::Arc;
 
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -17,13 +17,13 @@ use crate::layer::Impl;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LayerPropertiesBase {
     #[serde(with = "crate::serialization::shared_layer")]
-    pub base_impl: Immutable<dyn Impl>,
+    pub base_impl: Arc<dyn Impl>,
     /// Contains render passes used by the renderer, see `mln::RenderPass`.
     pub render_passes: u8,
 }
 
 impl LayerPropertiesBase {
-    pub fn new(impl_: Immutable<dyn Impl>) -> Self {
+    pub fn new(impl_: Arc<dyn Impl>) -> Self {
         LayerPropertiesBase { base_impl: impl_, render_passes: 0 }
     }
 }
@@ -67,7 +67,7 @@ impl std::ops::Deref for dyn LayerProperties {
 }
 
 /// `static_cast<const Derived&>(*properties)`, checked.
-fn downcast_properties<'a, D: LayerProperties>(properties: &'a Immutable<dyn LayerProperties>, what: &str) -> &'a D {
+fn downcast_properties<'a, D: LayerProperties>(properties: &'a Arc<dyn LayerProperties>, what: &str) -> &'a D {
     match properties.downcast_ref::<D>() {
         Some(derived) => derived,
         None => panic!("{what}: layer properties type mismatch"),
@@ -76,13 +76,13 @@ fn downcast_properties<'a, D: LayerProperties>(properties: &'a Immutable<dyn Lay
 
 /// `getEvaluated<Derived>(properties)`. C++ uses `static_cast`; this panics on a
 /// type mismatch.
-pub fn get_evaluated<D: HasEvaluated>(properties: &Immutable<dyn LayerProperties>) -> &D::Evaluated {
+pub fn get_evaluated<D: HasEvaluated>(properties: &Arc<dyn LayerProperties>) -> &D::Evaluated {
     downcast_properties::<D>(properties, "get_evaluated").evaluated()
 }
 
 /// `getCrossfade<Derived>(properties)`.
 pub fn get_crossfade<D: HasCrossfade>(
-    properties: &Immutable<dyn LayerProperties>,
+    properties: &Arc<dyn LayerProperties>,
 ) -> &crate::renderer::property_evaluation_parameters::CrossfadeParameters {
     downcast_properties::<D>(properties, "get_crossfade").crossfade()
 }

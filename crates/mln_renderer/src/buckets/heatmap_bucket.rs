@@ -4,8 +4,8 @@
 // bucket is built on the worker thread and shared with `Arc`); the render
 // layer copies them into the shared gfx vectors its drawables reference.
 
-use std::sync::RwLock;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, RwLock};
 
 use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -20,7 +20,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
@@ -67,7 +66,7 @@ static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl HeatmapBucket {
     /// `HeatmapBucket(const BucketParameters&, const std::vector<Immutable<style::LayerProperties>>&)`.
-    pub fn new(parameters: &BucketParameters, layers: &[Immutable<dyn LayerProperties>]) -> Self {
+    pub fn new(parameters: &BucketParameters, layers: &[Arc<dyn LayerProperties>]) -> Self {
         let mut paint_property_binders = VecMap::new();
         for layer in layers {
             // `emplace` keeps the first entry for an id.

@@ -16,7 +16,6 @@ use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
@@ -66,13 +65,13 @@ fn convert(json: &str) -> Box<dyn Layer> {
 
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
 /// the `RenderOrchestrator` evaluates it.
-fn layer(json: &str, z: f32) -> Immutable<dyn LayerProperties> {
+fn layer(json: &str, z: f32) -> Arc<dyn LayerProperties> {
     let render_layer = layermanager::create_render_layer(&convert(json).base_impl()).unwrap();
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(z));
     render_layer.borrow().base().evaluated_properties.clone()
 }
 
-fn layers(jsons: &[&str]) -> Vec<Immutable<dyn LayerProperties>> {
+fn layers(jsons: &[&str]) -> Vec<Arc<dyn LayerProperties>> {
     jsons.iter().map(|json| layer(json, 0.0)).collect()
 }
 
@@ -92,7 +91,7 @@ fn parameters() -> WorkerParameters {
     }
 }
 
-fn set_layers(layers: &[Immutable<dyn LayerProperties>], correlation_id: u64) -> WorkerMessage {
+fn set_layers(layers: &[Arc<dyn LayerProperties>], correlation_id: u64) -> WorkerMessage {
     WorkerMessage::SetLayers {
         layers: layers.to_vec(),
         global_state: None,
@@ -276,7 +275,7 @@ fn comparable(result: &LayoutResult) -> [Vec<u8>; 3] {
 /// directly (in that order: decoding MLT data drops its bytes, and a tile
 /// sends its data before anything decodes it), checks that both layouts
 /// are the same, and returns the one that crossed, with its codec.
-fn cross(layers: &[Immutable<dyn LayerProperties>], data: &SharedTileData) -> (ThroughCodec, LayoutResult) {
+fn cross(layers: &[Arc<dyn LayerProperties>], data: &SharedTileData) -> (ThroughCodec, LayoutResult) {
     let messages = || vec![set_layers(layers, 1), set_data(data, 2)];
     let mut codec = ThroughCodec::new();
     let result = codec.layout(messages());
@@ -655,7 +654,7 @@ impl LayerProperties for Unknown {
 fn failed_set_layers_define_nothing() {
     let mut map = map_codec();
     let fill = layer(FILL, 0.0);
-    let unknown: Immutable<dyn LayerProperties> =
+    let unknown: Arc<dyn LayerProperties> =
         Arc::new(Unknown(mln_style::layer_properties::LayerPropertiesBase::new(layer(LINE, 0.0).base_impl.clone())));
     assert!(map.message(TILE, &set_layers(&[fill.clone(), unknown], 1)).is_err());
 

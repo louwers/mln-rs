@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/circle_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
 // branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -14,7 +16,6 @@ use mln_style::layers::circle_layer_properties::{
 };
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
-use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, slot_bucket};
@@ -31,7 +32,7 @@ pub struct CircleLayerTweaker {
 }
 
 impl CircleLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         CircleLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

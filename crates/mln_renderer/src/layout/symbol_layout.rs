@@ -44,7 +44,6 @@ use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geometry::FeatureType;
 use mln_util::i18n;
-use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
@@ -234,7 +233,7 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
 
 /// `SymbolLayout`.
 pub struct SymbolLayout {
-    pub layer_paint_properties: VecMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_paint_properties: VecMap<String, Arc<dyn LayerProperties>>,
     pub bucket_leader_id: String,
     pub symbol_instances: Vec<SymbolInstance>,
     pub sort_key_ranges: Vec<SortKeyRange>,
@@ -265,7 +264,7 @@ pub struct SymbolLayout {
     text_radial_offset: PropertyValue<f32>,
     text_variable_anchor_offset: PropertyValue<VariableAnchorOffsetCollection>,
 
-    layout: Immutable<SymbolLayoutProperties::PossiblyEvaluated>,
+    layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
 
     features: Vec<SymbolFeature>,
 
@@ -284,7 +283,7 @@ impl SymbolLayout {
     /// `SymbolLayout(parameters, layers, sourceLayer, layoutParameters)`.
     pub fn new(
         parameters: &BucketParameters,
-        layers: &[Immutable<dyn LayerProperties>],
+        layers: &[Arc<dyn LayerProperties>],
         source_layer: SourceLayer,
         layout_parameters: &mut LayoutParameters<'_>,
     ) -> Result<Self, Error> {

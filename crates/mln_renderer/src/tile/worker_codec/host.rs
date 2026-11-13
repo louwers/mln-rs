@@ -27,7 +27,6 @@ use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
@@ -77,9 +76,9 @@ enum Hosted {
 /// The layers, global state, available images, subdivision granularity and
 /// pixel ratio a geometry tile's worker got with its layers.
 type SentLayers = (
-    Vec<Immutable<dyn LayerProperties>>,
+    Vec<Arc<dyn LayerProperties>>,
     Option<Arc<GlobalStateMap>>,
-    Immutable<VecSet<String>>,
+    Arc<VecSet<String>>,
     SubdivisionGranularitySetting,
     f32,
 );
@@ -87,7 +86,7 @@ type SentLayers = (
 /// What a geometry tile's worker has of its tile's data and of its layers.
 #[derive(Default)]
 struct Sent {
-    data: Kept<(Option<SharedTileData>, Immutable<VecSet<String>>)>,
+    data: Kept<(Option<SharedTileData>, Arc<VecSet<String>>)>,
     layers: Kept<SentLayers>,
 }
 

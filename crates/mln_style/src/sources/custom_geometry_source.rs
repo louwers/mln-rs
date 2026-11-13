@@ -19,14 +19,13 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
-use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 
 use super::geojson_source::TileFeatures;
 use crate::custom_tile_loader::{CustomTileLoader, TileFunction};
 use crate::layer::LayerTypeInfo;
 use crate::layer::layer_type_info::TileKind;
-use crate::source::{Source, SourceBase, static_immutable_cast};
+use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
 /// `CustomGeometrySource::TileOptions`: how the host's GeoJSON is cut into
@@ -123,7 +122,7 @@ fn tile_features(geojson: &GeoJSON, tile_id: &CanonicalTileID, options: &TileOpt
 #[derive(Clone)]
 pub struct CustomGeometrySourceHandle {
     loader: PoolActorRef<CustomGeometryTileLoader>,
-    tile_options: Immutable<TileOptions>,
+    tile_options: Arc<TileOptions>,
 }
 
 impl std::fmt::Debug for CustomGeometrySourceHandle {
@@ -168,7 +167,7 @@ impl CustomGeometrySourceHandle {
 #[derive(Clone)]
 pub struct Impl {
     base: ImplBase,
-    tile_options: Immutable<TileOptions>,
+    tile_options: Arc<TileOptions>,
     zoom_range: Range<u8>,
     loader_ref: Option<PoolActorRef<CustomGeometryTileLoader>>,
 }
@@ -209,7 +208,7 @@ impl Impl {
     }
 
     #[must_use]
-    pub fn get_tile_options(&self) -> &Immutable<TileOptions> {
+    pub fn get_tile_options(&self) -> &Arc<TileOptions> {
         &self.tile_options
     }
 
@@ -265,7 +264,7 @@ impl CustomGeometrySource {
         if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
             return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
         }
-        let impl_: Immutable<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), &options));
+        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), &options));
         let loader = Actor::new(scheduler::get_background(), |_| {
             CustomTileLoader::new(options.fetch_tile_function, options.cancel_tile_function)
         });
@@ -275,7 +274,7 @@ impl CustomGeometrySource {
     /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
-        static_immutable_cast::<Impl>(&self.inner.base.base_impl())
+        downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
     /// A handle to answer the tile functions with, from any thread.
@@ -314,7 +313,7 @@ impl Source for CustomGeometrySource {
     }
 
     fn load_description(&self, _file_source: &dyn FileSource) {
-        let new_impl: Immutable<dyn source_impl::Impl> =
+        let new_impl: Arc<dyn source_impl::Impl> =
             Arc::new(Impl::with_loader(&self.impl_(), self.inner.loader.self_ref()));
         self.inner.base.set_base_impl(new_impl);
         self.inner.base.set_loaded(true);

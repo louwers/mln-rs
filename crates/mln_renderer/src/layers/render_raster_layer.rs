@@ -33,7 +33,7 @@ use mln_gfx::{
     ShaderProgramBasePtr, ShaderRegistry,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style::layers::raster_layer_properties::{
@@ -43,7 +43,6 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::time::Instant;
 
 use super::raster_layer_tweaker::RasterLayerTweaker;
@@ -62,7 +61,7 @@ use crate::render_tree::RenderTree;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &RasterLayerImpl {
+fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &RasterLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), RasterLayerImpl::static_type_info()));
     impl_.downcast_ref::<RasterLayerImpl>().expect("RenderRasterLayer: not a raster layer impl")
 }
@@ -89,9 +88,9 @@ pub struct RenderRasterLayer {
 }
 
 impl RenderRasterLayer {
-    pub fn new(impl_: Immutable<RasterLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<RasterLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(RasterLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(RasterLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderRasterLayer {
@@ -277,7 +276,7 @@ impl RenderLayer for RenderRasterLayer {
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties).clone();
         let mut properties = RasterLayerProperties::with_evaluated(
-            static_immutable_cast::<RasterLayerImpl>(&self.base.base_impl),
+            downcast_arc::<RasterLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 

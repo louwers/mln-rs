@@ -4,8 +4,8 @@
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
 
-use std::sync::RwLock;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, RwLock};
 
 use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -18,7 +18,6 @@ use mln_style::layers::circle_layer_properties::{
 use mln_style::properties::Property;
 use mln_style_types::image::ImagePositions;
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
@@ -64,11 +63,7 @@ pub struct CircleBucket {
 impl CircleBucket {
     /// `CircleBucket(layerPaintProperties, mode, zoom)`.
     #[must_use]
-    pub fn new(
-        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
-        mode: MapMode,
-        zoom: f32,
-    ) -> Self {
+    pub fn new(layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>, mode: MapMode, zoom: f32) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {

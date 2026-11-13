@@ -1,20 +1,18 @@
 // Ports src/mln/style/collection.hpp.
 //
-// Manages an ordered collection of elements and their `Immutable<Impl>`s. The
-// latter is itself stored in an Immutable container. Using immutability at the
+// Manages an ordered collection of elements and their `Arc<Impl>`s. The
+// latter is itself stored in an `Arc`. Using immutability at the
 // collection level allows us to short-circuit significant portions of the
 // RenderStyle update logic via a simple pointer equality check, greatly
 // improving performance.
 
 use std::sync::Arc;
 
-use mln_util::immutable::Immutable;
-
 /// What C++ requires of an element type: an `Impl` type, an
 /// `Immutable<Impl> baseImpl` member and `getID()`.
 pub trait CollectionElement {
     type Impl: ?Sized;
-    fn base_impl(&self) -> Immutable<Self::Impl>;
+    fn base_impl(&self) -> Arc<Self::Impl>;
     fn get_id(&self) -> String;
     /// `impl->id` (used to order the impls of a persistent-order collection).
     fn impl_id(impl_: &Self::Impl) -> &str;
@@ -22,7 +20,7 @@ pub trait CollectionElement {
 
 impl CollectionElement for dyn crate::layer::Layer {
     type Impl = dyn crate::layer::Impl;
-    fn base_impl(&self) -> Immutable<Self::Impl> {
+    fn base_impl(&self) -> Arc<Self::Impl> {
         crate::layer::Layer::base_impl(self)
     }
     fn get_id(&self) -> String {
@@ -35,7 +33,7 @@ impl CollectionElement for dyn crate::layer::Layer {
 
 impl CollectionElement for dyn crate::source::Source {
     type Impl = dyn crate::source::Impl;
-    fn base_impl(&self) -> Immutable<Self::Impl> {
+    fn base_impl(&self) -> Arc<Self::Impl> {
         crate::source::Source::base_impl(self)
     }
     fn get_id(&self) -> String {
@@ -46,7 +44,7 @@ impl CollectionElement for dyn crate::source::Source {
     }
 }
 
-pub type ImmutableVector<I> = Immutable<Vec<Immutable<I>>>;
+pub type ImmutableVector<I> = Arc<Vec<Arc<I>>>;
 
 /// `CollectionBase<T>`.
 pub struct CollectionBase<T: CollectionElement + ?Sized> {
@@ -131,7 +129,7 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
 
     /// Must be called whenever an element of the collection is internally
     /// mutated.
-    fn update_at(&mut self, impl_index: usize, base_impl: Immutable<T::Impl>) {
+    fn update_at(&mut self, impl_index: usize, base_impl: Arc<T::Impl>) {
         if impl_index >= self.size() {
             debug_assert!(false);
             return;

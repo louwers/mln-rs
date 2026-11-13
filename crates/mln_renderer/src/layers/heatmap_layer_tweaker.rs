@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/heatmap_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
 // branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -13,7 +15,6 @@ use mln_style::layers::heatmap_layer_properties::{
 };
 use mln_style::properties::Property;
 use mln_style_types::TranslateAnchorType;
-use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, slot_bucket};
@@ -30,7 +31,7 @@ pub struct HeatmapLayerTweaker {
 }
 
 impl HeatmapLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         HeatmapLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

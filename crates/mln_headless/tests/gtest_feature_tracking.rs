@@ -33,7 +33,6 @@ use mln_style_types::{
 use mln_util::Color;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use support::*;
 
 const SOURCE_NAME: &str = "source";
@@ -762,7 +761,7 @@ fn globe_capture_during_transition() {
 fn globe_capture_close_up() {
     let mut test = globe_test();
     let options = GeoJSONOptions { maxzoom: 0, ..GeoJSONOptions::default() };
-    let source = GeoJSONSource::new("lowZoom", Immutable::new(options));
+    let source = GeoJSONSource::new("lowZoom", Arc::new(options));
     let large = r#"{"type": "Feature", "id": "large", "properties": {},
         "geometry": {"type": "Polygon", "coordinates": [[[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]]]}}"#;
     source.set_geojson(&geojson::parse(large).expect("GeoJSON")).expect("set GeoJSON");

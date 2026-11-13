@@ -10,8 +10,8 @@ use crate::layer_properties::{HasCrossfade, HasEvaluated, LayerProperties, Layer
 use crate::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::paint_property!(
     /// `struct BackgroundColor : PaintProperty<Color>`:
@@ -52,7 +52,7 @@ pub struct BackgroundLayerProperties {
 
 impl BackgroundLayerProperties {
     /// `explicit BackgroundLayerProperties(Immutable<BackgroundLayer::Impl>)`.
-    pub fn new(impl_: Immutable<BackgroundLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<BackgroundLayerImpl>) -> Self {
         BackgroundLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             crossfade: CrossfadeParameters::default(),
@@ -62,7 +62,7 @@ impl BackgroundLayerProperties {
 
     /// `BackgroundLayerProperties(Immutable<BackgroundLayer::Impl>, CrossfadeParameters, BackgroundPaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<BackgroundLayerImpl>,
+        impl_: Arc<BackgroundLayerImpl>,
         crossfade: CrossfadeParameters,
         evaluated: BackgroundPaintProperties::PossiblyEvaluated,
     ) -> Self {

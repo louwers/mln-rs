@@ -8,6 +8,8 @@
 // by default in C++: on Metal the expression UBO is all zeros and no
 // property is marked as evaluated on the GPU.
 
+use std::sync::Arc;
+
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -29,7 +31,6 @@ use mln_style::layers::line_layer_properties::{
 };
 use mln_style::properties::Property;
 use mln_style::renderer::cross_faded_property_evaluator::Faded;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::sync::RwLockExt;
@@ -83,7 +84,7 @@ pub struct LineLayerTweaker {
 }
 
 impl LineLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         LineLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

@@ -6,7 +6,6 @@ use mln_text::glyph::{Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphRange};
 use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_util::image::AlphaImage;
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
 
 use super::read_file;
@@ -22,11 +21,11 @@ fn fixture_range() -> GlyphRange {
     GlyphRange::new(0, 255, GlyphIDType::FontPBF)
 }
 
-fn intern_range(cache: &GlyphCache, data: &[u8]) -> Vec<Immutable<Glyph>> {
+fn intern_range(cache: &GlyphCache, data: &[u8]) -> Vec<Arc<Glyph>> {
     parse_glyph_pbf(&fixture_range(), data).unwrap().into_iter().map(|parsed| cache.intern_glyph(parsed)).collect()
 }
 
-fn range(id: char, glyph: &Immutable<Glyph>) -> GlyphCacheRange {
+fn range(id: char, glyph: &Arc<Glyph>) -> GlyphCacheRange {
     GlyphCacheRange::from([(GlyphID::new(id as u32), glyph.clone())])
 }
 

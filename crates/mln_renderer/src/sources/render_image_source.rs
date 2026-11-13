@@ -17,12 +17,11 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::layer_properties::LayerProperties;
-use mln_style::source::{self, static_immutable_cast};
+use mln_style::source::{self, downcast_arc};
 use mln_style::sources::image_source;
 use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
-use mln_util::immutable::Immutable;
 use mln_util::interpolate::Interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
@@ -232,7 +231,7 @@ pub struct RenderImageSource {
 impl RenderImageSource {
     #[must_use]
     pub fn new(impl_: Arc<image_source::Impl>) -> Self {
-        let impl_: Immutable<dyn source::Impl> = impl_;
+        let impl_: Arc<dyn source::Impl> = impl_;
         RenderImageSource {
             base: RenderSourceBase::new(impl_),
             bucket: None,
@@ -244,7 +243,7 @@ impl RenderImageSource {
     }
 
     fn impl_(&self) -> Arc<image_source::Impl> {
-        static_immutable_cast::<image_source::Impl>(&self.base.base_impl)
+        downcast_arc::<image_source::Impl>(&self.base.base_impl)
     }
 }
 
@@ -265,8 +264,8 @@ impl RenderSource for RenderImageSource {
 
     fn update(
         &mut self,
-        base_impl: Immutable<dyn source::Impl>,
-        _layers: &[Immutable<dyn LayerProperties>],
+        base_impl: Arc<dyn source::Impl>,
+        _layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         _needs_relayout: bool,
         parameters: &TileParameters<'_>,

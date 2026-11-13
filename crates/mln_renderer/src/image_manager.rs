@@ -15,7 +15,6 @@ use std::sync::Arc;
 use mln_actor::scheduler;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
 
@@ -94,7 +93,7 @@ struct State {
     requested_images_cache_size: usize,
     images: ImageMap,
     // Mirror of 'ImageMap images;' keys.
-    available_images: Immutable<VecSet<String>>,
+    available_images: Arc<VecSet<String>>,
     updated_image_versions: ImageVersionMap,
 }
 
@@ -164,17 +163,17 @@ impl ImageManager {
     }
 
     /// `getImage(id)`.
-    pub fn get_image(&self, id: &str) -> Option<Immutable<ImageImpl>> {
+    pub fn get_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
         self.get_shared_image(id)
     }
 
     /// `getSharedImage(id)`.
-    pub fn get_shared_image(&self, id: &str) -> Option<Immutable<ImageImpl>> {
+    pub fn get_shared_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
         self.state.borrow().images.get(id).cloned()
     }
 
     /// `addImage(Immutable<style::Image::Impl>)`.
-    pub fn add_image(&self, image: Immutable<ImageImpl>) {
+    pub fn add_image(&self, image: Arc<ImageImpl>) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
         debug_assert!(!state.images.contains_key(&image.id));
@@ -197,7 +196,7 @@ impl ImageManager {
 
     /// `updateImage(Immutable<style::Image::Impl>)`: true when tiles need a
     /// relayout.
-    pub fn update_image(&self, image: Immutable<ImageImpl>) -> bool {
+    pub fn update_image(&self, image: Arc<ImageImpl>) -> bool {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
 
@@ -353,7 +352,7 @@ impl ImageManager {
     }
 
     /// `getAvailableImages()`.
-    pub fn get_available_images(&self) -> Immutable<VecSet<String>> {
+    pub fn get_available_images(&self) -> Arc<VecSet<String>> {
         self.state.borrow().available_images.clone()
     }
 

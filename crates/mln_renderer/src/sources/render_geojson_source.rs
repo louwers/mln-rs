@@ -6,13 +6,12 @@ use std::sync::{Arc, Weak};
 
 use mln_map_types::MapMode;
 use mln_style::layer_properties::LayerProperties;
-use mln_style::source::{self, static_immutable_cast};
+use mln_style::source::{self, downcast_arc};
 use mln_style::source_impl::Impl as _;
 use mln_style::sources::geojson_source::GeoJSONData;
 use mln_style::sources::geojson_source_impl;
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 
 use crate::query::FeatureExtensionValue;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
@@ -79,13 +78,13 @@ pub struct RenderGeoJSONSource {
 impl RenderGeoJSONSource {
     /// `RenderGeoJSONSource(Immutable<style::GeoJSONSource::Impl>, const TaggedScheduler&)`.
     pub fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
-        let impl_: Immutable<dyn source::Impl> = impl_;
+        let impl_: Arc<dyn source::Impl> = impl_;
         RenderGeoJSONSource { tile_source: RenderTileSource::new(impl_), data: None, tiles_update_synchronously: false }
     }
 
     /// `impl()`.
     fn impl_(&self) -> Arc<geojson_source_impl::Impl> {
-        static_immutable_cast::<geojson_source_impl::Impl>(&self.tile_source.base.base_impl)
+        downcast_arc::<geojson_source_impl::Impl>(&self.tile_source.base.base_impl)
     }
 
     pub fn tile_source(&self) -> &RenderTileSource {
@@ -108,8 +107,8 @@ impl RenderSource for RenderGeoJSONSource {
 
     fn update(
         &mut self,
-        base_impl: Immutable<dyn source::Impl>,
-        layers: &[Immutable<dyn LayerProperties>],
+        base_impl: Arc<dyn source::Impl>,
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,

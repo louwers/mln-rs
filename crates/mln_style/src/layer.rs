@@ -19,7 +19,6 @@ use std::sync::Arc;
 use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
 use crate::conversion::{Converter, convert};
@@ -27,7 +26,7 @@ use crate::expression::{
     Dependency, EvaluationContext, Expression, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
-pub use crate::layer_impl::{FontStack, Impl, ImplBase, static_immutable_cast};
+pub use crate::layer_impl::{FontStack, Impl, ImplBase, downcast_arc};
 use crate::style_property::StyleProperty;
 
 /// The enums nested in C++ `LayerTypeInfo`.
@@ -106,7 +105,7 @@ pub trait Layer: Any + Send + Sync {
     // --- virtual / protected members ---
 
     /// The `baseImpl` member.
-    fn base_impl(&self) -> Immutable<dyn Impl>;
+    fn base_impl(&self) -> Arc<dyn Impl>;
 
     /// `auto impl_ = mutableBaseImpl(); f(*impl_); baseImpl = std::move(impl_);`
     /// for the base members.

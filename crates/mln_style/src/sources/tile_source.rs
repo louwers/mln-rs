@@ -18,14 +18,13 @@ use std::sync::Arc;
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::constants;
-use mln_util::immutable::Immutable;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
 use crate::conversion::Error;
 use crate::conversion::tileset::convert_json_tileset;
 use crate::layer::LayerTypeInfo;
 use crate::layer::layer_type_info::TileKind;
-use crate::source::{Source, SourceBase, static_immutable_cast};
+use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
 /// `TileSource::Impl`.
@@ -132,7 +131,7 @@ impl TileSource {
         source_type: SourceType,
         overrides: Overrides,
     ) -> Self {
-        let impl_: Immutable<dyn source_impl::Impl> = Arc::new(Impl::new(source_type, id, tile_size));
+        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(source_type, id, tile_size));
         TileSource {
             inner: Rc::new(Inner {
                 base: SourceBase::new(impl_),
@@ -147,7 +146,7 @@ impl TileSource {
     /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
-        static_immutable_cast::<Impl>(&self.inner.base.base_impl())
+        downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
     #[must_use]
@@ -232,7 +231,7 @@ fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: &Re
         let current = this.impl_();
         let changed = current.tileset.as_ref() != Some(&tileset);
 
-        let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&current, tileset));
+        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&current, tileset));
         this.inner.base.set_base_impl(new_impl);
         this.inner.base.set_loaded(true);
 
@@ -253,7 +252,7 @@ impl Source for TileSource {
         let raw_url = match &self.inner.url_or_tileset {
             UrlOrTileset::Tileset(tileset) => {
                 let tileset = Tileset { sparse: self.inner.sparse.get(), ..tileset.clone() };
-                let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&self.impl_(), tileset));
+                let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&self.impl_(), tileset));
                 self.inner.base.set_base_impl(new_impl);
                 self.inner.base.set_loaded(true);
                 let observer = self.inner.base.observer();
@@ -345,7 +344,7 @@ impl VectorSource {
         }
         let mut new_tileset = tileset.clone();
         new_tileset.tiles = tiles.to_vec();
-        let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&impl_, new_tileset));
+        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&impl_, new_tileset));
         self.tile_source.inner.base.set_base_impl(new_impl);
         self.tile_source.inner.base.observer().on_source_changed(self);
     }

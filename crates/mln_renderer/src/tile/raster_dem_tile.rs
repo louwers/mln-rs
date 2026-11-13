@@ -20,7 +20,6 @@ use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::serialization::payload::shared_bytes;
 use mln_util::tileset::{RasterEncoding, Tileset};
 use serde::{Deserialize, Serialize};
@@ -419,7 +418,7 @@ impl Tile for RasterDEMTile {
         self.inner.mark_obsolete();
     }
 
-    fn layer_properties_updated(&self, _layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+    fn layer_properties_updated(&self, _layer_properties: &Arc<dyn LayerProperties>) -> bool {
         self.inner.bucket.borrow().is_some()
     }
 

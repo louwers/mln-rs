@@ -26,7 +26,7 @@ use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::{AttributeDataType, Context, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::custom_layer::Impl as CustomLayerImpl;
 use mln_style::layers::{
@@ -34,7 +34,6 @@ use mln_style::layers::{
     CustomLayerRenderParameters,
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
-use mln_util::immutable::Immutable;
 
 use crate::change_request::UniqueChangeRequestVec;
 use crate::paint_parameters::PaintParameters;
@@ -87,9 +86,9 @@ pub struct RenderCustomLayer {
 }
 
 impl RenderCustomLayer {
-    pub fn new(impl_: Immutable<CustomLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<CustomLayerImpl>) -> Self {
         let host = impl_.host();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(CustomLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(CustomLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.passes = RenderPass::Translucent;
         RenderCustomLayer {
@@ -146,10 +145,10 @@ impl RenderLayer for RenderCustomLayer {
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        new_layer: &Immutable<dyn layer::Impl>,
+        new_layer: &Arc<dyn layer::Impl>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
-        let new_layer = static_immutable_cast::<CustomLayerImpl>(new_layer);
+        let new_layer = downcast_arc::<CustomLayerImpl>(new_layer);
         let same = self.shared.host.borrow().as_ref().is_some_and(|host| new_layer.has_host(host));
         if !same {
             self.shared.end(false);

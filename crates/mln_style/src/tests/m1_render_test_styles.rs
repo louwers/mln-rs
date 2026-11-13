@@ -8,16 +8,16 @@
 // in MapMode::Continuous for the transition test.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use mln_conversion::Convertible;
 use mln_style_types::VisibilityType;
 use mln_util::chrono::{Duration, TimePoint, milliseconds};
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::{Color, UnitBezier};
 
 use super::util::FixtureLog;
-use crate::layer::static_immutable_cast;
+use crate::layer::downcast_arc;
 use crate::layers::BackgroundPaintProperties;
 use crate::layers::background_layer::Impl as BackgroundLayerImpl;
 use crate::map::zoom_history::ZoomHistory;
@@ -62,11 +62,11 @@ fn load(test: &str) -> Impl {
     style
 }
 
-fn background_impl(style: &Impl, id: &str) -> Immutable<BackgroundLayerImpl> {
+fn background_impl(style: &Impl, id: &str) -> Arc<BackgroundLayerImpl> {
     let impls = style.get_layer_impls();
     let impl_ = impls.iter().find(|impl_| impl_.id == id).unwrap_or_else(|| panic!("no layer {id}"));
     assert!(std::ptr::eq(impl_.get_type_info(), BackgroundLayerImpl::static_type_info()));
-    static_immutable_cast::<BackgroundLayerImpl>(impl_)
+    downcast_arc::<BackgroundLayerImpl>(impl_)
 }
 
 /// One `RenderOrchestrator` update: `layer->transition(transitionParameters)`

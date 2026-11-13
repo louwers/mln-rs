@@ -15,11 +15,10 @@ use mln_style_types::SourceType;
 use mln_util::LatLng;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 
 use crate::layer::LayerTypeInfo;
 use crate::layer::layer_type_info::TileKind;
-use crate::source::{Source, SourceBase, static_immutable_cast};
+use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
 /// `ImageSource::Impl`.
@@ -102,7 +101,7 @@ impl std::fmt::Debug for ImageSource {
 impl ImageSource {
     /// `ImageSource(std::string id, const std::array<LatLng, 4>)`.
     pub fn new(id: impl Into<String>, coords: [LatLng; 4]) -> Self {
-        let impl_: Immutable<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), coords));
+        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), coords));
         ImageSource {
             inner: Rc::new(Inner {
                 base: SourceBase::new(impl_),
@@ -116,12 +115,12 @@ impl ImageSource {
     /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
-        static_immutable_cast::<Impl>(&self.inner.base.base_impl())
+        downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
     /// `setCoordinates(const std::array<LatLng, 4>&)`.
     pub fn set_coordinates(&self, coords: [LatLng; 4]) {
-        let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_coordinates(&self.impl_(), coords));
+        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_coordinates(&self.impl_(), coords));
         self.inner.base.set_base_impl(new_impl);
         self.inner.base.observer().on_source_changed(self);
     }
@@ -149,7 +148,7 @@ impl ImageSource {
         self.inner.generation.set(self.inner.generation.get() + 1);
         *self.inner.req.borrow_mut() = None;
         self.inner.base.set_loaded(true);
-        let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_image(&self.impl_(), image));
+        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_image(&self.impl_(), image));
         self.inner.base.set_base_impl(new_impl);
         self.inner.base.observer().on_source_changed(self);
     }
@@ -188,7 +187,7 @@ fn on_image_response(weak: &Weak<Inner>, res: &Response) {
             let observer = this.inner.base.observer();
             match result {
                 Ok(image) => {
-                    let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_image(&this.impl_(), image));
+                    let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_image(&this.impl_(), image));
                     this.inner.base.set_base_impl(new_impl);
                 }
                 Err(error) => observer.on_source_error(&this, Error::native(error.message)),

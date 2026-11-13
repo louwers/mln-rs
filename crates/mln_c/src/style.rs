@@ -14,7 +14,6 @@ use mln_util::chrono::Duration;
 use mln_util::constants;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
@@ -661,7 +660,7 @@ impl CompletionValue for LentLayers {
 /// A style image, whose pixels and intervals its `mln_style_image_info`
 /// lends.
 struct LentImage {
-    image: Immutable<StyleImage>,
+    image: Arc<StyleImage>,
     stretch_x: Vec<mln_image_stretch>,
     stretch_y: Vec<mln_image_stretch>,
 }
@@ -671,7 +670,7 @@ fn lend_stretches(stretches: &[mln_image_stretch]) -> *const mln_image_stretch {
 }
 
 impl LentImage {
-    fn new(image: Immutable<StyleImage>) -> Self {
+    fn new(image: Arc<StyleImage>) -> Self {
         let intervals = |stretches: &[(f32, f32)]| {
             stretches.iter().map(|&(from, to)| mln_image_stretch { from, to }).collect::<Vec<_>>()
         };

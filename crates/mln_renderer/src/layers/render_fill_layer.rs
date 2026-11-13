@@ -18,7 +18,7 @@ use mln_gfx::{
     UniqueDrawableBuilder, VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
 use mln_style::layers::fill_layer_properties::{
@@ -28,7 +28,6 @@ use mln_style::layers::fill_layer_properties::{
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 
 use super::fill_layer_tweaker::FillLayerTweaker;
@@ -57,7 +56,7 @@ const FILL_PATTERN_SHADER_NAME: &str = "FillPatternShader";
 const FILL_OUTLINE_PATTERN_SHADER_NAME: &str = "FillOutlinePatternShader";
 const FILL_OUTLINE_TRIANGULATED_SHADER_NAME: &str = "FillOutlineTriangulatedShader";
 
-fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &FillLayerImpl {
+fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), FillLayerImpl::static_type_info()));
     impl_.downcast_ref::<FillLayerImpl>().expect("RenderFillLayer: not a fill layer impl")
 }
@@ -213,9 +212,9 @@ pub struct RenderFillLayer {
 }
 
 impl RenderFillLayer {
-    pub fn new(impl_: Immutable<FillLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<FillLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(FillLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderFillLayer {
@@ -248,7 +247,7 @@ impl RenderLayer for RenderFillLayer {
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = get_evaluated::<FillLayerProperties>(&self.base.evaluated_properties).clone();
         let mut properties = FillLayerProperties::with_evaluated(
-            static_immutable_cast::<FillLayerImpl>(&self.base.base_impl),
+            downcast_arc::<FillLayerImpl>(&self.base.base_impl),
             parameters.get_crossfade_parameters(),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );

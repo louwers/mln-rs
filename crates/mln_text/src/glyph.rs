@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use mln_style_types::image::RectU16;
 use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::image::AlphaImage;
-use mln_util::immutable::Immutable;
 use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
@@ -151,7 +150,7 @@ impl Glyph {
 }
 
 /// `Glyphs = std::map<GlyphID, std::optional<Immutable<Glyph>>>`.
-pub type Glyphs = BTreeMap<GlyphID, Option<Immutable<Glyph>>>;
+pub type Glyphs = BTreeMap<GlyphID, Option<Arc<Glyph>>>;
 /// `GlyphMap = std::map<FontStackHash, Glyphs>`.
 pub type GlyphMap = VecMap<FontStackHash, Glyphs>;
 

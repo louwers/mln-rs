@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode};
 use mln_style::layer::layer_type_info;
@@ -16,7 +17,6 @@ use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{LatLngBounds, WrapMode};
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -55,7 +55,7 @@ where
     previously_rendered_tiles: &'p mut BTreeMap<UnwrappedTileID, OverscaledTileID>,
     retain: &'p mut BTreeSet<OverscaledTileID>,
     observer: &'p Rc<dyn TileObserver>,
-    layers: &'p [Immutable<dyn LayerProperties>],
+    layers: &'p [Arc<dyn LayerProperties>],
     parameters: &'p TileParameters<'a>,
     tile_range: Option<TileRange>,
     needs_relayout: bool,
@@ -191,7 +191,7 @@ impl TilePyramid {
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
-        layers: &[Immutable<dyn LayerProperties>],
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,

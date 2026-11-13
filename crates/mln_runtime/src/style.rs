@@ -22,7 +22,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
 
@@ -891,7 +890,7 @@ impl Map {
     }
 
     /// An image of the style, or `None` when the style has no such image.
-    pub fn style_image(&self, image_id: impl Into<String>) -> Result<Completion<Option<Immutable<StyleImage>>>, Error> {
+    pub fn style_image(&self, image_id: impl Into<String>) -> Result<Completion<Option<Arc<StyleImage>>>, Error> {
         let image_id = image_id.into();
         self.query(move |map| Ok(map.style().get_image(&image_id)))
     }

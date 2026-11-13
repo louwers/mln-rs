@@ -30,7 +30,7 @@ use mln_gfx::{
     UniqueDrawableBuilder,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
 use mln_style::layers::fill_extrusion_layer_properties::{
@@ -41,7 +41,6 @@ use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
@@ -65,7 +64,7 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &FillExtrusionLayerImpl {
+fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillExtrusionLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), FillExtrusionLayerImpl::static_type_info()));
     impl_.downcast_ref::<FillExtrusionLayerImpl>().expect("RenderFillExtrusionLayer: not a fill-extrusion layer impl")
 }
@@ -241,9 +240,9 @@ pub struct RenderFillExtrusionLayer {
 }
 
 impl RenderFillExtrusionLayer {
-    pub fn new(impl_: Immutable<FillExtrusionLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<FillExtrusionLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(FillExtrusionLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(FillExtrusionLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderFillExtrusionLayer {
@@ -277,7 +276,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = get_evaluated::<FillExtrusionLayerProperties>(&self.base.evaluated_properties).clone();
         let mut properties = FillExtrusionLayerProperties::with_evaluated(
-            static_immutable_cast::<FillExtrusionLayerImpl>(&self.base.base_impl),
+            downcast_arc::<FillExtrusionLayerImpl>(&self.base.base_impl),
             parameters.get_crossfade_parameters(),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );

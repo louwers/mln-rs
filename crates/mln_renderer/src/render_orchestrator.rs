@@ -36,7 +36,6 @@ use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
 
@@ -200,7 +199,7 @@ pub struct RenderOrchestrator {
     line_atlas: Rc<RefCell<LineAtlas>>,
     pattern_atlas: Rc<RefCell<PatternAtlas>>,
 
-    image_impls: Immutable<Vec<Immutable<image::Impl>>>,
+    image_impls: Arc<Vec<Arc<image::Impl>>>,
     source_impls: ImmutableVector<dyn source::Impl>,
     layer_impls: ImmutableVector<dyn layer::Impl>,
 
@@ -224,7 +223,7 @@ pub struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
-    filtered_layers_for_source: Vec<Immutable<dyn LayerProperties>>,
+    filtered_layers_for_source: Vec<Arc<dyn LayerProperties>>,
 
     thread_pool: TaggedScheduler,
     /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).

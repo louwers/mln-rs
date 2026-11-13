@@ -14,7 +14,6 @@ use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecMap;
 
@@ -24,7 +23,7 @@ use crate::conversion::geojson::convert_json_geojson;
 use crate::expression::Expression;
 use crate::layer::LayerTypeInfo;
 use crate::layer::layer_type_info::TileKind;
-use crate::source::{Source, SourceBase, static_immutable_cast};
+use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl;
 
 /// `GeoJSONOptions::ClusterExpression`.
@@ -100,8 +99,8 @@ impl std::fmt::Debug for GeoJSONOptions {
 
 impl GeoJSONOptions {
     /// `GeoJSONOptions::defaultOptions()`: one shared instance.
-    pub fn default_options() -> Immutable<GeoJSONOptions> {
-        static OPTIONS: OnceLock<Immutable<GeoJSONOptions>> = OnceLock::new();
+    pub fn default_options() -> Arc<GeoJSONOptions> {
+        static OPTIONS: OnceLock<Arc<GeoJSONOptions>> = OnceLock::new();
         OPTIONS.get_or_init(|| Arc::new(GeoJSONOptions::default())).clone()
     }
 }
@@ -131,7 +130,7 @@ pub trait GeoJSONData: Send + Sync {
 pub fn create_geojson_data(
     geojson: &GeoJSON,
     sequenced_scheduler: SchedulerPtr,
-    options: &Immutable<GeoJSONOptions>,
+    options: &Arc<GeoJSONOptions>,
 ) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
     geojson_source_impl::create(geojson, sequenced_scheduler, options)
 }
@@ -140,13 +139,13 @@ pub fn create_geojson_data(
 /// `Send`, so the work can leave the source's thread.
 #[derive(Clone)]
 pub struct GeoJSONDataBuilder {
-    options: Immutable<GeoJSONOptions>,
+    options: Arc<GeoJSONOptions>,
     sequenced_scheduler: SchedulerPtr,
 }
 
 impl GeoJSONDataBuilder {
     #[must_use]
-    pub fn options(&self) -> &Immutable<GeoJSONOptions> {
+    pub fn options(&self) -> &Arc<GeoJSONOptions> {
         &self.options
     }
 
@@ -184,8 +183,8 @@ impl std::fmt::Debug for GeoJSONSource {
 
 impl GeoJSONSource {
     /// `GeoJSONSource(std::string id, Immutable<GeoJSONOptions>)`.
-    pub fn new(id: impl Into<String>, options: Immutable<GeoJSONOptions>) -> Self {
-        let impl_: Immutable<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), options));
+    pub fn new(id: impl Into<String>, options: Arc<GeoJSONOptions>) -> Self {
+        let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), options));
         GeoJSONSource {
             inner: Rc::new(Inner {
                 base: SourceBase::new(impl_),
@@ -206,7 +205,7 @@ impl GeoJSONSource {
     /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
-        static_immutable_cast::<Impl>(&self.inner.base.base_impl())
+        downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
     /// `setURL(url)`: set the url to a geojson file which can be fetched.
@@ -252,7 +251,7 @@ impl GeoJSONSource {
     pub fn set_geojson_data(&self, geojson_data: Option<Arc<dyn GeoJSONData>>) {
         *self.inner.req.borrow_mut() = None;
         self.drop_building_response();
-        let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_data(&self.impl_(), geojson_data));
+        let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_data(&self.impl_(), geojson_data));
         self.inner.base.set_base_impl(new_impl);
         self.inner.base.observer().on_source_changed(self);
     }
@@ -269,7 +268,7 @@ impl GeoJSONSource {
     }
 
     #[must_use]
-    pub fn get_options(&self) -> Immutable<GeoJSONOptions> {
+    pub fn get_options(&self) -> Arc<GeoJSONOptions> {
         self.impl_().get_options().clone()
     }
 
@@ -310,9 +309,9 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
             &*this.inner.background,
             SimpleIdentity::EMPTY,
             /* makeImplInBackground */
-            move || -> Immutable<dyn source_impl::Impl> {
+            move || -> Arc<dyn source_impl::Impl> {
                 let data = data.expect("response data");
-                let current = static_immutable_cast::<Impl>(&current_impl);
+                let current = downcast_arc::<Impl>(&current_impl);
                 let mut error = Error::default();
                 let mut geojson_data = None;
                 if let Some(geojson) = convert_json_geojson(&data, &mut error) {
@@ -330,7 +329,7 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
                 Arc::new(Impl::with_data(&current, geojson_data))
             },
             /* onImplReady */
-            move |new_impl: Immutable<dyn source_impl::Impl>| {
+            move |new_impl: Arc<dyn source_impl::Impl>| {
                 if let Some(inner) = weak.upgrade() {
                     // If a new request is being processed, ignore this impl.
                     if generation == inner.request_generation.get() {

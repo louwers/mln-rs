@@ -22,7 +22,7 @@ use mln_renderer::layout::pattern_layout::PatternLayerMap;
 use mln_renderer::tile_mask::TileMask;
 use mln_style::CrossfadeParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::FillLayer;
 use mln_style::layers::fill_extrusion_layer_properties::{
@@ -40,7 +40,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::FeatureType;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
@@ -202,8 +201,8 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     *evaluated.get_mut::<FillColor>() = PossiblyEvaluatedPropertyValue::Expression(
         layer.downcast_ref::<FillLayer>().expect("fill layer").get_fill_color().as_expression().clone(),
     );
-    let properties: Immutable<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
-        static_immutable_cast(&layer.base_impl()),
+    let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
+        downcast_arc(&layer.base_impl()),
         CrossfadeParameters::default(),
         evaluated,
     ));

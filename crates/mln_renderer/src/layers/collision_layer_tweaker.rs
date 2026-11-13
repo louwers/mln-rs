@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/collision_layer_tweaker.cpp and
 // src/mln/gfx/collision_drawable_data.hpp.
 
+use std::sync::Arc;
+
 use mln_gfx::LayerGroupBase;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::shader_defines::{
@@ -10,7 +12,6 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::symbol_layer_ubo::{CollisionDrawableUBO, CollisionTilePropsUBO};
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
-use mln_util::immutable::Immutable;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -28,7 +29,7 @@ pub struct CollisionLayerTweaker {
 }
 
 impl CollisionLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         CollisionLayerTweaker { base: LayerTweakerBase::new(id, properties) }
     }
 }

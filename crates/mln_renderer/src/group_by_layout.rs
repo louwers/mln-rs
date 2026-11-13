@@ -14,7 +14,6 @@ use mln_style::layer;
 use mln_style::layer::LayerTypeInfo;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
-use mln_util::immutable::Immutable;
 
 /// `LayoutGroupKey`.
 pub struct LayoutGroupKey {
@@ -30,7 +29,7 @@ pub struct LayoutGroupKey {
     pub filter_expression: Option<Arc<dyn Expression>>,
 
     // Reference to impl for layout comparison
-    pub impl_: Immutable<dyn layer::Impl>,
+    pub impl_: Arc<dyn layer::Impl>,
 }
 
 impl PartialEq for LayoutGroupKey {
@@ -79,7 +78,7 @@ impl PartialEq for LayoutGroupKey {
     }
 }
 
-fn create_group_key(impl_: &Immutable<dyn layer::Impl>) -> LayoutGroupKey {
+fn create_group_key(impl_: &Arc<dyn layer::Impl>) -> LayoutGroupKey {
     LayoutGroupKey {
         type_info: impl_.get_type_info(),
         source: impl_.source.clone(),
@@ -93,10 +92,10 @@ fn create_group_key(impl_: &Immutable<dyn layer::Impl>) -> LayoutGroupKey {
 }
 
 /// `GroupMap`: the groups with their keys, in first-appearance order.
-pub type GroupMap = Vec<(LayoutGroupKey, Vec<Immutable<dyn LayerProperties>>)>;
+pub type GroupMap = Vec<(LayoutGroupKey, Vec<Arc<dyn LayerProperties>>)>;
 
 /// `groupLayers(layers)`.
-pub fn group_layers(layers: &[Immutable<dyn LayerProperties>]) -> GroupMap {
+pub fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
     let mut group_map: GroupMap = Vec::with_capacity(layers.len());
 
     for layer in layers {

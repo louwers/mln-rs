@@ -10,8 +10,8 @@ use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase
 use crate::layers::circle_layer_impl::Impl as CircleLayerImpl;
 use mln_style_types::{AlignmentType, CirclePitchScaleType, TranslateAnchorType};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::data_driven_layout_property!(
     /// `struct CircleSortKey : DataDrivenLayoutProperty<float>`:
@@ -122,7 +122,7 @@ pub struct CircleLayerProperties {
 
 impl CircleLayerProperties {
     /// `explicit CircleLayerProperties(Immutable<CircleLayer::Impl>)`.
-    pub fn new(impl_: Immutable<CircleLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<CircleLayerImpl>) -> Self {
         CircleLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             evaluated: CirclePaintProperties::PossiblyEvaluated::default(),
@@ -131,7 +131,7 @@ impl CircleLayerProperties {
 
     /// `CircleLayerProperties(Immutable<CircleLayer::Impl>, CirclePaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<CircleLayerImpl>,
+        impl_: Arc<CircleLayerImpl>,
         evaluated: CirclePaintProperties::PossiblyEvaluated,
     ) -> Self {
         CircleLayerProperties {

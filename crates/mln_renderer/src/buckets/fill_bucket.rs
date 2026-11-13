@@ -3,8 +3,8 @@
 // outlines are generated both as triangulated lines and as line primitives).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::RwLock;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, RwLock};
 
 use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -19,7 +19,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -89,7 +88,7 @@ impl FillBucket {
     #[must_use]
     pub fn new(
         _layout: &FillLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         _overscaling: u32,
     ) -> Self {

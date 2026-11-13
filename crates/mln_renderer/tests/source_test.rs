@@ -17,7 +17,7 @@ use mln_renderer::tile_parameters::TileParameters;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
-use mln_style::layer::{Layer, static_immutable_cast};
+use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::layers::hillshade_layer::Impl as HillshadeLayerImpl;
@@ -42,7 +42,6 @@ use mln_util::chrono::{Duration, milliseconds};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -178,20 +177,20 @@ enum Tiled {
 impl Tiled {
     /// `RasterLayer` / `HillshadeLayer` / `LineLayer` (source-layer "water")
     /// "id" on "source", as layer properties.
-    fn layers(self) -> Vec<Immutable<dyn LayerProperties>> {
-        let properties: Immutable<dyn LayerProperties> = match self {
+    fn layers(self) -> Vec<Arc<dyn LayerProperties>> {
+        let properties: Arc<dyn LayerProperties> = match self {
             Tiled::Raster => {
                 let layer = RasterLayer::new("id", "source");
-                Arc::new(RasterLayerProperties::new(static_immutable_cast::<RasterLayerImpl>(&layer.base_impl())))
+                Arc::new(RasterLayerProperties::new(downcast_arc::<RasterLayerImpl>(&layer.base_impl())))
             }
             Tiled::RasterDEM => {
                 let layer = HillshadeLayer::new("id", "source");
-                Arc::new(HillshadeLayerProperties::new(static_immutable_cast::<HillshadeLayerImpl>(&layer.base_impl())))
+                Arc::new(HillshadeLayerProperties::new(downcast_arc::<HillshadeLayerImpl>(&layer.base_impl())))
             }
             Tiled::Vector => {
                 let mut layer = LineLayer::new("id", "source");
                 layer.set_source_layer("water");
-                Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())))
+                Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())))
             }
         };
         vec![properties]
@@ -587,8 +586,8 @@ fn custom_geometry_case(
 
     let mut layer = LineLayer::new("id", "source");
     layer.set_source_layer("water");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
     let layers = vec![layer_properties];
 
     let mut render_source = render_source::create(&source.base_impl()).unwrap();
@@ -668,8 +667,8 @@ fn custom_vector_source_set_tile_data() {
 
     let mut layer = LineLayer::new("id", "source");
     layer.set_source_layer("water");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
 
     let mut render_source = render_source::create(&source.base_impl()).unwrap();
     render_source.set_observer(observer);
@@ -765,11 +764,11 @@ fn geojson_source_tiles_after_data_reset() {
         create_geojson_data(&geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
     source.set_geojson_data(Some(geojson_data.clone()));
     let mut render_source =
-        RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
+        RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
 
     let layer = CircleLayer::new("id", "source");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
@@ -798,28 +797,28 @@ fn run_until_work(run_loop: &RunLoop) {
 }
 
 /// A circle layer "id" on "source", as layer properties.
-fn circle_layers() -> Vec<Immutable<dyn LayerProperties>> {
+fn circle_layers() -> Vec<Arc<dyn LayerProperties>> {
     let layer = CircleLayer::new("id", "source");
-    vec![Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())))]
+    vec![Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))]
 }
 
 /// A GeoJSON source rendered with a circle layer. Its data is clustered,
 /// which slices a tile within the call in either mode, so whether the tiles
 /// complete within an update shows only how they lay out.
 struct SynchronousUpdateSource {
-    options: Immutable<GeoJSONOptions>,
+    options: Arc<GeoJSONOptions>,
     source: GeoJSONSource,
     render_source: RenderGeoJSONSource,
-    layers: Vec<Immutable<dyn LayerProperties>>,
+    layers: Vec<Arc<dyn LayerProperties>>,
 }
 
 impl SynchronousUpdateSource {
     fn new(synchronous_update: bool) -> Self {
-        let options: Immutable<GeoJSONOptions> =
+        let options: Arc<GeoJSONOptions> =
             Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
         let source = GeoJSONSource::new("source", options.clone());
         let render_source =
-            RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
+            RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
         SynchronousUpdateSource { options, source, render_source, layers: circle_layers() }
     }
 
@@ -893,7 +892,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
         create_geojson_data(&geojson, slicer.clone(), &GeoJSONOptions::default_options()).unwrap(),
     ));
     let mut render_source =
-        RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
+        RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
     let layers = circle_layers();
     let update = |render_source: &mut RenderGeoJSONSource| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);

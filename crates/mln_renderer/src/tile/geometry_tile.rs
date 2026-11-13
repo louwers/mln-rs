@@ -47,7 +47,6 @@ use mln_text::BiDi;
 use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
@@ -254,7 +253,7 @@ pub struct GeometryTileInner {
 }
 
 impl GeometryTileInner {
-    fn available_images(&self) -> Immutable<VecSet<String>> {
+    fn available_images(&self) -> Arc<VecSet<String>> {
         self.image_manager.get_available_images()
     }
 
@@ -619,7 +618,7 @@ impl Tile for GeometryTile {
         self.inner.mark_obsolete();
     }
 
-    fn set_layers(&self, layers: &[Immutable<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
+    fn set_layers(&self, layers: &[Arc<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
         let inner = &self.inner;
         // Mark the tile as pending again if it was complete before to
         // prevent signaling a complete state despite pending parse
@@ -630,7 +629,7 @@ impl Tile for GeometryTile {
         }
 
         let id = inner.base.id();
-        let mut impls: Vec<Immutable<dyn LayerProperties>> = Vec::with_capacity(layers.len());
+        let mut impls: Vec<Arc<dyn LayerProperties>> = Vec::with_capacity(layers.len());
 
         for layer in layers {
             // Skip irrelevant layers.
@@ -721,7 +720,7 @@ impl Tile for GeometryTile {
         }
     }
 
-    fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+    fn layer_properties_updated(&self, layer_properties: &Arc<dyn LayerProperties>) -> bool {
         let mut layout_result = self.inner.layout_result.borrow_mut();
         let Some(result) = layout_result.as_mut() else {
             return false;

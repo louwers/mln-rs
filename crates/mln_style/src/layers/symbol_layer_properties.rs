@@ -14,8 +14,8 @@ use mln_style_types::{
     TextTransformType, TextVariableAnchorType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection,
 };
 use mln_util::{Color, Padding};
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::layout_property!(
     /// `struct IconAllowOverlap : LayoutProperty<bool>`:
@@ -505,7 +505,7 @@ pub struct SymbolLayerProperties {
 
 impl SymbolLayerProperties {
     /// `explicit SymbolLayerProperties(Immutable<SymbolLayer::Impl>)`.
-    pub fn new(impl_: Immutable<SymbolLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<SymbolLayerImpl>) -> Self {
         SymbolLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             evaluated: SymbolPaintProperties::PossiblyEvaluated::default(),
@@ -514,7 +514,7 @@ impl SymbolLayerProperties {
 
     /// `SymbolLayerProperties(Immutable<SymbolLayer::Impl>, SymbolPaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<SymbolLayerImpl>,
+        impl_: Arc<SymbolLayerImpl>,
         evaluated: SymbolPaintProperties::PossiblyEvaluated,
     ) -> Self {
         SymbolLayerProperties {
