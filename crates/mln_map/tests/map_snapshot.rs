@@ -60,7 +60,6 @@ fn snapshot_reports_every_member() {
         max_zoom: Some(18.0),
         min_pitch: Some(5.0),
         max_pitch: Some(50.0),
-        ..Default::default()
     })
     .unwrap();
     map.set_debug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION);
