@@ -486,8 +486,8 @@ fn create_region() {
 
     check_log_empty(&log);
 
-    expect_same_tile_pyramid(&definition, region.get_definition());
-    assert_eq!(&metadata, region.get_metadata());
+    expect_same_tile_pyramid(&definition, &region.definition);
+    assert_eq!(metadata, region.metadata);
 }
 
 // gtest: OfflineDatabase.UpdateMetadata
@@ -500,9 +500,9 @@ fn update_metadata() {
     let region = db.create_region(&definition.into(), &metadata).expect("region");
 
     let newmetadata: OfflineRegionMetadata = vec![4, 5, 6];
-    assert!(db.update_metadata(region.get_id(), &newmetadata).is_ok());
-    let new_region = db.get_region(region.get_id()).unwrap().expect("region");
-    assert_eq!(new_region.get_metadata(), &newmetadata);
+    assert!(db.update_metadata(region.id, &newmetadata).is_ok());
+    let new_region = db.get_region(region.id).unwrap().expect("region");
+    assert_eq!(new_region.metadata, newmetadata);
 
     check_log_empty(&log);
 }
@@ -520,9 +520,9 @@ fn list_regions() {
 
     assert_eq!(1, regions.len());
 
-    assert_eq!(region.get_id(), regions[0].get_id());
-    expect_same_tile_pyramid(&definition, regions[0].get_definition());
-    assert_eq!(&metadata, regions[0].get_metadata());
+    assert_eq!(region.id, regions[0].id);
+    expect_same_tile_pyramid(&definition, &regions[0].definition);
+    assert_eq!(metadata, regions[0].metadata);
 
     check_log_empty(&log);
 }
@@ -536,12 +536,12 @@ fn get_region() {
     let metadata: OfflineRegionMetadata = vec![1, 2, 3];
 
     let created_region = db.create_region(&definition.clone().into(), &metadata).expect("region");
-    let region_id = created_region.get_id();
+    let region_id = created_region.id;
     let region = db.get_region(region_id).unwrap().expect("region");
 
-    assert_eq!(region_id, region.get_id());
-    expect_same_tile_pyramid(&definition, region.get_definition());
-    assert_eq!(&metadata, region.get_metadata());
+    assert_eq!(region_id, region.id);
+    expect_same_tile_pyramid(&definition, &region.definition);
+    assert_eq!(metadata, region.metadata);
 
     check_log_empty(&log);
 }
@@ -557,7 +557,7 @@ fn get_region_definition() {
     check_log_empty(&log);
 
     let region = db.create_region(&definition.clone().into(), &metadata).expect("region");
-    let region_definition = db.get_region_definition(region.get_id()).unwrap();
+    let region_definition = db.get_region_definition(region.id).unwrap();
 
     expect_same_tile_pyramid(&definition, &region_definition);
 }
@@ -602,10 +602,10 @@ fn disabled_maximum_ambient_cache_size() {
             db.put(&ambient_style, &response);
 
             let region_tile = tile(&format!("https://example.com/tiles/tiles/region_tile_{i}"), 1.0, 0, 0, 0);
-            let _ = db.put_region_resource(region.get_id(), &region_tile, &response);
+            let _ = db.put_region_resource(region.id, &region_tile, &response);
 
             let region_style = style(&format!("https://example.com/maps/region_style_{i}"));
-            let _ = db.put_region_resource(region.get_id(), &region_style, &response);
+            let _ = db.put_region_resource(region.id, &region_style, &response);
         }
     }
 
@@ -738,12 +738,12 @@ fn delete_region() {
 
         let mut status = OfflineRegionStatus::default();
         db.put_region_resources(
-            region1.get_id(),
+            region1.id,
             &generate_resources("https://example.com/tiles/tiles/tile_1", "https://example.com/maps/style_1"),
             &mut status,
         );
         db.put_region_resources(
-            region2.get_id(),
+            region2.id,
             &generate_resources("https://example.com/tiles/tiles/tile_2", "https://example.com/maps/style_2"),
             &mut status,
         );
@@ -838,17 +838,17 @@ fn invalidate() {
 
     let region1 = db.create_region(&definition.clone().into(), &metadata).unwrap();
     let region1_tile = tile("https://example.com/tiles/tiles/tile_offline_region1", 1.0, 0, 0, 0);
-    db.put_region_resource(region1.get_id(), &region1_tile, &response);
+    db.put_region_resource(region1.id, &region1_tile, &response);
 
     let region1_style = style("https://example.com/maps/style_offline_region1");
-    db.put_region_resource(region1.get_id(), &region1_style, &response);
+    db.put_region_resource(region1.id, &region1_style, &response);
 
     let region2 = db.create_region(&definition.into(), &metadata).unwrap();
     let region2_tile = tile("https://example.com/tiles/tiles/tile_offline_region2", 1.0, 0, 0, 0);
-    db.put_region_resource(region2.get_id(), &region2_tile, &response);
+    db.put_region_resource(region2.id, &region2_tile, &response);
 
     let region2_style = style("https://example.com/maps/style_offline_region2");
-    db.put_region_resource(region2.get_id(), &region2_style, &response);
+    db.put_region_resource(region2.id, &region2_style, &response);
 
     let mut get = |r: &Resource| db.get(r).expect("response");
 
@@ -862,7 +862,7 @@ fn invalidate() {
 
     // Invalidate a region will not invalidate ambient tiles or other
     // regions.
-    assert!(db.invalidate_region(region1.get_id()).is_none());
+    assert!(db.invalidate_region(region1.id).is_none());
 
     let mut get = |r: &Resource| db.get(r).expect("response");
     assert!(get(&ambient_tile).is_usable());
@@ -900,8 +900,8 @@ fn invalidate() {
     assert!(!get(&region2_style).must_revalidate);
 
     // Should not throw.
-    assert!(db.invalidate_region(region2.get_id()).is_none());
-    assert!(db.invalidate_region(region2.get_id()).is_none());
+    assert!(db.invalidate_region(region2.id).is_none());
+    assert!(db.invalidate_region(region2.id).is_none());
     assert!(db.invalidate_region(123).is_none());
 
     // Invalidate != delete.
@@ -956,8 +956,8 @@ fn create_region_infinite_max_zoom() {
 
     check_log_empty(&log);
 
-    assert_eq!(0.0, region.get_definition().min_zoom());
-    assert_eq!(f64::INFINITY, region.get_definition().max_zoom());
+    assert_eq!(0.0, region.definition.min_zoom());
+    assert_eq!(f64::INFINITY, region.definition.max_zoom());
 }
 
 // gtest: OfflineDatabase.ConcurrentUse
@@ -1077,10 +1077,10 @@ fn offline_region_does_not_affect_ambient_cache_size() {
     // 1MB of offline region data.
     for i in 0..5 {
         let t = tile(&format!("https://example.com/tiles/tiles/tile_{i}"), 1.0, 0, 0, 0);
-        db.put_region_resource(region.get_id(), &t, &response);
+        db.put_region_resource(region.id, &t, &response);
 
         let s = style(&format!("https://example.com/maps/style_{i}"));
-        db.put_region_resource(region.get_id(), &s, &response);
+        db.put_region_resource(region.id, &s, &response);
     }
 
     // Second 100KB ambient cache resource.
@@ -1106,7 +1106,7 @@ fn put_region_resource_does_not_evict() {
     response.data = Some(random_string(1024));
 
     for i in 1..=100u32 {
-        db.put_region_resource(region.get_id(), &style(&format!("http://example.com/{i}")), &response);
+        db.put_region_resource(region.id, &style(&format!("http://example.com/{i}")), &response);
     }
 
     assert!(db.get(&style("http://example.com/1")).is_some());
@@ -1165,7 +1165,7 @@ fn get_region_completed_status() {
     let metadata = OfflineRegionMetadata::new();
     let region = db.create_region(&definition.into(), &metadata).expect("region");
 
-    let status1 = db.get_region_completed_status(region.get_id()).expect("status");
+    let status1 = db.get_region_completed_status(region.id).expect("status");
     assert_eq!(0, status1.completed_resource_count);
     assert_eq!(0, status1.completed_resource_size);
     assert_eq!(0, status1.completed_tile_count);
@@ -1174,17 +1174,17 @@ fn get_region_completed_status() {
     let mut response = Response::new();
     response.data = Some(data("data"));
 
-    let style_size = db.put_region_resource(region.get_id(), &style("http://example.com/"), &response);
+    let style_size = db.put_region_resource(region.id, &style("http://example.com/"), &response);
 
-    let status2 = db.get_region_completed_status(region.get_id()).expect("status");
+    let status2 = db.get_region_completed_status(region.id).expect("status");
     assert_eq!(1, status2.completed_resource_count);
     assert_eq!(style_size, status2.completed_resource_size);
     assert_eq!(0, status2.completed_tile_count);
     assert_eq!(0, status2.completed_tile_size);
 
-    let tile_size = db.put_region_resource(region.get_id(), &tile("http://example.com/", 1.0, 0, 0, 0), &response);
+    let tile_size = db.put_region_resource(region.id, &tile("http://example.com/", 1.0, 0, 0, 0), &response);
 
-    let status3 = db.get_region_completed_status(region.get_id()).expect("status");
+    let status3 = db.get_region_completed_status(region.id).expect("status");
     assert_eq!(2, status3.completed_resource_count);
     assert_eq!(style_size + tile_size, status3.completed_resource_size);
     assert_eq!(1, status3.completed_tile_count);
@@ -1210,7 +1210,7 @@ fn has_region_resource() {
     response.data = Some(random_string(1024));
 
     for i in 1..=100u32 {
-        db.put_region_resource(region.get_id(), &style(&format!("http://example.com/{i}")), &response);
+        db.put_region_resource(region.id, &style(&format!("http://example.com/{i}")), &response);
     }
 
     assert!(db.has_region_resource(&style("http://example.com/1")).is_some());
@@ -1236,12 +1236,12 @@ fn has_region_resource_tile() {
     response.data = Some(data("first"));
 
     assert!(db.has_region_resource(&resource).is_none());
-    db.put_region_resource(region.get_id(), &resource, &response);
+    db.put_region_resource(region.id, &resource, &response);
     assert!(db.has_region_resource(&resource).is_some());
     assert_eq!(Some(5), db.has_region_resource(&resource));
 
     let another_region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
-    assert!(region.get_id() < another_region.get_id());
+    assert!(region.id < another_region.id);
     assert!(db.has_region_resource(&resource).is_some());
     assert_eq!(Some(5), db.has_region_resource(&resource));
 
@@ -1262,17 +1262,17 @@ fn check_region_resource_and_not_modified_size() {
         let mut response = Response::new();
         response.data = Some(data("first"));
         assert_eq!(None, db.check_region_resource(&resource));
-        assert_eq!(5, db.put_region_resource(region.get_id(), &resource, &response));
+        assert_eq!(5, db.put_region_resource(region.id, &resource, &response));
         assert_eq!(Some((5, true)), db.check_region_resource(&resource));
 
-        assert!(db.invalidate_region(region.get_id()).is_none());
+        assert!(db.invalidate_region(region.id).is_none());
         assert_eq!(Some((5, false)), db.check_region_resource(&resource));
         assert_eq!(Some(5), db.has_region_resource(&resource));
 
         let mut not_modified = Response::new();
         not_modified.not_modified = true;
         not_modified.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
-        assert_eq!(5, db.put_region_resource(region.get_id(), &resource, &not_modified));
+        assert_eq!(5, db.put_region_resource(region.id, &resource, &not_modified));
         assert_eq!(Some((5, true)), db.check_region_resource(&resource));
     }
 
@@ -1298,7 +1298,7 @@ fn batch_insertion() {
     }
 
     let mut status = OfflineRegionStatus::default();
-    db.put_region_resources(region.get_id(), &resources, &mut status);
+    db.put_region_resources(region.id, &resources, &mut status);
 
     for i in 1..=100u32 {
         assert!(db.get(&style(&format!("http://example.com/{i}"))).is_some());
@@ -1537,7 +1537,7 @@ fn merge_database_with_single_region_new() {
     let result = db.merge_database(&filename_sideload);
     assert_eq!(new_regions_count, db.list_regions().unwrap().len());
 
-    let region_id = result.unwrap()[0].get_id();
+    let region_id = result.unwrap()[0].id;
     let status = db.get_region_completed_status(region_id).unwrap();
     assert_eq!(398, status.completed_resource_count);
     assert_eq!(5, status.completed_tile_count);
@@ -1563,7 +1563,7 @@ fn merge_database_with_single_region_update() {
         let mut db = OfflineDatabase::new(&filename);
         let regions = db.list_regions();
         assert_eq!(1, db.list_regions().unwrap().len());
-        let region_id = regions.unwrap()[0].get_id();
+        let region_id = regions.unwrap()[0].id;
 
         let result = db.merge_database(&filename_sideload);
         assert_eq!(1, result.unwrap().len());
@@ -1640,12 +1640,12 @@ fn merge_database_with_multiple_regions_new() {
     assert_eq!(2, result.len());
     assert_eq!(2, db.list_regions().unwrap().len());
 
-    let region1_id = result.first().unwrap().get_id();
+    let region1_id = result.first().unwrap().id;
     let status = db.get_region_completed_status(region1_id).unwrap();
     assert_eq!(398, status.completed_resource_count);
     assert_eq!(5, status.completed_tile_count);
 
-    let region2_id = result.last().unwrap().get_id();
+    let region2_id = result.last().unwrap().id;
     let status = db.get_region_completed_status(region2_id).unwrap();
     assert_eq!(0, status.completed_tile_count);
     assert_eq!(200, status.completed_resource_count);
@@ -1865,8 +1865,8 @@ fn geometry_region_round_trip() {
     let region = db.create_region(&definition.clone().into(), &OfflineRegionMetadata::new()).unwrap();
     let regions = db.list_regions().unwrap();
     assert_eq!(1, regions.len());
-    assert_eq!(region.get_id(), regions[0].get_id());
-    assert_eq!(&OfflineRegionDefinition::Geometry(definition), regions[0].get_definition());
+    assert_eq!(region.id, regions[0].id);
+    assert_eq!(OfflineRegionDefinition::Geometry(definition), regions[0].definition);
 }
 
 fn cached_accessed(filename: &str, table: &str) -> i64 {
@@ -2109,7 +2109,7 @@ fn batched_read_touch_failure_does_not_prevent_region_deletion() {
     assert!(db.set_maximum_ambient_cache_size(0).is_none());
     let definition = tile_pyramid("https://example.com/maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
     let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).unwrap();
-    db.put_region_resource(region.get_id(), &fixture::tile(), &fixture::response());
+    db.put_region_resource(region.id, &fixture::tile(), &fixture::response());
     assert!(db.get_region_resource(&fixture::tile()).is_some());
     cache_sql(
         &filename,

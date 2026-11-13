@@ -83,10 +83,8 @@ impl LayerTweaker for SymbolLayerTweaker {
         let context = parameters.context;
         let state = parameters.state;
         let properties = self.base.evaluated_properties.clone();
-        let symbol_layer_properties = (*properties)
-            .as_any()
-            .downcast_ref::<SymbolLayerProperties>()
-            .expect("SymbolLayerTweaker: symbol layer properties");
+        let symbol_layer_properties =
+            (*properties).downcast_ref::<SymbolLayerProperties>().expect("SymbolLayerTweaker: symbol layer properties");
         let evaluated = get_evaluated::<SymbolLayerProperties>(&properties);
 
         let zoom = state.get_zoom() as f32;

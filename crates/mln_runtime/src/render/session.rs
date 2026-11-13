@@ -125,18 +125,13 @@ impl RingSlot {
 
 /// Work sent to a session's thread, whose completion an abandon can fail at
 /// once instead of waiting for the thread to run it.
-pub(crate) trait PendingWork: Send {
+pub(crate) trait PendingWork: Any + Send {
     fn fail(self: Box<Self>, error: Error);
-    fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 }
 
 impl<T: Send + 'static> PendingWork for Resolver<T> {
     fn fail(self: Box<Self>, error: Error) {
         (*self).resolve(Err(error));
-    }
-
-    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
-        self
     }
 }
 
@@ -311,8 +306,8 @@ impl SessionShared {
     /// The completion of the work `id`, unless an end of the session
     /// completed it first.
     pub(crate) fn take_work<T: Send + 'static>(&self, id: WorkId) -> Option<Resolver<T>> {
-        let work = self.state.lock_unpoisoned().pending.remove(&id)?;
-        work.into_any().downcast::<Resolver<T>>().ok().map(|resolver| *resolver)
+        let work: Box<dyn Any + Send> = self.state.lock_unpoisoned().pending.remove(&id)?;
+        work.downcast::<Resolver<T>>().ok().map(|resolver| *resolver)
     }
 
     pub(crate) fn is_released(&self) -> bool {

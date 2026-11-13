@@ -534,8 +534,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     pub fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
         let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio).expect("a headless frontend");
-        let options =
-            MapOptions::new().with_map_mode(mode).with_size(frontend.get_size()).with_pixel_ratio(pixel_ratio);
+        let options = MapOptions { map_mode: mode, size: frontend.get_size(), pixel_ratio, ..Default::default() };
         let map = Map::with_file_source(file_source.clone(), options).unwrap();
         frontend.attach(&map);
         let map = Rc::new(RefCell::new(map));

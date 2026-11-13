@@ -46,17 +46,22 @@ fn style() -> String {
 /// A map that looks at the wall from its east, with padding, roll, pitch
 /// and bearing.
 fn map_of(runtime: &Runtime) -> Map {
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     wait(map.set_style_json(style()));
-    let camera = CameraOptions::default()
-        .with_center(Some(LatLng::new(40.7, WALL + 0.0001).unwrap()))
-        .with_zoom(Some(17.0))
-        .with_bearing(Some(-70.0))
-        .with_pitch(Some(50.0))
-        .with_roll(Some(6.0))
-        .with_padding(Some(EdgeInsets::new(6.0, 10.0, 0.0, 0.0).unwrap()));
+    let camera = CameraOptions {
+        center: Some(LatLng::new(40.7, WALL + 0.0001).unwrap()),
+        zoom: Some(17.0),
+        bearing: Some(-70.0),
+        pitch: Some(50.0),
+        roll: Some(6.0),
+        padding: Some(EdgeInsets::new(6.0, 10.0, 0.0, 0.0).unwrap()),
+        ..Default::default()
+    };
     wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }));
     map
 }

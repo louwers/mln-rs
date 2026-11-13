@@ -204,10 +204,8 @@ impl TileBase {
 }
 
 /// The virtual interface of `Tile`.
-pub trait Tile {
+pub trait Tile: Any {
     fn base(&self) -> &TileBase;
-
-    fn as_any(&self) -> &dyn Any;
 
     fn create_render_data(&self) -> Box<dyn TileRenderData>;
 
@@ -336,5 +334,12 @@ pub trait Tile {
 
     fn dump_debug_logs(&self) {
         self.base().dump_debug_logs();
+    }
+}
+
+impl dyn Tile {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: Tile>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
     }
 }

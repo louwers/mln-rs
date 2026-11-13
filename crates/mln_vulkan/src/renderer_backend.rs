@@ -31,7 +31,6 @@
 //   device's queue meanwhile, so a backend waits for its own work instead
 //   (`BackendImpl::wait_idle`), and never needs every queue at once.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::CStr;
 use std::mem::ManuallyDrop;
@@ -404,10 +403,6 @@ impl RendererBackend {
 impl renderer_backend::RendererBackend for RendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {

@@ -9,7 +9,6 @@
 //   made for: C++ keys it by the caller's hash alone, which would hand a
 //   state made for one renderable to a pass on another.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -223,9 +222,6 @@ impl Shader for ShaderProgram {
     fn type_name(&self) -> &'static str {
         Self::NAME
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 impl ShaderProgramBase for ShaderProgram {
@@ -245,5 +241,5 @@ impl ShaderProgramBase for ShaderProgram {
 
 /// Downcast a shader handle to the Metal program (C++ `static_cast`).
 pub fn as_mtl_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
-    shader.as_any().downcast_ref::<ShaderProgram>()
+    shader.downcast_ref::<ShaderProgram>()
 }

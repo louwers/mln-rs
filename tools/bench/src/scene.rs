@@ -197,13 +197,14 @@ impl Scene {
             || Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db"),
             PathBuf::from,
         );
-        let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
+        let resource_options =
+            ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
         let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache)
             .expect("a headless frontend");
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let map = Map::with_resource_options(
-            MapOptions::new().with_map_mode(map_mode).with_size(size).with_pixel_ratio(1.0),
+            MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() },
             &file_sources,
             &resource_options,
         )
@@ -235,20 +236,23 @@ impl Scene {
 
     /// Jumps to a camera with `bearing` in degrees.
     pub fn jump_rotated(&mut self, center: LatLng, zoom: f64, bearing: f64) {
-        self.map.jump_to(
-            &CameraOptions::default().with_center(Some(center)).with_zoom(Some(zoom)).with_bearing(Some(bearing)),
-        );
+        self.map.jump_to(&CameraOptions {
+            center: Some(center),
+            zoom: Some(zoom),
+            bearing: Some(bearing),
+            ..Default::default()
+        });
     }
 
     /// Jumps to a camera with `bearing` and `pitch` in degrees.
     pub fn jump_pitched(&mut self, center: LatLng, zoom: f64, bearing: f64, pitch: f64) {
-        self.map.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(center))
-                .with_zoom(Some(zoom))
-                .with_bearing(Some(bearing))
-                .with_pitch(Some(pitch)),
-        );
+        self.map.jump_to(&CameraOptions {
+            center: Some(center),
+            zoom: Some(zoom),
+            bearing: Some(bearing),
+            pitch: Some(pitch),
+            ..Default::default()
+        });
     }
 
     /// A complete still frame, read back. Waits on the run loop, which
@@ -467,7 +471,7 @@ impl Scene {
 
     /// The GPU's description, and whether it is a software rasterizer.
     pub fn gpu(&self) -> (String, bool) {
-        let backend = self.frontend.get_backend().as_any();
+        let backend = self.frontend.get_backend();
         #[cfg(target_vendor = "apple")]
         if let Device::Metal(metal) = self.frontend.device() {
             return (format!("{} (Metal)", metal.name()), false);

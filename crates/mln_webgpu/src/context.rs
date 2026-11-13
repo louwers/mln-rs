@@ -13,7 +13,6 @@
 // (`runRenderJobs` in begin/end frame, cleanup). None is on the
 // background-layer path.
 
-use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap};
@@ -141,19 +140,19 @@ impl Context {
 
     /// The layout of the group that holds only `globalIndex`, which every
     /// shader with one shares (see `ShaderProgram::get_index_group`).
-    pub(crate) fn index_bind_group_layout(&self) -> Option<wgpu::BindGroupLayout> {
-        let device = self.backend.get_device()?;
+    pub(crate) fn index_bind_group_layout(&self) -> wgpu::BindGroupLayout {
+        let device = self.backend.device();
         let mut table = self.index_table.borrow_mut();
-        Some(table.get_or_insert_with(|| IndexTable::new(&device)).layout().clone())
+        table.get_or_insert_with(|| IndexTable::new(device)).layout().clone()
     }
 
     /// The bind group of the index group, and the dynamic offset that
     /// selects `index`.
     pub(crate) fn index_bind_group(&self, index: u32) -> Option<(wgpu::BindGroup, u32)> {
-        let device = self.backend.get_device()?;
+        let device = self.backend.device();
         let mut table = self.index_table.borrow_mut();
-        let table = table.get_or_insert_with(|| IndexTable::new(&device));
-        if let Some((replaced, size)) = table.reserve(&device, index) {
+        let table = table.get_or_insert_with(|| IndexTable::new(device));
+        if let Some((replaced, size)) = table.reserve(device, index) {
             if replaced > 0 {
                 self.count_buffer_released(replaced);
             }
@@ -251,8 +250,8 @@ impl Context {
 
     /// A buffer holding `data` (zero padded to 4 bytes), as `createBuffer`
     /// makes one (usage | `CopyDst`, initial queue write).
-    fn create_raw_buffer(&self, data: &[u8], usage: wgpu::BufferUsages) -> Option<(wgpu::Buffer, u64)> {
-        let device = self.backend.get_device()?;
+    fn create_raw_buffer(&self, data: &[u8], usage: wgpu::BufferUsages) -> (wgpu::Buffer, u64) {
+        let device = self.backend.device();
         let padded_size = (data.len() + 3) & !3usize;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Buffer Resource"),
@@ -264,30 +263,32 @@ impl Context {
         padded.resize(padded_size, 0);
         self.backend.write_buffer(&buffer, 0, &padded);
         self.count_buffer_created(buffer.size());
-        Some((buffer, data.len() as u64))
+        (buffer, data.len() as u64)
     }
 
     /// `getTileVertexBuffer()`: `RenderStaticData::tileVertices()`, the four
     /// corners of the tile extent as short2 (inlined: `RenderStaticData` is a
     /// renderer type).
-    pub fn get_tile_vertex_buffer(&self) -> Option<(wgpu::Buffer, u64)> {
+    pub fn get_tile_vertex_buffer(&self) -> (wgpu::Buffer, u64) {
         let mut cached = self.tile_vertex_buffer.borrow_mut();
-        if cached.is_none() {
-            const EXTENT: i16 = 8192; // util::EXTENT
-            let vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
-            *cached = self.create_raw_buffer(bytemuck::cast_slice(&vertices), wgpu::BufferUsages::VERTEX);
-        }
-        cached.clone()
+        cached
+            .get_or_insert_with(|| {
+                const EXTENT: i16 = 8192; // util::EXTENT
+                let vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
+                self.create_raw_buffer(bytemuck::cast_slice(&vertices), wgpu::BufferUsages::VERTEX)
+            })
+            .clone()
     }
 
     /// `getTileIndexBuffer()`: `RenderStaticData::quadTriangleIndices()`.
-    pub fn get_tile_index_buffer(&self) -> Option<(wgpu::Buffer, u64)> {
+    pub fn get_tile_index_buffer(&self) -> (wgpu::Buffer, u64) {
         let mut cached = self.tile_index_buffer.borrow_mut();
-        if cached.is_none() {
-            let indices: [u16; 6] = [0, 1, 2, 1, 2, 3];
-            *cached = self.create_raw_buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX);
-        }
-        cached.clone()
+        cached
+            .get_or_insert_with(|| {
+                let indices: [u16; 6] = [0, 1, 2, 1, 2, 3];
+                self.create_raw_buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX)
+            })
+            .clone()
     }
 
     /// A new uniform buffer holding `ubos`, `stride` bytes apart, and
@@ -297,18 +298,18 @@ impl Context {
     fn clip_mask_uniform_buffer<'a, T: bytemuck::Pod>(
         &self,
         ubos: impl ExactSizeIterator<Item = &'a T>,
-    ) -> Option<(wgpu::Buffer, u64)> {
+    ) -> (wgpu::Buffer, u64) {
         let size = std::mem::size_of::<T>();
         let stride = size.next_multiple_of(UNIFORM_BUFFER_ALIGNMENT);
         let mut data = vec![0; stride * ubos.len()];
         for (ubo, slot) in ubos.zip(data.chunks_exact_mut(stride)) {
             slot[..size].copy_from_slice(bytemuck::bytes_of(ubo));
         }
-        let (buffer, _) = self.create_raw_buffer(&data, wgpu::BufferUsages::UNIFORM)?;
+        let (buffer, _) = self.create_raw_buffer(&data, wgpu::BufferUsages::UNIFORM);
         if let Some(previous) = self.clip_mask_uniform_buffer.replace(Some(buffer.clone())) {
             self.count_buffer_released(previous.size());
         }
-        Some((buffer, stride as u64))
+        (buffer, stride as u64)
     }
 
     fn get_clip_mask_shader(&self, shaders: &ShaderRegistry) -> Option<ShaderProgramBasePtr> {
@@ -354,7 +355,7 @@ impl Context {
             eprintln!("WebGPU: Failed to acquire globe clipping mask shader");
             return false;
         };
-        let Some(webgpu_render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return false;
         };
         let mut encoder_guard = webgpu_render_pass.get_encoder();
@@ -410,14 +411,9 @@ impl Context {
         encoder.set_pipeline(&pipeline);
 
         let ubo_size = std::mem::size_of::<ProjectionUBO>() as u64;
-        let Some((uniform_buffer, stride)) = self.clip_mask_uniform_buffer(masks.iter().map(|mask| &mask.projection))
-        else {
-            return false;
-        };
+        let (uniform_buffer, stride) = self.clip_mask_uniform_buffer(masks.iter().map(|mask| &mask.projection));
 
-        let Some(device) = self.backend.get_device() else {
-            return false;
-        };
+        let device = self.backend.device();
         let Some(&bind_group_index) = shader.get_bind_group_order().first() else {
             return false;
         };
@@ -461,15 +457,9 @@ impl Context {
                 let key = (tile.z, tile.y == 0, tile.y == (1u32 << tile.z) - 1, borders);
                 if let Entry::Vacant(entry) = meshes.entry(key) {
                     let (vertices, indices) = mesh(tile, borders);
-                    let (Some(vertex_buffer), Some(index_buffer)) = (
-                        self.create_raw_buffer(&vertices, wgpu::BufferUsages::VERTEX),
-                        self.create_raw_buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX),
-                    ) else {
-                        return false;
-                    };
                     entry.insert(GlobeClipMesh {
-                        vertices: vertex_buffer,
-                        indices: index_buffer,
+                        vertices: self.create_raw_buffer(&vertices, wgpu::BufferUsages::VERTEX),
+                        indices: self.create_raw_buffer(bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX),
                         index_count: indices.len() as u32,
                     });
                 }
@@ -509,7 +499,7 @@ impl Context {
             eprintln!("WebGPU: Failed to acquire clipping mask shader");
             return false;
         };
-        let Some(webgpu_render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return false;
         };
         let mut encoder_guard = webgpu_render_pass.get_encoder();
@@ -524,12 +514,8 @@ impl Context {
             self.clip_mask_renderable.set(Some(renderable));
         }
 
-        let (Some((vertex_buffer, vertex_size)), Some((index_buffer, index_size))) =
-            (self.get_tile_vertex_buffer(), self.get_tile_index_buffer())
-        else {
-            eprintln!("WebGPU: Missing tile geometry buffers for clipping masks");
-            return false;
-        };
+        let (vertex_buffer, vertex_size) = self.get_tile_vertex_buffer();
+        let (index_buffer, index_size) = self.get_tile_index_buffer();
 
         let color_mode = ColorMode::disabled();
         let Some(source) = shader_source(BuiltIn::ClippingMaskProgram) else {
@@ -570,15 +556,9 @@ impl Context {
         encoder.set_index_buffer(index_buffer.slice(0..index_size), wgpu::IndexFormat::Uint16);
 
         let ubo_size = std::mem::size_of::<ClipUBO>() as u64;
-        let Some((uniform_buffer, stride)) = self.clip_mask_uniform_buffer(tile_ubos.iter()) else {
-            eprintln!("WebGPU: Failed to allocate the uniform buffer for clipping masks");
-            return false;
-        };
+        let (uniform_buffer, stride) = self.clip_mask_uniform_buffer(tile_ubos.iter());
 
-        let Some(device) = self.backend.get_device() else {
-            eprintln!("WebGPU: Device unavailable for clipping masks");
-            return false;
-        };
+        let device = self.backend.device();
         let Some(&bind_group_index) = shader.get_bind_group_order().first() else {
             eprintln!("WebGPU: No bind group layouts available for clipping mask shader");
             return false;
@@ -631,10 +611,6 @@ impl Context {
 impl GfxContext for Context {
     fn context_base(&self) -> &ContextBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn backend_type(&self) -> BackendType {
@@ -746,13 +722,13 @@ impl GfxContext for Context {
     /// Metal; the pass refers to the context's array for the drawables' bind
     /// groups (C++ stores a pointer to it).
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        if let Some(pass) = render_pass.as_any().downcast_ref::<RenderPass>() {
+        if let Some(pass) = render_pass.downcast_ref::<RenderPass>() {
             pass.set_global_uniform_buffers(true);
         }
     }
 
     fn unbind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        if let Some(pass) = render_pass.as_any().downcast_ref::<RenderPass>() {
+        if let Some(pass) = render_pass.downcast_ref::<RenderPass>() {
             pass.set_global_uniform_buffers(false);
         }
     }

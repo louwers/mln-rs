@@ -332,7 +332,6 @@ impl RuntimeCore {
     pub(crate) fn database(&self) -> Result<&DatabaseFileSource, Error> {
         self.database
             .as_ref()
-            .and_then(|database| database.as_any())
             .and_then(|database| database.downcast_ref::<DatabaseFileSource>())
             .ok_or_else(|| Error::unsupported("the runtime has no cache database"))
     }
@@ -362,11 +361,11 @@ pub(crate) fn reply_on<T: Send + 'static, E: Into<Error>>(
 fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> {
     let mut resource_options = ResourceOptions::default();
     if let Some(asset_path) = &options.asset_path {
-        resource_options = resource_options.with_asset_path(utf8(asset_path, "asset path")?);
+        resource_options.asset_path = utf8(asset_path, "asset path")?.to_owned();
     }
     #[cfg(target_os = "android")]
     if options.asset_path.is_none() {
-        resource_options = resource_options.with_asset_path(mln_storage::android::APP_ASSETS);
+        resource_options.asset_path = mln_storage::android::APP_ASSETS.to_owned();
     }
     if options.cache_path.is_some() && cfg!(target_family = "wasm") {
         return Err(Error::unsupported("the browser build has no cache database: the browser caches the requests"));
@@ -380,7 +379,7 @@ fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> 
             .truncate(false)
             .open(cache_path)
             .map_err(|error| Error::invalid_argument(format!("can't open the cache database {path}: {error}")))?;
-        resource_options = resource_options.with_cache_path(path);
+        resource_options.cache_path = path.to_owned();
     }
     Ok(resource_options)
 }
@@ -494,8 +493,8 @@ impl Runtime {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
     /// empty size or a pixel ratio that isn't finite and positive.
     pub fn create_map(&self, options: MapOptions) -> Result<(Map, Completion<Applied>), Error> {
-        let size = options.map.size();
-        let pixel_ratio = options.map.pixel_ratio();
+        let size = options.map.size;
+        let pixel_ratio = options.map.pixel_ratio;
         if size.is_empty() {
             return Err(Error::invalid_argument("the map's size must not be empty"));
         }
@@ -568,9 +567,9 @@ impl Runtime {
         &self,
         transform: impl Fn(Kind, &str, FinishedCallback) + Send + Sync + 'static,
     ) -> Result<Completion<()>, Error> {
-        let transform = ResourceTransform::new(Some(Arc::new(transform)));
+        let transform: ResourceTransform = Arc::new(transform);
         self.apply(move |core| {
-            core.network()?.set_resource_transform(transform);
+            core.network()?.set_resource_transform(Some(transform));
             core.hooks.set_transform_set(true);
             Ok(())
         })
@@ -579,7 +578,7 @@ impl Runtime {
     /// Stops rewriting request URLs.
     pub fn clear_resource_transform(&self) -> Result<Completion<()>, Error> {
         self.apply(move |core| {
-            core.network()?.set_resource_transform(ResourceTransform::default());
+            core.network()?.set_resource_transform(None);
             core.hooks.set_transform_set(false);
             Ok(())
         })

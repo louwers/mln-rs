@@ -201,7 +201,7 @@ fn respond_to_full_style(test: &OfflineTest, sprite_json: bool) {
 fn no_subresources() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
+    let download = test.download(region.id, STYLE_URL, false);
 
     test.respond_with(Kind::Style, "empty.style.json", expect_style_url);
 
@@ -239,7 +239,7 @@ fn no_subresources() {
 fn inline_source() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     test.respond_with(Kind::Style, "inline_source.style.json", expect_style_url);
     test.respond_with(
@@ -273,7 +273,7 @@ fn inline_source() {
 fn geojson_source() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
+    let download = test.download(region.id, STYLE_URL, false);
 
     test.respond_with(Kind::Style, "geojson_source.style.json", expect_style_url);
     test.respond_with(Kind::Source, "geojson.json", |resource| {
@@ -328,7 +328,7 @@ fn check_completed_and_computed(
 fn activate() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     respond_to_full_style(&test, true);
 
@@ -356,7 +356,7 @@ fn activate() {
 fn exclude_ideographs() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
+    let download = test.download(region.id, STYLE_URL, false);
 
     respond_to_full_style(&test, true);
 
@@ -484,7 +484,7 @@ fn does_not_flood_the_file_source_with_requests() {
     let test = OfflineTest::new();
     let file_source = Arc::new(FakeOnlineFileSource::new());
     let region = test.create_region().expect("region");
-    let download = test.download_with_zoom(region.get_id(), STYLE_URL, 0.0, 0.0, true, file_source.clone());
+    let download = test.download_with_zoom(region.id, STYLE_URL, 0.0, 0.0, true, file_source.clone());
 
     download.set_observer(Some(Rc::new(MockObserver::default())));
     download.set_state(OfflineRegionDownloadState::Active);
@@ -506,7 +506,7 @@ fn does_not_flood_the_file_source_with_requests() {
 fn get_status_no_resources() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
+    let download = test.download(region.id, STYLE_URL, false);
     let status = download.get_status();
 
     assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
@@ -524,7 +524,7 @@ fn get_status_no_resources() {
 fn get_status_style_complete() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     let response = test.response("style.json");
     test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
@@ -546,7 +546,7 @@ fn get_status_style_complete() {
 fn get_status_style_and_source_complete() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     let response = test.response("style.json");
     test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response);
@@ -572,7 +572,7 @@ fn get_status_infinite_max_zoom() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
     let download = OfflineDownload::new(
-        region.get_id(),
+        region.id,
         OfflineTilePyramidRegionDefinition::new(
             STYLE_URL,
             LatLngBounds::hull(LatLng::new(0.5, 0.5).unwrap(), LatLng::new(0.5001, 0.5001).unwrap()),
@@ -609,7 +609,7 @@ fn connection_error() -> Response {
 fn request_error() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
+    let download = test.download(region.id, STYLE_URL, false);
 
     test.respond(Kind::Style, |_| connection_error());
 
@@ -634,7 +634,7 @@ fn request_error() {
 fn request_errors_are_retried() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     let (file_source, size) = (Arc::downgrade(&test.file_source), test.size.clone());
     test.respond(Kind::Style, move |_| {
@@ -677,7 +677,7 @@ fn put_tile(test: &OfflineTest, x: i32, y: i32, z: i8) {
 fn with_previously_existing_tile() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
+    let download = test.download(region.id, STYLE_URL, false);
 
     test.respond_with(Kind::Style, "inline_source.style.json", expect_style_url);
 
@@ -707,7 +707,7 @@ fn with_previously_existing_tile() {
 fn reactivate_previously_completed_download() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     test.respond_with(Kind::Style, "inline_source.style.json", expect_style_url);
 
@@ -728,7 +728,7 @@ fn reactivate_previously_completed_download() {
 
     test.run_loop.run();
 
-    let redownload = test.download(region.get_id(), STYLE_URL, false);
+    let redownload = test.download(region.id, STYLE_URL, false);
 
     let statuses_after_reactivate: Rc<RefCell<Vec<OfflineRegionStatus>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -772,7 +772,7 @@ fn reactivate_previously_completed_download() {
 fn deactivate() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, false);
+    let download = test.download(region.id, STYLE_URL, false);
 
     test.respond_with(Kind::Style, "mapbox_source.style.json", expect_style_url);
 
@@ -799,7 +799,7 @@ fn deactivate() {
 fn all_offline_requests_have_low_priority_and_offline_usage() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     let low_offline = |resource: &Resource| {
         assert_eq!(resource.priority, Priority::Low);
@@ -835,7 +835,7 @@ fn all_offline_requests_have_low_priority_and_offline_usage() {
 fn interrupt_and_resume() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     respond_to_full_style(&test, true);
 
@@ -890,7 +890,7 @@ fn interrupt_and_resume() {
 fn no_freezing_on_cached_tiles_and_new_style() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download_with_zoom(region.get_id(), STYLE_URL, 1.0, 1.0, true, test.file_source.clone());
+    let download = test.download_with_zoom(region.id, STYLE_URL, 1.0, 1.0, true, test.file_source.clone());
 
     test.file_source.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(2));
     test.respond_with(Kind::Style, "inline_source.style.json", |_| {});
@@ -922,7 +922,7 @@ fn no_freezing_on_cached_tiles_and_new_style() {
 fn no_freezing_on_not_found_error() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
-    let download = test.download(region.get_id(), STYLE_URL, true);
+    let download = test.download(region.id, STYLE_URL, true);
 
     respond_to_full_style(&test, false);
     test.respond(Kind::SpriteJSON, |_| {
@@ -1072,9 +1072,9 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
     let (style, tile) = (old_style.clone(), old_tile.clone());
     test.respond(Kind::Style, move |_| response(&style, "style-1"));
     test.respond(Kind::Tile, move |_| response(&tile, "tile-1"));
-    download_until_inactive(&test, region.get_id(), &definition, None);
+    download_until_inactive(&test, region.id, &definition, None);
 
-    invalidate_region(&test, region.get_id());
+    invalidate_region(&test, region.id);
 
     let revalidate = move |resource: &Resource, prior_etag: &str, not_modified: bool, data: &[u8], etag: &str| {
         assert_eq!(Some(prior_etag), resource.prior_etag.as_deref());
@@ -1102,7 +1102,7 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
         requests.set(requests.get() + 1);
         revalidate(resource, "tile-1", tile_not_modified, &tile, "tile-2")
     });
-    let status = download_until_inactive(&test, region.get_id(), &definition, None);
+    let status = download_until_inactive(&test, region.id, &definition, None);
 
     assert_eq!(1, style_requests.get());
     assert_eq!(1, tile_requests.get());
@@ -1182,7 +1182,7 @@ fn revalidates_only_stored_resources_that_must_be_revalidated() {
     });
     test.respond(Kind::Tile, |resource| panic!("requested usable tile {}", resource.url));
 
-    let status = download_until_inactive(&test, region.get_id(), &definition, None);
+    let status = download_until_inactive(&test, region.id, &definition, None);
 
     assert_eq!(1, style_requests.get());
     assert_eq!(6, status.completed_resource_count);
@@ -1224,12 +1224,12 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     test.respond(Kind::Tile, |resource| {
         with_data(format!("tile {}", resource.tile_data.as_ref().unwrap().url_template))
     });
-    download_until_inactive(&test, region.get_id(), &world_at_zoom(0.0), None);
+    download_until_inactive(&test, region.id, &world_at_zoom(0.0), None);
 
     // The refreshed style moves the tile to another URL.
     *tile_url.borrow_mut() = v2;
-    invalidate_region(&test, region.get_id());
-    let download = OfflineDownload::new(region.get_id(), world_at_zoom(0.0), test.db.clone(), test.file_source.clone());
+    invalidate_region(&test, region.id);
+    let download = OfflineDownload::new(region.id, world_at_zoom(0.0), test.db.clone(), test.file_source.clone());
     let active = run_until_inactive(&test, &download, None);
 
     // While it runs, the refresh counts what the current style lists.
@@ -1264,11 +1264,11 @@ fn inline_source_without_tile_urls_has_no_tiles() {
     test.respond(Kind::Style, |_| {
         with_data(r#"{"version":8,"sources":{"inline":{"type":"vector","tiles":[]}},"layers":[]}"#)
     });
-    let status = download_until_inactive(&test, region.get_id(), &world_at_zoom(0.0), None);
+    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), None);
     assert_eq!(1, status.completed_resource_count);
     assert_eq!(0, status.required_tile_count);
 
-    let stored = stored_status(&test, region.get_id());
+    let stored = stored_status(&test, region.id);
     assert_eq!(1, stored.required_resource_count);
     assert_eq!(0, stored.required_tile_count);
     assert!(stored.required_resource_count_is_precise);
@@ -1283,14 +1283,14 @@ fn reports_a_tile_json_without_tile_urls() {
     test.respond(Kind::Style, |_| with_data(TILE_JSON_SOURCE_STYLE));
     test.respond(Kind::Source, |_| with_data(r#"{"tilejson":"2.1.0","tiles":[]}"#));
     let errors = collect_errors();
-    let status = download_until_inactive(&test, region.get_id(), &world_at_zoom(0.0), Some(errors.clone()));
+    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(errors.clone()));
     assert_eq!(1, errors.borrow().len());
     assert_eq!(Reason::Other, errors.borrow()[0].reason);
     assert_eq!(2, status.completed_resource_count);
     assert_eq!(0, status.required_tile_count);
     assert!(!status.required_resource_count_is_precise);
 
-    let stored = stored_status(&test, region.get_id());
+    let stored = stored_status(&test, region.id);
     assert_eq!(2, stored.required_resource_count);
     assert_eq!(0, stored.required_tile_count);
     assert!(!stored.required_resource_count_is_precise);
@@ -1304,13 +1304,13 @@ fn reports_a_style_with_no_content() {
     let region = test.create_region().expect("region");
     test.respond(Kind::Style, |_| no_content());
     let errors = collect_errors();
-    let status = download_until_inactive(&test, region.get_id(), &world_at_zoom(0.0), Some(errors.clone()));
+    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(errors.clone()));
     assert_eq!(1, errors.borrow().len());
     assert_eq!(Reason::Other, errors.borrow()[0].reason);
     assert_eq!(1, status.completed_resource_count);
     assert!(!status.required_resource_count_is_precise);
 
-    let stored = stored_status(&test, region.get_id());
+    let stored = stored_status(&test, region.id);
     assert_eq!(1, stored.required_resource_count);
     assert!(!stored.required_resource_count_is_precise);
 }
@@ -1345,8 +1345,8 @@ impl RefreshedRegion {
             requests.set(requests.get() + 1);
             with_data("tile")
         });
-        let downloaded = download_until_inactive(&test, region.get_id(), &world_at_zoom(0.0), None);
-        invalidate_region(&test, region.get_id());
+        let downloaded = download_until_inactive(&test, region.id, &world_at_zoom(0.0), None);
+        invalidate_region(&test, region.id);
         RefreshedRegion { test, region, style, source, tile_requests, downloaded }
     }
 
@@ -1355,8 +1355,7 @@ impl RefreshedRegion {
     /// refreshed.
     fn refresh_keeping_resources(&self, reason: Reason) {
         let errors = collect_errors();
-        let status =
-            download_until_inactive(&self.test, self.region.get_id(), &world_at_zoom(0.0), Some(errors.clone()));
+        let status = download_until_inactive(&self.test, self.region.id, &world_at_zoom(0.0), Some(errors.clone()));
         assert_eq!(1, errors.borrow().len());
         assert_eq!(reason, errors.borrow()[0].reason);
         assert!(status.required_resource_count_is_precise);
@@ -1439,7 +1438,7 @@ fn pausing_from_an_error_stops_the_refresh() {
 
     // The observer pauses the download when it reports the invalid style.
     let download =
-        OfflineDownload::new(refreshed.region.get_id(), world_at_zoom(0.0), test.db.clone(), test.file_source.clone());
+        OfflineDownload::new(refreshed.region.id, world_at_zoom(0.0), test.db.clone(), test.file_source.clone());
     let (weak, stop) = (download.downgrade(), test.run_loop.clone());
     let observer = MockObserver {
         response_error_fn: Some(Box::new(move |_| {
@@ -1472,7 +1471,7 @@ fn missing_tile_json_leaves_a_precise_resource_count() {
     test.respond(Kind::Style, |_| with_data(TILE_JSON_SOURCE_STYLE));
     test.respond(Kind::Source, |_| not_found());
     let errors = collect_errors();
-    let status = download_until_inactive(&test, region.get_id(), &world_at_zoom(0.0), Some(errors.clone()));
+    let status = download_until_inactive(&test, region.id, &world_at_zoom(0.0), Some(errors.clone()));
     assert_eq!(1, errors.borrow().len());
     assert_eq!(1, status.required_resource_count);
     assert!(status.required_resource_count_is_precise);

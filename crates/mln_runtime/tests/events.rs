@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use httpmock::MockServer;
 use mln_map::MapEvent;
-use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, RuntimeEvent, RuntimeEventKind};
+use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
 use support::{EMPTY_STYLE, EventLog, map, map_options, runtime, wait, wait_err};
 
 fn is_map_event(event: &RuntimeEvent, event_type: EventType) -> bool {
@@ -54,7 +54,7 @@ fn an_event_comes_after_a_snapshot_that_includes_it() {
     }));
     let applied = wait(map.set_style_json(EMPTY_STYLE));
     wait(map.update_camera(mln_map::CameraUpdate {
-        camera: mln_map::CameraOptions::default().with_zoom(Some(2.0)),
+        camera: mln_map::CameraOptions { zoom: Some(2.0), ..Default::default() },
         ..mln_map::CameraUpdate::default()
     }));
     let checked = checked.lock().unwrap();
@@ -86,7 +86,8 @@ fn every_event_names_its_map() {
 fn the_event_mask_selects_the_events() {
     let runtime = runtime();
     let log = EventLog::install(&runtime);
-    let (map, created) = runtime.create_map(map_options().with_event_mask(EventType::MapStyleLoaded.into())).unwrap();
+    let (map, created) =
+        runtime.create_map(MapOptions { event_mask: EventType::MapStyleLoaded.into(), ..map_options() }).unwrap();
     created.wait().unwrap();
     assert_eq!(EventMask::from(EventType::MapStyleLoaded), map.event_mask());
     wait(map.set_style_json(EMPTY_STYLE));

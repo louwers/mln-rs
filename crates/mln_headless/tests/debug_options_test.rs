@@ -22,7 +22,7 @@ const RASTER_STYLE: &str = r#"{
 
 /// Tile 1/1/1 filling the frontend's 256 px: 32 tile units to a pixel.
 fn tile_camera() -> CameraOptions {
-    CameraOptions::default().with_center(LatLng::new(-66.513_260_443_111_86, 90.0).ok()).with_zoom(Some(0.0))
+    CameraOptions { center: LatLng::new(-66.513_260_443_111_86, 90.0).ok(), zoom: Some(0.0), ..Default::default() }
 }
 
 fn raster_map() -> MapTest {
@@ -130,7 +130,7 @@ fn text_follows_a_change_of_options() {
 #[test]
 fn tile_borders_follow_the_camera() {
     // The same four tiles before and after the move.
-    let camera = |lng: f64| CameraOptions::default().with_center(LatLng::new(0.0, lng).ok()).with_zoom(Some(2.0));
+    let camera = |lng: f64| CameraOptions { center: LatLng::new(0.0, lng).ok(), zoom: Some(2.0), ..Default::default() };
 
     let moved = raster_map();
     moved.map().jump_to(&camera(0.0));

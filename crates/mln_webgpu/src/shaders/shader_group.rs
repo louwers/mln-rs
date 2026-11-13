@@ -99,7 +99,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
         vertex_source = preprocess_wgsl(&vertex_source, &define_set);
         fragment_source = preprocess_wgsl(&fragment_source, &define_set);
 
-        let context = gfx_context.as_any().downcast_ref::<Context>().expect("webgpu::Context");
+        let context = gfx_context.downcast_ref::<Context>().expect("webgpu::Context");
         let mut program =
             ShaderProgram::new(context, &vertex_source, &fragment_source, source.attributes, source.textures, name);
         for attribute in source.instance_attributes {

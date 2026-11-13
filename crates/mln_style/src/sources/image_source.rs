@@ -5,7 +5,6 @@
 // Like the other sources, an ImageSource is a handle to an `Rc`'d state
 // (see source.rs); the image request callback holds a `Weak` to it.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -203,10 +202,6 @@ fn on_image_response(weak: &Weak<Inner>, res: &Response) {
 impl Source for ImageSource {
     fn base(&self) -> &SourceBase {
         &self.inner.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     /// `loadDescription(FileSource&)`.

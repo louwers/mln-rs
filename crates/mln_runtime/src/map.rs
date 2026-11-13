@@ -57,31 +57,6 @@ impl Default for MapOptions {
     }
 }
 
-impl MapOptions {
-    #[must_use]
-    pub fn new(map: mln_map::MapOptions) -> Self {
-        MapOptions { map, ..Self::default() }
-    }
-
-    #[must_use]
-    pub fn with_event_mask(mut self, event_mask: EventMask) -> Self {
-        self.event_mask = event_mask;
-        self
-    }
-
-    #[must_use]
-    pub fn with_fallback_font_faces(mut self, json: impl Into<String>) -> Self {
-        self.fallback_font_faces = Some(json.into());
-        self
-    }
-
-    #[must_use]
-    pub fn with_tile_cache_enabled(mut self, enabled: bool) -> Self {
-        self.tile_cache_enabled = enabled;
-        self
-    }
-}
-
 /// What a map command left behind once it ran.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Applied {
@@ -164,8 +139,8 @@ impl MapShared {
         MapShared {
             id,
             runtime,
-            mode: options.map.map_mode(),
-            scale_factor: AtomicU64::new(f64::from(options.map.pixel_ratio()).to_bits()),
+            mode: options.map.map_mode,
+            scale_factor: AtomicU64::new(f64::from(options.map.pixel_ratio).to_bits()),
             tile_cache_enabled: options.tile_cache_enabled,
             session: Mutex::new(None),
             sent: Mutex::new(1),
@@ -452,7 +427,7 @@ impl Map {
         // The scale factor that a session attached later renders at.
         self.shared.scale_factor.store(scale_factor.to_bits(), Ordering::SeqCst);
         self.command(move |map| {
-            if map.get_map_options().size() != size {
+            if map.get_map_options().size != size {
                 map.set_size(size)?;
             }
             map.set_pixel_ratio(scale_factor as f32)
@@ -772,7 +747,7 @@ impl Map {
                     // on every frame. That changes nothing, so it publishes
                     // no update, which a demand sent before would draw.
                     let pixel_ratio = scale_factor as f32;
-                    if entry.core.get_map_options().size() == size && entry.core.get_pixel_ratio() == pixel_ratio {
+                    if entry.core.get_map_options().size == size && entry.core.get_pixel_ratio() == pixel_ratio {
                         return Ok(());
                     }
                     entry.core.set_size(size)?;

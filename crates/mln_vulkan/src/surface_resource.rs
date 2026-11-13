@@ -26,7 +26,6 @@
 //   own, after the frame's passes and before the frame is copied for
 //   reading and submitted (`SurfaceTarget::set_overlay`).
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -817,10 +816,6 @@ impl TargetResource for SurfaceResource {
         }
         let state = self.state.borrow();
         state.swapchain_framebuffers.get(state.acquired_image_index as usize).copied().unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

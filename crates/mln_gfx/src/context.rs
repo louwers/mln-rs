@@ -39,7 +39,6 @@ pub struct ContextBase {
 
 pub trait Context: Any {
     fn context_base(&self) -> &ContextBase;
-    fn as_any(&self) -> &dyn Any;
 
     /// The backend this context is of. C++ builds one backend and asks
     /// `gfx::Backend::GetType()`; the port can build several and asks the
@@ -142,6 +141,11 @@ pub trait Context: Any {
 }
 
 impl dyn Context {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: Context>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+
     /// `emplaceOrUpdateUniformBuffer<T>(ptr, const T* data)` for a `Pod` UBO.
     pub fn emplace_or_update_uniform_buffer_pod<T: bytemuck::Pod>(
         &self,

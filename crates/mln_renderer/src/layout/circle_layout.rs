@@ -67,10 +67,8 @@ impl CircleLayout {
     ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
         let zoom = f32::from(parameters.tile_id.overscaled_z);
-        let leader_layer_properties = (*group[0])
-            .as_any()
-            .downcast_ref::<CircleLayerProperties>()
-            .expect("CircleLayout: not circle layer properties");
+        let leader_layer_properties =
+            (*group[0]).downcast_ref::<CircleLayerProperties>().expect("CircleLayout: not circle layer properties");
         let leader_impl = leader_layer_properties.layer_impl();
         let unevaluated_layout = &leader_impl.layout;
         let sort_features_by_key = !unevaluated_layout.get::<CircleSortKey>().is_undefined();

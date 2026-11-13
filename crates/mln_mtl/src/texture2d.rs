@@ -8,7 +8,6 @@
 //   reads the texture with `getBytes`, which on macOS needs a synchronized
 //   managed texture).
 
-use std::any::Any;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -415,13 +414,5 @@ impl texture2d::Texture2D for Texture2D {
 
     fn needs_upload(&self) -> bool {
         self.image.is_some()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

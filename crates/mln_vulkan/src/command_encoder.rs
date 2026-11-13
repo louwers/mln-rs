@@ -70,8 +70,4 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         f(&mut encoder);
         true
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

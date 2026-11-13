@@ -105,7 +105,7 @@ impl RenderRasterDEMSource {
     fn backfill_tiles(&self) {
         let pyramid = &self.tile_source.tile_pyramid;
         for tile in pyramid.get_tiles().values() {
-            let Some(demtile) = tile.as_any().downcast_ref::<RasterDEMTile>() else {
+            let Some(demtile) = tile.downcast_ref::<RasterDEMTile>() else {
                 continue;
             };
             self.on_tile_changed(demtile);
@@ -153,7 +153,7 @@ impl RenderRasterDEMSource {
                 if !renderable_neighbor.is_renderable() {
                     continue;
                 }
-                let Some(border_tile) = renderable_neighbor.as_any().downcast_ref::<RasterDEMTile>() else {
+                let Some(border_tile) = renderable_neighbor.downcast_ref::<RasterDEMTile>() else {
                     continue;
                 };
                 demtile.backfill_border(border_tile, mask);

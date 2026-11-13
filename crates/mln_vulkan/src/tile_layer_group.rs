@@ -1,7 +1,5 @@
 // Ports include/mln/vulkan/tile_layer_group.hpp and src/mln/vulkan/tile_layer_group.cpp
 
-use std::any::Any;
-
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::renderer::layer_group::{self, LayerGroupBaseData};
@@ -38,12 +36,6 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
     fn base_mut(&mut self) -> &mut LayerGroupBaseData {
         &mut self.inner.base
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn as_tile_layer_group(&self) -> Option<&layer_group::TileLayerGroup> {
         Some(&self.inner)
     }
@@ -63,12 +55,12 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         if !self.inner.base.enabled || self.inner.get_drawable_count() == 0 {
             return;
         }
-        let Some(upload_pass) = upload_pass.as_any().downcast_ref::<UploadPass>() else {
+        let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() else {
             return;
         };
         self.inner.visit_drawables(|drawable| {
             if drawable.get_enabled()
-                && let Some(drawable) = drawable.as_any_mut().downcast_mut::<Drawable>()
+                && let Some(drawable) = drawable.downcast_mut::<Drawable>()
             {
                 drawable.upload(upload_pass);
             }
@@ -163,7 +155,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
                 } else {
                     stencil_mode_3d.unwrap_or_else(StencilMode::disabled)
                 };
-                if let Some(drawable) = drawable.as_any_mut().downcast_mut::<Drawable>() {
+                if let Some(drawable) = drawable.downcast_mut::<Drawable>() {
                     drawable.set_depth_mode_for_3d(&depth);
                     drawable.set_stencil_mode_for_3d(&stencil);
                 }

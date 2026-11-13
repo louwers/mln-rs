@@ -197,9 +197,10 @@ impl MainResourceLoaderThread {
     }
 }
 
-/// `MainResourceLoader::Impl`. `thread` comes first: it is dropped (joined)
-/// before the file sources, as C++ destroys members in reverse order.
-struct Impl {
+/// `MainResourceLoader`: the `ResourceLoader` file source. `thread` comes
+/// first: it is dropped (joined) before the file sources, as C++ destroys
+/// members in reverse order.
+pub struct MainResourceLoader {
     thread: Thread<MainResourceLoaderThread>,
     asset_file_source: FileSourcePtr,
     database_file_source: FileSourcePtr,
@@ -213,17 +214,18 @@ struct Impl {
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
-impl Impl {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        resource_options: &ResourceOptions,
-        asset_file_source: FileSourcePtr,
-        database_file_source: FileSourcePtr,
-        local_file_source: FileSourcePtr,
-        online_file_source: FileSourcePtr,
-        mbtiles_file_source: FileSourcePtr,
-        pmtiles_file_source: FileSourcePtr,
-    ) -> Self {
+impl MainResourceLoader {
+    /// A loader over `file_sources`' asset, database, file system,
+    /// network, MBTiles and PMTiles file sources for these options.
+    #[must_use]
+    pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
+        let get = |type_| file_sources.get_file_source(type_, resource_options);
+        let asset_file_source = get(FileSourceType::Asset);
+        let database_file_source = get(FileSourceType::Database);
+        let local_file_source = get(FileSourceType::FileSystem);
+        let online_file_source = get(FileSourceType::Network);
+        let mbtiles_file_source = get(FileSourceType::Mbtiles);
+        let pmtiles_file_source = get(FileSourceType::Pmtiles);
         let sources = (
             asset_file_source.clone(),
             database_file_source.clone(),
@@ -237,7 +239,7 @@ impl Impl {
             let (asset, database, local, online, mbtiles, pmtiles) = sources;
             MainResourceLoaderThread::new(asset, database, local, online, mbtiles, pmtiles)
         });
-        Impl {
+        MainResourceLoader {
             thread,
             supports_cache_only_requests: database_file_source.is_some(),
             asset_file_source,
@@ -250,18 +252,10 @@ impl Impl {
         }
     }
 
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let mut req = FileSourceRequest::new(callback);
-        let req_id = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-
-        let actor_ref = self.thread.actor();
-        req.on_cancel(Box::new(move || {
-            actor_ref.invoke(move |t: &MainResourceLoaderThread| t.cancel(req_id));
-        }));
-        let req_ref = req.actor();
-        let resource = resource.clone();
-        self.thread.actor().invoke(move |t: &MainResourceLoaderThread| t.request(req_id, &resource, &req_ref));
-        Box::new(req)
+    /// Holds the loader's thread until the guard drops (`crate::tests::pause`).
+    #[cfg(test)]
+    pub(crate) fn pause(&self) -> crate::tests::Paused {
+        crate::tests::pause(&self.thread.actor())
     }
 
     fn all(&self) -> [&FileSourcePtr; 6] {
@@ -285,65 +279,40 @@ impl Impl {
             &self.pmtiles_file_source,
         ]
     }
-
-    fn can_request(&self, resource: &Resource) -> bool {
-        self.all().iter().any(|fs| fs.as_ref().is_some_and(|fs| fs.can_request(resource)))
-    }
-}
-
-/// `MainResourceLoader`: the `ResourceLoader` file source.
-pub struct MainResourceLoader {
-    impl_: Impl,
-}
-
-impl MainResourceLoader {
-    /// A loader over `file_sources`' asset, database, file system,
-    /// network, MBTiles and PMTiles file sources for these options.
-    #[must_use]
-    pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
-        let get = |type_| file_sources.get_file_source(type_, resource_options);
-        MainResourceLoader {
-            impl_: Impl::new(
-                resource_options,
-                get(FileSourceType::Asset),
-                get(FileSourceType::Database),
-                get(FileSourceType::FileSystem),
-                get(FileSourceType::Network),
-                get(FileSourceType::Mbtiles),
-                get(FileSourceType::Pmtiles),
-            ),
-        }
-    }
-
-    /// Holds the loader's thread until the guard drops (`crate::tests::pause`).
-    #[cfg(test)]
-    pub(crate) fn pause(&self) -> crate::tests::Paused {
-        crate::tests::pause(&self.impl_.thread.actor())
-    }
 }
 
 impl FileSource for MainResourceLoader {
     fn supports_cache_only_requests(&self) -> bool {
-        self.impl_.supports_cache_only_requests
+        self.supports_cache_only_requests
     }
 
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        self.impl_.request(resource, callback)
+        let mut req = FileSourceRequest::new(callback);
+        let req_id = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+
+        let actor_ref = self.thread.actor();
+        req.on_cancel(Box::new(move || {
+            actor_ref.invoke(move |t: &MainResourceLoaderThread| t.cancel(req_id));
+        }));
+        let req_ref = req.actor();
+        let resource = resource.clone();
+        self.thread.actor().invoke(move |t: &MainResourceLoaderThread| t.request(req_id, &resource, &req_ref));
+        Box::new(req)
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
-        self.impl_.can_request(resource)
+        self.all().iter().any(|fs| fs.as_ref().is_some_and(|fs| fs.can_request(resource)))
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        let mut resource_options = self.impl_.resource_options.lock_unpoisoned();
+        let mut resource_options = self.resource_options.lock_unpoisoned();
         *resource_options = options.clone();
-        for fs in self.impl_.in_member_order().into_iter().flatten() {
+        for fs in self.in_member_order().into_iter().flatten() {
             fs.set_resource_options(options.clone());
         }
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock_unpoisoned().clone()
     }
 }

@@ -14,7 +14,6 @@
 //   after the GPU finished the host's work (`gfx::Context::finish`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`).
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -231,14 +230,6 @@ impl drawable::Drawable for CustomDrawable {
 
     fn base_mut(&mut self) -> &mut DrawableBase {
         &mut self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn draw(&mut self, parameters: &mut dyn GfxPaintParameters) {

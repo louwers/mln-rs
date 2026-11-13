@@ -8,7 +8,6 @@
 // - `vulkan::VertexAttribute`'s storage buffer (`initVertexAttribute`'s
 //   `ubo`) is not ported: instance attributes are vertex inputs.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -253,9 +252,6 @@ impl Shader for ShaderProgram {
     fn type_name(&self) -> &'static str {
         Self::NAME
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 impl ShaderProgramBase for ShaderProgram {
@@ -275,5 +271,5 @@ impl ShaderProgramBase for ShaderProgram {
 
 /// Downcast a shader handle to the Vulkan program (C++ `static_cast`).
 pub fn as_vulkan_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
-    shader.as_any().downcast_ref::<ShaderProgram>()
+    shader.downcast_ref::<ShaderProgram>()
 }

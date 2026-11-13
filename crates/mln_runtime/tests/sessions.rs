@@ -33,7 +33,10 @@ fn style(color: &str) -> String {
 }
 
 fn map_in_mode(runtime: &Runtime, mode: MapMode) -> Map {
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(Size::new(256, 256)).with_map_mode(mode));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: mode, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     map
@@ -123,8 +126,11 @@ fn hold_runtime(map: &Map) -> std::sync::mpsc::Sender<()> {
 }
 
 fn zoom(map: &Map, zoom: f64) -> mln_runtime::Completion<mln_runtime::Applied> {
-    map.update_camera(CameraUpdate { camera: CameraOptions::default().with_zoom(Some(zoom)), ..Default::default() })
-        .unwrap()
+    map.update_camera(CameraUpdate {
+        camera: CameraOptions { zoom: Some(zoom), ..Default::default() },
+        ..Default::default()
+    })
+    .unwrap()
 }
 
 /// The premultiplied RGBA of the center pixel of the session's last frame.
@@ -420,7 +426,10 @@ fn resizes_apply_in_order_and_publish_generations() {
 #[test]
 fn a_session_renders_at_its_maps_pixel_ratio() {
     let runtime = runtime();
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_pixel_ratio(2.0));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: SIZE, pixel_ratio: 2.0, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     wait(map.set_style_json(style("#ff0000")));
@@ -1140,9 +1149,12 @@ fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
     let serving = server.clone();
     wait(runtime.set_resource_provider(move |request: ResourceRequest| serving.serve(request)));
     let size = Size::new(256, 256);
-    let mut options = MapOptions::new(mln_map::MapOptions::new().with_size(size).with_map_mode(MapMode::Static));
+    let mut options = MapOptions {
+        map: mln_map::MapOptions { size, map_mode: MapMode::Static, ..Default::default() },
+        ..Default::default()
+    };
     if let Some(enabled) = tile_cache_enabled {
-        options = options.with_tile_cache_enabled(enabled);
+        options.tile_cache_enabled = enabled;
     }
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
@@ -1225,7 +1237,7 @@ fn query_session(runtime: &Runtime) -> (Map, RenderSession) {
     let map = map_in_mode(runtime, MapMode::Continuous);
     wait(map.set_style_json(QUERY_STYLE));
     wait(map.update_camera(CameraUpdate {
-        camera: CameraOptions::default().with_zoom(Some(0.0)).with_center(Some(mln_util::geo::LatLng::default())),
+        camera: CameraOptions { zoom: Some(0.0), center: Some(mln_util::geo::LatLng::default()), ..Default::default() },
         ..Default::default()
     }));
     let session = attach(&map);

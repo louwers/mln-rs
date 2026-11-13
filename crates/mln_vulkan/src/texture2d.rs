@@ -12,7 +12,6 @@
 // - The memory comes from gpu-allocator, as the buffers' does
 //   (buffer_resource.rs).
 
-use std::any::Any;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
@@ -985,13 +984,5 @@ impl texture2d::Texture2D for Texture2D {
 
     fn needs_upload(&self) -> bool {
         self.image_data.is_some()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

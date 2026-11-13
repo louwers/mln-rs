@@ -79,9 +79,11 @@ impl MapProjection {
     /// does.
     pub fn set_visible_coordinates(&mut self, lat_lngs: &[LatLng], padding: &EdgeInsets) -> Result<(), Error> {
         let mut transform = self.transform();
-        let camera = camera_for_lat_lngs(lat_lngs, &transform, padding)?
-            .with_bearing(Some(mln_math::rad2deg(-transform.get_bearing())))
-            .with_pitch(Some(mln_math::rad2deg(transform.get_pitch())));
+        let camera = CameraOptions {
+            bearing: Some(mln_math::rad2deg(-transform.get_bearing())),
+            pitch: Some(mln_math::rad2deg(transform.get_pitch())),
+            ..camera_for_lat_lngs(lat_lngs, &transform, padding)?
+        };
         transform.jump_to(&camera);
         self.state = transform.get_state().clone();
         Ok(())

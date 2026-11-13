@@ -389,10 +389,8 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
         properties: &Immutable<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties)
-            .as_any()
-            .downcast_ref::<FillExtrusionLayerProperties>()
-            .expect("FillExtrusionLayerProperties");
+        let properties =
+            (**properties).downcast_ref::<FillExtrusionLayerProperties>().expect("FillExtrusionLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
 

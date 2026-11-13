@@ -2,7 +2,6 @@
 // the host, with what the host waits for before it reads them, and what the
 // target waits for before it draws into a texture the host read.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
@@ -244,10 +243,6 @@ impl TargetResource for Resource {
 
     fn get_render_pass_descriptor(&self) -> Option<MTLRenderPassDescriptorPtr> {
         self.render_pass_descriptor.borrow().clone()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

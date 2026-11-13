@@ -197,13 +197,13 @@ impl WebMap {
     /// Moves the camera.
     pub fn jump_to(&mut self, latitude: f64, longitude: f64, zoom: f64, bearing: f64, pitch: f64) {
         let center = LatLng::new(latitude, longitude).ok();
-        self.map.jump_to(
-            &CameraOptions::default()
-                .with_center(center)
-                .with_zoom(Some(zoom))
-                .with_bearing(Some(bearing))
-                .with_pitch(Some(pitch)),
-        );
+        self.map.jump_to(&CameraOptions {
+            center,
+            zoom: Some(zoom),
+            bearing: Some(bearing),
+            pitch: Some(pitch),
+            ..Default::default()
+        });
     }
 
     /// The camera as `[latitude, longitude, zoom, bearing, pitch]`, in
@@ -225,7 +225,7 @@ impl WebMap {
     pub fn reset_north(&mut self) {
         let update = CameraUpdate {
             mode: CameraUpdateMode::Ease,
-            camera: CameraOptions::default().with_bearing(Some(0.0)).with_pitch(Some(0.0)),
+            camera: CameraOptions { bearing: Some(0.0), pitch: Some(0.0), ..Default::default() },
             animation: AnimationOptions::new(Duration::from_millis(500)),
             phase: GesturePhase::None,
         };
@@ -246,11 +246,13 @@ impl WebMap {
         self.map.cancel_transitions();
         let update = CameraUpdate {
             mode: CameraUpdateMode::Jump,
-            camera: CameraOptions::default()
-                .with_center(LatLng::new(latitude, longitude).ok())
-                .with_zoom(Some(zoom))
-                .with_bearing(Some(bearing))
-                .with_pitch(Some(pitch)),
+            camera: CameraOptions {
+                center: LatLng::new(latitude, longitude).ok(),
+                zoom: Some(zoom),
+                bearing: Some(bearing),
+                pitch: Some(pitch),
+                ..Default::default()
+            },
             animation: AnimationOptions::default(),
             phase: GesturePhase::None,
         };
@@ -283,7 +285,7 @@ impl WebMap {
         self.map.set_pixel_ratio(pixel_ratio as f32).map_err(js_error)?;
         self.pixel_ratio = pixel_ratio;
         self.frontend.renderer.set_pixel_ratio(pixel_ratio as f32);
-        let size = self.map.get_map_options().size();
+        let size = self.map.get_map_options().size;
         self.frontend.target.resize(physical(size, pixel_ratio));
         Ok(())
     }
@@ -471,7 +473,7 @@ impl WebMap {
         );
         renderer.set_tile_worker_transport(transport);
         let mut map =
-            Map::new(MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32)).map_err(js_error)?;
+            Map::new(MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() }).map_err(js_error)?;
         map.set_waker(Some(pump::waker()));
         renderer.set_event_queue(Some(map.renderer_events()));
         let frontend =

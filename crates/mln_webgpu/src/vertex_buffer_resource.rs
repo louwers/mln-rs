@@ -4,7 +4,6 @@
 // Both are shared through `Rc` (gfx::AttributeBinding keeps a clone) and
 // updated in place, so the buffer sits behind a `RefCell`.
 
-use std::any::Any;
 use std::cell::{Cell, Ref, RefCell};
 
 use mln_gfx::vertex_buffer;
@@ -63,11 +62,7 @@ impl Drop for VertexBufferResource {
     }
 }
 
-impl vertex_buffer::VertexBufferResource for VertexBufferResource {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl vertex_buffer::VertexBufferResource for VertexBufferResource {}
 
 pub struct IndexBufferResource {
     buffer: RefCell<BufferResource>,
@@ -103,8 +98,4 @@ impl Drop for IndexBufferResource {
     }
 }
 
-impl vertex_buffer::IndexBufferResource for IndexBufferResource {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl vertex_buffer::IndexBufferResource for IndexBufferResource {}

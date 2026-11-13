@@ -1,6 +1,7 @@
 //! The map handle's style commands: sources and their data, custom sources,
 //! images, layers, the light, the global state and transitions.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -356,9 +357,8 @@ fn find_source<'a>(style: &'a Style, id: &str) -> Result<&'a dyn Source, Error> 
 
 /// The source `id` as a `T`, which `kind` names in the error for a source of
 /// another kind, as in `source "water" is not a GeoJSON source`.
-fn find_source_as<'a, T: 'static>(style: &'a Style, id: &str, kind: &str) -> Result<&'a T, Error> {
+fn find_source_as<'a, T: Source>(style: &'a Style, id: &str, kind: &str) -> Result<&'a T, Error> {
     find_source(style, id)?
-        .as_any()
         .downcast_ref::<T>()
         .ok_or_else(|| Error::invalid_argument(format!("source {} is not {kind}", quote(id))))
 }
@@ -372,7 +372,7 @@ fn require_new_source(style: &Style, id: &str) -> Result<(), Error> {
 }
 
 fn tile_source(source: &dyn Source) -> Option<&TileSource> {
-    let any = source.as_any();
+    let any: &dyn Any = source;
     if let Some(vector) = any.downcast_ref::<VectorSource>() {
         Some(vector.tile_source())
     } else if let Some(raster) = any.downcast_ref::<RasterSource>() {
@@ -383,7 +383,7 @@ fn tile_source(source: &dyn Source) -> Option<&TileSource> {
 }
 
 fn source_kind(source: &dyn Source) -> Option<SourceKind> {
-    let any = source.as_any();
+    let any: &dyn Any = source;
     Some(if any.is::<VectorSource>() {
         SourceKind::Vector
     } else if any.is::<RasterSource>() {
@@ -421,7 +421,7 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
 
 fn source_info(source: &dyn Source) -> Option<SourceInfo> {
     let kind = source_kind(source)?;
-    let any = source.as_any();
+    let any: &dyn Any = source;
     let url = if let Some(tiles) = tile_source(source) {
         tiles.get_url()
     } else if let Some(geojson) = any.downcast_ref::<GeoJSONSource>() {
@@ -1045,7 +1045,7 @@ fn add_callback_source(
 
 /// Another handle to a custom source.
 fn clone_source(source: &dyn Source) -> Result<Box<dyn Source>, Error> {
-    let any = source.as_any();
+    let any: &dyn Any = source;
     if let Some(geometry) = any.downcast_ref::<CustomGeometrySource>() {
         Ok(Box::new(geometry.clone()))
     } else if let Some(vector) = any.downcast_ref::<CustomVectorSource>() {

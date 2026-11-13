@@ -95,10 +95,9 @@ jobs:
 
   # maplibre-native-ffi's C ABI suite against crates/mln_c (`just c-abi-test`,
   # tools/c-abi-test), under its Vulkan preset on lavapipe and its OpenGL one on
-  # llvmpipe: each fails when a case fails that the preset's list
-  # (tools/c-abi-test/expected-failures*.txt) doesn't name, or a listed case
-  # passes. Also that crates/mln_c's generated declarations are what its
-  # headers generate (`just generate-c-abi`, which needs libclang).
+  # llvmpipe: each fails when any case fails. Also that crates/mln_c's generated
+  # declarations are what its headers generate (`just generate-c-abi`, which
+  # needs libclang).
   c-abi:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -132,11 +131,11 @@ jobs:
           just assert-git-is-clean
 
       - name: Test
-        run: just c-abi-test -v
+        run: just c-abi-test
 
       - name: Test the OpenGL preset
         if: ${{ !cancelled() }}
-        run: MLN_C_TEST_BACKEND=opengl just c-abi-test -v
+        run: MLN_C_TEST_BACKEND=opengl just c-abi-test
 
   # The Cargo manifests: build each crates.io package from its packaged
   # sources, as the release does (RELEASING.md), and every test target, so a

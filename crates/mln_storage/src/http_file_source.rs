@@ -114,13 +114,6 @@ impl Cancellation {
     }
 }
 
-/// `HTTPFileSource::Impl`
-struct Impl {
-    transport: Arc<dyn HttpTransport>,
-    header_transform: Mutex<HttpHeaderTransform>,
-    resource_options: Mutex<ResourceOptions>,
-}
-
 /// `headerMatches(header, buffer, length)`: ASCII-case-insensitive prefix.
 fn header_value<'a>(name: &str, header: &str, line: &'a str) -> Option<&'a str> {
     (name.eq_ignore_ascii_case(header)).then_some(line)
@@ -348,7 +341,9 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
 
 /// `HTTPFileSource`: plain HTTP(S) requests, used by the `OnlineFileSource`.
 pub struct HTTPFileSource {
-    impl_: Impl,
+    transport: Arc<dyn HttpTransport>,
+    header_transform: Mutex<HttpHeaderTransform>,
+    resource_options: Mutex<ResourceOptions>,
 }
 
 impl HTTPFileSource {
@@ -357,11 +352,9 @@ impl HTTPFileSource {
     #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         HTTPFileSource {
-            impl_: Impl {
-                transport: current_transport(),
-                header_transform: Mutex::new(HttpHeaderTransform::default()),
-                resource_options: Mutex::new(resource_options.clone()),
-            },
+            transport: current_transport(),
+            header_transform: Mutex::new(HttpHeaderTransform::default()),
+            resource_options: Mutex::new(resource_options.clone()),
         }
     }
 
@@ -371,9 +364,9 @@ impl HTTPFileSource {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         let cancellation = Arc::new(Cancellation::default());
-        let header_transform = self.impl_.header_transform.lock_unpoisoned().clone();
+        let header_transform = self.header_transform.lock_unpoisoned().clone();
         let headers = header_transform.headers(resource.kind, &resource.url);
-        self.impl_.transport.start(TransferRequest {
+        self.transport.start(TransferRequest {
             resource: resource.clone(),
             headers,
             reply: ActorRef::new(&mailbox),
@@ -393,14 +386,14 @@ impl FileSource for HTTPFileSource {
     }
 
     fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        *self.impl_.header_transform.lock_unpoisoned() = transform;
+        *self.header_transform.lock_unpoisoned() = transform;
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.impl_.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock_unpoisoned().clone()
     }
 }

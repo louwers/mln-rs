@@ -186,8 +186,4 @@ impl render_pass::RenderPass for RenderPass {
         self.context.bind_global_uniform_buffers(self);
         true
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

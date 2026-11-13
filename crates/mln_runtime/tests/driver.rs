@@ -28,8 +28,10 @@ fn style(color: &str) -> String {
 
 /// A continuous map with a style of one color.
 fn map_of(runtime: &Runtime, color: &str) -> Map {
-    let options =
-        MapOptions::new(mln_map::MapOptions::new().with_size(Size::new(256, 256)).with_map_mode(MapMode::Continuous));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: MapMode::Continuous, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     wait(map.set_style_json(style(color)));
@@ -100,8 +102,11 @@ fn center_pixel(driver: &DriverWork, session: &RenderSession) -> [u8; 4] {
 #[test]
 fn a_demand_made_while_attaching_fails_when_the_map_cant_bind_the_session() {
     let runtime = runtime();
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(Size::new(256, 256)))
-        .with_fallback_font_faces("not font faces");
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: Size::new(256, 256), ..Default::default() },
+        fallback_font_faces: Some("not font faces".to_owned()),
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     assert!(created.wait().is_err());
     let (session, attached) = map.attach(offscreen(), caller_options()).unwrap();

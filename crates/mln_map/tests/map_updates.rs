@@ -12,7 +12,7 @@ use mln_style::expression::expression::FeatureState;
 use mln_util::size::Size;
 
 fn map() -> Map {
-    let options = MapOptions::new().with_size(Size::new(256, 256));
+    let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
     Map::with_file_source(Arc::new(StubFileSource::new(ResponseType::Asynchronous)), options).expect("map")
 }
 
@@ -41,10 +41,10 @@ fn a_command_group_holds_its_updates_until_the_outermost_group_ends() {
     let (_reader, wakes) = count_wakes(&map);
 
     map.begin_command_group();
-    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     map.begin_command_group();
     assert_eq!(map.command_group_depth(), 2);
-    map.jump_to(&CameraOptions::default().with_zoom(Some(3.0)));
+    map.jump_to(&CameraOptions { zoom: Some(3.0), ..Default::default() });
     map.end_command_group().expect("the inner group ends");
     map.set_prefetch_zoom_delta(1);
     assert_eq!(map.update_generation(), before);
@@ -73,11 +73,11 @@ fn a_hold_keeps_updates_back_apart_from_the_groups() {
     let (_reader, wakes) = count_wakes(&map);
 
     map.hold_updates();
-    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     assert_eq!(map.command_group_depth(), 0);
     assert_eq!(map.end_command_group().expect_err("the hold is no group").kind, ErrorKind::InvalidState);
     map.begin_command_group();
-    map.jump_to(&CameraOptions::default().with_zoom(Some(3.0)));
+    map.jump_to(&CameraOptions { zoom: Some(3.0), ..Default::default() });
     map.end_command_group().expect("the group ends");
     assert_eq!((map.update_generation(), map.pending_update_generation()), (before, before + 1));
 
@@ -90,7 +90,7 @@ fn a_hold_keeps_updates_back_apart_from_the_groups() {
     assert_eq!(wakes.load(Ordering::SeqCst), 1);
 
     map.hold_updates();
-    map.jump_to(&CameraOptions::default().with_zoom(Some(4.0)));
+    map.jump_to(&CameraOptions { zoom: Some(4.0), ..Default::default() });
     map.release_updates();
     assert_eq!(map.update_generation(), before + 2);
 }
@@ -181,7 +181,7 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
 fn the_update_reader_sees_the_map_go() {
     let _loop = RunLoop::new();
     let mut map = map();
-    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     let reader = map.update_reader();
     let generation = reader.generation();
     let (_reader, wakes) = count_wakes(&map);
@@ -209,7 +209,7 @@ fn an_update_reaches_a_reader_on_another_thread() {
         receiver.recv().expect("a wake");
         reader.latest().map(|update| update.parameters.transform_state.get_zoom())
     });
-    map.jump_to(&CameraOptions::default().with_zoom(Some(4.0)));
+    map.jump_to(&CameraOptions { zoom: Some(4.0), ..Default::default() });
     let zoom = thread.join().expect("the reader thread").expect("an update");
     assert_near(zoom, 4.0);
 }

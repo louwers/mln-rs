@@ -139,7 +139,7 @@ impl RenderSource for RenderGeoJSONSource {
                 let max_z = impl_.get_zoom_range().max;
                 for (id, tile) in self.tile_source.tile_pyramid.get_tiles() {
                     if id.canonical.z <= max_z
-                        && let Some(tile) = tile.as_any().downcast_ref::<GeoJSONTile>()
+                        && let Some(tile) = tile.downcast_ref::<GeoJSONTile>()
                     {
                         tile.update_data(data.clone(), needs_relayout, parameters.is_update_synchronous);
                     }

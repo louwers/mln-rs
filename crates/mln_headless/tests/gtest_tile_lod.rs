@@ -31,11 +31,12 @@ impl TileLODTest {
         let run_loop = RunLoop::new();
         let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
         let mut map = Map::with_resource_options(
-            MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+            MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
             &FileSourceManager::new(),
-            &ResourceOptions::default()
-                .with_cache_path(":memory:")
-                .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+            &ResourceOptions {
+                asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
+                ..ResourceOptions::default()
+            },
         )
         .unwrap();
         frontend.attach(&map);

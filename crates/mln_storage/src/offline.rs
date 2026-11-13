@@ -349,35 +349,15 @@ pub trait OfflineRegionObserver {
     fn response_error(&self, _error: ResourceError) {}
 }
 
-/// `OfflineRegion`.
+/// A region in the offline database.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OfflineRegion {
-    id: i64,
-    definition: OfflineRegionDefinition,
-    metadata: OfflineRegionMetadata,
-}
-
-impl OfflineRegion {
-    /// The private constructor (`friend class OfflineDatabase`).
-    #[cfg(feature = "sqlite")]
-    pub(crate) fn new(id: i64, definition: OfflineRegionDefinition, metadata: OfflineRegionMetadata) -> Self {
-        OfflineRegion { id, definition, metadata }
-    }
-
-    #[must_use]
-    pub fn get_id(&self) -> i64 {
-        self.id
-    }
-
-    #[must_use]
-    pub fn get_definition(&self) -> &OfflineRegionDefinition {
-        &self.definition
-    }
-
-    #[must_use]
-    pub fn get_metadata(&self) -> &OfflineRegionMetadata {
-        &self.metadata
-    }
+    /// The database's id for the region.
+    pub id: i64,
+    /// The area and zoom levels the region downloads.
+    pub definition: OfflineRegionDefinition,
+    /// The app's bytes for the region.
+    pub metadata: OfflineRegionMetadata,
 }
 
 /// `OfflineRegions`.

@@ -50,7 +50,6 @@ impl RendererBackendBase {
 /// into is a `FrameTarget` built on it.
 pub trait RendererBackend: Any {
     fn renderer_backend_base(&self) -> &RendererBackendBase;
-    fn as_any(&self) -> &dyn Any;
 
     /// Returns the device's context, created on first use (`std::call_once`).
     /// Must be called inside a `BackendScope`.
@@ -78,4 +77,11 @@ pub trait RendererBackend: Any {
     fn create_context(&self) -> Rc<dyn Context>;
     fn activate(&self);
     fn deactivate(&self);
+}
+
+impl dyn RendererBackend {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: RendererBackend>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }

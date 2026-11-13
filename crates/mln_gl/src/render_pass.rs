@@ -65,8 +65,4 @@ impl render_pass::RenderPass for RenderPass {
         self.context.bind_framebuffer(framebuffer, size, has_stencil);
         true
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

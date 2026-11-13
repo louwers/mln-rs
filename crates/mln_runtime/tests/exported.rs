@@ -30,7 +30,10 @@ fn style(color: &str) -> String {
 }
 
 fn red_map(runtime: &Runtime) -> Map {
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     wait(map.set_style_json(style("#ff0000")));
@@ -485,7 +488,10 @@ mod linux {
     }
 
     fn session_map(runtime: &Runtime, style: &str) -> Map {
-        let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
+        let options = MapOptions {
+            map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+            ..Default::default()
+        };
         let (map, created) = runtime.create_map(options).unwrap();
         created.wait().unwrap();
         wait(map.set_style_json(style.to_owned()));
@@ -969,7 +975,10 @@ mod android {
             eprintln!("skipped: the {backend:?} device exports no hardware buffers");
             return None;
         }
-        let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
+        let options = MapOptions {
+            map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+            ..Default::default()
+        };
         let (map, created) = runtime.create_map(options).unwrap();
         created.wait().unwrap();
         wait(map.set_style_json(style.to_owned()));

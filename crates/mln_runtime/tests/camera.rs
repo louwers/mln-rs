@@ -31,7 +31,7 @@ fn recorded(ends: &Arc<Mutex<Vec<TransitionEnd>>>, duration: Duration) -> Animat
 fn zoom_to(zoom: f64, animation: AnimationOptions) -> CameraUpdate {
     CameraUpdate {
         mode: CameraUpdateMode::Ease,
-        camera: CameraOptions::default().with_zoom(Some(zoom)),
+        camera: CameraOptions { zoom: Some(zoom), ..Default::default() },
         animation,
         ..CameraUpdate::default()
     }
@@ -101,7 +101,8 @@ fn the_visible_bounds_unwrap_across_the_antimeridian() {
     let runtime = runtime();
     let map = map(&runtime);
     // 256 pixels at zoom 1 span 90 degrees.
-    let camera = CameraOptions::default().with_center(Some(LatLng::new(0.0, 170.0).unwrap())).with_zoom(Some(1.0));
+    let camera =
+        CameraOptions { center: Some(LatLng::new(0.0, 170.0).unwrap()), zoom: Some(1.0), ..Default::default() };
     let bounds = wait(map.lat_lng_bounds_for_camera(camera));
     assert!((bounds.west() - 125.0).abs() < 1e-6, "{bounds:?}");
     assert!((bounds.east() - 215.0).abs() < 1e-6, "{bounds:?}");

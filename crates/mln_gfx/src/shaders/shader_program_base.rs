@@ -1,5 +1,6 @@
 // Ports include/mln/shaders/shader_program_base.hpp
 
+use std::any::Any;
 use std::rc::Rc;
 
 use mln_util::identity::SimpleIdentity;
@@ -17,6 +18,13 @@ pub trait ShaderProgramBase: Shader {
     fn get_vertex_attributes(&self) -> &VertexAttributeArray;
     /// Get the available instance attributes and their default values
     fn get_instance_attributes(&self) -> &VertexAttributeArray;
+}
+
+impl dyn ShaderProgramBase {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: ShaderProgramBase>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }
 
 pub type ShaderProgramBasePtr = Rc<dyn ShaderProgramBase>;

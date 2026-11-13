@@ -297,20 +297,8 @@ impl ExpressionBase {
     }
 }
 
-/// Gives trait objects of any lifetime an `&dyn Any` of the concrete type
-/// (all expressions are `'static` types).
-pub trait AsAny {
-    fn as_any(&self) -> &dyn Any;
-}
-
-impl<T: Any> AsAny for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
 /// `expression::Expression`.
-pub trait Expression: AsAny + Send + Sync {
+pub trait Expression: Any + Send + Sync {
     fn base(&self) -> &ExpressionBase;
 
     fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult;
@@ -377,8 +365,8 @@ impl fmt::Debug for dyn Expression {
 }
 
 /// `static_cast<const T*>(&expression)` after a kind check.
-pub fn downcast<T: Expression + Any>(e: &dyn Expression) -> Option<&T> {
-    e.as_any().downcast_ref::<T>()
+pub fn downcast<T: Expression>(e: &dyn Expression) -> Option<&T> {
+    (e as &dyn Any).downcast_ref()
 }
 
 /// `Expression::depsOf` for an optional child.

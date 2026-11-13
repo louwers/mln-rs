@@ -10,8 +10,13 @@ use mln_util::host_bytes::HostBytes;
 use crate::draw_mode::DrawMode;
 
 /// `gfx::IndexBufferBase`: backend buffer attached to a shared index vector.
-pub trait IndexBufferBase: Any {
-    fn as_any(&self) -> &dyn Any;
+pub trait IndexBufferBase: Any {}
+
+impl dyn IndexBufferBase {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: IndexBufferBase>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }
 
 /// `gfx::IndexVectorBase`. `IndexVector<DrawMode>` only adds a grouped

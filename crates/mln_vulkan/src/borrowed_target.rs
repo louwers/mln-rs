@@ -2,7 +2,6 @@
 // the host, with what the host waits for before it reads them, and what the
 // target waits for before it draws into an image the host read.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -243,10 +242,6 @@ impl TargetResource for Resource {
 
     fn get_framebuffer(&self) -> vk::Framebuffer {
         self.framebuffers.get(self.selected.get()).copied().unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

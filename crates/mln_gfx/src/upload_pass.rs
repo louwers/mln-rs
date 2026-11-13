@@ -40,6 +40,11 @@ pub trait UploadPass: DebugGroupTarget + Any {
         usage: BufferUsageType,
         persistent: bool,
     ) -> Box<dyn IndexBufferResource>;
+}
 
-    fn as_any(&self) -> &dyn Any;
+impl dyn UploadPass {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: UploadPass>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }

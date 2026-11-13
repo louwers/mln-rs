@@ -233,10 +233,6 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         self.tile.base()
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
         self.tile.create_render_data()
     }

@@ -3,7 +3,6 @@
 //
 // `GeoJSONSource` is a handle (see source.rs): `Clone` shares the source.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
@@ -349,10 +348,6 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
 impl Source for GeoJSONSource {
     fn base(&self) -> &SourceBase {
         &self.inner.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn load_description(&self, file_source: &dyn FileSource) {

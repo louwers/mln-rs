@@ -36,10 +36,12 @@ fn assert_near(actual: f64, expected: f64) {
 #[test]
 fn snapshot_reports_every_member() {
     let _loop = RunLoop::new();
-    let mut map = map(MapOptions::new()
-        .with_size(Size::new(512, 256))
-        .with_pixel_ratio(2.0)
-        .with_constrain_mode(ConstrainMode::WidthAndHeight));
+    let mut map = map(MapOptions {
+        size: Size::new(512, 256),
+        pixel_ratio: 2.0,
+        constrain_mode: ConstrainMode::WidthAndHeight,
+        ..Default::default()
+    });
 
     let snapshot = map.snapshot();
     assert_eq!(snapshot.debug, MapDebugOptions::NO_DEBUG);
@@ -52,14 +54,13 @@ fn snapshot_reports_every_member() {
     assert_near(snapshot.tile.lod_pitch_threshold, 60.0);
 
     let bounds = LatLngBounds::hull(ll(-10.0, -20.0), ll(30.0, 40.0));
-    map.set_bounds(
-        &BoundOptions::default()
-            .with_lat_lng_bounds(bounds)
-            .with_min_zoom(1.0)
-            .with_max_zoom(18.0)
-            .with_min_pitch(5.0)
-            .with_max_pitch(50.0),
-    )
+    map.set_bounds(&BoundOptions {
+        bounds: Some(bounds),
+        min_zoom: Some(1.0),
+        max_zoom: Some(18.0),
+        min_pitch: Some(5.0),
+        max_pitch: Some(50.0),
+    })
     .unwrap();
     map.set_debug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION);
     map.set_prefetch_zoom_delta(2);
@@ -74,18 +75,20 @@ fn snapshot_reports_every_member() {
     map.set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(0.25).with_y_skew(0.5));
     map.enable_rendering_stats_view(true);
     map.apply_camera_delta(&CameraDelta { phase: GesturePhase::Begin, ..CameraDelta::default() }).unwrap();
-    let camera = CameraOptions::default()
-        .with_center(Some(ll(10.0, 20.0)))
-        .with_padding(Some(insets(10.0, 20.0, 30.0, 40.0)))
-        .with_zoom(Some(6.0))
-        .with_bearing(Some(30.0))
-        .with_pitch(Some(20.0))
-        .with_roll(Some(5.0))
-        .with_fov(Some(40.0));
+    let camera = CameraOptions {
+        center: Some(ll(10.0, 20.0)),
+        padding: Some(insets(10.0, 20.0, 30.0, 40.0)),
+        zoom: Some(6.0),
+        bearing: Some(30.0),
+        pitch: Some(20.0),
+        roll: Some(5.0),
+        fov: Some(40.0),
+        ..Default::default()
+    };
     map.jump_to(&camera);
     map.update_camera(&CameraUpdate {
         mode: CameraUpdateMode::Ease,
-        camera: CameraOptions::default().with_zoom(Some(7.0)),
+        camera: CameraOptions { zoom: Some(7.0), ..Default::default() },
         animation: AnimationOptions { duration: Some(Duration::from_secs(10)), ..AnimationOptions::default() },
         ..CameraUpdate::default()
     });
@@ -146,7 +149,7 @@ fn snapshot_reports_every_member() {
 #[test]
 fn generation_grows_with_each_change() {
     let _loop = RunLoop::new();
-    let mut map = map(MapOptions::new().with_size(Size::new(256, 256)));
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
 
     let mut last = map.generation();
     let mut assert_changed = |map: &Map, changed: bool, what: &str| {
@@ -164,7 +167,7 @@ fn generation_grows_with_each_change() {
     map.get_camera_options(None);
     assert_changed(&map, false, "reading");
 
-    map.jump_to(&CameraOptions::default().with_zoom(Some(3.0)));
+    map.jump_to(&CameraOptions { zoom: Some(3.0), ..Default::default() });
     assert_changed(&map, true, "jump_to");
     map.set_tile_lod_scale(2.0);
     assert_changed(&map, true, "set_tile_lod_scale");
@@ -172,7 +175,7 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, false, "set_tile_lod_scale to the same value");
     map.set_debug(MapDebugOptions::OVERDRAW);
     assert_changed(&map, true, "set_debug");
-    map.set_bounds(&BoundOptions::default().with_min_pitch(10.0)).unwrap();
+    map.set_bounds(&BoundOptions { min_pitch: Some(10.0), ..Default::default() }).unwrap();
     assert_changed(&map, true, "set_bounds");
     map.set_bounds(&BoundOptions::default()).unwrap();
     assert_changed(&map, false, "set_bounds with no limits");
@@ -200,11 +203,11 @@ fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
 #[test]
 fn update_generation_counts_the_updates_published() {
     let _loop = RunLoop::new();
-    let mut map = map(MapOptions::new().with_size(Size::new(256, 256)));
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
     let before = map.update_generation();
     let (_reader, wakes) = count_wakes(&map);
 
-    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     map.set_prefetch_zoom_delta(1);
     let published = wakes.load(Ordering::SeqCst);
     assert!(published >= 2);
@@ -218,11 +221,11 @@ fn update_generation_counts_the_updates_published() {
 #[test]
 fn a_static_map_changes_without_publishing_updates() {
     let _loop = RunLoop::new();
-    let mut map = map(MapOptions::new().with_size(Size::new(256, 256)).with_map_mode(MapMode::Static));
+    let mut map = map(MapOptions { size: Size::new(256, 256), map_mode: MapMode::Static, ..Default::default() });
     let (_reader, wakes) = count_wakes(&map);
 
     let before = map.snapshot();
-    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     map.set_debug(MapDebugOptions::TILE_BORDERS);
     let after = map.snapshot();
     assert!(after.generation > before.generation);
@@ -234,19 +237,22 @@ fn a_static_map_changes_without_publishing_updates() {
 #[test]
 fn projection_from_a_view_matches_the_map() {
     let _loop = RunLoop::new();
-    let mut map = map(MapOptions::new().with_size(Size::new(400, 300)).with_pixel_ratio(1.5));
+    let mut map = map(MapOptions { size: Size::new(400, 300), pixel_ratio: 1.5, ..Default::default() });
     // Bounds past the antimeridian keep the center's copy of the world, which
     // the view keeps too.
-    map.set_bounds(&BoundOptions::default().with_lat_lng_bounds(LatLngBounds::hull(ll(-20.0, 170.0), ll(20.0, 200.0))))
-        .unwrap();
-    map.jump_to(
-        &CameraOptions::default()
-            .with_center(Some(ll(5.0, 185.0)))
-            .with_zoom(Some(4.0))
-            .with_bearing(Some(15.0))
-            .with_pitch(Some(30.0))
-            .with_padding(Some(insets(0.0, 40.0, 0.0, 0.0))),
-    );
+    map.set_bounds(&BoundOptions {
+        bounds: Some(LatLngBounds::hull(ll(-20.0, 170.0), ll(20.0, 200.0))),
+        ..Default::default()
+    })
+    .unwrap();
+    map.jump_to(&CameraOptions {
+        center: Some(ll(5.0, 185.0)),
+        zoom: Some(4.0),
+        bearing: Some(15.0),
+        pitch: Some(30.0),
+        padding: Some(insets(0.0, 40.0, 0.0, 0.0)),
+        ..Default::default()
+    });
 
     let view = map.snapshot().view;
     assert!(view.camera.center.longitude() > 180.0);
@@ -275,7 +281,7 @@ fn projection_from_a_view_matches_the_map() {
 #[test]
 fn projection_from_a_view_rejects_views_no_map_shows() {
     let _loop = RunLoop::new();
-    let map = map(MapOptions::new().with_size(Size::new(256, 256)));
+    let map = map(MapOptions { size: Size::new(256, 256), ..Default::default() });
     let view = map.snapshot().view;
     assert!(MapProjection::from_view(&view).is_ok());
 
@@ -301,17 +307,17 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
 #[test]
 fn projection_from_a_globe_view_matches_the_map() {
     let _loop = RunLoop::new();
-    let mut map = map(MapOptions::new().with_size(Size::new(400, 300)));
+    let mut map = map(MapOptions { size: Size::new(400, 300), ..Default::default() });
     map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
     // The globe lets the zoom fall below 0 toward a pole, and the center past
     // Mercator's latitudes.
-    map.jump_to(
-        &CameraOptions::default()
-            .with_center(Some(ll(87.0, 40.0)))
-            .with_zoom(Some(-0.5))
-            .with_bearing(Some(20.0))
-            .with_pitch(Some(10.0)),
-    );
+    map.jump_to(&CameraOptions {
+        center: Some(ll(87.0, 40.0)),
+        zoom: Some(-0.5),
+        bearing: Some(20.0),
+        pitch: Some(10.0),
+        ..Default::default()
+    });
     map.set_globe_free_bearing(true);
 
     let snapshot = map.snapshot();

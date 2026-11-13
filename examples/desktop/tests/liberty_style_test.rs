@@ -17,7 +17,7 @@ const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 #[ignore = "needs network access"]
 fn loads_liberty_over_https() {
     let run_loop = RunLoop::new();
-    let mut map = Map::new(MapOptions::new().with_size(Size::new(256, 256)).with_pixel_ratio(1.0)).unwrap();
+    let mut map = Map::new(MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() }).unwrap();
 
     map.style_mut().load_url(LIBERTY);
     assert!(!map.style().is_loaded());

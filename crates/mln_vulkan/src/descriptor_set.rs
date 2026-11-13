@@ -325,7 +325,7 @@ impl UniformDescriptorSet {
         let current_index = context.get_current_frame_resource_index();
         let first_id = if type_ == DescriptorSetType::Global { 0 } else { LAYER_SSBO_START_ID };
         for id in first_id..uniforms.allocated_size() {
-            let Some(uniform_buffer) = uniforms.get(id).and_then(|b| b.as_any().downcast_ref::<UniformBuffer>()) else {
+            let Some(uniform_buffer) = uniforms.get(id).and_then(|b| b.downcast_ref::<UniformBuffer>()) else {
                 continue;
             };
             let Some(binding) = Self::binding_of(type_, id, uniform_buffer.is_storage()) else {
@@ -439,7 +439,7 @@ impl ImageDescriptorSet {
                 continue;
             };
             let mut texture = texture.borrow_mut();
-            let Some(texture) = texture.as_any_mut().downcast_mut::<Texture2D>() else {
+            let Some(texture) = texture.downcast_mut::<Texture2D>() else {
                 continue;
             };
             let image_view = texture.get_vulkan_image_view();

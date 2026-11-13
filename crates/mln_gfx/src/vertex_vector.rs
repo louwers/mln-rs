@@ -9,8 +9,13 @@ use mln_util::host_bytes::HostBytes;
 use mln_util::time::Instant;
 
 /// `gfx::VertexBufferBase`: backend buffer attached to a shared vertex vector.
-pub trait VertexBufferBase: Any {
-    fn as_any(&self) -> &dyn Any;
+pub trait VertexBufferBase: Any {}
+
+impl dyn VertexBufferBase {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: VertexBufferBase>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }
 
 /// The data members of `gfx::VertexVectorBase`. Interior mutability because
@@ -273,11 +278,7 @@ mod tests {
 
     struct StubBuffer;
 
-    impl VertexBufferBase for StubBuffer {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-    }
+    impl VertexBufferBase for StubBuffer {}
 
     #[test]
     fn released_vector_frees_its_data_once_it_has_a_buffer() {

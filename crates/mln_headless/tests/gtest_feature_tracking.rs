@@ -1,5 +1,5 @@
 // Ports test/renderer/feature_tracking.test.cpp: the features a map with
-// `MapOptions::with_rendered_feature_info` reports as rendered in the last
+// `MapOptions::capture_rendered_features` reports as rendered in the last
 // frame, and their bounds in normalized device coordinates.
 
 mod support;
@@ -87,10 +87,12 @@ impl FeatureTrackingTest {
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
             file_source,
-            MapOptions::new()
-                .with_map_mode(MapMode::Static)
-                .with_size(frontend.get_size())
-                .with_rendered_feature_info(true),
+            MapOptions {
+                map_mode: MapMode::Static,
+                size: frontend.get_size(),
+                capture_rendered_features: true,
+                ..Default::default()
+            },
         )
         .expect("map");
         frontend.attach(&map);
@@ -213,7 +215,7 @@ impl FeatureTrackingTest {
 }
 
 fn camera(zoom_level: f64) -> CameraOptions {
-    CameraOptions::default().with_zoom(Some(zoom_level))
+    CameraOptions { zoom: Some(zoom_level), ..Default::default() }
 }
 
 // gtest: FeatureTracking.ApiQuery
@@ -374,7 +376,7 @@ fn ndc_bound_circle() {
 /// The pitched circle tests: each combination of pitch options projects the
 /// vertices differently.
 fn pitched_circle_test(image: &str, alignment: AlignmentType, scale: CirclePitchScaleType) -> FeatureTrackingTest {
-    let mut test = FeatureTrackingTest::new(camera(10.0).with_pitch(Some(60.0)));
+    let mut test = FeatureTrackingTest::new(CameraOptions { pitch: Some(60.0), ..camera(10.0) });
     test.show(CIRCLE_LAYER_NAME);
     test.with_circle_layer(|layer| {
         layer.set_circle_pitch_alignment(&constant(alignment));
@@ -449,7 +451,7 @@ fn ndc_bound_tilt() {
     assert_eq!(0, test.count(Some("pt0"), None, None)); // out of view
 
     // tilt and the feature appears
-    let pitched = test.map.get_camera_options(None).with_pitch(Some(60.0));
+    let pitched = CameraOptions { pitch: Some(60.0), ..test.map.get_camera_options(None) };
     test.map.jump_to(&pitched);
     test.run(Some("NDCBoundTilt"), 0.01);
 
@@ -546,7 +548,7 @@ fn zero_opacity_data_driven() {
 
 #[test]
 fn ndc_bound_fill_extrusion() {
-    let mut test = FeatureTrackingTest::new(camera(10.0).with_pitch(Some(45.0)));
+    let mut test = FeatureTrackingTest::new(CameraOptions { pitch: Some(45.0), ..camera(10.0) });
     let mut layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
     layer.set_fill_extrusion_color(&constant(Color::new(0.0, 0.0, 1.0, 1.0)));
     layer.set_fill_extrusion_height(&constant(1000.0));
@@ -584,7 +586,7 @@ const GLOBE_GEOMETRY: &str = r#"{"type": "FeatureCollection", "features": [
 fn globe_test() -> FeatureTrackingTest {
     let mut test = FeatureTrackingTest::with_geojson(
         GLOBE_GEOMETRY,
-        camera(0.0).with_center(Some(LatLng::new(0.0, 0.0).expect("LatLng"))),
+        CameraOptions { center: Some(LatLng::new(0.0, 0.0).expect("LatLng")), ..camera(0.0) },
     );
     set_projection(&mut test, ProjectionDefinition::new(ProjectionType::Globe));
     test.with_circle_layer(|layer| layer.set_circle_radius(&constant(4.0)));
@@ -771,7 +773,7 @@ fn globe_capture_close_up() {
         style.add_source(Box::new(source)).expect("add source");
         style.add_layer(Box::new(fill_layer), None).expect("add layer");
     }
-    test.map.jump_to(&camera(11.0).with_pitch(Some(60.0)));
+    test.map.jump_to(&CameraOptions { pitch: Some(60.0), ..camera(11.0) });
     let image = test.run(None, 0.0).image;
     test.expect_captured_as_drawn("large", "lowZoomFill", &image);
 }

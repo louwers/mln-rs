@@ -27,7 +27,7 @@ pub trait GestureCamera {
 
 impl GestureCamera for Map {
     fn viewport(&self) -> ScreenCoordinate {
-        let size = self.get_map_options().size();
+        let size = self.get_map_options().size;
         ScreenCoordinate::new(f64::from(size.width), f64::from(size.height))
     }
 

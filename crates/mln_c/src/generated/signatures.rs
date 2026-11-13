@@ -774,11 +774,6 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(mln_network_status, *mut mln_diagnostic) -> mln_status = crate::runtime::mln_network_set_status;
 const _: unsafe extern "C" fn() -> mln_open_gl_context_provider_flags = crate::render_target::mln_open_gl_supported_context_provider_mask;
 const _: unsafe extern "C" fn(
-    *const mln_plugin_descriptor_v1,
-    *mut ::core::ffi::c_char,
-    usize,
-) -> mln_plugin_status = crate::plugin::mln_plugin_register_v1;
-const _: unsafe extern "C" fn(
     mln_lat_lng,
     *mut mln_projected_meters,
     *mut mln_diagnostic,

@@ -30,7 +30,7 @@ fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) ->
 fn database_file_source(dir: &TempDir) -> DatabaseFileSource {
     DatabaseFileSource::new(
         &FileSourceManager::new(),
-        &ResourceOptions::default().with_cache_path(dir.path("cache.db")),
+        &ResourceOptions { cache_path: dir.path("cache.db"), ..ResourceOptions::default() },
     )
 }
 
@@ -60,7 +60,7 @@ impl OfflineRegionObserver for StatusObserver {
 
 fn observe(source: &DatabaseFileSource, region: &OfflineRegion) -> Receiver<OfflineRegionStatus> {
     let (tx, rx) = channel();
-    wait(|done| source.set_offline_region_observer(region.get_id(), Some(Box::new(StatusObserver(tx))), done)).unwrap();
+    wait(|done| source.set_offline_region_observer(region.id, Some(Box::new(StatusObserver(tx))), done)).unwrap();
     rx
 }
 
@@ -82,32 +82,31 @@ fn a_region_lives_from_creation_to_deletion() {
     let style_url = server.url("/style.json");
 
     let region = wait(|done| source.create_offline_region(&definition(&style_url), &b"one".to_vec(), done)).unwrap();
-    assert_eq!(b"one", region.get_metadata().as_slice());
+    assert_eq!(b"one", region.metadata.as_slice());
     assert_eq!(vec![region.clone()], wait(|done| source.list_offline_regions(done)).unwrap());
-    assert_eq!(Some(region.clone()), wait(|done| source.get_offline_region(region.get_id(), done)).unwrap());
-    assert_eq!(None, wait(|done| source.get_offline_region(region.get_id() + 1, done)).unwrap());
+    assert_eq!(Some(region.clone()), wait(|done| source.get_offline_region(region.id, done)).unwrap());
+    assert_eq!(None, wait(|done| source.get_offline_region(region.id + 1, done)).unwrap());
 
-    let updated = wait(|done| source.update_offline_metadata(region.get_id(), &b"two".to_vec(), done)).unwrap();
-    assert_eq!(b"two", updated.get_metadata().as_slice());
-    assert_eq!(Some(updated), wait(|done| source.get_offline_region(region.get_id(), done)).unwrap());
+    let updated = wait(|done| source.update_offline_metadata(region.id, &b"two".to_vec(), done)).unwrap();
+    assert_eq!(b"two", updated.metadata.as_slice());
+    assert_eq!(Some(updated), wait(|done| source.get_offline_region(region.id, done)).unwrap());
 
-    let status = wait(|done| source.get_offline_region_status(region.get_id(), done)).unwrap();
+    let status = wait(|done| source.get_offline_region_status(region.id, done)).unwrap();
     assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
     assert_eq!(0, status.completed_resource_count);
 
     let statuses = observe(&source, &region);
-    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
-        .unwrap();
+    wait(|done| source.set_offline_region_download_state(region.id, OfflineRegionDownloadState::Active, done)).unwrap();
     let status = wait_until_complete(&statuses);
     assert_eq!(1, status.completed_resource_count);
-    let status = wait(|done| source.get_offline_region_status(region.get_id(), done)).unwrap();
+    let status = wait(|done| source.get_offline_region_status(region.id, done)).unwrap();
     assert_eq!(1, status.completed_resource_count);
     assert!(status.complete());
 
-    wait(|done| source.invalidate_offline_region(region.get_id(), done)).unwrap();
-    wait(|done| source.delete_offline_region(region.get_id(), done)).unwrap();
+    wait(|done| source.invalidate_offline_region(region.id, done)).unwrap();
+    wait(|done| source.delete_offline_region(region.id, done)).unwrap();
     assert_eq!(wait(|done| source.list_offline_regions(done)).unwrap(), [] as [mln_storage::offline::OfflineRegion; 0]);
-    let id = region.get_id();
+    let id = region.id;
     let not_found =
         |result: Result<(), DatabaseError>| matches!(result, Err(DatabaseError::RegionNotFound(i)) if i == id);
     assert!(not_found(wait(|done| source.get_offline_region_status(id, done)).map(|_| ())));
@@ -135,10 +134,9 @@ fn a_deleted_region_stops_downloading() {
     let region =
         wait(|done| source.create_offline_region(&definition(&server.url("/style.json")), &Vec::new(), done)).unwrap();
     let statuses = observe(&source, &region);
-    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
-        .unwrap();
+    wait(|done| source.set_offline_region_download_state(region.id, OfflineRegionDownloadState::Active, done)).unwrap();
     assert_eq!(OfflineRegionDownloadState::Active, statuses.recv_timeout(TIMEOUT).unwrap().download_state);
-    wait(|done| source.delete_offline_region(region.get_id(), done)).unwrap();
+    wait(|done| source.delete_offline_region(region.id, done)).unwrap();
 
     // The style answers after the deletion; the download it belonged to is
     // gone, so the observer hears nothing more.
@@ -167,14 +165,12 @@ fn a_download_refreshes_an_invalidated_region() {
     let region =
         wait(|done| source.create_offline_region(&definition(&server.url("/style.json")), &Vec::new(), done)).unwrap();
     let statuses = observe(&source, &region);
-    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
-        .unwrap();
+    wait(|done| source.set_offline_region_download_state(region.id, OfflineRegionDownloadState::Active, done)).unwrap();
     let downloaded = wait_until_complete(&statuses);
     assert_eq!((1, 0), (fetched.calls(), revalidated.calls()));
 
-    wait(|done| source.invalidate_offline_region(region.get_id(), done)).unwrap();
-    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
-        .unwrap();
+    wait(|done| source.invalidate_offline_region(region.id, done)).unwrap();
+    wait(|done| source.set_offline_region_download_state(region.id, OfflineRegionDownloadState::Active, done)).unwrap();
     let refreshed = wait_until_complete(&statuses);
     assert_eq!((1, 1), (fetched.calls(), revalidated.calls()));
     assert_eq!(downloaded.completed_resource_count, refreshed.completed_resource_count);
@@ -192,8 +188,8 @@ fn merging_copies_the_regions_of_another_database() {
 
     let merged = wait(|done| source.merge_offline_regions(&side_path, done)).unwrap();
     assert_eq!(1, merged.len());
-    assert_eq!(side_region.get_definition(), merged[0].get_definition());
-    assert_eq!(b"side", merged[0].get_metadata().as_slice());
+    assert_eq!(side_region.definition, merged[0].definition);
+    assert_eq!(b"side", merged[0].metadata.as_slice());
     assert_eq!(merged, wait(|done| source.list_offline_regions(done)).unwrap());
 
     let missing = wait(|done| source.merge_offline_regions(&dir.path("missing.db"), done));

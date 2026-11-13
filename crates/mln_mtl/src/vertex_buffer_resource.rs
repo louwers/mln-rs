@@ -2,7 +2,6 @@
 // src/mln/mtl/vertex_buffer_resource.cpp and their index buffer
 // counterparts (index_buffer_resource.hpp/.cpp)
 
-use std::any::Any;
 use std::cell::Cell;
 
 use mln_gfx::context::Context as _;
@@ -54,11 +53,7 @@ impl Drop for VertexBufferResource {
     }
 }
 
-impl vertex_buffer::VertexBufferResource for VertexBufferResource {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl vertex_buffer::VertexBufferResource for VertexBufferResource {}
 
 pub struct IndexBufferResource {
     buffer: BufferResource,
@@ -90,8 +85,4 @@ impl Drop for IndexBufferResource {
     }
 }
 
-impl vertex_buffer::IndexBufferResource for IndexBufferResource {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl vertex_buffer::IndexBufferResource for IndexBufferResource {}

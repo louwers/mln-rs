@@ -502,8 +502,4 @@ impl render_pass::RenderPass for RenderPass {
             encoder.insertDebugSignpost(&NSString::from_str(name));
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

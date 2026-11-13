@@ -47,8 +47,10 @@ impl Impl {
         resource_options: &ResourceOptions,
         impl_options: &ImplOptions,
     ) -> Result<Impl, String> {
-        let resource_options =
-            mln_storage::ResourceOptions::default().with_cache_path(resource_options.cache_path.clone());
+        let resource_options = mln_storage::ResourceOptions {
+            cache_path: resource_options.cache_path.clone(),
+            ..mln_storage::ResourceOptions::default()
+        };
         let frontend =
             HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
@@ -58,18 +60,21 @@ impl Impl {
         }
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         let mut map = Map::with_resource_options(
-            MapOptions::new()
-                .with_map_mode(map_mode(metadata.map_mode))
-                .with_size(metadata.size)
-                .with_pixel_ratio(metadata.pixel_ratio)
-                .with_cross_source_collisions(metadata.cross_source_collisions),
+            MapOptions {
+                map_mode: map_mode(metadata.map_mode),
+                size: metadata.size,
+                pixel_ratio: metadata.pixel_ratio,
+                cross_source_collisions: metadata.cross_source_collisions,
+                ..Default::default()
+            },
             file_sources,
             &resource_options,
         )
         .map_err(|e| e.to_string())?;
         frontend.attach(&map);
         if let Some(max_pitch) = metadata.max_pitch {
-            map.set_bounds(&BoundOptions::default().with_max_pitch(f64::from(max_pitch))).map_err(|e| e.to_string())?;
+            map.set_bounds(&BoundOptions { max_pitch: Some(f64::from(max_pitch)), ..Default::default() })
+                .map_err(|e| e.to_string())?;
         }
         Ok(Impl { frontend, file_source, map })
     }
@@ -127,13 +132,15 @@ impl TestRunnerImpl for Impl {
         camera: &CameraOptions,
         zoom: u8,
     ) -> Result<Vec<crate::runner::TileId>, MapError> {
-        let camera = mln_map::CameraOptions::default()
-            .with_center(camera.center)
-            .with_center_altitude(camera.center_altitude)
-            .with_zoom(camera.zoom)
-            .with_bearing(camera.bearing)
-            .with_pitch(camera.pitch)
-            .with_roll(camera.roll);
+        let camera = mln_map::CameraOptions {
+            center: camera.center,
+            center_altitude: camera.center_altitude,
+            zoom: camera.zoom,
+            bearing: camera.bearing,
+            pitch: camera.pitch,
+            roll: camera.roll,
+            ..Default::default()
+        };
         let bounds = self.map.lat_lng_bounds_for_camera(&camera).map_err(|e| MapError::Exception(e.to_string()))?;
         Ok(mln_renderer::util::tile_cover::tile_cover_bounds(&bounds, zoom)
             .into_iter()
@@ -166,13 +173,15 @@ impl TestRunnerImpl for Impl {
     }
 
     fn jump_to(&mut self, camera: &CameraOptions) -> Result<(), MapError> {
-        let camera = mln_map::CameraOptions::default()
-            .with_center(camera.center)
-            .with_center_altitude(camera.center_altitude)
-            .with_zoom(camera.zoom)
-            .with_bearing(camera.bearing)
-            .with_pitch(camera.pitch)
-            .with_roll(camera.roll);
+        let camera = mln_map::CameraOptions {
+            center: camera.center,
+            center_altitude: camera.center_altitude,
+            zoom: camera.zoom,
+            bearing: camera.bearing,
+            pitch: camera.pitch,
+            roll: camera.roll,
+            ..Default::default()
+        };
         self.map.jump_to(&camera);
         Ok(())
     }

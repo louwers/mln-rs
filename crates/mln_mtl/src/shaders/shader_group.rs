@@ -78,7 +78,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
             additional_defines.insert(GLOBE_DEFINE.to_owned(), String::new());
         }
 
-        let context = gfx_context.as_any().downcast_ref::<Context>()?;
+        let context = gfx_context.downcast_ref::<Context>()?;
         let shader_source = format!("{PRELUDE}{}{}", source.msl.prelude, source.msl.source);
         let mut shader = context.create_program(
             shader_name.clone(),

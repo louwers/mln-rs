@@ -5,7 +5,6 @@
 // is also read through (`getUBO`, `getBufferUsage`); here every attribute's
 // buffer is a vertex buffer, an instance attribute's too.
 
-use std::any::Any;
 use std::rc::Rc;
 
 use ash::vk;
@@ -35,11 +34,7 @@ struct VertexBuffer {
     resource: Rc<VertexBufferResource>,
 }
 
-impl VertexBufferBase for VertexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl VertexBufferBase for VertexBuffer {}
 
 impl UploadPass {
     #[must_use]
@@ -85,11 +80,8 @@ impl UploadPass {
     pub fn get_buffer(&self, vec: Option<&VertexVectorBasePtr>) -> Option<UniqueVertexBufferResource> {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();
-        let existing = vec
-            .get_buffer()
-            .as_ref()
-            .and_then(|b| b.as_any().downcast_ref::<VertexBuffer>())
-            .map(|b| b.resource.clone());
+        let existing =
+            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| b.resource.clone());
         // If we already have a buffer and it hasn't changed, use it. A
         // freed vector's data is already in the buffer.
         if let Some(resource) = existing
@@ -261,9 +253,5 @@ impl upload_pass::UploadPass for UploadPass {
             vk::BufferUsageFlags::INDEX_BUFFER,
             persistent,
         )))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

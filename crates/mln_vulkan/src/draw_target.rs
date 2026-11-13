@@ -10,13 +10,12 @@ use mln_gfx::frame;
 use mln_util::size::Size;
 
 /// What a Vulkan draw target is made of.
-pub trait TargetResource {
+pub trait TargetResource: Any {
     /// Prepares the resource for a pass.
     fn bind(&self);
     fn get_extent(&self) -> vk::Extent2D;
     fn get_render_pass(&self) -> vk::RenderPass;
     fn get_framebuffer(&self) -> vk::Framebuffer;
-    fn as_any(&self) -> &dyn Any;
 }
 
 /// The `gfx::DrawTarget` of every Vulkan target.
@@ -43,13 +42,9 @@ impl frame::DrawTarget for DrawTarget {
     fn size(&self) -> Size {
         self.size.get()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// `target` as a Vulkan draw target.
 pub fn as_vulkan(target: &dyn frame::DrawTarget) -> Option<&DrawTarget> {
-    target.as_any().downcast_ref::<DrawTarget>()
+    target.downcast_ref::<DrawTarget>()
 }
