@@ -752,6 +752,44 @@ mod globe {
         });
         result.iter().map(|tile| tile.id).collect()
     }
+
+    pub(super) fn level_cover(
+        state: &TileCoverParameters,
+        z: u8,
+        zoom_range: Range<u8>,
+        overscaled_z: Option<u8>,
+    ) -> Vec<OverscaledTileID> {
+        let center = Projection::project(
+            &state.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped),
+            1.0 / constants::TILE_SIZE_D,
+        );
+        let center_world = center.x.floor();
+        let first_copy_center_x = center.x - center_world;
+        let overscaled_zoom =
+            if z == zoom_range.max { std::cmp::max(overscaled_z.unwrap_or(z), zoom_range.max) } else { z };
+        let tiles_per_side = 1u32 << z;
+        let mut result = Vec::with_capacity((tiles_per_side * tiles_per_side) as usize);
+        for y in 0..tiles_per_side {
+            for x in 0..tiles_per_side {
+                let wrap =
+                    (f64::from(wrap_for(first_copy_center_x, &CanonicalTileID::new(z, x, y))) + center_world) as i16;
+                result.push(OverscaledTileID::with_zxy(overscaled_zoom, wrap, z, x, y));
+            }
+        }
+        result
+    }
+}
+
+/// Every tile of zoom `z`, the ones behind the planet too, under the ids the
+/// globe's [`tile_cover`] gives the visible ones: the same wraps, and the same
+/// overscaled zoom for `zoom_range` and `overscaled_z`.
+pub fn globe_level_cover(
+    state: &TileCoverParameters,
+    z: u8,
+    zoom_range: Range<u8>,
+    overscaled_z: Option<u8>,
+) -> Vec<OverscaledTileID> {
+    globe::level_cover(state, z, zoom_range, overscaled_z)
 }
 
 pub fn tile_cover(

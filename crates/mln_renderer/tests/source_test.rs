@@ -11,7 +11,9 @@ use mln_map_types::{
 };
 use mln_renderer::render_source::{self as render_source, RenderSource, RenderSourceObserver};
 use mln_renderer::sources::render_geojson_source::RenderGeoJSONSource;
+use mln_renderer::sources::render_vector_source::RenderVectorSource;
 use mln_renderer::tile_parameters::TileParameters;
+use mln_renderer::tile_pyramid::TilePyramid;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
@@ -33,13 +35,14 @@ use mln_style::sources::custom_vector_source::{
 };
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data};
 use mln_style::sources::geojson_source_impl;
-use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
-use mln_style_types::SourceType;
+use mln_style::sources::tile_source::{self, RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
+use mln_style_types::{ProjectionDefinition, SourceType};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
+use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{Tileset, VectorEncoding};
@@ -1071,4 +1074,207 @@ fn raster_dem_tile_rounds_covering_zoom() {
     for &z in requested_zooms.borrow().iter() {
         assert_eq!(5, z);
     }
+}
+
+/// A vector source drawn with the camera of a map, whose tile requests are
+/// answered only when the test says so.
+struct TurningSource {
+    test: SourceTest,
+    file_source: Arc<StubFileSource>,
+    requests: Rc<RefCell<usize>>,
+    source: Box<dyn Source>,
+    render_source: RenderVectorSource,
+    layers: Vec<Arc<dyn LayerProperties>>,
+    prefetch_zoom_delta: u8,
+}
+
+impl TurningSource {
+    fn new(projection: &str, size: Size, min_zoom: u8) -> Self {
+        let mut test = SourceTest::new();
+        test.transform.resize(size).unwrap();
+        test.transform.set_projection_definition(&ProjectionDefinition::from_name(projection));
+        let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
+        let requests = Rc::new(RefCell::new(0));
+        {
+            let requests = requests.clone();
+            file_source.set_response(Kind::Tile, move |_| {
+                *requests.borrow_mut() += 1;
+                let mut response = Response::new();
+                response.no_content = true;
+                Some(response)
+            });
+        }
+        let source = Tiled::Vector.source(UrlOrTileset::Tileset(Tileset {
+            tiles: vec!["tiles".to_owned()],
+            zoom_range: Range::new(min_zoom, 14),
+            ..Default::default()
+        }));
+        source.load_description(&*file_source);
+        let render_source = RenderVectorSource::new(source::downcast_arc::<tile_source::Impl>(&source.base_impl()));
+        TurningSource {
+            test,
+            file_source,
+            requests,
+            source,
+            render_source,
+            layers: Tiled::Vector.layers(),
+            prefetch_zoom_delta: 0,
+        }
+    }
+
+    fn pyramid(&self) -> &TilePyramid {
+        &self.render_source.tile_source().tile_pyramid
+    }
+
+    /// Moves the camera and updates the source, as a frame would.
+    fn update(&mut self, longitude: f64, zoom: f64) {
+        self.test.transform.jump_to(&CameraOptions {
+            center: Some(LatLng::new(0.0, longitude).unwrap()),
+            zoom: Some(zoom),
+            ..Default::default()
+        });
+        let file_source: Arc<dyn FileSource> = self.file_source.clone();
+        let mut parameters = self.test.tile_parameters_with(MapMode::Continuous, Some(file_source));
+        parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
+        self.render_source.update(self.source.base_impl(), &self.layers, true, false, &parameters);
+    }
+
+    /// Updates the source at this camera until every tile it asks for has
+    /// loaded.
+    fn load(&mut self, longitude: f64, zoom: f64) {
+        self.update(longitude, zoom);
+        for _ in 0..100 {
+            self.file_source.respond_to_all();
+            while self.test.run_loop.run_once() {}
+            self.test.thread_pool.wait_for_empty();
+            while self.test.run_loop.run_once() {}
+            self.update(longitude, zoom);
+            if self.pyramid().is_loaded() {
+                return;
+            }
+        }
+        panic!("the tiles did not load");
+    }
+
+    /// The pyramid's tiles of zoom `z`.
+    fn tiles_at(&self, z: u8) -> Vec<CanonicalTileID> {
+        self.pyramid().get_tiles().keys().filter(|id| id.canonical.z == z).map(|id| id.canonical).collect()
+    }
+
+    /// The tiles still loading that no rendered tile stands in for.
+    fn bare_tiles(&self) -> Vec<OverscaledTileID> {
+        let rendered: Vec<CanonicalTileID> = self.pyramid().get_rendered_tiles().map(|(id, _)| id.canonical).collect();
+        self.pyramid()
+            .get_tiles()
+            .iter()
+            .filter(|(id, tile)| {
+                !tile.is_renderable()
+                    && !rendered.iter().any(|parent| *parent == id.canonical || id.canonical.is_child_of(parent))
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+}
+
+/// A globe turned to its far side before any tile there has loaded draws the
+/// source's first level in their place.
+fn globe_far_side_falls_back_to_the_base_level(size: Size, min_zoom: u8, zoom: f64) {
+    let mut turning = TurningSource::new("vertical-perspective", size, min_zoom);
+    turning.prefetch_zoom_delta = 4;
+    turning.load(60.0, zoom);
+    assert_eq!(1 << (2 * min_zoom), turning.tiles_at(min_zoom).len(), "the whole first level is loaded");
+    assert!(
+        turning.pyramid().get_rendered_tiles().all(|(id, _)| id.canonical.z > min_zoom),
+        "the loaded view draws none of it"
+    );
+
+    turning.update(240.0, zoom);
+    let loading = turning.pyramid().get_tiles().values().filter(|tile| !tile.is_renderable()).count();
+    assert!(loading > 0, "the far side has tiles to load");
+    assert_eq!(Vec::<OverscaledTileID>::new(), turning.bare_tiles());
+    assert!(turning.pyramid().get_rendered_tiles().any(|(id, _)| id.canonical.z == min_zoom));
+}
+
+#[test]
+fn globe_far_side_falls_back_to_zoom_zero() {
+    globe_far_side_falls_back_to_the_base_level(Size::new(1920, 1080), 0, 5.0);
+}
+
+#[test]
+fn globe_far_side_falls_back_to_zoom_one() {
+    globe_far_side_falls_back_to_the_base_level(Size::new(512, 512), 1, 3.0);
+}
+
+/// The tiles past the antimeridian have another wrap than the zoom-0 tile,
+/// which stands in for them all the same, and is drawn once.
+#[test]
+fn globe_fallback_crosses_the_antimeridian() {
+    let mut turning = TurningSource::new("vertical-perspective", Size::new(512, 512), 0);
+    turning.load(90.0, 2.0);
+    assert!(turning.pyramid().get_rendered_tiles().all(|(id, _)| id.canonical.z == 2));
+
+    turning.update(150.0, 2.0);
+    let wraps = |renderable: bool| -> Vec<i16> {
+        let tiles = turning.pyramid().get_tiles();
+        let mut wraps: Vec<i16> = tiles
+            .iter()
+            .filter(|(id, tile)| id.canonical.z == 2 && tile.is_renderable() == renderable)
+            .map(|(id, _)| id.wrap)
+            .collect();
+        wraps.dedup();
+        wraps
+    };
+    assert_eq!((vec![0], vec![1]), (wraps(true), wraps(false)));
+    assert_eq!(Vec::<OverscaledTileID>::new(), turning.bare_tiles());
+    assert_eq!(1, turning.pyramid().get_rendered_tiles().filter(|(id, _)| id.canonical.z == 0).count());
+}
+
+/// The first level costs a source that starts at zoom 1 the tiles of it that
+/// the view doesn't show, and a Mercator map nothing.
+#[test]
+fn globe_base_level_requests() {
+    let mut globe = TurningSource::new("vertical-perspective", Size::new(512, 512), 1);
+    globe.load(60.0, 3.0);
+    let mut mercator = TurningSource::new("mercator", Size::new(512, 512), 1);
+    mercator.load(60.0, 3.0);
+    assert_eq!(Vec::<CanonicalTileID>::new(), mercator.tiles_at(1));
+    assert_eq!(4, globe.tiles_at(1).len());
+    let view = globe.pyramid().get_tiles().len() - 4;
+    assert_eq!(view + 4, *globe.requests.borrow());
+}
+
+#[test]
+fn globe_base_level_is_released() {
+    let mut turning = TurningSource::new("vertical-perspective", Size::new(512, 512), 1);
+    turning.load(60.0, 3.0);
+    assert_eq!(4, turning.tiles_at(1).len());
+
+    // The planet's radius passes twice the viewport's side between these.
+    turning.update(60.0, 3.6);
+    assert_eq!(4, turning.tiles_at(1).len());
+    turning.update(60.0, 3.7);
+    assert_eq!(Vec::<CanonicalTileID>::new(), turning.tiles_at(1));
+
+    turning.update(60.0, 3.0);
+    assert_eq!(4, turning.tiles_at(1).len());
+    turning.test.transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
+    turning.update(60.0, 3.0);
+    assert_eq!(Vec::<CanonicalTileID>::new(), turning.tiles_at(1));
+}
+
+/// A first level of sixteen tiles is not kept, nor one that the search for a
+/// loaded parent would not reach.
+#[test]
+fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
+    let mut large = TurningSource::new("vertical-perspective", Size::new(512, 512), 2);
+    large.load(60.0, 3.0);
+    assert_eq!(Vec::<CanonicalTileID>::new(), large.tiles_at(2));
+
+    let mut out_of_reach = TurningSource::new("vertical-perspective", Size::new(512, 512), 1);
+    source::set_max_overscale_factor_for_parent_tiles(&*out_of_reach.source, Some(1));
+    out_of_reach.load(60.0, 3.0);
+    assert_eq!(Vec::<CanonicalTileID>::new(), out_of_reach.tiles_at(1));
+    source::set_max_overscale_factor_for_parent_tiles(&*out_of_reach.source, Some(2));
+    out_of_reach.load(60.0, 3.0);
+    assert_eq!(4, out_of_reach.tiles_at(1).len());
 }
