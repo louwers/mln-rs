@@ -59,6 +59,11 @@ mln_gl.workspace = true
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 mln_vulkan.workspace = true
 
+# A style's font faces, shaped in-process. The browser build leaves the
+# shaper to a module of its own (crates/mln_renderer/Cargo.toml).
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+mln_renderer = { workspace = true, features = ["font-face-shaper"] }
+
 # The X11 windows of the window target test.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 winit.workspace = true
