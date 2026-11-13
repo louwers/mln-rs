@@ -23,6 +23,7 @@ use mln_gfx::types::{
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_util::identity::SimpleIdentity;
+use mln_util::logging::{Event, Log};
 use mln_vec_map::VecMap;
 
 use crate::context::Context;
@@ -279,7 +280,7 @@ impl ShaderProgram {
                     source: shader_source(source),
                 })
             });
-            module.map_err(|error| eprintln!("{error}")).ok()
+            module.map_err(|error| Log::error(Event::Render, error.to_string())).ok()
         };
 
         // The shader group already prepends the common prelude and runs the
@@ -287,16 +288,19 @@ impl ShaderProgram {
         if program.has_vertex_entry_point {
             program.vertex_shader_module = create_module("Vertex Shader Module", vertex_source);
             if program.vertex_shader_module.is_none() {
-                eprintln!("Failed to create vertex shader module for {}", program.shader_name);
-                eprintln!("Vertex shader source length: {}", vertex_source.len());
+                Log::error(Event::Render, format!("Failed to create vertex shader module for {}", program.shader_name));
+                Log::error(Event::Render, format!("Vertex shader source length: {}", vertex_source.len()));
             }
         }
 
         if program.has_fragment_entry_point {
             program.fragment_shader_module = create_module("Fragment Shader Module", fragment_source);
             if program.fragment_shader_module.is_none() {
-                eprintln!("Failed to create fragment shader module for {}", program.shader_name);
-                eprintln!("Fragment shader source length: {}", fragment_source.len());
+                Log::error(
+                    Event::Render,
+                    format!("Failed to create fragment shader module for {}", program.shader_name),
+                );
+                Log::error(Event::Render, format!("Fragment shader source length: {}", fragment_source.len()));
             }
         }
 
@@ -616,9 +620,12 @@ impl ShaderProgram {
         let device = self.context.get_backend().device();
         if !self.has_vertex_entry_point || !self.has_fragment_entry_point {
             if !self.logged_missing_entry_point.get() {
-                eprintln!(
-                    "WebGPU: shader '{}' is missing WGSL entry points; skipping pipeline creation",
-                    self.shader_name
+                Log::warning(
+                    Event::Render,
+                    format!(
+                        "WebGPU: shader '{}' is missing WGSL entry points; skipping pipeline creation",
+                        self.shader_name
+                    ),
                 );
                 self.logged_missing_entry_point.set(true);
             }
@@ -627,11 +634,14 @@ impl ShaderProgram {
         let (Some(vertex_module), Some(fragment_module), Some(pipeline_layout)) =
             (self.vertex_shader_module.as_ref(), self.fragment_shader_module.as_ref(), self.pipeline_layout.as_ref())
         else {
-            eprintln!(
-                "createPipeline missing requirement: vertexModule={}, fragmentModule={}, pipelineLayout={}",
-                self.vertex_shader_module.is_some(),
-                self.fragment_shader_module.is_some(),
-                self.pipeline_layout.is_some()
+            Log::error(
+                Event::Render,
+                format!(
+                    "createPipeline missing requirement: vertexModule={}, fragmentModule={}, pipelineLayout={}",
+                    self.vertex_shader_module.is_some(),
+                    self.fragment_shader_module.is_some(),
+                    self.pipeline_layout.is_some()
+                ),
             );
             return None;
         };
@@ -783,7 +793,11 @@ impl ShaderProgram {
                 cache: None,
             })
         });
-        pipeline.map_err(|error| eprintln!("{} pipeline creation failed: {error}", self.shader_name)).ok()
+        pipeline
+            .map_err(|error| {
+                Log::error(Event::Render, format!("{} pipeline creation failed: {error}", self.shader_name))
+            })
+            .ok()
     }
 }
 

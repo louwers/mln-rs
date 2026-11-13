@@ -1,3 +1,5 @@
+use mln_util::logging::{Event, Log};
+
 use crate::coalesce::Coalesce;
 use crate::compound_expression::CompoundExpression;
 use crate::expression::{Dependency, Expression, Kind, downcast};
@@ -120,15 +122,15 @@ pub(crate) fn find_zoom_curve(e: &dyn Expression) -> ZoomCurveOrError<'_> {
 }
 
 /// Find a zoom curve in the expression tree: the relevant step or
-/// interpolate item, or null if the expression represents an error.
+/// interpolate item, or null if the expression represents an error, which
+/// is logged.
 pub fn find_zoom_curve_checked(e: &dyn Expression) -> ZoomCurvePtr<'_> {
     if !e.has(Dependency::ZOOM) {
         return ZoomCurvePtr::Null;
     }
     match find_zoom_curve(e).expect("zoom-dependent expression without a zoom curve") {
         ZoomCurve::Error(err) => {
-            // C++ also logs "Invalid Expression: <message>" here.
-            let _ = err;
+            Log::error(Event::Style, format!("Invalid Expression: {}", err.message));
             ZoomCurvePtr::Null
         }
         ZoomCurve::Interpolate(i) => ZoomCurvePtr::Interpolate(i),

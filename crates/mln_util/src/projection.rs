@@ -3,13 +3,11 @@ use std::f64::consts::PI;
 use geometry::Point;
 use mln_math::{clamp_f64, deg2rad, rad2deg};
 
-use crate::constants::{DEGREES_MAX, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, MIN_ZOOM};
+use crate::constants::{
+    DEGREES_MAX, EARTH_RADIUS_M, LATITUDE_MAX, LONGITUDE_MAX, M2PI, MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D,
+};
 use crate::error::Error;
 use crate::geo::{LatLng, WrapMode};
-
-const TILE_SIZE_D: f64 = 512.0;
-const M2PI: f64 = PI * 2.0;
-const EARTH_RADIUS_M: f64 = 6_378_137.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectedMeters {

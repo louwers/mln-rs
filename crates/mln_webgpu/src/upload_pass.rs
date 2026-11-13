@@ -9,6 +9,7 @@ use mln_gfx::upload_pass;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_gfx::vertex_buffer::{self, UniqueVertexBufferResource};
 use mln_gfx::vertex_vector::{VertexBufferBase, VertexVectorBasePtr};
+use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::buffer_resource::BufferResource;
@@ -37,7 +38,7 @@ impl UploadPass {
     fn create_vertex_buffer(&self, data: &[u8]) -> Rc<VertexBufferResource> {
         let buffer = BufferResource::new(Rc::clone(&self.context), Some(data), data.len(), wgpu::BufferUsages::VERTEX);
         if buffer.get_buffer().is_none() {
-            eprintln!("  Failed to create vertex buffer!");
+            Log::error(Event::Render, "  Failed to create vertex buffer!");
         }
         Rc::new(VertexBufferResource::new(buffer))
     }
@@ -240,7 +241,7 @@ impl upload_pass::UploadPass for UploadPass {
                 return;
             }
 
-            eprintln!("Failed to create buffer for attribute");
+            Log::error(Event::Render, "Failed to create buffer for attribute");
             debug_assert!(false);
         };
 

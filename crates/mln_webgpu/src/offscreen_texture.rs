@@ -19,6 +19,7 @@ use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
@@ -193,7 +194,7 @@ impl OffscreenTextureResource {
         if self.copied_at.take() != Some(self.context.submissions()) {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
             if !self.encode_copy(device, &mut encoder) {
-                eprintln!("WebGPU: Color texture is null");
+                Log::error(Event::Render, "WebGPU: Color texture is null");
                 return PremultipliedImage::from_vec(size, data);
             }
             queue.submit([encoder.finish()]);
@@ -219,7 +220,7 @@ impl OffscreenTextureResource {
             waited = wait();
         }
         if let Err(e) = waited {
-            eprintln!("WebGPU: Buffer mapping wait failed: {e}");
+            Log::error(Event::Render, format!("WebGPU: Buffer mapping wait failed: {e}"));
         }
         match rx.try_recv() {
             Ok(Ok(())) => match staging_buffer.get_mapped_range(..) {
@@ -235,10 +236,10 @@ impl OffscreenTextureResource {
                         }
                     }
                 }
-                Err(e) => eprintln!("WebGPU: Failed to get mapped range: {e}"),
+                Err(e) => Log::error(Event::Render, format!("WebGPU: Failed to get mapped range: {e}")),
             },
-            Ok(Err(e)) => eprintln!("WebGPU: Buffer mapping failed with status: {e}"),
-            Err(_) => eprintln!("WebGPU: Buffer mapping timeout after polling"),
+            Ok(Err(e)) => Log::error(Event::Render, format!("WebGPU: Buffer mapping failed with status: {e}")),
+            Err(_) => Log::error(Event::Render, "WebGPU: Buffer mapping timeout after polling"),
         }
         staging_buffer.unmap();
         PremultipliedImage::from_vec(size, data)

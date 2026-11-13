@@ -5,6 +5,7 @@ use mln_gfx::renderer::layer_group::{self, LayerGroupBaseData};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
+use mln_util::logging::{Event, Log};
 
 use crate::drawable::Drawable;
 use crate::upload_pass::UploadPass;
@@ -127,7 +128,10 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
             draw_count += 1;
 
             if drawable.get_shader().is_none() {
-                eprintln!("Drawable {} in {name} missing shader; skipping", drawable.get_name());
+                Log::warning(
+                    Event::Render,
+                    format!("Drawable {} in {name} missing shader; skipping", drawable.get_name()),
+                );
                 return;
             }
 
@@ -182,7 +186,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
 
         let final_draw_calls = parameters.context().rendering_stats().num_draw_calls;
         if draw_count > 0 && final_draw_calls == initial_draw_calls {
-            eprintln!("{name} visited {visit_count} drawables but produced no draw calls!");
+            Log::warning(Event::Render, format!("{name} visited {visit_count} drawables but produced no draw calls!"));
         }
     }
 

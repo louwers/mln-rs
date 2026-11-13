@@ -299,9 +299,7 @@ pub(crate) fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, SqliteE
     Ok(match row.get_ref(offset)? {
         ValueRef::Null => Vec::new(),
         ValueRef::Integer(i) => i.to_string().into_bytes(),
-        // SQLite formats reals with "%!.15g"; this uses Rust's shortest
-        // round-trip formatting.
-        ValueRef::Real(r) => format!("{r}").into_bytes(),
+        ValueRef::Real(r) => real_to_text(r).into_bytes(),
         ValueRef::Text(t) | ValueRef::Blob(t) => t.to_vec(),
     })
 }
@@ -321,6 +319,70 @@ pub(crate) fn get_optional_string(row: &Row<'_>, offset: usize) -> Result<Option
         Ok(s) => s,
         Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
     }))
+}
+
+/// SQLite's REAL to TEXT conversion as of 3.45, the version MapLibre Native
+/// vendors: `printf("%!.15g")`. The value is rounded half up to 15
+/// significant digits and keeps at least one digit after the point, in
+/// exponent form when its decimal exponent is below -4 or above 14
+/// ("1.0", "0.0001", "1.0e-05", "1.0e+15"). SQLite rounds an approximation
+/// of the value's digits, so a value within a few units in the 19th
+/// significant digit of a rounding tie can round the other way there.
+pub(crate) fn real_to_text(r: f64) -> String {
+    if r.is_nan() {
+        return "NaN".to_owned();
+    }
+    if r.is_infinite() {
+        return if r < 0.0 { "-Inf" } else { "Inf" }.to_owned();
+    }
+    if r == 0.0 {
+        return "0.0".to_owned();
+    }
+    let sign = if r < 0.0 { "-" } else { "" };
+
+    // Every significant digit of the value: an f64 has at most 767.
+    let exact = format!("{:.766e}", r.abs());
+    let (mantissa, exponent) = exact.split_once('e').expect("exponent form");
+    let mut exponent: i32 = exponent.parse().expect("decimal exponent");
+    let mut digits: Vec<u8> = mantissa.bytes().filter(u8::is_ascii_digit).collect();
+
+    let round_up = digits[15] >= b'5';
+    digits.truncate(15);
+    if round_up {
+        match digits.iter().rposition(|&d| d != b'9') {
+            Some(i) => {
+                digits[i] += 1;
+                digits.truncate(i + 1);
+            }
+            None => {
+                digits = vec![b'1'];
+                exponent += 1;
+            }
+        }
+    }
+    while digits.len() > 1 && digits.last() == Some(&b'0') {
+        digits.pop();
+    }
+    let digits = String::from_utf8(digits).expect("ASCII digits");
+
+    if (-4..=14).contains(&exponent) {
+        let (int_part, frac_part) = if exponent >= 0 {
+            let int_len = exponent as usize + 1;
+            if digits.len() > int_len {
+                (digits[..int_len].to_owned(), digits[int_len..].to_owned())
+            } else {
+                (format!("{digits:0<int_len$}"), String::new())
+            }
+        } else {
+            ("0".to_owned(), format!("{}{digits}", "0".repeat((-exponent - 1) as usize)))
+        };
+        let frac_part = if frac_part.is_empty() { "0" } else { &frac_part };
+        format!("{sign}{int_part}.{frac_part}")
+    } else {
+        let frac_part = if digits.len() > 1 { &digits[1..] } else { "0" };
+        let exponent_sign = if exponent < 0 { '-' } else { '+' };
+        format!("{sign}{}.{frac_part}e{exponent_sign}{:02}", &digits[..1], exponent.unsigned_abs())
+    }
 }
 
 /// SQLite's REAL to INTEGER conversion (`sqlite3RealToI64`: saturating).

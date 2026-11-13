@@ -21,6 +21,7 @@ use mln_gfx::upload_pass::UploadPass as _;
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::IndexBuffer as GfxIndexBuffer;
+use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::bind_groups::{BindGroupKey, EntryResource, SharedBindGroup};
@@ -234,7 +235,10 @@ impl Drawable {
 
     pub(crate) fn upload(&mut self, upload_pass: &UploadPass) {
         let Some(shader) = self.base.shader.clone() else {
-            eprintln!("Missing shader for drawable {}/{}", self.base.unique_id, self.base.name);
+            Log::warning(
+                Event::General,
+                format!("Missing shader for drawable {}/{}", self.base.unique_id, self.base.name),
+            );
             debug_assert!(false);
             return;
         };
@@ -322,7 +326,7 @@ impl Drawable {
                 && let Some(webgpu_ub) = ub.downcast_ref::<UniformBuffer>()
                 && webgpu_ub.get_buffer().is_none()
             {
-                eprintln!("Uniform buffer {i} has no GPU buffer!");
+                Log::error(Event::Render, format!("Uniform buffer {i} has no GPU buffer!"));
             }
         }
 
@@ -371,9 +375,12 @@ impl Drawable {
 
         for (slot, &group) in shader.get_bind_group_order().iter().enumerate() {
             let Some(layout) = shader.get_bind_group_layout(group) else {
-                eprintln!(
-                    "WebGPU: missing bind group layout for group {group} in shader '{}'",
-                    shader.get_shader_name()
+                Log::warning(
+                    Event::Render,
+                    format!(
+                        "WebGPU: missing bind group layout for group {group} in shader '{}'",
+                        shader.get_shader_name()
+                    ),
                 );
                 return false;
             };
@@ -396,9 +403,12 @@ impl Drawable {
                         }
                         let Some(buffer) = buffer else {
                             if draw_call_count <= 200 {
-                                eprintln!(
-                                    "No buffer found for binding {} type={} group={group}",
-                                    binding_info.binding, binding_info.type_ as i32
+                                Log::warning(
+                                    Event::Render,
+                                    format!(
+                                        "No buffer found for binding {} type={} group={group}",
+                                        binding_info.binding, binding_info.type_ as i32
+                                    ),
                                 );
                             }
                             valid_bindings = false;
@@ -409,9 +419,12 @@ impl Drawable {
                             .and_then(|b| Some((b.get_buffer()?.clone(), b.get_offset(), b.get_aligned_size())));
                         let Some((gpu_buffer, offset, size)) = gpu_buffer else {
                             if draw_call_count <= 200 {
-                                eprintln!(
-                                    "Uniform buffer missing GPU handle for binding {} group={group}",
-                                    binding_info.binding
+                                Log::warning(
+                                    Event::Render,
+                                    format!(
+                                        "Uniform buffer missing GPU handle for binding {} group={group}",
+                                        binding_info.binding
+                                    ),
                                 );
                             }
                             valid_bindings = false;
@@ -465,7 +478,10 @@ impl Drawable {
             }
 
             if !valid_bindings || resources.is_empty() {
-                eprintln!("WebGPU: invalid bindings for drawable '{}' (group={group}, slot={slot})", self.base.name);
+                Log::warning(
+                    Event::Render,
+                    format!("WebGPU: invalid bindings for drawable '{}' (group={group}, slot={slot})", self.base.name),
+                );
                 return false;
             }
 
@@ -674,18 +690,21 @@ impl drawable::Drawable for Drawable {
             return;
         };
         let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) else {
-            eprintln!("No render pass encoder available");
+            Log::error(Event::Render, "No render pass encoder available");
             debug_assert!(false);
             return;
         };
         if !render_pass.has_encoder() {
-            eprintln!("No render pass encoder available");
+            Log::error(Event::Render, "No render pass encoder available");
             debug_assert!(false);
             return;
         }
 
         let Some(shader_ptr) = self.base.shader.clone() else {
-            eprintln!("Missing shader for drawable {}/{}", self.base.unique_id, self.base.name);
+            Log::warning(
+                Event::General,
+                format!("Missing shader for drawable {}/{}", self.base.unique_id, self.base.name),
+            );
             debug_assert!(false);
             return;
         };
@@ -751,9 +770,12 @@ impl drawable::Drawable for Drawable {
             accumulate_bindings(&self.impl_.instance_bindings, wgpu::VertexStepMode::Instance, &mut unique_bindings);
 
             if unique_bindings.len() > MAX_VERTEX_BUFFER_SLOTS {
-                eprintln!(
-                    "WebGPU: reducing vertex buffer bindings from {} to {MAX_VERTEX_BUFFER_SLOTS}",
-                    unique_bindings.len()
+                Log::warning(
+                    Event::Render,
+                    format!(
+                        "WebGPU: reducing vertex buffer bindings from {} to {MAX_VERTEX_BUFFER_SLOTS}",
+                        unique_bindings.len()
+                    ),
                 );
                 unique_bindings.truncate(MAX_VERTEX_BUFFER_SLOTS);
             }
@@ -791,10 +813,13 @@ impl drawable::Drawable for Drawable {
                 cull_mode,
             );
             if self.impl_.pipeline_state.is_none() {
-                eprintln!(
-                    "WebGPU: skipping pipeline creation for drawable '{}' (shader='{}')",
-                    self.base.name,
-                    mln_gfx::shader::Shader::type_name(shader)
+                Log::warning(
+                    Event::Render,
+                    format!(
+                        "WebGPU: skipping pipeline creation for drawable '{}' (shader='{}')",
+                        self.base.name,
+                        mln_gfx::shader::Shader::type_name(shader)
+                    ),
                 );
             }
         }
@@ -810,11 +835,14 @@ impl drawable::Drawable for Drawable {
         };
 
         let Some(mut encoder) = render_pass.state_filter() else {
-            eprintln!("renderPassEncoder is null!");
+            Log::error(Event::Render, "renderPassEncoder is null!");
             return;
         };
         let Some(pipeline) = &self.impl_.pipeline_state else {
-            eprintln!("WebGPU: no pipeline available for drawable '{}'; draw skipped", self.base.name);
+            Log::warning(
+                Event::Render,
+                format!("WebGPU: no pipeline available for drawable '{}'; draw skipped", self.base.name),
+            );
             return;
         };
         encoder.set_pipeline(pipeline);
@@ -856,9 +884,12 @@ impl drawable::Drawable for Drawable {
             let Some(buffer) = buffer_resource.get_buffer() else { continue };
             let buffer_size = buffer_resource.get_size_in_bytes() as u64;
             if binding.base_offset >= buffer_size {
-                eprintln!(
-                    "Skipping vertex buffer slot {buffer_slot} due to base offset {} >= size {buffer_size}",
-                    binding.base_offset
+                Log::warning(
+                    Event::Render,
+                    format!(
+                        "Skipping vertex buffer slot {buffer_slot} due to base offset {} >= size {buffer_size}",
+                        binding.base_offset
+                    ),
                 );
                 continue;
             }
@@ -902,7 +933,10 @@ impl drawable::Drawable for Drawable {
                     let expected_stencil = parameters.stencil_mode_for_clipping(&tile_id.to_unwrapped());
                     if hash_stencil_mode(&expected_stencil) != hash_stencil_mode(&self.impl_.stencil_mode) {
                         debug_assert!(false, "stencil mismatch");
-                        eprintln!("WebGPU drawable stencil mismatch for '{}' tile={tile_id}", self.base.name);
+                        Log::warning(
+                            Event::Render,
+                            format!("WebGPU drawable stencil mismatch for '{}' tile={tile_id}", self.base.name),
+                        );
                     }
                     encoder.set_stencil_reference(expected_stencil.ref_ as u32);
                 }
@@ -976,7 +1010,10 @@ impl drawable::Drawable for Drawable {
                 attrib.set_raw_data(data);
                 attrib.set_stride(VertexAttribute::get_stride_of(data_type));
             } else {
-                eprintln!("Vertex attribute type mismatch: {} / {}", self.base.name, self.impl_.vertex_attr_id);
+                Log::warning(
+                    Event::General,
+                    format!("Vertex attribute type mismatch: {} / {}", self.base.name, self.impl_.vertex_attr_id),
+                );
                 debug_assert!(false);
             }
         }

@@ -16,6 +16,7 @@ use mln_gfx::context::Context as _;
 use mln_gfx::debug_group::DebugGroupTarget;
 use mln_gfx::render_pass::{self, RenderPassDescriptor};
 use mln_gfx::uniform_buffer::UniformBufferArray;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
@@ -69,13 +70,13 @@ impl RenderPass {
 
         let mut encoder_guard = command_encoder.get_encoder();
         let Some(command_encoder) = encoder_guard.as_mut() else {
-            eprintln!("WebGPU: Command encoder unavailable");
+            Log::error(Event::Render, "WebGPU: Command encoder unavailable");
             return pass;
         };
 
         // Access the draw target associated with this pass
         let Some(target) = as_webgpu(descriptor.target) else {
-            eprintln!("WebGPU: The pass's draw target is not a WebGPU one");
+            Log::error(Event::Render, "WebGPU: The pass's draw target is not a WebGPU one");
             return pass;
         };
         pass.renderable_id = std::ptr::from_ref(target) as usize;
@@ -84,7 +85,7 @@ impl RenderPass {
 
         // Resolve the color attachment view.
         let Some(color_view) = renderable_resource.get_color_texture_view() else {
-            eprintln!("WebGPU: Failed to acquire color attachment view");
+            Log::error(Event::Render, "WebGPU: Failed to acquire color attachment view");
             return pass;
         };
         if let Some(color_format) = renderable_resource.get_color_texture_format() {

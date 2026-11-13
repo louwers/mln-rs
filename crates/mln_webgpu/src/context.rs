@@ -34,6 +34,7 @@ use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
+use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;
 
@@ -402,11 +403,11 @@ impl Context {
         }
 
         let Some(shader_ptr) = self.get_globe_clip_mask_shader(shaders) else {
-            eprintln!("WebGPU: Failed to acquire globe clipping mask shader");
+            Log::error(Event::Render, "WebGPU: Failed to acquire globe clipping mask shader");
             return false;
         };
         let Some(shader) = as_webgpu_shader(&shader_ptr) else {
-            eprintln!("WebGPU: Failed to acquire globe clipping mask shader");
+            Log::error(Event::Render, "WebGPU: Failed to acquire globe clipping mask shader");
             return false;
         };
         let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
@@ -458,7 +459,7 @@ impl Context {
             // it overwrites the tile in front
             CullFaceMode::back_ccw(),
         ) else {
-            eprintln!("WebGPU: Failed to create globe clipping mask pipeline");
+            Log::error(Event::Render, "WebGPU: Failed to create globe clipping mask pipeline");
             return false;
         };
 
@@ -533,11 +534,11 @@ impl Context {
             return false;
         }
         let Some(shader_ptr) = self.get_clip_mask_shader(shaders) else {
-            eprintln!("WebGPU: Failed to acquire clipping mask shader");
+            Log::error(Event::Render, "WebGPU: Failed to acquire clipping mask shader");
             return false;
         };
         let Some(shader) = as_webgpu_shader(&shader_ptr) else {
-            eprintln!("WebGPU: Failed to acquire clipping mask shader");
+            Log::error(Event::Render, "WebGPU: Failed to acquire clipping mask shader");
             return false;
         };
         let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
@@ -545,7 +546,7 @@ impl Context {
         };
         let mut encoder_guard = webgpu_render_pass.get_encoder();
         let Some(encoder) = encoder_guard.as_mut() else {
-            eprintln!("WebGPU: render pass encoder unavailable for clipping masks");
+            Log::error(Event::Render, "WebGPU: render pass encoder unavailable for clipping masks");
             return false;
         };
 
@@ -588,7 +589,7 @@ impl Context {
             self.clip_mask_pipeline_hash.get(),
             CullFaceMode::disabled(),
         ) else {
-            eprintln!("WebGPU: Failed to create clipping mask pipeline");
+            Log::error(Event::Render, "WebGPU: Failed to create clipping mask pipeline");
             return false;
         };
 
@@ -597,11 +598,11 @@ impl Context {
         encoder.set_index_buffer(index_buffer.slice(0..index_size), wgpu::IndexFormat::Uint16);
 
         let Some(&bind_group_index) = shader.get_bind_group_order().first() else {
-            eprintln!("WebGPU: No bind group layouts available for clipping mask shader");
+            Log::error(Event::Render, "WebGPU: No bind group layouts available for clipping mask shader");
             return false;
         };
         let Some(layout) = shader.get_bind_group_layout(bind_group_index) else {
-            eprintln!("WebGPU: Bind group layout missing for clipping mask shader");
+            Log::error(Event::Render, "WebGPU: Bind group layout missing for clipping mask shader");
             return false;
         };
         let Some(uniform_binding) = shader
@@ -610,7 +611,7 @@ impl Context {
             .find(|info| info.type_ == BindingType::UniformBuffer)
             .map(|info| info.binding)
         else {
-            eprintln!("WebGPU: Uniform binding not found for clipping mask shader");
+            Log::error(Event::Render, "WebGPU: Uniform binding not found for clipping mask shader");
             return false;
         };
 

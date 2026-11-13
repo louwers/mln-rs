@@ -7,6 +7,7 @@ use mln_gfx::drawable_builder::{self, DrawableBuilderBase};
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_util::logging::{Event, Log};
 
 use crate::drawable::Drawable;
 
@@ -41,7 +42,7 @@ impl drawable_builder::DrawableBuilder for DrawableBuilder {
     fn init(&mut self) {
         let base = &mut self.base;
         let Some(current) = base.current_drawable.as_mut() else {
-            eprintln!("DrawableBuilder::init called with no current drawable");
+            Log::warning(Event::Render, "DrawableBuilder::init called with no current drawable");
             return;
         };
         let Some(drawable) = current.downcast_mut::<Drawable>() else {
@@ -89,7 +90,7 @@ impl drawable_builder::DrawableBuilder for DrawableBuilder {
             let segments = std::mem::take(&mut impl_.segments);
             drawable.set_index_data(Some(indexes), segments);
         } else {
-            eprintln!("  No index data to set!");
+            Log::warning(Event::Render, "  No index data to set!");
         }
 
         // Flush texture bindings so the shared builder doesn't leak the
