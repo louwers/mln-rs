@@ -10,17 +10,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
-use mln_map::{CameraOptions, CameraUpdate, MapMode};
+use mln_map::{CameraOptions, CameraUpdate, MapEvent, MapMode, TileOperation};
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
     LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
-    RenderedQueryOptions, ResourceRequest, Runtime, SourceQueryOptions,
+    RenderedQueryOptions, ResourceRequest, Runtime, RuntimeEvent, RuntimeEventKind, SourceQueryOptions,
 };
+use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
-use mln_util::geo::ScreenCoordinate;
+use mln_util::chrono::Timestamp;
+use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::size::Size;
-use support::{TIMEOUT, eventually, runtime, wait, wait_err};
+use support::{EventLog, TIMEOUT, eventually, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -1065,6 +1067,129 @@ fn a_still_image_that_fails_ends_its_demand() {
     assert_eq!(ErrorKind::Native, wait_err(map.request_still_image()).kind);
     let ended = take_one(&session);
     assert_eq!((None, FrameDisposition::NoUpdate), (ended.token, ended.disposition));
+}
+
+// MARK: - The tile cache
+
+/// One vector source with tiles up to zoom 14.
+const TILE_CACHE_STYLE: &str = r#"{"version":8,"sources":{"tiles":{"type":"vector","tiles":["custom://tiles/{z}/{x}/{y}.pbf"],"minzoom":0,"maxzoom":14}},"layers":[{"id":"lines","type":"line","source":"tiles","source-layer":"any"}]}"#;
+
+/// Serves empty tiles that are fresh for years, so a request for a tile that
+/// the map kept only revalidates it. It counts the other requests, the
+/// loads, and holds them while the test says so.
+#[derive(Clone, Default)]
+struct TileServer {
+    loads: Arc<AtomicUsize>,
+    /// The loads that wait, or `None` while the server answers at once.
+    held: Arc<Mutex<Option<Vec<ResourceRequest>>>>,
+}
+
+impl TileServer {
+    fn answer(request: ResourceRequest, revalidation: bool) {
+        let expires = Some(Timestamp::from_secs(4_102_444_800));
+        let _ = request.respond(Response { expires, not_modified: revalidation, ..empty_tile() });
+    }
+
+    fn serve(&self, request: ResourceRequest) {
+        let revalidation = request.resource().prior_expires.is_some();
+        if request.resource().kind == Kind::Tile && !revalidation {
+            self.loads.fetch_add(1, Ordering::SeqCst);
+            if let Some(held) = self.held.lock().unwrap().as_mut() {
+                return held.push(request);
+            }
+        }
+        TileServer::answer(request, revalidation);
+    }
+
+    fn hold(&self) {
+        *self.held.lock().unwrap() = Some(Vec::new());
+    }
+
+    fn release(&self) {
+        for request in self.held.lock().unwrap().take().unwrap_or_default() {
+            TileServer::answer(request, false);
+        }
+    }
+}
+
+/// Whether `event` reports that the map looked for a tile of zoom 0 in the
+/// cache, as it does once the tiles of a view fall back on their parents all
+/// the way up.
+fn looked_up_zoom_0(event: &RuntimeEvent) -> bool {
+    matches!(
+        &event.kind,
+        RuntimeEventKind::Map(MapEvent::TileAction { op: TileOperation::RequestedFromCache, id, .. })
+            if id.canonical.z == 0
+    )
+}
+
+/// Renders still images of a view, of a view elsewhere, and of the first
+/// view again, and returns how many tiles the first image loads and how many
+/// the last one does. The ambient cache is off, so a tile that the map let
+/// go loads again. The tiles of the first two views load only once the map
+/// has looked for their parents in the cache, up to zoom 0: as with tiles
+/// that take a while to load, the map then holds many tiles that load
+/// nothing.
+fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
+    let runtime = runtime();
+    wait(runtime.set_maximum_ambient_cache_size(0));
+    let server = TileServer::default();
+    let serving = server.clone();
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| serving.serve(request)));
+    let size = Size::new(256, 256);
+    let mut options = MapOptions::new(mln_map::MapOptions::new().with_size(size).with_map_mode(MapMode::Static));
+    if let Some(enabled) = tile_cache_enabled {
+        options = options.with_tile_cache_enabled(enabled);
+    }
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
+    wait(map.set_style_json(TILE_CACHE_STYLE));
+    let (_session, attached) = map.attach(offscreen(size), AttachOptions::default()).unwrap();
+    attached.wait().unwrap();
+    let render_at = |latitude: f64, longitude: f64, fall_back: bool| {
+        let camera = CameraOptions {
+            center: Some(LatLng::new(latitude, longitude).unwrap()),
+            zoom: Some(10.0),
+            ..CameraOptions::default()
+        };
+        wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }));
+        let log = fall_back.then(|| {
+            server.hold();
+            EventLog::install(&runtime)
+        });
+        let still = map.request_still_image().unwrap();
+        if let Some(log) = log {
+            assert!(log.wait_for(looked_up_zoom_0).is_some(), "the tiles never fell back on zoom 0");
+            server.release();
+        }
+        still.wait().unwrap();
+        server.loads.load(Ordering::SeqCst)
+    };
+    let first = render_at(0.0, 0.0, true);
+    let elsewhere = render_at(40.0, 100.0, true);
+    let returning = render_at(0.0, 0.0, false) - elsewhere;
+    (first, returning)
+}
+
+#[test]
+fn a_map_keeps_the_tiles_that_left_the_view_by_default() {
+    let (first, returning) = render_and_return(None);
+    assert!(first > 0);
+    assert_eq!(0, returning);
+}
+
+#[test]
+fn a_map_with_the_tile_cache_enabled_keeps_them() {
+    let (first, returning) = render_and_return(Some(true));
+    assert!(first > 0);
+    assert_eq!(0, returning);
+}
+
+#[test]
+fn a_map_with_the_tile_cache_disabled_loads_them_again() {
+    let (first, returning) = render_and_return(Some(false));
+    assert!(first > 0);
+    assert_eq!(first, returning);
 }
 
 // MARK: - Queries

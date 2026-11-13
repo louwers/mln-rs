@@ -112,6 +112,7 @@ where
                 is_volatile: self.is_volatile,
             });
             tile.set_necessity(necessity);
+            tile.base().retained_necessity.set(necessity);
         }
 
         // A new pixel ratio lays the tile out again, without the relayout
@@ -416,16 +417,21 @@ impl TilePyramid {
             if let Some(tile) = self.tiles.remove(&key) {
                 if relayout {
                     self.cache.deferred_release(tile);
-                } else {
+                } else if tile.is_renderable() {
+                    tile.set_necessity(TileNecessity::Optional);
+                    self.cache.add(key, tile);
+                } else if tile.base().retained_necessity.get() == TileNecessity::Required {
                     // Port-only: a tile still loading keeps its necessity,
                     // so that it goes on loading in the cache (C++ releases
                     // it, and optional, it would stop loading). A view that
                     // turns back and forth needs the tiles at its corners
                     // for moments too short to load them each time.
-                    if tile.is_renderable() {
-                        tile.set_necessity(TileNecessity::Optional);
-                    }
                     self.cache.add(key, tile);
+                } else {
+                    // A fallback that looked only in the cache, and found
+                    // nothing there, loads nothing: kept, it would only push
+                    // the tiles that the view needed out of the cache.
+                    self.cache.deferred_release(tile);
                 }
             }
         }

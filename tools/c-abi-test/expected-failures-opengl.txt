@@ -10,8 +10,6 @@
 # then shrinks this list, keeping the reasons of the cases that stay.
 abi/base/logging.c:a_failed_discarded_command_logs_one_warning  # a failed command without a completion is dropped instead of logged as a warning
 abi/base/logging.c:a_log_callback_cannot_call_back_into_the_c_api  # no discarded-failure warning is logged, so the callback never tries the C API
-abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default  # likely: a still map loads the tiles that come back into view again
-abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them  # likely: a still map loads the tiles that come back into view again
 abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api  # plugins are stubs: mln_plugin_get_register_function_v1 returns NULL
 abi/projection/projection.c:creation_rejects_invalid_views  # mln-rs projects globe views, which the suite expects to be UNSUPPORTED
 abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features  # feature state stays in mln_runtime's store and never reaches the renderer
