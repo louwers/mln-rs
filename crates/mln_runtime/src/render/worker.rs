@@ -121,6 +121,66 @@ pub(crate) struct Init {
     pub(crate) glyph_cache: Arc<GlyphCache>,
     /// Whether the renderer keeps tiles that left the view.
     pub(crate) tile_cache_enabled: bool,
+    /// Why the session's device couldn't be made before the build: in the
+    /// browser, whose WebGPU makes devices asynchronously.
+    pub(crate) failure: Option<Error>,
+}
+
+impl TargetInit {
+    /// In the browser, whether the target renders with WebGPU without the
+    /// host's device: the session asks the browser for one before it builds.
+    #[cfg(target_family = "wasm")]
+    fn needs_web_gpu_device(&self) -> bool {
+        match self {
+            TargetInit::Offscreen(None) => cfg!(feature = "webgpu"),
+            TargetInit::Surface { device: None, surface } => surface.presents_with_web_gpu(),
+            _ => false,
+        }
+    }
+
+    #[cfg(all(target_family = "wasm", feature = "webgpu"))]
+    fn set_device(&mut self, made: Device) {
+        match self {
+            TargetInit::Offscreen(device @ None) | TargetInit::Surface { device: device @ None, .. } => {
+                *device = Some(made);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// In the browser, makes the device that the session's build needs, if
+/// any: the browser's WebGPU makes one asynchronously. The future resolves
+/// once it is in the session's [`Init`], or its failure is.
+#[cfg(target_family = "wasm")]
+pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl std::future::Future<Output = ()> + 'static {
+    let needs_device = shared
+        .state
+        .lock_unpoisoned()
+        .init
+        .as_ref()
+        .and_then(|init| init.downcast_ref::<Init>())
+        .is_some_and(|init| init.target.needs_web_gpu_device());
+    let shared = shared.clone();
+    async move {
+        if !needs_device {
+            return;
+        }
+        #[cfg(feature = "webgpu")]
+        let made = mln_webgpu::Device::request().await.map(Device::WebGpu);
+        #[cfg(not(feature = "webgpu"))]
+        let made: Result<Device, Error> = Err(Error::unsupported("this build has no WebGPU"));
+        let mut state = shared.state.lock_unpoisoned();
+        if let Some(init) = state.init.as_mut().and_then(|init| init.downcast_mut::<Init>()) {
+            match made {
+                #[cfg(feature = "webgpu")]
+                Ok(device) => init.target.set_device(device),
+                #[cfg(not(feature = "webgpu"))]
+                Ok(_) => {}
+                Err(error) => init.failure = Some(error),
+            }
+        }
+    }
 }
 
 /// What a session renders into, before its thread builds it.
@@ -162,7 +222,10 @@ impl Gfx {
     const OBJECTS: u32 = 2;
 
     fn new(init: Init) -> Result<Gfx, Error> {
-        let Init { target, size, scale_factor, glyph_cache, tile_cache_enabled } = init;
+        let Init { target, size, scale_factor, glyph_cache, tile_cache_enabled, failure } = init;
+        if let Some(failure) = failure {
+            return Err(failure);
+        }
         let pixel_ratio = scale_factor as f32;
         let size = physical_size(size, pixel_ratio);
         let target = match target {
@@ -176,6 +239,7 @@ impl Gfx {
         let backend = target.backend();
         let mut renderer = Renderer::with_glyph_cache(backend.clone(), pixel_ratio, None, glyph_cache.clone());
         renderer.set_tile_cache_enabled(tile_cache_enabled);
+        set_tile_worker_transport(&mut renderer);
         Ok(Gfx { renderer, target, backend, glyph_cache })
     }
 
@@ -203,8 +267,20 @@ impl Gfx {
             Renderer::with_glyph_cache(self.backend.clone(), pixel_ratio, None, self.glyph_cache.clone());
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
+        set_tile_worker_transport(&mut renderer);
         self.renderer = renderer;
     }
+}
+
+/// In the browser, puts the renderer's tile workers in the instance's Web
+/// Workers. Elsewhere they stay on the background threads.
+fn set_tile_worker_transport(renderer: &mut Renderer) {
+    #[cfg(target_family = "wasm")]
+    if let Some(transport) = crate::web::tile_worker_transport() {
+        renderer.set_tile_worker_transport(transport);
+    }
+    #[cfg(not(target_family = "wasm"))]
+    let _ = renderer;
 }
 
 /// A host's frame demand on its way, and the last command sent before it.
@@ -331,6 +407,7 @@ pub(crate) struct Worker {
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// How often the session's thread polls the host's reads.
+#[cfg(not(target_family = "wasm"))]
 const SETTLE_POLL: Duration = Duration::from_millis(2);
 
 /// A release or replacement that waits for the host's reads.
@@ -347,6 +424,26 @@ type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
 /// its later turns, until the returned flag stops it. It posts to the
 /// session's loop, so a caller-driven session's host gets a wake for each
 /// poll.
+#[cfg(target_family = "wasm")]
+fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
+    // The browser's one thread polls in the pump's slices instead, which it
+    // asks for meanwhile.
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let deadline = Instant::now() + SETTLE_TIMEOUT * 2;
+    mln_web_host::pump::add(move || {
+        if stopped.load(Ordering::SeqCst) || Instant::now() >= deadline {
+            return false;
+        }
+        post(&run_loop, Worker::poll_settling);
+        mln_web_host::pump::wake();
+        true
+    })
+    .detach();
+    stop
+}
+
+#[cfg(not(target_family = "wasm"))]
 fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = stop.clone();

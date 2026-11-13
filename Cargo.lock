@@ -2369,6 +2369,7 @@ dependencies = [
 name = "mln-rs-c"
 version = "0.0.11"
 dependencies = [
+ "js-sys",
  "libc",
  "mln-rs-conversion",
  "mln-rs-expression",
@@ -2388,6 +2389,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
+ "mln-rs-web-host",
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -2395,6 +2397,7 @@ dependencies = [
  "raw-window-handle",
  "serde_json",
  "thiserror 2.0.21",
+ "wasm-bindgen",
  "windows-sys 0.61.2",
  "winit",
 ]
@@ -2579,6 +2582,7 @@ version = "0.0.11"
 dependencies = [
  "bytemuck",
  "glow",
+ "js-sys",
  "khronos-egl",
  "libc",
  "libloading",
@@ -2778,6 +2782,7 @@ version = "0.0.11"
 dependencies = [
  "glow",
  "httpmock",
+ "js-sys",
  "khronos-egl",
  "libc",
  "mln-rs-actor",
@@ -2799,9 +2804,13 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vulkan",
+ "mln-rs-web-host",
  "mln-rs-webgpu",
  "pollster",
  "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
  "windows",
  "winit",

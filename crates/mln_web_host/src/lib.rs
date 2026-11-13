@@ -2,15 +2,15 @@
 //! examples/web: wasm32-unknown-unknown without atomics, one instance per
 //! Web Worker, each with its own memory and one thread.
 //!
-//! - [`pump`]: the instance's work on its own event loop. Its `RunLoop`s and
+//! - `pump`: the instance's work on its own event loop. Its `RunLoop`s and
 //!   the cooperative scheduler wake it, and it runs them in slices of a few
 //!   milliseconds, each a task of its own, so that input, worker replies
 //!   and animation frames get in between.
-//! - [`tile_workers`]: the map side of tile workers in other Web Workers,
+//! - `tile_workers`: the map side of tile workers in other Web Workers,
 //!   for `mln_renderer`'s `SerializingTransport`, over a `MessagePort` to each.
-//! - [`tile_worker`]: the side of a Web Worker that runs tile workers, one
+//! - `tile_worker`: the side of a Web Worker that runs tile workers, one
 //!   `TileWorkerHost` per port that a map connected.
-//! - [`shaper`]: the font-face shaper as a second module, which the map's
+//! - `shaper`: the font-face shaper as a second module, which the map's
 //!   instance loads the first time a style declares font faces.
 //!
 //! The crate is empty on other targets.
@@ -24,8 +24,7 @@ pub mod tile_workers;
 
 use std::sync::Arc;
 
-use mln_actor::CooperativeScheduler;
-use mln_actor::scheduler;
+use mln_actor::{CooperativeScheduler, scheduler};
 use wasm_bindgen::JsValue;
 
 /// The instance's cooperative scheduler, installed on the first call. An
@@ -40,6 +39,7 @@ pub fn install_cooperative_scheduler() -> Arc<CooperativeScheduler> {
 /// `mlnPanic`, for the JavaScript that runs the instance: wasm32-unknown-unknown
 /// aborts on a panic, which traps the instance, and nothing may call into it
 /// after that.
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = mlnWebSetPanicHook)]
 pub fn set_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let message = JsValue::from_str(&info.to_string());

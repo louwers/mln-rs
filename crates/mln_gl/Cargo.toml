@@ -42,8 +42,9 @@ raw-window-handle.workspace = true
 
 # The canvas backend's context: the browser's WebGL2.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
 wasm-bindgen.workspace = true
-web-sys = { workspace = true, features = ["WebGl2RenderingContext", "WebGlContextAttributes"] }
+web-sys = { workspace = true, features = ["HtmlCanvasElement", "WebGl2RenderingContext", "WebGlContextAttributes"] }
 
 # Compiles and links every GLSL program, in both projection variants, and
 # checks its uniform blocks against the UBOs the renderer writes.

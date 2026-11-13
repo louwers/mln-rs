@@ -72,6 +72,23 @@ pub fn set_loader(loader: js_sys::Function) {
     });
 }
 
+/// Sets how this instance loads the shaper module, unless a loader is set
+/// already: for the package that ships the module beside its own.
+pub fn set_default_loader(loader: js_sys::Function) {
+    MODULE.with(|module| {
+        let mut module = module.borrow_mut();
+        if module.is_none() {
+            *module = Some(Module::NotLoaded { loader });
+        }
+    });
+}
+
+/// [`set_loader`], for the JavaScript that hosts the instance.
+#[wasm_bindgen(js_name = mlnWebSetShaperLoader)]
+pub fn set_loader_js(loader: js_sys::Function) {
+    set_loader(loader);
+}
+
 fn message(error: &JsValue) -> String {
     match error.dyn_ref::<js_sys::Error>() {
         Some(error) => String::from(error.message()),

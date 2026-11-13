@@ -113,3 +113,104 @@ impl Drop for PortInstances {
         }
     }
 }
+
+/// How this instance starts its tile workers' Web Workers.
+#[derive(Default)]
+struct Pool {
+    /// How many to start; by default one fewer than the browser's logical
+    /// processors, from one to four.
+    count: Option<usize>,
+    /// `spawn()` returns a new Web Worker (or what posts to one).
+    spawn: Option<js_sys::Function>,
+    /// The script of the Web Workers that `start` starts without `spawn`.
+    script: Option<String>,
+    /// The Web Workers, once the first map side connected.
+    workers: Option<Vec<JsValue>>,
+}
+
+thread_local! {
+    static POOL: std::cell::RefCell<Pool> = std::cell::RefCell::new(Pool::default());
+}
+
+/// Sets how this instance starts its tile workers' Web Workers, before the
+/// first map side [`connect`]s: `count` of them (by default one fewer than
+/// the browser's logical processors, from one to four), each from
+/// `spawn()`, which returns a Web Worker, or else from the default script
+/// ([`set_default_script`]). Each Web Worker gets a message
+/// `{module, port}` for each map side that connects: `module` the
+/// instance's `WebAssembly.Module`, which it instantiates with the first,
+/// and `port` to serve with `mlnWebServeTileWorker`.
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = mlnWebConfigureTileWorkers)]
+pub fn configure(count: Option<u32>, spawn: Option<js_sys::Function>) {
+    POOL.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        pool.count = count.map(|count| count as usize);
+        pool.spawn = spawn;
+    });
+}
+
+/// Sets the script of the Web Workers that the instance starts when
+/// [`configure`] gave no `spawn`: a module script, at `url`, that serves
+/// each `{module, port}` it gets as `configure` describes. For the package
+/// that ships it beside the module's bindings.
+pub fn set_default_script(url: String) {
+    POOL.with(|pool| pool.borrow_mut().script = Some(url));
+}
+
+fn default_count() -> usize {
+    let navigator = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("navigator")).ok();
+    let processors = navigator
+        .and_then(|navigator| js_sys::Reflect::get(&navigator, &JsValue::from_str("hardwareConcurrency")).ok())
+        .and_then(|count| count.as_f64())
+        .unwrap_or(2.0) as usize;
+    processors.saturating_sub(1).clamp(1, 4)
+}
+
+fn start(pool: &Pool) -> Result<Vec<JsValue>, String> {
+    let count = pool.count.unwrap_or_else(default_count);
+    if count == 0 {
+        return Err("the instance was configured with no tile workers".to_owned());
+    }
+    (0..count)
+        .map(|_| match (&pool.spawn, &pool.script) {
+            (Some(spawn), _) => spawn.call0(&JsValue::NULL).map_err(|error| format!("spawn() threw {error:?}")),
+            (None, Some(script)) => {
+                let options = web_sys::WorkerOptions::new();
+                options.set_type(web_sys::WorkerType::Module);
+                web_sys::Worker::new_with_options(script, &options)
+                    .map(JsValue::from)
+                    .map_err(|error| format!("the tile worker script {script} didn't start: {error:?}"))
+            }
+            (None, None) => Err("no tile worker script: configure a `spawn`".to_owned()),
+        })
+        .collect()
+}
+
+/// Connects a new map side to each of this instance's tile workers' Web
+/// Workers, which start with the first: one port to each, for
+/// [`transport`].
+pub fn connect() -> Result<Vec<web_sys::MessagePort>, String> {
+    POOL.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        if pool.workers.is_none() {
+            pool.workers = Some(start(&pool)?);
+        }
+        let module = wasm_bindgen::module();
+        let post = JsValue::from_str("postMessage");
+        pool.workers
+            .iter()
+            .flatten()
+            .map(|worker| {
+                let channel = web_sys::MessageChannel::new().map_err(|error| format!("{error:?}"))?;
+                let message = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(&message, &JsValue::from_str("module"), &module);
+                let _ = js_sys::Reflect::set(&message, &JsValue::from_str("port"), &channel.port2());
+                let post: js_sys::Function =
+                    js_sys::Reflect::get(worker, &post).map_err(|error| format!("{error:?}"))?.unchecked_into();
+                post.call2(worker, &message, &js_sys::Array::of1(&channel.port2()))
+                    .map_err(|error| format!("posting to a tile worker failed: {error:?}"))?;
+                Ok(channel.port1())
+            })
+            .collect()
+    })
+}

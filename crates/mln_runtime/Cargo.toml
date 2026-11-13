@@ -14,8 +14,10 @@ name = "mln_runtime"
 doctest = false
 
 # The backends that sessions render with, each where its platform has it:
-# Metal on Apple's, Vulkan elsewhere but in the browser, OpenGL ES natively,
-# and WebGPU (wgpu) everywhere.
+# Metal on Apple's, Vulkan elsewhere but in the browser, OpenGL ES natively
+# and the browser's WebGL2, and WebGPU (wgpu, and in the browser the
+# browser's) everywhere. A browser build turns on one of `webgpu` and `gl`,
+# so that it carries one backend and its shaders.
 [features]
 default = ["webgpu", "metal", "vulkan", "gl"]
 webgpu = ["dep:mln_webgpu", "dep:wgpu"]
@@ -33,9 +35,7 @@ mln_gfx.workspace = true
 mln_map.workspace = true
 mln_math.workspace = true
 mln_renderer.workspace = true
-# The cache database and offline regions.
-mln_storage = { workspace = true, features = ["sqlite"] }
-mln_storage_offline.workspace = true
+mln_storage.workspace = true
 mln_style.workspace = true
 mln_style_types.workspace = true
 mln_text.workspace = true
@@ -46,6 +46,24 @@ mln_webgpu = { workspace = true, optional = true }
 serde_json.workspace = true
 # The host's WebGPU devices and surfaces.
 wgpu = { workspace = true, optional = true }
+
+# The cache database and offline regions, which the browser build leaves
+# out: the browser's HTTP cache caches its requests.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+mln_storage = { workspace = true, features = ["sqlite"] }
+mln_storage_offline.workspace = true
+
+# The browser build's instance: its pump, tile workers in Web Workers and
+# canvases.
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+mln_web_host.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = ["HtmlCanvasElement", "OffscreenCanvas", "WebGl2RenderingContext"] }
+# wgpu's objects are Send and Sync on an instance without threads, as the
+# runtime's handles need.
+wgpu = { workspace = true, optional = true, features = ["fragile-send-sync-non-atomic-wasm"] }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 mln_mtl = { workspace = true, optional = true }

@@ -270,6 +270,13 @@ impl RunLoop {
         *self.inner.core.waker.lock_unpoisoned() = waker;
     }
 
+    /// Whether a [`stop`](Self::stop) task ran, for a host that drives the
+    /// loop with `run_once` rather than `run`.
+    #[must_use]
+    pub fn is_stopped(&self) -> bool {
+        self.inner.core.stopped.load(Ordering::SeqCst)
+    }
+
     /// `uv_run(loop, UV_RUN_NOWAIT)`. Returns whether a timer, task or
     /// async handle ran.
     pub fn run_once(&self) -> bool {
@@ -464,6 +471,15 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 1);
         run_loop.run_once();
         assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_loop_run_once_at_a_time_sees_its_stop() {
+        let run_loop = RunLoop::new();
+        run_loop.stop();
+        assert!(!run_loop.is_stopped());
+        run_loop.run_once();
+        assert!(run_loop.is_stopped());
     }
 
     #[test]

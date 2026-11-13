@@ -104,7 +104,9 @@ impl<T: Send + 'static> Completion<T> {
     /// does, so their wait on the runtime's thread would never end either.
     /// Such a wait fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) instead,
-    /// unless the result is already there.
+    /// unless the result is already there, and so does every wait in the
+    /// browser, whose instance has one thread: await the completion there,
+    /// or pass it a callback.
     pub fn wait(self) -> Result<T, Error> {
         let mut state = self.shared.state.lock_unpoisoned();
         loop {
@@ -112,7 +114,9 @@ impl<T: Send + 'static> Completion<T> {
                 State::Ready(result) => return result,
                 pending @ State::Pending { .. } => {
                     *state = pending;
-                    if self.shared.home.is_current() {
+                    // The browser's one thread runs everything that would
+                    // resolve it, after this returns.
+                    if self.shared.home.is_current() || cfg!(target_family = "wasm") {
                         return Err(Error::invalid_state(
                             "a completion can't be waited for on the thread that resolves it",
                         ));

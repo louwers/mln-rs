@@ -16,9 +16,7 @@
 #[cfg(not(target_family = "wasm"))]
 use std::sync::Mutex;
 
-#[cfg(not(target_family = "wasm"))]
 use mln_util::error::Error;
-#[cfg(not(target_family = "wasm"))]
 use mln_util::logging::{Event, Log};
 #[cfg(not(target_family = "wasm"))]
 use mln_util::sync::MutexExt;
@@ -112,6 +110,44 @@ impl Device {
         // C++ sets no uncaptured-error callback, and Dawn logs the error and
         // invalidates the object. wgpu's default handler panics; log instead
         // (Dawn's logUncapturedError).
+        device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
+            Log::error(Event::Render, format!("WebGPU validation error: {error}"));
+        }));
+        Ok(Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None })
+    }
+
+    /// The library's device in the browser, on the browser's WebGPU and its
+    /// high-performance adapter, which arrive asynchronously. Its uncaptured
+    /// errors are logged.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// browser has no WebGPU adapter, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the adapter can't
+    /// create the device.
+    #[cfg(target_family = "wasm")]
+    pub async fn request() -> Result<Device, Error> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| Error::unsupported(format!("No adapter found: {e}")))?;
+        let required_limits = wgpu::Limits::default().or_worse_values_from(&adapter.limits());
+        let required_features = adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("MapLibre WebGPU Device"),
+                required_features,
+                required_limits,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
         device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
             Log::error(Event::Render, format!("WebGPU validation error: {error}"));
         }));

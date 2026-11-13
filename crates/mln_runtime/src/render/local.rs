@@ -4,7 +4,8 @@
 //!
 //! [`RenderTarget`]: super::RenderTarget
 
-// The browser build has no backend for sessions.
+// The browser build has only canvases' backends, and none of the targets
+// that the others make.
 #![cfg_attr(target_family = "wasm", allow(unused_macros, unused_variables, unused_imports))]
 
 use std::rc::Rc;
@@ -192,7 +193,7 @@ macro_rules! presenting {
 
 #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 offscreen!(mln_webgpu::OffscreenTarget);
-#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+#[cfg(feature = "webgpu")]
 presenting!(mln_webgpu::SurfaceTarget);
 #[cfg(all(feature = "metal", target_vendor = "apple"))]
 offscreen!(mln_mtl::OffscreenTarget);
@@ -208,6 +209,8 @@ offscreen!(mln_gl::OffscreenTarget);
 presenting!(mln_gl::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 presenting!(mln_gl::HostSurfaceTarget);
+#[cfg(all(feature = "gl", target_family = "wasm"))]
+presenting!(mln_gl::CanvasTarget);
 
 #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 impl Borrowed for mln_webgpu::BorrowedTarget {
@@ -252,35 +255,36 @@ impl Borrowed for mln_gl::BorrowedTarget {
 /// A backend, by its type.
 #[derive(Clone)]
 enum Backend {
-    #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+    #[cfg(feature = "webgpu")]
     WebGpu(Rc<mln_webgpu::RendererBackend>),
     #[cfg(all(feature = "metal", target_vendor = "apple"))]
     Metal(Rc<mln_mtl::RendererBackend>),
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(Rc<mln_vulkan::RendererBackend>),
-    #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+    #[cfg(feature = "gl")]
     Gl(Rc<mln_gl::RendererBackend>),
 }
 
 impl Backend {
     fn as_dyn(&self) -> Rc<dyn RendererBackend> {
         match *self {
-            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            #[cfg(feature = "webgpu")]
             Backend::WebGpu(ref backend) => backend.clone(),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Backend::Metal(ref backend) => backend.clone(),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Backend::Vulkan(ref backend) => backend.clone(),
-            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            #[cfg(feature = "gl")]
             Backend::Gl(ref backend) => backend.clone(),
         }
     }
 
     /// A backend on `device`, for offscreen targets and the surfaces that
     /// the device's backend makes on it.
+    #[cfg_attr(target_family = "wasm", allow(clippy::unnecessary_wraps))]
     fn new(device: &Device) -> Result<Backend, Error> {
         match *device {
-            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            #[cfg(feature = "webgpu")]
             Device::WebGpu(ref device) => Ok(Backend::WebGpu(Rc::new(mln_webgpu::RendererBackend::new(device)))),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(ref device) => Ok(Backend::Metal(Rc::new(mln_mtl::RendererBackend::new(device)))),
@@ -288,6 +292,10 @@ impl Backend {
             Device::Vulkan(ref device) => Ok(Backend::Vulkan(Rc::new(mln_vulkan::RendererBackend::new(device)?))),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Device::Gl(ref device) => Ok(Backend::Gl(Rc::new(mln_gl::RendererBackend::new(device)?))),
+            #[cfg(all(feature = "gl", target_family = "wasm"))]
+            Device::WebGl(_) => {
+                Err(Error::unsupported("WebGL2 renders only into a canvas, with the canvas's own context"))
+            }
         }
     }
 
@@ -354,9 +362,19 @@ impl Backend {
         }
     }
 
+    /// An offscreen target of `size` pixels on the backend: none in the
+    /// browser, which renders into canvases.
+    #[cfg(target_family = "wasm")]
+    #[expect(clippy::unused_self, reason = "the other builds' targets are of the backend")]
+    fn offscreen(&self, _size: Size) -> Result<Box<dyn Offscreen>, Error> {
+        Err(Error::unsupported("the browser build renders into canvases only"))
+    }
+
     /// An offscreen target of `size` pixels on the backend.
-    fn offscreen(&self, size: Size) -> Box<dyn Offscreen> {
-        match *self {
+    #[cfg(not(target_family = "wasm"))]
+    #[expect(clippy::unnecessary_wraps, reason = "the browser build's fails")]
+    fn offscreen(&self, size: Size) -> Result<Box<dyn Offscreen>, Error> {
+        Ok(match *self {
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             Backend::WebGpu(ref backend) => Box::new(mln_webgpu::OffscreenTarget::new(backend.clone(), size)),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
@@ -365,7 +383,7 @@ impl Backend {
             Backend::Vulkan(ref backend) => Box::new(mln_vulkan::OffscreenTarget::new(backend.clone(), size)),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Backend::Gl(ref backend) => Box::new(mln_gl::OffscreenTarget::new(backend.clone(), size)),
-        }
+        })
     }
 
     /// A target on the backend that presents to `surface`, at `size`
@@ -374,10 +392,21 @@ impl Backend {
     fn surface(&self, surface: Surface, size: Size) -> Result<Box<dyn Presenting>, Error> {
         #[allow(unreachable_patterns)]
         match (self, surface.kind) {
-            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            #[cfg(feature = "webgpu")]
             (Backend::WebGpu(backend), kind) => {
+                #[cfg(target_family = "wasm")]
+                let format = match &kind {
+                    SurfaceKind::WebCanvas { format: Some(format), .. } => Some(match format {
+                        super::target::CanvasFormat::Bgra8Unorm => wgpu::TextureFormat::Bgra8Unorm,
+                        super::target::CanvasFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
+                        super::target::CanvasFormat::Rgba16Float => wgpu::TextureFormat::Rgba16Float,
+                    }),
+                    _ => None,
+                };
+                #[cfg(not(target_family = "wasm"))]
+                let format = None;
                 let target = webgpu_surface(backend, kind)?;
-                let options = mln_webgpu::SurfaceOptions::default();
+                let options = mln_webgpu::SurfaceOptions { format, ..mln_webgpu::SurfaceOptions::default() };
                 Ok(Box::new(mln_webgpu::SurfaceTarget::new(backend.clone(), target, size, options)?))
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
@@ -402,7 +431,7 @@ impl Backend {
 
 /// A wgpu surface of `kind`, made with the instance of `backend`'s device
 /// where the host didn't make it.
-#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+#[cfg(feature = "webgpu")]
 fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> Result<wgpu::Surface<'static>, Error> {
     let instance = || {
         backend
@@ -411,8 +440,19 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
             .ok_or_else(|| Error::invalid_argument("the session's device has no instance to make a surface with"))
     };
     let made = match kind {
+        #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
         SurfaceKind::Wgpu(surface) => return Ok(surface),
         SurfaceKind::Window(window) => instance()?.create_surface(window),
+        #[cfg(target_family = "wasm")]
+        SurfaceKind::WebCanvas { canvas, .. } => {
+            use wasm_bindgen::JsCast as _;
+            let canvas = canvas.take().map(|canvas| (*canvas).clone()).unwrap_or_default();
+            let target = match canvas.dyn_into::<web_sys::OffscreenCanvas>() {
+                Ok(canvas) => wgpu::SurfaceTarget::OffscreenCanvas(canvas),
+                Err(canvas) => wgpu::SurfaceTarget::Canvas(canvas.unchecked_into()),
+            };
+            instance()?.create_surface(target)
+        }
         #[cfg(all(feature = "metal", target_vendor = "apple"))]
         SurfaceKind::MetalLayer(_) => return Err(Error::unsupported("a Metal layer presents on a Metal device")),
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -449,6 +489,25 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
         #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
             let (backend, target) = mln_gl::SurfaceTarget::with_backend(window.clone(), size, true)?;
+            Ok((Backend::Gl(backend), Box::new(target)))
+        }
+        #[cfg(all(feature = "gl", target_family = "wasm"))]
+        (Device::WebGl(context), SurfaceKind::WebCanvas { canvas, .. }) => {
+            use wasm_bindgen::JsCast as _;
+            let canvas = canvas.take().map(|canvas| (*canvas).clone()).unwrap_or_default();
+            // The host's context renders only into its own canvas.
+            if let Some(context) = context.0.as_ref().and_then(|context| context.get()) {
+                let own =
+                    js_sys::Reflect::get(&context, &wasm_bindgen::JsValue::from_str("canvas")).unwrap_or_default();
+                if !js_sys::Object::is(&own, &canvas) {
+                    return Err(Error::invalid_argument("a WebGL device's sessions present to its context's canvas"));
+                }
+            }
+            let canvas = match canvas.dyn_into::<web_sys::OffscreenCanvas>() {
+                Ok(canvas) => mln_gl::WebCanvas::Offscreen(canvas),
+                Err(canvas) => mln_gl::WebCanvas::Element(canvas.unchecked_into()),
+            };
+            let (backend, target) = mln_gl::CanvasTarget::with_backend(canvas, size)?;
             Ok((Backend::Gl(backend), Box::new(target)))
         }
         _ => {
@@ -493,7 +552,7 @@ impl LocalTarget {
             None => Device::new(DeviceOptions::default())?,
         };
         let backend = Backend::new(&device)?;
-        let frames = Frames::Offscreen(backend.offscreen(size));
+        let frames = Frames::Offscreen(backend.offscreen(size)?);
         Ok(LocalTarget { device, backend, frames, window: None })
     }
 
@@ -797,5 +856,10 @@ fn default_surface_device(surface: &Surface) -> Result<Device, Error> {
         SurfaceKind::Vulkan(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         SurfaceKind::Gl(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
+        // A WebGPU build asked the browser for a device before the build.
+        #[cfg(all(target_family = "wasm", feature = "gl"))]
+        SurfaceKind::WebCanvas { .. } => Ok(Device::WebGl(super::target::WebGlContext::default())),
+        #[cfg(all(target_family = "wasm", not(feature = "gl")))]
+        SurfaceKind::WebCanvas { .. } => Err(Error::invalid_state("the browser's WebGPU device isn't there yet")),
     }
 }

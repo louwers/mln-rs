@@ -163,6 +163,7 @@ impl WebMap {
         let options = mln_webgpu::SurfaceOptions {
             cap_frame_rate: true,
             usages: Some(capabilities.usages | wgpu::TextureUsages::COPY_SRC),
+            format: None,
         };
         let device = mln_webgpu::Device::from_wgpu(Some(instance), device, queue, Some(format));
         let webgpu_backend = Rc::new(mln_webgpu::RendererBackend::new(&device));

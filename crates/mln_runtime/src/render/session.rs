@@ -520,6 +520,12 @@ impl SessionShared {
         // A core worker lets go of its graphics objects at its next task,
         // which runs before this returns: the host may destroy what they were
         // made on once it does.
+        // In the browser the session's loop runs on this thread, which runs
+        // that task here instead, unless it is inside the session's work.
+        #[cfg(target_family = "wasm")]
+        let run_now = self.driver == Driver::CoreWorker
+            && !self.in_call.load(Ordering::SeqCst)
+            && !SENDING.with(|sending| sending.borrow().contains(&self.id));
         let torn_down = (self.driver == Driver::CoreWorker && !on_driver).then(|| {
             let (sender, receiver) = std::sync::mpsc::sync_channel::<()>(1);
             worker::post(&self.run_loop, move |_, _| {
@@ -531,6 +537,11 @@ impl SessionShared {
         if let Some(receiver) = torn_down {
             // A worker that ended drops the task, and the sender with it.
             let _ = receiver.recv();
+        }
+        #[cfg(target_family = "wasm")]
+        if run_now {
+            worker::post(&self.run_loop, |_, _| {});
+            crate::web::run_session_now(self.id);
         }
         if kept != 0 {
             let reason = if keep_graphics {
@@ -815,6 +826,7 @@ fn attach_unlocked<R>(
                 scale_factor,
                 glyph_cache: map.glyph_cache(),
                 tile_cache_enabled: map.tile_cache_enabled(),
+                failure: None,
             })),
             resizes_sent: 0,
             graphics_objects: 0,
@@ -880,6 +892,7 @@ fn attach_unlocked<R>(
 
 /// Starts a core worker's thread, which builds the session's renderer, then
 /// runs the session's loop until the session ends.
+#[cfg(not(target_family = "wasm"))]
 fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
     let thread = mln_util::thread::builder("RenderSession")
         .spawn(move || {
@@ -900,6 +913,40 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
     // The thread ends by itself once the session ends, so nothing joins it.
     drop(thread);
     Ok(thread_id)
+}
+
+/// Runs a core worker on this thread, the browser's one, in the instance's
+/// pump: it builds the session's renderer once its device is ready, which
+/// may take the browser's WebGPU a while, then runs the session's loop until
+/// the session ends.
+#[cfg(target_family = "wasm")]
+#[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
+fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
+    let prepared = worker::prepare(&shared);
+    wasm_bindgen_futures::spawn_local(async move {
+        prepared.await;
+        let Some(run_loop) = RunLoop::adopt(&shared.run_loop) else { return };
+        let slot = worker::Slot::default();
+        {
+            let _current = run_loop.enter();
+            let _worker = worker::enter(&slot);
+            worker::build(&shared, &slot);
+        }
+        let id = shared.id;
+        // The worker holds the session from here on.
+        drop(shared);
+        let driven = run_loop.clone();
+        crate::web::drive_session(id, run_loop, move || {
+            let _current = driven.enter();
+            let _worker = worker::enter(&slot);
+            driven.run_once();
+            if driven.is_stopped() {
+                let worker = slot.borrow_mut().take();
+                drop(worker);
+            }
+        });
+    });
+    Ok(std::thread::current().id())
 }
 
 impl RenderSession {

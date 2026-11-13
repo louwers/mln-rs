@@ -44,6 +44,8 @@ thread_local! {
 /// `init`.
 #[wasm_bindgen(js_name = mlnWebServeTileWorker)]
 pub fn serve(port: &web_sys::MessagePort) {
+    // The Web Worker's script reports a panic's message from `mlnPanic`.
+    crate::set_panic_hook();
     let scheduler = crate::install_cooperative_scheduler();
     scheduler.set_waker(Some(pump::waker()));
     pump::set_slice(Duration::from_millis(10));
