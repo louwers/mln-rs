@@ -75,134 +75,6 @@ fn modf_fraction(x: f64) -> f64 {
     (x - x.trunc()).copysign(x)
 }
 
-/// `TransformStateProperties`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct TransformStateProperties {
-    pub x: Option<f64>,
-    pub y: Option<f64>,
-    pub z: Option<f64>,
-    pub fov: Option<f64>,
-    pub scale: Option<f64>,
-    pub bearing: Option<f64>,
-    pub pitch: Option<f64>,
-    pub roll: Option<f64>,
-    pub x_skew: Option<f64>,
-    pub y_skew: Option<f64>,
-    pub axonometric: Option<bool>,
-    pub panning: Option<bool>,
-    pub scaling: Option<bool>,
-    pub rotating: Option<bool>,
-    pub edge_insets: Option<EdgeInsets>,
-    pub size: Option<Size>,
-    pub constrain: Option<ConstrainMode>,
-    pub north_orientation: Option<NorthOrientation>,
-    pub view_port_mode: Option<ViewportMode>,
-    pub frustum_offset: Option<EdgeInsets>,
-}
-
-impl TransformStateProperties {
-    #[must_use]
-    pub fn with_x(mut self, val: Option<f64>) -> Self {
-        self.x = val;
-        self
-    }
-    #[must_use]
-    pub fn with_y(mut self, val: Option<f64>) -> Self {
-        self.y = val;
-        self
-    }
-    #[must_use]
-    pub fn with_z(mut self, val: Option<f64>) -> Self {
-        self.z = val;
-        self
-    }
-    #[must_use]
-    pub fn with_scale(mut self, val: Option<f64>) -> Self {
-        self.scale = val;
-        self
-    }
-    #[must_use]
-    pub fn with_fov(mut self, val: Option<f64>) -> Self {
-        self.fov = val;
-        self
-    }
-    #[must_use]
-    pub fn with_bearing(mut self, val: Option<f64>) -> Self {
-        self.bearing = val;
-        self
-    }
-    #[must_use]
-    pub fn with_pitch(mut self, val: Option<f64>) -> Self {
-        self.pitch = val;
-        self
-    }
-    #[must_use]
-    pub fn with_roll(mut self, val: Option<f64>) -> Self {
-        self.roll = val;
-        self
-    }
-    #[must_use]
-    pub fn with_x_skew(mut self, val: Option<f64>) -> Self {
-        self.x_skew = val;
-        self
-    }
-    #[must_use]
-    pub fn with_y_skew(mut self, val: Option<f64>) -> Self {
-        self.y_skew = val;
-        self
-    }
-    #[must_use]
-    pub fn with_axonometric(mut self, val: Option<bool>) -> Self {
-        self.axonometric = val;
-        self
-    }
-    #[must_use]
-    pub fn with_panning_in_progress(mut self, val: Option<bool>) -> Self {
-        self.panning = val;
-        self
-    }
-    #[must_use]
-    pub fn with_scaling_in_progress(mut self, val: Option<bool>) -> Self {
-        self.scaling = val;
-        self
-    }
-    #[must_use]
-    pub fn with_rotating_in_progress(mut self, val: Option<bool>) -> Self {
-        self.rotating = val;
-        self
-    }
-    #[must_use]
-    pub fn with_edge_insets(mut self, val: Option<EdgeInsets>) -> Self {
-        self.edge_insets = val;
-        self
-    }
-    #[must_use]
-    pub fn with_size(mut self, val: Option<Size>) -> Self {
-        self.size = val;
-        self
-    }
-    #[must_use]
-    pub fn with_constrain_mode(mut self, val: Option<ConstrainMode>) -> Self {
-        self.constrain = val;
-        self
-    }
-    #[must_use]
-    pub fn with_north_orientation(mut self, val: Option<NorthOrientation>) -> Self {
-        self.north_orientation = val;
-        self
-    }
-    #[must_use]
-    pub fn with_viewport_mode(mut self, val: Option<ViewportMode>) -> Self {
-        self.view_port_mode = val;
-        self
-    }
-    #[must_use]
-    pub fn with_frustum_offset(mut self, val: Option<EdgeInsets>) -> Self {
-        self.frustum_offset = val;
-        self
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct TransformState {
     bounds: LatLngBounds,
@@ -319,69 +191,6 @@ impl TransformState {
         }
     }
 
-    pub fn set_properties(&mut self, properties: &TransformStateProperties) {
-        if let Some(x) = properties.x {
-            self.set_x(x);
-        }
-        if let Some(y) = properties.y {
-            self.set_y(y);
-        }
-        if let Some(z) = properties.z {
-            self.set_z(z);
-        }
-        if let Some(scale) = properties.scale {
-            self.set_scale(scale);
-        }
-        if let Some(bearing) = properties.bearing {
-            self.set_bearing(bearing);
-        }
-        if let Some(fov) = properties.fov {
-            self.set_field_of_view(fov);
-        }
-        if let Some(pitch) = properties.pitch {
-            self.set_pitch(pitch);
-        }
-        if let Some(roll) = properties.roll {
-            self.set_roll(roll);
-        }
-        if let Some(x_skew) = properties.x_skew {
-            self.set_x_skew(x_skew);
-        }
-        if let Some(y_skew) = properties.y_skew {
-            self.set_y_skew(y_skew);
-        }
-        if let Some(axonometric) = properties.axonometric {
-            self.set_axonometric(axonometric);
-        }
-        if let Some(panning) = properties.panning {
-            self.set_panning_in_progress(panning);
-        }
-        if let Some(scaling) = properties.scaling {
-            self.set_scaling_in_progress(scaling);
-        }
-        if let Some(rotating) = properties.rotating {
-            self.set_rotating_in_progress(rotating);
-        }
-        if let Some(edge_insets) = properties.edge_insets {
-            self.set_edge_insets(&edge_insets);
-        }
-        if let Some(size) = properties.size {
-            self.set_size(size);
-        }
-        if let Some(constrain) = properties.constrain {
-            self.set_constrain_mode(constrain);
-        }
-        if let Some(north_orientation) = properties.north_orientation {
-            self.set_north_orientation(north_orientation);
-        }
-        if let Some(view_port_mode) = properties.view_port_mode {
-            self.set_viewport_mode(view_port_mode);
-        }
-        if let Some(frustum_offset) = properties.frustum_offset {
-            self.set_frustum_offset(&frustum_offset);
-        }
-    }
-
     // MARK: - Projection
 
     pub fn set_projection_definition(&mut self, definition: &ProjectionDefinition) {
@@ -422,8 +231,11 @@ impl TransformState {
 
     // MARK: - Matrix
 
-    pub fn matrix_for(&self, matrix: &mut Mat4, tile_id: &UnwrappedTileID) {
-        mercator_tile_matrix(matrix, tile_id, self.scale);
+    /// The tile-to-world matrix of a tile at the state's scale.
+    pub fn matrix_for(&self, tile_id: &UnwrappedTileID) -> Mat4 {
+        let mut matrix = [0.0; 16];
+        mercator_tile_matrix(&mut matrix, tile_id, self.scale);
+        matrix
     }
 
     /// The globe while [`is_globe_rendering`](Self::is_globe_rendering),
@@ -483,9 +295,12 @@ impl TransformState {
     }
 
     /// `getProjMatrix(mat4&, uint16_t nearZ = 1, bool aligned = false)`.
-    pub fn get_proj_matrix(&self, proj_matrix: &mut Mat4, near_z: u16, aligned: bool) {
+    /// The projection matrix with its near plane at `near_z`, aligned to the
+    /// pixel grid if `aligned`; zero while the size is empty.
+    pub fn get_proj_matrix(&self, near_z: u16, aligned: bool) -> Mat4 {
+        let mut proj_matrix = [0.0; 16];
         if self.size.is_empty() {
-            return;
+            return proj_matrix;
         }
 
         let offset = self.get_center_offset();
@@ -520,7 +335,7 @@ impl TransformState {
             matrix::rotate_z(&mut camera_to_clip, &a, -self.get_north_orientation_angle());
         }
 
-        matrix::multiply(proj_matrix, &camera_to_clip, &world_to_camera);
+        matrix::multiply(&mut proj_matrix, &camera_to_clip, &world_to_camera);
 
         if self.axonometric {
             // mat[11] controls perspective
@@ -557,15 +372,16 @@ impl TransformState {
             let bearing_sin = self.bearing.sin();
             let dxa = -modf_fraction(dx) + bearing_cos * x_shift + bearing_sin * y_shift;
             let dya = -modf_fraction(dy) + bearing_cos * y_shift + bearing_sin * x_shift;
-            let a = *proj_matrix;
+            let a = proj_matrix;
             matrix::translate(
-                proj_matrix,
+                &mut proj_matrix,
                 &a,
                 if dxa > 0.5 { dxa - 1.0 } else { dxa },
                 if dya > 0.5 { dya - 1.0 } else { dya },
                 0.0,
             );
         }
+        proj_matrix
     }
 
     /// The camera that the state's position and orientation describe, or the
@@ -728,8 +544,7 @@ impl TransformState {
             if self.size.is_empty() {
                 return Matrices::default();
             }
-            let mut projection = [0.0; 16];
-            self.get_proj_matrix(&mut projection, 1, false);
+            let projection = self.get_proj_matrix(1, false);
             let coord = self.coordinate_point_matrix(&projection);
 
             let mut inv_projection = [0.0; 16];
@@ -1036,11 +851,7 @@ impl TransformState {
     }
 
     fn constrained_min_scale(&self) -> f64 {
-        let mut test_scale = self.min_scale;
-        let mut unused_x = self.x;
-        let mut unused_y = self.y;
-        self.constrain(&mut test_scale, &mut unused_x, &mut unused_y);
-        test_scale
+        self.constrain(self.min_scale, self.x, self.y).0
     }
 
     pub fn set_max_zoom(&mut self, max_zoom: f64) {
@@ -1275,25 +1086,25 @@ impl TransformState {
     }
 
     pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        let mut p: Vec4 = [0.0; 4];
-        self.lat_lng_to_screen_coordinate_with(lat_lng, &mut p)
+        self.lat_lng_to_screen_coordinate_with_clip(lat_lng).0
     }
 
-    /// `latLngToScreenCoordinate(const LatLng&, vec4&)`.
-    pub fn lat_lng_to_screen_coordinate_with(&self, lat_lng: &LatLng, p: &mut Vec4) -> ScreenCoordinate {
+    /// The screen point of a location and its clip-space position, whose w
+    /// is negative behind the camera. Both are zero while the size is empty.
+    pub fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, Vec4) {
         if self.size.is_empty() {
-            return ScreenCoordinate::new(0.0, 0.0);
+            return (ScreenCoordinate::new(0.0, 0.0), [0.0; 4]);
         }
 
         if self.is_globe_rendering() {
-            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng, p);
+            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng);
         }
 
         let pt = Projection::project(lat_lng, self.scale);
         let pt = Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D);
         let c: Vec4 = [pt.x, pt.y, 0.0, 1.0];
-        matrix::transform_mat4(p, &c, &self.get_coord_matrix());
-        ScreenCoordinate::new(p[0] / p[3], f64::from(self.size.height) - p[1] / p[3])
+        let p = matrix::transform_mat4_value(&c, &self.get_coord_matrix());
+        (ScreenCoordinate::new(p[0] / p[3], f64::from(self.size.height) - p[1] / p[3]), p)
     }
 
     /// Whether the globe hides a location from the camera; a Mercator map
@@ -1399,38 +1210,33 @@ impl TransformState {
         self.orientation == NorthOrientation::Leftwards || self.orientation == NorthOrientation::Rightwards
     }
 
-    /// `constrainScreen(double& scale_, double& lat, double& lon)`.
-    pub fn constrain_screen(&self, scale: &mut f64, lat: &mut f64, lon: &mut f64) -> bool {
-        if self.constrain_mode == ConstrainMode::Screen {
-            let mut zoom = self.scale_zoom(*scale);
-            let mut options = CameraOptions::default();
-            self.constrain_camera_and_zoom_to_bounds(&mut options, &mut zoom);
-
-            *scale = self.zoom_scale(zoom);
-
-            if let Some(center) = options.center {
-                *lat = center.latitude();
-                *lon = center.longitude();
-
-                return true;
-            }
+    /// In [`ConstrainMode::Screen`], the scale and center that keep the
+    /// lat/lng bounds on the screen at `scale`: the center only if it had to
+    /// move. Other modes return `scale` unchanged and no center.
+    pub fn constrain_screen(&self, scale: f64) -> (f64, Option<LatLng>) {
+        if self.constrain_mode != ConstrainMode::Screen {
+            return (scale, None);
         }
-        false
+        let mut zoom = self.scale_zoom(scale);
+        let mut options = CameraOptions::default();
+        self.constrain_camera_and_zoom_to_bounds(&mut options, &mut zoom);
+        (self.zoom_scale(zoom), options.center)
     }
 
-    /// `constrain(double& scale, double& x, double& y)`.
-    pub fn constrain(&self, scale: &mut f64, x: &mut f64, y: &mut f64) {
+    /// The `(scale, x, y)` nearest the given ones that the constrain mode
+    /// allows.
+    pub fn constrain(&self, mut scale: f64, mut x: f64, mut y: f64) -> (f64, f64, f64) {
         if self.constrain_mode == ConstrainMode::None || self.constrain_mode == ConstrainMode::Screen {
-            return;
+            return (scale, x, y);
         }
 
         // The globe has no off-world area: the center goes past the Mercator
         // range toward a pole as far as the zoom allows.
         if self.is_globe_rendering() {
-            let max_latitude = VerticalPerspectiveProjection::max_latitude(self, self.scale_zoom(*scale));
-            let max_y = Projection::world_size(*scale) / M2PI * mln_math::deg2rad(max_latitude).tan().asinh();
-            *y = mln_math::clamp_f64(*y, -max_y, max_y);
-            return;
+            let max_latitude = VerticalPerspectiveProjection::max_latitude(self, self.scale_zoom(scale));
+            let max_y = Projection::world_size(scale) / M2PI * mln_math::deg2rad(max_latitude).tan().asinh();
+            y = mln_math::clamp_f64(y, -max_y, max_y);
+            return (scale, x, y);
         }
 
         let width = f64::from(self.size.width);
@@ -1440,17 +1246,18 @@ impl TransformState {
         // areas on the Y axis.
         let ratio_y = (if self.rotated_north() { width } else { height }) / TILE_SIZE_D;
         // util::max: fmax
-        *scale = mln_math::fmax(*scale, ratio_y);
+        scale = mln_math::fmax(scale, ratio_y);
 
         // Constrain min/max pan to avoid showing off-world areas on the Y axis.
-        let max_y = (*scale * TILE_SIZE_D - (if self.rotated_north() { width } else { height })) / 2.0;
-        *y = f64::max(-max_y, f64::min(*y, max_y));
+        let max_y = (scale * TILE_SIZE_D - (if self.rotated_north() { width } else { height })) / 2.0;
+        y = f64::max(-max_y, f64::min(y, max_y));
 
         if self.constrain_mode == ConstrainMode::WidthAndHeight {
             // Constrain min/max pan to avoid showing off-world areas on the X axis.
-            let max_x = (*scale * TILE_SIZE_D - (if self.rotated_north() { height } else { width })) / 2.0;
-            *x = f64::max(-max_x, f64::min(*x, max_x));
+            let max_x = (scale * TILE_SIZE_D - (if self.rotated_north() { height } else { width })) / 2.0;
+            x = f64::max(-max_x, f64::min(x, max_x));
         }
+        (scale, x, y)
     }
 
     pub fn constrain_camera_and_zoom_to_bounds(&self, requested_camera: &mut CameraOptions, requested_zoom: &mut f64) {
@@ -1718,13 +1525,7 @@ impl TransformState {
     }
 
     fn set_scale_point(&mut self, new_scale: f64, point: &ScreenCoordinate) {
-        let mut constrained_scale = new_scale;
-        let mut constrained_point = *point;
-        self.constrain(&mut constrained_scale, &mut constrained_point.x, &mut constrained_point.y);
-
-        self.scale = constrained_scale;
-        self.x = constrained_point.x;
-        self.y = constrained_point.y;
+        (self.scale, self.x, self.y) = self.constrain(new_scale, point.x, point.y);
         self.bc = Projection::world_size(self.scale) / constants::DEGREES_MAX;
         self.cc = Projection::world_size(self.scale) / M2PI;
         self.invalidate_matrices();

@@ -1448,8 +1448,7 @@ impl RenderOrchestrator {
             source_ids.insert(layer.base().base_impl.source.clone());
         }
 
-        let mut proj_matrix: mln_util::mat4::Mat4 = [0.0; 16];
-        self.transform_state.get_proj_matrix(&mut proj_matrix, 1, false);
+        let proj_matrix = self.transform_state.get_proj_matrix(1, false);
 
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::new();
         for source_id in &source_ids {

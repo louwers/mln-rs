@@ -34,7 +34,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::Mat4;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::vectors::{Vec3, Vec4};
+use mln_util::vectors::Vec3;
 
 use crate::feature_state::FeatureStateStore;
 use crate::map_event::{CameraChange, MapEvent, RenderFrameStatus, RenderMode};
@@ -1685,8 +1685,7 @@ fn globe_bounds(transform: &crate::transform::Transform) -> Result<LatLngBounds,
     let on_screen = |pole: &LatLng| {
         // In front of the camera and inside its depth range, as GL JS's
         // isSurfacePointOnScreen asks.
-        let mut clip: Vec4 = [0.0; 4];
-        VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.get_state(), pole, &mut clip);
+        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.get_state(), pole);
         if clip[3] <= 0.0 || (clip[2] / clip[3]).abs() >= 1.0 {
             return false;
         }

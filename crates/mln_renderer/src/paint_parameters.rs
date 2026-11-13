@@ -46,18 +46,12 @@ pub struct TransformParameters {
 impl TransformParameters {
     pub fn new(state: &TransformState) -> Self {
         let state = state.clone();
-        // C++ leaves the matrices uninitialized; getProjMatrix fills them
-        // unless the size is empty.
-        let mut proj_matrix: Mat4 = [0.0; 16];
-        let mut aligned_proj_matrix: Mat4 = [0.0; 16];
-        let mut near_clipped_proj_matrix: Mat4 = [0.0; 16];
-
         // Update the default matrices to the current viewport dimensions.
-        state.get_proj_matrix(&mut proj_matrix, 1, false);
+        let proj_matrix = state.get_proj_matrix(1, false);
 
         // Also compute a projection matrix that aligns with the current pixel
         // grid, taking into account odd viewport sizes.
-        state.get_proj_matrix(&mut aligned_proj_matrix, 1, true);
+        let aligned_proj_matrix = state.get_proj_matrix(1, true);
 
         // Calculate a second projection matrix with the near plane moved
         // further, to a tenth of the far value, so as not to waste depth
@@ -65,7 +59,7 @@ impl TransformParameters {
         // (fill-extrusion) that use the depth buffer to emulate real-world
         // space.
         let near_z = (0.1 * f64::from(state.get_camera_to_center_distance())) as u16;
-        state.get_proj_matrix(&mut near_clipped_proj_matrix, near_z, false);
+        let near_clipped_proj_matrix = state.get_proj_matrix(near_z, false);
 
         TransformParameters {
             proj_matrix,

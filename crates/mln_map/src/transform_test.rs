@@ -303,10 +303,9 @@ fn perspective_projection() {
     assert_near(point.x, 1000.0, 1e-5);
     assert_near(point.y, 0.0, 1e-4);
 
-    let mut p: Vec4 = [0.0; 4];
-    let point = transform
+    let (point, p) = transform
         .get_state()
-        .lat_lng_to_screen_coordinate_with(&ll(37.692_872_969_426_375, -76.758_232_392_056_41), &mut p);
+        .lat_lng_to_screen_coordinate_with_clip(&ll(37.692_872_969_426_375, -76.758_232_392_056_41));
     assert_near(point.x, 1000.0, 1e-5);
     assert_near(point.y, 0.0, 1e-4);
     assert!(p[3] > 0.0);
@@ -317,9 +316,9 @@ fn perspective_projection() {
         pitch: Some(51.566_201_56),
         ..Default::default()
     });
-    let _point = transform
+    let (_, p) = transform
         .get_state()
-        .lat_lng_to_screen_coordinate_with(&ll(7.692_872_969_426_375, -76.758_232_392_056_41), &mut p);
+        .lat_lng_to_screen_coordinate_with_clip(&ll(7.692_872_969_426_375, -76.758_232_392_056_41));
     assert!(p[3] < 0.0);
 }
 
@@ -1740,14 +1739,11 @@ fn projection_data_matches_tile_matrix() {
                         let scale = state.get_scale();
 
                         for aligned in [false, true] {
-                            let mut proj_matrix: Mat4 = [0.0; 16];
-                            state.get_proj_matrix(&mut proj_matrix, 1, aligned);
+                            let proj_matrix = state.get_proj_matrix(1, aligned);
 
                             for tile_id in &tile_ids {
                                 let tile_matrix = reference_tile_matrix(scale, tile_id);
-                                let mut actual_tile_matrix: Mat4 = [0.0; 16];
-                                state.matrix_for(&mut actual_tile_matrix, tile_id);
-                                assert_eq!(tile_matrix, actual_tile_matrix);
+                                assert_eq!(tile_matrix, state.matrix_for(tile_id));
 
                                 let mut expected: Mat4 = [0.0; 16];
                                 matrix::multiply(&mut expected, &proj_matrix, &tile_matrix);

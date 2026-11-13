@@ -193,8 +193,7 @@ pub fn get_tile_matrix_for(
     aligned: bool,
 ) -> Mat4 {
     // from RenderTile::prepare
-    let mut tile_matrix: Mat4 = [0.0; 16];
-    transform_state.matrix_for(&mut tile_matrix, tile_id);
+    let mut tile_matrix = transform_state.matrix_for(tile_id);
     if let Some(origin) = origin {
         let a = tile_matrix;
         matrix::translate(&mut tile_matrix, &a, origin.x, origin.y, 0.0);

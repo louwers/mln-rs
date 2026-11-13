@@ -387,15 +387,18 @@ impl VerticalPerspectiveProjection {
         if wrap_mode == WrapMode::Wrapped { lat_lng.wrapped() } else { lat_lng }
     }
 
-    pub fn lat_lng_to_screen_coordinate(state: &TransformState, lat_lng: &LatLng, clip: &mut Vec4) -> ScreenCoordinate {
+    /// The screen point of a location on the globe and its clip-space
+    /// position.
+    pub fn lat_lng_to_screen_coordinate(state: &TransformState, lat_lng: &LatLng) -> (ScreenCoordinate, Vec4) {
         let surface = Self::surface_vector(lat_lng);
         let position: Vec4 = [surface[0], surface[1], surface[2], 1.0];
-        matrix::transform_mat4(clip, &position, &state.get_globe_view_projection_matrix());
+        let clip = matrix::transform_mat4_value(&position, &state.get_globe_view_projection_matrix());
         let size = state.get_size();
-        Point::new(
+        let point = Point::new(
             (clip[0] / clip[3] * 0.5 + 0.5) * f64::from(size.width),
             (clip[1] / clip[3] * 0.5 + 0.5) * f64::from(size.height),
-        )
+        );
+        (point, clip)
     }
 
     /// The center that puts `lat_lng` under `anchor` with the bearing
@@ -711,9 +714,7 @@ impl VerticalPerspectiveProjection {
         // around the pole instead, blended in with a smoothstep and in full
         // from the edge on. GL JS takes the sweep from the screen with y down.
         let pole_latitude = if center.latitude() >= 0.0 { 90.0 } else { -90.0 };
-        let mut clip: Vec4 = [0.0; 4];
-        let pole =
-            Self::lat_lng_to_screen_coordinate(state, &lat_lng(pole_latitude, 0.0, WrapMode::Unwrapped), &mut clip);
+        let (pole, _) = Self::lat_lng_to_screen_coordinate(state, &lat_lng(pole_latitude, 0.0, WrapMode::Unwrapped));
         let rx = point.x - pole.x;
         let ry = pole.y - point.y;
         let ramp = clamp(1.0 - (LATITUDE_MAX - center.latitude().abs()) / DIAL_RAMP_DEGREES, 0.0, 1.0);

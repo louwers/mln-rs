@@ -34,5 +34,5 @@ pub use camera::FreeCameraOptions;
 pub use projection::{ProjectedTilePoint, Projection, ProjectionData};
 pub use tile_coordinate::TileCoordinate;
 pub use tile_projector::TileProjector;
-pub use transform_state::{NorthOrientation, TransformState, TransformStateProperties};
+pub use transform_state::{NorthOrientation, TransformState};
 pub use vertical_perspective_projection::{CenterAndBearing, VerticalPerspectiveProjection};

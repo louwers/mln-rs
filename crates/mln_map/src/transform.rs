@@ -21,8 +21,8 @@ use geometry::Point;
 use mln_map_types::{
     AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
     CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay,
-    MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TransformState,
-    TransformStateProperties, TransitionEnd, TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
+    MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TransformState, TransitionEnd,
+    TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
 };
 use mln_style_types::ProjectionDefinition;
 use mln_util::UnitBezier;
@@ -565,14 +565,8 @@ impl Transform {
 
         self.observer.on_camera_will_change(CameraChange::default());
         self.state.set_size(size);
-        let mut scale = self.state.get_scale();
-        let mut x = self.state.get_x();
-        let mut y = self.state.get_y();
-        let z = self.state.get_z();
-
-        let mut lat = 0.0;
-        let mut lon = 0.0;
-        if self.state.constrain_screen(&mut scale, &mut lat, &mut lon) {
+        let (scale, center) = self.state.constrain_screen(self.state.get_scale());
+        if let Some(center) = center {
             // Turns out that if you resize during a transition any changes
             // made to the state will be ignored :( So if we have to constrain
             // because of a resize and a transition is in progress - cancel
@@ -581,23 +575,15 @@ impl Transform {
                 self.cancel_transitions();
             }
 
-            // It also turns out that state.setProperties isn't enough if you
-            // change the center, you need to set Cc and Bc too, which
-            // setLatLngZoom does.
+            // Setting x and y isn't enough to change the center: Cc and Bc
+            // must change too, which setLatLngZoom does.
             let zoom = self.state.scale_zoom(scale);
-            self.state.set_lat_lng_zoom(&lat_lng(lat, lon), zoom);
+            self.state.set_lat_lng_zoom(&center, zoom);
             self.observer.on_camera_did_change(CameraChange::default());
 
             return Ok(());
         }
-        self.state.constrain(&mut scale, &mut x, &mut y);
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_scale(Some(scale))
-                .with_x(Some(x))
-                .with_y(Some(y))
-                .with_z(Some(z)),
-        );
+        self.constrain_position(scale);
 
         self.observer.on_camera_did_change(CameraChange::default());
         Ok(())
@@ -1484,33 +1470,27 @@ impl Transform {
 
     pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
         self.state.set_north_orientation(orientation);
-        self.constrain_and_set_properties();
+        self.constrain_position(self.state.get_scale());
     }
 
     pub fn get_north_orientation(&self) -> NorthOrientation {
         self.state.get_north_orientation()
     }
 
-    fn constrain_and_set_properties(&mut self) {
-        let mut scale = self.state.get_scale();
-        let mut x = self.state.get_x();
-        let mut y = self.state.get_y();
-        let z = self.state.get_z();
-        self.state.constrain(&mut scale, &mut x, &mut y);
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_scale(Some(scale))
-                .with_x(Some(x))
-                .with_y(Some(y))
-                .with_z(Some(z)),
-        );
+    /// Moves the state to the position nearest its own at `scale` that the
+    /// constrain mode allows.
+    fn constrain_position(&mut self, scale: f64) {
+        let (scale, x, y) = self.state.constrain(scale, self.state.get_x(), self.state.get_y());
+        self.state.set_x(x);
+        self.state.set_y(y);
+        self.state.set_scale(scale);
     }
 
     // MARK: - Constrain mode
 
     pub fn set_constrain_mode(&mut self, mode: ConstrainMode) {
         self.state.set_constrain_mode(mode);
-        self.constrain_and_set_properties();
+        self.constrain_position(self.state.get_scale());
     }
 
     pub fn get_constrain_mode(&self) -> ConstrainMode {
@@ -1530,11 +1510,15 @@ impl Transform {
     // MARK: - Projection mode
 
     pub fn set_projection_mode(&mut self, options: &ProjectionMode) {
-        let properties = TransformStateProperties::default()
-            .with_axonometric(Some(options.axonometric.unwrap_or(self.state.get_axonometric())))
-            .with_x_skew(Some(options.x_skew.unwrap_or(self.state.get_x_skew())))
-            .with_y_skew(Some(options.y_skew.unwrap_or(self.state.get_y_skew())));
-        self.state.set_properties(&properties);
+        if let Some(x_skew) = options.x_skew {
+            self.state.set_x_skew(x_skew);
+        }
+        if let Some(y_skew) = options.y_skew {
+            self.state.set_y_skew(y_skew);
+        }
+        if let Some(axonometric) = options.axonometric {
+            self.state.set_axonometric(axonometric);
+        }
     }
 
     pub fn get_projection_mode(&self) -> ProjectionMode {
@@ -1746,12 +1730,9 @@ impl Transform {
     /// scaling and rotating flags.
     fn update_movement_flags(&mut self) {
         let moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields.get() & t.moving_fields.get()));
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_panning_in_progress(Some(moving & CENTER != 0))
-                .with_scaling_in_progress(Some(moving & ZOOM != 0))
-                .with_rotating_in_progress(Some(moving & BEARING != 0)),
-        );
+        self.state.set_panning_in_progress(moving & CENTER != 0);
+        self.state.set_scaling_in_progress(moving & ZOOM != 0);
+        self.state.set_rotating_in_progress(moving & BEARING != 0);
     }
 
     fn finish_transitions(&mut self, finished: &[Rc<Transition>]) {
