@@ -36,7 +36,7 @@ mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
-mln_runtime = { workspace = true, default-features = false }
+mln_runtime.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
 mln_style_types.workspace = true

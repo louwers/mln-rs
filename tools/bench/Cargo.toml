@@ -31,7 +31,7 @@ mln_image.workspace = true
 mln_map.workspace = true
 mln_renderer.workspace = true
 # The device the headless frontend renders on.
-mln_runtime.workspace = true
+mln_runtime = { workspace = true, features = ["default"] }
 # Its `sqlite` feature (the ambient cache, as on native) comes through
 # render_test: naming it here would stop `mln-bench compare` building this
 # harness over commits from before mln_storage had the feature.

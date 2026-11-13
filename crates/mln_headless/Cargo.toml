@@ -22,7 +22,7 @@ mln_map.workspace = true
 mln_renderer.workspace = true
 # The devices and offscreen targets the frontend renders on, of every
 # backend.
-mln_runtime.workspace = true
+mln_runtime = { workspace = true, features = ["default"] }
 mln_style.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true

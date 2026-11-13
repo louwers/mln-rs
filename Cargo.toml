@@ -58,7 +58,9 @@ mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.11"
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
 mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.11", default-features = false }
-mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.11" }
+# Without its backends (its default features) unless a package asks for
+# them, so that a browser build of mln_c carries one.
+mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.11", default-features = false }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.11" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
@@ -388,7 +390,7 @@ mln_map_types.workspace = true
 mln_math.workspace = true
 mln_mtl.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
-mln_runtime.workspace = true
+mln_runtime = { workspace = true, features = ["default"] }
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.
 mln_storage = { workspace = true, features = ["sqlite"] }
