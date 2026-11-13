@@ -179,7 +179,7 @@ impl Map {
     /// A map with a `ResourceLoader` of its own for the default
     /// `ResourceOptions`.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size()`.
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
     pub fn new(map_options: MapOptions) -> Result<Map, Error> {
         Self::with_resource_options(map_options, &FileSourceManager::new(), &ResourceOptions::default())
     }
@@ -1172,7 +1172,7 @@ impl Map {
 
     // MARK: - Rendered features
     //
-    // With `MapOptions::with_capture_rendered_features(true)`, these give the
+    // With `MapOptions::capture_rendered_features` on, these give the
     // features rendered in the most recently completed frame.
 
     /// The stats of the most recently completed frame, whose

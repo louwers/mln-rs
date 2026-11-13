@@ -1,5 +1,5 @@
 // Ports test/renderer/feature_tracking.test.cpp: the features a map with
-// `MapOptions::with_capture_rendered_features` reports as rendered in the last
+// `MapOptions::capture_rendered_features` reports as rendered in the last
 // frame, and their bounds in normalized device coordinates.
 
 mod support;
