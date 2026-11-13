@@ -125,9 +125,15 @@ ci-test-msrv:  env-info test-msrv && assert-git-is-clean
 clean:
     cargo clean
 
-# Run cargo clippy to lint the code
+# Run cargo clippy to lint the code. On Linux, also lint the C library with each native backend's feature alone, as
+# maplibre-native-ffi's presets build it: the workspace's build turns them all on.
 clippy *args:
     cargo clippy --workspace --all-targets {{args}}
+    if [ {{quote(os())}} = linux ]; then \
+      for backend in vulkan gl; do \
+        cargo clippy -p mln-rs-c --all-targets --no-default-features --features "$backend" {{args}} || exit 1; \
+      done; \
+    fi
 
 # Measure the Cargo tests' coverage and open the HTML report. Uses `cargo-llvm-cov`
 coverage:  (_coverage '--open')

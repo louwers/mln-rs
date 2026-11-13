@@ -3340,7 +3340,8 @@ pub type mln_gpu_device_option_fields = u32;
 /** Options for mln_gpu_device_create().
 
  Name the GPU by at most one of `adapter_index`, `adapter_uuid`, and
- `adapter_luid`. Without one, the device prefers a discrete GPU.*/
+ `adapter_luid`. Without one, the device prefers a discrete GPU. An OpenGL
+ device takes none of them: it renders on the GPU that the platform picks.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_gpu_device_options {
@@ -3354,12 +3355,11 @@ pub struct mln_gpu_device_options {
     /// The GPU to use, as an index into the backend's list of GPUs.
     pub adapter_index: u32,
     /** The 16-byte UUID of the GPU to use: Vulkan's
- `VkPhysicalDeviceIDProperties.deviceUUID`, or OpenGL's
- `GL_DEVICE_UUID_EXT`.*/
+ `VkPhysicalDeviceIDProperties.deviceUUID`. Only a Vulkan device takes one.*/
     pub adapter_uuid: mln_buffer_view,
     /** The 8-byte LUID of the GPU to use: on Windows, its DXGI adapter LUID,
- which Vulkan reports as `VkPhysicalDeviceIDProperties.deviceLUID`, and on
- Apple platforms, its `MTLDevice.registryID`, in the platform's byte order.*/
+ which Vulkan reports as `VkPhysicalDeviceIDProperties.deviceLUID`. Only a
+ Vulkan device takes one.*/
     pub adapter_luid: mln_buffer_view,
     /** The OpenGL API that an OpenGL device renders with. An EGL device
  defaults to MLN_OPEN_GL_CLIENT_API_GLES, and takes

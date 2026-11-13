@@ -64,7 +64,7 @@ enum Target {
     },
     /// The host's surface, which only a device of the host's instance or
     /// share group presents to. Apple builds have neither kind.
-    #[cfg_attr(any(target_vendor = "apple", target_family = "wasm"), allow(dead_code))]
+    #[cfg_attr(not(backend_vulkan), allow(dead_code))]
     HostSurface {
         size: Size,
         surface: Surface,
@@ -227,7 +227,7 @@ fn vulkan_ring(
         return Err(Error::invalid_argument(format!("{name} needs a depth_format and depth_final_layout")));
     }
     let size = Size::new(target.logical_size.width, target.logical_size.height);
-    #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+    #[cfg(backend_vulkan)]
     {
         use mln_vulkan::ash::vk::{self, Handle as _};
         let borrowed = |textures: &[crate::generated::types::mln_vulkan_borrowed_texture]| {
@@ -257,7 +257,7 @@ fn vulkan_ring(
         };
         Ok(Target::Borrowed { size, ring: BorrowedRing::vulkan(images) })
     }
-    #[cfg(any(target_vendor = "apple", target_family = "wasm"))]
+    #[cfg(not(backend_vulkan))]
     {
         let _ = (owner, size);
         Ok(Target::Unsupported("Vulkan targets are not supported by this build"))
@@ -543,7 +543,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 if surface == 0 {
                     return Err(Error::invalid_argument(format!("{} must not be null", field("surface"))));
                 }
-                #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+                #[cfg(backend_vulkan)]
                 {
                     // SAFETY: the host's surface, which the header's contract
                     // keeps alive; the attach checks that it is of the
@@ -552,12 +552,12 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     let surface = Surface::vulkan(mln_vulkan::HostSurface::from_raw(surface));
                     Target::HostSurface { size, surface }
                 }
-                #[cfg(any(target_vendor = "apple", target_family = "wasm"))]
+                #[cfg(not(backend_vulkan))]
                 Target::Unsupported("Vulkan targets are not supported by this build")
             }
             MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE => {
                 let surface = required(target.data.open_gl_surface.surface, &field("surface"))?;
-                #[cfg(all(unix, not(target_vendor = "apple")))]
+                #[cfg(all(backend_gl, unix))]
                 {
                     // SAFETY: the host's surface, which the header's contract
                     // keeps alive; the attach checks that the device wraps a
@@ -565,7 +565,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     let surface = Surface::gl(mln_gl::HostSurface::from_raw(surface));
                     Target::HostSurface { size, surface }
                 }
-                #[cfg(windows)]
+                #[cfg(all(backend_gl, windows))]
                 {
                     // SAFETY: the host's `HDC`, which the header's contract
                     // keeps alive; the attach checks that the device wraps a
@@ -573,7 +573,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     let surface = Surface::gl(mln_gl::HostSurface::from_hdc(surface));
                     Target::HostSurface { size, surface }
                 }
-                #[cfg(not(any(windows, all(unix, not(target_vendor = "apple")))))]
+                #[cfg(not(backend_gl))]
                 {
                     let _ = surface;
                     Target::Unsupported("OpenGL surfaces of the host's are not supported by this build")
@@ -629,7 +629,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 if ring.target != 0x0DE1 {
                     return Err(Error::invalid_argument(format!("{} must be GL_TEXTURE_2D", field("target"))));
                 }
-                #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
+                #[cfg(backend_gl)]
                 {
                     let textures = mln_gl::BorrowedTextures {
                         textures: textures.iter().map(|texture| texture.texture).collect(),
@@ -638,7 +638,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     };
                     Target::Borrowed { size, ring: BorrowedRing::gl(textures) }
                 }
-                #[cfg(not(any(windows, all(unix, not(target_vendor = "apple")))))]
+                #[cfg(not(backend_gl))]
                 Target::Unsupported("OpenGL textures of the host's are not supported by this build")
             }
             MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES => {
@@ -956,9 +956,9 @@ pub unsafe extern "C" fn mln_logical_extent_physical_size(
 pub extern "C" fn mln_open_gl_supported_context_provider_mask() -> mln_open_gl_context_provider_flags {
     if cfg!(all(target_family = "wasm", feature = "gl", not(feature = "webgpu"))) {
         crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WEB_GL
-    } else if cfg!(windows) {
+    } else if cfg!(all(backend_gl, windows)) {
         crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WGL
-    } else if cfg!(all(unix, not(target_vendor = "apple"))) {
+    } else if cfg!(all(backend_gl, unix)) {
         crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL
     } else {
         0
@@ -1412,9 +1412,9 @@ mod tests {
     fn each_platform_has_one_open_gl_provider() {
         let egl = crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL;
         let wgl = crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WGL;
-        let expected = if cfg!(windows) {
+        let expected = if cfg!(all(backend_gl, windows)) {
             wgl
-        } else if cfg!(all(unix, not(target_vendor = "apple"))) {
+        } else if cfg!(all(backend_gl, unix)) {
             egl
         } else {
             0

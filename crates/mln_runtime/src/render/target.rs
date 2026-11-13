@@ -285,6 +285,7 @@ impl BorrowedRing {
     #[must_use]
     pub fn takes_depth_on(&self, device: &Device) -> bool {
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+        #[allow(irrefutable_let_patterns)]
         if let RingKind::Gl(_) = self.kind {
             return true;
         }

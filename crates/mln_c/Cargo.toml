@@ -26,7 +26,7 @@ doctest = false
 default = ["webgpu", "metal", "vulkan", "gl"]
 webgpu = ["mln_runtime/webgpu"]
 metal = ["mln_runtime/metal"]
-vulkan = ["mln_runtime/vulkan"]
+vulkan = ["mln_runtime/vulkan", "dep:mln_vulkan"]
 gl = ["mln_runtime/gl", "dep:mln_gl"]
 
 [dependencies]
@@ -72,7 +72,7 @@ wasm-bindgen.workspace = true
 
 # The host's Vulkan devices, images and surfaces.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
-mln_vulkan.workspace = true
+mln_vulkan = { workspace = true, optional = true }
 
 # A style's font faces, shaped in-process. The browser build leaves the
 # shaper to a module of its own (crates/mln_renderer/Cargo.toml). The C
