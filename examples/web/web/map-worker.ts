@@ -244,10 +244,12 @@ async function run(
   let attribution = '';
   let styleName = '';
   // The debug overlay: whether the page shows it, and the pointer it asks
-  // about, which `hoverMoved` marks as not yet queried.
+  // about, which `hoverMoved` marks as not yet queried and `hoverStale` as
+  // queried before the map last drew.
   let debug = false;
   let hover: [number, number] | null = null;
   let hoverMoved = false;
+  let hoverStale = false;
   let hoverQueried = 0;
   const report = (force: boolean) => {
     const now = performance.now();
@@ -294,8 +296,10 @@ async function run(
     if (debug) {
       post({ type: 'frame', sample: { interval, phases: Array.from(map.frame_timings()) } });
       const now = performance.now();
-      if (hover && (hoverMoved || (drew && now - hoverQueried >= HOVER_REQUERY_MS))) {
+      hoverStale ||= drew;
+      if (hover && (hoverMoved || (hoverStale && now - hoverQueried >= HOVER_REQUERY_MS))) {
         hoverMoved = false;
+        hoverStale = false;
         hoverQueried = now;
         const features = JSON.parse(map.query_features(hover[0], hover[1], HOVER_RADIUS)) as DebugFeature[];
         post({ type: 'features', point: hover, features });
