@@ -2,7 +2,6 @@
 // src/mln/style/sources/geojson_source_impl.cpp (GeoJSONSource::Impl,
 // GeoJSONVTData, SuperclusterData and GeoJSONData::create).
 
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Weak};
 
 use feature::{Feature, PropertyMap, Value};
@@ -188,55 +187,37 @@ pub(super) fn create(
 }
 
 /// `GeoJSONSource::Impl`.
-#[derive(Debug)]
+/// Cloning it is the C++ copy constructor (`Impl(const Impl&) = default`
+/// via `createMutable`).
+#[derive(Debug, Clone)]
 pub struct Impl {
     base: ImplBase,
     options: Arc<GeoJSONOptions>,
     data: Option<Arc<dyn GeoJSONData>>,
-    /// Replaces `options.synchronous_update` once set: `OVERRIDE_UNSET`,
-    /// `OVERRIDE_OFF` or `OVERRIDE_ON`.
-    override_synchronous_update: AtomicU8,
-}
-
-const OVERRIDE_UNSET: u8 = 0;
-const OVERRIDE_OFF: u8 = 1;
-const OVERRIDE_ON: u8 = 2;
-
-impl Clone for Impl {
-    /// The C++ copy constructor (`Impl(const Impl&) = default` via
-    /// `createMutable`).
-    fn clone(&self) -> Self {
-        Impl {
-            base: self.base.clone(),
-            options: self.options.clone(),
-            data: self.data.clone(),
-            override_synchronous_update: AtomicU8::new(self.override_synchronous_update.load(Ordering::Relaxed)),
-        }
-    }
+    /// `options.synchronous_update` until the source's override replaces it.
+    synchronous_update: bool,
 }
 
 impl Impl {
-    /// `Impl(std::string id, Immutable<GeoJSONOptions>)`.
+    /// `Impl(std::string id, Arc<GeoJSONOptions>)`.
     #[must_use]
     pub fn new(id: String, options: Arc<GeoJSONOptions>) -> Self {
-        Impl {
-            base: ImplBase::new(SourceType::GeoJSON, id),
-            options,
-            data: None,
-            override_synchronous_update: AtomicU8::new(OVERRIDE_UNSET),
-        }
+        let synchronous_update = options.synchronous_update;
+        Impl { base: ImplBase::new(SourceType::GeoJSON, id), options, data: None, synchronous_update }
     }
 
     /// `Impl(const GeoJSONSource::Impl&, std::shared_ptr<GeoJSONData>)`.
+    #[must_use]
     pub fn with_data(other: &Impl, data: Option<Arc<dyn GeoJSONData>>) -> Self {
         Impl {
             base: other.base.clone(),
             options: other.options.clone(),
             data,
-            override_synchronous_update: AtomicU8::new(other.override_synchronous_update.load(Ordering::Relaxed)),
+            synchronous_update: other.synchronous_update,
         }
     }
 
+    #[must_use]
     pub fn get_zoom_range(&self) -> Range<u8> {
         Range::new(self.options.minzoom, self.options.maxzoom)
     }
@@ -246,14 +227,14 @@ impl Impl {
         self.data.as_ref().map(Arc::downgrade)
     }
 
+    #[must_use]
     pub fn get_options(&self) -> &Arc<GeoJSONOptions> {
         &self.options
     }
 
     /// Replaces `options.synchronous_update`, on or off.
-    pub fn set_override_synchronous_update(&self, new_override: bool) {
-        let value = if new_override { OVERRIDE_ON } else { OVERRIDE_OFF };
-        self.override_synchronous_update.store(value, Ordering::Relaxed);
+    pub fn set_update_synchronous(&mut self, value: bool) {
+        self.synchronous_update = value;
     }
 }
 
@@ -271,10 +252,6 @@ impl source_impl::Impl for Impl {
     }
 
     fn is_update_synchronous(&self) -> bool {
-        match self.override_synchronous_update.load(Ordering::Relaxed) {
-            OVERRIDE_OFF => false,
-            OVERRIDE_ON => true,
-            _ => self.options.synchronous_update,
-        }
+        self.synchronous_update
     }
 }

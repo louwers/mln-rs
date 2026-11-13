@@ -182,7 +182,7 @@ impl std::fmt::Debug for GeoJSONSource {
 }
 
 impl GeoJSONSource {
-    /// `GeoJSONSource(std::string id, Immutable<GeoJSONOptions>)`.
+    /// `GeoJSONSource(std::string id, Arc<GeoJSONOptions>)`.
     pub fn new(id: impl Into<String>, options: Arc<GeoJSONOptions>) -> Self {
         let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), options));
         GeoJSONSource {
@@ -277,8 +277,16 @@ impl GeoJSONSource {
         source_impl::Impl::is_update_synchronous(&*self.impl_())
     }
 
+    /// Replaces the `synchronous_update` option, on or off. The renderer
+    /// recreates the source's tiles in the new mode.
     pub fn set_override_synchronous_update(&self, value: bool) {
-        self.impl_().set_override_synchronous_update(value);
+        if self.is_update_synchronous() == value {
+            return;
+        }
+        let mut new_impl = (*self.impl_()).clone();
+        new_impl.set_update_synchronous(value);
+        self.inner.base.set_base_impl(Arc::new(new_impl));
+        self.inner.base.observer().on_source_changed(self);
     }
 }
 
@@ -299,7 +307,7 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
         // Note: This task appears to be safe enough to schedule on the
         // generic background queue. This task does not reference other
         // objects who's lifetimes are coupled with a map.
-        let current_impl = this.inner.base.base_impl();
+        let options = this.impl_().get_options().clone();
         let data = res.data.clone();
         let seq_scheduler = this.inner.sequenced_scheduler.clone();
         let generation = this.inner.request_generation.get() + 1;
@@ -309,13 +317,12 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
             &*this.inner.background,
             SimpleIdentity::EMPTY,
             /* makeImplInBackground */
-            move || -> Arc<dyn source_impl::Impl> {
+            move || -> Option<Arc<dyn GeoJSONData>> {
                 let data = data.expect("response data");
-                let current = downcast_arc::<Impl>(&current_impl);
                 let mut error = Error::default();
                 let mut geojson_data = None;
                 if let Some(geojson) = convert_json_geojson(&data, &mut error) {
-                    match create_geojson_data(&geojson, seq_scheduler, current.get_options()) {
+                    match create_geojson_data(&geojson, seq_scheduler, &options) {
                         Ok(created) => geojson_data = Some(created),
                         // TODO(port): C++ lets the Supercluster exception
                         // escape the background task.
@@ -326,16 +333,21 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
                     // not infinitely waiting for tiles to load.
                     Log::error(Event::ParseStyle, format!("Failed to parse GeoJSON data: {}", error.message));
                 }
-                Arc::new(Impl::with_data(&current, geojson_data))
+                geojson_data
             },
             /* onImplReady */
-            move |new_impl: Arc<dyn source_impl::Impl>| {
+            move |geojson_data: Option<Arc<dyn GeoJSONData>>| {
                 if let Some(inner) = weak.upgrade() {
-                    // If a new request is being processed, ignore this impl.
+                    // If a new request is being processed, ignore this data.
                     if generation == inner.request_generation.get() {
-                        inner.base.set_base_impl(new_impl);
-                        inner.base.set_loaded(true);
                         let this = GeoJSONSource { inner };
+                        // The impl is made here, from the current one, so
+                        // that it keeps what changed during the build, such
+                        // as the synchronous-update override.
+                        let new_impl: Arc<dyn source_impl::Impl> =
+                            Arc::new(Impl::with_data(&this.impl_(), geojson_data));
+                        this.inner.base.set_base_impl(new_impl);
+                        this.inner.base.set_loaded(true);
                         this.inner.base.observer().on_source_loaded(&this);
                     }
                 }

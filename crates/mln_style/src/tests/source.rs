@@ -337,6 +337,48 @@ fn geojson_source_url_replaces_building_url_data() {
     assert_eq!(2, geojson_source_feature_count(&source));
 }
 
+#[test]
+fn geojson_source_synchronous_update_override_publishes_a_new_impl() {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Manual);
+    file_source.set_response(Kind::Source, |_| {
+        let mut response = Response::new();
+        response.data = Some(geojson_points(1));
+        Some(response)
+    });
+    let (observer, loads) = counting_loads();
+    let changes = Rc::new(RefCell::new(0));
+    {
+        let changes = changes.clone();
+        *observer.source_changed.borrow_mut() = Some(Box::new(move |_| *changes.borrow_mut() += 1));
+    }
+
+    let options = GeoJSONOptions { synchronous_update: true, ..Default::default() };
+    let source = GeoJSONSource::new("source", Arc::new(options));
+    source.set_observer(Some(observer.clone()));
+    source.set_url("url");
+    source.load_description(&file_source);
+    // The URL's data arrives and starts building in the background.
+    file_source.respond_to_all();
+
+    let published = source.base_impl();
+    source.set_override_synchronous_update(false);
+    assert_eq!(1, *changes.borrow());
+    assert!(!source.is_update_synchronous());
+    // The impl the renderer may hold keeps its mode.
+    assert!(published.is_update_synchronous());
+
+    // Setting the mode the source has changes nothing.
+    source.set_override_synchronous_update(false);
+    assert_eq!(1, *changes.borrow());
+
+    // The build that was running keeps the override.
+    finish_geojson_build(&run_loop);
+    assert_eq!(1, *loads.borrow());
+    assert_eq!(1, geojson_source_feature_count(&source));
+    assert!(!source.is_update_synchronous());
+}
+
 fn as_vector(source: &dyn Source) -> &VectorSource {
     source.downcast_ref::<VectorSource>().expect("a VectorSource")
 }

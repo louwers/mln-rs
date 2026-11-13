@@ -77,6 +77,7 @@ pub struct RenderGeoJSONSource {
 
 impl RenderGeoJSONSource {
     /// `RenderGeoJSONSource(Immutable<style::GeoJSONSource::Impl>, const TaggedScheduler&)`.
+    #[must_use]
     pub fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderGeoJSONSource { tile_source: RenderTileSource::new(impl_), data: None, tiles_update_synchronously: false }

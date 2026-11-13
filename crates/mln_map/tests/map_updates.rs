@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use feature::Value;
 use mln_actor::RunLoop;
 use mln_map::{CameraOptions, ErrorKind, Map, MapOptions, UpdateReader};
+use mln_renderer::update_slot::Update;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::expression::expression::FeatureState;
+use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_util::size::Size;
 
 fn map() -> Map {
@@ -229,4 +231,41 @@ fn each_reader_wakes_until_it_drops() {
     map.set_prefetch_zoom_delta(2);
     assert_eq!(first_wakes.load(Ordering::SeqCst), 1);
     assert_eq!(second_wakes.load(Ordering::SeqCst), 2);
+}
+
+/// Whether `update`'s only source updates synchronously.
+fn publishes_synchronous(update: &Update) -> bool {
+    update.parameters.sources[0].is_update_synchronous()
+}
+
+fn set_override_synchronous_update(map: &mut Map, value: bool) {
+    let source = map.style_mut().get_source("points").expect("the source");
+    source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source").set_override_synchronous_update(value);
+    map.process_events();
+}
+
+#[test]
+fn the_synchronous_update_override_publishes_an_update() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.jump_to(&CameraOptions::default());
+    let reader = map.update_reader();
+    map.style_mut().load_json(
+        r#"{"version":8,"sources":{"points":{"type":"geojson","synchronousUpdate":true,
+            "data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
+    );
+    map.process_events();
+    let before = map.update_generation();
+    let published = reader.latest().expect("an update");
+    assert!(publishes_synchronous(&published));
+
+    set_override_synchronous_update(&mut map, false);
+    assert_eq!(map.update_generation(), before + 1);
+    assert!(!publishes_synchronous(&reader.latest().expect("an update")));
+    // The update the renderer already has keeps its mode.
+    assert!(publishes_synchronous(&published));
+
+    // Setting the mode the source has publishes nothing.
+    set_override_synchronous_update(&mut map, false);
+    assert_eq!(map.update_generation(), before + 1);
 }
