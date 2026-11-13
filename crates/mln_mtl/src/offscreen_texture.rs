@@ -62,6 +62,9 @@ pub struct OffscreenTextureResource {
     readback_buffer: RefCell<Option<MTLBufferPtr>>,
     /// Whether the readback buffer holds the last frame swapped.
     readback_current: Cell<bool>,
+    /// The committed command buffer that copies the color texture into the
+    /// readback buffer, until a read has waited for it.
+    readback_copy: RefCell<Option<MTLCommandBufferPtr>>,
     /// Whether the next frame copies its image into the readback buffer: set
     /// by a read, cleared by the frame after it.
     copy_next_frame: Cell<bool>,
@@ -88,11 +91,12 @@ impl OffscreenTextureResource {
             render_pass_descriptor: RefCell::new(None),
             readback_buffer: RefCell::new(None),
             readback_current: Cell::new(false),
+            readback_copy: RefCell::new(None),
             copy_next_frame: Cell::new(false),
         }
     }
 
-    /// The image the passes rendered, once they have run.
+    /// The image the passes committed so far rendered. Waits for them.
     pub fn read_still_image(&self) -> PremultipliedImage {
         let mut image = PremultipliedImage::new(self.size);
         let color = self.color_texture.borrow();
@@ -106,7 +110,13 @@ impl OffscreenTextureResource {
         let Some(buffer) = buffer.as_ref() else {
             return image;
         };
-        if !self.readback_current.get() {
+        if self.readback_current.get() {
+            if let Some(copy) = self.readback_copy.borrow_mut().take() {
+                copy.waitUntilCompleted();
+            }
+        } else {
+            // The queue runs command buffers in commit order, so this copy
+            // also waits for every pass committed before it.
             if !color.copy_to(buffer) {
                 return image;
             }
@@ -131,21 +141,27 @@ impl Drop for OffscreenTextureResource {
 
 impl OffscreenTextureResource {
     /// Commits the passes encoded since `bind`, with the copy a read asked
-    /// for, and waits for them.
-    pub fn commit(&self) {
+    /// for, without waiting for them, and returns the committed command
+    /// buffer.
+    ///
+    /// Every pass goes to the backend's queue, which runs command buffers in
+    /// commit order, so a later pass that samples the texture sees what
+    /// these passes rendered.
+    pub fn commit(&self) -> Option<MTLCommandBufferPtr> {
         let command_buffer = self.command_buffer.borrow_mut().take();
         debug_assert!(command_buffer.is_some());
-        if let Some(command_buffer) = command_buffer {
+        if let Some(command_buffer) = &command_buffer {
             if self.copy_next_frame.replace(false)
                 && let Some(buffer) = self.readback_buffer.borrow().as_ref()
             {
-                let copied = self.color_texture.borrow().encode_copy_to(&command_buffer, buffer);
+                let copied = self.color_texture.borrow().encode_copy_to(command_buffer, buffer);
                 self.readback_current.set(copied);
+                *self.readback_copy.borrow_mut() = copied.then(|| command_buffer.clone());
             }
             command_buffer.commit();
-            command_buffer.waitUntilCompleted();
         }
         self.render_pass_descriptor.borrow_mut().take();
+        command_buffer
     }
 }
 
@@ -161,6 +177,7 @@ impl TargetResource for OffscreenTextureResource {
             *command_buffer = self.context.get_backend().get_command_queue().commandBuffer();
         }
         self.readback_current.set(false);
+        self.readback_copy.borrow_mut().take();
         let descriptor = MTLRenderPassDescriptor::new();
         let mut color = self.color_texture.borrow_mut();
         color.create();

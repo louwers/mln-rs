@@ -9,6 +9,7 @@ use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::types::TextureChannelDataType;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use objc2_metal::MTLCommandBuffer as _;
 
 use crate::draw_target::{DrawTarget, downcast_resource};
 use crate::offscreen_texture::OffscreenTextureResource;
@@ -73,7 +74,11 @@ impl FrameTarget for OffscreenTarget {
         let image = self.image.borrow();
         match image.as_deref().and_then(|image| image.resource().as_any().downcast_ref::<OffscreenTextureResource>()) {
             Some(resource) => {
-                resource.commit();
+                // Nothing presents the frame, so waiting for it here is what
+                // paces continuous rendering.
+                if let Some(command_buffer) = resource.commit() {
+                    command_buffer.waitUntilCompleted();
+                }
                 Handoff::ReadBack
             }
             None => Handoff::Dropped,
