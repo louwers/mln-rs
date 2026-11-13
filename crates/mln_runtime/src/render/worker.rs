@@ -465,7 +465,7 @@ impl Drop for Ticker {
         // It sleeps for no longer than `SETTLE_POLL`.
         #[cfg(not(target_family = "wasm"))]
         if let Some(thread) = self.thread.take() {
-            mln_util::thread::join(thread);
+            let _ = thread.join();
         }
     }
 }

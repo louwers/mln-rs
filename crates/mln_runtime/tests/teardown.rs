@@ -102,21 +102,6 @@ fn dropping_a_render_session_waits_for_its_thread() {
 }
 
 #[test]
-fn a_session_that_holds_the_last_map_has_its_thread_wait_for_the_runtime() {
-    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
-    let map = map(&runtime);
-    let session = attach(&map);
-    let threads = [runtime_thread(&map), session_thread(&session)];
-    drop(runtime);
-    drop(map);
-    // The session's thread lets go of the map, and of the runtime with it.
-    drop(session);
-    for ended in threads {
-        assert!(ended.has(), "the {} thread runs", ended.thread);
-    }
-}
-
-#[test]
 fn a_runtime_dropped_on_its_own_thread_ends() {
     let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
     let map = map(&runtime);

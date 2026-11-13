@@ -61,8 +61,8 @@ pub struct RuntimeOptions {
 /// end alone. The host's handlers, providers and transforms that the runtime
 /// holds are dropped on its thread meanwhile, so they mustn't wait for the
 /// thread that drops it. A drop on a thread of the library, such as in a
-/// handler or callback that the library runs, doesn't wait: that thread
-/// waits for the runtime's at its own end.
+/// handler or callback that the library runs, doesn't wait: it leaves the
+/// runtime's threads to end alone.
 #[derive(Clone)]
 pub struct Runtime {
     pub(crate) shared: Arc<RuntimeShared>,

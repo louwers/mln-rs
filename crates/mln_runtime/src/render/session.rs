@@ -695,8 +695,8 @@ pub(crate) fn physical_size(size: Size, pixel_ratio: f32) -> Size {
 /// handles, [`AcquiredFrame`]s and [`FrameView`]s waits for a core worker's
 /// thread to end, once the session has let go of its graphics objects and
 /// its map. A drop on a thread of the library, such as in a callback or a
-/// wake that the library runs, doesn't wait: that thread waits for the
-/// session's at its own end.
+/// wake that the library runs, doesn't wait: it leaves the session's thread
+/// to end alone.
 #[derive(Clone)]
 pub struct RenderSession {
     handle: Arc<SessionHandle>,

@@ -85,7 +85,7 @@ impl<O: 'static> Drop for Thread<O> {
         let _ = stoppable_rx.recv();
         run_loop.stop();
         if let Some(thread) = thread.take() {
-            mln_util::thread::join(thread);
+            let _ = thread.join();
         }
     }
 }

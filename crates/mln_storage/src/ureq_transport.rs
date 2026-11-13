@@ -224,7 +224,7 @@ impl Drop for Transport {
         }
         if matches!(self.ended.get_mut().recv_timeout(STOP_TIMEOUT), Err(mpsc::RecvTimeoutError::Disconnected)) {
             for worker in self.workers.drain(..) {
-                mln_util::thread::join(worker);
+                let _ = worker.join();
             }
         }
     }

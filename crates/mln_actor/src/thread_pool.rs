@@ -172,7 +172,7 @@ impl Drop for ThreadedScheduler {
         *self.shared.worker_mutex.lock() = true;
         self.shared.cv_available.notify_all();
         for thread in self.threads.drain(..) {
-            mln_util::thread::join(thread);
+            let _ = thread.join();
         }
     }
 }
