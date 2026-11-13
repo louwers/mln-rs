@@ -322,10 +322,9 @@ update-testdata checkout=cpp:
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
 # The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
-# builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
-# fix the suite's own bugs and drop its uses of the location-indicator layer type, which mln-rs doesn't have, and the
-# declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's t3/gpu-device-targets branch at
-# 08f3fefffebb, which changes the render target headers and adds frame depth and custom layers ahead of their merge.
+# builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then the declarations are
+# regenerated. The copies are from maplibre/maplibre-native-ffi's t3/gpu-device-targets branch at 29b1be78d6c8, which
+# changes the render target headers and adds frame depth and custom layers ahead of their merge.
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash
@@ -338,9 +337,6 @@ update-ffi-abi checkout=ffi:
         rsync -a --delete {{quote(checkout)}}/"$dir"/ "tools/c-abi-test/testdata/$dir"/
     done
     cp {{quote(checkout)}}/LICENSE tools/c-abi-test/testdata/
-    for patch in tools/c-abi-test/patches/*.patch; do
-        git apply --directory=tools/c-abi-test/testdata "$patch"
-    done
     {{just}} generate-c-abi
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
