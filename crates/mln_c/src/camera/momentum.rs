@@ -162,6 +162,9 @@ pub(super) fn momentum(momentum: &mln_gesture_momentum) -> Result<CameraMomentum
     Ok(CameraMomentum {
         pan_velocity,
         pan_decay,
+        // The C API's pan has no anchor: it glides as held at the view's
+        // center.
+        pan_anchor: None,
         zoom_velocity,
         zoom_decay,
         zoom_anchor,

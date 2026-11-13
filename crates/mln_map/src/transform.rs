@@ -30,6 +30,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 use mln_util::time::Instant;
+use mln_util::vectors::Vec3;
 use parking_lot::Mutex;
 
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
@@ -367,12 +368,27 @@ const MOMENTUM_ZOOM: usize = 0;
 const MOMENTUM_BEARING: usize = 1;
 const MOMENTUM_PITCH: usize = 2;
 
+/// How a pan momentum turns the globe: about one axis, fixed in the planet.
+#[derive(Clone, Copy)]
+struct GlobeTurn {
+    axis: Vec3,
+    /// What the planet turns per pixel of the pan's distance, at the size it
+    /// had at release.
+    radians_per_pixel: f64,
+    /// The planet's radius at release, in pixels. The turn keeps its speed
+    /// on screen when the zoom changes under it.
+    radius: f64,
+}
+
 /// A momentum under way.
 struct MomentumState {
     options: CameraMomentum,
     /// The pan's distance, with its direction.
     pan_total: ScreenCoordinate,
     pan: MomentumPart,
+    /// Set while the pan turns the globe; a pan that leaves the globe moves
+    /// on by its distance on screen.
+    pan_turn: Option<GlobeTurn>,
     /// The zoom, bearing and pitch parts, and each one's signed distance.
     scalars: [MomentumPart; 3],
     scalar_totals: [f64; 3],
@@ -1778,6 +1794,7 @@ impl Transform {
             options: *options,
             pan_total: ScreenCoordinate::new(0.0, 0.0),
             pan: MomentumPart::default(),
+            pan_turn: None,
             scalars: [MomentumPart::default(); 3],
             scalar_totals: [0.0; 3],
             replaced: false,
@@ -1794,6 +1811,7 @@ impl Transform {
                 motion = glide.duration;
                 let scale = glide.distance / speed;
                 momentum.pan_total = ScreenCoordinate::new(velocity.x * scale, velocity.y * scale);
+                momentum.pan_turn = self.globe_turn(&velocity, options.pan_anchor);
             }
         }
         let scalars = [
@@ -1918,7 +1936,12 @@ impl Transform {
         let fraction = advance(&mut momentum.pan);
         if fraction != 0.0 {
             let total = momentum.pan_total;
-            if !self.step_pan(ScreenCoordinate::new(total.x * fraction, total.y * fraction)) {
+            momentum.pan_turn = momentum.pan_turn.filter(|_| self.globe_fills_projection());
+            let moved = match momentum.pan_turn {
+                Some(turn) => self.step_globe_turn(&turn, momentum.pan.glide.distance * fraction),
+                None => self.step_pan(ScreenCoordinate::new(total.x * fraction, total.y * fraction)),
+            };
+            if !moved {
                 momentum.pan.moving = false;
             }
         }
@@ -2038,6 +2061,96 @@ impl Transform {
         }
         self.state.set_center_altitude(altitude);
         self.get_lat_lng(WrapMode::Unwrapped) != before
+    }
+
+    /// The turn that a pan released at `velocity` starts on the globe: the
+    /// differential of the drag ([`Self::move_by_with_anchor`]) that holds
+    /// `anchor`, or the view's center without one or with one off the
+    /// planet. `None` off the globe and through its transition to Mercator,
+    /// where the pan moves by its distance on screen.
+    fn globe_turn(&self, velocity: &ScreenCoordinate, anchor: Option<ScreenCoordinate>) -> Option<GlobeTurn> {
+        if !self.globe_fills_projection() {
+            return None;
+        }
+        let size = self.state.get_size();
+        let flipped = |point: &ScreenCoordinate| ScreenCoordinate::new(point.x, f64::from(size.height) - point.y);
+        let view_center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
+        let grab = anchor
+            .map(|anchor| flipped(&anchor))
+            .filter(|anchor| VerticalPerspectiveProjection::screen_coordinate_hits_globe(&self.state, anchor))
+            .unwrap_or_else(|| flipped(&view_center));
+        let (axis, radians_per_pixel) = VerticalPerspectiveProjection::drag_rotation(
+            &self.state,
+            &grab,
+            &ScreenCoordinate::new(velocity.x, -velocity.y),
+        )?;
+        Some(GlobeTurn { axis, radians_per_pixel, radius: self.globe_radius_pixels() })
+    }
+
+    /// Whether the globe is drawn in full, not partway to Mercator.
+    fn globe_fills_projection(&self) -> bool {
+        self.globe_on_screen() && self.state.get_projection_transition() >= 1.0
+    }
+
+    fn globe_radius_pixels(&self) -> f64 {
+        VerticalPerspectiveProjection::globe_radius_pixels(
+            Projection::world_size(self.state.get_scale()),
+            self.get_lat_lng(WrapMode::Unwrapped).latitude(),
+        )
+    }
+
+    /// Turns the globe on by `pixels` of a pan momentum's distance. The
+    /// turns of a momentum share an axis, so they add up to one rotation
+    /// whatever the frames are. With the bearing free it turns with the
+    /// planet; held, the center follows the planet and a swing over a pole
+    /// stops on it, as a drag does. The zoom keeps the planet's size as the
+    /// latitude changes.
+    fn step_globe_turn(&mut self, turn: &GlobeTurn, pixels: f64) -> bool {
+        // With the bearing held, each step turns the planet no farther than a
+        // drag does in one event, so that a swing over a pole is one there
+        // too. A frame that would need more steps than a frame can afford
+        // takes longer ones.
+        const MAX_STEP: f64 = 16.0;
+        const MAX_STEPS: f64 = 100.0;
+        // Limits hold a center that moves less than this share of the way
+        // the turn takes it.
+        const HELD_SHARE: f64 = 1e-3;
+        if pixels.is_nan() || pixels <= 0.0 {
+            return true;
+        }
+        let altitude = self.state.get_center_altitude();
+        let steps = if self.globe_free_bearing { 1.0 } else { f64::min((pixels / MAX_STEP).ceil(), MAX_STEPS) };
+        let mut moved = true;
+        for _ in 0..steps as u32 {
+            let radius = self.globe_radius_pixels();
+            let radians = pixels / steps * turn.radians_per_pixel * turn.radius / radius;
+            let before = self.get_lat_lng(WrapMode::Unwrapped);
+            let (turned, bearing, on_pole) = if self.globe_free_bearing {
+                let camera = VerticalPerspectiveProjection::turn_camera(&self.state, &turn.axis, radians);
+                (camera.center, Some(camera.bearing), false)
+            } else {
+                let (center, on_pole) = VerticalPerspectiveProjection::turn_center(&self.state, &turn.axis, radians);
+                (center, None, on_pole)
+            };
+            let center = self.state.constrained_center(&turned, self.get_zoom());
+            let zoom =
+                self.get_zoom() + VerticalPerspectiveProjection::zoom_adjustment(before.latitude(), center.latitude());
+            if let Some(bearing) = bearing {
+                self.state.set_bearing(mln_math::deg2rad(-bearing));
+            }
+            self.state.set_lat_lng_zoom(&center, zoom);
+            // Limits that hold the center in place stop the turn, and so does
+            // a pole it swung over.
+            let from_before = |to: &LatLng| {
+                VerticalPerspectiveProjection::surface_distance_pixels(1.0, before.latitude(), &before, to)
+            };
+            if on_pole || from_before(&center) < from_before(&turned) * HELD_SHARE {
+                moved = false;
+                break;
+            }
+        }
+        self.state.set_center_altitude(altitude);
+        moved
     }
 
     /// One pan step on the globe, as a drag around the view center

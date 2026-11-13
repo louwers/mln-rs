@@ -1036,3 +1036,126 @@ fn a_drag_on_the_globe_turns_it_around_the_cursor() {
         "{dragged:?} {around_the_center:?}"
     );
 }
+
+/// A camera that keeps the momentum its gesture ended with.
+struct Released {
+    camera: Transform,
+    momentum: Option<CameraMomentum>,
+}
+
+impl GestureCamera for Released {
+    fn viewport(&self) -> ScreenCoordinate {
+        self.camera.viewport()
+    }
+
+    fn camera(&self) -> CameraOptions {
+        self.camera.camera()
+    }
+
+    fn zoom_range(&self) -> (f64, f64) {
+        self.camera.zoom_range()
+    }
+
+    fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {
+        self.camera.lat_lng_for_pixel(pixel)
+    }
+
+    fn apply_camera_delta(&mut self, delta: &CameraDelta) {
+        if delta.momentum.is_some() {
+            self.momentum = delta.momentum;
+        }
+        GestureCamera::apply_camera_delta(&mut self.camera, delta);
+    }
+
+    fn update_camera(&mut self, update: &CameraUpdate) {
+        GestureCamera::update_camera(&mut self.camera, update);
+    }
+
+    fn cancel_transitions_with_id(&mut self, transition_id: u64) {
+        GestureCamera::cancel_transitions_with_id(&mut self.camera, transition_id);
+    }
+}
+
+// Port-only: a release's pan momentum holds the point the pan last held, the
+// pointer or the middle of a pinch, which the globe turns on around.
+#[test]
+fn a_release_carries_where_the_pan_was_held() {
+    let mut input = GestureRecognizer::new(GestureOptions::DEFAULT);
+    let mut camera = Released { camera: transform(), momentum: None };
+    let mut now = 1000.0;
+    input.handle(
+        &mut camera,
+        Input::PointerDown {
+            id: 1,
+            kind: PointerKind::Mouse,
+            button: Button::Primary,
+            position: p(600.0, 200.0),
+            modifiers: Modifiers::default(),
+        },
+        now,
+    );
+    for i in 1..=8 {
+        now += 16.0;
+        input.handle(&mut camera, Input::PointerMove { id: 1, position: p(600.0 + 12.0 * f64::from(i), 200.0) }, now);
+    }
+    input.handle(&mut camera, Input::PointerUp { id: 1, position: p(696.0, 200.0) }, now);
+    let momentum = camera.momentum.take().expect("the release glides");
+    assert!(momentum.pan_velocity.is_some_and(|velocity| velocity.x > 500.0));
+    assert_eq!(momentum.pan_anchor, Some(p(696.0, 200.0)));
+
+    // Two fingers moving together hold their middle.
+    let mut input = GestureRecognizer::new(GestureOptions::DEFAULT);
+    for (id, x) in [(1, 300.0), (2, 500.0)] {
+        input.handle(
+            &mut camera,
+            Input::PointerDown {
+                id,
+                kind: PointerKind::Touch,
+                button: Button::Primary,
+                position: p(x, 300.0),
+                modifiers: Modifiers::default(),
+            },
+            now,
+        );
+    }
+    for i in 1..=8 {
+        now += 16.0;
+        let x = 12.0 * f64::from(i);
+        input.handle(&mut camera, Input::PointerMove { id: 1, position: p(300.0 + x, 300.0) }, now);
+        input.handle(&mut camera, Input::PointerMove { id: 2, position: p(500.0 + x, 300.0) }, now);
+    }
+    input.handle(&mut camera, Input::PointerUp { id: 1, position: p(396.0, 300.0) }, now);
+    input.handle(&mut camera, Input::PointerUp { id: 2, position: p(596.0, 300.0) }, now);
+    let momentum = camera.momentum.take().expect("the release glides");
+    assert!(momentum.pan_velocity.is_some_and(|velocity| velocity.x > 500.0), "{momentum:?}");
+    assert_eq!(momentum.pan_anchor, Some(p(496.0, 300.0)));
+}
+
+// Port-only: a flick released near the globe's edge turns the planet farther
+// than the same flick at its middle, where the surface faces the finger.
+#[test]
+fn a_flick_near_the_globes_edge_turns_it_farther() {
+    let fling = |x: f64| {
+        let mut rig = Rig::new();
+        rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        rig.camera.jump_to(&CameraOptions {
+            center: Some(LatLng::new(0.0, 20.0).unwrap()),
+            zoom: Some(1.5),
+            ..Default::default()
+        });
+        rig.down(1, PointerKind::Mouse, x, 300.0);
+        let mut at = x;
+        for _ in 0..8 {
+            rig.now += 16.0;
+            at += 6.0;
+            rig.to(1, at, 300.0);
+        }
+        let released = rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude();
+        rig.up(1, at, 300.0);
+        rig.settle();
+        released - rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude()
+    };
+    let (middle, edge) = (fling(376.0), fling(531.0));
+    assert!(middle > 1.0, "{middle}");
+    assert!(edge > 1.5 * middle, "{edge} {middle}");
+}

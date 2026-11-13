@@ -196,6 +196,9 @@ struct Release {
     zoom: Option<f64>,
     bearing: Option<f64>,
     pitch: Option<f64>,
+    /// Where the pan's last step held the map: the pointer, or a pinch's
+    /// middle.
+    pan_anchor: Option<V2>,
     zoom_anchor: Option<V2>,
     bearing_anchor: Option<V2>,
 }
@@ -210,6 +213,7 @@ struct Tracking {
     pitch: f64,
     /// Pan x and y, zoom, bearing, pitch.
     trackers: [VelocityTracker; 5],
+    pan_anchor: Option<V2>,
     zoom_anchor: Option<V2>,
     bearing_anchor: Option<V2>,
     /// A pinch's release, staged when it continued as a one-finger pan,
@@ -232,6 +236,9 @@ impl Tracking {
         self.zoom += step.zoom;
         self.bearing += step.bearing;
         self.pitch += step.pitch;
+        if step.pan != V2::ZERO {
+            self.pan_anchor = step.around;
+        }
         if step.zoom != 0.0 {
             self.zoom_anchor = step.around;
         }
@@ -262,6 +269,7 @@ impl Tracking {
             zoom: some(zoom),
             bearing: some(bearing),
             pitch: some(pitch),
+            pan_anchor: self.pan_anchor,
             zoom_anchor: self.zoom_anchor,
             bearing_anchor: self.bearing_anchor,
         };
@@ -273,6 +281,7 @@ impl Tracking {
         {
             if release.pan.is_none() {
                 release.pan = staged.pan;
+                release.pan_anchor = staged.pan_anchor;
             }
             if release.zoom.is_none() {
                 release.zoom = staged.zoom;
@@ -325,6 +334,7 @@ impl Release {
         CameraMomentum {
             pan_velocity: pan.map(ScreenCoordinate::from),
             pan_decay: options.pan_decay,
+            pan_anchor: self.pan_anchor.map(ScreenCoordinate::from),
             zoom_velocity: zoom,
             zoom_decay: options.zoom_decay,
             zoom_anchor: self.zoom_anchor.map(ScreenCoordinate::from),
@@ -812,7 +822,7 @@ impl GestureRecognizer {
                 let step =
                     CameraDelta { offset: Some(delta.into()), anchor: Some(to.into()), ..CameraDelta::default() };
                 self.update(camera, step);
-                self.tracking.record(now, Step { pan: delta, ..Step::default() });
+                self.tracking.record(now, Step { pan: delta, around: Some(to), ..Step::default() });
             }
         }
     }

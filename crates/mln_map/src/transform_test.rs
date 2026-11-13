@@ -4571,10 +4571,10 @@ fn momentum_pans_its_distance_on_screen() {
     assert!(!transform.in_transition());
 }
 
-// Port-only: momentum pans the globe as a drag around the view center does,
-// and its zoom keeps the planet's size as the latitude changes.
+// Port-only: momentum pans the globe by turning the planet, and its zoom
+// keeps the planet's size as the latitude changes.
 #[test]
-fn momentum_pans_the_globe_as_a_drag_does() {
+fn momentum_pans_the_globe_by_turning_the_planet() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(10.0, 20.0), 3.0);
     let start = transform.get_lat_lng(WrapMode::Wrapped);
@@ -5438,4 +5438,388 @@ fn a_stale_frame_time_doesnt_start_commands_in_the_past() {
     let fresh = Instant::now() + Duration::from_millis(5);
     transform.set_frame_time(Some(fresh));
     assert_eq!(transform.frame_time(), Some(fresh));
+}
+
+// MARK: - Pan momentum on the globe (port-only)
+
+/// The globe camera's orientation, as the projection composes it.
+fn globe_orientation(transform: &Transform) -> Quaternion {
+    let center = transform.get_lat_lng(WrapMode::Unwrapped);
+    Quaternion::from_euler_angles(deg2rad(-center.longitude()), deg2rad(-center.latitude()), -transform.get_bearing())
+}
+
+/// The rotation from one orientation to another: its angle in degrees, and
+/// its axis.
+fn rotation_between(from: &Quaternion, to: &Quaternion) -> (f64, Vec3) {
+    let q = from.conjugate().multiply(to);
+    let sine = (q.x * q.x + q.y * q.y + q.z * q.z).sqrt();
+    let sign = if q.w < 0.0 { -1.0 } else { 1.0 };
+    (mln_math::rad2deg(2.0 * sine.atan2(q.w.abs())), [sign * q.x / sine, sign * q.y / sine, sign * q.z / sine])
+}
+
+/// The planet's radius on screen along x from the center of
+/// `set_up_globe`'s view.
+fn limb_radius(transform: &Transform) -> f64 {
+    let (mut low, mut high) = (0.0, 2000.0);
+    while high - low > 1e-6 {
+        let middle = f64::midpoint(low, high);
+        if VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+            transform.get_state(),
+            &sc(400.0 + middle, 300.0),
+        ) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    low
+}
+
+/// A pan released at `velocity` holding `anchor`, with the default decay.
+fn pan_momentum(velocity: ScreenCoordinate, anchor: Option<ScreenCoordinate>) -> CameraMomentum {
+    CameraMomentum { pan_velocity: Some(velocity), pan_anchor: anchor, ..CameraMomentum::default() }
+}
+
+/// How far the default pan decay glides from `speed`, in pixels.
+fn pan_glide(speed: f64) -> f64 {
+    (speed - MomentumDecay::PAN.stop_speed) / friction_rate(MomentumDecay::PAN.half_life)
+}
+
+/// What a drag of one pixel towards `direction` at `anchor` turns the planet
+/// by, in degrees, the bearing free.
+fn drag_degrees_per_pixel(transform: &mut Transform, anchor: ScreenCoordinate, direction: ScreenCoordinate) -> f64 {
+    let camera = transform.get_camera_options(None);
+    let free_bearing = transform.is_globe_free_bearing();
+    let before = globe_orientation(transform);
+    let length = direction.x.hypot(direction.y);
+    transform.set_globe_free_bearing(true);
+    transform
+        .move_by_with_anchor(
+            &sc(direction.x / length, direction.y / length),
+            Some(anchor),
+            &AnimationOptions::default(),
+        )
+        .unwrap();
+    let degrees = rotation_between(&before, &globe_orientation(transform)).0;
+    transform.jump_to(&camera);
+    transform.set_globe_free_bearing(free_bearing);
+    degrees
+}
+
+// With the bearing free, the planet turns about one axis: every frame's
+// orientation is the release's turned about it, by the angle a drag at the
+// anchor turns the planet per pixel over the glide's distance, whatever the
+// frames are.
+#[test]
+fn globe_momentum_turns_the_planet_about_one_axis() {
+    for (name, velocity) in [("right", sc(1500.0, 0.0)), ("up and left", sc(-900.0, -1200.0))] {
+        for place in ["center", "limb"] {
+            let _trace = ScopedTrace(format!("{name} at the {place}"));
+            let mut transform = new_transform();
+            set_up_globe(&mut transform, &ll(30.0, 10.0), 1.5, 0.0, 0.0);
+            transform.set_globe_free_bearing(true);
+            let anchor =
+                if place == "center" { sc(400.0, 300.0) } else { sc(400.0 + 0.85 * limb_radius(&transform), 300.0) };
+            let per_pixel = drag_degrees_per_pixel(&mut transform, anchor, velocity);
+            let release = globe_orientation(&transform);
+
+            let begin = start_clock(&mut transform);
+            transform.start_momentum(&pan_momentum(velocity, Some(anchor)), &AnimationOptions::default());
+            let rate = friction_rate(MomentumDecay::PAN.half_life);
+            let mut first_axis = None;
+            for frame in 1..=70u64 {
+                transform.update_transitions(Some(begin + Duration::from_millis(16 * frame)));
+                let (degrees, axis) = rotation_between(&release, &globe_orientation(&transform));
+                let first = *first_axis.get_or_insert(axis);
+                for i in 0..3 {
+                    assert_near(first[i], axis[i], 1e-9);
+                }
+                let seconds = f64::min(0.016 * frame as f64, (1500.0f64 / 10.0).ln() / rate);
+                let pixels = 1500.0 * -(-rate * seconds).exp_m1() / rate;
+                // The drag's one pixel is a finite step, the glide's rate its
+                // differential.
+                assert_near(pixels * per_pixel, degrees, 0.01 * degrees);
+            }
+            assert!(!transform.in_transition());
+            let end = globe_orientation(&transform);
+            assert_near(pan_glide(1500.0) * per_pixel, rotation_between(&release, &end).0, 1.5);
+
+            // One frame for the whole glide ends at the same camera.
+            let mut at_once = new_transform();
+            set_up_globe(&mut at_once, &ll(30.0, 10.0), 1.5, 0.0, 0.0);
+            at_once.set_globe_free_bearing(true);
+            let begin = start_clock(&mut at_once);
+            at_once.start_momentum(&pan_momentum(velocity, Some(anchor)), &AnimationOptions::default());
+            at_once.update_transitions(Some(begin + Duration::from_secs(3)));
+            assert_near(0.0, rotation_between(&end, &globe_orientation(&at_once)).0, 1e-9);
+        }
+    }
+}
+
+// A flick at the view's center lasts as long as on a flat map and turns the
+// planet by its distance over the planet's radius, as when the glide replayed
+// drags at the center.
+#[test]
+fn globe_momentum_at_the_center_keeps_its_distance_and_duration() {
+    for free_bearing in [false, true] {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(30.0, 10.0), 1.5, 0.0, 0.0);
+        transform.set_globe_free_bearing(free_bearing);
+        let radius = globe_radius(transform.get_state());
+        let begin = start_clock(&mut transform);
+        transform.start_momentum(&pan_momentum(sc(0.0, -1500.0), None), &AnimationOptions::default());
+        let seconds = (1500.0f64 / 10.0).ln() / friction_rate(MomentumDecay::PAN.half_life);
+        transform.update_transitions(Some(begin + Duration::from_secs_f64(seconds - 0.001)));
+        assert!(transform.in_transition());
+        transform.update_transitions(Some(begin + Duration::from_secs_f64(seconds + 0.001)));
+        assert!(!transform.in_transition());
+        let center = transform.get_lat_lng(WrapMode::Unwrapped);
+        let degrees = mln_math::rad2deg(pan_glide(1500.0) / radius);
+        assert_near(30.0 - degrees, center.latitude(), 0.002 * degrees);
+        // Replaying drags of 16 px at the center ended at 34.82 degrees south.
+        assert_near(-34.82, center.latitude(), 0.05);
+        assert_near(10.0, center.longitude(), 1e-6);
+        assert_near(0.0, bearing_degrees(&transform), 1e-9);
+        // The zoom keeps the planet's size.
+        assert_near(radius, globe_radius(transform.get_state()), 1e-6);
+    }
+}
+
+// A flick released near the planet's edge turns the planet on as the finger
+// was turning it: the ground under the finger leaves at the finger's speed,
+// which near the edge is a faster turn than at the center.
+#[test]
+fn globe_momentum_carries_on_at_the_fingers_angular_speed() {
+    let turned = |anchor: Option<ScreenCoordinate>| {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(30.0, 10.0), 1.5, 0.0, 0.0);
+        transform.set_globe_free_bearing(true);
+        let release = globe_orientation(&transform);
+        let begin = start_clock(&mut transform);
+        transform.start_momentum(&pan_momentum(sc(1500.0, 0.0), anchor), &AnimationOptions::default());
+        transform.update_transitions(Some(begin + Duration::from_secs(3)));
+        rotation_between(&release, &globe_orientation(&transform)).0
+    };
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(30.0, 10.0), 1.5, 0.0, 0.0);
+    transform.set_globe_free_bearing(true);
+    let limb = limb_radius(&transform);
+    let anchor = sc(400.0 + 0.85 * limb, 300.0);
+    // In the first millisecond the ground passing under the finger moves the
+    // pixels the finger would have.
+    let rate = friction_rate(MomentumDecay::PAN.half_life);
+    let pixels = 1500.0 * -(-rate * 0.001).exp_m1() / rate;
+    let ground =
+        transform.screen_coordinate_to_lat_lng(&sc(anchor.x - pixels / 2.0, anchor.y), WrapMode::Unwrapped).unwrap();
+    let begin = start_clock(&mut transform);
+    transform.start_momentum(&pan_momentum(sc(1500.0, 0.0), Some(anchor)), &AnimationOptions::default());
+    transform.update_transitions(Some(begin + Duration::from_millis(1)));
+    let moved = transform.lat_lng_to_screen_coordinate(&ground);
+    assert_near(anchor.x + pixels / 2.0, moved.x, 1e-3);
+    assert_near(anchor.y, moved.y, 1e-3);
+
+    // At 85% of the way to the edge the surface is foreshortened about
+    // twofold, so the same speed on screen turns the planet twice as fast.
+    let at_center = turned(None);
+    assert_near(2.08, turned(Some(anchor)) / at_center, 0.02);
+    // An anchor at the center, off the planet or absent is the center.
+    assert_eq!(at_center, turned(Some(sc(400.0, 300.0))));
+    assert_eq!(at_center, turned(Some(sc(400.0 + 1.2 * limb, 300.0))));
+}
+
+// With the bearing held, the center follows the planet's turn, and the
+// bearing stays.
+#[test]
+fn globe_momentum_with_the_bearing_held_moves_the_center_as_the_planet_turns() {
+    let run = |free_bearing: bool, anchor: Option<ScreenCoordinate>| {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(30.0, 10.0), 1.5, 20.0, 0.0);
+        transform.set_globe_free_bearing(free_bearing);
+        let begin = start_clock(&mut transform);
+        transform.start_momentum(&pan_momentum(sc(1500.0, 0.0), anchor), &AnimationOptions::default());
+        let mut centers = Vec::new();
+        while transform.in_transition() {
+            transform.update_transitions(Some(begin + Duration::from_millis(16 * (centers.len() as u64 + 1))));
+            centers.push((transform.get_lat_lng(WrapMode::Wrapped), bearing_degrees(&transform)));
+        }
+        centers
+    };
+    for anchor in [None, Some(sc(520.0, 180.0))] {
+        let free = run(true, anchor);
+        let held = run(false, anchor);
+        assert_eq!(free.len(), held.len());
+        for ((free_center, _), (held_center, bearing)) in free.iter().zip(&held) {
+            assert_near(free_center.latitude(), held_center.latitude(), 1e-6);
+            assert_near(free_center.longitude(), held_center.longitude(), 1e-6);
+            assert_near(20.0, *bearing, 1e-9);
+        }
+        assert!((free.last().unwrap().1 - 20.0).abs() > 5.0);
+    }
+}
+
+// With the bearing held, a glide that swings over a pole stops on it, on the
+// meridian it came along, as a drag does; with the bearing free it carries
+// on down the far side.
+#[test]
+fn globe_momentum_with_the_bearing_held_stops_on_a_pole() {
+    for free_bearing in [false, true] {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(60.0, 10.0), 1.5, 0.0, 0.0);
+        transform.set_globe_free_bearing(free_bearing);
+        let (animation, ended) = record_end();
+        let begin = start_clock(&mut transform);
+        transform.start_momentum(&pan_momentum(sc(0.0, 4000.0), None), &animation);
+        let mut frames = 0;
+        let mut latitude = 60.0;
+        while transform.in_transition() {
+            frames += 1;
+            transform.update_transitions(Some(begin + Duration::from_millis(16 * frames)));
+            let center = transform.get_lat_lng(WrapMode::Wrapped);
+            if !free_bearing {
+                // The center climbs the meridian and never comes back down.
+                assert!(center.latitude() >= latitude, "frame {frames}");
+                assert_near(10.0, center.longitude(), 1e-6);
+                latitude = center.latitude();
+            }
+        }
+        let center = transform.get_lat_lng(WrapMode::Wrapped);
+        assert_eq!(ended.get().unwrap().outcome, TransitionOutcome::Completed);
+        if free_bearing {
+            assert!(frames > 70, "{frames}");
+            assert_near(-170.0, center.longitude(), 1e-6);
+            assert_near(180.0, bearing_degrees(&transform).abs(), 1e-6);
+            assert!(center.latitude() < 60.0, "{}", center.latitude());
+        } else {
+            // It ends there, well before its glide would have.
+            assert!(frames < 30, "{frames}");
+            assert_eq!(90.0, center.latitude());
+            assert_near(0.0, bearing_degrees(&transform), 1e-9);
+        }
+    }
+}
+
+// Past the zoom where the pole is in reach, the latitude limit holds the
+// center, and a glide straight at it ends there.
+#[test]
+fn globe_momentum_stops_at_the_latitude_limit() {
+    for free_bearing in [false, true] {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(84.9, 10.0), 6.0, 0.0, 0.0);
+        transform.set_globe_free_bearing(free_bearing);
+        // The latitude the limit holds a center at the pole to.
+        let limit = |transform: &Transform| {
+            transform.get_state().constrained_center(&ll(90.0, 10.0), transform.get_zoom()).latitude()
+        };
+        assert!(limit(&transform) < 86.0, "{}", limit(&transform));
+        let begin = start_clock(&mut transform);
+        transform.start_momentum(&pan_momentum(sc(0.0, 3000.0), None), &AnimationOptions::default());
+        let mut frames = 0;
+        while transform.in_transition() {
+            frames += 1;
+            transform.update_transitions(Some(begin + Duration::from_millis(16 * frames)));
+        }
+        assert!(frames < 40, "{frames}");
+        let center = transform.get_lat_lng(WrapMode::Wrapped);
+        assert_near(limit(&transform), center.latitude(), 1e-9);
+        assert_near(10.0, center.longitude(), 1e-6);
+        assert_near(0.0, bearing_degrees(&transform), 1e-9);
+    }
+}
+
+// A caught glide reports its speed in pixels per second at the point it was
+// released at: the share of the release speed that the planet's turn has
+// left.
+#[test]
+fn globe_momentum_reports_its_speed_at_the_anchor_when_cancelled() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(30.0, 10.0), 1.5, 0.0, 0.0);
+    transform.set_globe_free_bearing(true);
+    let anchor = sc(400.0 + 0.85 * limb_radius(&transform), 300.0);
+    let (animation, ended) = record_end();
+    let begin = start_clock(&mut transform);
+    transform.start_momentum(&pan_momentum(sc(1200.0, -900.0), Some(anchor)), &animation);
+    let turned_in_a_millisecond = |transform: &mut Transform, from: u64| {
+        let before = globe_orientation(transform);
+        transform.update_transitions(Some(begin + Duration::from_millis(from + 1)));
+        rotation_between(&before, &globe_orientation(transform)).0
+    };
+    let at_release = turned_in_a_millisecond(&mut transform, 0);
+    // One half-life on.
+    transform.update_transitions(Some(begin + Duration::from_millis(140)));
+    let at_catch = turned_in_a_millisecond(&mut transform, 140);
+    transform.cancel_transitions();
+    let ended = ended.get().expect("the momentum ended");
+    assert_eq!(ended.outcome, TransitionOutcome::Cancelled);
+    let rate = friction_rate(MomentumDecay::PAN.half_life);
+    let left = (-rate * 0.141).exp();
+    assert_near(1200.0 * left, ended.velocity.pan.x, 1e-6);
+    assert_near(-900.0 * left, ended.velocity.pan.y, 1e-6);
+    // The planet turns at that share of its release speed: a release at the
+    // reported velocity, at the same point, carries on as the glide was.
+    assert_near((-rate * 0.140).exp(), at_catch / at_release, 1e-6);
+}
+
+// Zoom, bearing and pitch momentum run alongside the pan's turn: each part
+// moves its planned amount, the turn keeps its axis, and it keeps its speed
+// on screen as the planet grows.
+#[test]
+fn globe_momentum_parts_compose_with_the_turn() {
+    let run = |zoom: Option<f64>, others: bool| {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(30.0, 10.0), 2.0, 0.0, 0.0);
+        let momentum = CameraMomentum {
+            zoom_velocity: zoom,
+            bearing_velocity: others.then_some(90.0),
+            pitch_velocity: others.then_some(40.0),
+            ..pan_momentum(sc(0.0, -1500.0), None)
+        };
+        let begin = start_clock(&mut transform);
+        transform.start_momentum(&momentum, &AnimationOptions::default());
+        let mut frames = 0;
+        while transform.in_transition() {
+            frames += 1;
+            transform.update_transitions(Some(begin + Duration::from_millis(16 * frames)));
+            // A flick along the meridian keeps to it.
+            assert_near(10.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+        }
+        transform
+    };
+    let rate = friction_rate(Duration::from_millis(140));
+    let alone = run(None, false);
+    let turned = |transform: &Transform| 30.0 - transform.get_lat_lng(WrapMode::Wrapped).latitude();
+
+    let with_others = run(None, true);
+    assert_near(turned(&alone), turned(&with_others), 1e-6);
+    assert_near((90.0 - 1.0) / rate, bearing_degrees(&with_others), 1e-6);
+    assert_near((40.0 - 1.0) / rate, pitch_degrees(&with_others), 1e-6);
+
+    // Zooming in by a level over the glide: the planet ends twice the size,
+    // and the same pixels turn it less.
+    let zooming = run(Some(1.0 * rate + 0.01), false);
+    assert_near(2.0 * globe_radius(alone.get_state()), globe_radius(zooming.get_state()), 1e-6);
+    let share = turned(&zooming) / turned(&alone);
+    assert!((0.55..0.8).contains(&share), "{share}");
+}
+
+// Between Mercator and the globe the pan moves by its distance on screen,
+// as on a flat map, wherever it was held.
+#[test]
+fn momentum_through_the_globes_transition_ignores_the_anchor() {
+    let run = |anchor: Option<ScreenCoordinate>| {
+        let mut transform = new_transform();
+        transform.resize(Size::new(800, 600)).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::between(
+            ProjectionType::Mercator,
+            ProjectionType::VerticalPerspective,
+            0.5,
+        ));
+        transform.jump_to(&CameraOptions { center: Some(ll(30.0, 10.0)), zoom: Some(1.5), ..Default::default() });
+        let begin = start_clock(&mut transform);
+        transform.start_momentum(&pan_momentum(sc(1500.0, 0.0), anchor), &AnimationOptions::default());
+        transform.update_transitions(Some(begin + Duration::from_secs(3)));
+        transform.get_lat_lng(WrapMode::Unwrapped)
+    };
+    let center = run(None);
+    assert!(center.longitude() < 0.0, "{center:?}");
+    assert_eq!(center, run(Some(sc(550.0, 300.0))));
 }
