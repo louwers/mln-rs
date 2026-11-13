@@ -40,7 +40,6 @@ use std::time::Duration;
 pub use map::{WebMap, set_preloads};
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_actor::scheduler;
-use mln_util::enum_::Enum;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::time::Instant;
 use wasm_bindgen::prelude::*;
@@ -79,7 +78,7 @@ struct ConsoleLog;
 
 impl Observer for ConsoleLog {
     fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
-        let line = JsValue::from_str(&format!("[{}] {msg}", event.to_string()));
+        let line = JsValue::from_str(&format!("[{}] {msg}", event.as_str()));
         match severity {
             EventSeverity::Error => web_sys::console::error_1(&line),
             EventSeverity::Warning => web_sys::console::warn_1(&line),

@@ -14,13 +14,12 @@ pub mod string;
 pub mod unitbezier;
 
 pub use color::{Color, ColorSpace};
-pub use error::{Error, ErrorKind};
+pub use error::{Error, ErrorKind, ParseEnumError};
 pub use geo::{EdgeInsets, LatLng, LatLngBounds};
 pub use padding::Padding;
 pub use unitbezier::UnitBezier;
 pub mod bounding_volumes;
 pub mod chrono;
-pub mod enum_;
 pub mod error;
 pub mod event_queue;
 pub mod feature;

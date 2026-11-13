@@ -8,10 +8,12 @@
 //   ignore files are read member by member (`read_json_object_members`).
 
 use std::fmt::{self, Write};
+use std::str::FromStr;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use feature::Value;
+use mln_util::ParseEnumError;
 use mln_util::geo::LatLng;
 use mln_util::size::Size;
 use regex::Regex;
@@ -461,21 +463,22 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     metadata
 }
 
-/// `mln::TileLodMode` (include/mln/map/mode.hpp) with the names the runner's
-/// `MBGL_DEFINE_ENUM` gives it.
+/// `mln::TileLodMode` (include/mln/map/mode.hpp), parsed from the names the
+/// C++ runner gives it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileLodMode {
     Default,
     Distance,
 }
 
-impl TileLodMode {
-    #[must_use]
-    pub fn to_enum(s: &str) -> Option<TileLodMode> {
+impl FromStr for TileLodMode {
+    type Err = ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "default" => Some(TileLodMode::Default),
-            "distance" => Some(TileLodMode::Distance),
-            _ => None,
+            "default" => Ok(TileLodMode::Default),
+            "distance" => Ok(TileLodMode::Distance),
+            _ => Err(ParseEnumError),
         }
     }
 }
@@ -1044,7 +1047,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             // setTileLodMode
             // C++ calls `.value()` on the optional: an unknown name throws
             // std::bad_optional_access, which the runner does not catch.
-            let Some(mode) = TileLodMode::to_enum(get_str(arg(1))) else {
+            let Ok(mode) = get_str(arg(1)).parse::<TileLodMode>() else {
                 metadata.error_message = format!("Unknown tile LOD mode: {}", get_str(arg(1)));
                 return Vec::new();
             };

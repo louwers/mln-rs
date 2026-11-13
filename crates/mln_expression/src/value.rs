@@ -9,7 +9,6 @@ use mln_style_types::{
     RotateAnchorType, Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
     TextTransformType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
 };
-use mln_util::enum_::Enum;
 use mln_util::string::to_string_double;
 use mln_util::{Color, Padding};
 use serde::Serialize;
@@ -573,11 +572,11 @@ macro_rules! enum_value_converter {
                     Type::String
                 }
                 fn to_expression_value(&self) -> Value {
-                    Value::String(Enum::to_string(*self).to_owned())
+                    Value::String(self.as_str().to_owned())
                 }
                 fn from_expression_value(value: &Value) -> Option<Self> {
                     match value {
-                        Value::String(v) => <$t as Enum>::to_enum(v),
+                        Value::String(v) => v.parse().ok(),
                         _ => None,
                     }
                 }
