@@ -1038,10 +1038,9 @@ fn a_drag_on_the_globe_turns_it_around_the_cursor() {
 }
 
 /// A rig on the globe, centered at `latitude`.
-fn globe_rig(latitude: f64, zoom: f64, pitch: f64, free_bearing: bool) -> Rig {
+fn globe_rig(latitude: f64, zoom: f64, pitch: f64) -> Rig {
     let mut rig = Rig::new();
     rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-    rig.camera.set_globe_free_bearing(free_bearing);
     rig.camera.jump_to(&CameraOptions {
         center: Some(LatLng::new(latitude, 20.0).unwrap()),
         zoom: Some(zoom),
@@ -1108,22 +1107,18 @@ fn a_drag_on_the_globe_holds_the_location_it_grabbed() {
     // At zoom 2 with a pitch, the pointer of most of these is at the planet's
     // edge or off it, where the drag doesn't hold.
     for (zoom, pitch) in [(2.0, 0.0), (6.0, 0.0), (6.0, 45.0)] {
-        for free_bearing in [false, true] {
-            for (name, path) in &paths {
-                if zoom == 2.0 && *name == "north" {
-                    // Ends with the center near the pole.
-                    continue;
-                }
-                let mut rig = globe_rig(30.0, zoom, pitch, free_bearing);
-                let drift = drag_drift(&mut rig, path);
-                assert!(drift < 0.01, "{name} at zoom {zoom}, pitch {pitch}, free bearing {free_bearing}: {drift} px");
-                if !free_bearing {
-                    assert!(rig.bearing().abs() < 1e-9, "{name}: bearing {}", rig.bearing());
-                }
+        for (name, path) in &paths {
+            if zoom == 2.0 && *name == "north" {
+                // Ends with the center near the pole.
+                continue;
             }
+            let mut rig = globe_rig(30.0, zoom, pitch);
+            let drift = drag_drift(&mut rig, path);
+            assert!(drift < 0.01, "{name} at zoom {zoom}, pitch {pitch}: {drift} px");
+            assert!(rig.bearing().abs() < 1e-9, "{name}: bearing {}", rig.bearing());
         }
     }
-    let mut rig = globe_rig(60.0, 2.0, 0.0, false);
+    let mut rig = globe_rig(60.0, 2.0, 0.0);
     let drift = drag_drift(&mut rig, &paths[5].1);
     assert!(drift < 0.01, "at latitude 60: {drift} px");
     // A drag that returns to its press returns the camera.
@@ -1151,7 +1146,7 @@ fn a_drag_on_the_globe_changes_how_it_holds_without_a_jump() {
         ("to the south pole", -60.0, 3.0, 30.0, p(380.0, 400.0), p(420.0, 20.0)),
     ];
     for (name, latitude, zoom, pitch, from, to) in cases {
-        let mut rig = globe_rig(latitude, zoom, pitch, false);
+        let mut rig = globe_rig(latitude, zoom, pitch);
         // There and back.
         let mut path = line(from, to, 1.0);
         path.extend(line(to, from, 1.0).into_iter().skip(1));
@@ -1189,7 +1184,7 @@ fn a_drag_on_the_globe_changes_how_it_holds_without_a_jump() {
 // grabbed it.
 #[test]
 fn a_finger_landing_in_a_globe_drag_doesnt_jump() {
-    let mut rig = globe_rig(30.0, 2.0, 0.0, false);
+    let mut rig = globe_rig(30.0, 2.0, 0.0);
     rig.down(1, PointerKind::Touch, 300.0, 300.0);
     for i in 1..=20 {
         rig.now += 16.0;

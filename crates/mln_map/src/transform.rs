@@ -1297,13 +1297,11 @@ impl Transform {
                         {
                             Some(held.location)
                         }
-                        _ => on_globe(&self.state, &from).then(|| {
-                            VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(
-                                &self.state,
-                                &flipped(&self.state, &from),
-                                WrapMode::Unwrapped,
-                            )
-                        }),
+                        _ if on_globe(&self.state, &from) => self
+                            .state
+                            .screen_coordinate_to_lat_lng(&flipped(&self.state, &from), WrapMode::Unwrapped)
+                            .ok(),
+                        _ => None,
                     };
                     location.and_then(|location| {
                         VerticalPerspectiveProjection::drag_center_holding(
