@@ -342,28 +342,26 @@ pub(crate) fn real_to_text(r: f64) -> String {
 
     // Every significant digit of the value: an f64 has at most 767.
     let exact = format!("{:.766e}", r.abs());
-    let (mantissa, exponent) = exact.split_once('e').expect("exponent form");
-    let mut exponent: i32 = exponent.parse().expect("decimal exponent");
+    // `{:e}` always writes "<mantissa>e<exponent>".
+    let (mantissa, exponent) = exact.split_once('e').unwrap_or((&exact, "0"));
+    let mut exponent: i32 = exponent.parse().unwrap_or(0);
     let mut digits: Vec<u8> = mantissa.bytes().filter(u8::is_ascii_digit).collect();
 
     let round_up = digits[15] >= b'5';
     digits.truncate(15);
     if round_up {
-        match digits.iter().rposition(|&d| d != b'9') {
-            Some(i) => {
-                digits[i] += 1;
-                digits.truncate(i + 1);
-            }
-            None => {
-                digits = vec![b'1'];
-                exponent += 1;
-            }
+        if let Some(i) = digits.iter().rposition(|&d| d != b'9') {
+            digits[i] += 1;
+            digits.truncate(i + 1);
+        } else {
+            digits = vec![b'1'];
+            exponent += 1;
         }
     }
     while digits.len() > 1 && digits.last() == Some(&b'0') {
         digits.pop();
     }
-    let digits = String::from_utf8(digits).expect("ASCII digits");
+    let digits: String = digits.into_iter().map(char::from).collect();
 
     if (-4..=14).contains(&exponent) {
         let (int_part, frac_part) = if exponent >= 0 {

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{Sender, channel};
 
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
@@ -6,21 +6,19 @@ use crate::dsl::*;
 use crate::find_zoom_curve::find_zoom_curve_checked;
 use crate::value::Value;
 
-type Records = Arc<Mutex<Vec<(EventSeverity, Event, String)>>>;
-
-struct Recorder(Records);
+struct Recorder(Sender<(EventSeverity, Event, String)>);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push((severity, event, msg.to_owned()));
+        let _ = self.0.send((severity, event, msg.to_owned()));
         true
     }
 }
 
 #[test]
 fn invalid_zoom_curve_is_logged() {
-    let records: Records = Arc::default();
-    let previous = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&records)))));
+    let (sender, records) = channel();
+    let previous = Log::set_thread_observer(Some(Box::new(Recorder(sender))));
 
     // A zoom step nested below the top level.
     let expression =
@@ -29,7 +27,7 @@ fn invalid_zoom_curve_is_logged() {
 
     let _ = Log::set_thread_observer(previous);
     assert_eq!(
-        *records.lock().unwrap(),
+        records.try_iter().collect::<Vec<_>>(),
         [(
             EventSeverity::Error,
             Event::Style,

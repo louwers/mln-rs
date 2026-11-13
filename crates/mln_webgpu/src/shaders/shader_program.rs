@@ -795,7 +795,7 @@ impl ShaderProgram {
         });
         pipeline
             .map_err(|error| {
-                Log::error(Event::Render, format!("{} pipeline creation failed: {error}", self.shader_name))
+                Log::error(Event::Render, format!("{} pipeline creation failed: {error}", self.shader_name));
             })
             .ok()
     }
