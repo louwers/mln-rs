@@ -15,8 +15,8 @@ use crate::latency::{set_tile_latency, take_tile_requests};
 use crate::meter::{Meter, live_heap_mib, ms};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
-    basemap_center, basemap_mlt_style, basemap_north_west, basemap_point, basemap_south_east, basemap_style, cjk_center,
-    prepare_basemap_mlt, write_frame,
+    basemap_center, basemap_mlt_style, basemap_north_west, basemap_point, basemap_south_east, basemap_style,
+    cjk_center, prepare_basemap_mlt, write_frame,
 };
 use crate::stats::{median, percentile};
 use crate::{Context, Metrics};

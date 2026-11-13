@@ -15,7 +15,10 @@
 //   geometry for it), which shifts the property index of later features;
 //   an id column whose length then differs fails the tile;
 // - the triangles of a tessellated (multi-)polygon are its slice of the index
-//   buffer, counted from the feature's first vertex.
+//   buffer, counted from the feature's first decoded vertex. Unlike the C++,
+//   which counts them as the tile stores its rings, without the closing
+//   vertices that decoding appends, this skips those vertices: otherwise
+//   the triangles of a polygon with several rings name the wrong vertices.
 // - property columns keep their presence: a value of an optional column is
 //   absent past its end, and a non-optional column shorter than the layer
 //   throws "Missing property value" when read (PresentProperties::getProperty);
@@ -729,10 +732,10 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Tria
             }
             let start = values.vertex_range(index)?.start as u32;
             let first = rebased.len();
-            let rings = &ring_lens[rings_of[index].clone()];
+            let ring_counts = &ring_lens[rings_of[index].clone()];
             // Polygons are never dropped.
             if let Some(g) = geometry_of[index]
-                && rebase_triangles(corners, start, rings, &mut ring_shifts, &mut rebased)
+                && rebase_triangles(corners, start, ring_counts, &mut ring_shifts, &mut rebased)
             {
                 geometries[g].triangles = Some(first..rebased.len());
             }
