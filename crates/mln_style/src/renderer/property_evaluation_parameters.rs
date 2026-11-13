@@ -19,11 +19,11 @@ pub struct CrossfadeParameters {
 
 #[derive(Clone, Debug)]
 pub struct PropertyEvaluationParameters {
-    pub z: f32,
+    pub(crate) z: f32,
     /// The time to evaluate transitions at; `None` evaluates them as ended.
     pub now: Option<Instant>,
-    pub zoom_history: ZoomHistory,
-    pub default_fade_duration: Duration,
+    pub(crate) zoom_history: ZoomHistory,
+    pub(crate) default_fade_duration: Duration,
 
     /// The style's current global state, used to evaluate `global-state` expressions.
     pub global_state: Option<Arc<GlobalStateMap>>,

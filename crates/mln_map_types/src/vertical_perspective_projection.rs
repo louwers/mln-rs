@@ -204,7 +204,7 @@ fn remap_saturate(value: f64, old_min: f64, old_max: f64, new_min: f64, new_max:
 impl VerticalPerspectiveProjection {
     /// GL JS `earthRadius`, `GLOBE_RADIUS` in the shaders: the meters an
     /// elevation is measured against.
-    pub const GLOBE_RADIUS_METERS: f64 = 6_371_008.8;
+    pub(crate) const GLOBE_RADIUS_METERS: f64 = 6_371_008.8;
 
     /// Globe radius in pixels at the given world size and center latitude, so
     /// zoom means the same on both projections.
@@ -217,7 +217,7 @@ impl VerticalPerspectiveProjection {
     /// globe radius is divided by. Mercator ends at the edge of its range, so
     /// past it the globe keeps its size there.
     #[must_use]
-    pub fn planet_scale(center_latitude: f64) -> f64 {
+    pub(crate) fn planet_scale(center_latitude: f64) -> f64 {
         mln_math::deg2rad(f64::min(center_latitude.abs(), LATITUDE_MAX)).cos()
     }
 
@@ -326,7 +326,7 @@ impl VerticalPerspectiveProjection {
     }
 
     #[must_use]
-    pub fn surface_vector_to_lat_lng(surface: &Vec3) -> LatLng {
+    pub(crate) fn surface_vector_to_lat_lng(surface: &Vec3) -> LatLng {
         let latitude = mln_math::rad2deg(clamp(surface[1], -1.0, 1.0).asin());
         let length_xz = (surface[0] * surface[0] + surface[2] * surface[2]).sqrt();
         if length_xz <= POLE_AXIS_DISTANCE {
@@ -340,7 +340,7 @@ impl VerticalPerspectiveProjection {
     /// Unit-sphere point under a screen pixel (y up, as `TransformState`
     /// takes it); pixels off the globe snap to the nearest point on the
     /// horizon.
-    pub fn screen_coordinate_to_surface(state: &TransformState, point: &ScreenCoordinate) -> Vec3 {
+    pub(crate) fn screen_coordinate_to_surface(state: &TransformState, point: &ScreenCoordinate) -> Vec3 {
         let origin = state.get_globe_camera_position();
         let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
 
@@ -376,7 +376,7 @@ impl VerticalPerspectiveProjection {
         ray_sphere_intersection(&state.get_globe_camera_position(), &direction).is_some()
     }
 
-    pub fn screen_coordinate_to_lat_lng(
+    pub(crate) fn screen_coordinate_to_lat_lng(
         state: &TransformState,
         point: &ScreenCoordinate,
         wrap_mode: WrapMode,
@@ -401,7 +401,7 @@ impl VerticalPerspectiveProjection {
 
     /// The center that puts `lat_lng` under `anchor` with the bearing
     /// unchanged, if one exists.
-    pub fn center_for_location_at_point(
+    pub(crate) fn center_for_location_at_point(
         state: &TransformState,
         lat_lng: &LatLng,
         anchor: &ScreenCoordinate,
@@ -579,7 +579,7 @@ impl VerticalPerspectiveProjection {
     /// given zoom. Past the Mercator range there are no tiles, so the center
     /// reaches the pole only while that area fits in the view, and eases back
     /// to the edge of the range as the area outgrows the view.
-    pub fn max_latitude(state: &TransformState, zoom: f64) -> f64 {
+    pub(crate) fn max_latitude(state: &TransformState, zoom: f64) -> f64 {
         let area_radians = mln_math::deg2rad(90.0 - LATITUDE_MAX);
         let area_pixels =
             Self::globe_radius_pixels(Projection::world_size(2.0f64.powf(zoom)), LATITUDE_MAX) * area_radians;

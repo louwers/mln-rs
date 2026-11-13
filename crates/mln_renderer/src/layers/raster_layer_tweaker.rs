@@ -16,14 +16,14 @@ use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
-pub struct RasterLayerTweaker {
+pub(crate) struct RasterLayerTweaker {
     base: LayerTweakerBase,
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl RasterLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         RasterLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,
@@ -105,7 +105,7 @@ impl LayerTweaker for RasterLayerTweaker {
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                &[0.0, 0.0],
+                [0.0, 0.0],
                 TranslateAnchorType::Viewport,
                 false,
                 false,

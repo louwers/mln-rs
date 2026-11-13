@@ -5,8 +5,6 @@ use std::rc::Rc;
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 
-use crate::draw_mode::DrawMode;
-
 /// A backend buffer attached to a shared index vector.
 pub trait IndexBufferBase: Any {}
 
@@ -44,20 +42,6 @@ impl IndexVectorBase {
             v: indexes,
             #[cfg(target_family = "wasm")]
             host: None,
-            buffer: None,
-            dirty: true,
-            released: false,
-            freed_count: 0,
-        }
-    }
-
-    /// The C++ copy constructor: the buffer is not copied.
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        IndexVectorBase {
-            v: self.v.clone(),
-            #[cfg(target_family = "wasm")]
-            host: self.host.clone(),
             buffer: None,
             dirty: true,
             released: false,
@@ -126,26 +110,10 @@ impl IndexVectorBase {
             self.free_raw_data();
         }
     }
-    #[must_use]
-    pub fn is_released(&self) -> bool {
-        self.released
-    }
-    pub fn reserve(&mut self, count: usize) {
-        self.v.reserve(count);
-    }
-    pub fn extend(&mut self, n: usize, val: u16) {
-        debug_assert!(!self.released);
-        self.v.resize(self.v.len() + n, val);
-        self.dirty = true;
-    }
     pub fn at_mut(&mut self, n: usize) -> &mut u16 {
         debug_assert!(!self.released);
         self.dirty = true;
         &mut self.v[n]
-    }
-    #[must_use]
-    pub fn at(&self, n: usize) -> u16 {
-        self.v[n]
     }
     /// The element count, which stays when the CPU copy is freed.
     #[must_use]
@@ -153,25 +121,11 @@ impl IndexVectorBase {
         self.v.len() + self.host_count() + self.freed_count
     }
     #[must_use]
-    pub fn bytes(&self) -> usize {
-        self.elements() * std::mem::size_of::<u16>()
-    }
-    #[must_use]
     pub fn empty(&self) -> bool {
         self.elements() == 0
     }
-    pub fn clear(&mut self) {
-        self.dirty = true;
-        self.v.clear();
-        #[cfg(target_family = "wasm")]
-        {
-            self.host = None;
-        }
-        self.freed_count = 0;
-        self.buffer = None;
-    }
     /// Indicate that this shared index vector will no longer be updated.
-    pub fn release(&mut self) {
+    pub(crate) fn release(&mut self) {
         self.released = true;
         // If we've already created a buffer, we don't need the raw data any more.
         if self.buffer.is_some() && !self.dirty {
@@ -195,14 +149,5 @@ impl IndexVectorBase {
     #[must_use]
     pub fn vector(&self) -> &Vec<u16> {
         &self.v
-    }
-
-    /// Appends `indexes`, whose count must be a multiple of `mode`'s group
-    /// size.
-    pub fn emplace_back_group(&mut self, mode: DrawMode, indexes: &[u16]) {
-        debug_assert!(indexes.len().is_multiple_of(mode.buffer_group_size()), "wrong buffer element count");
-        debug_assert!(!self.released);
-        self.v.extend_from_slice(indexes);
-        self.dirty = true;
     }
 }

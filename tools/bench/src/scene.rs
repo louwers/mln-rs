@@ -26,7 +26,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 /// A display's refresh period at 60 Hz, the clock continuous cases draw on.
-pub const REFRESH: Duration = Duration::from_nanos(16_666_667);
+pub(crate) const REFRESH: Duration = Duration::from_nanos(16_666_667);
 
 /// How long a scene may take to show a complete frame.
 const WAIT_LIMIT: Duration = Duration::from_secs(60);
@@ -34,30 +34,30 @@ const WAIT_LIMIT: Duration = Duration::from_secs(60);
 /// A `render-tests/real-world/*` style whose tiles the cache database
 /// holds, at its test's camera and size.
 #[derive(Clone, Copy, Debug)]
-pub struct RealWorld {
-    pub name: &'static str,
-    pub latitude: f64,
-    pub longitude: f64,
-    pub zoom: f64,
+pub(crate) struct RealWorld {
+    pub(crate) name: &'static str,
+    pub(crate) latitude: f64,
+    pub(crate) longitude: f64,
+    pub(crate) zoom: f64,
 }
 
-pub const REAL_WORLD: &[RealWorld] = &[
+pub(crate) const REAL_WORLD: &[RealWorld] = &[
     RealWorld { name: "chicago", latitude: 41.870_396_5, longitude: -87.694_244_5, zoom: 13.0 },
     RealWorld { name: "sanfrancisco", latitude: 37.766_999_5, longitude: -122.448_635, zoom: 15.0 },
     RealWorld { name: "norway", latitude: 64.863_174, longitude: 10.8181, zoom: 12.0 },
 ];
 
 /// The render tests' view, whose 1x sprites the cache database holds.
-pub const REAL_WORLD_SIZE: Size = Size { width: 512, height: 512 };
+pub(crate) const REAL_WORLD_SIZE: Size = Size { width: 512, height: 512 };
 
 impl RealWorld {
     #[must_use]
-    pub fn style_url(&self) -> String {
+    pub(crate) fn style_url(&self) -> String {
         format!("local://styles/{}.json", self.name)
     }
 
     #[must_use]
-    pub fn center(&self) -> LatLng {
+    pub(crate) fn center(&self) -> LatLng {
         LatLng::new(self.latitude, self.longitude).expect("a scene's center")
     }
 }
@@ -65,7 +65,7 @@ impl RealWorld {
 /// The render suite's `text-font/chinese` style, without its unused
 /// sprite: `data/chinese.geojson`'s 500 labels in Noto Sans CJK, about 2,500
 /// characters over 80 glyph ranges, all in the cache database.
-pub const CJK_STYLE: &str = r#"{
+pub(crate) const CJK_STYLE: &str = r#"{
   "version": 8,
   "sources": { "geojson": { "type": "geojson", "data": "local://data/chinese.geojson" } },
   "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
@@ -82,21 +82,21 @@ pub const CJK_STYLE: &str = r#"{
 
 /// The `text-font/chinese` test's camera, at its size.
 #[must_use]
-pub fn cjk_center() -> LatLng {
+pub(crate) fn cjk_center() -> LatLng {
     LatLng::new(43.390_048_986_773_8, -70.752_954_126).expect("the CJK view's center")
 }
-pub const CJK_ZOOM: f64 = 11.0;
-pub const CJK_SIZE: Size = Size { width: 512, height: 512 };
+pub(crate) const CJK_ZOOM: f64 = 11.0;
+pub(crate) const CJK_SIZE: Size = Size { width: 512, height: 512 };
 
 /// maplibre-native-ffi's view of the basemap.
-pub const BASEMAP_SIZE: Size = Size { width: 1024, height: 768 };
+pub(crate) const BASEMAP_SIZE: Size = Size { width: 1024, height: 768 };
 /// The zoom of the basemap's tiles, and of its views.
-pub const BASEMAP_ZOOM: f64 = 14.0;
+pub(crate) const BASEMAP_ZOOM: f64 = 14.0;
 
 /// A point of the basemap's 5 x 5 block of zoom-14 tiles, in tile
 /// coordinates: x from 2618 to 2623, y from 6330 to 6335.
 #[must_use]
-pub fn basemap_point(x: f64, y: f64) -> LatLng {
+pub(crate) fn basemap_point(x: f64, y: f64) -> LatLng {
     let tiles = 16384.0;
     let longitude = x / tiles * 360.0 - 180.0;
     let latitude = (std::f64::consts::PI * (1.0 - 2.0 * y / tiles)).sinh().atan().to_degrees();
@@ -105,21 +105,21 @@ pub fn basemap_point(x: f64, y: f64) -> LatLng {
 
 /// The block's center, and the corners of the views that share no tile.
 #[must_use]
-pub fn basemap_center() -> LatLng {
+pub(crate) fn basemap_center() -> LatLng {
     basemap_point(2620.5, 6332.5)
 }
 #[must_use]
-pub fn basemap_north_west() -> LatLng {
+pub(crate) fn basemap_north_west() -> LatLng {
     basemap_point(2619.0, 6331.0)
 }
 #[must_use]
-pub fn basemap_south_east() -> LatLng {
+pub(crate) fn basemap_south_east() -> LatLng {
     basemap_point(2622.0, 6334.0)
 }
 
 /// The basemap's style, its URLs pointing into `fixtures`.
 #[must_use]
-pub fn basemap_style(fixtures: &Path) -> String {
+pub(crate) fn basemap_style(fixtures: &Path) -> String {
     let style = include_str!("../style.json");
     style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
 }
@@ -127,10 +127,10 @@ pub fn basemap_style(fixtures: &Path) -> String {
 /// When the map draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// A static map: [`Scene::render_still`] draws a complete frame.
+    /// A static map: `Scene::render_still` draws a complete frame.
     Still,
     /// A continuous map, drawn only when the case calls
-    /// [`Scene::render_frame`], as a host on a display clock does.
+    /// `Scene::render_frame`, as a host on a display clock does.
     OnDemand,
     /// A continuous map, drawn whenever the map updates, as the run loop
     /// delivers the update.
@@ -189,7 +189,7 @@ impl Scene {
     }
 
     /// A map whose renderer shares `glyph_cache`.
-    pub fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
+    pub(crate) fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
         let file_sources = file_sources();
         // MLN_BENCH_CACHE_DB names the render suite's cache database where
         // the binary runs without its checkout, as on an Android device.
@@ -214,28 +214,28 @@ impl Scene {
     }
 
     /// Starts loading a style; it loads while the scene renders.
-    pub fn load_url(&mut self, url: &str) {
+    pub(crate) fn load_url(&mut self, url: &str) {
         self.map.style_mut().load_url(url);
     }
 
-    pub fn load_json(&mut self, json: &str) {
+    pub(crate) fn load_json(&mut self, json: &str) {
         self.map.style_mut().load_json(json);
     }
 
     /// Adds an image to the style, as a sprite's would be.
-    pub fn add_image(&mut self, id: &str, image: PremultipliedImage) {
+    pub(crate) fn add_image(&mut self, id: &str, image: PremultipliedImage) {
         let image =
             mln_style::image::Impl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
                 .expect("a style image");
         self.map.style_mut().add_image(Arc::new(image));
     }
 
-    pub fn jump(&mut self, center: LatLng, zoom: f64) {
+    pub(crate) fn jump(&mut self, center: LatLng, zoom: f64) {
         self.jump_rotated(center, zoom, 0.0);
     }
 
     /// Jumps to a camera with `bearing` in degrees.
-    pub fn jump_rotated(&mut self, center: LatLng, zoom: f64, bearing: f64) {
+    pub(crate) fn jump_rotated(&mut self, center: LatLng, zoom: f64, bearing: f64) {
         self.map.jump_to(&CameraOptions {
             center: Some(center),
             zoom: Some(zoom),
@@ -245,7 +245,7 @@ impl Scene {
     }
 
     /// Jumps to a camera with `bearing` and `pitch` in degrees.
-    pub fn jump_pitched(&mut self, center: LatLng, zoom: f64, bearing: f64, pitch: f64) {
+    pub(crate) fn jump_pitched(&mut self, center: LatLng, zoom: f64, bearing: f64, pitch: f64) {
         self.map.jump_to(&CameraOptions {
             center: Some(center),
             zoom: Some(zoom),
@@ -258,7 +258,7 @@ impl Scene {
     /// A complete still frame, read back. Waits on the run loop, which
     /// sleeps until there is work, rather than polling it, so the wait
     /// costs no CPU time.
-    pub fn render_still(&mut self) -> PremultipliedImage {
+    pub(crate) fn render_still(&mut self) -> PremultipliedImage {
         let outcome: Rc<RefCell<Option<Result<(), String>>>> = Rc::default();
         let done = outcome.clone();
         self.map.render_still(Box::new(move |result| {
@@ -273,7 +273,7 @@ impl Scene {
 
     /// A complete still frame through `HeadlessFrontend::render`, as the
     /// render tests draw one.
-    pub fn render(&mut self) -> PremultipliedImage {
+    pub(crate) fn render(&mut self) -> PremultipliedImage {
         let result = self.frontend.render(&mut self.map);
         self.observe();
         match result {
@@ -283,7 +283,7 @@ impl Scene {
     }
 
     /// Delivers what the map's workers have finished, without waiting.
-    pub fn pump(&mut self) {
+    pub(crate) fn pump(&mut self) {
         RunLoop::get().run_once();
         self.observe();
     }
@@ -311,7 +311,7 @@ impl Scene {
 
     /// Draws a frame of what has loaded and waits for the GPU to finish
     /// it, as a host does before presenting it.
-    pub fn render_frame(&mut self) -> RenderFrameStatus {
+    pub(crate) fn render_frame(&mut self) -> RenderFrameStatus {
         self.frontend.render_frame();
         self.wait_for_gpu();
         self.observe();
@@ -341,19 +341,19 @@ impl Scene {
     }
 
     /// The last frame [`Scene::render_frame`] drew, read back.
-    pub fn read_frame(&self) -> PremultipliedImage {
+    pub(crate) fn read_frame(&self) -> PremultipliedImage {
         self.frontend.read_still_image()
     }
 
     /// Draws frames on the display's clock until one shows the view
     /// complete, and returns how many it drew.
-    pub fn present_until_complete(&mut self) -> usize {
+    pub(crate) fn present_until_complete(&mut self) -> usize {
         self.present_until(|status| status.mode == RenderMode::Full)
     }
 
     /// Draws frames on the display's clock until the view is complete and
     /// no transition or fade needs another frame.
-    pub fn settle(&mut self) -> usize {
+    pub(crate) fn settle(&mut self) -> usize {
         self.present_until(|status| status.mode == RenderMode::Full && !status.needs_repaint)
     }
 
@@ -382,7 +382,7 @@ impl Scene {
 
     /// Lets the run loop work for `duration`, drawing as the map asks
     /// (`Mode::Driven`).
-    pub fn run_for(&mut self, duration: Duration) {
+    pub(crate) fn run_for(&mut self, duration: Duration) {
         let timer = Timer::new();
         let elapsed = Rc::new(Cell::new(false));
         let done = elapsed.clone();
@@ -391,18 +391,18 @@ impl Scene {
     }
 
     /// The frames the renderer has drawn.
-    pub fn frames(&self) -> u64 {
+    pub(crate) fn frames(&self) -> u64 {
         self.observer.frames
     }
 
     /// Whether the last frame showed the view complete with nothing left to
     /// animate.
-    pub fn is_settled(&self) -> bool {
+    pub(crate) fn is_settled(&self) -> bool {
         self.observer.last_frame.as_ref().is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
     }
 
     /// Shows or hides every layer that draws `source`.
-    pub fn set_source_visible(&mut self, source: &str, visible: bool) {
+    pub(crate) fn set_source_visible(&mut self, source: &str, visible: bool) {
         let ids: Vec<String> = self
             .map
             .style()
@@ -420,20 +420,20 @@ impl Scene {
 
     /// The vertex and index buffers the GPU held after the last frame, in
     /// MiB.
-    pub fn gpu_buffers_mib(&self) -> f64 {
+    pub(crate) fn gpu_buffers_mib(&self) -> f64 {
         let stats = &self.observer.last_frame.as_ref().expect("a frame").rendering_stats;
         f64::from(stats.mem_vertex_buffers + stats.mem_index_buffers) / (1024.0 * 1024.0)
     }
 
     /// Drops every loaded tile and the renderer's other data, as after a
     /// memory warning: the next frames load and lay out again.
-    pub fn clear_data(&self) {
+    pub(crate) fn clear_data(&self) {
         self.frontend.with_renderer(mln_renderer::Renderer::clear_data);
     }
 
     /// Sets `selected` on every other feature of `source_layer` in the
     /// loaded tiles, and `false` on the rest.
-    pub fn select_every_feature(&self, source: &str, source_layer: &str) {
+    pub(crate) fn select_every_feature(&self, source: &str, source_layer: &str) {
         self.frontend.with_renderer(|renderer| {
             let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
             let features = renderer.query_source_features(source, &options).expect("the source's features");
@@ -449,7 +449,7 @@ impl Scene {
     }
 
     /// Sets the `selected` state of one feature.
-    pub fn select_feature(&self, source: &str, source_layer: &str, id: &str, selected: bool) {
+    pub(crate) fn select_feature(&self, source: &str, source_layer: &str, id: &str, selected: bool) {
         self.frontend.with_renderer(|renderer| {
             let mut state = ValueObject::new();
             state.insert("selected".to_string(), Value::Bool(selected));
@@ -458,7 +458,7 @@ impl Scene {
     }
 
     /// The ids of the loaded features of a source layer.
-    pub fn feature_ids(&self, source: &str, source_layer: &str) -> Vec<String> {
+    pub(crate) fn feature_ids(&self, source: &str, source_layer: &str) -> Vec<String> {
         self.frontend.with_renderer(|renderer| {
             let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
             let features = renderer.query_source_features(source, &options).expect("the source's features");
@@ -497,7 +497,7 @@ impl Scene {
 }
 
 /// Writes `image` as `<dir>/<name>.png`, the name's slashes as dashes.
-pub fn write_frame(dir: &Path, name: &str, image: &PremultipliedImage) {
+pub(crate) fn write_frame(dir: &Path, name: &str, image: &PremultipliedImage) {
     std::fs::create_dir_all(dir).expect("the frames directory");
     let path = dir.join(format!("{}.png", name.replace('/', "-")));
     std::fs::write(&path, mln_image::png_writer::encode_png(image))

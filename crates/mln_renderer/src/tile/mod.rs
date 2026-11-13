@@ -2,21 +2,21 @@
 //! `mln_tile` decodes the tile data.
 
 #[allow(clippy::module_inception)]
-pub mod tile;
+pub(crate) mod tile;
 
-pub mod custom_tile;
-pub mod geojson_tile;
-pub mod geojson_tile_data;
-pub mod geometry_tile;
-pub mod geometry_tile_worker;
-pub mod ordered_replies;
-pub mod raster_dem_tile; // dem-heatmap
-pub mod raster_tile;
-pub mod tile_cache;
-pub mod tile_loader;
-pub mod tile_observer;
-pub mod tile_worker_transport;
-pub mod vector_tile;
+pub(crate) mod custom_tile;
+pub(crate) mod geojson_tile;
+pub(crate) mod geojson_tile_data;
+pub(crate) mod geometry_tile;
+pub(crate) mod geometry_tile_worker;
+pub(crate) mod ordered_replies;
+pub(crate) mod raster_dem_tile; // dem-heatmap
+pub(crate) mod raster_tile;
+pub(crate) mod tile_cache;
+pub(crate) mod tile_loader;
+pub(crate) mod tile_observer;
+pub(crate) mod tile_worker_transport;
+pub(crate) mod vector_tile;
 pub mod worker_codec;
 
-pub use tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, TileUpdateParameters};
+pub use tile::TileOperation;

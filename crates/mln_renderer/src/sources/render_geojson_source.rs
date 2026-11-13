@@ -63,7 +63,7 @@ fn supercluster_extension(
     })
 }
 
-pub struct RenderGeoJSONSource {
+pub(crate) struct RenderGeoJSONSource {
     tile_source: RenderTileSource,
     data: Option<Weak<dyn GeoJSONData>>,
     /// The mode the tiles in the pyramid were created with.
@@ -72,7 +72,7 @@ pub struct RenderGeoJSONSource {
 
 impl RenderGeoJSONSource {
     #[must_use]
-    pub fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderGeoJSONSource { tile_source: RenderTileSource::new(impl_), data: None, tiles_update_synchronously: false }
     }
@@ -80,19 +80,11 @@ impl RenderGeoJSONSource {
     fn impl_(&self) -> Arc<geojson_source_impl::Impl> {
         downcast_arc::<geojson_source_impl::Impl>(&self.tile_source.base.base_impl)
     }
-
-    pub fn tile_source(&self) -> &RenderTileSource {
-        &self.tile_source
-    }
 }
 
 impl RenderSource for RenderGeoJSONSource {
     fn base(&self) -> &RenderSourceBase {
         &self.tile_source.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderSourceBase {
-        &mut self.tile_source.base
     }
 
     fn is_loaded(&self) -> bool {

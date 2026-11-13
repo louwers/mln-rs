@@ -21,7 +21,7 @@ use crate::draw_target::{DrawTarget, TargetResource};
 use crate::renderer_backend::BackendImpl;
 use crate::texture2d::{Texture2D, Texture2DUsage};
 
-pub struct OffscreenTextureResource {
+pub(crate) struct OffscreenTextureResource {
     backend: Rc<BackendImpl>,
     context: Weak<Context>,
     extent: vk::Extent2D,
@@ -57,14 +57,14 @@ impl OffscreenTextureResource {
         }
     }
 
-    pub fn read_still_image(&self) -> PremultipliedImage {
+    pub(crate) fn read_still_image(&self) -> PremultipliedImage {
         self.color_texture
             .borrow_mut()
             .read_image()
             .unwrap_or_else(|| PremultipliedImage::new(Size::new(self.extent.width, self.extent.height)))
     }
 
-    pub fn get_texture(&self) -> Texture2DPtr {
+    pub(crate) fn get_texture(&self) -> Texture2DPtr {
         self.color_texture.clone()
     }
 
@@ -147,13 +147,13 @@ impl Drop for OffscreenTextureResource {
 }
 
 /// A draw target over a color texture, without depth or stencil.
-pub struct OffscreenTexture {
+pub(crate) struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,
 }
 
 impl OffscreenTexture {
-    pub fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_));
         OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource }
     }

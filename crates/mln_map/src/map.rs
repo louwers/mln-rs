@@ -42,7 +42,7 @@ use crate::transform::{Transform, TransformObserver};
 
 /// Receives the outcome of [`Map::render_still`]: `Ok` once a complete frame
 /// rendered, or why the image failed.
-pub type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
+pub(crate) type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
 
 /// A call of the style's observer.
 enum StyleEvent {
@@ -761,22 +761,6 @@ impl Map {
         self.on_update();
     }
 
-    pub fn is_gesture_in_progress(&self) -> bool {
-        self.transform.is_gesture_in_progress()
-    }
-
-    pub fn is_rotating(&self) -> bool {
-        self.transform.is_rotating()
-    }
-
-    pub fn is_scaling(&self) -> bool {
-        self.transform.is_scaling()
-    }
-
-    pub fn is_panning(&self) -> bool {
-        self.transform.is_panning()
-    }
-
     /// On the globe, let drags and zooms around a point turn the bearing so
     /// the planet keeps its orientation, for maps whose rotation gestures are
     /// enabled. Off, the default, they hold the bearing as GL JS does.
@@ -795,7 +779,7 @@ impl Map {
     /// Samples the camera's animations at the host's frame time, from now on,
     /// and starts new ones from it: call it at the start of each frame with
     /// `Instant::now()`, before rendering. One older than
-    /// [`STALE_FRAME_TIME`](crate::transform::STALE_FRAME_TIME) counts as
+    /// `STALE_FRAME_TIME` counts as
     /// unset, so commands made while the host isn't drawing start now. If an
     /// animation runs, the map updates for this frame at once. `None` goes
     /// back to sampling at `Instant::now()` whenever the map updates. Still
@@ -1076,10 +1060,6 @@ impl Map {
         self.on_update();
     }
 
-    pub fn get_frustum_offset(&self) -> EdgeInsets {
-        self.transform.get_frustum_offset()
-    }
-
     pub fn get_map_options(&self) -> MapOptions {
         let transform = &self.transform;
         let state = transform.get_state();
@@ -1172,7 +1152,7 @@ impl Map {
     /// The stats of the most recently completed frame, whose
     /// `frame_rendered_features` holds every rendered feature by source and
     /// layer. `None` before the first frame.
-    pub fn get_last_frame_stats(&self) -> Option<Arc<RenderingStats>> {
+    pub(crate) fn get_last_frame_stats(&self) -> Option<Arc<RenderingStats>> {
         self.last_frame_stats.clone()
     }
 
@@ -1267,13 +1247,9 @@ impl Map {
 
     /// Whether the globe hides a location from the camera; a Mercator map
     /// hides nothing.
-    pub fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
         self.transform.is_location_occluded(lat_lng)
-    }
-
-    /// Whether the map is drawn as a globe, alone or blending into Mercator.
-    pub fn is_globe_rendering(&self) -> bool {
-        self.transform.get_state().is_globe_rendering()
     }
 
     pub fn lat_lngs_for_pixels(

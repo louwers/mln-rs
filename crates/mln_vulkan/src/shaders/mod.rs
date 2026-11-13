@@ -14,11 +14,11 @@
 //! have the id of another layer's storage buffer, so a buffer's binding
 //! follows from its id and from whether it is a storage buffer.
 
-pub mod compiler;
+pub(crate) mod compiler;
 /// The C++ core's GLSL, with the port's changes.
 #[rustfmt::skip]
-pub mod glsl_sources;
-pub mod layout;
-pub mod shader_group;
-pub mod shader_program;
-pub mod shader_source;
+pub(crate) mod glsl_sources;
+pub(crate) mod layout;
+pub(crate) mod shader_group;
+pub(crate) mod shader_program;
+pub(crate) mod shader_source;

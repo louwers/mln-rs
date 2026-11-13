@@ -4,7 +4,7 @@ use super::layer_factory::LayerFactory;
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::background_layer::{BackgroundLayer, Impl};
 
-pub struct BackgroundLayerFactory;
+pub(crate) struct BackgroundLayerFactory;
 
 impl LayerFactory for BackgroundLayerFactory {
     fn get_type_info(&self) -> &'static LayerTypeInfo {

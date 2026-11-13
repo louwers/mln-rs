@@ -21,11 +21,7 @@ use mln_gfx::texture2d::{SamplerState, Texture2D as _};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_vulkan::Context;
-use mln_vulkan::renderer_backend::BackendImpl;
-use mln_vulkan::shaders::compiler::{Stage, compile};
-use mln_vulkan::surface_target::{Overlay, OverlayTarget};
-use mln_vulkan::texture2d::Texture2D;
+use mln_vulkan::{Context, Device, Overlay, OverlayTarget, ShaderStage, Texture2D, compile_glsl};
 
 use crate::overlay::Paint;
 
@@ -80,7 +76,8 @@ struct Texture {
 }
 
 struct Painter {
-    backend: Rc<BackendImpl>,
+    /// The device, which lives until the painter's objects are destroyed.
+    device: Device,
     context: Weak<Context>,
     set_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
@@ -179,7 +176,7 @@ impl Painter {
 
         // Dropping the painter destroys what a failed step leaves.
         let mut painter = Painter {
-            backend: target.context.get_backend().clone(),
+            device: target.context.device().clone(),
             context: target.context.weak(),
             set_layout,
             pipeline_layout,
@@ -199,14 +196,14 @@ impl Painter {
         if self.pipeline != vk::Pipeline::null() && self.render_pass == render_pass {
             return Ok(());
         }
-        let module = |stage: Stage, source: &str| {
-            let spirv = compile(stage, source)?;
+        let module = |stage: ShaderStage, source: &str| {
+            let spirv = compile_glsl(stage, source)?;
             let create_info = vk::ShaderModuleCreateInfo::default().code(&spirv);
             // SAFETY: the code is the SPIR-V module naga wrote.
             unsafe { device.create_shader_module(&create_info, None) }.map_err(|e| format!("shader module: {e}"))
         };
-        let vertex = module(Stage::Vertex, VERTEX_SHADER)?;
-        let pipeline = module(Stage::Fragment, FRAGMENT_SHADER).and_then(|fragment| {
+        let vertex = module(ShaderStage::Vertex, VERTEX_SHADER)?;
+        let pipeline = module(ShaderStage::Fragment, FRAGMENT_SHADER).and_then(|fragment| {
             let pipeline = self.create_pipeline(device, render_pass, vertex, fragment);
             // SAFETY: a pipeline keeps nothing of the modules it was made
             // from.
@@ -218,9 +215,9 @@ impl Painter {
         let old = std::mem::replace(&mut self.pipeline, pipeline?);
         self.render_pass = render_pass;
         if old != vk::Pipeline::null() {
-            let backend = self.backend.clone();
+            let device = self.device.clone();
             // SAFETY: the frames that drew with the pipeline are done.
-            destroy_later(&self.context, move || unsafe { backend.get_device().destroy_pipeline(old, None) });
+            destroy_later(&self.context, move || unsafe { device.ash_device().destroy_pipeline(old, None) });
         }
         Ok(())
     }
@@ -501,13 +498,13 @@ impl Painter {
 
 impl Drop for Painter {
     fn drop(&mut self) {
-        let backend = self.backend.clone();
+        let device = self.device.clone();
         let (set_layout, pipeline_layout, pipeline) = (self.set_layout, self.pipeline_layout, self.pipeline);
         let pools = std::mem::take(&mut self.pools);
         // The textures go first: each waits for the frames that use it.
         self.textures.clear();
         destroy_later(&self.context, move || {
-            let device = backend.get_device();
+            let device = device.ash_device();
             // SAFETY: the frames that drew with these are done, and nothing
             // else refers to them: destroying a pool frees its sets.
             unsafe {

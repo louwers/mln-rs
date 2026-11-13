@@ -56,6 +56,7 @@ use mln_util::size::Size;
 use crate::buffer_resource::BufferResource;
 use crate::command_encoder::CommandEncoder;
 use crate::descriptor_set::{DescriptorPoolGrowable, ImageBinding, UniformDescriptorSet};
+use crate::device::Device;
 use crate::drawable_builder::DrawableBuilder;
 use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
@@ -92,7 +93,7 @@ struct GlobeClipMaskInstance {
 }
 
 /// Destroys something once the frame it was last used in is done.
-pub type DeletionTask = Box<dyn FnOnce(&Context)>;
+pub(crate) type DeletionTask = Box<dyn FnOnce(&Context)>;
 
 /// What a frame in flight records into and waits on, and what is destroyed
 /// when it is done.
@@ -105,18 +106,18 @@ struct FrameResources {
 /// The attachments a render pass is made for. Without a depth format, the
 /// pass has a color attachment only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct RenderPassKey {
-    pub color_format: vk::Format,
-    pub depth_format: Option<vk::Format>,
+pub(crate) struct RenderPassKey {
+    pub(crate) color_format: vk::Format,
+    pub(crate) depth_format: Option<vk::Format>,
     /// The layout the pass leaves the color attachment in.
-    pub color_final_layout: vk::ImageLayout,
+    pub(crate) color_final_layout: vk::ImageLayout,
     /// Whether the pass draws over what the color attachment holds, which
     /// is in `color_final_layout` when the pass begins, instead of clearing
     /// it.
-    pub color_load: bool,
+    pub(crate) color_load: bool,
     /// The layout the pass leaves the depth attachment in, having stored its
     /// depth and stencil for the host, or `None` to discard them.
-    pub depth_final_layout: Option<vk::ImageLayout>,
+    pub(crate) depth_final_layout: Option<vk::ImageLayout>,
 }
 
 #[derive(Default)]
@@ -268,7 +269,7 @@ impl Context {
     /// Creates the context of `backend`, or an error if the device can't make
     /// the frames' command buffers, the descriptor set layouts or the pipeline
     /// layouts.
-    pub fn new(backend: Rc<BackendImpl>) -> Result<Rc<Context>, String> {
+    pub(crate) fn new(backend: Rc<BackendImpl>) -> Result<Rc<Context>, String> {
         let storage = |type_: DescriptorSetType| type_.buffer_shape().storage as u32;
         let uniform = |type_: DescriptorSetType| type_.buffer_shape().uniform as u32;
         let (global, layer, drawable) =
@@ -369,7 +370,7 @@ impl Context {
     }
 
     /// The owning `Rc`.
-    pub fn rc(&self) -> Rc<Context> {
+    pub(crate) fn rc(&self) -> Rc<Context> {
         self.weak_self.upgrade().expect("vulkan::Context used after drop")
     }
 
@@ -377,13 +378,18 @@ impl Context {
         self.weak_self.clone()
     }
 
-    pub fn get_backend(&self) -> &Rc<BackendImpl> {
+    pub(crate) fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
+    }
+
+    /// The device the context renders on.
+    pub fn device(&self) -> &Device {
+        self.backend.device()
     }
 
     /// Makes `surface` the images that frames are acquired from and
     /// presented to, from the next frame on.
-    pub fn set_surface(&self, surface: &Rc<SurfaceResource>) {
+    pub(crate) fn set_surface(&self, surface: &Rc<SurfaceResource>) {
         let surface = Rc::downgrade(surface);
         if !self.surface.borrow().ptr_eq(&surface) {
             *self.surface.borrow_mut() = surface;
@@ -481,7 +487,7 @@ impl Context {
 
     /// Records `function`'s commands into a command buffer of their own, and
     /// waits for them.
-    pub fn submit_one_time_command(&self, function: impl FnOnce(vk::CommandBuffer)) {
+    pub(crate) fn submit_one_time_command(&self, function: impl FnOnce(vk::CommandBuffer)) {
         let device = self.backend.get_device();
         let allocate_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(self.backend.get_command_pool())
@@ -520,7 +526,7 @@ impl Context {
     /// between its passes, where they run before the passes that follow, or
     /// else into a command buffer of their own, which is waited for.
     /// Returns whether the commands have run.
-    pub fn record_upload(&self, function: impl FnOnce(vk::CommandBuffer)) -> bool {
+    pub(crate) fn record_upload(&self, function: impl FnOnce(vk::CommandBuffer)) -> bool {
         if self.frame_recording.get() && !self.render_pass_active.get() {
             function(self.get_command_buffer());
             false
@@ -544,7 +550,7 @@ impl Context {
 
     /// Has the swapchain rebuilt, a few frames from now or, without
     /// `use_delay`, before the next one.
-    pub fn request_surface_update(&self, use_delay: bool) {
+    pub(crate) fn request_surface_update(&self, use_delay: bool) {
         if self.surface_update_requested.get() {
             if !use_delay {
                 self.surface_update_latency.set(0);
@@ -577,7 +583,7 @@ impl Context {
 
     /// Waits for the frame of the current frame resources. Returns false if
     /// there is none or the wait fails.
-    pub fn wait_frame(&self) -> bool {
+    pub(crate) fn wait_frame(&self) -> bool {
         let fence = self
             .frame_resources
             .borrow()
@@ -591,7 +597,7 @@ impl Context {
     /// Has the frame being recorded wait for `semaphore` before its commands
     /// run: for a timeline, until it reaches `value`, and for a binary
     /// semaphore, whose `value` is `None`, until it is signaled.
-    pub fn wait_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
+    pub(crate) fn wait_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
         let mut sync = self.frame_sync.borrow_mut();
         sync.timeline |= value.is_some();
         sync.waits.push((semaphore, value.unwrap_or(0)));
@@ -600,7 +606,7 @@ impl Context {
     /// Has the frame being recorded signal `semaphore` once its commands
     /// finish: a timeline with `value`, or a binary semaphore, whose `value`
     /// is `None`.
-    pub fn signal_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
+    pub(crate) fn signal_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
         let mut sync = self.frame_sync.borrow_mut();
         sync.timeline |= value.is_some();
         sync.signals.push((semaphore, value.unwrap_or(0)));
@@ -609,13 +615,13 @@ impl Context {
     /// Has the next frame that begins wait, before its commands run, for
     /// every command submitted to the queue before it, such as the host's
     /// reads of an image that the frame draws into.
-    pub fn wait_for_queue_in_next_frame(&self) {
+    pub(crate) fn wait_for_queue_in_next_frame(&self) {
         self.queue_wait.set(true);
     }
 
     /// Ends the frame's command buffer, submits it and, with a platform
     /// surface, presents the image.
-    pub fn submit_frame(&self) {
+    pub(crate) fn submit_frame(&self) {
         let frame_sync = std::mem::take(&mut *self.frame_sync.borrow_mut());
         if !self.frame_recording.replace(false) {
             return;
@@ -723,7 +729,7 @@ impl Context {
 
     /// Compiles the two stages of `source`, with its prelude, the program's
     /// defines and `additional_defines`.
-    pub fn create_program(
+    pub(crate) fn create_program(
         &self,
         name: String,
         source: &GlslShaderSource,
@@ -772,7 +778,7 @@ impl Context {
 
     /// A buffer bound where a buffer or a vertex attribute has no data.
     /// Shaders don't read it.
-    pub fn get_dummy_buffer(&self) -> vk::Buffer {
+    pub(crate) fn get_dummy_buffer(&self) -> vk::Buffer {
         if let Some(buffer) = self.dummy_buffer.borrow().as_ref() {
             return buffer.get_vulkan_buffer();
         }
@@ -786,7 +792,7 @@ impl Context {
     }
 
     /// A texture bound where a shader's texture has no image.
-    pub fn get_dummy_texture(&self) -> Option<ImageBinding> {
+    pub(crate) fn get_dummy_texture(&self) -> Option<ImageBinding> {
         let mut dummy = self.dummy_texture.borrow_mut();
         let texture = if let Some(texture) = dummy.as_mut() {
             texture
@@ -809,7 +815,7 @@ impl Context {
         })
     }
 
-    pub fn get_descriptor_set_layout(&self, type_: DescriptorSetType) -> vk::DescriptorSetLayout {
+    pub(crate) fn get_descriptor_set_layout(&self, type_: DescriptorSetType) -> vk::DescriptorSetLayout {
         self.descriptor_set_layouts.get()[type_ as usize]
     }
 
@@ -842,13 +848,13 @@ impl Context {
 
     /// The layout of the drawable pipelines: the four descriptor sets, and
     /// the drawable's index as the push constant.
-    pub fn get_general_pipeline_layout(&self) -> vk::PipelineLayout {
+    pub(crate) fn get_general_pipeline_layout(&self) -> vk::PipelineLayout {
         self.general_pipeline_layout.get()
     }
 
     /// The layout of the clip mask pipelines, whose push constants are
     /// matrices.
-    pub fn get_push_constant_pipeline_layout(&self) -> vk::PipelineLayout {
+    pub(crate) fn get_push_constant_pipeline_layout(&self) -> vk::PipelineLayout {
         self.push_constant_pipeline_layout.get()
     }
 
@@ -860,7 +866,7 @@ impl Context {
     /// (`SurfaceResource::initRenderPass`) keeps the color only; a
     /// pass without (`OffscreenTextureResource::createRenderPass`) leaves
     /// the color attachment ready to be sampled.
-    pub fn get_render_pass(&self, key: RenderPassKey) -> vk::RenderPass {
+    pub(crate) fn get_render_pass(&self, key: RenderPassKey) -> vk::RenderPass {
         if let Some(&render_pass) = self.render_passes.borrow().get(&key) {
             return render_pass;
         }
@@ -969,7 +975,7 @@ impl Context {
 
     /// The color and depth-stencil formats of a render pass that
     /// [`get_render_pass`](Self::get_render_pass) made.
-    pub fn render_pass_formats(&self, render_pass: vk::RenderPass) -> Option<(vk::Format, Option<vk::Format>)> {
+    pub(crate) fn render_pass_formats(&self, render_pass: vk::RenderPass) -> Option<(vk::Format, Option<vk::Format>)> {
         self.render_passes
             .borrow()
             .iter()
@@ -977,18 +983,18 @@ impl Context {
             .map(|(key, _)| (key.color_format, key.depth_format))
     }
 
-    pub fn get_current_frame_resource_index(&self) -> u8 {
+    pub(crate) fn get_current_frame_resource_index(&self) -> u8 {
         self.frame_resource_index.get()
     }
 
     /// The number of the frame being recorded, or of the last one. No two
     /// frames have the same.
-    pub fn frame_serial(&self) -> u64 {
+    pub(crate) fn frame_serial(&self) -> u64 {
         self.frame_serial.get()
     }
 
     /// The command buffer of the frame.
-    pub fn get_command_buffer(&self) -> vk::CommandBuffer {
+    pub(crate) fn get_command_buffer(&self) -> vk::CommandBuffer {
         self.frame_resources
             .borrow()
             .get(usize::from(self.frame_resource_index.get()))
@@ -1171,7 +1177,7 @@ impl Context {
             // or it overwrites the tile in front. The shader flips Y for
             // Vulkan's downward framebuffer, so the far side is still
             // clockwise on screen.
-            pipeline_info.set_cull_mode(&CullFaceMode::back_ccw());
+            pipeline_info.set_cull_mode(CullFaceMode::back_ccw());
             pipeline_info.input_bindings.push(
                 vk::VertexInputBindingDescription::default()
                     .binding(1)
@@ -1466,8 +1472,8 @@ impl GfxContext for Context {
         VertexAttributeArray::new_ptr()
     }
 
-    fn create_drawable_builder(&self, name: String) -> UniqueDrawableBuilder {
-        Box::new(DrawableBuilder::new(name))
+    fn create_drawable_builder(&self) -> UniqueDrawableBuilder {
+        Box::new(DrawableBuilder::new())
     }
 
     fn create_uniform_buffer(&self, data: &[u8], persistent: bool, ssbo: bool) -> UniformBufferPtr {

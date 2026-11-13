@@ -57,9 +57,9 @@ use crate::tile::worker_codec::fields;
 /// The tile data the worker parses (C++ `std::unique_ptr<const
 /// GeometryTileData>`, shared here with the feature index instead of
 /// cloned).
-pub type SharedTileData = Arc<dyn GeometryTileData + Send + Sync>;
+pub(crate) type SharedTileData = Arc<dyn GeometryTileData + Send + Sync>;
 
-pub use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
+pub(crate) use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
@@ -125,7 +125,7 @@ impl WorkerMessage {
     /// The message's correlation id, or 0 for the glyph and image replies,
     /// which have none.
     #[must_use]
-    pub fn correlation_id(&self) -> u64 {
+    pub(crate) fn correlation_id(&self) -> u64 {
         match self {
             WorkerMessage::SetData { correlation_id, .. }
             | WorkerMessage::SetLayers { correlation_id, .. }
@@ -151,7 +151,7 @@ pub enum TileMessage {
 
 /// The worker's reference to itself: `None` for the synchronous worker, whose
 /// self-sent messages are direct calls.
-pub type SelfRef = Option<PoolActorRef<GeometryTileWorker>>;
+pub(crate) type SelfRef = Option<PoolActorRef<GeometryTileWorker>>;
 
 /// The tile data a `GeometryTileWorker` received.
 enum ReceivedData {
@@ -161,12 +161,11 @@ enum ReceivedData {
     Received(Option<SharedTileData>),
 }
 
-pub struct GeometryTileWorker {
+pub(crate) struct GeometryTileWorker {
     self_ref: SelfRef,
     parent: Box<dyn TileEndpoint>,
 
     id: OverscaledTileID,
-    source_id: String,
     obsolete: Arc<AtomicBool>,
     mode: MapMode,
     pixel_ratio: f32,
@@ -208,11 +207,10 @@ pub struct GeometryTileWorker {
 
 impl GeometryTileWorker {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         self_ref: SelfRef,
         parent: Box<dyn TileEndpoint>,
         id: OverscaledTileID,
-        source_id: String,
         obsolete: Arc<AtomicBool>,
         mode: MapMode,
         pixel_ratio: f32,
@@ -225,7 +223,6 @@ impl GeometryTileWorker {
             self_ref,
             parent,
             id,
-            source_id,
             obsolete,
             mode,
             pixel_ratio,
@@ -259,7 +256,7 @@ impl GeometryTileWorker {
     }
 
     /// Runs the member function a message stands for.
-    pub fn handle(&mut self, message: WorkerMessage) {
+    pub(crate) fn handle(&mut self, message: WorkerMessage) {
         match message {
             WorkerMessage::SetData { data, available_images, correlation_id } => {
                 self.set_data(data, available_images, correlation_id);
@@ -329,7 +326,7 @@ impl GeometryTileWorker {
        See the C++ file for the full description.
     */
 
-    pub fn set_data(
+    pub(crate) fn set_data(
         &mut self,
         data: Option<SharedTileData>,
         available_images: Arc<VecSet<String>>,
@@ -353,7 +350,7 @@ impl GeometryTileWorker {
         });
     }
 
-    pub fn set_layers(
+    pub(crate) fn set_layers(
         &mut self,
         layers: Vec<Arc<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
@@ -382,7 +379,7 @@ impl GeometryTileWorker {
         });
     }
 
-    pub fn set_available_images(&mut self, available_images: Arc<VecSet<String>>, correlation_id: u64) {
+    pub(crate) fn set_available_images(&mut self, available_images: Arc<VecSet<String>>, correlation_id: u64) {
         self.guarded(|this| {
             this.available_images = available_images;
             this.correlation_id = correlation_id;
@@ -401,7 +398,7 @@ impl GeometryTileWorker {
         });
     }
 
-    pub fn reset(&mut self, correlation_id: u64) {
+    pub(crate) fn reset(&mut self, correlation_id: u64) {
         self.layers = None;
         self.data = ReceivedData::Pending;
         self.correlation_id = correlation_id;
@@ -414,7 +411,7 @@ impl GeometryTileWorker {
         }
     }
 
-    pub fn set_show_collision_boxes(&mut self, show_collision_boxes: bool, correlation_id: u64) {
+    pub(crate) fn set_show_collision_boxes(&mut self, show_collision_boxes: bool, correlation_id: u64) {
         self.guarded(|this| {
             this.show_collision_boxes = show_collision_boxes;
             this.correlation_id = correlation_id;
@@ -439,7 +436,7 @@ impl GeometryTileWorker {
 
     /// Forgets the glyphs that came back missing and parses again, so the
     /// layout requests them again.
-    pub fn retry_missing_glyphs(&mut self, correlation_id: u64) {
+    pub(crate) fn retry_missing_glyphs(&mut self, correlation_id: u64) {
         self.guarded(|this| {
             for glyphs in this.glyph_map.values_mut() {
                 glyphs.retain(|_, glyph| glyph.is_some());
@@ -524,7 +521,7 @@ impl GeometryTileWorker {
         }
     }
 
-    pub fn on_glyphs_available(&mut self, new_glyph_map: GlyphMap, mut results: HBShapeResults) {
+    pub(crate) fn on_glyphs_available(&mut self, new_glyph_map: GlyphMap, mut results: HBShapeResults) {
         // C++ moves the pending glyphs out of `newGlyphMap` in the first loop
         // and adds the rest (the shaped glyphs) in the second.
         let mut shaped_glyph_map = new_glyph_map.clone();
@@ -616,7 +613,7 @@ impl GeometryTileWorker {
         }
     }
 
-    pub fn on_images_available(
+    pub(crate) fn on_images_available(
         &mut self,
         new_icon_map: ImageMap,
         new_pattern_map: ImageMap,
@@ -839,8 +836,8 @@ impl GeometryTileWorker {
             for layout in &mut layouts {
                 if self.obsolete() {
                     if let Some(atlas) = &self.dynamic_texture_atlas {
-                        atlas.remove_textures(&glyph_atlas.texture_handles, &glyph_atlas.dynamic_texture);
-                        atlas.remove_textures(&image_atlas.texture_handles, &image_atlas.dynamic_texture);
+                        atlas.remove_textures(&glyph_atlas.texture_handles, glyph_atlas.dynamic_texture.as_ref());
+                        atlas.remove_textures(&image_atlas.texture_handles, image_atlas.dynamic_texture.as_ref());
                     }
                     return Ok(());
                 }
@@ -882,10 +879,5 @@ impl GeometryTileWorker {
         );
         self.parent.send(TileMessage::Layout { result: layout_result, correlation_id: self.correlation_id });
         Ok(())
-    }
-
-    #[must_use]
-    pub fn source_id(&self) -> &str {
-        &self.source_id
     }
 }

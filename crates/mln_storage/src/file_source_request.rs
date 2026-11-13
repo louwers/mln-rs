@@ -15,12 +15,12 @@ use crate::file_source::Callback;
 use crate::response::Response;
 
 /// The members of `FileSourceRequest` that its messages use.
-pub struct FileSourceRequestState {
+pub(crate) struct FileSourceRequestState {
     response_callback: Rc<RefCell<Callback>>,
 }
 
 impl FileSourceRequestState {
-    pub fn set_response(&self, response: Response) {
+    pub(crate) fn set_response(&self, response: Response) {
         // Copy, because calling the callback will sometimes self destroy
         // this object. We cannot move because this method can be called
         // more than once.
@@ -29,7 +29,7 @@ impl FileSourceRequestState {
     }
 }
 
-pub struct FileSourceRequest {
+pub(crate) struct FileSourceRequest {
     cancel_callback: Option<Box<dyn FnOnce()>>,
     mailbox: Arc<Mailbox>,
 }
@@ -38,18 +38,18 @@ impl FileSourceRequest {
     /// Creates a request that delivers responses to `callback` on the current
     /// thread's scheduler.
     #[must_use]
-    pub fn new(callback: Callback) -> Self {
+    pub(crate) fn new(callback: Callback) -> Self {
         let state = Rc::new(FileSourceRequestState { response_callback: Rc::new(RefCell::new(callback)) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         FileSourceRequest { cancel_callback: None, mailbox }
     }
 
-    pub fn on_cancel(&mut self, callback: Box<dyn FnOnce()>) {
+    pub(crate) fn on_cancel(&mut self, callback: Box<dyn FnOnce()>) {
         self.cancel_callback = Some(callback);
     }
 
     #[must_use]
-    pub fn actor(&self) -> ActorRef<FileSourceRequestState> {
+    pub(crate) fn actor(&self) -> ActorRef<FileSourceRequestState> {
         ActorRef::new(&self.mailbox)
     }
 }

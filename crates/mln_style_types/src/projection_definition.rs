@@ -17,7 +17,7 @@ const VERTICAL_PERSPECTIVE_NAME: &str = "vertical-perspective";
 const GLOBE_NAME: &str = "globe";
 
 #[must_use]
-pub fn projection_type_name(type_: ProjectionType) -> &'static str {
+pub(crate) fn projection_type_name(type_: ProjectionType) -> &'static str {
     match type_ {
         ProjectionType::Mercator => MERCATOR_NAME,
         ProjectionType::VerticalPerspective => VERTICAL_PERSPECTIVE_NAME,

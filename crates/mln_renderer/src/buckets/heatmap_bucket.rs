@@ -39,28 +39,28 @@ crate::paint_property_binders!(
 /// A heatmap layout vertex, also used for the heatmap texture's quad.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct HeatmapLayoutVertex {
-    pub a1: [i16; 2],
+pub(crate) struct HeatmapLayoutVertex {
+    pub(crate) a1: [i16; 2],
 }
 
-pub type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
+pub(crate) type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 
 #[derive(Serialize, Deserialize)]
-pub struct HeatmapBucket {
-    pub base: BucketBase,
-    pub vertices: GeometryVec<HeatmapLayoutVertex>,
-    pub triangles: GeometryVec<u16>,
-    pub segments: Vec<SegmentBase>,
+pub(crate) struct HeatmapBucket {
+    pub(crate) base: BucketBase,
+    pub(crate) vertices: GeometryVec<HeatmapLayoutVertex>,
+    pub(crate) triangles: GeometryVec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
     /// Behind `RwLock`s like the other buckets' binders (the bucket is
     /// shared; C++ heatmap buckets have no feature-state update).
-    pub paint_property_binders: VecMap<String, RwLock<HeatmapBinders>>,
-    pub mode: MapMode,
+    pub(crate) paint_property_binders: VecMap<String, RwLock<HeatmapBinders>>,
+    pub(crate) mode: MapMode,
 }
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl HeatmapBucket {
-    pub fn new(parameters: &BucketParameters, layers: &[Arc<dyn LayerProperties>]) -> Self {
+    pub(crate) fn new(parameters: &BucketParameters, layers: &[Arc<dyn LayerProperties>]) -> Self {
         let mut paint_property_binders = VecMap::new();
         for layer in layers {
             // `emplace` keeps the first entry for an id.
@@ -84,7 +84,7 @@ impl HeatmapBucket {
     /// The layout vertex for `p` with extrusion (`ex`, `ey`). As in C++,
     /// `p.x * 2` is an integer, added to a float and truncated to `i16`.
     #[must_use]
-    pub fn vertex(p: GeometryCoordinate, ex: f32, ey: f32) -> HeatmapLayoutVertex {
+    pub(crate) fn vertex(p: GeometryCoordinate, ex: f32, ey: f32) -> HeatmapLayoutVertex {
         HeatmapLayoutVertex {
             a1: [
                 ((i32::from(p.x) * 2) as f32 + f32::midpoint(ex, 1.0)) as i32 as i16,
@@ -94,7 +94,7 @@ impl HeatmapBucket {
     }
 
     #[must_use]
-    pub fn texture_vertex(p: GeometryCoordinate) -> HeatmapTextureLayoutVertex {
+    pub(crate) fn texture_vertex(p: GeometryCoordinate) -> HeatmapTextureLayoutVertex {
         HeatmapLayoutVertex { a1: [p.x, p.y] }
     }
 }

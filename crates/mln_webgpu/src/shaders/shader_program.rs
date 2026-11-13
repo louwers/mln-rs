@@ -29,7 +29,7 @@ use crate::context::Context;
 use crate::shaders::shader_source::{AttributeInfo, TextureInfo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BindingType {
+pub(crate) enum BindingType {
     UniformBuffer,
     ReadOnlyStorageBuffer,
     StorageBuffer,
@@ -40,11 +40,11 @@ pub enum BindingType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BindingInfo {
-    pub group: u32,
-    pub binding: u32,
-    pub type_: BindingType,
-    pub visibility: wgpu::ShaderStages,
+pub(crate) struct BindingInfo {
+    pub(crate) group: u32,
+    pub(crate) binding: u32,
+    pub(crate) type_: BindingType,
+    pub(crate) visibility: wgpu::ShaderStages,
 }
 
 /// Runs `create` inside a validation error scope and returns the error the
@@ -181,13 +181,13 @@ fn to_stencil_op(op: StencilOpType) -> wgpu::StencilOperation {
 
 /// A vertex buffer layout (`WGPUVertexBufferLayout`) with owned attributes.
 #[derive(Clone, Debug)]
-pub struct VertexLayout {
-    pub array_stride: u64,
-    pub step_mode: wgpu::VertexStepMode,
-    pub attributes: Vec<wgpu::VertexAttribute>,
+pub(crate) struct VertexLayout {
+    pub(crate) array_stride: u64,
+    pub(crate) step_mode: wgpu::VertexStepMode,
+    pub(crate) attributes: Vec<wgpu::VertexAttribute>,
 }
 
-pub struct ShaderProgram {
+pub(crate) struct ShaderProgram {
     shader_program_id: SimpleIdentity,
     shader_name: String,
     context: Rc<Context>,
@@ -212,9 +212,9 @@ pub struct ShaderProgram {
 
 impl ShaderProgram {
     /// Static name member (`is_shader_v`)
-    pub const NAME: &'static str = "WebGPUShader";
+    pub(crate) const NAME: &'static str = "WebGPUShader";
 
-    pub fn new(
+    pub(crate) fn new(
         context: &Context,
         vertex_source: &str,
         fragment_source: &str,
@@ -240,7 +240,7 @@ impl ShaderProgram {
     ///
     /// A `globalIndex` the sources declare in group 0 moves to a group of its
     /// own (see [`get_index_group`](Self::get_index_group)).
-    pub fn from_sources(context: &Context, vertex_source: &str, fragment_source: &str) -> Self {
+    pub(crate) fn from_sources(context: &Context, vertex_source: &str, fragment_source: &str) -> Self {
         let index_group = index_group_of(&[vertex_source, fragment_source]);
         let (vertex_source, fragment_source) = match index_group {
             Some(group) => (move_global_index(vertex_source, group), move_global_index(fragment_source, group)),
@@ -308,7 +308,7 @@ impl ShaderProgram {
     /// calls with the same `reuse_hash`. C++ also takes a renderable, which
     /// it doesn't use.
     #[allow(clippy::too_many_arguments)]
-    pub fn get_render_pipeline(
+    pub(crate) fn get_render_pipeline(
         &self,
         vertex_layouts: &[VertexLayout],
         color_mode: &ColorMode,
@@ -316,7 +316,7 @@ impl ShaderProgram {
         stencil_mode: &StencilMode,
         draw_mode_type: DrawModeType,
         reuse_hash: Option<u64>,
-        cull_mode: &CullFaceMode,
+        cull_mode: CullFaceMode,
     ) -> Option<wgpu::RenderPipeline> {
         // Check cache first
         if let Some(hash) = reuse_hash
@@ -326,7 +326,7 @@ impl ShaderProgram {
         }
         // Create new pipeline
         let pipeline =
-            self.create_pipeline(vertex_layouts, color_mode, depth_mode, stencil_mode, draw_mode_type, *cull_mode);
+            self.create_pipeline(vertex_layouts, color_mode, depth_mode, stencil_mode, draw_mode_type, cull_mode);
         // Cache the pipeline if we have a reuse hash
         if let (Some(hash), Some(p)) = (reuse_hash, &pipeline) {
             self.render_pipeline_cache.borrow_mut().insert(hash, p.clone());
@@ -334,7 +334,7 @@ impl ShaderProgram {
         pipeline
     }
 
-    pub fn get_binding_infos_for_group(&self, group: u32) -> &[BindingInfo] {
+    pub(crate) fn get_binding_infos_for_group(&self, group: u32) -> &[BindingInfo] {
         for (i, &g) in self.bind_group_order.iter().enumerate() {
             if g == group {
                 return &self.bindings_per_group[i];
@@ -343,11 +343,11 @@ impl ShaderProgram {
         &[]
     }
 
-    pub fn get_bind_group_layout(&self, group: u32) -> Option<&wgpu::BindGroupLayout> {
+    pub(crate) fn get_bind_group_layout(&self, group: u32) -> Option<&wgpu::BindGroupLayout> {
         self.bind_group_order.iter().position(|&g| g == group).map(|i| &self.bind_group_layouts[i])
     }
 
-    pub fn get_bind_group_order(&self) -> &[u32] {
+    pub(crate) fn get_bind_group_order(&self) -> &[u32] {
         &self.bind_group_order
     }
 
@@ -357,20 +357,21 @@ impl ShaderProgram {
     /// with the dynamic offset of its index (`Context::index_bind_group`),
     /// so its other groups bind only what it shares with the layer's other
     /// draws.
-    pub fn get_index_group(&self) -> Option<u32> {
+    pub(crate) fn get_index_group(&self) -> Option<u32> {
         self.index_group
     }
 
-    pub fn get_shader_name(&self) -> &str {
+    pub(crate) fn get_shader_name(&self) -> &str {
         &self.shader_name
     }
 
     /// Whether both WGSL modules compiled.
-    pub fn has_shader_modules(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn has_shader_modules(&self) -> bool {
         self.vertex_shader_module.is_some() && self.fragment_shader_module.is_some()
     }
 
-    pub fn init_attribute(&mut self, info: &AttributeInfo) {
+    pub(crate) fn init_attribute(&mut self, info: &AttributeInfo) {
         let index = info.index as i32;
         // Indexes must be unique, if there's a conflict check the `attributes`
         // array in the shader
@@ -382,7 +383,7 @@ impl ShaderProgram {
         self.vertex_attributes.set(info.id, index, info.data_type, 1);
     }
 
-    pub fn init_instance_attribute(&mut self, info: &AttributeInfo) {
+    pub(crate) fn init_instance_attribute(&mut self, info: &AttributeInfo) {
         // Index is the block index of the instance attribute
         let index = info.index as i32;
         #[cfg(debug_assertions)]
@@ -390,7 +391,7 @@ impl ShaderProgram {
         self.instance_attributes.set(info.id, index, info.data_type, 1);
     }
 
-    pub fn init_texture(&mut self, info: &TextureInfo) {
+    pub(crate) fn init_texture(&mut self, info: &TextureInfo) {
         debug_assert!(info.id < self.texture_bindings.len());
         if info.id >= self.texture_bindings.len() {
             return;
@@ -808,7 +809,7 @@ impl ShaderProgramBase for ShaderProgram {
 }
 
 /// Downcast a shader handle to the WebGPU program (C++ `static_cast`).
-pub fn as_webgpu_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
+pub(crate) fn as_webgpu_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
     shader.downcast_ref::<ShaderProgram>()
 }
 

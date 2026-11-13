@@ -21,7 +21,8 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 pub type Mat4 = [f64; 16];
-pub type Matf4 = [f32; 16];
+#[cfg(test)]
+pub(crate) type Matf4 = [f32; 16];
 
 /// Matrix operations on `Mat4`.
 ///
@@ -35,7 +36,9 @@ pub type Matf4 = [f32; 16];
 /// The C++ literals are floats (`1.0f / (left - right)`) promoted to double;
 /// all of them are exactly representable, so the arithmetic here is f64.
 pub mod matrix {
-    use super::{Mat4, Matf4};
+    use super::Mat4;
+    #[cfg(test)]
+    use super::Matf4;
     use crate::vectors::Vec4;
 
     pub fn identity(out: &mut Mat4) {
@@ -57,13 +60,15 @@ pub mod matrix {
         out[15] = 1.0;
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn identity4() -> Mat4 {
+    pub(crate) const fn identity4() -> Mat4 {
         [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn identity4f() -> Matf4 {
+    pub(crate) const fn identity4f() -> Matf4 {
         [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     }
 
@@ -168,10 +173,6 @@ pub mod matrix {
         out[13] = 0.0;
         out[14] = (2.0 * far * near) * nf;
         out[15] = 0.0;
-    }
-
-    pub fn copy(out: &mut Mat4, a: &Mat4) {
-        *out = *a;
     }
 
     pub fn translate(out: &mut Mat4, a: &Mat4, x: f64, y: f64, z: f64) {
@@ -405,7 +406,8 @@ pub mod matrix {
         result
     }
 
-    pub fn diffsplit(out_value: &mut Matf4, out_diff: &mut Matf4, source: &Mat4) {
+    #[cfg(test)]
+    pub(crate) fn diffsplit(out_value: &mut Matf4, out_diff: &mut Matf4, source: &Mat4) {
         for i in 0..16 {
             out_value[i] = source[i] as f32;
             // double - float in double, then narrowed to float

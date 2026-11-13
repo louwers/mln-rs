@@ -31,12 +31,9 @@ impl OffscreenTarget {
     }
 
     /// The backend the target draws on.
-    pub fn backend(&self) -> &Rc<RendererBackend> {
+    #[cfg(test)]
+    pub(crate) fn backend(&self) -> &Rc<RendererBackend> {
         &self.backend
-    }
-
-    pub fn size(&self) -> Size {
-        self.size.get()
     }
 
     /// Draws the next frame at `size`, and drops the image of the last one.

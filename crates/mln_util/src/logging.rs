@@ -45,7 +45,7 @@ pub enum Event {
 impl EventSeverity {
     /// The name log lines print.
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             EventSeverity::Debug => "DEBUG",
             EventSeverity::Info => "INFO",
@@ -149,10 +149,6 @@ impl Log {
     #[must_use]
     pub fn set_thread_observer(observer: Option<Box<dyn Observer>>) -> Option<Box<dyn Observer>> {
         THREAD_OBSERVER.with(|o| std::mem::replace(&mut *o.borrow_mut(), observer))
-    }
-
-    pub fn debug(event: Event, msg: impl AsRef<str>) {
-        Self::record(EventSeverity::Debug, event, -1, msg.as_ref());
     }
 
     pub fn info(event: Event, msg: impl AsRef<str>) {

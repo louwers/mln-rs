@@ -22,7 +22,8 @@ fn upscale(x: i64) -> i64 {
 
 /// A contour command in 26.6, as `FT_Outline_Decompose` emits them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Segment {
+#[expect(clippy::enum_variant_names, reason = "FreeType's names for the outline commands")]
+pub(crate) enum Segment {
     MoveTo(i64, i64),
     LineTo(i64, i64),
     ConicTo(i64, i64, i64, i64),
@@ -404,7 +405,7 @@ fn sweep(w: &Worker, mut span: impl FnMut(i32, i32, i32, u8)) {
 /// first (FreeType's positive pitch), for an outline already translated
 /// into the bitmap (26.6, y up).
 #[must_use]
-pub fn render(outline: &[Segment], width: u32, rows: u32, overlap: bool) -> Vec<u8> {
+pub(crate) fn render(outline: &[Segment], width: u32, rows: u32, overlap: bool) -> Vec<u8> {
     let mut bitmap = vec![0u8; (width * rows) as usize];
     if outline.is_empty() || width == 0 || rows == 0 {
         return bitmap;

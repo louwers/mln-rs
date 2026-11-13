@@ -15,14 +15,14 @@ use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::TileRenderData;
 
 /// A vector tile, MVT or MLT.
-pub struct VectorTile {
+pub(crate) struct VectorTile {
     tile: GeometryTile,
     loader: Option<TileLoader>,
 }
 
 impl VectorTile {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         id: OverscaledTileID,
         source_id: String,
         parameters: &TileParameters<'_>,
@@ -36,8 +36,9 @@ impl VectorTile {
         VectorTile { tile, loader: Some(loader) }
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn geometry_tile(&self) -> &GeometryTile {
+    pub(crate) fn geometry_tile(&self) -> &GeometryTile {
         &self.tile
     }
 }
@@ -59,6 +60,7 @@ impl Tile for VectorTile {
         self.tile.create_render_data()
     }
 
+    #[cfg(test)]
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         self.tile.set_observer(observer);
     }

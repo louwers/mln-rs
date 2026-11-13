@@ -39,13 +39,12 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-pub type RenderLayerPtr = Rc<RefCell<dyn RenderLayer>>;
-pub type RenderLayerReferences = Vec<RenderLayerPtr>;
+pub(crate) type RenderLayerPtr = Rc<RefCell<dyn RenderLayer>>;
 
 #[derive(Clone)]
-pub struct LayerRenderData {
-    pub bucket: BucketPtr,
-    pub layer_properties: Arc<dyn LayerProperties>,
+pub(crate) struct LayerRenderData {
+    pub(crate) bucket: BucketPtr,
+    pub(crate) layer_properties: Arc<dyn LayerProperties>,
 }
 
 // symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
@@ -54,9 +53,9 @@ pub struct LayerRenderData {
 /// A symbol layer's `*-translate` in pixels, carried into placement the way
 /// GL JS passes `translation`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SymbolTranslate {
-    pub offset: [f32; 2],
-    pub anchor: TranslateAnchorType,
+pub(crate) struct SymbolTranslate {
+    pub(crate) offset: [f32; 2],
+    pub(crate) anchor: TranslateAnchorType,
 }
 
 impl Default for SymbolTranslate {
@@ -67,46 +66,50 @@ impl Default for SymbolTranslate {
 
 #[derive(Clone)]
 pub struct BucketPlacementData {
-    pub bucket: BucketPtr,
+    pub(crate) bucket: BucketPtr,
     /// The `RenderTile` (`tile`): `tile_owner[tile_index]`.
-    pub tile_owner: Rc<Vec<RenderTile>>,
-    pub tile_index: usize,
-    pub feature_index: Option<Arc<crate::geometry::feature_index::FeatureIndex>>,
-    pub source_id: String,
-    pub sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
-    pub text_translate: SymbolTranslate,
-    pub icon_translate: SymbolTranslate,
+    pub(crate) tile_owner: Rc<Vec<RenderTile>>,
+    pub(crate) tile_index: usize,
+    pub(crate) feature_index: Option<Arc<crate::geometry::feature_index::FeatureIndex>>,
+    pub(crate) source_id: String,
+    pub(crate) sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
+    pub(crate) text_translate: SymbolTranslate,
+    pub(crate) icon_translate: SymbolTranslate,
 }
 
 impl BucketPlacementData {
     /// `tile`.
     #[must_use]
-    pub fn tile(&self) -> &RenderTile {
+    pub(crate) fn tile(&self) -> &RenderTile {
         &self.tile_owner[self.tile_index]
     }
 }
 
-pub type LayerPlacementData = Vec<BucketPlacementData>;
+pub(crate) type LayerPlacementData = Vec<BucketPlacementData>;
 
 pub struct LayerPrepareParameters<'a> {
-    pub source: Option<&'a dyn RenderSource>,
+    pub(crate) source: Option<&'a dyn RenderSource>,
     /// conformance: `ImageManager& imageManager` (background-pattern).
-    pub image_manager: &'a crate::image_manager::ImageManager,
-    pub pattern_atlas: &'a RefCell<PatternAtlas>,
-    pub line_atlas: &'a RefCell<LineAtlas>,
-    pub state: &'a TransformState,
+    pub(crate) image_manager: &'a crate::image_manager::ImageManager,
+    pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
+    pub(crate) line_atlas: &'a RefCell<LineAtlas>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Stats {
+pub(crate) struct Stats {
     /// The features this layer rendered in the current frame, filled by
     /// `update` when `UpdateParameters::capture_rendered_features` is set.
-    pub rendered_features: LayerFeaturesMap,
+    pub(crate) rendered_features: LayerFeaturesMap,
 }
 
 impl Stats {
     /// Adds an entry for the feature, or merges it into the existing one.
-    pub fn add_rendered_feature(&mut self, feature_id: &str, bound: &NDCBound, tile_ids: HashSet<OverscaledTileID>) {
+    pub(crate) fn add_rendered_feature(
+        &mut self,
+        feature_id: &str,
+        bound: &NDCBound,
+        tile_ids: HashSet<OverscaledTileID>,
+    ) {
         mln_gfx::rendering_stats::add_rendered_feature(&mut self.rendered_features, feature_id, bound, tile_ids);
     }
 }
@@ -114,7 +117,7 @@ impl Stats {
 /// The alpha of a packed pair of colors (as the paint property binders store
 /// them), interpolated by `t`.
 #[must_use]
-pub fn unpack_mix_alpha(packed: &[f32; 4], t: f32) -> f32 {
+pub(crate) fn unpack_mix_alpha(packed: &[f32; 4], t: f32) -> f32 {
     fn decode_alpha(encoded: f32) -> f32 {
         let packed_int_value = encoded as i32;
         (packed_int_value - (packed_int_value / 256) * 256) as f32 / 255.0
@@ -125,7 +128,7 @@ pub fn unpack_mix_alpha(packed: &[f32; 4], t: f32) -> f32 {
 /// The zoom-interpolated value of a data-driven opacity at a vertex (the
 /// first two floats of `PaintPropertyBinder::get_vertex_value`).
 #[must_use]
-pub fn vertex_opacity(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
+pub(crate) fn vertex_opacity(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
     match vertex {
         [a, b, ..] => Some(a.interpolate(b, zoom_fraction)),
         _ => None,
@@ -135,14 +138,14 @@ pub fn vertex_opacity(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
 /// The zoom-interpolated alpha of a data-driven color at a vertex (the four
 /// floats of `PaintPropertyBinder::get_vertex_value`).
 #[must_use]
-pub fn vertex_color_alpha(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
+pub(crate) fn vertex_color_alpha(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
     let packed: &[f32; 4] = vertex.get(..4)?.try_into().ok()?;
     Some(unpack_mix_alpha(packed, zoom_fraction as f32))
 }
 
 /// Where a tile's features are drawn, for the rendered-feature capture: through
 /// the tile matrix on Mercator, through the tile's projection on the globe.
-pub enum CaptureView<'a> {
+pub(crate) enum CaptureView<'a> {
     /// The tile matrix, translated as the layer draws.
     Matrix(Mat4),
     /// The tile's projection, and the layer's translation in tile units.
@@ -151,11 +154,11 @@ pub enum CaptureView<'a> {
 
 impl<'a> CaptureView<'a> {
     /// The view of `tile_id` translated by `translation`, as a layer draws it.
-    pub fn new(
+    pub(crate) fn new(
         tile_id: &OverscaledTileID,
         state: &'a TransformState,
         transform_params: &crate::paint_parameters::TransformParameters,
-        translation: &[f32; 2],
+        translation: [f32; 2],
         anchor: mln_style_types::TranslateAnchorType,
         near_clipped: bool,
     ) -> Self {
@@ -182,7 +185,7 @@ impl<'a> CaptureView<'a> {
 
     /// The NDC bound of `vertex_count` vertices in tile units (z in meters
     /// above the ground) from `get_vertex`, as the view draws them.
-    pub fn tile_space_bound(
+    pub(crate) fn tile_space_bound(
         &self,
         vertex_count: usize,
         get_vertex: impl FnMut(usize) -> Option<Vec3>,
@@ -207,13 +210,13 @@ impl<'a> CaptureView<'a> {
 /// of `tile_id` translated by `translation`, or on the globe the tile's
 /// projection.
 #[allow(clippy::too_many_arguments)]
-pub fn capture_retained_features<'a>(
+pub(crate) fn capture_retained_features<'a>(
     stats: &mut Stats,
     bucket: &dyn crate::bucket::Bucket,
     tile_id: &OverscaledTileID,
     state: &'a TransformState,
     transform_params: &crate::paint_parameters::TransformParameters,
-    translation: &[f32; 2],
+    translation: [f32; 2],
     anchor: mln_style_types::TranslateAnchorType,
     mut visible: impl FnMut(usize) -> bool,
     mut bound: impl FnMut(&CaptureView<'_>, usize, usize) -> Option<NDCBound>,
@@ -252,7 +255,7 @@ fn minmax(range: (f64, f64), value: f64) -> (f64, f64) {
 /// The vertices' bounding box is projected by its corners through
 /// `tile_matrix`, unless `pre_transformed`, in which case the vertices are
 /// already in NDC.
-pub fn compute_feature_ndc_bound(
+pub(crate) fn compute_feature_ndc_bound(
     vertex_count: usize,
     tile_matrix: &Mat4,
     pre_transformed: bool,
@@ -324,7 +327,7 @@ pub fn compute_feature_ndc_bound(
 /// The box bends with the sphere and the horizon can cut through it, so its
 /// corners don't bound it: it is sampled every few degrees, keeping what the
 /// horizon leaves visible.
-pub fn compute_globe_feature_ndc_bound(
+pub(crate) fn compute_globe_feature_ndc_bound(
     vertex_count: usize,
     projector: &TileProjector<'_>,
     translation: &Vec2,
@@ -437,36 +440,36 @@ pub fn compute_globe_feature_ndc_bound(
 
 /// The data members of `RenderLayer`.
 pub struct RenderLayerBase {
-    pub evaluated_properties: Arc<dyn LayerProperties>,
-    pub base_impl: Arc<dyn layer::Impl>,
+    pub(crate) evaluated_properties: Arc<dyn LayerProperties>,
+    pub(crate) base_impl: Arc<dyn layer::Impl>,
 
-    pub passes: RenderPass,
-    pub layer_group: Option<LayerGroupBasePtr>,
-    pub layer_tweaker: Option<LayerTweakerPtr>,
-    pub layer_index: i32,
-    pub style_dependencies: Dependency,
-    pub is_renderable: bool,
+    pub(crate) passes: RenderPass,
+    pub(crate) layer_group: Option<LayerGroupBasePtr>,
+    pub(crate) layer_tweaker: Option<LayerTweakerPtr>,
+    pub(crate) layer_index: i32,
+    pub(crate) style_dependencies: Dependency,
+    pub(crate) is_renderable: bool,
 
-    pub stats: Stats,
+    pub(crate) stats: Stats,
 
     /// Stores current set of tiles to be rendered for this layer.
-    pub render_tiles: Option<RenderTiles>,
+    pub(crate) render_tiles: Option<RenderTiles>,
     /// Retains ownership of tiles
-    pub render_tiles_owner: Rc<Vec<RenderTile>>,
+    pub(crate) render_tiles_owner: Rc<Vec<RenderTile>>,
     /// The tile IDs in `render_tiles`, along with the identity of the
     /// bucket from which they were built (C++ `TinyUnorderedMap`; only
     /// looked up).
-    pub render_tile_ids: HashMap<OverscaledTileID, SimpleIdentity>,
+    pub(crate) render_tile_ids: HashMap<OverscaledTileID, SimpleIdentity>,
     // symbols: `placementData`.
-    pub placement_data: LayerPlacementData,
+    pub(crate) placement_data: LayerPlacementData,
     // symbols: `followerData`.
-    pub follower_data: LayerPlacementData,
+    pub(crate) follower_data: LayerPlacementData,
     /// The projection variant this layer's drawables are built with.
-    pub projection_variant: ProjectionVariant,
+    pub(crate) projection_variant: ProjectionVariant,
 }
 
 impl RenderLayerBase {
-    pub fn new(properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(properties: Arc<dyn LayerProperties>) -> Self {
         let base_impl = properties.base_impl.clone();
         RenderLayerBase {
             evaluated_properties: properties,
@@ -574,7 +577,7 @@ pub trait RenderLayer {
     fn layer_removed(&mut self, changes: &mut UniqueChangeRequestVec) {
         self.remove_all_drawables();
         let group = self.base().layer_group.clone();
-        activate_layer_group(&group, false, changes);
+        activate_layer_group(group.as_ref(), false, changes);
     }
 
     /// Called when the layer index changes.
@@ -584,7 +587,7 @@ pub trait RenderLayer {
         // Submit a change request to update the layer index of our tile layer
         // group
         let group = self.base().layer_group.clone();
-        change_layer_index(&group, new_layer_index, changes);
+        change_layer_index(group.as_ref(), new_layer_index, changes);
     }
 
     /// Called when the layer is included or excluded from rendering.
@@ -748,21 +751,21 @@ pub trait RenderLayer {
     fn set_layer_group(&mut self, layer_group: Option<LayerGroupBasePtr>, changes: &mut UniqueChangeRequestVec) {
         // Remove the active layer group, if any, before replacing it.
         let old = self.base().layer_group.clone();
-        activate_layer_group(&old, false, changes);
+        activate_layer_group(old.as_ref(), false, changes);
 
         self.base_mut().layer_group = layer_group;
 
         // Add the new layer group, if we're currently renderable.
         let group = self.base().layer_group.clone();
         let renderable = self.base().is_renderable;
-        activate_layer_group(&group, renderable, changes);
+        activate_layer_group(group.as_ref(), renderable, changes);
     }
 }
 
 /// The default `RenderLayer::mark_layer_renderable`, callable from
 /// overrides: sets the renderable flag, (un-)registers the layer group, and
 /// releases the render data of a layer that stops rendering.
-pub fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
+pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
     layer: &mut L,
     will_render: bool,
     changes: &mut UniqueChangeRequestVec,
@@ -772,7 +775,7 @@ pub fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
     // This layer is either being freshly included in the renderable set or
     // excluded
     let group = layer.base().layer_group.clone();
-    activate_layer_group(&group, will_render, changes);
+    activate_layer_group(group.as_ref(), will_render, changes);
 
     if !will_render {
         layer.release_render_data();
@@ -780,7 +783,7 @@ pub fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
 }
 
 /// The default `RenderLayer::release_render_data`, callable from overrides.
-pub fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
+pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
     layer.remove_all_drawables();
     let base = layer.base_mut();
     base.render_tiles = None;
@@ -792,7 +795,7 @@ pub fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
 /// The default `RenderLayer::prepare(params)`, callable from overrides (C++
 /// `RenderLayer::prepare(params)`). C++ asserts a source; without one (a
 /// source type the port has no render source for) the layer gets no tiles.
-pub fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &mut LayerPrepareParameters<'_>) {
+pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &mut LayerPrepareParameters<'_>) {
     let Some(source) = parameters.source else {
         let base = layer.base_mut();
         base.render_tiles = None;
@@ -819,8 +822,8 @@ fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID)
 }
 
 /// (Un-)Register the layer group with the orchestrator.
-pub fn activate_layer_group(
-    layer_group: &Option<LayerGroupBasePtr>,
+pub(crate) fn activate_layer_group(
+    layer_group: Option<&LayerGroupBasePtr>,
     activate: bool,
     changes: &mut UniqueChangeRequestVec,
 ) {
@@ -836,7 +839,11 @@ pub fn activate_layer_group(
     }
 }
 
-pub fn change_layer_index(group: &Option<LayerGroupBasePtr>, new_index: i32, changes: &mut UniqueChangeRequestVec) {
+pub(crate) fn change_layer_index(
+    group: Option<&LayerGroupBasePtr>,
+    new_index: i32,
+    changes: &mut UniqueChangeRequestVec,
+) {
     if let Some(group) = group
         && group.borrow().get_layer_index() != new_index
     {

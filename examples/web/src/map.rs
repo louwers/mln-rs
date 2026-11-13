@@ -518,7 +518,7 @@ impl WebMap {
 /// build of the module, its WebGL2 through `mln_gl` (`map_webgl.rs`).
 #[cfg(not(feature = "webgl"))]
 mod backend {
-    pub use mln_webgpu::SurfaceTarget as Target;
+    pub(super) use mln_webgpu::SurfaceTarget as Target;
 }
 #[cfg(feature = "webgl")]
 #[path = "map_webgl.rs"]

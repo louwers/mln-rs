@@ -4,7 +4,7 @@ use super::layer_factory::{LayerFactory, get_source};
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::raster_layer::{Impl, RasterLayer};
 
-pub struct RasterLayerFactory;
+pub(crate) struct RasterLayerFactory;
 
 impl LayerFactory for RasterLayerFactory {
     fn get_type_info(&self) -> &'static LayerTypeInfo {

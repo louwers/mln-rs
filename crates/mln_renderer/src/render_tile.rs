@@ -29,13 +29,13 @@ fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     Point::new(x, y)
 }
 
-pub struct RenderTile {
-    pub id: UnwrappedTileID,
+pub(crate) struct RenderTile {
+    pub(crate) id: UnwrappedTileID,
     /// The projection contract for this tile; `matrix` is its main matrix.
-    pub projection: ProjectionData,
-    pub matrix: Mat4,
+    pub(crate) projection: ProjectionData,
+    pub(crate) matrix: Mat4,
     /// layers: debug
-    pub debug_bucket: Option<Box<DebugBucket>>,
+    pub(crate) debug_bucket: Option<Box<DebugBucket>>,
 
     /// `tile.id`.
     tile_id: OverscaledTileID,
@@ -46,7 +46,7 @@ pub struct RenderTile {
 }
 
 impl RenderTile {
-    pub fn new(id: UnwrappedTileID, tile: &dyn Tile) -> Self {
+    pub(crate) fn new(id: UnwrappedTileID, tile: &dyn Tile) -> Self {
         RenderTile {
             id,
             projection: ProjectionData::default(),
@@ -61,9 +61,9 @@ impl RenderTile {
     }
 
     /// The layer's translation in tile units, rotated for its anchor.
-    pub fn tile_unit_translation(
+    pub(crate) fn tile_unit_translation(
         id: &UnwrappedTileID,
-        translation: &[f32; 2],
+        translation: [f32; 2],
         anchor: TranslateAnchorType,
         state: &TransformState,
     ) -> [f32; 2] {
@@ -77,12 +77,12 @@ impl RenderTile {
     }
 
     #[must_use]
-    pub fn get_overscaled_tile_id(&self) -> &OverscaledTileID {
+    pub(crate) fn get_overscaled_tile_id(&self) -> &OverscaledTileID {
         &self.tile_id
     }
 
     #[must_use]
-    pub fn hold_for_fade(&self) -> bool {
+    pub(crate) fn hold_for_fade(&self) -> bool {
         self.tile_hold_for_fade
     }
 
@@ -91,49 +91,49 @@ impl RenderTile {
         self.render_data.as_deref().expect("RenderTile::prepare")
     }
 
-    pub fn get_bucket(&self, impl_: &dyn layer::Impl) -> Option<&BucketPtr> {
+    pub(crate) fn get_bucket(&self, impl_: &dyn layer::Impl) -> Option<&BucketPtr> {
         self.render_data().get_bucket(impl_)
     }
 
     /// symbols: the feature index of the tile's layout result.
     #[must_use]
-    pub fn get_feature_index(&self) -> Option<std::sync::Arc<crate::geometry::feature_index::FeatureIndex>> {
+    pub(crate) fn get_feature_index(&self) -> Option<std::sync::Arc<crate::geometry::feature_index::FeatureIndex>> {
         self.render_data.as_ref().and_then(|data| data.get_feature_index())
     }
 
     /// Port-only: the render thread's copies of the tile's bucket geometry
     /// (`bucket_geometry.rs`).
     #[must_use]
-    pub fn get_bucket_geometry(&self) -> Option<&crate::bucket_geometry::BucketGeometry> {
+    pub(crate) fn get_bucket_geometry(&self) -> Option<&crate::bucket_geometry::BucketGeometry> {
         self.render_data.as_deref().and_then(|data| data.get_bucket_geometry())
     }
 
-    pub fn get_layer_render_data(&self, impl_: &dyn layer::Impl) -> Option<&LayerRenderData> {
+    pub(crate) fn get_layer_render_data(&self, impl_: &dyn layer::Impl) -> Option<&LayerRenderData> {
         self.render_data().get_layer_render_data(impl_)
     }
 
     #[must_use]
-    pub fn get_pattern(&self, pattern: &str) -> Option<ImagePosition> {
+    pub(crate) fn get_pattern(&self, pattern: &str) -> Option<ImagePosition> {
         self.render_data().get_pattern(pattern)
     }
 
     #[must_use]
-    pub fn get_atlas_textures(&self) -> Option<&Rc<TileAtlasTextures>> {
+    pub(crate) fn get_atlas_textures(&self) -> Option<&Rc<TileAtlasTextures>> {
         self.render_data.as_deref().and_then(|data| data.get_atlas_textures())
     }
 
     #[must_use]
-    pub fn get_needs_rendering(&self) -> bool {
+    pub(crate) fn get_needs_rendering(&self) -> bool {
         self.needs_rendering
     }
 
-    pub fn upload(&self, upload_pass: &dyn UploadPass) {
+    pub(crate) fn upload(&self, upload_pass: &dyn UploadPass) {
         self.render_data().upload(upload_pass);
     }
 
     /// Prepares the render tile for drawing; `tile` is the tile it was
     /// created for.
-    pub fn prepare(&mut self, tile: &dyn Tile, parameters: &SourcePrepareParameters<'_>) {
+    pub(crate) fn prepare(&mut self, tile: &dyn Tile, parameters: &SourcePrepareParameters<'_>) {
         let mut render_data = tile.create_render_data();
         render_data.prepare(parameters);
         self.render_data = Some(render_data);
@@ -160,7 +160,7 @@ impl RenderTile {
                 tile_base.modified.get(),
                 tile_base.expires.get(),
                 parameters.debug_options,
-                parameters.source_name.clone(),
+                &parameters.source_name,
             )));
         } else if parameters.debug_options == MapDebugOptions::NO_DEBUG {
             self.debug_bucket = None;

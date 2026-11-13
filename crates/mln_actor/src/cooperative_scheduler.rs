@@ -58,7 +58,7 @@ impl CooperativeScheduler {
     }
 
     /// Whether tasks are waiting.
-    pub fn has_tasks(&self) -> bool {
+    pub(crate) fn has_tasks(&self) -> bool {
         self.task_count.load(Ordering::SeqCst) != 0
     }
 

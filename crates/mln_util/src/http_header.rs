@@ -9,7 +9,7 @@ use crate::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CacheControl {
-    pub max_age: Option<u64>,
+    pub(crate) max_age: Option<u64>,
     pub must_revalidate: bool,
 }
 

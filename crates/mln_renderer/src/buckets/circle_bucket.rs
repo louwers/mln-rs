@@ -39,25 +39,29 @@ crate::paint_property_binders!(
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct CircleLayoutVertex {
-    pub a1: [i16; 2],
+pub(crate) struct CircleLayoutVertex {
+    pub(crate) a1: [i16; 2],
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct CircleBucket {
-    pub base: BucketBase,
-    pub vertices: GeometryVec<CircleLayoutVertex>,
-    pub triangles: GeometryVec<u16>,
-    pub segments: Vec<SegmentBase>,
+pub(crate) struct CircleBucket {
+    pub(crate) base: BucketBase,
+    pub(crate) vertices: GeometryVec<CircleLayoutVertex>,
+    pub(crate) triangles: GeometryVec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: VecMap<String, RwLock<CircleBinders>>,
-    pub mode: MapMode,
+    pub(crate) paint_property_binders: VecMap<String, RwLock<CircleBinders>>,
+    pub(crate) mode: MapMode,
 }
 
 impl CircleBucket {
     #[must_use]
-    pub fn new(layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>, mode: MapMode, zoom: f32) -> Self {
+    pub(crate) fn new(
+        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
+        mode: MapMode,
+        zoom: f32,
+    ) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {
@@ -77,7 +81,11 @@ impl CircleBucket {
     /// The layout vertex for `p` with extrusion (`ex`, `ey`). As in C++,
     /// `p.x * 2` is an integer, added to a float and truncated to `i16`.
     #[must_use]
-    pub fn vertex(p: mln_tile_id::geometry_tile_data::GeometryCoordinate, ex: f32, ey: f32) -> CircleLayoutVertex {
+    pub(crate) fn vertex(
+        p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
+        ex: f32,
+        ey: f32,
+    ) -> CircleLayoutVertex {
         CircleLayoutVertex {
             a1: [
                 ((i32::from(p.x) * 2) as f32 + f32::midpoint(ex, 1.0)) as i32 as i16,

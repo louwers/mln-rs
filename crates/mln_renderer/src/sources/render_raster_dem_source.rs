@@ -27,7 +27,7 @@ use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
 /// The render source of a raster-dem source.
-pub struct RenderRasterDEMSource {
+pub(crate) struct RenderRasterDEMSource {
     tile_source: RenderTileSource,
     cached_tileset: Option<Tileset>,
 }
@@ -50,7 +50,7 @@ fn opposite(mask: DEMTileNeighbors) -> DEMTileNeighbors {
 
 impl RenderRasterDEMSource {
     #[must_use]
-    pub fn new(impl_: Arc<tile_source::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<tile_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderRasterDEMSource { tile_source: RenderTileSource::new(impl_), cached_tileset: None }
     }
@@ -162,10 +162,6 @@ impl RenderRasterDEMSource {
 impl RenderSource for RenderRasterDEMSource {
     fn base(&self) -> &RenderSourceBase {
         &self.tile_source.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderSourceBase {
-        &mut self.tile_source.base
     }
 
     fn is_loaded(&self) -> bool {

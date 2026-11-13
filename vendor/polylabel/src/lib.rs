@@ -15,7 +15,7 @@ const OUT_OF_RANGE: &str = "vector::_M_range_check: __n (which is 0) >= this->si
 
 // get squared distance from a point to a segment
 #[must_use]
-pub fn get_seg_dist_sq(p: &Point<f64>, a: &Point<f64>, b: &Point<f64>) -> f64 {
+pub(crate) fn get_seg_dist_sq(p: &Point<f64>, a: &Point<f64>, b: &Point<f64>) -> f64 {
     let mut x = a.x;
     let mut y = a.y;
     let mut dx = b.x - x;
@@ -42,7 +42,7 @@ pub fn get_seg_dist_sq(p: &Point<f64>, a: &Point<f64>, b: &Point<f64>) -> f64 {
 // signed distance from point to polygon outline (negative if point is
 // outside)
 #[must_use]
-pub fn point_to_polygon_dist(point: &Point<f64>, polygon: &Polygon<f64>) -> f64 {
+pub(crate) fn point_to_polygon_dist(point: &Point<f64>, polygon: &Polygon<f64>) -> f64 {
     let mut inside = false;
     let mut min_dist_sq = f64::INFINITY;
 
@@ -67,20 +67,20 @@ pub fn point_to_polygon_dist(point: &Point<f64>, polygon: &Polygon<f64>) -> f64 
 
 /// `Cell<double>`
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Cell {
+pub(crate) struct Cell {
     /// cell center
-    pub c: Point<f64>,
+    pub(crate) c: Point<f64>,
     /// half the cell size
-    pub h: f64,
+    pub(crate) h: f64,
     /// distance from cell center to polygon
-    pub d: f64,
+    pub(crate) d: f64,
     /// max distance to polygon within a cell
-    pub max: f64,
+    pub(crate) max: f64,
 }
 
 impl Cell {
     #[must_use]
-    pub fn new(c: Point<f64>, h: f64, polygon: &Polygon<f64>) -> Self {
+    pub(crate) fn new(c: Point<f64>, h: f64, polygon: &Polygon<f64>) -> Self {
         let d = point_to_polygon_dist(&c, polygon);
         Cell { c, h, d, max: d + h * std::f64::consts::SQRT_2 }
     }
@@ -110,7 +110,7 @@ impl PartialEq for QueuedCell {
 impl Eq for QueuedCell {}
 
 // get polygon centroid
-pub fn get_centroid_cell(polygon: &Polygon<f64>) -> Result<Cell, String> {
+pub(crate) fn get_centroid_cell(polygon: &Polygon<f64>) -> Result<Cell, String> {
     let mut area = 0.0;
     let mut c = Point::new(0.0, 0.0);
     let ring = polygon.first().ok_or(OUT_OF_RANGE)?;

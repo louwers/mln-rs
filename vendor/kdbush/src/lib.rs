@@ -148,13 +148,13 @@ impl Index for usize {
 /// `KDBush<TPoint, TIndex>` (the points are copied in, as in C++).
 #[derive(Clone, Debug)]
 pub struct KDBush<N: Number, I: Index = usize> {
-    pub ids: Vec<I>,
-    pub points: Vec<(N, N)>,
+    pub(crate) ids: Vec<I>,
+    pub(crate) points: Vec<(N, N)>,
     node_size: u8,
 }
 
 /// `defaultNodeSize`
-pub const DEFAULT_NODE_SIZE: u8 = 64;
+pub(crate) const DEFAULT_NODE_SIZE: u8 = 64;
 
 impl<N: Number, I: Index> Default for KDBush<N, I> {
     fn default() -> Self {
@@ -165,12 +165,13 @@ impl<N: Number, I: Index> Default for KDBush<N, I> {
 impl<N: Number, I: Index> KDBush<N, I> {
     /// `KDBush(nodeSize)`
     #[must_use]
-    pub fn new(node_size: u8) -> Self {
+    pub(crate) fn new(node_size: u8) -> Self {
         KDBush { ids: Vec::new(), points: Vec::new(), node_size }
     }
 
     /// `KDBush(points, nodeSize)`
-    pub fn from_points<P: Nth<Number = N>>(points: &[P], node_size: u8) -> Self {
+    #[cfg(test)]
+    pub(crate) fn from_points<P: Nth<Number = N>>(points: &[P], node_size: u8) -> Self {
         let mut index = Self::new(node_size);
         index.fill(points);
         index
@@ -399,3 +400,6 @@ fn sq_dist<N: Number>(ax: N, ay: N, bx: N, by: N) -> N {
     let dy = ay.sub(by);
     dx.mul(dx).add(dy.mul(dy))
 }
+
+#[cfg(test)]
+mod tests;

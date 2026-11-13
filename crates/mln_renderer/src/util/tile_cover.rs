@@ -229,25 +229,26 @@ impl Iterator for TileCover {
 /// The parameters of a tile cover. They own a copy of the transform state,
 /// which C++ holds by reference.
 #[derive(Clone, Debug)]
-pub struct TileCoverParameters {
-    pub transform_state: TransformState,
-    pub tile_lod_min_radius: f64,
-    pub tile_lod_scale: f64,
-    pub tile_lod_pitch_threshold: f64,
-    pub tile_lod_mode: TileLodMode,
+pub(crate) struct TileCoverParameters {
+    pub(crate) transform_state: TransformState,
+    pub(crate) tile_lod_min_radius: f64,
+    pub(crate) tile_lod_scale: f64,
+    pub(crate) tile_lod_pitch_threshold: f64,
+    pub(crate) tile_lod_mode: TileLodMode,
     /// The zoom the source loads at the center of the view, shifted for its
     /// tile size and not yet clamped to its zoom range; the globe's level of
     /// detail falls off from it, as GL JS's does.
-    pub requested_zoom: Option<f64>,
+    pub(crate) requested_zoom: Option<f64>,
     /// Whether the source rounds zooms to whole tiles, as raster sources do,
     /// instead of flooring them.
-    pub round_zoom: bool,
+    pub(crate) round_zoom: bool,
 }
 
 impl TileCoverParameters {
     /// Parameters for `transform_state`, with the defaults for the other
     /// fields.
-    pub fn new(transform_state: TransformState) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(transform_state: TransformState) -> Self {
         TileCoverParameters {
             transform_state,
             tile_lod_min_radius: 3.0,
@@ -754,7 +755,7 @@ mod globe {
     }
 }
 
-pub fn tile_cover(
+pub(crate) fn tile_cover(
     state: &TileCoverParameters,
     z: u8,
     zoom_range: Range<u8>,
@@ -976,7 +977,8 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
     )
 }
 
-pub fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
+#[cfg(test)]
+pub(crate) fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
     let mut result = Vec::new();
     let mut tc = TileCover::new_from_geometry(geometry, z, true)?;
     while tc.has_next() {

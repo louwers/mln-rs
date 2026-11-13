@@ -38,26 +38,26 @@ use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 
 /// Maps vertex range to feature index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FeatureVertexRange {
-    pub feature_index: usize,
-    pub start: usize,
-    pub end: usize,
+pub(crate) struct FeatureVertexRange {
+    pub(crate) feature_index: usize,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
-pub type FeatureVertexRangeMap = VecMap<String, Vec<FeatureVertexRange>>;
+pub(crate) type FeatureVertexRangeMap = VecMap<String, Vec<FeatureVertexRange>>;
 
 /// The data-driven attribute values of all the binders of one
 /// `paint_property_binders!` struct, one interleaved vertex per layout
 /// vertex.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct InterleavedVertexBuffer {
-    pub stride: usize,
-    pub vertex_count: usize,
-    pub shared_vertex_vector: GeometryVec<u8>,
+pub(crate) struct InterleavedVertexBuffer {
+    pub(crate) stride: usize,
+    pub(crate) vertex_count: usize,
+    pub(crate) shared_vertex_vector: GeometryVec<u8>,
 }
 
 impl InterleavedVertexBuffer {
-    pub fn set(&mut self, index: usize, offset: usize, value: &[u8]) {
+    pub(crate) fn set(&mut self, index: usize, offset: usize, value: &[u8]) {
         let start = self.stride * index + offset;
         let data = self.shared_vertex_vector.get_mut();
         debug_assert!(start + value.len() <= data.len());
@@ -66,22 +66,14 @@ impl InterleavedVertexBuffer {
 
     /// The `len` bytes at `offset` in vertex `index`, or `None` when they are
     /// out of range.
-    pub fn try_get(&self, index: usize, offset: usize, len: usize) -> Option<Vec<u8>> {
+    pub(crate) fn try_get(&self, index: usize, offset: usize, len: usize) -> Option<Vec<u8>> {
         let start = self.stride.checked_mul(index)?.checked_add(offset)?;
         self.shared_vertex_vector.data().get(start..start.checked_add(len)?).map(<[u8]>::to_vec)
     }
 
-    /// The `len` bytes at `offset` in vertex `index`.
-    pub fn get(&self, index: usize, offset: usize, len: usize) -> Vec<u8> {
-        let start = self.stride * index + offset;
-        let data = self.shared_vertex_vector.data();
-        debug_assert!(start + len <= data.len());
-        data[start..start + len].to_vec()
-    }
-
     /// Appends a field of `size` bytes, aligned to `alignment`, to the vertex
     /// format and returns its offset.
-    pub fn extend_vertex_format(&mut self, size: usize, alignment: usize) -> usize {
+    pub(crate) fn extend_vertex_format(&mut self, size: usize, alignment: usize) -> usize {
         let mut offset = self.stride & (alignment - 1);
         if offset != 0 {
             offset = alignment - offset;
@@ -97,7 +89,7 @@ impl InterleavedVertexBuffer {
 /// The value types of data-driven paint properties with a single attribute
 /// (`float` and `Color` in circle, fill and line): `attributeValue(v)` and
 /// the attribute's type (`A::Type`).
-pub trait BinderValue: Clone + Default + ValueConverter + StatisticValue + std::fmt::Debug {
+pub(crate) trait BinderValue: Clone + Default + ValueConverter + StatisticValue + std::fmt::Debug {
     /// The number of floats `attribute_value` uses.
     const DIMENSIONS: usize;
     const BASE_DATA_TYPE: AttributeDataType;
@@ -158,7 +150,7 @@ fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
 
 /// The data of a `PaintPropertyBinder` subclass.
 #[derive(Debug, Serialize, Deserialize)]
-pub enum PaintPropertyBinderKind<T> {
+pub(crate) enum PaintPropertyBinderKind<T> {
     Constant {
         constant: T,
     },
@@ -223,18 +215,18 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PaintPropertyBinder<T> {
-    pub kind: PaintPropertyBinderKind<T>,
-    pub statistics: PaintPropertyStatistics<T>,
+pub(crate) struct PaintPropertyBinder<T> {
+    pub(crate) kind: PaintPropertyBinderKind<T>,
+    pub(crate) statistics: PaintPropertyStatistics<T>,
     /// Whether `set_interleaved_buffer` gave the binder vertex data.
-    pub has_interleaved_buffer: bool,
+    pub(crate) has_interleaved_buffer: bool,
     /// The binder's offset in the interleaved vertex; `usize::MAX` until
     /// `set_interleaved_buffer`.
-    pub vertex_offset: usize,
+    pub(crate) vertex_offset: usize,
 }
 
 impl<T: BinderValue> PaintPropertyBinder<T> {
-    pub fn create(value: &PossiblyEvaluatedPropertyValue<T>, zoom: f32, default_value: T) -> Self {
+    pub(crate) fn create(value: &PossiblyEvaluatedPropertyValue<T>, zoom: f32, default_value: T) -> Self {
         let kind = match value {
             PossiblyEvaluatedPropertyValue::Constant(constant) => {
                 PaintPropertyBinderKind::Constant { constant: constant.clone() }
@@ -272,7 +264,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 
     /// Adds the binder's zoom-interpolated vertex to the vertex format. The
     /// constant binder has no vertex data and does nothing.
-    pub fn set_interleaved_buffer(&mut self, buffer: &mut InterleavedVertexBuffer) {
+    pub(crate) fn set_interleaved_buffer(&mut self, buffer: &mut InterleavedVertexBuffer) {
         if let PaintPropertyBinderKind::Constant { .. } = self.kind {
             return;
         }
@@ -284,16 +276,16 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    pub fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
+    pub(crate) fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         if self.has_interleaved_buffer { buffer.vertex_count } else { 0 }
     }
 
-    pub fn is_interpolated(&self) -> bool {
+    pub(crate) fn is_interpolated(&self) -> bool {
         matches!(self.kind, PaintPropertyBinderKind::CompositeFunction { .. })
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn populate_vertex_vector(
+    pub(crate) fn populate_vertex_vector(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
         feature: &dyn GeometryTileFeature,
@@ -366,7 +358,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    pub fn update_vertex_vectors(
+    pub(crate) fn update_vertex_vectors(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
         states: &crate::bucket::FeatureStates,
@@ -396,7 +388,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 
     /// The factor that interpolates between the vertex's two zoom stops; 0
     /// unless the binder is a composite function.
-    pub fn interpolation_factor(&self, current_zoom: f32) -> f32 {
+    pub(crate) fn interpolation_factor(&self, current_zoom: f32) -> f32 {
         match &self.kind {
             PaintPropertyBinderKind::Constant { .. } | PaintPropertyBinderKind::SourceFunction { .. } => 0.0,
             PaintPropertyBinderKind::CompositeFunction { expression, zoom_range, .. } => {
@@ -412,7 +404,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
     }
 
     /// The property's value as a uniform.
-    pub fn uniform_value(&self, current_value: &PossiblyEvaluatedPropertyValue<T>) -> T {
+    pub(crate) fn uniform_value(&self, current_value: &PossiblyEvaluatedPropertyValue<T>) -> T {
         match &self.kind {
             PaintPropertyBinderKind::Constant { constant } => current_value.constant_or(constant),
             // Uniform values for vertex attribute arrays are unused.
@@ -422,7 +414,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 
     /// The zoom-interpolated vertex (`2 * DIMENSIONS` floats), or `None` when
     /// `index` is out of range (where C++ throws).
-    pub fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Option<Vec<f32>> {
+    pub(crate) fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Option<Vec<f32>> {
         let n = T::DIMENSIONS;
         Some(match &self.kind {
             PaintPropertyBinderKind::Constant { .. } => vec![0.0; 2 * n],
@@ -438,7 +430,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         })
     }
 
-    pub fn apply_paint_property(
+    pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
         shared: &VertexVectorBasePtr,
@@ -461,7 +453,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 
 /// The data of a cross-faded `PaintPropertyBinder` subclass.
 #[derive(Debug, Serialize, Deserialize)]
-pub enum CrossFadedPaintPropertyBinderKind<T> {
+pub(crate) enum CrossFadedPaintPropertyBinderKind<T> {
     Constant {
         constant: Faded<T>,
     },
@@ -480,10 +472,10 @@ pub enum CrossFadedPaintPropertyBinderKind<T> {
 /// The binder of a `*-pattern` property, whose two attributes are four `u16`s
 /// each.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CrossFadedPaintPropertyBinder<T> {
-    pub kind: CrossFadedPaintPropertyBinderKind<T>,
-    pub has_interleaved_buffer: bool,
-    pub vertex_offset: usize,
+pub(crate) struct CrossFadedPaintPropertyBinder<T> {
+    pub(crate) kind: CrossFadedPaintPropertyBinderKind<T>,
+    pub(crate) has_interleaved_buffer: bool,
+    pub(crate) vertex_offset: usize,
 }
 
 /// The size of a zoom-interpolated pattern vertex: eight `u16`s.
@@ -491,7 +483,7 @@ const PATTERN_ZOOM_INTERPOLATED_SIZE: usize = 16;
 
 impl CrossFadedPaintPropertyBinder<Image> {
     #[must_use]
-    pub fn create(value: &PossiblyEvaluatedFadedPropertyValue<Image>, zoom: f32, default_value: Image) -> Self {
+    pub(crate) fn create(value: &PossiblyEvaluatedFadedPropertyValue<Image>, zoom: f32, default_value: Image) -> Self {
         let kind = match value {
             PossiblyEvaluatedFadedPropertyValue::Constant(constant) => {
                 CrossFadedPaintPropertyBinderKind::Constant { constant: constant.clone() }
@@ -510,7 +502,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
 
     /// Adds the binder's vertex data to the vertex format; only the composite
     /// binder has any.
-    pub fn set_interleaved_buffer(&mut self, buffer: &mut InterleavedVertexBuffer) {
+    pub(crate) fn set_interleaved_buffer(&mut self, buffer: &mut InterleavedVertexBuffer) {
         if let CrossFadedPaintPropertyBinderKind::Constant { .. } = self.kind {
             return;
         }
@@ -522,17 +514,11 @@ impl CrossFadedPaintPropertyBinder<Image> {
         }
     }
 
-    pub fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
+    pub(crate) fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         if self.has_interleaved_buffer { buffer.vertex_count } else { 0 }
     }
 
-    /// Whether the binder interpolates by zoom: never for pattern binders.
-    #[must_use]
-    pub fn is_interpolated(&self) -> bool {
-        false
-    }
-
-    pub fn populate_vertex_vector(
+    pub(crate) fn populate_vertex_vector(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
         length: usize,
@@ -580,13 +566,14 @@ impl CrossFadedPaintPropertyBinder<Image> {
 
     /// The zoom interpolation factors, always (0, 0) for pattern binders.
     #[must_use]
-    pub fn interpolation_factor(&self, _current_zoom: f32) -> (f32, f32) {
+    #[expect(clippy::unused_self, reason = "the paint property macros call it on every binder alike")]
+    pub(crate) fn interpolation_factor(&self, _current_zoom: f32) -> (f32, f32) {
         (0.0, 0.0)
     }
 
     /// Points `attrib` at the interleaved pattern data. Both attributes
     /// (`attr_index` 0 and 1) get the same data, as in C++.
-    pub fn apply_paint_property(
+    pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
         shared: &VertexVectorBasePtr,
@@ -605,7 +592,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
 /// The virtual interface shared by both binder enums (the C++ base class
 /// `PaintPropertyBinder`), as `PaintPropertyBinders` and
 /// `readDataDrivenPaintProperty` use it.
-pub trait PaintPropertyBinderBase {
+pub(crate) trait PaintPropertyBinderBase {
     fn set_interleaved(&mut self, buffer: &mut InterleavedVertexBuffer);
     #[allow(clippy::too_many_arguments)]
     fn populate(
@@ -724,7 +711,7 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
 /// Adds the attributes `attribute_names` of one property to `attrs`, or
 /// records them as uniforms if the property is constant.
 #[allow(clippy::too_many_arguments)]
-pub fn read_data_driven_paint_property(
+pub(crate) fn read_data_driven_paint_property(
     attrs: &mut VertexAttributeArray,
     binder: &dyn PaintPropertyBinderBase,
     buffer: &InterleavedVertexBuffer,
@@ -753,7 +740,6 @@ pub fn read_data_driven_paint_property(
 /// struct with one binder per property (fields in the C++ type-list order,
 /// which is also the interleaved vertex order) and the shared
 /// `InterleavedVertexBuffer`.
-#[macro_export]
 macro_rules! paint_property_binders {
     (
         $(#[$meta:meta])*
@@ -763,13 +749,13 @@ macro_rules! paint_property_binders {
     ) => {
         $(#[$meta])*
         #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
-        pub struct $name {
+        pub(crate) struct $name {
             pub interleaved_vertex_buffer: $crate::paint_property_binder::InterleavedVertexBuffer,
             $(pub $field: $binder,)+
         }
 
         impl $name {
-            pub fn new(properties: &$props, z: f32) -> Self {
+            pub(crate) fn new(properties: &$props, z: f32) -> Self {
                 let mut result = $name {
                     interleaved_vertex_buffer: Default::default(),
                     $($field: <$binder>::create(
@@ -784,7 +770,7 @@ macro_rules! paint_property_binders {
             }
 
             #[allow(clippy::too_many_arguments)]
-            pub fn populate_vertex_vectors(
+            pub(crate) fn populate_vertex_vectors(
                 &mut self,
                 feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
                 length: usize,
@@ -817,7 +803,8 @@ macro_rules! paint_property_binders {
                 // copies the vector when it builds drawables.
             }
 
-            pub fn update_vertex_vectors(
+            #[allow(dead_code, reason = "the heatmap bucket doesn't rewrite its vertices on a feature state change")]
+            pub(crate) fn update_vertex_vectors(
                 &mut self,
                 states: &$crate::bucket::FeatureStates,
                 layer: &dyn mln_tile_id::geometry_tile_data::GeometryTileLayer,
@@ -834,7 +821,7 @@ macro_rules! paint_property_binders {
             }
 
             /// True if a feature state change rewrites the data-driven values.
-            pub fn depends_on_feature_state(&self) -> bool {
+            pub(crate) fn depends_on_feature_state(&self) -> bool {
                 false $(|| $crate::paint_property_binder::PaintPropertyBinderBase::depends_on_feature_state(
                     &self.$field))+
             }
@@ -842,3 +829,4 @@ macro_rules! paint_property_binders {
     };
 
 }
+pub(crate) use paint_property_binders;

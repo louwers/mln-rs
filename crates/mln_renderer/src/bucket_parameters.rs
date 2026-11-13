@@ -7,13 +7,13 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[derive(Clone, Debug)]
-pub struct BucketParameters {
-    pub tile_id: OverscaledTileID,
-    pub mode: MapMode,
-    pub pixel_ratio: f32,
-    pub layer_type: &'static LayerTypeInfo,
+pub(crate) struct BucketParameters {
+    pub(crate) tile_id: OverscaledTileID,
+    pub(crate) mode: MapMode,
+    pub(crate) pixel_ratio: f32,
+    pub(crate) layer_type: &'static LayerTypeInfo,
     /// The style's global state, used by "global-state" expressions.
-    pub global_state: Option<Arc<GlobalStateMap>>,
-    pub retain_features_by_id: bool,
-    pub subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) global_state: Option<Arc<GlobalStateMap>>,
+    pub(crate) retain_features_by_id: bool,
+    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 }

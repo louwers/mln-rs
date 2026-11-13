@@ -5,7 +5,7 @@ use crate::spec::Property;
 /// The camel-case spelling of a property name (`line-gap-width` ->
 /// `LineGapWidth`).
 #[must_use]
-pub fn camelize(s: &str) -> String {
+pub(crate) fn camelize(s: &str) -> String {
     let mut result = String::new();
     let mut upper_next = true;
     for c in s.chars() {
@@ -23,19 +23,19 @@ pub fn camelize(s: &str) -> String {
 
 /// The Rust spelling of a property name (`line-gap-width` -> `line_gap_width`).
 #[must_use]
-pub fn snake(s: &str) -> String {
+pub(crate) fn snake(s: &str) -> String {
     s.replace('-', "_")
 }
 
 #[must_use]
-pub fn is_overridable(property: &Property) -> bool {
+pub(crate) fn is_overridable(property: &Property) -> bool {
     ["text-color"].contains(&property.name.as_str())
 }
 
 /// The evaluated type of a property, as a type the generator can print both as
 /// C++ (for error messages) and as Rust.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EvaluatedType {
+pub(crate) enum EvaluatedType {
     Bool,
     Float,
     Double,
@@ -55,7 +55,7 @@ pub enum EvaluatedType {
 
 impl EvaluatedType {
     #[must_use]
-    pub fn cpp(&self) -> String {
+    pub(crate) fn cpp(&self) -> String {
         match self {
             EvaluatedType::Bool => "bool".into(),
             EvaluatedType::Float => "float".into(),
@@ -75,7 +75,7 @@ impl EvaluatedType {
     }
 
     #[must_use]
-    pub fn rust(&self) -> String {
+    pub(crate) fn rust(&self) -> String {
         match self {
             EvaluatedType::Bool => "bool".into(),
             EvaluatedType::Float => "f32".into(),
@@ -96,7 +96,7 @@ impl EvaluatedType {
 
     /// The named (non-primitive) Rust types this type mentions, for `use`
     /// lines.
-    pub fn named_types(&self, out: &mut Vec<String>) {
+    pub(crate) fn named_types(&self, out: &mut Vec<String>) {
         match self {
             EvaluatedType::Bool | EvaluatedType::Float | EvaluatedType::Double | EvaluatedType::String => {}
             EvaluatedType::Array(t, _) | EvaluatedType::Vector(t) => t.named_types(out),
@@ -188,7 +188,7 @@ fn evaluated_type_of(q: &TypeQuery<'_>) -> EvaluatedType {
 }
 
 #[must_use]
-pub fn evaluated_type(property: &Property) -> EvaluatedType {
+pub(crate) fn evaluated_type(property: &Property) -> EvaluatedType {
     evaluated_type_of(&TypeQuery {
         name: Some(&property.name),
         type_: property.type_(),
@@ -202,7 +202,7 @@ pub fn evaluated_type(property: &Property) -> EvaluatedType {
 
 /// The evaluated type of an array element of type `type_`, which has no name.
 #[must_use]
-pub fn evaluated_type_unnamed(type_: &str) -> EvaluatedType {
+pub(crate) fn evaluated_type_unnamed(type_: &str) -> EvaluatedType {
     evaluated_type_of(&TypeQuery {
         name: None,
         type_,
@@ -217,7 +217,7 @@ pub fn evaluated_type_unnamed(type_: &str) -> EvaluatedType {
 /// The expression type of an overridable property's values, as a Rust `Type`
 /// expression.
 #[must_use]
-pub fn expression_type_rust(type_: &str, value: Option<&str>) -> String {
+pub(crate) fn expression_type_rust(type_: &str, value: Option<&str>) -> String {
     match type_ {
         "boolean" => "Type::Boolean".into(),
         "number" | "enum" => "Type::Number".into(),
@@ -237,18 +237,18 @@ pub fn expression_type_rust(type_: &str, value: Option<&str>) -> String {
 /// `property['property-type']` is data-driven for `convert<>` and the layout
 /// property kind.
 #[must_use]
-pub fn is_data_driven(property: &Property) -> bool {
+pub(crate) fn is_data_driven(property: &Property) -> bool {
     matches!(property.property_type(), Some("data-driven" | "cross-faded-data-driven"))
 }
 
 #[must_use]
-pub fn is_color_ramp(property: &Property) -> bool {
+pub(crate) fn is_color_ramp(property: &Property) -> bool {
     property.property_type() == Some("color-ramp")
 }
 
 /// The Rust type of the property's style value.
 #[must_use]
-pub fn property_value_type(property: &Property) -> String {
+pub(crate) fn property_value_type(property: &Property) -> String {
     if is_color_ramp(property) {
         "ColorRampPropertyValue".into()
     } else {

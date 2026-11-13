@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use crate::debug_group::{DebugGroup, DebugGroupTarget};
+use crate::debug_group::DebugGroupTarget;
 use crate::frame::DrawTarget;
 use crate::render_pass::{RenderPass, RenderPassDescriptor};
 use crate::upload_pass::UploadPass;
@@ -27,9 +27,5 @@ impl dyn CommandEncoder {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: CommandEncoder>(&self) -> Option<&T> {
         (self as &dyn Any).downcast_ref()
-    }
-
-    pub fn create_debug_group(&self, name: &str) -> DebugGroup<'_> {
-        DebugGroup::new(self, name)
     }
 }

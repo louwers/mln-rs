@@ -70,7 +70,7 @@ const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
 /// its vertex attributes were built from.
 struct HillshadeDrawableGeometryTime(Instant);
 
-pub struct RenderHillshadeLayer {
+pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
     // Paint properties
     unevaluated: HillshadePaintProperties::Unevaluated,
@@ -91,7 +91,7 @@ pub struct RenderHillshadeLayer {
 }
 
 impl RenderHillshadeLayer {
-    pub fn new(impl_: Arc<HillshadeLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<HillshadeLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(HillshadeLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -238,7 +238,7 @@ impl RenderLayer for RenderHillshadeLayer {
         // RenderLayer::layerRemoved
         self.remove_all_drawables();
         let group = self.base.layer_group.clone();
-        crate::render_layer::activate_layer_group(&group, false, changes);
+        crate::render_layer::activate_layer_group(group.as_ref(), false, changes);
 
         self.remove_render_targets(changes);
     }
@@ -403,7 +403,7 @@ impl RenderLayer for RenderHillshadeLayer {
                     Rc::downgrade(&prepare_layer_tweaker),
                 ));
 
-                let mut hillshade_prepare_builder = context.create_drawable_builder("hillshadePrepare".to_owned());
+                let mut hillshade_prepare_builder = context.create_drawable_builder();
                 hillshade_prepare_builder.set_shader(Some(hillshade_prepare_shader.clone()));
                 hillshade_prepare_builder.set_depth_type(DepthMaskType::ReadOnly);
                 hillshade_prepare_builder.set_color_mode(&ColorMode::unblended());
@@ -498,7 +498,7 @@ impl RenderLayer for RenderHillshadeLayer {
             let update_existing = |drawable: &mut dyn Drawable| {
                 // Only current drawables are updated, ones produced for a
                 // previous style retain the attribute values for that style.
-                if !drawable_has_layer_tweaker(drawable, &layer_tweaker) {
+                if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
                     return false;
                 }
 
@@ -524,7 +524,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 continue;
             }
 
-            let mut hillshade_builder = context.create_drawable_builder("hillshade".to_owned());
+            let mut hillshade_builder = context.create_drawable_builder();
             hillshade_builder.set_shader(Some(hillshade_shader.clone()));
             hillshade_builder.set_enable_depth(false);
             hillshade_builder.set_color_mode(&ColorMode::alpha_blended());

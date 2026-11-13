@@ -19,7 +19,7 @@ pub fn hash(values: &[u64]) -> u64 {
 
 /// Hashes a string with FNV-1a, which is deterministic across runs.
 #[must_use]
-pub fn hash_str(s: &str) -> u64 {
+pub(crate) fn hash_str(s: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
         h ^= u64::from(b);

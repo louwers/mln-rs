@@ -28,10 +28,6 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
         matches!(self, PossiblyEvaluatedPropertyValue::Constant(_))
     }
 
-    pub fn is_expression(&self) -> bool {
-        matches!(self, PossiblyEvaluatedPropertyValue::Expression(_))
-    }
-
     pub fn constant(&self) -> Option<T> {
         match self {
             PossiblyEvaluatedPropertyValue::Constant(t) => Some(t.clone()),
@@ -41,17 +37,6 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
 
     pub fn constant_or(&self, t: &T) -> T {
         self.constant().unwrap_or_else(|| t.clone())
-    }
-
-    /// `evaluate(float zoom)`.
-    pub fn evaluate_zoom(&self, zoom: f32) -> T
-    where
-        T: Default + ValueConverter,
-    {
-        match self {
-            PossiblyEvaluatedPropertyValue::Constant(constant) => constant.clone(),
-            PossiblyEvaluatedPropertyValue::Expression(expression) => expression.evaluate_zoom(zoom),
-        }
     }
 
     pub fn evaluate_feature(&self, feature: &dyn GeometryTileFeature, zoom: f32, default_value: T) -> T
@@ -102,14 +87,14 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
         }
     }
 
-    pub fn get_dependencies(&self) -> Dependency {
+    pub(crate) fn get_dependencies(&self) -> Dependency {
         match self {
             PossiblyEvaluatedPropertyValue::Constant(_) => Dependency::NONE,
             PossiblyEvaluatedPropertyValue::Expression(expression) => expression.get_dependencies(),
         }
     }
 
-    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
+    pub(crate) fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         match self {
             PossiblyEvaluatedPropertyValue::Constant(_) => None,
             PossiblyEvaluatedPropertyValue::Expression(expression) => expression.get_global_state_refs(),
@@ -137,7 +122,7 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
         matches!(self, PossiblyEvaluatedFadedPropertyValue::Constant(_))
     }
 
-    pub fn constant(&self) -> Option<Faded<T>> {
+    pub(crate) fn constant(&self) -> Option<Faded<T>> {
         match self {
             PossiblyEvaluatedFadedPropertyValue::Constant(t) => Some(t.clone()),
             PossiblyEvaluatedFadedPropertyValue::Expression(_) => None,
@@ -186,14 +171,14 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
         }
     }
 
-    pub fn get_dependencies(&self) -> Dependency {
+    pub(crate) fn get_dependencies(&self) -> Dependency {
         match self {
             PossiblyEvaluatedFadedPropertyValue::Constant(_) => Dependency::NONE,
             PossiblyEvaluatedFadedPropertyValue::Expression(expression) => expression.get_dependencies(),
         }
     }
 
-    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
+    pub(crate) fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         match self {
             PossiblyEvaluatedFadedPropertyValue::Constant(_) => None,
             PossiblyEvaluatedFadedPropertyValue::Expression(expression) => expression.get_global_state_refs(),

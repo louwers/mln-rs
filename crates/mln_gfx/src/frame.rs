@@ -48,7 +48,7 @@ impl SyncKind {
     /// Every kind, from the one that waits least to the one that waits most:
     /// queue order waits for nothing, a GPU object makes only the GPU wait,
     /// a sync file crosses APIs, and a finished frame makes the CPU wait.
-    pub const BY_PREFERENCE: [SyncKind; 7] = [
+    pub(crate) const BY_PREFERENCE: [SyncKind; 7] = [
         SyncKind::QueueOrder,
         SyncKind::OpenGlFence,
         SyncKind::VulkanTimelineSemaphore,
@@ -87,7 +87,7 @@ impl SyncKinds {
     }
 
     #[must_use]
-    pub fn is_empty(self) -> bool {
+    pub(crate) fn is_empty(self) -> bool {
         self.0 == 0
     }
 

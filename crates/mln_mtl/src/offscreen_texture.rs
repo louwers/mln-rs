@@ -68,7 +68,13 @@ pub struct OffscreenTextureResource {
 }
 
 impl OffscreenTextureResource {
-    pub fn new(context: Rc<Context>, size: Size, type_: TextureChannelDataType, depth: bool, stencil: bool) -> Self {
+    pub(crate) fn new(
+        context: Rc<Context>,
+        size: Size,
+        type_: TextureChannelDataType,
+        depth: bool,
+        stencil: bool,
+    ) -> Self {
         debug_assert!(size.width != 0 && size.height != 0);
         let color_texture = render_target_texture(&context, size, TexturePixelType::RGBA, type_);
         let depth_texture = depth
@@ -94,7 +100,7 @@ impl OffscreenTextureResource {
     }
 
     /// The image the passes committed so far rendered. Waits for them.
-    pub fn read_still_image(&self) -> PremultipliedImage {
+    pub(crate) fn read_still_image(&self) -> PremultipliedImage {
         let mut image = PremultipliedImage::new(self.size);
         let color = self.color_texture.borrow();
         if color.get_data_size() != image.data.len() {
@@ -125,7 +131,7 @@ impl OffscreenTextureResource {
         image
     }
 
-    pub fn get_texture(&self) -> Texture2DPtr {
+    pub(crate) fn get_texture(&self) -> Texture2DPtr {
         self.color_texture.clone()
     }
 }
@@ -204,7 +210,7 @@ impl TargetResource for OffscreenTextureResource {
     }
 }
 
-pub struct OffscreenTexture {
+pub(crate) struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,
     /// The resource's color texture.
@@ -212,13 +218,19 @@ pub struct OffscreenTexture {
 }
 
 impl OffscreenTexture {
-    pub fn new(context: Rc<Context>, size: Size, type_: TextureChannelDataType, depth: bool, stencil: bool) -> Self {
+    pub(crate) fn new(
+        context: Rc<Context>,
+        size: Size,
+        type_: TextureChannelDataType,
+        depth: bool,
+        stencil: bool,
+    ) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
         let texture = resource.get_texture();
         OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource, texture }
     }
 
-    pub fn resource(&self) -> &OffscreenTextureResource {
+    pub(crate) fn resource(&self) -> &OffscreenTextureResource {
         &self.resource
     }
 }

@@ -784,7 +784,7 @@ fn unsupported(message: impl Into<std::borrow::Cow<'static, str>>) -> Error {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_attach(
+pub(crate) unsafe extern "C" fn mln_map_attach(
     map: mln_map,
     target: *const mln_render_target,
     device: mln_gpu_device,
@@ -875,7 +875,7 @@ type Replace = Box<dyn FnOnce(&RenderSession) -> Result<::mln_runtime::Completio
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_set_target(
+pub(crate) unsafe extern "C" fn mln_render_session_set_target(
     session: mln_render_session,
     target: *const mln_render_target,
     completion: *const mln_completion,
@@ -932,7 +932,7 @@ pub unsafe extern "C" fn mln_render_session_set_target(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_logical_extent_physical_size(
+pub(crate) unsafe extern "C" fn mln_logical_extent_physical_size(
     extent: mln_logical_extent,
     out_width: *mut u32,
     out_height: *mut u32,
@@ -953,7 +953,7 @@ pub unsafe extern "C" fn mln_logical_extent_physical_size(
 /// Android and `OpenHarmony`, WGL on Windows, and WebGL in a browser build that
 /// draws with OpenGL.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_open_gl_supported_context_provider_mask() -> mln_open_gl_context_provider_flags {
+pub(crate) extern "C" fn mln_open_gl_supported_context_provider_mask() -> mln_open_gl_context_provider_flags {
     if cfg!(all(target_family = "wasm", feature = "gl", not(feature = "webgpu"))) {
         crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WEB_GL
     } else if cfg!(windows) {

@@ -1,9 +1,9 @@
 //! Renderer utilities: tile cover, tile level of detail, tile meshes,
 //! subdivision and triangulation.
 
-pub mod subdivision;
+pub(crate) mod subdivision;
 pub mod tile_cover;
-pub mod tile_cover_impl;
-pub mod tile_lod;
-pub mod tile_mesh;
-pub mod triangulate;
+pub(crate) mod tile_cover_impl;
+pub(crate) mod tile_lod;
+pub(crate) mod tile_mesh;
+pub(crate) mod triangulate;

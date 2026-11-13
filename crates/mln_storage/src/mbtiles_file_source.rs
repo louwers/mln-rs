@@ -106,7 +106,7 @@ fn error_response(reason: Reason, message: impl Into<String>) -> Response {
     response
 }
 
-pub struct MBTilesFileSourceThread {
+pub(crate) struct MBTilesFileSourceThread {
     // Multiple databases open simultaneously, to effectively support
     // multiple .mbtiles maps
     db_cache: RefCell<VecMap<Vec<u8>, Database>>,
@@ -114,7 +114,8 @@ pub struct MBTilesFileSourceThread {
 
 impl MBTilesFileSourceThread {
     /// Generate a tilejson resource from .mbtiles file
-    pub fn request_tilejson(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
+    #[expect(clippy::unused_self, reason = "the file source's actor calls it on its thread's object")]
+    pub(crate) fn request_tilejson(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         let response = match Self::tilejson(resource) {
             Ok(response) => response,
             Err(message) => error_response(Reason::Other, message),
@@ -227,7 +228,7 @@ impl MBTilesFileSourceThread {
     }
 
     /// Load data for specific tile
-    pub fn request_tile(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request_tile(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         let response = match self.tile(resource) {
             Ok(response) => response,
             Err(message) => error_response(Reason::Other, message),
@@ -296,14 +297,14 @@ impl MBTilesFileSourceThread {
 }
 
 /// The `Mbtiles` file source: `mbtiles://` URLs with absolute paths.
-pub struct MBTilesFileSource {
+pub(crate) struct MBTilesFileSource {
     thread: Thread<MBTilesFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
 }
 
 impl MBTilesFileSource {
     #[must_use]
-    pub fn new(resource_options: &ResourceOptions) -> Self {
+    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
         MBTilesFileSource {
             thread: Thread::new("MBTilesFileSource", |_| MBTilesFileSourceThread {
                 db_cache: RefCell::new(VecMap::new()),

@@ -37,7 +37,7 @@ impl CompletionValue for Readback {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_render_session_read_texture(
+pub(crate) unsafe extern "C" fn mln_render_session_read_texture(
     session: mln_render_session,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,

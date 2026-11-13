@@ -65,7 +65,7 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &ColorReliefLayerImpl {
 
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
 
-pub struct RenderColorReliefLayer {
+pub(crate) struct RenderColorReliefLayer {
     base: RenderLayerBase,
     // Paint properties
     unevaluated: ColorReliefPaintProperties::Unevaluated,
@@ -98,7 +98,7 @@ pub struct RenderColorReliefLayer {
 }
 
 impl RenderColorReliefLayer {
-    pub fn new(impl_: Arc<ColorReliefLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<ColorReliefLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(ColorReliefLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -564,7 +564,7 @@ impl RenderLayer for RenderColorReliefLayer {
             dem_texture.borrow_mut().set_sampler_configuration(dem_sampler);
 
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
-                if !drawable_has_layer_tweaker(drawable, &layer_tweaker) {
+                if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
                     return false;
                 }
                 // The masked geometry changed: rebuild (see the file comment).
@@ -584,7 +584,7 @@ impl RenderLayer for RenderColorReliefLayer {
                 continue;
             }
 
-            let mut builder = context.create_drawable_builder("colorRelief".to_owned());
+            let mut builder = context.create_drawable_builder();
             builder.set_shader(Some(color_relief_shader.clone()));
             builder.set_enable_depth(false);
             builder.set_color_mode(&ColorMode::alpha_blended());

@@ -55,7 +55,7 @@ fn max4(values: [f32; 4]) -> f32 {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ProjectedCollisionBoxType {
+pub(crate) enum ProjectedCollisionBoxType {
     #[default]
     Unknown,
     Box,
@@ -64,7 +64,7 @@ pub enum ProjectedCollisionBoxType {
 
 /// A projected collision box or circle.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ProjectedCollisionBox {
+pub(crate) struct ProjectedCollisionBox {
     geometry: ProjectedCollisionBoxGeometry,
 }
 
@@ -78,20 +78,20 @@ enum ProjectedCollisionBoxGeometry {
 
 impl ProjectedCollisionBox {
     #[must_use]
-    pub fn new_box(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+    pub(crate) fn new_box(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         ProjectedCollisionBox {
             geometry: ProjectedCollisionBoxGeometry::Box(BBox::new(Point::new(x1, y1), Point::new(x2, y2))),
         }
     }
 
     #[must_use]
-    pub fn new_circle(x: f32, y: f32, r: f32) -> Self {
+    pub(crate) fn new_circle(x: f32, y: f32, r: f32) -> Self {
         ProjectedCollisionBox { geometry: ProjectedCollisionBoxGeometry::Circle(BCircle::new(Point::new(x, y), r)) }
     }
 
     /// The box; panics if this is a circle.
     #[must_use]
-    pub fn box_(&self) -> &BBox {
+    pub(crate) fn box_(&self) -> &BBox {
         match &self.geometry {
             ProjectedCollisionBoxGeometry::Box(b) => b,
             _ => panic!("ProjectedCollisionBox::box: not a box"),
@@ -100,7 +100,7 @@ impl ProjectedCollisionBox {
 
     /// The circle; panics if this is a box.
     #[must_use]
-    pub fn circle(&self) -> &BCircle {
+    pub(crate) fn circle(&self) -> &BCircle {
         match &self.geometry {
             ProjectedCollisionBoxGeometry::Circle(c) => c,
             _ => panic!("ProjectedCollisionBox::circle: not a circle"),
@@ -109,7 +109,7 @@ impl ProjectedCollisionBox {
 
     /// The `type` member.
     #[must_use]
-    pub fn type_(&self) -> ProjectedCollisionBoxType {
+    pub(crate) fn type_(&self) -> ProjectedCollisionBoxType {
         match self.geometry {
             ProjectedCollisionBoxGeometry::Unknown => ProjectedCollisionBoxType::Unknown,
             ProjectedCollisionBoxGeometry::Box(_) => ProjectedCollisionBoxType::Box,
@@ -118,53 +118,60 @@ impl ProjectedCollisionBox {
     }
 
     #[must_use]
-    pub fn is_circle(&self) -> bool {
+    pub(crate) fn is_circle(&self) -> bool {
         self.type_() == ProjectedCollisionBoxType::Circle
     }
 
     #[must_use]
-    pub fn is_box(&self) -> bool {
+    pub(crate) fn is_box(&self) -> bool {
         self.type_() == ProjectedCollisionBoxType::Box
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CollisionBox {
+pub(crate) struct CollisionBox {
     /// the box is centered around the anchor point
-    pub anchor: Point<f32>,
+    pub(crate) anchor: Point<f32>,
 
     // the offset of the box from the label's anchor point.
     // TODO: might be needed for #13526
     // Point<float> offset;
 
     // distances to the edges from the anchor
-    pub x1: f32,
-    pub y1: f32,
-    pub x2: f32,
-    pub y2: f32,
+    pub(crate) x1: f32,
+    pub(crate) y1: f32,
+    pub(crate) x2: f32,
+    pub(crate) y2: f32,
 
-    pub signed_distance_from_anchor: f32,
+    pub(crate) signed_distance_from_anchor: f32,
 }
 
 impl CollisionBox {
     #[must_use]
-    pub fn new(anchor: Point<f32>, x1: f32, y1: f32, x2: f32, y2: f32, signed_distance_from_anchor: f32) -> Self {
+    pub(crate) fn new(
+        anchor: Point<f32>,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        signed_distance_from_anchor: f32,
+    ) -> Self {
         CollisionBox { anchor, x1, y1, x2, y2, signed_distance_from_anchor }
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CollisionFeature {
-    pub boxes: Vec<CollisionBox>,
-    pub indexed_feature: IndexedSubfeature,
-    pub along_line: bool,
+pub(crate) struct CollisionFeature {
+    pub(crate) boxes: Vec<CollisionBox>,
+    pub(crate) indexed_feature: IndexedSubfeature,
+    pub(crate) along_line: bool,
 }
 
 impl CollisionFeature {
     /// The constructor for text.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new_text(
+    pub(crate) fn new_text(
         line: &GeometryCoordinates,
         anchor: &Anchor,
         shaped_text: &Shaping,
@@ -206,7 +213,7 @@ impl CollisionFeature {
     /// off collision detection too much. See:
     /// <https://github.com/mapbox/mapbox-gl-js/issues/4861>
     #[must_use]
-    pub fn new_icon(
+    pub(crate) fn new_icon(
         line: &GeometryCoordinates,
         anchor: &Anchor,
         shaped_icon: Option<&PositionedIcon>,

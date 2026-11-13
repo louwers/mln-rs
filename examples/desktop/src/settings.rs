@@ -6,7 +6,7 @@ use mln_util::constants::{DEFAULT_FOV, DEFAULT_PITCH_MAX};
 /// The camera and options the app starts with: central Amsterdam, as the
 /// web demo opens.
 #[derive(Clone, Debug)]
-pub struct Settings {
+pub(crate) struct Settings {
     pub longitude: f64,
     pub latitude: f64,
     pub altitude: f64,

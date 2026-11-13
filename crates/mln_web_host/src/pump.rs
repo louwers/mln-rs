@@ -167,7 +167,7 @@ pub fn waker() -> Arc<dyn Fn() + Send + Sync> {
 
 /// Sets how long each slice runs the scheduler's tasks: 4 ms unless set.
 /// The steps run in every slice, however long they take.
-pub fn set_slice(slice: Duration) {
+pub(crate) fn set_slice(slice: Duration) {
     PUMP.with(|pump| pump.slice.set(slice));
 }
 

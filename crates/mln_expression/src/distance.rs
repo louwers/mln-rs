@@ -964,7 +964,7 @@ fn get_geometry(geometry: &Geometry<f64>, ctx: &mut ParsingContext) -> Option<Ge
 }
 
 /// The distance in meters from the feature to a GeoJSON geometry.
-pub struct Distance {
+pub(crate) struct Distance {
     base: ExpressionBase,
     geojson_source: geojson::GeoJSON,
     geometries: Geometry<f64>,
@@ -972,7 +972,7 @@ pub struct Distance {
 
 impl Distance {
     #[must_use]
-    pub fn new(geojson: geojson::GeoJSON, geometries: Geometry<f64>) -> Self {
+    pub(crate) fn new(geojson: geojson::GeoJSON, geometries: Geometry<f64>) -> Self {
         Distance {
             base: ExpressionBase::new(Kind::Distance, Type::Number, Dependency::FEATURE),
             geojson_source: geojson,
@@ -980,7 +980,7 @@ impl Distance {
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let parsed_value = parse_value(value, ctx)?;
 
         let geometries: Vec<&Geometry<f64>> = match &parsed_value {

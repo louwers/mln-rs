@@ -28,31 +28,31 @@ use crate::render_layer::LayerRenderData;
 
 /// A feature the filter accepted, by index (see the file comment).
 #[derive(Clone, Copy, Debug)]
-pub struct CircleFeature {
-    pub i: usize,
-    pub sort_key: f32,
+pub(crate) struct CircleFeature {
+    pub(crate) i: usize,
+    pub(crate) sort_key: f32,
 }
 
-pub struct CircleLayout {
-    pub layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
-    pub bucket_leader_id: String,
+pub(crate) struct CircleLayout {
+    pub(crate) layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
+    pub(crate) bucket_leader_id: String,
 
-    pub features: Vec<CircleFeature>,
+    pub(crate) features: Vec<CircleFeature>,
 
-    pub zoom: f32,
-    pub mode: MapMode,
-    pub source_layer_id: String,
-    pub retain_features_by_id: bool,
+    pub(crate) zoom: f32,
+    pub(crate) mode: MapMode,
+    pub(crate) source_layer_id: String,
+    pub(crate) retain_features_by_id: bool,
 
     /// The source layer the layout gets its features from again (see
     /// layout.rs); `None` when built from a borrowed layer.
-    pub source_layer: Option<SourceLayer>,
+    pub(crate) source_layer: Option<SourceLayer>,
 }
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl CircleLayout {
-    pub fn new(
+    pub(crate) fn new(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
@@ -139,7 +139,7 @@ impl CircleLayout {
 
     /// Creates the layout and keeps `source_layer`, as the layer factory
     /// does.
-    pub fn with_source_layer(
+    pub(crate) fn with_source_layer(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
         source_layer: SourceLayer,
@@ -151,14 +151,15 @@ impl CircleLayout {
     }
 
     #[must_use]
-    pub fn has_dependencies(&self) -> bool {
+    #[expect(clippy::unused_self, reason = "matches the other layouts' `has_dependencies`")]
+    pub(crate) fn has_dependencies(&self) -> bool {
         false
     }
 
     /// Creates the bucket from the source layer. `insert_feature(geometries,
     /// i, source_layer_id, bucket_leader_id)` adds a feature to the feature
     /// index.
-    pub fn create_bucket_with(
+    pub(crate) fn create_bucket_with(
         &mut self,
         source_layer: &dyn GeometryTileLayer,
         insert_feature: &mut dyn FnMut(&GeometryCollection, usize, &str, &str),

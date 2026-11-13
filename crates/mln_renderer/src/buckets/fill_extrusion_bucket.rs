@@ -56,30 +56,30 @@ crate::paint_property_binders!(
 /// its ring.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct FillExtrusionLayoutVertex {
-    pub a1: [i16; 2],
-    pub a2: [u16; 2],
+pub(crate) struct FillExtrusionLayoutVertex {
+    pub(crate) a1: [i16; 2],
+    pub(crate) a2: [u16; 2],
 }
 
 /// A corner of the wall quad every instance draws: x picks the instance's
 /// vertex (0) or the next one (1), y the base (0) or the top (1).
-pub type FillExtrusionStaticVertex = [i16; 2];
+pub(crate) type FillExtrusionStaticVertex = [i16; 2];
 
-pub use crate::render_light::EvaluatedLight;
+pub(crate) use crate::render_light::EvaluatedLight;
 
 #[derive(Serialize, Deserialize)]
-pub struct FillExtrusionBucket {
-    pub base: BucketBase,
-    pub layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
+pub(crate) struct FillExtrusionBucket {
+    pub(crate) base: BucketBase,
+    pub(crate) layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
 
-    pub vertices: GeometryVec<FillExtrusionLayoutVertex>,
-    pub triangles: GeometryVec<u16>,
-    pub triangle_segments: Vec<SegmentBase>,
-    pub subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) vertices: GeometryVec<FillExtrusionLayoutVertex>,
+    pub(crate) triangles: GeometryVec<u16>,
+    pub(crate) triangle_segments: Vec<SegmentBase>,
+    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: VecMap<String, RwLock<FillExtrusionBinders>>,
+    pub(crate) paint_property_binders: VecMap<String, RwLock<FillExtrusionBinders>>,
 }
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
@@ -95,7 +95,7 @@ fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
 
 impl FillExtrusionBucket {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
         layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
@@ -118,12 +118,12 @@ impl FillExtrusionBucket {
         }
     }
 
-    pub fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
+    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
         self.subdivision_granularity = *value;
     }
 
     #[must_use]
-    pub fn layout_vertex(p: Point<f64>, edge_distance: u16, is_discarded: bool) -> FillExtrusionLayoutVertex {
+    pub(crate) fn layout_vertex(p: Point<f64>, edge_distance: u16, is_discarded: bool) -> FillExtrusionLayoutVertex {
         let int_part = Point::new(p.x.floor(), p.y.floor());
         // Multiply factional part by 2^7 to pack them into integers [0..127]
         let frac_x = ((p.x - int_part.x) * 128.0) as u8;
@@ -236,12 +236,12 @@ impl FillExtrusionBucket {
     }
 
     #[must_use]
-    pub fn light_color(light: &EvaluatedLight) -> [f32; 3] {
+    pub(crate) fn light_color(light: &EvaluatedLight) -> [f32; 3] {
         let color = light.get::<LightColor>();
         [color.r, color.g, color.b]
     }
 
-    pub fn light_position(light: &EvaluatedLight, state: &TransformState) -> [f32; 3] {
+    pub(crate) fn light_position(light: &EvaluatedLight, state: &TransformState) -> [f32; 3] {
         let mut light_pos: Vec3f = light.get::<LightPosition>().get_cartesian();
         let mut light_mat: Mat3 = [0.0; 9];
         mat3::identity(&mut light_mat);
@@ -255,7 +255,7 @@ impl FillExtrusionBucket {
     }
 
     #[must_use]
-    pub fn light_intensity(light: &EvaluatedLight) -> f32 {
+    pub(crate) fn light_intensity(light: &EvaluatedLight) -> f32 {
         *light.get::<LightIntensity>()
     }
 }
@@ -363,7 +363,7 @@ impl Bucket for FillExtrusionBucket {
 }
 
 /// The pattern layout of fill-extrusion layers, which have no sort key.
-pub struct FillExtrusionLayoutSpec;
+pub(crate) struct FillExtrusionLayoutSpec;
 
 impl PatternLayoutSpec for FillExtrusionLayoutSpec {
     type Bucket = FillExtrusionBucket;

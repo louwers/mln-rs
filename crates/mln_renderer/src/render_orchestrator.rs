@@ -103,7 +103,7 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
     fn on_glyphs_error(
         &self,
         font_stack: &mln_util::font_stack::FontStack,
-        glyph_range: &mln_text::glyph::GlyphRange,
+        glyph_range: mln_text::glyph::GlyphRange,
         error: mln_util::error::Error,
     ) {
         let range = if glyph_range.type_ == mln_text::glyph::GlyphIDType::FontPBF {
@@ -120,18 +120,18 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
         );
         self.events.emit(RendererEvent::GlyphsError {
             font_stack: font_stack.clone(),
-            range: *glyph_range,
+            range: glyph_range,
             error: error.clone(),
         });
         self.events.emit(RendererEvent::ResourceError(error));
     }
 
-    fn on_glyphs_loaded(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
-        self.events.emit(RendererEvent::GlyphsLoaded { font_stack: font_stack.clone(), range: *range });
+    fn on_glyphs_loaded(&self, font_stack: &mln_util::font_stack::FontStack, range: mln_text::glyph::GlyphRange) {
+        self.events.emit(RendererEvent::GlyphsLoaded { font_stack: font_stack.clone(), range });
     }
 
-    fn on_glyphs_requested(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
-        self.events.emit(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range: *range });
+    fn on_glyphs_requested(&self, font_stack: &mln_util::font_stack::FontStack, range: mln_text::glyph::GlyphRange) {
+        self.events.emit(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
     }
 }
 
@@ -168,7 +168,7 @@ fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
     }
 }
 
-pub struct RenderOrchestrator {
+pub(crate) struct RenderOrchestrator {
     events: EventSink,
     source_observer: Rc<OrchestratorSourceObserver>,
 
@@ -245,7 +245,7 @@ pub struct RenderOrchestrator {
 impl RenderOrchestrator {
     // C++ gets the map's thread pool; the port uses the background pool
     // with its own tag.
-    pub fn new(
+    pub(crate) fn new(
         background_layer_as_color: bool,
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
@@ -306,12 +306,12 @@ impl RenderOrchestrator {
     /// Port-only: the transport that creates the workers of the tiles
     /// created from now on (by default `InProcessTransport`, on the thread
     /// pool).
-    pub fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
+    pub(crate) fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
         self.tile_worker_transport = transport;
     }
 
     /// Sets the queue the orchestrator and its parts push their events to.
-    pub fn set_event_queue(&mut self, events: Option<RendererEvents>) {
+    pub(crate) fn set_event_queue(&mut self, events: Option<RendererEvents>) {
         self.events.set(events);
     }
 
@@ -319,20 +319,20 @@ impl RenderOrchestrator {
         self.events.emit(event);
     }
 
-    pub fn get_render_source(&self, id: &str) -> Option<&dyn RenderSource> {
+    pub(crate) fn get_render_source(&self, id: &str) -> Option<&dyn RenderSource> {
         self.render_sources.get(id).map(AsRef::as_ref)
     }
 
     /// The orchestrator's line atlas.
-    pub fn get_line_atlas(&self) -> &Rc<RefCell<LineAtlas>> {
+    pub(crate) fn get_line_atlas(&self) -> &Rc<RefCell<LineAtlas>> {
         &self.line_atlas
     }
 
-    pub fn get_pattern_atlas(&self) -> &Rc<RefCell<PatternAtlas>> {
+    pub(crate) fn get_pattern_atlas(&self) -> &Rc<RefCell<PatternAtlas>> {
         &self.pattern_atlas
     }
 
-    pub fn create_render_tree(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<RenderTree> {
+    pub(crate) fn create_render_tree(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<RenderTree> {
         let start_time = mln_util::time::Instant::now();
 
         let is_map_mode_continuous = update_parameters.mode == MapMode::Continuous;
@@ -613,13 +613,12 @@ impl RenderOrchestrator {
 
         // Create render sources for newly added sources.
         for (id, impl_) in &source_diff.added {
-            if let Some(mut render_source) = render_source::create(impl_) {
-                render_source.set_observer(self.source_observer.clone());
-                render_source.set_cache_enabled(self.tile_cache_enabled);
-                render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
-                // `emplace` keeps an existing entry.
-                self.render_sources.entry(id.clone()).or_insert(render_source);
-            }
+            let mut render_source = render_source::create(impl_);
+            render_source.set_observer(self.source_observer.clone());
+            render_source.set_cache_enabled(self.tile_cache_enabled);
+            render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
+            // `emplace` keeps an existing entry.
+            self.render_sources.entry(id.clone()).or_insert(render_source);
         }
 
         // The update carries the map's whole feature state, so a render
@@ -647,12 +646,8 @@ impl RenderOrchestrator {
         let _tilted_view = self.transform_state.get_pitch() != 0.0;
 
         // Create parameters for the render tree.
-        let mut render_tree_parameters = Box::new(RenderTreeParameters::new(
-            &update_parameters.transform_state,
-            update_parameters.mode,
-            update_parameters.debug_options,
-            update_parameters.time_point,
-        ));
+        let mut render_tree_parameters =
+            Box::new(RenderTreeParameters::new(&update_parameters.transform_state, update_parameters.debug_options));
         // conformance: the RenderTreeParameters ctor's `renderLight.getEvaluated()`.
         render_tree_parameters.light = self.render_light.get_evaluated().clone();
         render_tree_parameters.sky = self.render_sky.as_ref().map(|render_sky| render_sky.get_evaluated().clone());
@@ -732,9 +727,9 @@ impl RenderOrchestrator {
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
                                 let source_id = source_impl.base().id.clone();
-                                layer_render_items.entry(index as u32).or_insert_with(|| {
-                                    LayerRenderItem::new(layer_ptr.clone(), Some(source_id), index as u32)
-                                });
+                                layer_render_items
+                                    .entry(index as u32)
+                                    .or_insert_with(|| LayerRenderItem::new(layer_ptr.clone(), Some(source_id)));
                                 update_list[index] = true;
                             }
                         }
@@ -761,7 +756,7 @@ impl RenderOrchestrator {
                     }
                     layer_render_items
                         .entry(index as u32)
-                        .or_insert_with(|| LayerRenderItem::new(layer_ptr.clone(), None, index as u32));
+                        .or_insert_with(|| LayerRenderItem::new(layer_ptr.clone(), None));
                     update_list[index] = true;
                 }
             }
@@ -806,7 +801,6 @@ impl RenderOrchestrator {
                 render_source.prepare(&SourcePrepareParameters {
                     transform: &render_tree_parameters.transform_params,
                     debug_options: update_parameters.debug_options,
-                    image_manager: &self.image_manager,
                     source_name: name.clone(),
                 });
             } else {
@@ -825,7 +819,6 @@ impl RenderOrchestrator {
                 image_manager: &self.image_manager, // conformance
                 pattern_atlas: &self.pattern_atlas,
                 line_atlas: &self.line_atlas,
-                state: &update_parameters.transform_state,
             });
             if render_layer.needs_placement() {
                 layers_need_placement.push(render_item.layer.clone());
@@ -946,7 +939,7 @@ impl RenderOrchestrator {
         Some(render_tree)
     }
 
-    pub fn has_transitions(&self, time_point: Option<Instant>) -> bool {
+    pub(crate) fn has_transitions(&self, time_point: Option<Instant>) -> bool {
         // conformance
         if self.render_light.has_transition() {
             return true;
@@ -975,7 +968,7 @@ impl RenderOrchestrator {
         false
     }
 
-    pub fn is_loaded(&self) -> bool {
+    pub(crate) fn is_loaded(&self) -> bool {
         // do the simple boolean check before iterating over all the tiles in
         // all the sources
         if !self.image_manager.is_loaded() {
@@ -991,7 +984,7 @@ impl RenderOrchestrator {
         true
     }
 
-    pub fn clear_data(&mut self) {
+    pub(crate) fn clear_data(&mut self) {
         if !self.source_impls.is_empty() {
             self.source_impls = Arc::new(Vec::new());
         }
@@ -1032,7 +1025,7 @@ impl RenderOrchestrator {
     /// and globe depth passes, and the debug drawables. The next update
     /// makes them again, from the shaders the renderer has then. The
     /// sources keep their tiles, and the tiles their layout.
-    pub fn release_shaders(&mut self) {
+    pub(crate) fn release_shaders(&mut self) {
         self.remake_render_layers = true;
         self.debug_layer_groups.clear(); // layers: debug
         self.debug_layer_tweakers.clear(); // layers: debug
@@ -1043,7 +1036,7 @@ impl RenderOrchestrator {
     /// symbols: C++ `Renderer::render` recreates the dynamic texture atlas
     /// when the style changed (`impl->dynamicTextureAtlas` is owned by the
     /// renderer and handed to createRenderTree).
-    pub fn reset_dynamic_texture_atlas(&mut self) {
+    pub(crate) fn reset_dynamic_texture_atlas(&mut self) {
         self.dynamic_texture_atlas = Arc::new(DynamicTextureAtlas::new());
     }
 
@@ -1051,7 +1044,7 @@ impl RenderOrchestrator {
         self.pending_changes.append(changes);
     }
 
-    pub fn update_layer_index(&mut self, layer_group: &LayerGroupBasePtr, new_index: i32) {
+    pub(crate) fn update_layer_index(&mut self, layer_group: &LayerGroupBasePtr, new_index: i32) {
         let current = layer_group.borrow().get_layer_index();
         if current == new_index {
             return;
@@ -1072,7 +1065,7 @@ impl RenderOrchestrator {
         layer_group.borrow_mut().update_layer_index(new_index);
     }
 
-    pub fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr) -> bool {
+    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr) -> bool {
         let index = layer_group.borrow().get_layer_index();
         let groups = self.layer_groups_by_layer_index.entry(index).or_default();
         if groups.iter().any(|g| Rc::ptr_eq(g, &layer_group)) {
@@ -1083,7 +1076,7 @@ impl RenderOrchestrator {
         }
     }
 
-    pub fn remove_layer_group(&mut self, layer_group: &LayerGroupBasePtr) -> bool {
+    pub(crate) fn remove_layer_group(&mut self, layer_group: &LayerGroupBasePtr) -> bool {
         let index = layer_group.borrow().get_layer_index();
         if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&index)
             && let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group))
@@ -1097,29 +1090,29 @@ impl RenderOrchestrator {
         false
     }
 
-    pub fn num_layer_groups(&self) -> usize {
+    pub(crate) fn num_layer_groups(&self) -> usize {
         self.layer_groups_by_layer_index.values().map(Vec::len).sum()
     }
 
     /// The layer groups in multimap order (ascending layer index).
-    pub fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
+    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
         self.layer_groups_by_layer_index.values().flatten().cloned().collect()
     }
 
-    pub fn visit_layer_groups(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
+    pub(crate) fn visit_layer_groups(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
         for group in self.layer_groups() {
             f(&mut *group.borrow_mut());
         }
     }
 
-    pub fn visit_layer_groups_reversed(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
+    pub(crate) fn visit_layer_groups_reversed(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
         for group in self.layer_groups().into_iter().rev() {
             f(&mut *group.borrow_mut());
         }
     }
 
     /// Updates the debug layer groups (layers: debug).
-    pub fn update_debug_layer_groups(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
+    pub(crate) fn update_debug_layer_groups(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
         for item in render_tree.get_source_render_items() {
             item.update_debug_drawables(&mut self.debug_layer_groups, parameters);
         }
@@ -1147,12 +1140,12 @@ impl RenderOrchestrator {
 
     /// The debug layer groups, in `DebugType` order (`visitDebugLayerGroups`)
     /// (layers: debug).
-    pub fn debug_layer_groups(&self) -> Vec<LayerGroupBasePtr> {
+    pub(crate) fn debug_layer_groups(&self) -> Vec<LayerGroupBasePtr> {
         self.debug_layer_groups.values().cloned().collect()
     }
 
     /// Runs the live tweakers of the layer group and drops the expired ones.
-    pub fn run_tweakers(&mut self, layer_group: &LayerGroupBasePtr, parameters: &PaintParameters<'_>) {
+    pub(crate) fn run_tweakers(&mut self, layer_group: &LayerGroupBasePtr, parameters: &PaintParameters<'_>) {
         let id = layer_group.borrow().get_id();
         let Some(tweakers) = self.layer_group_tweakers.get_mut(&id) else {
             return;
@@ -1169,13 +1162,13 @@ impl RenderOrchestrator {
     }
 
     /// Visits every render layer, in no order.
-    pub fn visit_render_layers(&self, mut f: impl FnMut(&mut dyn crate::render_layer::RenderLayer)) {
+    pub(crate) fn visit_render_layers(&self, mut f: impl FnMut(&mut dyn crate::render_layer::RenderLayer)) {
         for layer in self.render_layers.values() {
             f(&mut *layer.borrow_mut());
         }
     }
 
-    pub fn update_layers(
+    pub(crate) fn update_layers(
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
@@ -1224,7 +1217,7 @@ impl RenderOrchestrator {
             shaders,
             context,
             state,
-            &paint_parameters.renderable_size,
+            paint_parameters.renderable_size,
             paint_parameters.pixel_ratio,
             tree_parameters.sky.as_ref(),
             &tree_parameters.light,
@@ -1240,23 +1233,23 @@ impl RenderOrchestrator {
 
     /// Takes the features the layers rendered in the last `update_layers`,
     /// leaving none.
-    pub fn move_frame_rendered_features(&mut self) -> FrameRenderedFeaturesMap {
+    pub(crate) fn move_frame_rendered_features(&mut self) -> FrameRenderedFeaturesMap {
         std::mem::take(&mut self.frame_rendered_features)
     }
 
-    pub fn get_sky_layer_group(&self) -> Option<LayerGroupBasePtr> {
+    pub(crate) fn get_sky_layer_group(&self) -> Option<LayerGroupBasePtr> {
         self.sky_pass.get_sky_layer_group().cloned()
     }
 
-    pub fn get_atmosphere_layer_group(&self) -> Option<LayerGroupBasePtr> {
+    pub(crate) fn get_atmosphere_layer_group(&self) -> Option<LayerGroupBasePtr> {
         self.sky_pass.get_atmosphere_layer_group().cloned()
     }
 
-    pub fn get_globe_depth_layer_group(&self) -> Option<LayerGroupBasePtr> {
+    pub(crate) fn get_globe_depth_layer_group(&self) -> Option<LayerGroupBasePtr> {
         self.globe_depth_pass.get_layer_group().cloned()
     }
 
-    pub fn process_changes(&mut self) {
+    pub(crate) fn process_changes(&mut self) {
         let local_changes = std::mem::take(&mut self.pending_changes);
         for change in local_changes {
             match change {
@@ -1285,7 +1278,7 @@ impl RenderOrchestrator {
     }
 
     // dem-heatmap: render targets.
-    pub fn add_render_target(&mut self, render_target: crate::render_target::RenderTargetPtr) -> bool {
+    pub(crate) fn add_render_target(&mut self, render_target: crate::render_target::RenderTargetPtr) -> bool {
         if self.render_targets.iter().any(|t| Rc::ptr_eq(t, &render_target)) {
             false
         } else {
@@ -1294,7 +1287,7 @@ impl RenderOrchestrator {
         }
     }
 
-    pub fn remove_render_target(&mut self, render_target: &crate::render_target::RenderTargetPtr) -> bool {
+    pub(crate) fn remove_render_target(&mut self, render_target: &crate::render_target::RenderTargetPtr) -> bool {
         match self.render_targets.iter().position(|t| Rc::ptr_eq(t, render_target)) {
             Some(pos) => {
                 self.render_targets.remove(pos);
@@ -1306,14 +1299,14 @@ impl RenderOrchestrator {
 
     /// The render targets, for `visitRenderTargets` (cloned, so that the
     /// visitor may use the orchestrator).
-    pub fn render_targets(&self) -> Vec<crate::render_target::RenderTargetPtr> {
+    pub(crate) fn render_targets(&self) -> Vec<crate::render_target::RenderTargetPtr> {
         self.render_targets.clone()
     }
 
     // query
     /// Queries the rendered features in `geometry`. `Err` if the query fails
     /// (a malformed tile).
-    pub fn query_rendered_features(
+    pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
@@ -1453,13 +1446,13 @@ impl RenderOrchestrator {
     }
 
     /// A copy of the placed symbols' data (the placement is shared).
-    pub fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
+    pub(crate) fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
         self.placement_controller.get_placement().get_placed_symbols_data().to_vec()
     }
 
     /// Queries the features of the source `source_id`. `Err`: as
     /// [`query_rendered_features`](Self::query_rendered_features).
-    pub fn query_source_features(
+    pub(crate) fn query_source_features(
         &self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
@@ -1473,7 +1466,7 @@ impl RenderOrchestrator {
 
     /// Queries a feature extension of the source `source_id`; a null value
     /// for a source the style doesn't have.
-    pub fn query_feature_extensions(
+    pub(crate) fn query_feature_extensions(
         &self,
         source_id: &str,
         feature: &mln_util::feature::Feature,
@@ -1487,7 +1480,7 @@ impl RenderOrchestrator {
         }
     }
 
-    pub fn dump_debug_logs(&self) {
+    pub(crate) fn dump_debug_logs(&self) {
         for source in self.render_sources.values() {
             source.dump_debug_logs();
         }
@@ -1495,7 +1488,7 @@ impl RenderOrchestrator {
     }
 
     // layers: feature state
-    pub fn set_feature_state(
+    pub(crate) fn set_feature_state(
         &mut self,
         source_id: &str,
         source_layer_id: Option<&str>,
@@ -1507,7 +1500,7 @@ impl RenderOrchestrator {
         }
     }
 
-    pub fn get_feature_state(
+    pub(crate) fn get_feature_state(
         &self,
         source_id: &str,
         source_layer_id: Option<&str>,
@@ -1519,7 +1512,7 @@ impl RenderOrchestrator {
         }
     }
 
-    pub fn remove_feature_state(
+    pub(crate) fn remove_feature_state(
         &mut self,
         source_id: &str,
         source_layer_id: Option<&str>,
@@ -1531,11 +1524,11 @@ impl RenderOrchestrator {
         }
     }
 
-    pub fn collect_placed_symbol_data(&mut self, enable: bool) {
+    pub(crate) fn collect_placed_symbol_data(&mut self, enable: bool) {
         self.placed_symbol_data_collected = enable;
     }
 
-    pub fn set_tile_cache_enabled(&mut self, enable: bool) {
+    pub(crate) fn set_tile_cache_enabled(&mut self, enable: bool) {
         self.tile_cache_enabled = enable;
 
         for source in self.render_sources.values_mut() {
@@ -1543,7 +1536,7 @@ impl RenderOrchestrator {
         }
     }
 
-    pub fn reduce_memory_use(&mut self) {
+    pub(crate) fn reduce_memory_use(&mut self) {
         self.filtered_layers_for_source.shrink_to_fit();
         for source in self.render_sources.values_mut() {
             source.reduce_memory_use();
@@ -1552,7 +1545,7 @@ impl RenderOrchestrator {
         self.events.emit(RendererEvent::Invalidate);
     }
 
-    pub fn get_tile_cache_enabled(&self) -> bool {
+    pub(crate) fn get_tile_cache_enabled(&self) -> bool {
         self.tile_cache_enabled
     }
 }

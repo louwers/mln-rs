@@ -27,7 +27,7 @@ use crate::tile::tile_worker_transport::WorkerParameters;
 
 /// A worker's message for its tile, decoded: the messages of the tile's
 /// worker type.
-pub enum Reply {
+pub(crate) enum Reply {
     Geometry(TileMessage),
     Raster(RasterTileMessage),
     RasterDEM(RasterDEMTileMessage),
@@ -42,7 +42,7 @@ enum WorkerType {
 }
 
 /// The map side of one worker instance.
-pub struct MapCodec {
+pub(crate) struct MapCodec {
     /// The keys of what the instance has of this side's: layers, their
     /// properties and expressions, images and tile data; and the copies of
     /// the instance's textures.
@@ -88,7 +88,7 @@ impl Default for MapCodec {
 }
 
 impl MapCodec {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         MapCodec::default()
     }
 
@@ -129,19 +129,19 @@ impl MapCodec {
     }
 
     /// The request that creates the worker of `tile`.
-    pub fn create(&mut self, tile: u64, parameters: &WorkerParameters) -> Vec<u8> {
+    pub(crate) fn create(&mut self, tile: u64, parameters: &WorkerParameters) -> Vec<u8> {
         self.add(tile, WorkerType::Geometry);
         self.bare_request(Action::Create { tile, parameters: parameters.clone() })
     }
 
     /// The request that creates the `RasterTileWorker` of `tile`.
-    pub fn create_raster(&mut self, tile: u64) -> Vec<u8> {
+    pub(crate) fn create_raster(&mut self, tile: u64) -> Vec<u8> {
         self.add(tile, WorkerType::Raster);
         self.bare_request(Action::CreateRaster { tile })
     }
 
     /// The request that creates the `RasterDEMTileWorker` of `tile`.
-    pub fn create_raster_dem(&mut self, tile: u64) -> Vec<u8> {
+    pub(crate) fn create_raster_dem(&mut self, tile: u64) -> Vec<u8> {
         self.add(tile, WorkerType::RasterDEM);
         self.bare_request(Action::CreateRasterDEM { tile })
     }
@@ -151,21 +151,21 @@ impl MapCodec {
     }
 
     /// The request that drops the worker of `tile`.
-    pub fn remove(&mut self, tile: u64) -> Vec<u8> {
+    pub(crate) fn remove(&mut self, tile: u64) -> Vec<u8> {
         self.tiles.remove(&tile);
         self.bare_request(Action::Remove { tile })
     }
 
     /// A request that only carries the releases of bins of the instance's
     /// atlas, if any are waiting (the next request carries them otherwise).
-    pub fn releases(&mut self) -> Option<Vec<u8>> {
+    pub(crate) fn releases(&mut self) -> Option<Vec<u8>> {
         self.atlas.has_releases().then(|| self.bare_request(Action::None))
     }
 
     /// The request that sends `message` to the worker of `tile`. Fails for
     /// what can't cross (tile data that no longer has its bytes, say) or an
     /// unknown tile.
-    pub fn message(&mut self, tile: u64, message: &WorkerMessage) -> Result<Vec<u8>, String> {
+    pub(crate) fn message(&mut self, tile: u64, message: &WorkerMessage) -> Result<Vec<u8>, String> {
         let state = self.tiles.get_mut(&tile).ok_or_else(|| format!("no tile {tile}"))?;
         let correlation_id = message.correlation_id();
         let kind = match message {
@@ -193,14 +193,14 @@ impl MapCodec {
     }
 
     /// The request that sends `message` to the `RasterTileWorker` of `tile`.
-    pub fn raster_message(&mut self, tile: u64, message: &RasterWorkerMessage) -> Vec<u8> {
+    pub(crate) fn raster_message(&mut self, tile: u64, message: &RasterWorkerMessage) -> Vec<u8> {
         let &RasterWorkerMessage::Parse { correlation_id, .. } = message;
         self.simple_message(tile, correlation_id, message)
     }
 
     /// The request that sends `message` to the `RasterDEMTileWorker` of
     /// `tile`.
-    pub fn raster_dem_message(&mut self, tile: u64, message: &RasterDEMWorkerMessage) -> Vec<u8> {
+    pub(crate) fn raster_dem_message(&mut self, tile: u64, message: &RasterDEMWorkerMessage) -> Vec<u8> {
         let &RasterDEMWorkerMessage::Parse { correlation_id, .. } = message;
         self.simple_message(tile, correlation_id, message)
     }
@@ -216,7 +216,7 @@ impl MapCodec {
     /// reply to a tile that is gone (sent before the worker got the
     /// `Remove`). A message this side can't decode becomes an error for the
     /// tile. Fails only for bytes that aren't a reply.
-    pub fn decode(&mut self, reply: Encoded) -> Result<Option<(u64, Reply)>, String> {
+    pub(crate) fn decode(&mut self, reply: Encoded) -> Result<Option<(u64, Reply)>, String> {
         let Encoded { bytes, payloads } = reply;
         payload::decode(payloads, || {
             let (head, message): (ReplyHead<LayoutAtlases>, &[u8]) = self.tables.open(|| envelope::take(&bytes))?;
@@ -276,7 +276,7 @@ fn error(message: impl Into<String>, correlation_id: u64) -> TileMessage {
 /// are this side's copies of the instance's (`SharedTexture`), which upload
 /// the pixels the instance queued for them.
 #[derive(Default)]
-pub struct AtlasMirror {
+pub(crate) struct AtlasMirror {
     released: Mutex<Vec<(DynamicTexturePtr, Vec<TextureHandle>)>>,
 }
 
@@ -293,7 +293,7 @@ impl AtlasMirror {
 
 impl TextureAtlas for AtlasMirror {
     /// Queues the releases for the instance.
-    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>) {
+    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: Option<&DynamicTexturePtr>) {
         if let Some(texture) = dynamic_texture
             && !texture_handles.is_empty()
         {

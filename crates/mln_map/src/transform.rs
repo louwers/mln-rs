@@ -38,7 +38,7 @@ use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 /// A frame time older than this is stale (see [`Transform::frame_time`]):
 /// longer than a frame at 10 fps, so any host that draws sets a fresh one
 /// first.
-pub const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
+pub(crate) const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
 
 /// Converts the given angle (in radians) to be numerically close to the
 /// anchor angle, allowing it to be interpolated properly without sudden
@@ -61,10 +61,6 @@ fn normalize_angle(mut angle: f64, anchor_angle: f64) -> f64 {
     }
 
     angle
-}
-
-fn angle_between(a: &Point<f64>, b: &Point<f64>) -> f64 {
-    (a.x * b.y - a.y * b.x).atan2(a.x * b.x + a.y * b.y)
 }
 
 fn lat_lng(lat: f64, lon: f64) -> LatLng {
@@ -107,7 +103,7 @@ impl TransformObserver for NullTransformObserver {}
 /// center or padding the frame could not compute (logged), which keeps the
 /// current one.
 type FrameFn = Rc<dyn Fn(&TransformState, f64) -> CameraOptions>;
-pub type ProjectionForZoomFn = Rc<dyn Fn(f64) -> ProjectionDefinition>;
+pub(crate) type ProjectionForZoomFn = Rc<dyn Fn(f64) -> ProjectionDefinition>;
 
 // `Transform::CameraField`.
 const CENTER: u16 = 1 << 0;
@@ -550,7 +546,7 @@ impl Transform {
         }
     }
 
-    pub fn from_state(state: TransformState) -> Self {
+    pub(crate) fn from_state(state: TransformState) -> Self {
         Transform {
             observer: Rc::new(NullTransformObserver),
             state,
@@ -853,7 +849,7 @@ impl Transform {
     ///
     /// Where applicable, local variable documentation begins with the
     /// associated variable or function in van Wijk (2003).
-    pub fn fly_to(
+    pub(crate) fn fly_to(
         &mut self,
         input_camera: &CameraOptions,
         animation: &AnimationOptions,
@@ -1334,7 +1330,7 @@ impl Transform {
 
     // MARK: - Zoom
 
-    pub fn get_zoom(&self) -> f64 {
+    pub(crate) fn get_zoom(&self) -> f64 {
         self.state.get_zoom()
     }
 
@@ -1348,21 +1344,21 @@ impl Transform {
         Ok(())
     }
 
-    pub fn set_min_zoom(&mut self, min_zoom: f64) {
+    pub(crate) fn set_min_zoom(&mut self, min_zoom: f64) {
         if min_zoom.is_nan() {
             return;
         }
         self.state.set_min_zoom(min_zoom);
     }
 
-    pub fn set_max_zoom(&mut self, max_zoom: f64) {
+    pub(crate) fn set_max_zoom(&mut self, max_zoom: f64) {
         if max_zoom.is_nan() {
             return;
         }
         self.state.set_max_zoom(max_zoom);
     }
 
-    pub fn set_min_pitch(&mut self, min_pitch: f64) {
+    pub(crate) fn set_min_pitch(&mut self, min_pitch: f64) {
         if min_pitch.is_nan() {
             return;
         }
@@ -1394,43 +1390,13 @@ impl Transform {
         self.state.set_max_pitch(mln_math::deg2rad(max_pitch));
     }
 
-    pub fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
+    pub(crate) fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
         self.state.set_frustum_offset(frustum_offset);
-    }
-
-    pub fn get_frustum_offset(&self) -> EdgeInsets {
-        self.state.get_frustum_offset()
     }
 
     // MARK: - Bearing
 
-    pub fn rotate_by(&mut self, first: &ScreenCoordinate, second: &ScreenCoordinate, animation: &AnimationOptions) {
-        let size = self.state.get_size();
-        let mut center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
-        let offset = ScreenCoordinate::new(first.x - center.x, first.y - center.y);
-        // C++: std::sqrt(std::pow(2, offset.x) + std::pow(2, offset.y)) (sic).
-        let distance = (2.0f64.powf(offset.x) + 2.0f64.powf(offset.y)).sqrt();
-
-        // If the first click was too close to the center, move the center of
-        // rotation by 200 pixels in the direction of the click.
-        if distance < 200.0 {
-            let height_offset = -200.0;
-            let rotate_bearing = offset.y.atan2(offset.x);
-            center.x = first.x + rotate_bearing.cos() * height_offset;
-            center.y = first.y + rotate_bearing.sin() * height_offset;
-        }
-
-        let bearing = -mln_math::rad2deg(
-            self.state.get_bearing()
-                + angle_between(
-                    &Point::new(first.x - center.x, first.y - center.y),
-                    &Point::new(second.x - center.x, second.y - center.y),
-                ),
-        );
-        self.ease_to(&CameraOptions { bearing: Some(bearing), ..Default::default() }, animation);
-    }
-
-    pub fn get_bearing(&self) -> f64 {
+    pub(crate) fn get_bearing(&self) -> f64 {
         self.state.get_bearing()
     }
 
@@ -1440,12 +1406,12 @@ impl Transform {
         self.state.get_pitch()
     }
 
-    pub fn get_roll(&self) -> f64 {
+    pub(crate) fn get_roll(&self) -> f64 {
         self.state.get_roll()
     }
 
     /// Returns `state.getFieldOfView()` (a float) as double.
-    pub fn get_field_of_view(&self) -> f64 {
+    pub(crate) fn get_field_of_view(&self) -> f64 {
         f64::from(self.state.get_field_of_view())
     }
 
@@ -1457,30 +1423,31 @@ impl Transform {
 
     /// The projection the style gives at a zoom, which constrains an
     /// animation's target as it constrains a jump.
-    pub fn set_projection_for_zoom(&mut self, projection_for_zoom: Option<ProjectionForZoomFn>) {
+    pub(crate) fn set_projection_for_zoom(&mut self, projection_for_zoom: Option<ProjectionForZoomFn>) {
         self.projection_for_zoom = projection_for_zoom;
     }
 
-    pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
+    pub(crate) fn set_globe_free_bearing(&mut self, free_bearing: bool) {
         self.globe_free_bearing = free_bearing;
     }
 
-    pub fn is_globe_free_bearing(&self) -> bool {
+    pub(crate) fn is_globe_free_bearing(&self) -> bool {
         self.globe_free_bearing
     }
 
-    pub fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
         self.state.is_location_occluded(lat_lng)
     }
 
     // MARK: - North Orientation
 
-    pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
+    pub(crate) fn set_north_orientation(&mut self, orientation: NorthOrientation) {
         self.state.set_north_orientation(orientation);
         self.constrain_position(self.state.get_scale());
     }
 
-    pub fn get_north_orientation(&self) -> NorthOrientation {
+    pub(crate) fn get_north_orientation(&self) -> NorthOrientation {
         self.state.get_north_orientation()
     }
 
@@ -1500,23 +1467,15 @@ impl Transform {
         self.constrain_position(self.state.get_scale());
     }
 
-    pub fn get_constrain_mode(&self) -> ConstrainMode {
-        self.state.get_constrain_mode()
-    }
-
     // MARK: - Viewport mode
 
     pub fn set_viewport_mode(&mut self, mode: ViewportMode) {
         self.state.set_viewport_mode(mode);
     }
 
-    pub fn get_viewport_mode(&self) -> ViewportMode {
-        self.state.get_viewport_mode()
-    }
-
     // MARK: - Projection mode
 
-    pub fn set_projection_mode(&mut self, options: &ProjectionMode) {
+    pub(crate) fn set_projection_mode(&mut self, options: &ProjectionMode) {
         if let Some(x_skew) = options.x_skew {
             self.state.set_x_skew(x_skew);
         }
@@ -1528,7 +1487,7 @@ impl Transform {
         }
     }
 
-    pub fn get_projection_mode(&self) -> ProjectionMode {
+    pub(crate) fn get_projection_mode(&self) -> ProjectionMode {
         ProjectionMode::default()
             .with_axonometric(self.state.get_axonometric())
             .with_x_skew(self.state.get_x_skew())
@@ -1820,7 +1779,8 @@ impl Transform {
 
     /// Continues a gesture with momentum. The momentum replaces the running
     /// animations of the fields that it moves, as a camera command does.
-    pub fn start_momentum(&mut self, options: &CameraMomentum, animation: &AnimationOptions) {
+    #[cfg(test)]
+    pub(crate) fn start_momentum(&mut self, options: &CameraMomentum, animation: &AnimationOptions) {
         self.with_source(CameraChangeSource::Momentum, |transform| {
             transform.start_momentum_now(options, animation, None);
         });
@@ -2297,7 +2257,7 @@ impl Transform {
     /// forgot to set it this frame. A stale frame time would start a command
     /// in the past, which the next frame would show already under way or
     /// over.
-    pub fn frame_time(&self) -> Option<Instant> {
+    pub(crate) fn frame_time(&self) -> Option<Instant> {
         self.fresh_frame_time(Instant::now())
     }
 
@@ -2311,7 +2271,7 @@ impl Transform {
         self.fresh_frame_time(now).unwrap_or(now)
     }
 
-    pub fn cancel_transitions(&mut self) {
+    pub(crate) fn cancel_transitions(&mut self) {
         let finished = std::mem::take(&mut self.transitions);
         for transition in &finished {
             transition.ended_by(TransitionOutcome::Cancelled);
@@ -2467,7 +2427,7 @@ impl Transform {
         }
     }
 
-    pub fn set_gesture_in_progress(&mut self, in_progress: bool) {
+    pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) {
         self.state.set_gesture_in_progress(in_progress);
     }
 
@@ -2481,15 +2441,18 @@ impl Transform {
         &self.state
     }
 
-    pub fn is_rotating(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_rotating(&self) -> bool {
         self.state.is_rotating()
     }
 
-    pub fn is_scaling(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_scaling(&self) -> bool {
         self.state.is_scaling()
     }
 
-    pub fn is_panning(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_panning(&self) -> bool {
         self.state.is_panning()
     }
 
@@ -2510,11 +2473,12 @@ impl Transform {
         self.state.screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
     }
 
-    pub fn get_free_camera_options(&self) -> FreeCameraOptions {
+    #[cfg(test)]
+    pub(crate) fn get_free_camera_options(&self) -> FreeCameraOptions {
         self.state.get_free_camera_options()
     }
 
-    pub fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
+    pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
         self.cancel_transitions();
         self.state.set_free_camera_options(options);
     }

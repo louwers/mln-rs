@@ -24,23 +24,23 @@ use crate::value::{ObjectType, Value, from_mbgl_value_owned, to_string, type_of}
 
 /// The parameter list of a signature: fixed types or `VarargsType`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Params {
+pub(crate) enum Params {
     Fixed(Vec<Type>),
     Varargs(Type),
 }
 
 type ApplyFn = fn(&EvaluationContext<'_>, &[Box<dyn Expression>]) -> EvaluationResult;
 
-pub struct SignatureBase {
-    pub result: Type,
-    pub params: Params,
-    pub name: &'static str,
-    pub dependencies: Dependency,
+pub(crate) struct SignatureBase {
+    pub(crate) result: Type,
+    pub(crate) params: Params,
+    pub(crate) name: &'static str,
+    pub(crate) dependencies: Dependency,
     apply: ApplyFn,
 }
 
 impl SignatureBase {
-    pub fn apply(&self, params: &EvaluationContext<'_>, args: &[Box<dyn Expression>]) -> EvaluationResult {
+    pub(crate) fn apply(&self, params: &EvaluationContext<'_>, args: &[Box<dyn Expression>]) -> EvaluationResult {
         (self.apply)(params, args)
     }
 }
@@ -568,7 +568,7 @@ fn definitions(name: &str) -> Vec<&'static SignatureBase> {
     REGISTRY.iter().filter(|s| s.name == name).collect()
 }
 
-pub struct CompoundExpression {
+pub(crate) struct CompoundExpression {
     base: ExpressionBase,
     signature: &'static SignatureBase,
     args: Vec<Box<dyn Expression>>,
@@ -576,7 +576,7 @@ pub struct CompoundExpression {
 
 impl CompoundExpression {
     #[must_use]
-    pub fn new(signature: &'static SignatureBase, args: Vec<Box<dyn Expression>>) -> Self {
+    pub(crate) fn new(signature: &'static SignatureBase, args: Vec<Box<dyn Expression>>) -> Self {
         CompoundExpression {
             base: ExpressionBase::new(
                 Kind::CompoundExpression,
@@ -589,7 +589,7 @@ impl CompoundExpression {
     }
 
     #[must_use]
-    pub fn get_parameter_count(&self) -> Option<usize> {
+    pub(crate) fn get_parameter_count(&self) -> Option<usize> {
         match &self.signature.params {
             Params::Varargs(_) => None,
             Params::Fixed(p) => Some(p.len()),
@@ -598,16 +598,16 @@ impl CompoundExpression {
 
     /// The signature the arguments matched.
     #[must_use]
-    pub fn signature(&self) -> &'static SignatureBase {
+    pub(crate) fn signature(&self) -> &'static SignatureBase {
         self.signature
     }
 
     #[must_use]
-    pub fn args(&self) -> &[Box<dyn Expression>] {
+    pub(crate) fn args(&self) -> &[Box<dyn Expression>] {
         &self.args
     }
 
-    pub fn exists(name: &str) -> bool {
+    pub(crate) fn exists(name: &str) -> bool {
         REGISTRY.iter().any(|s| s.name == name)
     }
 }
@@ -729,7 +729,7 @@ fn create_compound_expression_from(
     None
 }
 
-pub fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+pub(crate) fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
     debug_assert!(value.is_array() && value.array_length() > 0);
 
     let definitions = definitions(name);

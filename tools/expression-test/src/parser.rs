@@ -11,62 +11,62 @@ use mln_expression::{Expression, ParsingContext, is_feature_constant, is_zoom_co
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
-pub struct Input {
-    pub zoom: Option<f32>,
-    pub heatmap_density: Option<f64>,
-    pub canonical: Option<CanonicalTileID>,
-    pub available_images: VecSet<String>,
-    pub feature: Feature<f64>,
+pub(crate) struct Input {
+    pub(crate) zoom: Option<f32>,
+    pub(crate) heatmap_density: Option<f64>,
+    pub(crate) canonical: Option<CanonicalTileID>,
+    pub(crate) available_images: VecSet<String>,
+    pub(crate) feature: Feature<f64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Compiled {
-    pub success: bool,
-    pub is_feature_constant: bool,
-    pub is_zoom_constant: bool,
-    pub serialized_type: String,
-    pub errors: Vec<Value>,
+pub(crate) struct Compiled {
+    pub(crate) success: bool,
+    pub(crate) is_feature_constant: bool,
+    pub(crate) is_zoom_constant: bool,
+    pub(crate) serialized_type: String,
+    pub(crate) errors: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct TestResult {
-    pub compiled: Compiled,
-    pub expression: Option<Value>,
-    pub outputs: Option<Value>,
-    pub serialized: Option<Value>,
+pub(crate) struct TestResult {
+    pub(crate) compiled: Compiled,
+    pub(crate) expression: Option<Value>,
+    pub(crate) outputs: Option<Value>,
+    pub(crate) serialized: Option<Value>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct PropertySpec {
-    pub type_: String,
-    pub value: String,
-    pub length: usize,
-    pub is_data_driven: bool,
-    pub expression: Option<Value>,
+pub(crate) struct PropertySpec {
+    pub(crate) type_: String,
+    pub(crate) value: String,
+    pub(crate) length: usize,
+    pub(crate) is_data_driven: bool,
+    pub(crate) expression: Option<Value>,
 }
 
-pub struct TestData {
-    pub inputs: Vec<Input>,
-    pub expected: TestResult,
-    pub result: TestResult,
-    pub recompiled: TestResult,
-    pub spec: Option<PropertySpec>,
-    pub document: serde_json::Value,
+pub(crate) struct TestData {
+    pub(crate) inputs: Vec<Input>,
+    pub(crate) expected: TestResult,
+    pub(crate) result: TestResult,
+    pub(crate) recompiled: TestResult,
+    pub(crate) spec: Option<PropertySpec>,
+    pub(crate) document: serde_json::Value,
 }
 
-pub struct Ignore {
-    pub id: String,
-    pub reason: String,
+pub(crate) struct Ignore {
+    pub(crate) id: String,
+    pub(crate) reason: String,
 }
 
-pub type Ignores = Vec<Ignore>;
+pub(crate) type Ignores = Vec<Ignore>;
 
 fn read_json(path: &Path) -> Result<serde_json::Value, String> {
     let text = std::fs::read_to_string(path).map_err(|_| format!("Unable to open file {}", path.display()))?;
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
-pub fn json_to_value(jsvalue: &serde_json::Value) -> Option<Value> {
+pub(crate) fn json_to_value(jsvalue: &serde_json::Value) -> Option<Value> {
     match jsvalue {
         serde_json::Value::Null => Some(Value::Null),
         serde_json::Value::Array(a) => Some(Value::Array(a.iter().filter_map(json_to_value).collect())),
@@ -308,7 +308,7 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
 
 /// The corpus root and the test directories (`parseArguments`).
 #[must_use]
-pub fn collect_test_paths(root_path: &Path, test_names: &[String], filter: Option<&str>) -> Vec<PathBuf> {
+pub(crate) fn collect_test_paths(root_path: &Path, test_names: &[String], filter: Option<&str>) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -345,7 +345,7 @@ pub fn collect_test_paths(root_path: &Path, test_names: &[String], filter: Optio
 }
 
 #[must_use]
-pub fn parse_expression_ignores(ignores_path: &Path) -> Ignores {
+pub(crate) fn parse_expression_ignores(ignores_path: &Path) -> Ignores {
     let Ok(document) = read_json(ignores_path) else {
         return Vec::new();
     };
@@ -360,7 +360,7 @@ pub fn parse_expression_ignores(ignores_path: &Path) -> Ignores {
     ignores
 }
 
-pub fn parse_test_data(path: &Path) -> Result<TestData, String> {
+pub(crate) fn parse_test_data(path: &Path) -> Result<TestData, String> {
     let document = read_json(path).map_err(|e| format!("Cannot parse test '{}': {e}", path.display()))?;
     let mut data = TestData {
         inputs: Vec::new(),
@@ -395,7 +395,7 @@ pub fn parse_test_data(path: &Path) -> Result<TestData, String> {
 
 /// Pretty-printed JSON, for diff output only.
 #[must_use]
-pub fn to_json(value: &Value) -> String {
+pub(crate) fn to_json(value: &Value) -> String {
     serde_json::to_string_pretty(&mbgl_to_json_for_display(value)).unwrap_or_default()
 }
 
@@ -420,7 +420,7 @@ fn mbgl_to_json_for_display(value: &Value) -> serde_json::Value {
 /// `Int64(static_cast<int64_t>(d))`, NaN/Inf make the JSON invalid) and
 /// parses it back with rapidjson.
 #[must_use]
-pub fn to_document(value: &Value) -> serde_json::Value {
+pub(crate) fn to_document(value: &Value) -> serde_json::Value {
     fn has_nan(value: &Value) -> bool {
         match value {
             Value::Double(d) => d.is_nan(),
@@ -464,7 +464,7 @@ pub fn to_document(value: &Value) -> serde_json::Value {
 }
 
 #[must_use]
-pub fn compiled_to_value(compiled: &Compiled) -> Value {
+pub(crate) fn compiled_to_value(compiled: &Compiled) -> Value {
     let mut compiled_object = ValueObject::new();
     compiled_object
         .insert("result".to_owned(), Value::String(if compiled.success { "success" } else { "error" }.to_owned()));
@@ -480,9 +480,9 @@ pub fn compiled_to_value(compiled: &Compiled) -> Value {
 
 /// Serializes an expression value to the JS format the tests expect; colors
 /// and formatted values have their own forms.
-pub fn expression_value_to_value(expr_value: &mln_expression::Value) -> Option<Value> {
+pub(crate) fn expression_value_to_value(expr_value: &mln_expression::Value) -> Value {
     use mln_expression::value::to_mbgl_value;
-    Some(match expr_value {
+    match expr_value {
         mln_expression::Value::Color(c) => Value::Array(vec![
             Value::Double(f64::from(c.r)),
             Value::Double(f64::from(c.g)),
@@ -495,15 +495,15 @@ pub fn expression_value_to_value(expr_value: &mln_expression::Value) -> Option<V
             Value::Object(value_map.iter().map(|(k, v)| (k.clone(), to_mbgl_value(v))).collect())
         }
         v => to_mbgl_value(v),
-    })
+    }
 }
 
-pub fn parse_expression(
+pub(crate) fn parse_expression(
     value: &serde_json::Value,
-    spec: &Option<PropertySpec>,
+    spec: Option<&PropertySpec>,
     result: &mut TestResult,
 ) -> Option<Box<dyn Expression>> {
-    let expected = spec.as_ref().and_then(to_expression_type);
+    let expected = spec.and_then(to_expression_type);
     let mut ctx = match &expected {
         Some(t) => ParsingContext::with_expected(t.clone()),
         None => ParsingContext::new(),

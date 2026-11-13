@@ -17,7 +17,7 @@ use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaint
 use crate::property_expression::PropertyExpression;
 use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 
-pub struct FormatSectionOverride {
+pub(crate) struct FormatSectionOverride {
     base: ExpressionBase,
     default_value: PossiblyEvaluatedPropertyValue<Color>,
     property_name: String,
@@ -25,7 +25,11 @@ pub struct FormatSectionOverride {
 
 impl FormatSectionOverride {
     #[must_use]
-    pub fn new(type_: Type, default_value: PossiblyEvaluatedPropertyValue<Color>, property_name: String) -> Self {
+    pub(crate) fn new(
+        type_: Type,
+        default_value: PossiblyEvaluatedPropertyValue<Color>,
+        property_name: String,
+    ) -> Self {
         let dependencies = default_value.get_dependencies() | Dependency::OVERRIDE | Dependency::FEATURE;
         FormatSectionOverride {
             base: ExpressionBase::new(Kind::FormatSectionOverride, type_, dependencies),
