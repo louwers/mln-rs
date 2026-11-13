@@ -85,6 +85,11 @@ fn non_decimal_integer(digits: &str, radix: u32) -> f64 {
 /// JS `Number(value)`, as GL JS's `to-number` applies it: null and booleans
 /// convert, and a value that gives NaN, or isn't a string, number, boolean or
 /// null, fails.
+///
+/// The style spec defines `to-number` on a string as ECMAScript's `ToNumber`
+/// (<https://maplibre.org/maplibre-style-spec/expressions/#to-number>,
+/// <https://tc39.es/ecma262/#sec-tonumber-applied-to-the-string-type>), so
+/// strings follow JS's grammar rather than Rust's `str::parse`.
 fn to_number(v: &Value) -> EvaluationResult {
     let result = match v {
         Value::Null => Some(0.0),
@@ -458,6 +463,26 @@ mod tests {
         }
         for nan in ["12px", "1e", ".", "+", "-0x10", "0x", "0xg", "0b2", "inf", "infinity", "NaN", "1_000", "\u{85}1"] {
             assert!(js_string_to_number(nan).is_nan(), "{nan:?}");
+        }
+    }
+
+    /// The strings on which `ToNumber` and `s.trim().parse::<f64>()` disagree.
+    #[test]
+    fn strings_where_to_number_differs_from_str_parse() {
+        let cases = [
+            ("", Some(0.0), None),
+            ("0x10", Some(16.0), None),
+            ("0o17", Some(15.0), None),
+            ("0b101", Some(5.0), None),
+            ("\u{feff}1", Some(1.0), None),
+            ("inf", None, Some(f64::INFINITY)),
+            ("INFINITY", None, Some(f64::INFINITY)),
+            ("\u{85}1", None, Some(1.0)),
+        ];
+        for (s, to_number, str_parse) in cases {
+            let n = js_string_to_number(s);
+            assert_eq!((!n.is_nan()).then_some(n), to_number, "ToNumber({s:?})");
+            assert_eq!(s.trim().parse::<f64>().ok(), str_parse, "{s:?}.trim().parse()");
         }
     }
 
