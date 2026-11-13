@@ -2,7 +2,7 @@
 // maps to the key of the tile in `tiles`: every rendered tile is one of the
 // pyramid's tiles.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -155,6 +155,29 @@ where
     }
 }
 
+/// The tiles a view wants: its ideal and prefetched tiles.
+struct WantedTiles(HashSet<(u8, u8, u32, u32)>);
+
+impl WantedTiles {
+    fn new<'a>(ids: impl Iterator<Item = &'a OverscaledTileID>) -> Self {
+        WantedTiles(ids.map(|id| (id.overscaled_z, id.canonical.z, id.canonical.x, id.canonical.y)).collect())
+    }
+
+    /// Whether `id` is a wanted tile or next to one at its zoom level, in any
+    /// world copy. A view that turns or swings back and forth shows such
+    /// tiles at its edges for moments at a time.
+    fn is_near(&self, id: &OverscaledTileID) -> bool {
+        let tiles = 1i64 << id.canonical.z;
+        let (x, y) = (i64::from(id.canonical.x), i64::from(id.canonical.y));
+        (y - 1..=y + 1).filter(|y| (0..tiles).contains(y)).any(|ny| {
+            (x - 1..=x + 1).any(|nx| {
+                let nx = nx.rem_euclid(tiles);
+                self.0.contains(&(id.overscaled_z, id.canonical.z, nx as u32, ny as u32))
+            })
+        })
+    }
+}
+
 impl Default for TilePyramid {
     fn default() -> Self {
         Self::new()
@@ -224,6 +247,8 @@ impl TilePyramid {
                     }
                 }
             }
+            // So are the tiles that went on loading in the cache.
+            self.cache.release_loading(|_| false);
 
             self.rendered_tiles.clear();
             self.cache.defer_pending_releases();
@@ -401,6 +426,16 @@ impl TilePyramid {
             self.cache.set_size(0);
         }
 
+        // Port-only: a tile that leaves the view while it loads goes on
+        // loading in the cache while it is next to the view's tiles (C++
+        // releases it). A view that turns back and forth needs the tiles at
+        // its corners for moments too short to load them each time. A tile
+        // that the view has left further behind, such as one of a zoom level
+        // that a fast zoom passed, stops loading as in C++: it would hold up
+        // the requests and the tile workers that the view's own tiles need.
+        let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles));
+        self.cache.release_loading(|id| wanted.is_near(id));
+
         // Remove stale tiles. This goes through the (sorted!) tiles map and
         // retain set in lockstep and removes items from tiles that don't
         // have the corresponding key in the retain set.
@@ -414,17 +449,16 @@ impl TilePyramid {
                 } else if tile.is_renderable() {
                     tile.set_necessity(TileNecessity::Optional);
                     self.cache.add(key, tile);
-                } else if tile.base().retained_necessity.get() == TileNecessity::Required {
-                    // Port-only: a tile still loading keeps its necessity,
-                    // so that it goes on loading in the cache (C++ releases
-                    // it, and optional, it would stop loading). A view that
-                    // turns back and forth needs the tiles at its corners
-                    // for moments too short to load them each time.
+                } else if tile.base().retained_necessity.get() == TileNecessity::Required && wanted.is_near(&key) {
+                    // Still loading, near the view: it keeps its necessity
+                    // and goes on loading in the cache.
                     self.cache.add(key, tile);
                 } else {
                     // A fallback that looked only in the cache, and found
                     // nothing there, loads nothing: kept, it would only push
-                    // the tiles that the view needed out of the cache.
+                    // the tiles that the view needed out of the cache. A
+                    // tile still loading far from the view stops loading.
+                    tile.set_necessity(TileNecessity::Optional);
                     self.cache.deferred_release(tile);
                 }
             }

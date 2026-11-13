@@ -31,6 +31,11 @@ impl RenderVectorSource {
         RenderVectorSource { tile_source: RenderTileSource::new(impl_), cached_tileset: None, fast_pfor_enabled: false }
     }
 
+    #[cfg(test)]
+    pub(crate) fn tile_source(&self) -> &RenderTileSource {
+        &self.tile_source
+    }
+
     fn impl_(&self) -> Arc<tile_source::Impl> {
         downcast_arc::<tile_source::Impl>(&self.tile_source.base.base_impl)
     }
