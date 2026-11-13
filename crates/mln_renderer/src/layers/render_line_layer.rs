@@ -52,6 +52,17 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
+/// The ends of a bucket's dashes. A dash pattern is shared by the whole
+/// bucket, so a `line-cap` that varies by feature gets square dashes, as in
+/// GL JS; each line still gets its own cap at its ends.
+fn dash_pattern_cap(bucket: &LineBucket) -> LinePatternCap {
+    if bucket.layout.get::<LineCap>().constant_or(&LineCapType::Butt) == LineCapType::Round {
+        LinePatternCap::Round
+    } else {
+        LinePatternCap::Square
+    }
+}
+
 fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &LineLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), LineLayerImpl::static_type_info()));
     impl_.downcast_ref::<LineLayerImpl>().expect("RenderLineLayer: not a line layer impl")
@@ -500,11 +511,7 @@ impl RenderLayer for RenderLineLayer {
             let Some(bucket) = (*render_data.bucket).downcast_ref::<LineBucket>() else {
                 continue;
             };
-            let cap = if *bucket.layout.get::<LineCap>() == LineCapType::Round {
-                LinePatternCap::Round
-            } else {
-                LinePatternCap::Square
-            };
+            let cap = dash_pattern_cap(bucket);
             // Ensures that the dash data gets added to the atlas.
             params.line_atlas.borrow_mut().get_dash_pattern_texture(
                 &evaluated.get::<LineDasharray>().from,
@@ -709,8 +716,7 @@ impl RenderLayer for RenderLineLayer {
                 continue;
             }
 
-            let round_cap = *bucket.layout.get::<LineCap>() == LineCapType::Round;
-            let cap_type = if round_cap { LinePatternCap::Round } else { LinePatternCap::Square };
+            let cap_type = dash_pattern_cap(bucket);
             let add_drawable = |mut drawable: mln_gfx::UniqueDrawable, type_: LineType| {
                 drawable.set_tile_id(tile_id);
                 drawable.set_type(type_ as usize);

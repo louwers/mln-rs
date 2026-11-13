@@ -10,11 +10,9 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::types::BufferUsageType;
 use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
-use mln_style::CrossfadeParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::FillLayer;
 use mln_style::layers::fill_extrusion_layer_properties::{
     FillExtrusionLayoutProperties, FillExtrusionRoundedCornerDistance,
 };
@@ -23,8 +21,10 @@ use mln_style::layers::fill_layer_properties::{
 };
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+use mln_style::layers::{FillLayer, LineLayer};
 use mln_style::property_value::PropertyValue;
 use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
+use mln_style::{CrossfadeParameters, PropertyEvaluationParameters};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -41,7 +41,7 @@ use crate::bucket_geometry::{BucketGeometry, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
-use crate::buckets::line_bucket::LineBucket;
+use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::pattern_layout::PatternLayerMap;
@@ -706,4 +706,73 @@ fn warns_once_for_mixed_pattern_types_per_bucket() {
             "Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"mixed-layer\""
         )
     );
+}
+
+/// The vertices of a line bucket for a line layer with `layout`, with one
+/// feature per `(properties, line)`.
+fn line_bucket_vertices(
+    layout: &serde_json::Value,
+    features: &[(serde_json::Value, &[(i16, i16)])],
+) -> Vec<LineLayoutVertex> {
+    let json = serde_json::json!({"type": "line", "id": "line", "source": "s", "layout": layout});
+    let mut error = ConversionError::default();
+    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layout = layer
+        .downcast_ref::<LineLayer>()
+        .expect("line layer")
+        .impl_()
+        .layout
+        .evaluate(&PropertyEvaluationParameters::new(10.0));
+    let mut bucket = LineBucket::new(layout, &VecMap::new(), 10.0, 1);
+    for (index, (properties, line)) in features.iter().enumerate() {
+        let line = collection(&[line]);
+        let mut feature = feature(FeatureType::LineString, &line);
+        for (key, value) in properties.as_object().expect("properties") {
+            let value = match value {
+                serde_json::Value::String(s) => Value::String(s.clone()),
+                v => Value::Double(v.as_f64().expect("a string or number")),
+            };
+            feature.properties.insert(key.clone(), value);
+        }
+        bucket
+            .add_feature(
+                &feature,
+                &line,
+                &ImagePositions::new(),
+                &PatternLayerMap::new(),
+                index,
+                &CanonicalTileID::new(0, 0, 0),
+            )
+            .unwrap();
+    }
+    bucket.vertices.data().clone()
+}
+
+#[test]
+fn line_bucket_evaluates_cap_and_limits_per_feature() {
+    // A sharp corner: its miter length is about 3.2, so a miter limit of 2
+    // bevels it and 10 doesn't, and a round limit of 1 rounds it and 10 doesn't.
+    const CORNER: &[(i16, i16)] = &[(0, 0), (100, 400), (200, 0)];
+    for (property, values) in [
+        ("line-cap", [serde_json::json!("butt"), serde_json::json!("round")]),
+        ("line-miter-limit", [serde_json::json!(2), serde_json::json!(10)]),
+        ("line-round-limit", [serde_json::json!(1), serde_json::json!(10)]),
+    ] {
+        let join = if property == "line-round-limit" { "round" } else { "miter" };
+        let constant = |value: &serde_json::Value| {
+            line_bucket_vertices(
+                &serde_json::json!({"line-join": join, property: value}),
+                &[(serde_json::json!({}), CORNER)],
+            )
+        };
+        let first = constant(&values[0]);
+        let second = constant(&values[1]);
+        assert_ne!(first, second, "{property}: the two values make the same line");
+
+        let data_driven = line_bucket_vertices(
+            &serde_json::json!({"line-join": join, property: ["get", "v"]}),
+            &[(serde_json::json!({"v": values[0]}), CORNER), (serde_json::json!({"v": values[1]}), CORNER)],
+        );
+        assert_eq!(data_driven, [first, second].concat(), "{property}");
+    }
 }

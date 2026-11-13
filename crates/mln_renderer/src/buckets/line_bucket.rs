@@ -221,12 +221,15 @@ impl LineBucket {
         }
 
         options.join_type = self.layout.evaluate_canonical::<LineJoin>(self.zoom, feature, canonical);
-        options.miter_limit =
-            if options.join_type == LineJoinType::Bevel { 1.05 } else { *self.layout.get::<LineMiterLimit>() };
-        options.begin_cap = *self.layout.get::<LineCap>();
-        options.end_cap =
-            if options.type_ == FeatureType::Polygon { LineCapType::Butt } else { *self.layout.get::<LineCap>() };
-        options.round_limit = *self.layout.get::<LineRoundLimit>();
+        options.miter_limit = if options.join_type == LineJoinType::Bevel {
+            1.05
+        } else {
+            self.layout.evaluate_canonical::<LineMiterLimit>(self.zoom, feature, canonical)
+        };
+        let cap = self.layout.evaluate_canonical::<LineCap>(self.zoom, feature, canonical);
+        options.begin_cap = cap;
+        options.end_cap = if options.type_ == FeatureType::Polygon { LineCapType::Butt } else { cap };
+        options.round_limit = self.layout.evaluate_canonical::<LineRoundLimit>(self.zoom, feature, canonical);
         options.overscaling = self.overscaling;
 
         let mut generator = PolylineGenerator::new(

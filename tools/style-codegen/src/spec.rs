@@ -95,11 +95,6 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
     remove(&mut spec, &["paint_line"], "line-layer-blend")?;
     remove(&mut spec, &["paint_raster"], "raster-layer-blend")?;
 
-    // https://github.com/maplibre/maplibre-native/issues/4194
-    zoom_only(&mut spec, "layout_line", "line-cap", "data-constant")?;
-    zoom_only(&mut spec, "layout_line", "line-miter-limit", "data-constant")?;
-    zoom_only(&mut spec, "layout_line", "line-round-limit", "data-constant")?;
-
     // https://github.com/maplibre/maplibre-native/issues/4517
     zoom_only(&mut spec, "layout_symbol", "icon-rotation-alignment", "data-constant")?;
 

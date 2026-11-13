@@ -10,7 +10,7 @@ use mln_util::Color;
 use mln_vec_map::VecSet;
 use std::sync::Arc;
 
-crate::layout_property!(
+crate::data_driven_layout_property!(
     /// The `line-cap` layout property.
     pub struct LineCap: LineCapType = LineCapType::Butt, name = "line-cap"
 );
@@ -20,12 +20,12 @@ crate::data_driven_layout_property!(
     pub struct LineJoin: LineJoinType = LineJoinType::Miter, name = "line-join"
 );
 
-crate::layout_property!(
+crate::data_driven_layout_property!(
     /// The `line-miter-limit` layout property.
     pub struct LineMiterLimit: f32 = 2.0_f32, name = "line-miter-limit"
 );
 
-crate::layout_property!(
+crate::data_driven_layout_property!(
     /// The `line-round-limit` layout property.
     pub struct LineRoundLimit: f32 = 1.0_f32, name = "line-round-limit"
 );

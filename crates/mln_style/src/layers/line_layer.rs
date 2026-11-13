@@ -575,7 +575,8 @@ impl Layer for LineLayer {
         };
 
         if property == Property::Blur || property == Property::GapWidth || property == Property::Offset ||
-            property == Property::Opacity || property == Property::Width || property == Property::SortKey {
+            property == Property::Opacity || property == Property::Width || property == Property::MiterLimit ||
+            property == Property::RoundLimit || property == Property::SortKey {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, true, false) else {
                 return Some(error);
@@ -603,6 +604,16 @@ impl Layer for LineLayer {
 
             if property == Property::Width {
                 self.set_line_width(&typed_value);
+                return None;
+            }
+
+            if property == Property::MiterLimit {
+                self.set_line_miter_limit(&typed_value);
+                return None;
+            }
+
+            if property == Property::RoundLimit {
+                self.set_line_round_limit(&typed_value);
                 return None;
             }
 
@@ -676,7 +687,7 @@ impl Layer for LineLayer {
 
         if property == Property::Cap {
             let mut error = Error::default();
-            let Some(typed_value) = convert_property_value::<LineCapType>(value, &mut error, false, false) else {
+            let Some(typed_value) = convert_property_value::<LineCapType>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
@@ -692,23 +703,6 @@ impl Layer for LineLayer {
 
             self.set_line_join(&typed_value);
             return None;
-        }
-
-        if property == Property::MiterLimit || property == Property::RoundLimit {
-            let mut error = Error::default();
-            let Some(typed_value) = convert_property_value::<f32>(value, &mut error, false, false) else {
-                return Some(error);
-            };
-
-            if property == Property::MiterLimit {
-                self.set_line_miter_limit(&typed_value);
-                return None;
-            }
-
-            if property == Property::RoundLimit {
-                self.set_line_round_limit(&typed_value);
-                return None;
-            }
         }
 
         let mut error = Error::default();
