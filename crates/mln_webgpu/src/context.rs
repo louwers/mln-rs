@@ -13,7 +13,6 @@
 // (`runRenderJobs` in begin/end frame, cleanup). None is on the
 // background-layer path.
 
-use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap};
@@ -354,7 +353,7 @@ impl Context {
             eprintln!("WebGPU: Failed to acquire globe clipping mask shader");
             return false;
         };
-        let Some(webgpu_render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return false;
         };
         let mut encoder_guard = webgpu_render_pass.get_encoder();
@@ -509,7 +508,7 @@ impl Context {
             eprintln!("WebGPU: Failed to acquire clipping mask shader");
             return false;
         };
-        let Some(webgpu_render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(webgpu_render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return false;
         };
         let mut encoder_guard = webgpu_render_pass.get_encoder();
@@ -633,10 +632,6 @@ impl GfxContext for Context {
         &self.base
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn backend_type(&self) -> BackendType {
         BackendType::WebGPU
     }
@@ -746,13 +741,13 @@ impl GfxContext for Context {
     /// Metal; the pass refers to the context's array for the drawables' bind
     /// groups (C++ stores a pointer to it).
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        if let Some(pass) = render_pass.as_any().downcast_ref::<RenderPass>() {
+        if let Some(pass) = render_pass.downcast_ref::<RenderPass>() {
             pass.set_global_uniform_buffers(true);
         }
     }
 
     fn unbind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        if let Some(pass) = render_pass.as_any().downcast_ref::<RenderPass>() {
+        if let Some(pass) = render_pass.downcast_ref::<RenderPass>() {
             pass.set_global_uniform_buffers(false);
         }
     }

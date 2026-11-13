@@ -607,10 +607,6 @@ impl Tile for GeometryTile {
         &self.inner.base
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
         Box::new(GeometryTileRenderData {
             atlas_textures: self.inner.atlas_textures.borrow().clone(),

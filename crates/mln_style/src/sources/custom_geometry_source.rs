@@ -7,7 +7,6 @@
 // background thread, so the host answers through a
 // [`CustomGeometrySourceHandle`], which is.
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -312,10 +311,6 @@ impl CustomGeometrySource {
 impl Source for CustomGeometrySource {
     fn base(&self) -> &SourceBase {
         &self.inner.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn load_description(&self, _file_source: &dyn FileSource) {

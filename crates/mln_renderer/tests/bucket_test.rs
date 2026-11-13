@@ -1,7 +1,6 @@
 // Ports test/gl/bucket.test.cpp (the Buckets.* tests; the OpenGL headless
 // backend is the WebGPU one here) and test/renderer/fill_bucket.test.cpp.
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -184,16 +183,12 @@ fn fill_extrusion_bucket_rounds_corners() {
 /// `StubIndexBuffer`: an index buffer that stands in for an upload.
 struct StubIndexBuffer;
 
-impl IndexBufferBase for StubIndexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl IndexBufferBase for StubIndexBuffer {}
 
 /// Runs `f` with the WebGPU upload pass of a headless backend.
 fn with_webgpu_upload_pass(f: impl FnOnce(&WebGpuUploadPass)) {
     with_upload_pass(|upload_pass| {
-        f(upload_pass.as_any().downcast_ref::<WebGpuUploadPass>().expect("WebGPU upload pass"));
+        f(upload_pass.downcast_ref::<WebGpuUploadPass>().expect("WebGPU upload pass"));
     });
 }
 

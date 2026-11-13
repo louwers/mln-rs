@@ -206,7 +206,7 @@ fn geojson_source_keeps_the_style_attribution() {
     );
     let converted = convert_source(&Convertible::from(&value), &mut error, "source");
     let converted = converted.unwrap_or_else(|| panic!("{}", error.message));
-    let source = converted.as_any().downcast_ref::<GeoJSONSource>().expect("a GeoJSONSource");
+    let source = converted.downcast_ref::<GeoJSONSource>().expect("a GeoJSONSource");
     assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
 
     let observer = Rc::new(StubStyleObserver::default());
@@ -338,7 +338,7 @@ fn geojson_source_url_replaces_building_url_data() {
 }
 
 fn as_vector(source: &dyn Source) -> &VectorSource {
-    source.as_any().downcast_ref::<VectorSource>().expect("a VectorSource")
+    source.downcast_ref::<VectorSource>().expect("a VectorSource")
 }
 
 // gtest: Source.VectorSourceSetTiles
@@ -426,7 +426,7 @@ fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
         let handle = run_loop.handle();
         *observer.source_loaded.borrow_mut() = Some(Box::new(move |source| {
             let impl_ = source.base_impl();
-            let impl_ = impl_.as_any().downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
+            let impl_ = impl_.downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
             *tileset.borrow_mut() = impl_.tileset.clone();
             handle.stop();
         }));
@@ -553,7 +553,7 @@ fn vector_sources_take_the_style_sparse() {
     let source = converted_source(r#"{"type": "vector", "tiles": ["tiles"], "sparse": true}"#).unwrap();
     source.load_description(&StubFileSource::new(ResponseType::Asynchronous));
     let impl_ = source.base_impl();
-    let impl_ = impl_.as_any().downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
+    let impl_ = impl_.downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
     assert!(impl_.tileset.as_ref().unwrap().sparse);
 
     let Err(error) = converted_source(r#"{"type": "vector", "url": "url", "sparse": "yes"}"#) else {

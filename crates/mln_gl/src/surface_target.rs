@@ -9,7 +9,6 @@
 // frame before it is presented (an app's controls), and a copy of a
 // presented frame.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_ulong, c_void};
 use std::rc::{Rc, Weak};
@@ -502,10 +501,6 @@ impl TargetResource for WindowResource {
             context.bind_framebuffer(None, self.size.get(), true);
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Frames presented to a window, from a GL context of the window's own.
@@ -610,7 +605,7 @@ impl FrameTarget for SurfaceTarget {
         let mut image = self.image.borrow_mut();
         if image.is_none() {
             let resource = WindowResource { context: self.backend.gl_context()?.weak(), size: self.size.clone() };
-            *image = Some(Rc::new(DrawTarget::new(self.size.get(), resource)));
+            *image = Some(Rc::new(DrawTarget::new(self.size.get(), Rc::new(resource))));
         }
         let image = image.clone()?;
         image.set_size(self.size.get());

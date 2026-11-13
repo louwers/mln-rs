@@ -7,7 +7,6 @@
 //   (offscreen_texture.rs).
 // - Each texture is a GL texture of its own (C++ takes them from a pool).
 
-use std::any::Any;
 use std::rc::{Rc, Weak};
 
 use glow::HasContext;
@@ -308,13 +307,5 @@ impl texture2d::Texture2D for Texture2D {
 
     fn needs_upload(&self) -> bool {
         self.image.is_some()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

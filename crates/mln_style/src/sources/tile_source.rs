@@ -11,7 +11,6 @@
 // `RasterSource` wrap it. Like GeoJSONSource, a TileSource is a handle to
 // an `Rc`'d state (see source.rs).
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -250,10 +249,6 @@ impl Source for TileSource {
         &self.inner.base
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn load_description(&self, file_source: &dyn FileSource) {
         let raw_url = match &self.inner.url_or_tileset {
             UrlOrTileset::Tileset(tileset) => {
@@ -366,10 +361,6 @@ impl Source for VectorSource {
         self.tile_source.base()
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn load_description(&self, file_source: &dyn FileSource) {
         self.tile_source.load_description(file_source);
     }
@@ -429,10 +420,6 @@ impl Source for RasterSource {
         self.tile_source.base()
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn load_description(&self, file_source: &dyn FileSource) {
         self.tile_source.load_description(file_source);
     }
@@ -488,10 +475,6 @@ impl RasterDEMSource {
 impl Source for RasterDEMSource {
     fn base(&self) -> &SourceBase {
         self.tile_source.base()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn load_description(&self, file_source: &dyn FileSource) {

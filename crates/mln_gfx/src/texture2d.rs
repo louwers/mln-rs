@@ -49,8 +49,18 @@ pub trait Texture2D: Any {
     /// `upload()`: upload the image set with `set_image`.
     fn upload(&mut self);
     fn needs_upload(&self) -> bool;
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl dyn Texture2D {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: Texture2D>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_mut<T: Texture2D>(&mut self) -> Option<&mut T> {
+        (self as &mut dyn Any).downcast_mut()
+    }
 }
 
 /// `std::shared_ptr<Texture2D>`, mutated through the shared pointer (e.g.

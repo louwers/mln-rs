@@ -4,7 +4,6 @@
 // are built per drawable in `Drawable::draw`) and `copy`, so the port uses
 // `gfx::UniformBufferArray` directly.
 
-use std::any::Any;
 use std::cell::Cell;
 use std::rc::{Rc, Weak};
 
@@ -138,9 +137,5 @@ impl uniform_buffer::UniformBuffer for UniformBuffer {
 
     fn get_size(&self) -> usize {
         self.size
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

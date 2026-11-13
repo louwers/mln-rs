@@ -1,7 +1,6 @@
 // Ports include/mln/webgpu/upload_pass.hpp, src/mln/webgpu/upload_pass.cpp
 // and src/mln/webgpu/vertex_attribute.cpp (`VertexAttribute::getBuffer`)
 
-use std::any::Any;
 use std::rc::Rc;
 
 use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
@@ -30,11 +29,7 @@ struct VertexBuffer {
     resource: Rc<VertexBufferResource>,
 }
 
-impl VertexBufferBase for VertexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl VertexBufferBase for VertexBuffer {}
 
 impl UploadPass {
     /// C++ pushes the encoder's debug groups and `name` on the pass; WebGPU
@@ -93,11 +88,8 @@ impl UploadPass {
     ) -> Option<UniqueVertexBufferResource> {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();
-        let existing = vec
-            .get_buffer()
-            .as_ref()
-            .and_then(|b| b.as_any().downcast_ref::<VertexBuffer>())
-            .map(|b| b.resource.clone());
+        let existing =
+            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| b.resource.clone());
         if let Some(resource) = existing
             && raw_size <= resource.get_size_in_bytes()
         {
@@ -277,9 +269,5 @@ impl upload_pass::UploadPass for UploadPass {
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
         let buffer = BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::INDEX);
         Box::new(IndexBufferResource::new(buffer))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

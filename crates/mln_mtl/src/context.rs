@@ -19,7 +19,6 @@
 // `createRenderbufferResource` and the render jobs of the backend thread
 // pool, as in the WebGPU backend.
 
-use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -459,7 +458,7 @@ impl Context {
         let Some(shader) = as_mtl_shader(&shader_ptr) else {
             return false;
         };
-        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return false;
         };
         let Some(encoder) = render_pass.get_metal_encoder() else {
@@ -532,7 +531,7 @@ impl Context {
         let Some(shader) = as_mtl_shader(&shader_ptr) else {
             return false;
         };
-        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return false;
         };
         let Some(encoder) = render_pass.get_metal_encoder() else {
@@ -611,10 +610,6 @@ impl Context {
 impl GfxContext for Context {
     fn context_base(&self) -> &ContextBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn backend_type(&self) -> BackendType {
@@ -710,7 +705,7 @@ impl GfxContext for Context {
     }
 
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        if let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() {
+        if let Some(render_pass) = render_pass.downcast_ref::<RenderPass>() {
             bind_uniform_buffer_array(&self.global_uniform_buffers.borrow(), render_pass);
         }
     }

@@ -2,7 +2,6 @@
 // into and given back to the host with what the host waits for before it
 // reads them; and the host's own surface, which frames are presented to.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -164,10 +163,6 @@ impl TargetResource for Resource {
             context.bind_framebuffer(Some(*framebuffer), self.size, true);
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Frames drawn into the host's textures, each given back to the host.
@@ -295,7 +290,7 @@ impl FrameTarget for BorrowedTarget {
             let context = self.backend.gl_context()?;
             let textures = self.textures.borrow();
             match Resource::new(&context, &textures, self.selected.clone()) {
-                Ok(resource) => *image = Some(Rc::new(DrawTarget::new(textures.size, resource))),
+                Ok(resource) => *image = Some(Rc::new(DrawTarget::new(textures.size, Rc::new(resource)))),
                 Err(error) => {
                     mln_util::logging::Log::error(mln_util::logging::Event::GraphicsBackend, error.message);
                     return None;
@@ -373,10 +368,6 @@ impl TargetResource for SurfaceResource {
             context.bind_framebuffer(None, self.size.get(), true);
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Frames presented to the host's EGL surface, through a context in the
@@ -432,7 +423,7 @@ impl FrameTarget for HostSurfaceTarget {
         if image.is_none() {
             let context = self.backend.gl_context()?;
             let resource = SurfaceResource { context: Rc::downgrade(&context), size: self.size.clone() };
-            *image = Some(Rc::new(DrawTarget::new(size, resource)));
+            *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
         let image = image.clone()?;
         image.set_size(size);

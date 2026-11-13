@@ -18,7 +18,6 @@
 // Not ported: the buffer allocator's shared buffers. Each uniform buffer is
 // a GL buffer of its own.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Weak;
 
@@ -199,9 +198,5 @@ impl uniform_buffer::UniformBuffer for UniformBuffer {
 
     fn get_size(&self) -> usize {
         self.size
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

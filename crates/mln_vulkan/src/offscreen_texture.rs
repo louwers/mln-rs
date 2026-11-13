@@ -5,7 +5,6 @@
 //   (`Context::get_render_pass`).
 // - The framebuffer is destroyed when the frame that may use it is done.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -126,10 +125,6 @@ impl TargetResource for OffscreenTextureResource {
     fn get_framebuffer(&self) -> vk::Framebuffer {
         self.framebuffer.get()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 impl Drop for OffscreenTextureResource {
@@ -187,8 +182,4 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     /// The frame's one command buffer orders the passes that sample the
     /// texture after the pass that drew it.
     fn submit(&self, _encoder: &dyn CommandEncoder) {}
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

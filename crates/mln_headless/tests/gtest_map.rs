@@ -1543,7 +1543,7 @@ fn source_changes_reach_the_observer() {
     {
         let mut map = test.map();
         let style = map.style_mut();
-        let source = style.get_source("points").unwrap().as_any().downcast_ref::<GeoJSONSource>().unwrap();
+        let source = style.get_source("points").unwrap().downcast_ref::<GeoJSONSource>().unwrap();
         source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(1.0, 1.0)))).unwrap();
         assert!(changed.borrow().is_empty());
     }
@@ -1679,7 +1679,7 @@ fn an_image_source_without_a_url_draws_once_it_has_an_image() {
     let mut red = PremultipliedImage::new(Size::new(1, 1));
     red.data.copy_from_slice(&[255, 0, 0, 255]);
     let image_source =
-        |map: &Map| map.style().get_source("image").unwrap().as_any().downcast_ref::<ImageSource>().cloned().unwrap();
+        |map: &Map| map.style().get_source("image").unwrap().downcast_ref::<ImageSource>().cloned().unwrap();
     image_source(&test.map()).set_image(red);
     assert_eq!(center_pixel(&test.render().image), [255, 0, 0, 255]);
 

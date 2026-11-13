@@ -10,8 +10,6 @@
 //   attachment formats change (C++: when its descriptor changes, and the
 //   depth-stencil state not at all).
 
-use std::any::Any;
-
 use bytemuck::bytes_of;
 use mln_gfx::attribute::AttributeBindingArray;
 use mln_gfx::color_mode::ColorMode;
@@ -53,11 +51,7 @@ struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
 
-impl IndexBufferBase for IndexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl IndexBufferBase for IndexBuffer {}
 
 /// `mtl::Drawable::Impl`
 struct DrawableImpl {
@@ -349,11 +343,7 @@ impl Drawable {
         empty: Option<&MTLBufferPtr>,
     ) {
         for binding in bindings.iter().flatten() {
-            match binding
-                .vertex_buffer_resource
-                .as_ref()
-                .and_then(|r| r.as_any().downcast_ref::<VertexBufferResource>())
-            {
+            match binding.vertex_buffer_resource.as_ref().and_then(|r| r.downcast_ref::<VertexBufferResource>()) {
                 Some(buffer) => render_pass.bind_vertex(buffer.get(), 0, binding.buffer_index as usize, 0),
                 None => {
                     if let Some(empty) = empty {
@@ -373,7 +363,7 @@ impl Drawable {
                 continue;
             };
             let mut texture = texture.borrow_mut();
-            if let Some(texture) = texture.as_any_mut().downcast_mut::<Texture2D>() {
+            if let Some(texture) = texture.downcast_mut::<Texture2D>() {
                 texture.bind(render_pass, location);
             }
         }
@@ -388,7 +378,7 @@ impl Drawable {
                 continue;
             };
             let texture = texture.borrow();
-            if let Some(texture) = texture.as_any().downcast_ref::<Texture2D>() {
+            if let Some(texture) = texture.downcast_ref::<Texture2D>() {
                 texture.unbind(render_pass, location);
             }
         }
@@ -402,19 +392,13 @@ impl drawable::Drawable for Drawable {
     fn base_mut(&mut self) -> &mut DrawableBase {
         &mut self.base
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
 
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
         let parameters: &dyn PaintParameters = parameters;
-        let Some(context) = parameters.context().as_any().downcast_ref::<Context>() else {
+        let Some(context) = parameters.context().downcast_ref::<Context>() else {
             return;
         };
-        let Some(render_pass) = parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>()) else {
+        let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) else {
             debug_assert!(false);
             return;
         };
@@ -456,7 +440,7 @@ impl drawable::Drawable for Drawable {
         let indexes = indexes.borrow();
         let index_buffer: Option<MTLBufferPtr> = indexes
             .get_buffer()
-            .and_then(|b| b.as_any().downcast_ref::<IndexBuffer>())
+            .and_then(|b| b.downcast_ref::<IndexBuffer>())
             .and_then(|b| b.buffer.get_resource::<IndexBufferResource>())
             .and_then(|r| r.get().get_metal_buffer());
         let Some(index_buffer) = index_buffer.filter(|_| !indexes.get_dirty()) else {

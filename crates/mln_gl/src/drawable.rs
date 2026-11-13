@@ -13,8 +13,6 @@
 // - Instance attributes, which C++'s OpenGL drawables don't have: the
 //   renderer draws fill extrusion walls instanced on every backend.
 
-use std::any::Any;
-
 use glow::HasContext;
 use mln_gfx::attribute::AttributeBindingArray;
 use mln_gfx::context::Context as _;
@@ -48,11 +46,7 @@ struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
 
-impl IndexBufferBase for IndexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl IndexBufferBase for IndexBuffer {}
 
 /// `gl::DrawableGL::Impl`
 struct DrawableImpl {
@@ -139,7 +133,7 @@ impl Drawable {
             }
             indexes
                 .get_buffer()
-                .and_then(|b| b.as_any().downcast_ref::<IndexBuffer>())
+                .and_then(|b| b.downcast_ref::<IndexBuffer>())
                 .and_then(|b| b.buffer.get_resource::<IndexBufferResource>())
                 .and_then(IndexBufferResource::get_buffer)
         };
@@ -252,7 +246,7 @@ impl Drawable {
                 continue;
             };
             let mut texture = texture.borrow_mut();
-            if let Some(texture) = texture.as_any_mut().downcast_mut::<Texture2D>() {
+            if let Some(texture) = texture.downcast_mut::<Texture2D>() {
                 texture.bind(context, unit as u32);
             }
         }
@@ -266,16 +260,10 @@ impl drawable::Drawable for Drawable {
     fn base_mut(&mut self) -> &mut DrawableBase {
         &mut self.base
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
 
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
         let parameters: &dyn PaintParameters = parameters;
-        let Some(context) = parameters.context().as_any().downcast_ref::<Context>() else {
+        let Some(context) = parameters.context().downcast_ref::<Context>() else {
             return;
         };
         let Some(shader_ptr) = self.base.shader.clone() else {

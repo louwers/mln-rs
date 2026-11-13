@@ -35,10 +35,14 @@ pub trait RenderPass: DebugGroupTarget + Any {
     fn lend_to_custom_layer(&self, _f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         false
     }
-    fn as_any(&self) -> &dyn Any;
 }
 
 impl dyn RenderPass {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: RenderPass>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+
     pub fn create_debug_group(&self, name: &str) -> DebugGroup<'_> {
         DebugGroup::new(self, name)
     }

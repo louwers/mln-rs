@@ -11,11 +11,11 @@
 // TODO(port): `registerAtCrossTileIndex`, `place`,
 // `updateVertices` (symbol buckets, M5), `getRenderThreadID`, `check`.
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use mln_gfx::UploadPass;
-use mln_style::util::AsAny;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
@@ -81,7 +81,7 @@ pub fn geometry_too_long() -> Error {
     Error::native("a polygon has more vertices than a 16-bit index can address")
 }
 
-pub trait Bucket: AsAny + Send + Sync {
+pub trait Bucket: Any + Send + Sync {
     fn base(&self) -> &BucketBase;
     fn base_mut(&mut self) -> &mut BucketBase;
 
@@ -166,7 +166,7 @@ pub trait Bucket: AsAny + Send + Sync {
 impl dyn Bucket {
     /// `static_cast<B&>(*bucket)`, checked.
     pub fn downcast_ref<B: Bucket>(&self) -> Option<&B> {
-        self.as_any().downcast_ref::<B>()
+        (self as &dyn Any).downcast_ref()
     }
 }
 

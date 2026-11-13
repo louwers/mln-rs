@@ -104,8 +104,4 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         *slot = Some(lent.encoder);
         true
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

@@ -1458,7 +1458,6 @@ impl Worker {
             .and_then(|sources| sources.iter().find(|source| source.base().id == source_id))
             .ok_or_else(|| Error::not_found(format!("the session's last render has no source named {source_id}")))?;
         let geojson = source
-            .as_any()
             .downcast_ref::<geojson_source_impl::Impl>()
             .ok_or_else(|| Error::invalid_argument(format!("source {source_id} is not a GeoJSON source")))?;
         if !geojson.get_options().cluster {

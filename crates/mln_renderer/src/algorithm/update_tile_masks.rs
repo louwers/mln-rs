@@ -75,7 +75,6 @@ pub fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
 // Ports test/algorithm/update_tile_masks.test.cpp.
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
     use std::cell::RefCell;
 
     use mln_style::layer_properties::LayerProperties;
@@ -94,9 +93,6 @@ mod tests {
     impl Tile for FakeTile {
         fn base(&self) -> &TileBase {
             &self.base
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
         }
         fn create_render_data(&self) -> Box<dyn TileRenderData> {
             unreachable!()

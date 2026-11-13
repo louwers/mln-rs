@@ -127,7 +127,6 @@ trait Table: Any + Send {
     fn rollback(&mut self);
     fn forget_dead(&mut self) -> Vec<u64>;
     fn forget(&mut self, keys: &[u64]);
-    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl<T: ?Sized + Send + Sync + 'static> Table for Origin<T> {
@@ -141,9 +140,6 @@ impl<T: ?Sized + Send + Sync + 'static> Table for Origin<T> {
         Origin::forget_dead(self)
     }
     fn forget(&mut self, _keys: &[u64]) {}
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
 }
 
 impl<T: ?Sized + Send + Sync + 'static> Table for Copies<T> {
@@ -158,9 +154,6 @@ impl<T: ?Sized + Send + Sync + 'static> Table for Copies<T> {
                 self.keys.remove(&address(&value));
             }
         }
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 
@@ -244,7 +237,7 @@ impl Tables {
     }
 
     fn table<K: Kind>(&mut self) -> Option<&mut dyn Any> {
-        self.0.iter_mut().find(|(name, _)| *name == K::NAME).map(|(_, table)| table.as_any_mut())
+        self.0.iter_mut().find(|(name, _)| *name == K::NAME).map(|(_, table)| &mut **table as &mut dyn Any)
     }
 }
 

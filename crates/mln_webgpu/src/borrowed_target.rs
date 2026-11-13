@@ -3,7 +3,6 @@
 // device's one queue, which orders the host's reads after the frame and the
 // next frame after the host's reads.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -158,10 +157,6 @@ impl TargetResource for Resource {
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
         Some(self.textures.borrow().depth_format().unwrap_or(self.depth_stencil_format))
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Frames drawn into the host's textures, each given back to the host.
@@ -260,7 +255,7 @@ impl FrameTarget for BorrowedTarget {
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {
-        let Some(encoder) = encoder.as_any().downcast_ref::<CommandEncoder>() else {
+        let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() else {
             return Handoff::Dropped;
         };
         encoder.submit_frame(Some(self.target.resource()));

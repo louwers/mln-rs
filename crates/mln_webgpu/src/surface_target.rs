@@ -28,7 +28,6 @@
 // - Port-only: `set_overlay` draws over each frame before it is presented,
 //   such as an app's controls over the map.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -474,10 +473,6 @@ impl TargetResource for SurfaceResource {
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
         Some(self.state.depth_stencil_format)
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// How a [`SurfaceTarget`] presents.
@@ -596,7 +591,7 @@ impl SurfaceTarget {
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
-        let image = Rc::new(DrawTarget::new(framebuffer_size, SurfaceResource { state: state.clone() }));
+        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::new(SurfaceResource { state: state.clone() })));
         Ok(SurfaceTarget { backend, state, image })
     }
 
@@ -664,7 +659,7 @@ impl FrameTarget for SurfaceTarget {
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {
-        if let Some(encoder) = encoder.as_any().downcast_ref::<CommandEncoder>() {
+        if let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() {
             encoder.submit_frame(Some(self.image.resource()));
         }
         if self.state.swap() { Handoff::Presented } else { Handoff::Dropped }

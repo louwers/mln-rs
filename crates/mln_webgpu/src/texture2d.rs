@@ -3,7 +3,6 @@
 // Port-only: the rendering stats count the textures and their memory, as the
 // OpenGL backend's do; the C++ WebGPU backend doesn't.
 
-use std::any::Any;
 use std::rc::Rc;
 
 use mln_gfx::texture2d::{self, SamplerState};
@@ -371,13 +370,5 @@ impl texture2d::Texture2D for Texture2D {
 
     fn needs_upload(&self) -> bool {
         self.dirty
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

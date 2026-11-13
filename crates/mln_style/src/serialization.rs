@@ -86,7 +86,7 @@ macro_rules! layer_types {
         }
 
         fn properties_ref(properties: &dyn LayerProperties) -> Option<PropertiesRef<'_>> {
-            $(if let Some(properties) = properties.as_any().downcast_ref::<$properties>() {
+            $(if let Some(properties) = properties.downcast_ref::<$properties>() {
                 return Some(PropertiesRef::$tag(properties));
             })+
             None

@@ -146,8 +146,6 @@ impl DrawableBase {
 pub trait Drawable: Any {
     fn base(&self) -> &DrawableBase;
     fn base_mut(&mut self) -> &mut DrawableBase;
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
 
     // --- pure virtuals ---
 
@@ -335,6 +333,13 @@ pub trait Drawable: Any {
     }
     fn set_origin(&mut self, p: Option<Point<f64>>) {
         self.base_mut().origin = p;
+    }
+}
+
+impl dyn Drawable {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_mut<T: Drawable>(&mut self) -> Option<&mut T> {
+        (self as &mut dyn Any).downcast_mut()
     }
 }
 

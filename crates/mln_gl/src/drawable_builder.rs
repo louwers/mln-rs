@@ -47,7 +47,7 @@ impl drawable_builder::DrawableBuilder for DrawableBuilder {
             debug_assert!(false, "DrawableBuilder::init called with no current drawable");
             return;
         };
-        let Some(drawable) = current.as_any_mut().downcast_mut::<Drawable>() else {
+        let Some(drawable) = current.downcast_mut::<Drawable>() else {
             debug_assert!(false, "DrawableBuilder::init: not a gl::Drawable");
             return;
         };

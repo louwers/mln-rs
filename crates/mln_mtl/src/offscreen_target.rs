@@ -1,6 +1,7 @@
 // The offscreen target: frames drawn into a texture of the library's and
 // read back, as C++'s headless backend renders (headless_backend.cpp).
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -64,14 +65,17 @@ impl FrameTarget for OffscreenTarget {
                 true,
                 true,
             );
-            *image = Some(Rc::new(DrawTarget::new(size, resource)));
+            *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
         image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
         let image = self.image.borrow();
-        match image.as_deref().and_then(|image| image.resource().as_any().downcast_ref::<OffscreenTextureResource>()) {
+        match image
+            .as_deref()
+            .and_then(|image| (image.resource() as &dyn Any).downcast_ref::<OffscreenTextureResource>())
+        {
             Some(resource) => {
                 resource.commit();
                 Handoff::ReadBack

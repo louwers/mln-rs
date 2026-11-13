@@ -31,7 +31,6 @@
 // `createRenderbufferResource` and the render jobs of the backend thread
 // pool (`runRenderJobs` in `beginFrame`), as in the WebGPU backend.
 
-use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -1081,8 +1080,7 @@ impl Context {
         let Some(shader) = as_vulkan_shader(&shader_ptr) else {
             return false;
         };
-        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding())
-        else {
+        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding()) else {
             return false;
         };
 
@@ -1174,8 +1172,7 @@ impl Context {
         let Some(shader) = as_vulkan_shader(&shader_ptr) else {
             return false;
         };
-        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding())
-        else {
+        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding()) else {
             return false;
         };
 
@@ -1326,10 +1323,6 @@ impl Drop for Context {
 impl GfxContext for Context {
     fn context_base(&self) -> &ContextBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn backend_type(&self) -> BackendType {
@@ -1546,7 +1539,7 @@ impl GfxContext for Context {
     }
 
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
-        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return;
         };
         let mut descriptor_set = self.global_descriptor_set.borrow_mut();

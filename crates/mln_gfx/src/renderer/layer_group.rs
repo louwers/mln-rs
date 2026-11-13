@@ -56,8 +56,6 @@ impl LayerGroupBaseData {
 pub trait LayerGroupBase: Any {
     fn base(&self) -> &LayerGroupBaseData;
     fn base_mut(&mut self) -> &mut LayerGroupBaseData;
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
 
     /// The `static_cast<TileLayerGroup&>` used by `visitLayerGroupDrawables`
     /// and the render layers.

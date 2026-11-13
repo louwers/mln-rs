@@ -423,7 +423,7 @@ pub fn register_at_cross_tile_index(
     render_tile: &RenderTile,
     state: &TransformState,
 ) -> (u32, bool) {
-    match bucket.as_any().downcast_ref::<SymbolBucket>() {
+    match bucket.downcast_ref::<SymbolBucket>() {
         Some(symbol_bucket) => symbol_bucket.register_at_cross_tile_index(index, render_tile, state),
         None => (0, false),
     }

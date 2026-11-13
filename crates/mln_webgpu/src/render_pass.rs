@@ -274,10 +274,6 @@ impl render_pass::RenderPass for RenderPass {
             encoder.insert_debug_marker(name);
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// The vertex buffer and bind group slots whose state [`PassState`] tracks.

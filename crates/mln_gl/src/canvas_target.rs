@@ -6,7 +6,6 @@
 // presents the canvas after the task that drew into it, so there is nothing
 // to activate or swap.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -40,10 +39,6 @@ impl TargetResource for CanvasResource {
         if let Some(context) = self.context.upgrade() {
             context.bind_framebuffer(None, self.size.get(), true);
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
@@ -113,7 +108,7 @@ impl FrameTarget for CanvasTarget {
         let mut image = self.image.borrow_mut();
         if image.is_none() {
             let resource = CanvasResource { context: self.backend.gl_context()?.weak(), size: self.size.clone() };
-            *image = Some(Rc::new(DrawTarget::new(self.size.get(), resource)));
+            *image = Some(Rc::new(DrawTarget::new(self.size.get(), Rc::new(resource))));
         }
         let image = image.clone()?;
         image.set_size(self.size.get());

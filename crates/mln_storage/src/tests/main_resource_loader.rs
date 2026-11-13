@@ -649,7 +649,7 @@ fn set_resource_cache_path() {
     let _resource_loader = main_resource_loader(&file_sources);
     let fs = database_file_source(&file_sources);
     // `std::static_pointer_cast<DatabaseFileSource>(fs)`.
-    let dbfs = fs.as_any().and_then(|fs| fs.downcast_ref::<DatabaseFileSource>()).expect("DatabaseFileSource");
+    let dbfs = fs.downcast_ref::<DatabaseFileSource>().expect("DatabaseFileSource");
     let stop = run_loop.handle();
     // C++: "./new_offline.db".
     let path = temp_path("new_offline.db");

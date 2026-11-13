@@ -85,10 +85,8 @@ impl SourceBase {
 }
 
 /// `style::Source`.
-pub trait Source {
+pub trait Source: Any {
     fn base(&self) -> &SourceBase;
-
-    fn as_any(&self) -> &dyn Any;
 
     /// `loadDescription(FileSource&)`.
     fn load_description(&self, file_source: &dyn FileSource);
@@ -145,6 +143,13 @@ pub trait Source {
     fn dump_debug_logs(&self) {
         Log::info(Event::General, format!("Source::id: {}", self.get_id()));
         Log::info(Event::General, format!("Source::loaded: {}", i32::from(self.loaded())));
+    }
+}
+
+impl dyn Source {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: Source>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
     }
 }
 

@@ -392,10 +392,6 @@ impl Tile for RasterDEMTile {
         &self.inner.base
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
         let bucket: Option<BucketPtr> = self.inner.bucket.borrow().clone().map(|b| b as BucketPtr);
         Box::new(SharedBucketTileRenderData::new(bucket))

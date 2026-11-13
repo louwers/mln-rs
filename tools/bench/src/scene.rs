@@ -467,7 +467,7 @@ impl Scene {
 
     /// The GPU's description, and whether it is a software rasterizer.
     pub fn gpu(&self) -> (String, bool) {
-        let backend = self.frontend.get_backend().as_any();
+        let backend = self.frontend.get_backend();
         #[cfg(target_vendor = "apple")]
         if let Device::Metal(metal) = self.frontend.device() {
             return (format!("{} (Metal)", metal.name()), false);

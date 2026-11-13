@@ -12,7 +12,6 @@
 // the framebuffer themselves, and `getExtensionFunctionPointer`: glow loads
 // the functions.
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -127,7 +126,7 @@ impl RendererBackend {
     /// `BackendScope`.
     pub fn gl_context(&self) -> Option<Rc<Context>> {
         let context = renderer_backend::RendererBackend::get_context(self);
-        context.as_any().downcast_ref::<Context>().map(Context::rc)
+        context.downcast_ref::<Context>().map(Context::rc)
     }
 
     /// `GL_RENDERER`: the name of the GL implementation. Call inside a
@@ -150,7 +149,7 @@ impl RendererBackend {
     /// (`Context::release_resources`).
     pub(crate) fn reset_context(&mut self) {
         if let Some(context) = self.base.reset_context()
-            && let Some(context) = context.as_any().downcast_ref::<Context>()
+            && let Some(context) = context.downcast_ref::<Context>()
         {
             self.impl_.make_current();
             context.release_resources();
@@ -164,7 +163,7 @@ impl RendererBackend {
         self.impl_.make_current();
         if self.impl_.take_state_lost()
             && let Some(context) = self.base.existing_context()
-            && let Some(context) = context.as_any().downcast_ref::<Context>()
+            && let Some(context) = context.downcast_ref::<Context>()
         {
             context.set_dirty_state();
         }
@@ -200,10 +199,6 @@ impl RendererBackend {
 impl renderer_backend::RendererBackend for RendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {

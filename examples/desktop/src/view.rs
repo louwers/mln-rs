@@ -699,7 +699,7 @@ impl View {
 
     /// Empties the cache database.
     fn reset_cache(&self) {
-        let database = self.database_file_source.as_deref().and_then(|source| source.as_any());
+        let database = self.database_file_source.as_deref();
         let Some(database) = database.and_then(|source| source.downcast_ref::<DatabaseFileSource>()) else {
             Log::warning(Event::Database, "There is no cache database to reset");
             return;

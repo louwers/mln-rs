@@ -7,7 +7,6 @@
 // `updateAssumedState` and `getExtensionFunctionPointer` have no
 // counterpart).
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -38,10 +37,6 @@ impl StubRendererBackend {
 impl RendererBackend for StubRendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn init_shaders(&self, _registry: &ShaderRegistry, _parameters: &ProgramParameters) {}

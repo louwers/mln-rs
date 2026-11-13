@@ -4,6 +4,7 @@
 // `ImplBase` and the virtual interface is the `Impl` trait (as for
 // `Layer::Impl`). `dyn Impl` derefs to its `ImplBase`.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use mln_style_types::SourceType;
@@ -11,8 +12,6 @@ use mln_util::chrono::Duration;
 use mln_util::constants;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-
-use crate::util::AsAny;
 
 /// `WarnIfOverscaleFactorCapsPrefetchDelta`.
 fn warn_if_overscale_factor_caps_prefetch_delta(overscale: Option<u8>, prefetch: Option<u8>) {
@@ -92,7 +91,7 @@ impl ImplBase {
 }
 
 /// The virtual interface of `Source::Impl`.
-pub trait Impl: AsAny {
+pub trait Impl: Any + Send + Sync {
     fn base(&self) -> &ImplBase;
     fn base_mut(&mut self) -> &mut ImplBase;
 
@@ -100,6 +99,13 @@ pub trait Impl: AsAny {
 
     fn is_update_synchronous(&self) -> bool {
         false
+    }
+}
+
+impl dyn Impl {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: Impl>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
     }
 }
 
@@ -113,7 +119,8 @@ impl std::ops::Deref for dyn Impl {
 /// `staticImmutableCast<T>(impl)` for source impls. C++ uses `static_cast`; this
 /// panics on a type mismatch.
 pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Arc<T> {
-    impl_.clone().into_any_arc().downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
+    let any: Arc<dyn Any + Send + Sync> = impl_.clone();
+    any.downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
 }
 
 // Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`

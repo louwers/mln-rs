@@ -6,8 +6,6 @@
 // that compares the array with what it last wrote
 // (`UniformDescriptorSet::bind`).
 
-use std::any::Any;
-
 use ash::vk;
 use mln_gfx::context::Context as _;
 use mln_gfx::uniform_buffer;
@@ -79,9 +77,5 @@ impl uniform_buffer::UniformBuffer for UniformBuffer {
 
     fn get_size(&self) -> usize {
         self.buffer.get_size_in_bytes()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

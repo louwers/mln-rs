@@ -1,5 +1,7 @@
 // Ports include/mln/storage/file_source.hpp.
 
+use std::any::Any;
+
 use feature::Value;
 
 use crate::async_request::AsyncRequest;
@@ -34,7 +36,7 @@ pub type Callback = Box<dyn FnMut(Response) + 'static>;
 
 /// `FileSource`. File sources are shared between threads
 /// (`std::shared_ptr<FileSource>`), hence `Send + Sync`.
-pub trait FileSource: Send + Sync {
+pub trait FileSource: Any + Send + Sync {
     /// Request a resource. The callback will be called asynchronously, in
     /// the same thread as the request was made. This thread must have an
     /// active `RunLoop`. The request may be cancelled before completion by
@@ -75,14 +77,15 @@ pub trait FileSource: Send + Sync {
 
     fn set_resource_options(&self, options: ResourceOptions);
     fn get_resource_options(&self) -> ResourceOptions;
+}
 
+impl dyn FileSource {
     /// The concrete file source, to reach the API of a specific type (such
-    /// as the database's) on one from a [`FileSourceManager`]. `None` unless
-    /// overridden.
+    /// as the database's) on one from a [`FileSourceManager`].
     ///
     /// [`FileSourceManager`]: crate::FileSourceManager
-    fn as_any(&self) -> Option<&dyn std::any::Any> {
-        None
+    pub fn downcast_ref<T: FileSource>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
     }
 }
 

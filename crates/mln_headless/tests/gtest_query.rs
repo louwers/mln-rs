@@ -325,7 +325,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
             let style = map.style_mut();
             // Keep the point away from tile boundaries so source queries return one copy.
             let source = style.get_source("source1").expect("source1");
-            let source = source.as_any().downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
+            let source = source.downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
             source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(1.003, 1.003)))).unwrap();
             style.add_layer(Box::new(CircleLayer::new("circle_layer", "source1")), None).unwrap();
         }

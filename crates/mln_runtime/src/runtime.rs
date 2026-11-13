@@ -321,7 +321,6 @@ impl RuntimeCore {
     pub(crate) fn database(&self) -> Result<&DatabaseFileSource, Error> {
         self.database
             .as_ref()
-            .and_then(|database| database.as_any())
             .and_then(|database| database.downcast_ref::<DatabaseFileSource>())
             .ok_or_else(|| Error::unsupported("the runtime has no cache database"))
     }

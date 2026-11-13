@@ -7,7 +7,6 @@
 // source. As for a custom geometry source, the host answers its tile
 // functions through a `Send` [`CustomVectorSourceHandle`].
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -235,10 +234,6 @@ impl CustomVectorSource {
 impl Source for CustomVectorSource {
     fn base(&self) -> &SourceBase {
         &self.inner.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn load_description(&self, _file_source: &dyn FileSource) {

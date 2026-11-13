@@ -13,6 +13,7 @@
 // notifies also replaces `baseImpl`). Several setter calls through one guard
 // therefore notify once.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
@@ -29,7 +30,6 @@ use crate::expression::{
 use crate::filter::Filter;
 pub use crate::layer_impl::{FontStack, Impl, ImplBase, static_immutable_cast};
 use crate::style_property::StyleProperty;
-use crate::util::AsAny;
 
 /// The enums nested in C++ `LayerTypeInfo`.
 pub mod layer_type_info {
@@ -103,7 +103,7 @@ pub enum PropertyScope {
 }
 
 /// The runtime representation of a layer from the MapLibre Style Spec.
-pub trait Layer: AsAny {
+pub trait Layer: Any + Send + Sync {
     // --- virtual / protected members ---
 
     /// The `baseImpl` member.
@@ -241,11 +241,11 @@ pub trait Layer: AsAny {
 impl dyn Layer {
     /// `layer->as<FooLayer>()`-style checked downcast.
     pub fn downcast_ref<T: Layer>(&self) -> Option<&T> {
-        self.as_any().downcast_ref::<T>()
+        (self as &dyn Any).downcast_ref()
     }
 
     pub fn downcast_mut<T: Layer>(&mut self) -> Option<&mut T> {
-        self.as_any_mut().downcast_mut::<T>()
+        (self as &mut dyn Any).downcast_mut()
     }
 }
 

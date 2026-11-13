@@ -15,7 +15,13 @@ use crate::command_encoder::CommandEncoder;
 pub trait DrawTarget: Any {
     /// The size in physical pixels.
     fn size(&self) -> Size;
-    fn as_any(&self) -> &dyn Any;
+}
+
+impl dyn DrawTarget {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: DrawTarget>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }
 
 /// How one side of a shared texture waits for the other's GPU work on it.

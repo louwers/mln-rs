@@ -377,7 +377,7 @@ impl PatternLayoutSpec for FillLayoutSpec {
         properties: &Immutable<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties).as_any().downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
+        let properties = (**properties).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
     fn pattern_property(properties: &Immutable<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
@@ -422,7 +422,7 @@ impl PatternLayoutSpec for LineLayoutSpec {
         properties: &Immutable<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties).as_any().downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
+        let properties = (**properties).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
     fn pattern_property(properties: &Immutable<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
@@ -459,12 +459,12 @@ impl PatternLayoutSpec for LineLayoutSpec {
 /// instantiation (`layout.get<SortKey>().isUndefined()` on the leader's
 /// unevaluated layout).
 pub fn fill_layout_is_sorted(leader: &Immutable<dyn LayerProperties>) -> bool {
-    let properties = (**leader).as_any().downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
+    let properties = (**leader).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
     !properties.layer_impl().layout.get::<FillSortKey>().is_undefined()
 }
 
 pub fn line_layout_is_sorted(leader: &Immutable<dyn LayerProperties>) -> bool {
-    let properties = (**leader).as_any().downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
+    let properties = (**leader).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
     !properties.layer_impl().layout.get::<LineSortKey>().is_undefined()
 }
 

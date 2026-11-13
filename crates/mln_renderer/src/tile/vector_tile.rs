@@ -3,7 +3,6 @@
 // and src/mln/tile/vector_mlt_tile.{hpp,cpp}: `VectorTile` with the
 // encoding of its subclass (VectorMVTTile or VectorMLTTile).
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -62,10 +61,6 @@ impl Drop for VectorTile {
 impl Tile for VectorTile {
     fn base(&self) -> &TileBase {
         self.tile.base()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn create_render_data(&self) -> Box<dyn TileRenderData> {

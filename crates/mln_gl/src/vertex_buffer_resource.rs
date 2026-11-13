@@ -1,7 +1,6 @@
 // Ports src/mln/gl/vertex_buffer_resource.hpp/.cpp and
 // src/mln/gl/index_buffer_resource.hpp/.cpp
 
-use std::any::Any;
 use std::cell::Cell;
 use std::rc::Weak;
 
@@ -88,11 +87,7 @@ impl Drop for VertexBufferResource {
     }
 }
 
-impl vertex_buffer::VertexBufferResource for VertexBufferResource {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl vertex_buffer::VertexBufferResource for VertexBufferResource {}
 
 pub struct IndexBufferResource {
     context: Weak<Context>,
@@ -145,8 +140,4 @@ impl Drop for IndexBufferResource {
     }
 }
 
-impl vertex_buffer::IndexBufferResource for IndexBufferResource {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl vertex_buffer::IndexBufferResource for IndexBufferResource {}

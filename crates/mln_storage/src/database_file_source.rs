@@ -333,8 +333,4 @@ impl FileSource for DatabaseFileSource {
     fn get_resource_options(&self) -> ResourceOptions {
         self.impl_.resource_options.lock_unpoisoned().clone()
     }
-
-    fn as_any(&self) -> Option<&dyn std::any::Any> {
-        Some(self)
-    }
 }

@@ -10,7 +10,6 @@
 // - An attribute is matched to its table entry by name (C++: by location,
 //   which the port's added attribute doesn't follow).
 
-use std::any::Any;
 use std::rc::{Rc, Weak};
 
 use glow::HasContext;
@@ -225,9 +224,6 @@ impl Shader for ShaderProgram {
     fn type_name(&self) -> &'static str {
         Self::NAME
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 impl ShaderProgramBase for ShaderProgram {
@@ -247,5 +243,5 @@ impl ShaderProgramBase for ShaderProgram {
 
 /// Downcast a shader handle to the GL program (C++ `static_cast`).
 pub fn as_gl_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
-    shader.as_any().downcast_ref::<ShaderProgram>()
+    shader.downcast_ref::<ShaderProgram>()
 }

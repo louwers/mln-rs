@@ -6,7 +6,6 @@
 // of the GPU's own; other reads copy the texture then (C++ reads the texture
 // itself; see texture2d.rs).
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -188,10 +187,6 @@ impl TargetResource for OffscreenTextureResource {
         debug_assert!(self.render_pass_descriptor.borrow().is_some());
         self.render_pass_descriptor.borrow().clone()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// `mtl::OffscreenTexture`
@@ -235,9 +230,5 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
 
     fn submit(&self, _encoder: &dyn CommandEncoder) {
         self.resource().commit();
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

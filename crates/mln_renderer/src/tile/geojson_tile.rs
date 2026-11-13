@@ -4,7 +4,6 @@
 // it was requested for with the tile's current data; here it holds a `Weak`
 // to the tile's state and the data pointer.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -88,10 +87,6 @@ impl GeoJSONTile {
 impl Tile for GeoJSONTile {
     fn base(&self) -> &TileBase {
         self.tile.base()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn create_render_data(&self) -> Box<dyn TileRenderData> {

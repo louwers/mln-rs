@@ -4,7 +4,6 @@
 // Logging: the C++ `Log::Warning`/`Log::Error` calls print to stderr here.
 // TODO(port): route them through mln::Log once a logging port exists.
 
-use std::any::Any;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -127,11 +126,7 @@ struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
 
-impl IndexBufferBase for IndexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl IndexBufferBase for IndexBuffer {}
 
 struct BindGroupRecord {
     slot: u32,
@@ -329,7 +324,7 @@ impl Drawable {
         // check that each has a GPU buffer.
         for i in 0..self.impl_.uniform_buffers.allocated_size() {
             if let Some(ub) = self.impl_.uniform_buffers.get(i)
-                && let Some(webgpu_ub) = ub.as_any().downcast_ref::<UniformBuffer>()
+                && let Some(webgpu_ub) = ub.downcast_ref::<UniformBuffer>()
                 && webgpu_ub.get_buffer().is_none()
             {
                 eprintln!("Uniform buffer {i} has no GPU buffer!");
@@ -417,7 +412,6 @@ impl Drawable {
                             break;
                         };
                         let gpu_buffer = buffer
-                            .as_any()
                             .downcast_ref::<UniformBuffer>()
                             .and_then(|b| Some((b.get_buffer()?.clone(), b.get_offset(), b.get_aligned_size())));
                         let Some((gpu_buffer, offset, size)) = gpu_buffer else {
@@ -441,7 +435,7 @@ impl Drawable {
                             break;
                         };
                         let mut texture = texture.borrow_mut();
-                        let Some(texture) = texture.as_any_mut().downcast_mut::<Texture2D>() else {
+                        let Some(texture) = texture.downcast_mut::<Texture2D>() else {
                             valid_bindings = false;
                             break;
                         };
@@ -461,7 +455,7 @@ impl Drawable {
                             break;
                         };
                         let mut texture = texture.borrow_mut();
-                        let Some(texture) = texture.as_any_mut().downcast_mut::<Texture2D>() else {
+                        let Some(texture) = texture.downcast_mut::<Texture2D>() else {
                             valid_bindings = false;
                             break;
                         };
@@ -572,18 +566,18 @@ impl Drawable {
                 .uniform_buffers
                 .get(info.binding as usize)
                 .or_else(|| global_buffers?.get(info.binding as usize))
-                .and_then(|buffer| buffer.as_any().downcast_ref::<UniformBuffer>())
+                .and_then(|buffer| buffer.downcast_ref::<UniformBuffer>())
                 .is_some_and(|buffer| {
                     buffer.get_buffer() == Some(bound)
                         && buffer.get_offset() == *bound_offset
                         && buffer.get_aligned_size() == *bound_size
                 }),
             (BindingType::Sampler, EntryResource::Sampler(bound)) => texture(true).is_some_and(|texture| {
-                texture.as_any().downcast_ref::<Texture2D>().and_then(Texture2D::get_sampler) == Some(bound)
+                texture.downcast_ref::<Texture2D>().and_then(Texture2D::get_sampler) == Some(bound)
             }),
             (BindingType::Texture | BindingType::UnfilterableTexture, EntryResource::TextureView(bound)) => {
                 texture(false).is_some_and(|texture| {
-                    texture.as_any().downcast_ref::<Texture2D>().is_some_and(|texture| {
+                    texture.downcast_ref::<Texture2D>().is_some_and(|texture| {
                         texture.get_texture().is_some() && texture.get_texture_view() == Some(bound)
                     })
                 })
@@ -630,7 +624,7 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
     for (attribute_index, binding) in source.iter().enumerate() {
         let Some(binding) = binding else { continue };
         let Some(resource) = &binding.vertex_buffer_resource else { continue };
-        let Some(vertex_buffer_res) = resource.as_any().downcast_ref::<VertexBufferResource>() else {
+        let Some(vertex_buffer_res) = resource.downcast_ref::<VertexBufferResource>() else {
             continue;
         };
         if !vertex_buffer_res.get_buffer().is_valid() {
@@ -675,12 +669,6 @@ impl drawable::Drawable for Drawable {
     fn base_mut(&mut self) -> &mut DrawableBase {
         &mut self.base
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
 
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
         let draw_call_count = DRAW_CALL_COUNT.with(|c| {
@@ -689,10 +677,10 @@ impl drawable::Drawable for Drawable {
         });
         // Get WebGPU context and render pass (following Metal's pattern)
         let parameters: &dyn PaintParameters = parameters;
-        let Some(context) = parameters.context().as_any().downcast_ref::<Context>() else {
+        let Some(context) = parameters.context().downcast_ref::<Context>() else {
             return;
         };
-        let Some(render_pass) = parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>()) else {
+        let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) else {
             eprintln!("No render pass encoder available");
             debug_assert!(false);
             return;
@@ -873,7 +861,7 @@ impl drawable::Drawable for Drawable {
 
         let mut buffer_slot = 0u32;
         for binding in unique_bindings.iter() {
-            let Some(resource) = binding.vertex_resource.as_any().downcast_ref::<VertexBufferResource>() else {
+            let Some(resource) = binding.vertex_resource.downcast_ref::<VertexBufferResource>() else {
                 continue;
             };
             let buffer_resource = resource.get_buffer();
@@ -895,7 +883,7 @@ impl drawable::Drawable for Drawable {
             let indexes = indexes.borrow();
             if indexes.elements() > 0
                 && !indexes.get_dirty()
-                && let Some(index_buffer) = indexes.get_buffer().and_then(|b| b.as_any().downcast_ref::<IndexBuffer>())
+                && let Some(index_buffer) = indexes.get_buffer().and_then(|b| b.downcast_ref::<IndexBuffer>())
                 && let Some(resource) = index_buffer.buffer.get_resource::<IndexBufferResource>()
             {
                 let buffer_resource = resource.get_buffer();

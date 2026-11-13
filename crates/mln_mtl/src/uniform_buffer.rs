@@ -3,8 +3,6 @@
 // `mtl::UniformBufferArray` only adds `bindMtl` to the gfx array, so the
 // port keeps the gfx struct and binds it with `bind_uniform_buffer_array`.
 
-use std::any::Any;
-
 use mln_gfx::context::Context as _;
 use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
 use mln_gfx::uniform_buffer::{self, UniformBufferArray};
@@ -78,10 +76,6 @@ impl uniform_buffer::UniformBuffer for UniformBuffer {
     fn get_size(&self) -> usize {
         self.buffer.get_size_in_bytes()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// `UniformBufferArray::bindMtl`: binds each buffer at its id, to the
@@ -92,7 +86,7 @@ pub fn bind_uniform_buffer_array(array: &UniformBufferArray, render_pass: &Rende
         let Some(uniform_buffer) = array.get(id) else {
             continue;
         };
-        let Some(buffer) = uniform_buffer.as_any().downcast_ref::<UniformBuffer>() else {
+        let Some(buffer) = uniform_buffer.downcast_ref::<UniformBuffer>() else {
             continue;
         };
         let resource = buffer.get_buffer_resource();
