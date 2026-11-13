@@ -80,7 +80,7 @@ fn resource_offline_usage_unset() {
         .expect("region");
 
     let download = OfflineDownload::new(
-        region.get_id(),
+        region.id,
         OfflineTilePyramidRegionDefinition::new(
             "http://127.0.0.1:3000/inline_source.style.json",
             LatLngBounds::world(),
@@ -109,7 +109,7 @@ fn resource_offline_usage_unset() {
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let (stop, db2, region_id) = (run_loop.clone(), db.clone(), region.get_id());
+    let (stop, db2, region_id) = (run_loop.clone(), db.clone(), region.id);
     download.set_observer(Some(Rc::new(StatusObserver(move |status: OfflineRegionStatus| {
         if status.complete() {
             // Once download completes, invalidate region and try rendering

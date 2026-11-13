@@ -350,11 +350,11 @@ pub(crate) fn reply_on<T: Send + 'static, E: Into<Error>>(
 fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> {
     let mut resource_options = ResourceOptions::default();
     if let Some(asset_path) = &options.asset_path {
-        resource_options = resource_options.with_asset_path(utf8(asset_path, "asset path")?);
+        resource_options.asset_path = utf8(asset_path, "asset path")?.to_owned();
     }
     #[cfg(target_os = "android")]
     if options.asset_path.is_none() {
-        resource_options = resource_options.with_asset_path(mln_storage::android::APP_ASSETS);
+        resource_options.asset_path = mln_storage::android::APP_ASSETS.to_owned();
     }
     if let Some(cache_path) = &options.cache_path {
         let path = utf8(cache_path, "cache path")?;
@@ -365,7 +365,7 @@ fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> 
             .truncate(false)
             .open(cache_path)
             .map_err(|error| Error::invalid_argument(format!("can't open the cache database {path}: {error}")))?;
-        resource_options = resource_options.with_cache_path(path);
+        resource_options.cache_path = path.to_owned();
     }
     Ok(resource_options)
 }
@@ -518,9 +518,9 @@ impl Runtime {
         &self,
         transform: impl Fn(Kind, &str, FinishedCallback) + Send + Sync + 'static,
     ) -> Result<Completion<()>, Error> {
-        let transform = ResourceTransform::new(Some(Arc::new(transform)));
+        let transform: ResourceTransform = Arc::new(transform);
         self.apply(move |core| {
-            core.network()?.set_resource_transform(transform);
+            core.network()?.set_resource_transform(Some(transform));
             core.hooks.set_transform_set(true);
             Ok(())
         })
@@ -529,7 +529,7 @@ impl Runtime {
     /// Stops rewriting request URLs.
     pub fn clear_resource_transform(&self) -> Result<Completion<()>, Error> {
         self.apply(move |core| {
-            core.network()?.set_resource_transform(ResourceTransform::default());
+            core.network()?.set_resource_transform(None);
             core.hooks.set_transform_set(false);
             Ok(())
         })

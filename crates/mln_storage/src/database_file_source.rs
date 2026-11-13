@@ -190,21 +190,10 @@ fn into_result(error: Option<DatabaseError>) -> Result<(), DatabaseError> {
     error.map_or(Ok(()), Err)
 }
 
-/// `DatabaseFileSource::Impl`.
-struct Impl {
-    thread: Thread<DatabaseFileSourceThread>,
-    resource_options: Mutex<ResourceOptions>,
-}
-
-impl Impl {
-    fn actor(&self) -> ActorRef<DatabaseFileSourceThread> {
-        self.thread.actor()
-    }
-}
-
 /// `DatabaseFileSource`.
 pub struct DatabaseFileSource {
-    impl_: Impl,
+    thread: Thread<DatabaseFileSourceThread>,
+    resource_options: Mutex<ResourceOptions>,
 }
 
 impl DatabaseFileSource {
@@ -213,19 +202,19 @@ impl DatabaseFileSource {
     #[must_use]
     pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let online_file_source = file_sources.get_file_source(FileSourceType::Network, resource_options);
-        let cache_path = resource_options.cache_path().to_owned();
+        let cache_path = resource_options.cache_path.clone();
         // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_DATABASE).
         let thread = Thread::new("DatabaseFileSource", move |self_ref| {
             DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path)
         });
-        DatabaseFileSource { impl_: Impl { thread, resource_options: Mutex::new(resource_options.clone()) } }
+        DatabaseFileSource { thread, resource_options: Mutex::new(resource_options.clone()) }
     }
 
     /// `setDatabasePath(path, callback)`. The callback runs on the database
     /// thread, as in C++.
     pub fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
         let path = path.to_owned();
-        self.impl_.actor().invoke(move |t: &DatabaseFileSourceThread| t.set_database_path(&path, callback));
+        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.set_database_path(&path, callback));
     }
 
     /// `resetDatabase(callback)`: deletes the database file and starts an
@@ -282,7 +271,7 @@ impl DatabaseFileSource {
     /// Runs `f` on the database thread, after the requests and operations
     /// sent before it.
     pub fn invoke(&self, f: impl FnOnce(&DatabaseFileSourceThread) + Send + 'static) {
-        self.impl_.actor().invoke(f);
+        self.thread.actor().invoke(f);
     }
 }
 
@@ -291,7 +280,7 @@ impl FileSource for DatabaseFileSource {
         let req = FileSourceRequest::new(callback);
         let req_ref = req.actor();
         let resource = resource.clone();
-        self.impl_.actor().invoke(move |t: &DatabaseFileSourceThread| t.request(&resource, &req_ref));
+        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.request(&resource, &req_ref));
         Box::new(req)
     }
 
@@ -304,7 +293,7 @@ impl FileSource for DatabaseFileSource {
             callback.map(|callback| Box::new(scheduler::bind_once(&scheduler::get_current(), callback)) as _);
         let res = res.clone();
         let response = response.clone();
-        self.impl_.actor().invoke(move |t: &DatabaseFileSourceThread| t.forward(&res, &response, wrapper));
+        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.forward(&res, &response, wrapper));
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
@@ -317,7 +306,7 @@ impl FileSource for DatabaseFileSource {
         match value {
             Value::Bool(read_only) if key == READ_ONLY_MODE_KEY => {
                 let read_only = *read_only;
-                self.impl_.actor().invoke(move |t: &DatabaseFileSourceThread| t.reopen_database_read_only(read_only));
+                self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.reopen_database_read_only(read_only));
             }
             _ => {
                 let message = format!("Resource provider does not support property {key}");
@@ -327,11 +316,11 @@ impl FileSource for DatabaseFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.impl_.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock_unpoisoned().clone()
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {

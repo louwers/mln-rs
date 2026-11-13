@@ -100,7 +100,6 @@
 "crates/mln_storage/src/offline.rs" = 1
 "crates/mln_storage/src/offline_database.rs" = 5
 "crates/mln_storage/src/pmtiles_file_source.rs" = 2
-"crates/mln_storage/src/resource_transform.rs" = 1
 "crates/mln_storage/src/sqlite3.rs" = 4
 "crates/mln_storage/src/stub_file_source.rs" = 2
 "crates/mln_storage/src/ureq_transport.rs" = 1

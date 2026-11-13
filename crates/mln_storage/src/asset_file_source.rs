@@ -67,7 +67,7 @@ pub struct AssetFileSource {
 impl AssetFileSource {
     #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
-        let root = resource_options.asset_path().to_owned();
+        let root = resource_options.asset_path.clone();
         AssetFileSource {
             thread: Thread::new("AssetFileSource", move |_| AssetFileSourceThread { root }),
             resource_options: Mutex::new(resource_options.clone()),

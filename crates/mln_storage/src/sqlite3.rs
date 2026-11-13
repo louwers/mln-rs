@@ -99,7 +99,7 @@ impl From<rusqlite::Error> for SqliteError {
 
 /// `mapbox::sqlite::Database`.
 pub struct Database {
-    impl_: Arc<Mutex<Connection>>,
+    connection: Arc<Mutex<Connection>>,
 }
 
 impl Database {
@@ -109,7 +109,7 @@ impl Database {
     pub fn try_open(filename: &str, flags: OpenFlag) -> Result<Database, SqliteError> {
         let flags = OpenFlags::from_bits_retain(flags as i32) | OpenFlags::SQLITE_OPEN_URI;
         let conn = Connection::open_with_flags(filename, flags)?;
-        Ok(Database { impl_: Arc::new(Mutex::new(conn)) })
+        Ok(Database { connection: Arc::new(Mutex::new(conn)) })
     }
 
     /// `Database::open(filename, flags)` (throws the `tryOpen` exception).
@@ -135,9 +135,9 @@ impl Database {
         exec(&self.conn(), sql)
     }
 
-    /// The connection (`impl->db`).
+    /// The connection.
     pub fn conn(&self) -> MutexGuard<'_, Connection> {
-        self.impl_.lock_unpoisoned()
+        self.connection.lock_unpoisoned()
     }
 }
 
@@ -164,7 +164,7 @@ pub enum TransactionMode {
 /// `mapbox::sqlite::Transaction`: rolls back on drop unless committed or
 /// rolled back.
 pub struct Transaction {
-    db_impl: Arc<Mutex<Connection>>,
+    connection: Arc<Mutex<Connection>>,
     need_rollback: bool,
 }
 
@@ -178,11 +178,11 @@ impl Transaction {
         };
         // C++ throws from the constructor: no destructor, no rollback.
         db.exec(sql)?;
-        Ok(Transaction { db_impl: db.impl_.clone(), need_rollback: true })
+        Ok(Transaction { connection: db.connection.clone(), need_rollback: true })
     }
 
     fn exec(&self, sql: &str) -> Result<(), SqliteError> {
-        exec(&self.db_impl.lock_unpoisoned(), sql)
+        exec(&self.connection.lock_unpoisoned(), sql)
     }
 
     /// `commit()`.

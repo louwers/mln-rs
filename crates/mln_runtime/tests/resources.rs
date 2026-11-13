@@ -360,7 +360,7 @@ fn a_merge_takes_only_a_readable_database_file() {
     }
     assert!(!missing.exists());
     let merged = wait(offline.merge_regions(side.to_str().unwrap()));
-    assert_eq!(vec![b"side".to_vec()], merged.iter().map(|region| region.get_metadata().clone()).collect::<Vec<_>>());
+    assert_eq!(vec![b"side".to_vec()], merged.iter().map(|region| region.metadata.clone()).collect::<Vec<_>>());
     assert_eq!(merged, wait(offline.regions()));
 }
 
@@ -382,11 +382,11 @@ fn an_offline_region_downloads_and_reports_its_progress() {
         .unwrap()
         .into();
     let region = wait(offline.create_region(definition, b"one".to_vec()));
-    let id = region.get_id();
+    let id = region.id;
     assert_eq!(vec![region.clone()], wait(offline.regions()));
     assert_eq!(Some(region), wait(offline.region(id)));
     assert_eq!(None, wait(offline.region(id + 1)));
-    assert_eq!(b"two", wait(offline.update_region_metadata(id, b"two".to_vec())).get_metadata().as_slice());
+    assert_eq!(b"two", wait(offline.update_region_metadata(id, b"two".to_vec())).metadata.as_slice());
 
     assert_eq!(ErrorKind::InvalidArgument, offline.set_region_observed(id, EventMask::ALL).unwrap_err().kind);
     wait(offline.set_region_observed(id, EventMask::ALL_RUNTIME_EVENTS));

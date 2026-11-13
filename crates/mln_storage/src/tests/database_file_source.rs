@@ -212,7 +212,10 @@ fn failed_accessed_flush_waits_for_next_read() {
     Log::set_observer(Box::new(FlushFailures { count: failures.clone(), marker }));
     let _remove_observer = RemoveObserver;
 
-    let source = DatabaseFileSource::new(&FileSourceManager::new(), &ResourceOptions::default().with_cache_path(&path));
+    let source = DatabaseFileSource::new(
+        &FileSourceManager::new(),
+        &ResourceOptions { cache_path: (&path).into(), ..ResourceOptions::default() },
+    );
     let cached = cached_request(&run_loop, &source, &resource);
     assert!(cached.error.is_none());
     assert_eq!(response.data, cached.data);
@@ -248,7 +251,10 @@ fn maintain(operation: impl FnOnce(Box<dyn FnOnce(Result<(), DatabaseError>) + S
 fn cache_maintenance() {
     let run_loop = RunLoop::new();
     let path = temp_path("cache-maintenance.db");
-    let source = DatabaseFileSource::new(&FileSourceManager::new(), &ResourceOptions::default().with_cache_path(&path));
+    let source = DatabaseFileSource::new(
+        &FileSourceManager::new(),
+        &ResourceOptions { cache_path: (&path).into(), ..ResourceOptions::default() },
+    );
     let resource =
         Resource::with_tile_data(Kind::Unknown, "https://example.com/maintained", None, LoadingMethod::CacheOnly);
     let mut response = Response::new();

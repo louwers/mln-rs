@@ -21,7 +21,7 @@ use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::resource_transform::{FinishedCallback, ResourceTransform};
+use crate::resource_transform::FinishedCallback;
 use crate::response::{Reason, ResourceError, Response};
 
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
@@ -736,11 +736,9 @@ fn request_same_url_multiple_times() {
 fn failed_resource_transform() {
     let run_loop = RunLoop::new();
     let fs = online_file_source();
-    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        |_kind: Kind, _url: &str, finished: FinishedCallback| {
-            finished(Err(ResourceError::new(Reason::Other, "No credential")));
-        },
-    ))));
+    fs.set_resource_transform(Some(Arc::new(|_kind: Kind, _url: &str, finished: FinishedCallback| {
+        finished(Err(ResourceError::new(Reason::Other, "No credential")));
+    })));
 
     let stop = run_loop.clone();
     let _req = fs.request(
@@ -770,16 +768,14 @@ fn retry_failed_resource_transform() {
     let transforms = Arc::new(AtomicU32::new(0));
     let (delayed, test) = (server.url("/delayed"), server.url("/test"));
     let counter = transforms.clone();
-    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        move |_kind: Kind, url: &str, finished: FinishedCallback| {
-            assert_eq!(delayed, url);
-            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                finished(Err(ResourceError::new(Reason::Connection, "Offline")));
-            } else {
-                finished(Ok(test.clone()));
-            }
-        },
-    ))));
+    fs.set_resource_transform(Some(Arc::new(move |_kind: Kind, url: &str, finished: FinishedCallback| {
+        assert_eq!(delayed, url);
+        if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+            finished(Err(ResourceError::new(Reason::Connection, "Offline")));
+        } else {
+            finished(Ok(test.clone()));
+        }
+    })));
 
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
@@ -820,9 +816,9 @@ fn a_header_transform_runs_for_every_attempt() {
 
     let target = server.url("/temporary-error");
     let rewritten = target.clone();
-    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        move |_kind: Kind, _url: &str, finished: FinishedCallback| finished(Ok(rewritten.clone())),
-    ))));
+    fs.set_resource_transform(Some(Arc::new(move |_kind: Kind, _url: &str, finished: FinishedCallback| {
+        finished(Ok(rewritten.clone()));
+    })));
     let urls = Arc::new(Mutex::new(Vec::new()));
     let seen = urls.clone();
     fs.set_http_header_transform(HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {

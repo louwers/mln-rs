@@ -37,8 +37,12 @@ fn shares_a_live_file_source_per_type_and_options() {
     let second = manager.get_file_source(FileSourceType::Network, &options).unwrap();
     assert!(Arc::ptr_eq(&first, &second));
 
-    let elsewhere =
-        manager.get_file_source(FileSourceType::Network, &options.clone().with_cache_path("other")).unwrap();
+    let elsewhere = manager
+        .get_file_source(
+            FileSourceType::Network,
+            &ResourceOptions { cache_path: "other".to_owned(), ..options.clone() },
+        )
+        .unwrap();
     assert!(!Arc::ptr_eq(&first, &elsewhere));
 
     let clone = manager.clone();
@@ -92,9 +96,9 @@ fn unregistered_types_have_no_file_source() {
 }
 
 fn failing_transform(message: &'static str) -> ResourceTransform {
-    ResourceTransform::new(Some(Arc::new(move |_kind: Kind, _url: &str, finished: FinishedCallback| {
+    Arc::new(move |_kind: Kind, _url: &str, finished: FinishedCallback| {
         finished(Err(ResourceError::new(Reason::Other, message)));
-    })))
+    })
 }
 
 /// The error message of a request through `manager`'s `ResourceLoader`.
@@ -121,8 +125,8 @@ fn a_resource_transform_stays_with_its_manager() {
     let options = ResourceOptions::default();
     let network_a = a.get_file_source(FileSourceType::Network, &options).unwrap();
     let network_b = b.get_file_source(FileSourceType::Network, &options).unwrap();
-    network_a.set_resource_transform(failing_transform("transform a"));
-    network_b.set_resource_transform(failing_transform("transform b"));
+    network_a.set_resource_transform(Some(failing_transform("transform a")));
+    network_b.set_resource_transform(Some(failing_transform("transform b")));
 
     assert_eq!("transform a", loader_error(&a));
     assert_eq!("transform b", loader_error(&b));

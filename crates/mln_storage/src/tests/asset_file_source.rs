@@ -18,9 +18,10 @@ use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 fn asset_file_source() -> AssetFileSource {
-    AssetFileSource::new(
-        &ResourceOptions::default().with_asset_path(cpp_path("test/fixtures/storage/assets").to_str().unwrap()),
-    )
+    AssetFileSource::new(&ResourceOptions {
+        asset_path: cpp_path("test/fixtures/storage/assets").to_str().unwrap().to_owned(),
+        ..ResourceOptions::default()
+    })
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.

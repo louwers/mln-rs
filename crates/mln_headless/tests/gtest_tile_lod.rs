@@ -33,9 +33,10 @@ impl TileLODTest {
         let mut map = Map::with_resource_options(
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
             &FileSourceManager::new(),
-            &ResourceOptions::default()
-                .with_cache_path(":memory:")
-                .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+            &ResourceOptions {
+                asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
+                ..ResourceOptions::default()
+            },
         )
         .unwrap();
         frontend.attach(&map);

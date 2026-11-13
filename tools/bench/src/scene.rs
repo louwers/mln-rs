@@ -197,7 +197,8 @@ impl Scene {
             || Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db"),
             PathBuf::from,
         );
-        let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
+        let resource_options =
+            ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
         let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache)
             .expect("a headless frontend");
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);

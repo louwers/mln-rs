@@ -60,7 +60,7 @@ pub trait FileSource: Send + Sync {
     fn can_request(&self, resource: &Resource) -> bool;
 
     /// Sets a transformer for resource URLs (online file sources).
-    fn set_resource_transform(&self, _transform: ResourceTransform) {}
+    fn set_resource_transform(&self, _transform: Option<ResourceTransform>) {}
 
     /// Port-only: sets the headers to add to HTTP requests (online and HTTP
     /// file sources).

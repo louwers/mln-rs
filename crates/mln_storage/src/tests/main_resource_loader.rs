@@ -19,7 +19,7 @@ use crate::main_resource_loader::MainResourceLoader;
 use crate::network_status::{NetworkStatus, Status};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
-use crate::resource_transform::{FinishedCallback, ResourceTransform};
+use crate::resource_transform::FinishedCallback;
 use crate::response::{Reason, Response};
 
 fn main_resource_loader(file_sources: &FileSourceManager) -> Rc<MainResourceLoader> {
@@ -562,7 +562,7 @@ fn no_cache_refresh_modified_modified() {
     });
 }
 
-/// The target of the test's `Actor<ResourceTransform::TransformCallback>`.
+/// The actor the test's resource transform forwards to.
 struct TransformActor {
     test_url: String,
 }
@@ -594,12 +594,10 @@ fn set_resource_transform() {
         Mailbox::with_target(&scheduler::get_current(), Rc::new(TransformActor { test_url: server.url("/test") }));
 
     let actor_ref = ActorRef::<TransformActor>::new(&transform);
-    onlinefs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        move |_kind: Kind, url: &str, cb: FinishedCallback| {
-            let url = url.to_owned();
-            actor_ref.invoke(move |transform: &TransformActor| transform.call(&url, cb));
-        },
-    ))));
+    onlinefs.set_resource_transform(Some(Arc::new(move |_kind: Kind, url: &str, cb: FinishedCallback| {
+        let url = url.to_owned();
+        actor_ref.invoke(move |transform: &TransformActor| transform.call(&url, cb));
+    })));
     let resource1 = Resource::new(Kind::Unknown, "localhost://test");
 
     let req = req();
@@ -623,7 +621,7 @@ fn set_resource_transform() {
 
     run_loop.run();
 
-    onlinefs.set_resource_transform(ResourceTransform::default());
+    onlinefs.set_resource_transform(None);
     let resource2 = Resource::new(Kind::Unknown, server.url("/test"));
 
     let (r, stop) = (req.clone(), run_loop.clone());
@@ -926,15 +924,23 @@ fn resource_options() {
     let _serial = serial();
     let fs = MainResourceLoader::new(
         &FileSourceManager::new(),
-        &ResourceOptions::default().with_asset_path("originalAssetPath").with_maximum_cache_size(1),
+        &ResourceOptions {
+            asset_path: "originalAssetPath".to_owned(),
+            maximum_cache_size: 1,
+            ..ResourceOptions::default()
+        },
     );
 
-    fs.set_resource_options(ResourceOptions::default().with_asset_path("updatedAssetPath").with_maximum_cache_size(2));
+    fs.set_resource_options(ResourceOptions {
+        asset_path: "updatedAssetPath".to_owned(),
+        maximum_cache_size: 2,
+        ..ResourceOptions::default()
+    });
 
     let updated_options = fs.get_resource_options();
 
-    assert_eq!(updated_options.asset_path(), "updatedAssetPath");
-    assert_eq!(updated_options.maximum_cache_size(), 2);
+    assert_eq!(updated_options.asset_path, "updatedAssetPath");
+    assert_eq!(updated_options.maximum_cache_size, 2);
 }
 
 // Not a C++ test: the "Unsupported resource request." branch (a request

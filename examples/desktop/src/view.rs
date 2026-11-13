@@ -110,7 +110,7 @@ pub(crate) fn run(launch: Launch) {
     }
 
     let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
-    let resource_options = ResourceOptions::default().with_cache_path(cache_db);
+    let resource_options = ResourceOptions { cache_path: cache_db, ..ResourceOptions::default() };
 
     let file_sources = FileSourceManager::new();
     let database_file_source = file_sources.get_file_source(FileSourceType::Database, &resource_options);

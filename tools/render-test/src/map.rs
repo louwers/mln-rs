@@ -47,8 +47,10 @@ impl Impl {
         resource_options: &ResourceOptions,
         impl_options: &ImplOptions,
     ) -> Result<Impl, String> {
-        let resource_options =
-            mln_storage::ResourceOptions::default().with_cache_path(resource_options.cache_path.clone());
+        let resource_options = mln_storage::ResourceOptions {
+            cache_path: resource_options.cache_path.clone(),
+            ..mln_storage::ResourceOptions::default()
+        };
         let frontend =
             HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {

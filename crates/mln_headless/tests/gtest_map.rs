@@ -619,7 +619,11 @@ fn main_resource_loader_test(
     let run_loop = RunLoop::new();
     let file_source = Arc::new(MainResourceLoader::new(
         file_sources,
-        &ResourceOptions::default().with_cache_path(cache_path).with_asset_path(asset_path),
+        &ResourceOptions {
+            cache_path: cache_path.to_owned(),
+            asset_path: asset_path.to_owned(),
+            ..ResourceOptions::default()
+        },
     ));
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
@@ -1274,9 +1278,10 @@ fn continuous_rendering() {
     let map = Map::with_resource_options(
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
         &FileSourceManager::new(),
-        &ResourceOptions::default()
-            .with_cache_path(":memory:")
-            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+        &ResourceOptions {
+            asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
+            ..ResourceOptions::default()
+        },
     )
     .unwrap();
     frontend.attach(&map);
@@ -2217,10 +2222,7 @@ fn expired_sprite_sheet() {
     // check runs on the update each frame draws.
     let run_loop = RunLoop::new();
     let file_sources = FileSourceManager::new();
-    let file_source = Arc::new(MainResourceLoader::new(
-        &file_sources,
-        &ResourceOptions::default().with_cache_path(":memory:").with_asset_path("."),
-    ));
+    let file_source = Arc::new(MainResourceLoader::new(&file_sources, &ResourceOptions::default()));
     let observer = Rc::new(StubMapObserver::default());
     let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
     let options =
@@ -2876,9 +2878,10 @@ fn observe_tile_lifecycle() {
     let mut map = Map::with_resource_options(
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         &FileSourceManager::new(),
-        &ResourceOptions::default()
-            .with_cache_path(":memory:")
-            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+        &ResourceOptions {
+            asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
+            ..ResourceOptions::default()
+        },
     )
     .unwrap();
     frontend.attach(&map);
@@ -3128,9 +3131,10 @@ fn globe_hand_off_keeps_tiles() {
     let mut map = Map::with_file_source(
         Arc::new(MainResourceLoader::new(
             &FileSourceManager::new(),
-            &ResourceOptions::default()
-                .with_cache_path(":memory:")
-                .with_asset_path(asset_path.to_str().expect("asset path")),
+            &ResourceOptions {
+                asset_path: asset_path.to_str().expect("asset path").to_owned(),
+                ..ResourceOptions::default()
+            },
         )),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
     )
@@ -3414,9 +3418,10 @@ fn globe_bounded_source_loads_finer_tiles() {
     let mut map = Map::with_file_source(
         Arc::new(MainResourceLoader::new(
             &FileSourceManager::new(),
-            &ResourceOptions::default()
-                .with_cache_path(":memory:")
-                .with_asset_path(asset_path.to_str().expect("asset path")),
+            &ResourceOptions {
+                asset_path: asset_path.to_str().expect("asset path").to_owned(),
+                ..ResourceOptions::default()
+            },
         )),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
     )
