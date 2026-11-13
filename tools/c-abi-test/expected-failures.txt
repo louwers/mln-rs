@@ -1,43 +1,38 @@
 # The ABI suite's cases (tools/c-abi-test/testdata/tests/native, from
-# maplibre-native-ffi) that fail against crates/mln_c, as <file>:<case>,
-# sorted, each optionally followed by `  # ` and why it fails. `just
-# c-abi-test` fails when another case fails or a listed case passes;
-# implementing a function makes cases pass, and `just c-abi-test --update`
+# maplibre-native-ffi) that fail against crates/mln_c under its vulkan
+# preset, as <file>:<case>, sorted, each optionally followed by `  # ` and
+# why it fails. This command fails when another case fails or a listed case
+# passes:
+#
+#     just c-abi-test
+#
+# Implementing a function makes cases pass, and the command with `--update`
 # then shrinks this list, keeping the reasons of the cases that stay.
 abi/backend/opengl_validation.c:only_the_builds_providers_wrap  # the Vulkan preset expects no OpenGL provider, and mln-rs builds EGL beside Vulkan
-abi/backend/retarget.c:frames_published_before_a_retarget_cannot_be_acquired  # mln_render_session_service_driver_work: crates/mln_c drives no session on the caller's thread yet
-abi/base/logging.c:a_failed_discarded_command_logs_one_warning
-abi/base/logging.c:a_log_callback_cannot_call_back_into_the_c_api
-abi/map/still_image.c:a_barrier_ends_a_still_image_demand_until_the_next
-abi/map/still_image.c:a_still_image_waits_for_the_next_session
-abi/map/still_image.c:host_demands_and_a_still_image_demand_never_replace_each_other
-abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default
-abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them
-abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api
-abi/projection/projection.c:creation_rejects_invalid_views
-abi/render/driver.c:a_detached_session_frees_its_map_and_refuses_work
-abi/render/driver.c:a_released_caller_driven_session_detaches_at_its_next_service
-abi/render/driver.c:a_released_caller_driven_session_is_abandoned_when_its_map_releases
-abi/render/driver.c:abandon_from_a_driver_completion_is_busy
-abi/render/driver.c:abandon_from_an_attach_completion_is_busy
-abi/render/driver.c:an_attached_session_holds_its_map
-abi/render/driver.c:maintenance_waits_behind_a_demand_for_map_commands
-abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features
-abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_changes
-abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host
-abi/render/invalidation.c:feature_state_stays_with_the_update_held_by_a_command_group
-abi/render/style_replacement.c:waiting_demands_settle_replaced_styles_with_revalidated_tiles
-abi/render/unused_images.c:only_images_set_with_keep_unused_survive_when_unused
-abi/resources/asset_paths.c:host_string_views_reject_nul_and_null_data_with_a_length
-abi/resources/offline.c:an_offline_operation_accepted_before_release_still_completes
-abi/runtime/event_payloads.c:a_failed_style_load_names_its_kind
-abi/style/commands.c:other_root_properties_read_back_as_loaded_and_reject_changes
-abi/style/feature_state.c:a_removed_source_takes_its_state_with_it
-abi/style/feature_state.c:a_style_load_clears_every_source_state
-abi/style/feature_state.c:rendered_features_carry_state_from_the_last_frame
-abi/style/feature_state.c:typed_ids_reach_the_features_that_carry_them
-abi/style/loading.c:a_style_url_answered_without_a_style_fails_once
-abi/style/locale_expressions_icu.c:collator_follows_locale_extensions_and_sensitivity
-abi/style/locale_expressions_icu.c:number_format_follows_locale_currency_and_fraction_limits
-abi/style/locale_expressions_icu.c:resolved_locale_reports_the_language_and_honored_extensions
-abi/style/rejected_inputs.c:style_commands_reject_invalid_inputs
+abi/base/logging.c:a_failed_discarded_command_logs_one_warning  # a failed command without a completion is dropped instead of logged as a warning
+abi/base/logging.c:a_log_callback_cannot_call_back_into_the_c_api  # no discarded-failure warning is logged, so the callback never tries the C API
+abi/map/still_image.c:a_barrier_ends_a_still_image_demand_until_the_next  # a still image is one attempt per update, not a demand that waits, parks and ends
+abi/map/still_image.c:a_still_image_waits_for_the_next_session  # a still image is one attempt per update, not a demand that waits, parks and ends
+abi/map/still_image.c:host_demands_and_a_still_image_demand_never_replace_each_other  # a still image is one attempt per update, not a demand that waits, parks and ends
+abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default  # likely: a still map loads the tiles that come back into view again
+abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them  # likely: a still map loads the tiles that come back into view again
+abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api  # plugins are stubs: mln_plugin_get_register_function_v1 returns NULL
+abi/projection/projection.c:creation_rejects_invalid_views  # mln-rs projects globe views, which the suite expects to be UNSUPPORTED
+abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features  # feature state stays in mln_runtime's store and never reaches the renderer
+abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_changes  # a feature-state change publishes no render update
+abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host  # feature state stays in mln_runtime's store and never reaches the renderer
+abi/render/invalidation.c:feature_state_stays_with_the_update_held_by_a_command_group  # feature state stays in mln_runtime's store and never reaches the renderer
+abi/render/unused_images.c:only_images_set_with_keep_unused_survive_when_unused  # reduce_memory_use doesn't drop the image manager's unused images
+abi/resources/asset_paths.c:host_string_views_reject_nul_and_null_data_with_a_length  # mln_c accepts a text view with a NUL inside
+abi/resources/offline.c:an_offline_operation_accepted_before_release_still_completes  # a runtime release drops the core before the offline database replies
+abi/runtime/event_payloads.c:a_failed_style_load_names_its_kind  # a first style response without content is skipped, so the load never fails
+abi/style/commands.c:other_root_properties_read_back_as_loaded_and_reject_changes  # a loaded style takes projection and sky changes, which the suite expects refused
+abi/style/feature_state.c:a_removed_source_takes_its_state_with_it  # feature state stays in mln_runtime's store and never reaches the renderer
+abi/style/feature_state.c:a_style_load_clears_every_source_state  # feature state stays in mln_runtime's store and never reaches the renderer
+abi/style/feature_state.c:rendered_features_carry_state_from_the_last_frame  # feature state stays in mln_runtime's store and never reaches the renderer
+abi/style/feature_state.c:typed_ids_reach_the_features_that_carry_them  # feature state stays in mln_runtime's store and never reaches the renderer
+abi/style/loading.c:a_style_url_answered_without_a_style_fails_once  # a first style response without content is skipped, so the load never fails
+abi/style/locale_expressions_icu.c:collator_follows_locale_extensions_and_sensitivity  # locale expressions ignore the locale: there is no ICU
+abi/style/locale_expressions_icu.c:number_format_follows_locale_currency_and_fraction_limits  # locale expressions ignore the locale: there is no ICU
+abi/style/locale_expressions_icu.c:resolved_locale_reports_the_language_and_honored_extensions  # locale expressions ignore the locale: there is no ICU
+abi/style/rejected_inputs.c:style_commands_reject_invalid_inputs  # mln_c accepts a text view with a NUL inside

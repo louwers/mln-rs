@@ -1,21 +1,22 @@
 # Builds maplibre-native-ffi's ABI suite (testdata/tests/native/abi) against
 # crates/mln_c's headers and library, the way maplibre-native-ffi's
 # cmake/mln_ffi_tests.cmake builds it against its own: the same support files,
-# Unity, test plugin and graphics fixtures, for one render backend. `just
-# c-abi-test` configures it with the library that Cargo built and runs it
-# through run.py.
+# Unity, test plugin and graphics fixtures, for one render backend: vulkan, or
+# opengl on EGL, maplibre-native-ffi's Linux OpenGL preset. `just c-abi-test`
+# configures it with the library that Cargo built and runs it through run.py.
 cmake_minimum_required(VERSION 3.25)
 project(mln_c_abi_test C CXX)
 
 set(MLN_C_LIBRARY "" CACHE FILEPATH "crates/mln_c's shared library")
-# The backend the suite drives its fixtures with. On Linux that is Vulkan,
-# which lavapipe provides without a GPU.
+# The backend the suite drives its fixtures with: Vulkan, which lavapipe
+# provides without a GPU, or OpenGL on EGL, which llvmpipe does.
 set(MLN_C_TEST_BACKEND vulkan CACHE STRING "The render backend to test")
+set_property(CACHE MLN_C_TEST_BACKEND PROPERTY STRINGS vulkan opengl)
 if(NOT EXISTS "${MLN_C_LIBRARY}")
   message(FATAL_ERROR "MLN_C_LIBRARY must name crates/mln_c's shared library")
 endif()
-if(NOT MLN_C_TEST_BACKEND STREQUAL "vulkan")
-  message(FATAL_ERROR "only the vulkan backend is set up")
+if(NOT MLN_C_TEST_BACKEND MATCHES "^(vulkan|opengl)$")
+  message(FATAL_ERROR "MLN_C_TEST_BACKEND must be vulkan or opengl")
 endif()
 
 set(MLN_C_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../crates/mln_c/include")
@@ -26,6 +27,11 @@ set(SUPPORT_DIR "${TESTS_DIR}/support")
 find_package(Threads REQUIRED)
 find_path(VULKAN_INCLUDE_DIR vulkan/vulkan_core.h REQUIRED)
 find_library(VULKAN_LOADER_LIBRARY NAMES vulkan vulkan.1 REQUIRED)
+# The OpenGL cases make EGL contexts and GL textures of their own.
+if(MLN_C_TEST_BACKEND STREQUAL "opengl")
+  find_library(EGL_LIBRARY NAMES EGL REQUIRED)
+  find_library(GLES_LIBRARY NAMES GLESv2 REQUIRED)
+endif()
 
 # The library, under the name of maplibre-native-ffi's target. Cargo gives it
 # no soname, so the suite links it by directory and name.
@@ -69,6 +75,9 @@ set(FILE_TAGS
     windows
     icu)
 set(ACTIVE_TAGS ${MLN_C_TEST_BACKEND})
+if(MLN_C_TEST_BACKEND STREQUAL "opengl")
+  list(APPEND ACTIVE_TAGS egl)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND ACTIVE_TAGS wayland linux icu)
 endif()
@@ -151,6 +160,12 @@ target_compile_definitions(
   mln_test_graphics_objects
   PRIVATE MLN_TEST_GRAPHICS_EXPORTS
           "MLN_TEST_GRAPHICS_VULKAN_LOADER=\"${VULKAN_LOADER_LIBRARY}\"")
+if(MLN_C_TEST_BACKEND STREQUAL "opengl")
+  target_compile_definitions(
+    mln_test_graphics_objects
+    PRIVATE "MLN_TEST_GRAPHICS_EGL_LIBRARY=\"${EGL_LIBRARY}\""
+            "MLN_TEST_GRAPHICS_GLES_LIBRARY=\"${GLES_LIBRARY}\"")
+endif()
 target_link_libraries(mln_test_graphics_objects PUBLIC ${CMAKE_DL_LIBS})
 
 add_executable(
@@ -186,6 +201,12 @@ target_include_directories(
 string(TOUPPER "${MLN_C_TEST_BACKEND}" backend)
 target_compile_definitions(mln_native_abi_tests
                            PRIVATE MLN_FFI_TEST_BACKEND_${backend}=1)
+if(MLN_C_TEST_BACKEND STREQUAL "opengl")
+  target_compile_definitions(mln_native_abi_tests
+                             PRIVATE MLN_FFI_TEST_OPENGL_EGL=1)
+  target_link_libraries(mln_native_abi_tests PRIVATE "${EGL_LIBRARY}"
+                                                     "${GLES_LIBRARY}")
+endif()
 target_compile_options(
   mln_native_abi_tests
   PRIVATE -Werror=unused-function

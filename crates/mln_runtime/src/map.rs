@@ -10,6 +10,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
+use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLngBounds;
@@ -111,6 +112,11 @@ pub(crate) struct Published {
 }
 
 impl Published {
+    /// The sequence number of the last command that ran.
+    pub(crate) fn applied(&self) -> u64 {
+        self.applied.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn new(event_mask: EventMask) -> Self {
         Published {
             snapshot: Mutex::new(None),
@@ -396,7 +402,7 @@ impl Map {
                         held.removal = Some(resolver);
                         return Ok(completion);
                     }
-                    Some(_) => return Err(Error::invalid_state("the map still has an attached render session")),
+                    Some(_) => return Err(Error::invalid_state("map still has an attached render session")),
                     // The session is gone without letting go of the map.
                     None => Some((held.id, None)),
                 },
@@ -525,7 +531,27 @@ impl Map {
         target: RenderTarget,
         options: AttachOptions,
     ) -> Result<(RenderSession, Completion<()>), Error> {
-        crate::render::attach(self, target, options)
+        crate::render::attach(self, target, options, |session, attached| (session.clone(), attached))
+    }
+
+    /// Attaches a render session as [`attach`](Self::attach) does, and calls
+    /// `then` with it and the attach's completion before the session's
+    /// thread may deliver the attach's result. A callback that `then`
+    /// attaches with [`Completion::on_complete`] runs where the session
+    /// delivers it: on the session's thread, inside its driver call, even
+    /// when the session attaches before `then` runs. One attached after
+    /// `attach` returned would run at once on this thread instead.
+    ///
+    /// `then` keeps the session with a clone of it: the session is released
+    /// once its last handle drops. Fails as `attach` does, before `then`
+    /// runs.
+    pub fn attach_then<R>(
+        &self,
+        target: RenderTarget,
+        options: AttachOptions,
+        then: impl FnOnce(&RenderSession, Completion<()>) -> R,
+    ) -> Result<R, Error> {
+        crate::render::attach(self, target, options, then)
     }
 
     /// Renders a still image of a static or tile map, once every resource
@@ -576,6 +602,11 @@ impl Map {
         })
     }
 
+    /// Whether the map was released or disposed.
+    pub(crate) fn is_released(&self) -> bool {
+        self.shared.released.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn runtime_thread(&self) -> std::thread::ThreadId {
         self.shared.runtime.thread()
     }
@@ -624,14 +655,21 @@ impl Map {
 
     /// Sends the command that binds the session `id`, whose thread runs
     /// `run_loop`, to the map: it sizes the map to `size`, and hands the
-    /// session the map's updates.
-    pub(crate) fn bind_session(&self, id: SessionId, run_loop: RunLoopHandle, size: Size) -> Result<(), Error> {
+    /// session the map's updates. The map tells the session of the commands
+    /// it runs from `awaited` on.
+    pub(crate) fn bind_session(
+        &self,
+        id: SessionId,
+        run_loop: RunLoopHandle,
+        awaited: Arc<AtomicU64>,
+        size: Size,
+    ) -> Result<(), Error> {
         let sent = self.shared.send(move |core, outbox, map_id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&map_id) {
                 return worker_post(&run_loop, |worker, outbox| worker.bind_failed(missing_map(), outbox));
             }
-            let link = SessionLink { id, run_loop: run_loop.clone() };
+            let link = SessionLink { id, run_loop: run_loop.clone(), awaited };
             apply_command(
                 core,
                 map_id,
@@ -640,11 +678,14 @@ impl Map {
                 move |entry, _| {
                     entry.session = Some(link);
                     let resized = entry.core.set_size(size);
-                    (resized, entry.core.update_reader(), entry.core.renderer_events())
+                    (resized, entry.core.update_reader(), entry.core.renderer_events(), entry.published.clone())
                 },
-                move |_, (resized, reader, events), _, _| match resized {
+                move |_, (resized, reader, events, published), _, _| match resized {
                     Ok(()) => {
-                        worker_post(&run_loop, move |worker, outbox| worker.bound(sequence, reader, events, outbox));
+                        let bound = move |worker: &mut Worker, outbox: &mut Outbox| {
+                            worker.bound(sequence, reader, events, published, outbox);
+                        };
+                        worker_post(&run_loop, bound);
                     }
                     Err(error) => worker_post(&run_loop, move |worker, outbox| worker.bind_failed(error, outbox)),
                 },
@@ -878,6 +919,20 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let json = json.into();
         self.command(move |map| map.style_mut().add_layer_json(&json, before_layer_id.as_deref()))
+    }
+
+    /// Adds a custom layer named `layer_id` that `host` draws, below
+    /// `before_layer_id` or above every layer. See `Style::add_custom_layer`
+    /// for the errors. The map lets go of `host` once the style no longer has
+    /// the layer, and no renderer draws it.
+    pub fn add_custom_layer(
+        &self,
+        layer_id: impl Into<String>,
+        host: Arc<dyn CustomLayerHost>,
+        before_layer_id: Option<String>,
+    ) -> Result<Completion<Applied>, Error> {
+        let layer_id = layer_id.into();
+        self.command(move |map| map.style_mut().add_custom_layer(&layer_id, host, before_layer_id.as_deref()))
     }
 
     /// Removes a layer from the style. Completes with
@@ -1196,6 +1251,8 @@ fn unbind(core: &mut RuntimeCore, map_id: MapId, id: SessionId) {
 pub(crate) struct SessionLink {
     id: SessionId,
     run_loop: RunLoopHandle,
+    /// The session's `awaited_command`.
+    awaited: Arc<AtomicU64>,
 }
 
 /// A still image on its way: the map's callback leaves its outcome for the
@@ -1345,7 +1402,9 @@ pub(crate) fn apply_command<T>(
     let Some(entry) = core.maps.get(&id) else { return };
     after(entry, value, entry.applied(), outbox);
     entry.published.applied.store(sequence, Ordering::SeqCst);
-    if let Some(link) = &entry.session {
+    if let Some(link) = &entry.session
+        && sequence >= link.awaited.load(Ordering::SeqCst)
+    {
         worker_post(&link.run_loop, move |worker, outbox| worker.map_applied(sequence, outbox));
     }
 }

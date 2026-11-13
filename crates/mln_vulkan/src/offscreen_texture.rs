@@ -86,6 +86,7 @@ impl OffscreenTextureResource {
             depth_format: None,
             color_final_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             color_load: false,
+            depth_final_layout: None,
         });
         let attachments = [texture.get_vulkan_image_view()];
         if attachments[0] == vk::ImageView::null() {

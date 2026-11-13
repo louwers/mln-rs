@@ -787,10 +787,10 @@ impl CollisionIndex {
                 any_point_visible = any_point_visible || !projected.occluded;
                 point = projected.point;
             }
-            bounds[0] = std_min(bounds[0], point.x);
-            bounds[1] = std_min(bounds[1], point.y);
-            bounds[2] = std_max(bounds[2], point.x);
-            bounds[3] = std_max(bounds[3], point.y);
+            bounds[0] = f32::min(bounds[0], point.x);
+            bounds[1] = f32::min(bounds[1], point.y);
+            bounds[2] = f32::max(bounds[2], point.x);
+            bounds[3] = f32::max(bounds[3], point.y);
         }
 
         ProjectedBox { boundaries: bounds, all_points_occluded: !any_point_visible }
@@ -805,16 +805,6 @@ fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
 /// `Point<float> * float`.
 fn mul(a: Point<f32>, b: f32) -> Point<f32> {
     Point::new(a.x * b, a.y * b)
-}
-
-/// `std::min(a, b)`: `b < a ? b : a`.
-fn std_min(a: f32, b: f32) -> f32 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)`: `a < b ? b : a`.
-fn std_max(a: f32, b: f32) -> f32 {
-    if a < b { b } else { a }
 }
 
 /// `vec4 p = {{point.x, point.y, 0, 1}}; matrix::transformMat4(p, p, posMatrix)`.

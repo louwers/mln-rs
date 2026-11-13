@@ -6,7 +6,6 @@
 pub mod color;
 pub mod compression;
 pub mod constants;
-pub mod cstdlib;
 pub mod geo;
 pub mod interpolate;
 pub mod padding;

@@ -43,8 +43,8 @@ pub(crate) const BACKENDS: &[(BackendType, mln_render_backend, mln_render_backen
     (BackendType::Metal, types::MLN_RENDER_BACKEND_METAL, types::MLN_RENDER_BACKEND_FLAG_METAL),
     #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
     (BackendType::Vulkan, MLN_RENDER_BACKEND_VULKAN, types::MLN_RENDER_BACKEND_FLAG_VULKAN),
-    // OpenGL comes through EGL.
-    #[cfg(all(unix, not(target_vendor = "apple")))]
+    // OpenGL comes through EGL, and on Windows through WGL.
+    #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
     (BackendType::OpenGL, MLN_RENDER_BACKEND_OPEN_GL, types::MLN_RENDER_BACKEND_FLAG_OPEN_GL),
     #[cfg(not(target_family = "wasm"))]
     (BackendType::WebGPU, MLN_RENDER_BACKEND_WEB_GPU, types::MLN_RENDER_BACKEND_FLAG_WEB_GPU),
@@ -215,7 +215,8 @@ unsafe fn request(options: *const mln_gpu_device_options) -> Result<Request, Err
     }
     let client_api = fields.get(MLN_GPU_DEVICE_OPTION_OPEN_GL_CLIENT_API, options.open_gl_client_api);
     let gl_api = match client_api {
-        None | Some(MLN_OPEN_GL_CLIENT_API_GLES) => GlApi::Gles,
+        None => GlApi::default(),
+        Some(MLN_OPEN_GL_CLIENT_API_GLES) => GlApi::Gles,
         Some(MLN_OPEN_GL_CLIENT_API_GL) => GlApi::Gl,
         Some(_) => {
             return Err(Error::invalid_argument("mln_gpu_device_options.open_gl_client_api must name an OpenGL API"));
@@ -354,7 +355,7 @@ fn capabilities(device: &Device) -> mln_gpu_device_capabilities {
         let (producer, consumer) = vulkan.sync_kinds();
         sync = producer.union(consumer);
     }
-    #[cfg(all(unix, not(target_vendor = "apple")))]
+    #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
     if let Device::Gl(gl) = device
         && gl.is_host()
     {
@@ -381,7 +382,24 @@ fn capabilities(device: &Device) -> mln_gpu_device_capabilities {
         target_kinds,
         export_kinds: crate::render_target::export_flags(exports),
         sync_kinds: sync_flags(sync),
+        depth_stencil_formats: depth_stencil_flags(device.depth_stencil_formats()),
+        depth_export_kinds: crate::render_target::export_flags(device.depth_export_kinds()),
     }
+}
+
+/// The `mln_depth_stencil_format_flags` of `formats`.
+fn depth_stencil_flags(formats: ::mln_runtime::DepthStencilFormats) -> types::mln_depth_stencil_format_flags {
+    formats.iter().fold(0, |flags, format| {
+        flags
+            | match format {
+                ::mln_runtime::DepthStencilFormat::Depth24Stencil8 => {
+                    types::MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH24_STENCIL8
+                }
+                ::mln_runtime::DepthStencilFormat::Depth32FloatStencil8 => {
+                    types::MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH32_FLOAT_STENCIL8
+                }
+            }
+    })
 }
 
 /// `mln_gpu_device_get_capabilities()`.
@@ -598,6 +616,24 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_open_gl(
             // header's contract).
             let device = unsafe {
                 mln_gl::Device::from_raw(pointer(egl.display)?, pointer(egl.config)?, pointer(egl.share_context)?)
+            }?;
+            *out_device = DEVICES.insert(Device::Gl(device).into())?;
+            return Ok(());
+        }
+        #[cfg(windows)]
+        if context.platform == types::MLN_OPEN_GL_CONTEXT_PLATFORM_WGL {
+            // SAFETY: the variant that `platform` names, checked above.
+            let wgl = unsafe { context.data.wgl };
+            let pointer =
+                |pointer: *mut c_void| core::ptr::NonNull::new(pointer).ok_or_else(|| Error::invalid_argument("null"));
+            // SAFETY: the host's live device context and context, and its
+            // `wglGetProcAddress` or null (the header's contract).
+            let device = unsafe {
+                mln_gl::Device::from_wgl(
+                    pointer(wgl.device_context)?,
+                    pointer(wgl.share_context)?,
+                    wgl.get_proc_address,
+                )
             }?;
             *out_device = DEVICES.insert(Device::Gl(device).into())?;
             return Ok(());

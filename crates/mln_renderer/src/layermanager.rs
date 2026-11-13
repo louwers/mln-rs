@@ -12,6 +12,7 @@ use mln_style::layer::{layer_type_info, static_immutable_cast};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
+use mln_style::layers::custom_layer::Impl as CustomLayerImpl;
 use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
 use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
 use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
@@ -24,6 +25,7 @@ use mln_util::logging::{Event, Log};
 use crate::bucket::Bucket;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionLayoutSpec;
+use crate::layers::render_custom_layer::RenderCustomLayer;
 use crate::layers::{
     RenderBackgroundLayer, RenderCircleLayer, RenderFillExtrusionLayer, RenderFillLayer, RenderLineLayer,
     RenderRasterLayer,
@@ -38,6 +40,11 @@ use crate::render_layer::RenderLayerPtr;
 /// `LayerManager::createRenderLayer(Immutable<style::Layer::Impl>)`.
 pub fn create_render_layer(impl_: &Immutable<dyn layer::Impl>) -> Option<RenderLayerPtr> {
     let type_info = impl_.get_type_info();
+    if std::ptr::eq(type_info, CustomLayerImpl::static_type_info()) {
+        let layer: RenderLayerPtr =
+            Rc::new(RefCell::new(RenderCustomLayer::new(static_immutable_cast::<CustomLayerImpl>(impl_))));
+        return Some(layer);
+    }
     if std::ptr::eq(type_info, BackgroundLayerImpl::static_type_info()) {
         let layer: RenderLayerPtr =
             Rc::new(RefCell::new(RenderBackgroundLayer::new(static_immutable_cast::<BackgroundLayerImpl>(impl_))));

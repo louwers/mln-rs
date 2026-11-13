@@ -307,7 +307,7 @@ impl RenderSource for RenderImageSource {
         let dx = ne_point.x - sw_point.x;
         let dy = ne_point.y - sw_point.y;
         let d_max = if dx < dy { dy } else { dx };
-        let floor = (-mln_math::log2(d_max)).floor();
+        let floor = (-d_max.log2()).floor();
         let zoom = (if 0.0 < floor { floor } else { 0.0 }) as u8;
 
         // Only enable if the long side of the image is > 2 pixels. Resulting

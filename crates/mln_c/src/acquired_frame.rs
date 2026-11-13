@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ::mln_runtime::{
-    AcquiredFrame, ConsumerSync, ExportedImage, FrameTexture, FrameTextureKind, FrameView, GpuSync, SyncKind,
+    AcquiredFrame, ConsumerSync, ExportedImage, FrameDepth, FrameTexture, FrameTextureKind, FrameView, GpuSync,
+    NativeTexture, SyncKind,
 };
 use mln_util::ErrorKind;
 use mln_util::sync::MutexExt;
@@ -393,9 +394,15 @@ pub unsafe extern "C" fn mln_acquired_frame_get_vulkan_texture(
         // SAFETY: the caller's contract.
         unsafe { abi::check_out_size(out_frame) }?;
         let (texture, scale_factor, slot) = frame_texture(frame)?;
+        let (depth_image, depth_image_view, depth_format, depth_layout) = match texture.depth {
+            Some(FrameDepth { texture: NativeTexture::Vulkan { image, view, format, layout }, .. }) => {
+                (image, view, format as u32, layout as u32)
+            }
+            _ => (0, 0, 0, 0),
+        };
         #[allow(unreachable_patterns)]
-        let record = match texture.kind {
-            FrameTextureKind::Vulkan { image, view, device, format, layout } => mln_vulkan_texture_frame {
+        let record = match texture.native_kind() {
+            Some(&FrameTextureKind::Vulkan { image, view, device, format, layout }) => mln_vulkan_texture_frame {
                 size: size_of::<mln_vulkan_texture_frame>() as u32,
                 width: texture.size.width,
                 height: texture.size.height,
@@ -406,6 +413,10 @@ pub unsafe extern "C" fn mln_acquired_frame_get_vulkan_texture(
                 device: device as *mut c_void,
                 format: format as u32,
                 layout: layout as u32,
+                depth_image,
+                depth_image_view,
+                depth_format,
+                depth_layout,
             },
             _ => return Err(different_backend()),
         };
@@ -438,9 +449,15 @@ pub unsafe extern "C" fn mln_acquired_frame_get_metal_texture(
         // SAFETY: the caller's contract.
         unsafe { abi::check_out_size(out_frame) }?;
         let (texture, scale_factor, slot) = frame_texture(frame)?;
+        let (depth_texture, depth_pixel_format) = match texture.depth {
+            Some(FrameDepth { texture: NativeTexture::Metal { texture, pixel_format }, .. }) => {
+                (texture as usize as *mut c_void, pixel_format)
+            }
+            _ => (core::ptr::null_mut(), 0),
+        };
         #[allow(unreachable_patterns)]
-        let record = match texture.kind {
-            FrameTextureKind::Metal { texture: object, device, pixel_format } => mln_metal_texture_frame {
+        let record = match texture.native_kind() {
+            Some(&FrameTextureKind::Metal { texture: object, device, pixel_format }) => mln_metal_texture_frame {
                 size: size_of::<mln_metal_texture_frame>() as u32,
                 width: texture.size.width,
                 height: texture.size.height,
@@ -449,6 +466,8 @@ pub unsafe extern "C" fn mln_acquired_frame_get_metal_texture(
                 texture: object as usize as *mut c_void,
                 device: device as usize as *mut c_void,
                 pixel_format,
+                depth_texture,
+                depth_pixel_format,
             },
             _ => return Err(different_backend()),
         };
@@ -472,9 +491,15 @@ pub unsafe extern "C" fn mln_acquired_frame_get_open_gl_texture(
         // SAFETY: the caller's contract.
         unsafe { abi::check_out_size(out_frame) }?;
         let (texture, scale_factor, slot) = frame_texture(frame)?;
+        let (depth_texture, depth_internal_format) = match texture.depth {
+            Some(FrameDepth { texture: NativeTexture::OpenGl { texture, internal_format, .. }, .. }) => {
+                (texture, internal_format)
+            }
+            _ => (0, 0),
+        };
         #[allow(unreachable_patterns)]
-        let record = match texture.kind {
-            FrameTextureKind::OpenGl { texture: name, target } => mln_open_gl_texture_frame {
+        let record = match texture.native_kind() {
+            Some(&FrameTextureKind::OpenGl { texture: name, target }) => mln_open_gl_texture_frame {
                 size: size_of::<mln_open_gl_texture_frame>() as u32,
                 width: texture.size.width,
                 height: texture.size.height,
@@ -482,6 +507,8 @@ pub unsafe extern "C" fn mln_acquired_frame_get_open_gl_texture(
                 slot,
                 texture: name,
                 target,
+                depth_texture,
+                depth_internal_format,
             },
             _ => return Err(different_backend()),
         };
@@ -606,6 +633,13 @@ pub unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
         else {
             return Err(other_export());
         };
+        let (depth_fd, depth_allocation_size, depth_dedicated, depth_format) = match texture.depth {
+            Some(FrameDepth {
+                export: Some(ExportedImage::OpaqueFd { fd, allocation_size, dedicated, format }),
+                ..
+            }) => (fd, allocation_size, dedicated, format),
+            _ => (-1, 0, false, 0),
+        };
         let record = mln_opaque_fd_frame {
             size: size_of::<mln_opaque_fd_frame>() as u32,
             width: texture.size.width,
@@ -616,6 +650,10 @@ pub unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
             allocation_size,
             dedicated,
             format,
+            depth_fd,
+            depth_allocation_size,
+            depth_dedicated,
+            depth_format,
         };
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_frame, &record) }

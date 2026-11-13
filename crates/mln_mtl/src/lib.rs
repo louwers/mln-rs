@@ -22,6 +22,7 @@ pub mod borrowed_target;
 pub mod buffer_resource;
 pub mod command_encoder;
 pub mod context;
+pub mod custom_layer;
 pub mod device;
 pub mod draw_target;
 pub mod drawable;
@@ -43,6 +44,7 @@ pub mod vertex_buffer_resource;
 
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, PendingReads};
 pub use context::Context;
+pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
 pub use exported_target::ExportedTarget;
 pub use objc2;

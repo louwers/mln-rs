@@ -10,16 +10,20 @@ use std::rc::Rc;
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::export::Generations;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::{ConsumerSync, ExportKind, ExportKinds, ExportedImage, ExportedRing, SyncKind, SyncKinds};
+use mln_gfx::{
+    ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture,
+    SyncKind, SyncKinds,
+};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use objc2::rc::Retained;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
 use objc2_io_surface::{
     IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow, kIOSurfaceHeight, kIOSurfacePixelFormat,
     kIOSurfaceWidth,
 };
-use objc2_metal::{MTLDevice, MTLPixelFormat, MTLTextureDescriptor, MTLTextureUsage};
+use objc2_metal::{MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage};
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
@@ -119,22 +123,53 @@ fn surface_texture(device: &MTLDevicePtr, size: Size) -> Result<(CFRetained<IOSu
 struct Generation {
     target: BorrowedTarget,
     surfaces: Vec<CFRetained<IOSurfaceRef>>,
+    /// The textures over `surfaces`, and each slot's depth texture when the
+    /// ring keeps depth.
+    textures: BorrowedTextures,
     size: Size,
 }
 
 impl Generation {
-    fn new(backend: &Rc<RendererBackend>, depth: usize, size: Size, producer: SyncKind) -> Result<Generation, Error> {
+    fn new(
+        backend: &Rc<RendererBackend>,
+        depth: usize,
+        size: Size,
+        producer: SyncKind,
+        keep_depth: bool,
+    ) -> Result<Generation, Error> {
         let device = backend.device().device().clone();
         let mut surfaces = Vec::with_capacity(depth);
         let mut textures = Vec::with_capacity(depth);
+        let mut depth_textures = Vec::new();
         for _ in 0..depth {
             let (surface, texture) = surface_texture(&device, size)?;
             surfaces.push(surface);
             textures.push(texture);
+            if keep_depth {
+                depth_textures.push(depth_texture(&device, size)?);
+            }
         }
-        let target = BorrowedTarget::new(backend.clone(), BorrowedTextures { textures, size }, producer)?;
-        Ok(Generation { target, surfaces, size })
+        let textures = BorrowedTextures { textures, size, depth_textures };
+        let target = BorrowedTarget::new(backend.clone(), textures.clone(), producer)?;
+        Ok(Generation { target, surfaces, textures, size })
     }
+}
+
+/// A private texture of `size` that a frame stores its depth and stencil
+/// into, for the host to sample or draw into on the device.
+fn depth_texture(device: &MTLDevicePtr, size: Size) -> Result<MTLTexturePtr, Error> {
+    // SAFETY: a plain descriptor of a non-zero size and a 2D format.
+    let descriptor = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::Depth32Float_Stencil8,
+            size.width as usize,
+            size.height as usize,
+            false,
+        )
+    };
+    descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget);
+    descriptor.setStorageMode(MTLStorageMode::Private);
+    device.newTextureWithDescriptor(&descriptor).ok_or_else(|| Error::native("Metal can't make a depth texture"))
 }
 
 /// Frames drawn into IOSurfaces of the target's own, and queued for the host
@@ -143,6 +178,7 @@ pub struct ExportedTarget {
     backend: Rc<RendererBackend>,
     depth: usize,
     producer: SyncKind,
+    keep_depth: bool,
     generations: RefCell<Generations<Generation>>,
 }
 
@@ -168,11 +204,12 @@ impl ExportedTarget {
         if !sync_kinds(backend.device()).0.contains(producer) {
             return Err(Error::unsupported(format!("an exported IOSurface hands no frame over with {producer:?}")));
         }
-        let current = Generation::new(&backend, ring.depth, size, producer)?;
+        let current = Generation::new(&backend, ring.depth, size, producer, ring.keep_depth)?;
         Ok(ExportedTarget {
             backend,
             depth: ring.depth,
             producer,
+            keep_depth: ring.keep_depth,
             generations: RefCell::new(Generations::new(current)),
         })
     }
@@ -212,7 +249,7 @@ impl ExportedTarget {
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.backend, self.depth, size, self.producer)?;
+        let next = Generation::new(&self.backend, self.depth, size, self.producer, self.keep_depth)?;
         self.generations.borrow_mut().replace(next, held);
         Ok(true)
     }
@@ -222,13 +259,25 @@ impl ExportedTarget {
         self.generations.borrow().current().size
     }
 
-    /// The surface of the frame at `slot`, and its size.
-    pub fn image(&self, slot: usize) -> Option<(Size, ExportedImage)> {
+    /// The surface of the frame at `slot`, the texture over it, and its
+    /// depth texture when the ring keeps depth.
+    pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
         let generations = self.generations.borrow();
         let generation = generations.retired(slot).unwrap_or(generations.current());
-        generation.surfaces.get(slot).map(|surface| {
-            let surface = CFRetained::as_ptr(surface).as_ptr() as usize as u64;
-            (generation.size, ExportedImage::IoSurface { surface })
+        let surface = generation.surfaces.get(slot)?;
+        let native = |texture: &MTLTexturePtr| NativeTexture::Metal {
+            texture: Retained::as_ptr(texture) as usize as u64,
+            pixel_format: texture.pixelFormat().0 as u64,
+        };
+        Some(ExportedFrame {
+            size: generation.size,
+            image: ExportedImage::IoSurface { surface: CFRetained::as_ptr(surface).as_ptr() as usize as u64 },
+            texture: native(generation.textures.textures.get(slot)?),
+            depth: generation
+                .textures
+                .depth_textures
+                .get(slot)
+                .map(|texture| FrameDepth { texture: native(texture), export: None }),
         })
     }
 }

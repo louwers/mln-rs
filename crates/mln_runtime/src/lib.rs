@@ -39,14 +39,16 @@ pub use feature_state::{FeatureState, FeatureStateSelector};
 pub use map::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
 pub use mln_map::{LogicalExtent, MapSnapshot};
 pub use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
+pub use mln_renderer::{ClipDepthRange, FrameProjection};
 pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
-    AcquiredFrame, Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions,
-    DmaBufFormat, DmaBufPlane, Driver, DriverWork, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand,
-    FrameDisposition, FrameResult, FrameTexture, FrameTextureKind, FrameView, GlApi, GpuSync, LocalTarget,
-    RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget,
-    RenderedQueryGeometry, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
+    AcquiredFrame, Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, DepthStencilFormat,
+    DepthStencilFormats, Device, DeviceOptions, DmaBufFormat, DmaBufPlane, Driver, DriverWork, ExportKind, ExportKinds,
+    ExportedImage, ExportedRing, FrameDemand, FrameDepth, FrameDisposition, FrameResult, FrameTexture,
+    FrameTextureKind, FrameView, GlApi, GpuSync, LocalTarget, NativeTexture, RenderSession, RenderSessionCapabilities,
+    RenderSessionSnapshot, RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface, SurfaceType, SyncKind,
+    SyncKinds, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};

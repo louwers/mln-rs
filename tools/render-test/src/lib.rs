@@ -15,7 +15,6 @@ pub mod metadata;
 pub mod parser;
 pub mod render_test;
 pub mod runner;
-pub mod std_random;
 pub mod style_ops;
 pub mod test_runner_common;
 pub mod watchdog;

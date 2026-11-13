@@ -137,6 +137,10 @@ pub(crate) struct AsyncHandle {
 
 struct Inner {
     core: Arc<Core>,
+    /// The loop's scheduler, one for its life: mailboxes and actors hold
+    /// their scheduler weakly, so one made each time the loop is entered
+    /// would go once its guard drops, with what they send to it.
+    scheduler: scheduler::SchedulerPtr,
     handles: RefCell<Vec<Weak<AsyncHandle>>>,
     timers: RefCell<Vec<Weak<TimerHandle>>>,
 }
@@ -189,11 +193,19 @@ impl RunLoop {
     }
 
     fn over(core: Arc<Core>) -> Self {
-        RunLoop { inner: Rc::new(Inner { core, handles: RefCell::new(Vec::new()), timers: RefCell::new(Vec::new()) }) }
+        let scheduler = Arc::new(RunLoopHandle { core: core.clone() });
+        RunLoop {
+            inner: Rc::new(Inner {
+                core,
+                scheduler,
+                handles: RefCell::new(Vec::new()),
+                timers: RefCell::new(Vec::new()),
+            }),
+        }
     }
 
     fn scheduler(&self) -> scheduler::SchedulerPtr {
-        Arc::new(RunLoopHandle { core: self.inner.core.clone() })
+        self.inner.scheduler.clone()
     }
 
     /// The loop that runs the queue `handle` (see
@@ -467,6 +479,33 @@ mod tests {
         });
         let ran_on = thread.join().unwrap();
         assert_eq!(ran_on, rx.recv().unwrap());
+    }
+
+    #[test]
+    fn a_mailbox_opened_in_an_entered_loop_receives_after_the_guard_drops() {
+        let run_loop = RunLoop::adopt(&RunLoopHandle::new()).unwrap();
+        let mailbox = crate::mailbox::Mailbox::new();
+        let received = Rc::new(std::cell::Cell::new(false));
+        {
+            let _entered = run_loop.enter();
+            mailbox.open(&scheduler::get_current(), received.clone() as Rc<dyn std::any::Any>);
+        }
+        // Another thread sends while the loop isn't entered, and the loop
+        // delivers once it is again.
+        let sender = mailbox.clone();
+        std::thread::spawn(move || {
+            sender.push(Box::new(|target: &dyn std::any::Any| {
+                if let Some(received) = target.downcast_ref::<std::cell::Cell<bool>>() {
+                    received.set(true);
+                }
+            }));
+        })
+        .join()
+        .unwrap();
+        let _entered = run_loop.enter();
+        while run_loop.run_once() {}
+        assert!(received.get());
+        mailbox.close();
     }
 
     #[test]

@@ -38,6 +38,8 @@ pub struct TransformParameters {
     pub proj_matrix: Mat4,
     pub aligned_proj_matrix: Mat4,
     pub near_clipped_proj_matrix: Mat4,
+    /// The near plane of `near_clipped_proj_matrix`, in pixels.
+    pub near_clipped_near_z: f64,
     pub state: TransformState,
 }
 
@@ -65,7 +67,13 @@ impl TransformParameters {
         let near_z = (0.1 * f64::from(state.get_camera_to_center_distance())) as u16;
         state.get_proj_matrix(&mut near_clipped_proj_matrix, near_z, false);
 
-        TransformParameters { proj_matrix, aligned_proj_matrix, near_clipped_proj_matrix, state }
+        TransformParameters {
+            proj_matrix,
+            aligned_proj_matrix,
+            near_clipped_proj_matrix,
+            near_clipped_near_z: f64::from(near_z),
+            state,
+        }
     }
 }
 
@@ -114,6 +122,8 @@ pub struct PaintParameters<'a> {
 
     pub scissor_rect: ScissorRect,
     pub capture_rendered_features: bool,
+    /// The frame that custom layers draw into, set before their prerender.
+    pub custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
 }
 
 /// The WebGPU context's `rawGlobeTileMesh(tile, borders,
@@ -190,6 +200,7 @@ impl<'a> PaintParameters<'a> {
             tile_lod_mode,
             scissor_rect,
             capture_rendered_features,
+            custom_layer_frame: None,
         }
     }
 
@@ -221,6 +232,14 @@ impl<'a> PaintParameters<'a> {
             (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32).wrapping_add(u32::from(n));
         let depth = self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON;
         DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(depth, depth) }
+    }
+
+    /// The depth of `depth_mode_for_sublayer(0, ..)` where 2D layers write
+    /// depth, whether or not the current layer does.
+    #[must_use]
+    pub fn layer_depth(&self) -> f32 {
+        let steps = (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32);
+        self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON
     }
 
     #[must_use]
@@ -444,6 +463,10 @@ impl GfxPaintParameters for PaintParameters<'_> {
 
     fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
         PaintParameters::depth_mode_for_3d(self, mask)
+    }
+
+    fn layer_depth(&self) -> f32 {
+        PaintParameters::layer_depth(self)
     }
 
     fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) -> bool {

@@ -7,16 +7,6 @@ use crate::mat3::{vec3_add, vec3_cross, vec3_dot, vec3_length, vec3_normalize, v
 use crate::mat4::{Mat4, matrix};
 use crate::vectors::{Vec3, Vec3i, Vec4};
 
-/// `std::min(a, b)`: `(b < a) ? b : a`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)`: `(a < b) ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 fn to_vec3(v: &Vec4) -> Vec3 {
     [v[0], v[1], v[2]]
 }
@@ -80,7 +70,7 @@ fn adjust_far_plane_by_horizon_plane(corners: &mut [Vec4; 8], near_plane_indices
             Some(distance) if distance >= 0.0 => distance,
             _ => ray_lengths[i],
         };
-        max_distance = std_max(max_distance, length);
+        max_distance = f64::max(max_distance, length);
     }
     let near_plane = plane_through(
         &to_vec3(&corners[near_plane_indices[0] as usize]),
@@ -90,13 +80,15 @@ fn adjust_far_plane_by_horizon_plane(corners: &mut [Vec4; 8], near_plane_indices
     if let Some(ideal) = ideal_near_far_plane_distance(horizon_plane, &near_plane) {
         // The rays make the same angle with the near plane at all four
         // corners.
-        max_distance =
-            std_min(max_distance, ideal / vec3_dot(&ray_directions[0], &[near_plane[0], near_plane[1], near_plane[2]]));
+        max_distance = f64::min(
+            max_distance,
+            ideal / vec3_dot(&ray_directions[0], &[near_plane[0], near_plane[1], near_plane[2]]),
+        );
     }
     for i in 0..4 {
         let far = vec3_add(
             &to_vec3(&corners[i + NEAR_OFFSET]),
-            &vec3_scale(&ray_directions[i], std_min(max_distance, ray_lengths[i])),
+            &vec3_scale(&ray_directions[i], f64::min(max_distance, ray_lengths[i])),
         );
         corners[i + FAR_OFFSET] = [far[0], far[1], far[2], 1.0];
     }
@@ -108,8 +100,8 @@ fn project_points_to_axis<const N: usize>(points: &[Vec3; N], origin: &Vec3, axi
 
     for point in points {
         let projected_point = vec3_dot(&vec3_sub(point, origin), axis);
-        min = std_min(projected_point, min);
-        max = std_max(projected_point, max);
+        min = f64::min(projected_point, min);
+        max = f64::max(projected_point, max);
     }
 
     Point::new(min, max)
@@ -140,9 +132,9 @@ impl AABB {
     #[must_use]
     pub fn closest_point(&self, point: &Vec3) -> Vec3 {
         [
-            std_max(std_min(self.max[0], point[0]), self.min[0]),
-            std_max(std_min(self.max[1], point[1]), self.min[1]),
-            std_max(std_min(self.max[2], point[2]), self.min[2]),
+            f64::max(f64::min(self.max[0], point[0]), self.min[0]),
+            f64::max(f64::min(self.max[1], point[1]), self.min[1]),
+            f64::max(f64::min(self.max[2], point[2]), self.min[2]),
         ]
     }
 

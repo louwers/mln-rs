@@ -21,6 +21,7 @@ name = "render-test"
 path = "src/main.rs"
 
 [dependencies]
+fastrand.workspace = true
 feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true

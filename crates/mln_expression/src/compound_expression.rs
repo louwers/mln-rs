@@ -167,16 +167,6 @@ fn is_supported_script(params: &EvaluationContext<'_>, x: &str) -> bool {
     })
 }
 
-/// `platform::uppercase` / `platform::lowercase` (platform/default
-/// `string_stdlib.cpp`, nunicode case mapping). nunicode writes invalid UTF-8
-/// for some 4-byte results; a Rust String holds U+FFFD there.
-fn uppercase(s: &str) -> String {
-    nunicode::uppercase(s)
-}
-fn lowercase(s: &str) -> String {
-    nunicode::lowercase(s)
-}
-
 // A legacy comparison filter compares a number to a numeric feature value and
 // a string to a string one. One signature takes either, rather than an
 // overload for each, because parsing tries every overload of an arity on each
@@ -426,11 +416,11 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         }),
         sig("upcase", s.clone(), fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
-            Ok(Value::String(uppercase(string(&a[0]))))
+            Ok(Value::String(string(&a[0]).to_uppercase()))
         }),
         sig("downcase", s.clone(), fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
-            Ok(Value::String(lowercase(string(&a[0]))))
+            Ok(Value::String(string(&a[0]).to_lowercase()))
         }),
         sig("concat", s.clone(), Params::Varargs(T::Value), D::NONE, |p, args| {
             let a = eval_args(p, args)?;

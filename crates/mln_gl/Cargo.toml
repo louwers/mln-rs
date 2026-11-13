@@ -32,6 +32,10 @@ khronos-egl.workspace = true
 [target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
 libloading.workspace = true
 
+# The WGL contexts on Windows, and the windows they are current on.
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))'.dependencies]
 libc.workspace = true
 raw-window-handle.workspace = true

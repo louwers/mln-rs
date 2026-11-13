@@ -15,6 +15,8 @@ use mln_gfx::frame::DrawTarget;
 use mln_gfx::render_pass::RenderPassDescriptor;
 
 use crate::context::Context;
+use crate::custom_layer::CustomLayerEncoder;
+use crate::draw_target::as_mtl;
 use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
 
@@ -60,6 +62,17 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         descriptor: &RenderPassDescriptor<'_>,
     ) -> Box<dyn mln_gfx::render_pass::RenderPass> {
         Box::new(RenderPass::new(self, name, descriptor))
+    }
+
+    /// Lends the command buffer of `target`'s frame, which has no encoder
+    /// open between the passes.
+    fn lend_to_custom_layer(&self, target: &dyn DrawTarget, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        let Some(command_buffer) = as_mtl(target).and_then(|target| target.resource().get_command_buffer()) else {
+            return false;
+        };
+        let mut encoder = CustomLayerEncoder { command_buffer };
+        f(&mut encoder);
+        true
     }
 
     fn as_any(&self) -> &dyn Any {

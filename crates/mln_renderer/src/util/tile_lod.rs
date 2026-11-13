@@ -4,16 +4,6 @@
 
 use mln_math::deg2rad;
 
-/// `std::min(a, b)`: `b < a ? b : a`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)`: `a < b ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// The pitch at which Mercator's horizon reaches the top of the screen, in
 /// degrees.
 pub const MAX_MERCATOR_HORIZON_ANGLE_DEGREES: f64 = 89.25;
@@ -88,21 +78,22 @@ impl TileZoomFunction {
         distance_to_tile_z: f64,
         distance_to_center_3d: f64,
     ) -> f64 {
-        let center_pitch = std_min(1.0, distance_to_tile_z / distance_to_center_3d).acos();
-        let highest_pitch = std_min(
+        let center_pitch = f64::min(1.0, distance_to_tile_z / distance_to_center_3d).acos();
+        let highest_pitch = f64::min(
             deg2rad(MAX_MERCATOR_HORIZON_ANGLE_DEGREES),
             center_pitch + deg2rad(self.camera_vertical_fov / 2.0),
         );
-        let lowest_pitch = std_min(highest_pitch, center_pitch - deg2rad(self.camera_vertical_fov / 2.0));
+        let lowest_pitch = f64::min(highest_pitch, center_pitch - deg2rad(self.camera_vertical_fov / 2.0));
         let tile_count = integral_of_cos_x_by_p(self.pitch_tile_loading_behavior - 1.0, lowest_pitch, highest_pitch);
         let this_tile_pitch = (distance_to_tile_2d / distance_to_tile_z).atan();
         let distance_to_tile_3d = distance_to_tile_2d.hypot(distance_to_tile_z);
         let mut desired = requested_center_zoom;
-        desired +=
-            (distance_to_center_3d / distance_to_tile_3d / std_max(0.5, deg2rad(self.camera_vertical_fov / 2.0).cos()))
-                .log2();
+        desired += (distance_to_center_3d
+            / distance_to_tile_3d
+            / f64::max(0.5, deg2rad(self.camera_vertical_fov / 2.0).cos()))
+        .log2();
         desired += self.pitch_tile_loading_behavior * this_tile_pitch.cos().log2() / 2.0;
-        desired -= std_max(1.0, tile_count / self.tile_count_pitch0 / self.tile_count_max_min_ratio).log2() / 2.0;
+        desired -= f64::max(1.0, tile_count / self.tile_count_pitch0 / self.tile_count_max_min_ratio).log2() / 2.0;
         desired
     }
 }
@@ -124,5 +115,5 @@ pub fn elevation_for_tile_culling(
     let proximity = (TILE_CULLING_HORIZON_ONSET_DEGREES - bottom_edge_degrees_above_horizontal)
         / TILE_CULLING_HORIZON_ONSET_DEGREES;
     let proximity_to_horizon = proximity.clamp(0.0, 1.0);
-    center_elevation + proximity_to_horizon * std_max(ASSUMED_MAX_FEATURE_HEIGHT_METERS, max_content_elevation)
+    center_elevation + proximity_to_horizon * f64::max(ASSUMED_MAX_FEATURE_HEIGHT_METERS, max_content_elevation)
 }

@@ -8,6 +8,7 @@
 pub mod bound_options;
 pub mod camera;
 pub mod camera_momentum;
+pub mod frame_projection;
 pub mod map_view;
 pub mod mercator_projection;
 pub mod mode;
@@ -20,6 +21,7 @@ pub use camera::{
     GesturePhase, TransitionEnd, TransitionEndFn, TransitionOutcome,
 };
 pub use camera_momentum::{CameraMomentum, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
+pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
 pub use mode::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 pub use projection_mode::ProjectionMode;

@@ -1,39 +1,36 @@
 //! Ports the vendored nunicode subset of the C++ core
-//! (`vendor/nunicode`, with its `config.h`: UTF-8, toupper, tolower,
-//! unaccent and 0-terminated collation), plus the three functions the
-//! default platform builds on it:
+//! (`vendor/nunicode`, with its `config.h`: UTF-8, unaccent and
+//! 0-terminated collation), plus the `unaccent` helper of the default
+//! platform's collator (platform/default/src/mln/i18n/collator.cpp).
 //!
-//! - `unaccent` from platform/default/src/mln/i18n/collator.cpp,
-//! - `uppercase`/`lowercase` from `platform/default/src/mln/util/string_stdlib.cpp`.
+//! Case-insensitive collation folds case with `char::to_uppercase`.
 //!
 //! The generated tables (`src/tables`) come from nunicode's `src/libnu/gen`
 //! through `tools/gen_tables.py`.
 
-pub mod casemap;
 pub mod ducet;
 pub mod strcoll;
 mod tables;
 pub mod udb;
+pub mod unaccent;
 pub mod utf8;
 
-use casemap::{_nu_tolower, _nu_tounaccent, _nu_toupper, Transform};
 pub use strcoll::{nu_strcasecoll, nu_strcoll};
+use unaccent::nu_tounaccent;
 use utf8::{nu_utf8_read, nu_utf8_write};
 
-type TransformFn = fn(&[u8], usize, usize) -> (usize, u32, Transform);
-
-/// The loop shared by `string_stdlib.cpp`'s `uppercase`/`lowercase` and
-/// collator.cpp's `unaccent`: over the whole string (not up to a NUL),
+/// collator.cpp's `unaccent` loop: over the whole string (not up to a NUL),
 /// copying codepoints without a mapping and writing the decoded mapping
 /// otherwise.
-fn transform_bytes(s: &[u8], f: TransformFn) -> Vec<u8> {
+#[must_use]
+pub fn unaccent_bytes(s: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(s.len());
     let end = s.len();
     let mut itr = 0;
 
     while itr < end {
-        let (nitr, _code_point, buf) = f(s, itr, end);
-        if let Some(mut buf) = buf {
+        let (nitr, code_point) = nu_utf8_read(s, itr);
+        if let Some(mut buf) = nu_tounaccent(code_point) {
             loop {
                 let (next, code_point) = nu_utf8_read(buf, 0);
                 buf = &buf[next.min(buf.len())..];
@@ -51,44 +48,15 @@ fn transform_bytes(s: &[u8], f: TransformFn) -> Vec<u8> {
     output
 }
 
-/// The `_bytes` results as a `String`. nunicode's `b4_utf8` (`utf8_internal.h`)
-/// puts bit 12 of a 4-byte codepoint into the third byte instead of the
-/// second, so mappings to such codepoints (e.g. Warang Citi U+118A0 ->
-/// U+118C0) come out as invalid UTF-8 in C++. A `String` cannot hold that;
-/// those bytes become U+FFFD here. The `_bytes`
-/// functions return the exact C++ bytes.
+/// `unaccent_bytes`'s result as a `String`. nunicode's `b4_utf8`
+/// (`utf8_internal.h`) puts bit 12 of a 4-byte codepoint into the third byte
+/// instead of the second, so a mapping to such a codepoint comes out as
+/// invalid UTF-8. A `String` cannot hold that; those bytes become U+FFFD.
 fn into_string(bytes: Vec<u8>) -> String {
     match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
     }
-}
-
-/// `platform::uppercase` (`string_stdlib.cpp`) on raw bytes.
-pub fn uppercase_bytes(s: &[u8]) -> Vec<u8> {
-    transform_bytes(s, _nu_toupper)
-}
-
-/// `platform::lowercase` (`string_stdlib.cpp`) on raw bytes.
-pub fn lowercase_bytes(s: &[u8]) -> Vec<u8> {
-    transform_bytes(s, _nu_tolower)
-}
-
-/// `unaccent` (collator.cpp) on raw bytes.
-pub fn unaccent_bytes(s: &[u8]) -> Vec<u8> {
-    transform_bytes(s, _nu_tounaccent)
-}
-
-/// `platform::uppercase` (`platform/default/src/mln/util/string_stdlib.cpp`).
-#[must_use]
-pub fn uppercase(s: &str) -> String {
-    into_string(uppercase_bytes(s.as_bytes()))
-}
-
-/// `platform::lowercase` (`platform/default/src/mln/util/string_stdlib.cpp`).
-#[must_use]
-pub fn lowercase(s: &str) -> String {
-    into_string(lowercase_bytes(s.as_bytes()))
 }
 
 /// The `unaccent` helper of platform/default/src/mln/i18n/collator.cpp.
@@ -111,10 +79,9 @@ pub fn strcasecoll(lhs: &str, rhs: &str) -> i32 {
 }
 
 /// `platform::Collator::Impl::compare` (collator.cpp): DUCET collation,
-/// case-insensitive through nunicode's case folding (toupper in this
-/// configuration), diacritic-insensitive through `unaccent`. Works on the
-/// exact bytes, so it matches C++ also where `unaccent` produces invalid
-/// UTF-8.
+/// case-insensitive through uppercase folding, diacritic-insensitive through
+/// `unaccent`. Works on the exact bytes, so it matches C++ also where
+/// `unaccent` produces invalid UTF-8.
 #[must_use]
 pub fn collator_compare(lhs: &str, rhs: &str, case_sensitive: bool, diacritic_sensitive: bool) -> i32 {
     let (l, r) = (lhs.as_bytes(), rhs.as_bytes());
@@ -134,12 +101,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn case_mapping() {
-        assert_eq!(uppercase("abc ß ǅ"), "ABC SS Ǆ");
-        assert_eq!(lowercase("ABC ΣΑΣ"), "abc σας");
-        assert_eq!(lowercase("Σ"), "ς");
+    fn unaccent_() {
         assert_eq!(unaccent("äéñ"), "aen");
-        assert_eq!(uppercase("a\0b"), "A\0B");
+        assert_eq!(unaccent("a\0b"), "a\0b");
     }
 
     #[test]
@@ -151,6 +115,8 @@ mod tests {
         assert!(strcoll("a", "ä") < 0);
         assert!(strcoll("ä", "b") < 0);
         assert_eq!(strcasecoll("a", "A"), 0);
+        assert_eq!(strcasecoll("straße", "STRASSE"), 0);
+        assert!(strcasecoll("straße", "strasse!") < 0);
         assert!(strcoll("", "a") < 0);
         assert_eq!(strcoll("a\0b", "a\0c"), 0);
     }

@@ -12,6 +12,7 @@ use mln_gfx::frame::DrawTarget;
 use mln_gfx::render_pass::RenderPassDescriptor;
 
 use crate::context::Context;
+use crate::custom_layer::CustomLayerEncoder;
 use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
 
@@ -52,6 +53,16 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         descriptor: &RenderPassDescriptor<'_>,
     ) -> Box<dyn mln_gfx::render_pass::RenderPass> {
         Box::new(RenderPass::new(self, name, descriptor))
+    }
+
+    /// Lends the current context with vertex array 0 bound, then forgets the
+    /// GL state it knew; the next pass binds its framebuffer again.
+    fn lend_to_custom_layer(&self, _target: &dyn DrawTarget, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        self.context.state().bind_vertex_array(self.context.gl(), None);
+        let mut encoder = CustomLayerEncoder { context: self.context.clone() };
+        f(&mut encoder);
+        self.context.set_dirty_state();
+        true
     }
 
     fn as_any(&self) -> &dyn Any {

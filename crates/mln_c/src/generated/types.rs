@@ -241,41 +241,18 @@ pub const MLN_RUNTIME_EVENT_MAP_SOURCE_CHANGED: mln_runtime_event_type = 16;
 pub const MLN_RUNTIME_EVENT_OFFLINE_REGION_STATUS_CHANGED: mln_runtime_event_type = 17;
 /// A resource that the region needs failed to download.
 pub const MLN_RUNTIME_EVENT_OFFLINE_REGION_RESPONSE_ERROR: mln_runtime_event_type = 18;
-/** The region's download became inactive because the cache file's offline
- regions hold as many tiles from MapLibre's demo tile server as the limit
- allows. Only tiles of sources with a `maplibre://` URL count toward the
- limit.*/
-pub const MLN_RUNTIME_EVENT_OFFLINE_REGION_TILE_COUNT_LIMIT_EXCEEDED: mln_runtime_event_type = 19;
-/** The region's download became inactive because the cache file's offline
- regions hold as many tiles from MapLibre's demo tile server as the limit
- allows. Only tiles of sources with a `maplibre://` URL count toward the
- limit.*/
-pub const MLN_RUNTIME_EVENT_MAP_GLYPHS_REQUESTED: mln_runtime_event_type = 20;
-/** The region's download became inactive because the cache file's offline
- regions hold as many tiles from MapLibre's demo tile server as the limit
- allows. Only tiles of sources with a `maplibre://` URL count toward the
- limit.*/
-pub const MLN_RUNTIME_EVENT_MAP_GLYPHS_LOADED: mln_runtime_event_type = 21;
-/** The region's download became inactive because the cache file's offline
- regions hold as many tiles from MapLibre's demo tile server as the limit
- allows. Only tiles of sources with a `maplibre://` URL count toward the
- limit.*/
-pub const MLN_RUNTIME_EVENT_MAP_GLYPHS_ERROR: mln_runtime_event_type = 22;
-/** The region's download became inactive because the cache file's offline
- regions hold as many tiles from MapLibre's demo tile server as the limit
- allows. Only tiles of sources with a `maplibre://` URL count toward the
- limit.*/
-pub const MLN_RUNTIME_EVENT_MAP_SPRITE_REQUESTED: mln_runtime_event_type = 23;
-/** The region's download became inactive because the cache file's offline
- regions hold as many tiles from MapLibre's demo tile server as the limit
- allows. Only tiles of sources with a `maplibre://` URL count toward the
- limit.*/
-pub const MLN_RUNTIME_EVENT_MAP_SPRITE_LOADED: mln_runtime_event_type = 24;
-/** The region's download became inactive because the cache file's offline
- regions hold as many tiles from MapLibre's demo tile server as the limit
- allows. Only tiles of sources with a `maplibre://` URL count toward the
- limit.*/
-pub const MLN_RUNTIME_EVENT_MAP_SPRITE_ERROR: mln_runtime_event_type = 25;
+/// A resource that the region needs failed to download.
+pub const MLN_RUNTIME_EVENT_MAP_GLYPHS_REQUESTED: mln_runtime_event_type = 19;
+/// A resource that the region needs failed to download.
+pub const MLN_RUNTIME_EVENT_MAP_GLYPHS_LOADED: mln_runtime_event_type = 20;
+/// A resource that the region needs failed to download.
+pub const MLN_RUNTIME_EVENT_MAP_GLYPHS_ERROR: mln_runtime_event_type = 21;
+/// A resource that the region needs failed to download.
+pub const MLN_RUNTIME_EVENT_MAP_SPRITE_REQUESTED: mln_runtime_event_type = 22;
+/// A resource that the region needs failed to download.
+pub const MLN_RUNTIME_EVENT_MAP_SPRITE_LOADED: mln_runtime_event_type = 23;
+/// A resource that the region needs failed to download.
+pub const MLN_RUNTIME_EVENT_MAP_SPRITE_ERROR: mln_runtime_event_type = 24;
 /** The kind of an event.
 
  Only maps in MLN_MAP_MODE_CONTINUOUS raise
@@ -302,16 +279,15 @@ pub const MLN_RUNTIME_EVENT_FLAG_MAP_TILE_ACTION: mln_runtime_event_flag = 32768
 pub const MLN_RUNTIME_EVENT_FLAG_MAP_SOURCE_CHANGED: mln_runtime_event_flag = 65536;
 pub const MLN_RUNTIME_EVENT_FLAG_OFFLINE_REGION_STATUS_CHANGED: mln_runtime_event_flag = 131072;
 pub const MLN_RUNTIME_EVENT_FLAG_OFFLINE_REGION_RESPONSE_ERROR: mln_runtime_event_flag = 262144;
-pub const MLN_RUNTIME_EVENT_FLAG_OFFLINE_REGION_TILE_COUNT_LIMIT_EXCEEDED: mln_runtime_event_flag = 524288;
-pub const MLN_RUNTIME_EVENT_FLAG_MAP_GLYPHS_REQUESTED: mln_runtime_event_flag = 1048576;
-pub const MLN_RUNTIME_EVENT_FLAG_MAP_GLYPHS_LOADED: mln_runtime_event_flag = 2097152;
-pub const MLN_RUNTIME_EVENT_FLAG_MAP_GLYPHS_ERROR: mln_runtime_event_flag = 4194304;
-pub const MLN_RUNTIME_EVENT_FLAG_MAP_SPRITE_REQUESTED: mln_runtime_event_flag = 8388608;
-pub const MLN_RUNTIME_EVENT_FLAG_MAP_SPRITE_LOADED: mln_runtime_event_flag = 16777216;
-pub const MLN_RUNTIME_EVENT_FLAG_MAP_SPRITE_ERROR: mln_runtime_event_flag = 33554432;
-pub const MLN_RUNTIME_EVENT_FLAG_ALL_MAP_EVENTS: mln_runtime_event_flag = 66191358;
-pub const MLN_RUNTIME_EVENT_FLAG_ALL_RUNTIME_EVENTS: mln_runtime_event_flag = 917504;
-pub const MLN_RUNTIME_EVENT_FLAG_ALL: mln_runtime_event_flag = 67108862;
+pub const MLN_RUNTIME_EVENT_FLAG_MAP_GLYPHS_REQUESTED: mln_runtime_event_flag = 524288;
+pub const MLN_RUNTIME_EVENT_FLAG_MAP_GLYPHS_LOADED: mln_runtime_event_flag = 1048576;
+pub const MLN_RUNTIME_EVENT_FLAG_MAP_GLYPHS_ERROR: mln_runtime_event_flag = 2097152;
+pub const MLN_RUNTIME_EVENT_FLAG_MAP_SPRITE_REQUESTED: mln_runtime_event_flag = 4194304;
+pub const MLN_RUNTIME_EVENT_FLAG_MAP_SPRITE_LOADED: mln_runtime_event_flag = 8388608;
+pub const MLN_RUNTIME_EVENT_FLAG_MAP_SPRITE_ERROR: mln_runtime_event_flag = 16777216;
+pub const MLN_RUNTIME_EVENT_FLAG_ALL_MAP_EVENTS: mln_runtime_event_flag = 33161214;
+pub const MLN_RUNTIME_EVENT_FLAG_ALL_RUNTIME_EVENTS: mln_runtime_event_flag = 393216;
+pub const MLN_RUNTIME_EVENT_FLAG_ALL: mln_runtime_event_flag = 33554430;
 /// An event type, as a bit in a set.
 pub type mln_runtime_event_flag = u64;
 /// A set of mln_runtime_event_flag bits.
@@ -329,9 +305,8 @@ pub const MLN_RUNTIME_EVENT_PAYLOAD_TILE_ACTION: mln_runtime_event_payload_type 
 pub const MLN_RUNTIME_EVENT_PAYLOAD_SOURCE_CHANGED: mln_runtime_event_payload_type = 6;
 pub const MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_STATUS: mln_runtime_event_payload_type = 7;
 pub const MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_RESPONSE_ERROR: mln_runtime_event_payload_type = 8;
-pub const MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_TILE_COUNT_LIMIT: mln_runtime_event_payload_type = 9;
-pub const MLN_RUNTIME_EVENT_PAYLOAD_GLYPHS: mln_runtime_event_payload_type = 10;
-pub const MLN_RUNTIME_EVENT_PAYLOAD_SPRITE: mln_runtime_event_payload_type = 11;
+pub const MLN_RUNTIME_EVENT_PAYLOAD_GLYPHS: mln_runtime_event_payload_type = 9;
+pub const MLN_RUNTIME_EVENT_PAYLOAD_SPRITE: mln_runtime_event_payload_type = 10;
 /// The member of mln_runtime_event_payload that an event carries.
 pub type mln_runtime_event_payload_type = u32;
 pub const MLN_CAMERA_CHANGE_MODE_IMMEDIATE: mln_camera_change_mode = 0;
@@ -544,15 +519,6 @@ pub struct mln_runtime_event_offline_region_response_error {
     pub region_id: mln_offline_region_id,
     pub reason: mln_resource_error_reason,
 }
-/// The details of MLN_RUNTIME_EVENT_OFFLINE_REGION_TILE_COUNT_LIMIT_EXCEEDED.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_runtime_event_offline_region_tile_count_limit {
-    pub region_id: mln_offline_region_id,
-    /** The number of demo server tiles that the cache file's offline regions may
- hold together.*/
-    pub limit: u64,
-}
 /// The details of an event, in the member that its `payload_type` names.
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -565,7 +531,6 @@ pub union mln_runtime_event_payload {
     pub source_changed: mln_runtime_event_source_changed,
     pub offline_region_status: mln_runtime_event_offline_region_status,
     pub offline_region_response_error: mln_runtime_event_offline_region_response_error,
-    pub offline_region_tile_count_limit: mln_runtime_event_offline_region_tile_count_limit,
     pub glyphs: mln_runtime_event_glyphs,
     pub sprite: mln_runtime_event_sprite,
 }
@@ -1772,6 +1737,88 @@ pub struct mln_map_view {
     /// The style's projection at the camera's zoom.
     pub projection: mln_projection_definition,
 }
+/// A vector in four dimensions, such as a point in homogeneous coordinates.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vec4 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub w: f64,
+}
+/** A 4×4 matrix, by its columns: it takes a vector to `x` times the vector's x,
+ plus `y` times its y, `z` times its z, and `w` times its w. In memory it is
+ 16 doubles in column-major order, as OpenGL, Metal, Vulkan, and WebGPU
+ shaders take a matrix.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_mat4 {
+    pub x: mln_vec4,
+    pub y: mln_vec4,
+    pub z: mln_vec4,
+    pub w: mln_vec4,
+}
+/** Clip z runs from 0 to w, as in Metal, Vulkan, WebGPU, Direct3D, and
+ OpenGL with `glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)`.*/
+pub const MLN_CLIP_DEPTH_RANGE_ZERO_TO_ONE: mln_clip_depth_range = 1;
+/// Clip z runs from -w to w, as in OpenGL by default.
+pub const MLN_CLIP_DEPTH_RANGE_NEGATIVE_ONE_TO_ONE: mln_clip_depth_range = 2;
+/// How a graphics API's clip space holds depth.
+pub type mln_clip_depth_range = u32;
+/** Where a frame drew the map, and the depth that it wrote there.
+
+ World coordinates are Web Mercator's. x runs from 0 at 180° west to 1 at
+ 180° east, and on past both into the copies of the world beside the first.
+ y runs from 0 at the north edge of the Mercator world, about 85.05° north, to
+ 1 at its south edge. z is the altitude in meters above sea level, at the
+ scale of the heights of the map's 3D layers, and the map draws its ground at
+ 0.
+
+ `matrix` takes a world point to the clip coordinates where the frame drew
+ it, with the camera's padding, roll, field of view, and center altitude, and
+ the map's viewport and projection mode. Clip y points up, as the map draws
+ with OpenGL, Metal, and WebGPU. The map negates clip y with Vulkan, so negate
+ it there too. At high zooms, single precision can't tell nearby world points
+ apart: subtract an origin near your geometry from its coordinates in double
+ precision, and fold the origin into the matrix, before you convert to float.
+
+ Clip z follows `clip_depth_range`, the convention of the device's graphics
+ API. With the API's default depth range of 0 to 1, a fragment that you draw
+ through `matrix` gets the depth that the map's 3D layers, such as fill
+ extrusions, wrote at the same place: 0 at `near_distance` from the camera,
+ up to `far_depth` at `far_distance`. Depth-tested against the frame's depth,
+ your fragments hide behind the map's 3D layers where those stand in front of
+ them.
+
+ The frame's depth starts at 1. The map's 3D layers write the depth of each of
+ their fragments. A 2D layer below every 3D layer of the style that draws
+ opaque fragments, such as an opaque fill, writes one depth over all of them,
+ wherever they are: the higher the layer, the lower its depth, and every one
+ between `far_depth` and 1. Backgrounds, translucent fragments, and the 2D
+ layers above a 3D layer, such as labels, write no depth. So what you draw
+ through `matrix`, even on the ground, lies in front of every 2D layer.
+
+ While `globe` is true, the frame drew the map onto a globe, and its 2D layers
+ wrote no depth. `matrix` then is the map's Mercator one, which doesn't place
+ points on the globe.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_frame_projection {
+    pub matrix: mln_mat4,
+    pub clip_depth_range: mln_clip_depth_range,
+    /** The distance from the camera to the plane where the depth that you get
+ through `matrix` is 0, along the camera's view. Like `far_distance`, it is
+ in pixels of the map at the camera's zoom, where the world is
+ 512 × 2^zoom pixels wide.*/
+    pub near_distance: f64,
+    /// The distance to the plane where the depth is `far_depth`.
+    pub far_distance: f64,
+    /// The depth at `far_distance`, below 1.
+    pub far_depth: f64,
+    /** Whether the frame drew the map as a globe, alone or blending into
+ Mercator.*/
+    pub globe: bool,
+}
 /** How the map picks the tiles to load.
 
  The `lod_` members lower the level of detail away from the camera, so the
@@ -1841,347 +1888,6 @@ pub struct mln_camera_query_result {
     pub generation: u64,
     pub camera: mln_camera,
 }
-pub const MLN_STYLE_SOURCE_TYPE_UNKNOWN: mln_style_source_type = 0;
-pub const MLN_STYLE_SOURCE_TYPE_VECTOR: mln_style_source_type = 1;
-pub const MLN_STYLE_SOURCE_TYPE_RASTER: mln_style_source_type = 2;
-pub const MLN_STYLE_SOURCE_TYPE_RASTER_DEM: mln_style_source_type = 3;
-pub const MLN_STYLE_SOURCE_TYPE_GEO_JSON: mln_style_source_type = 4;
-pub const MLN_STYLE_SOURCE_TYPE_IMAGE: mln_style_source_type = 5;
-pub const MLN_STYLE_SOURCE_TYPE_VIDEO: mln_style_source_type = 6;
-pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY: mln_style_source_type = 7;
-pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR: mln_style_source_type = 8;
-/// The type of a style source.
-pub type mln_style_source_type = u32;
-pub const MLN_STYLE_SOURCE_INFO_TILE_JSON: mln_style_source_info_field = 1;
-pub const MLN_STYLE_SOURCE_INFO_BOUNDS: mln_style_source_info_field = 2;
-pub const MLN_STYLE_SOURCE_INFO_TILE_SIZE: mln_style_source_info_field = 4;
-pub const MLN_STYLE_SOURCE_INFO_VECTOR_ENCODING: mln_style_source_info_field = 8;
-pub const MLN_STYLE_SOURCE_INFO_RASTER_ENCODING: mln_style_source_info_field = 16;
-pub const MLN_STYLE_SOURCE_INFO_GEO_JSON: mln_style_source_info_field = 32;
-/// The fields that mln_style_source_info sets.
-pub type mln_style_source_info_field = u32;
-/// A set of mln_style_source_info_field bits.
-pub type mln_style_source_info_fields = u32;
-pub const MLN_STYLE_TILE_SCHEME_XYZ: mln_style_tile_scheme = 0;
-pub const MLN_STYLE_TILE_SCHEME_TMS: mln_style_tile_scheme = 1;
-/// Whether a tileset counts tile rows from the north (XYZ) or the south (TMS).
-pub type mln_style_tile_scheme = u32;
-pub const MLN_STYLE_VECTOR_TILE_ENCODING_MVT: mln_style_vector_tile_encoding = 0;
-pub const MLN_STYLE_VECTOR_TILE_ENCODING_MLT: mln_style_vector_tile_encoding = 1;
-/// The format of vector tiles.
-pub type mln_style_vector_tile_encoding = u32;
-pub const MLN_STYLE_RASTER_DEM_ENCODING_MAPBOX: mln_style_raster_dem_encoding = 0;
-pub const MLN_STYLE_RASTER_DEM_ENCODING_TERRARIUM: mln_style_raster_dem_encoding = 1;
-/// How a raster DEM tile encodes elevation in its colors.
-pub type mln_style_raster_dem_encoding = u32;
-/// A range of image pixels, from `from` to `to`, that stretches to fit text.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_image_stretch {
-    pub from: f32,
-    pub to: f32,
-}
-/// The area of an image, in image pixels, that text fits inside.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_image_content {
-    pub left: f32,
-    pub top: f32,
-    pub right: f32,
-    pub bottom: f32,
-}
-pub const MLN_STYLE_IMAGE_TEXT_FIT_STRETCH_OR_SHRINK: mln_style_image_text_fit = 0;
-pub const MLN_STYLE_IMAGE_TEXT_FIT_STRETCH_ONLY: mln_style_image_text_fit = 1;
-pub const MLN_STYLE_IMAGE_TEXT_FIT_PROPORTIONAL: mln_style_image_text_fit = 2;
-/// How an image stretches to fit text along one axis.
-pub type mln_style_image_text_fit = u32;
-pub const MLN_STYLE_LAYER_VISIBILITY_VISIBLE: mln_style_layer_visibility = 0;
-pub const MLN_STYLE_LAYER_VISIBILITY_NONE: mln_style_layer_visibility = 1;
-/// Whether a layer shows.
-pub type mln_style_layer_visibility = u32;
-pub const MLN_GEO_JSON_SOURCE_OPTION_MIN_ZOOM: mln_geo_json_source_option_field = 1;
-pub const MLN_GEO_JSON_SOURCE_OPTION_MAX_ZOOM: mln_geo_json_source_option_field = 2;
-pub const MLN_GEO_JSON_SOURCE_OPTION_TOLERANCE: mln_geo_json_source_option_field = 4;
-pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_MAX_ZOOM: mln_geo_json_source_option_field = 8;
-pub const MLN_GEO_JSON_SOURCE_OPTION_BUFFER: mln_geo_json_source_option_field = 16;
-pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_RADIUS: mln_geo_json_source_option_field = 32;
-pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_MIN_POINTS: mln_geo_json_source_option_field = 64;
-pub const MLN_GEO_JSON_SOURCE_OPTION_LINE_METRICS: mln_geo_json_source_option_field = 128;
-pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER: mln_geo_json_source_option_field = 256;
-/// The fields that mln_geo_json_source_options sets.
-pub type mln_geo_json_source_option_field = u32;
-/// A set of mln_geo_json_source_option_field bits.
-pub type mln_geo_json_source_option_fields = u32;
-pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_MIN_ZOOM: mln_custom_geometry_source_option_field = 1;
-pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_MAX_ZOOM: mln_custom_geometry_source_option_field = 2;
-pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_TOLERANCE: mln_custom_geometry_source_option_field = 4;
-pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_TILE_SIZE: mln_custom_geometry_source_option_field = 8;
-pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_BUFFER: mln_custom_geometry_source_option_field = 16;
-pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_CLIP: mln_custom_geometry_source_option_field = 32;
-pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_WRAP: mln_custom_geometry_source_option_field = 64;
-/// The fields that mln_custom_geometry_source_options sets.
-pub type mln_custom_geometry_source_option_field = u32;
-/// A set of mln_custom_geometry_source_option_field bits.
-pub type mln_custom_geometry_source_option_fields = u32;
-pub const MLN_CUSTOM_VECTOR_SOURCE_OPTION_MIN_ZOOM: mln_custom_vector_source_option_field = 1;
-pub const MLN_CUSTOM_VECTOR_SOURCE_OPTION_MAX_ZOOM: mln_custom_vector_source_option_field = 2;
-/// The fields that mln_custom_vector_source_options sets.
-pub type mln_custom_vector_source_option_field = u32;
-/// A set of mln_custom_vector_source_option_field bits.
-pub type mln_custom_vector_source_option_fields = u32;
-pub const MLN_STYLE_IMAGE_OPTION_PIXEL_RATIO: mln_style_image_option_field = 1;
-pub const MLN_STYLE_IMAGE_OPTION_SDF: mln_style_image_option_field = 2;
-pub const MLN_STYLE_IMAGE_OPTION_STRETCH_X: mln_style_image_option_field = 4;
-pub const MLN_STYLE_IMAGE_OPTION_STRETCH_Y: mln_style_image_option_field = 8;
-pub const MLN_STYLE_IMAGE_OPTION_CONTENT: mln_style_image_option_field = 16;
-pub const MLN_STYLE_IMAGE_OPTION_TEXT_FIT_WIDTH: mln_style_image_option_field = 32;
-pub const MLN_STYLE_IMAGE_OPTION_TEXT_FIT_HEIGHT: mln_style_image_option_field = 64;
-pub const MLN_STYLE_IMAGE_OPTION_KEEP_UNUSED: mln_style_image_option_field = 128;
-/// The fields that mln_style_image_options sets.
-pub type mln_style_image_option_field = u32;
-/// A set of mln_style_image_option_field bits.
-pub type mln_style_image_option_fields = u32;
-pub const MLN_STYLE_IMAGE_INFO_CONTENT: mln_style_image_info_field = 1;
-pub const MLN_STYLE_IMAGE_INFO_TEXT_FIT_WIDTH: mln_style_image_info_field = 2;
-pub const MLN_STYLE_IMAGE_INFO_TEXT_FIT_HEIGHT: mln_style_image_info_field = 4;
-/// The fields that mln_style_image_info sets.
-pub type mln_style_image_info_field = u32;
-/// A set of mln_style_image_info_field bits.
-pub type mln_style_image_info_fields = u32;
-pub const MLN_STYLE_TRANSITION_OPTION_DURATION: mln_style_transition_option_field = 1;
-pub const MLN_STYLE_TRANSITION_OPTION_DELAY: mln_style_transition_option_field = 2;
-pub const MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS: mln_style_transition_option_field = 4;
-/// The fields that mln_style_transition_options sets.
-pub type mln_style_transition_option_field = u32;
-/// A set of mln_style_transition_option_field bits.
-pub type mln_style_transition_option_fields = u32;
-/// The tiles of a source, as the style lists them.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_style_source_tile_info {
-    pub tile_urls: *const mln_buffer_view,
-    pub tile_url_count: usize,
-    pub min_zoom: f64,
-    pub max_zoom: f64,
-    pub scheme: mln_style_tile_scheme,
-}
-/** Options for a GeoJSON
- [source](https://maplibre.org/maplibre-style-spec/sources/#geojson).
-
- Zoom levels are whole numbers.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_geo_json_source_options {
-    pub size: u32,
-    pub fields: mln_geo_json_source_option_fields,
-    pub min_zoom: f64,
-    pub max_zoom: f64,
-    pub tolerance: f64,
-    /// The last zoom level that has clusters, at most 30.
-    pub cluster_max_zoom: f64,
-    /// The `clusterProperties` object, or empty for none.
-    pub cluster_properties: mln_buffer_view,
-    pub buffer: u32,
-    pub cluster_radius: u32,
-    /// At most 4294967295 on a 32-bit target.
-    pub cluster_min_points: u64,
-    pub line_metrics: bool,
-    pub cluster: bool,
-}
-/// A source in the map's style.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_style_source_info {
-    pub id: mln_buffer_view,
-    pub type_: mln_style_source_type,
-    pub fields: mln_style_source_info_fields,
-    pub is_volatile: bool,
-    pub attribution: mln_buffer_view,
-    pub url: mln_buffer_view,
-    /// The tiles that the style lists in the source itself, instead of at a URL.
-    pub tile_json: mln_style_source_tile_info,
-    pub bounds: mln_lat_lng_bounds,
-    pub tile_size: u32,
-    pub vector_encoding: mln_style_vector_tile_encoding,
-    pub raster_encoding: mln_style_raster_dem_encoding,
-    /// A GeoJSON source's options, with every field set.
-    pub geo_json: mln_geo_json_source_options,
-}
-/// A layer in the map's style.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_style_layer_info {
-    pub id: mln_buffer_view,
-    /** The layer's [type](https://maplibre.org/maplibre-style-spec/layers/#type),
- such as `fill`.*/
-    pub type_: mln_buffer_view,
-    pub source_id: mln_buffer_view,
-    pub source_layer: mln_buffer_view,
-    /** The zoom level where the layer starts to show, or negative infinity when
- the layer doesn't set one.*/
-    pub min_zoom: f64,
-    /** The zoom level where the layer stops showing, or infinity when the layer
- doesn't set one.*/
-    pub max_zoom: f64,
-    pub visibility: mln_style_layer_visibility,
-}
-/// A tile's zoom level `z`, column `x`, and row `y`, with row 0 at the north.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_canonical_tile_id {
-    pub z: u32,
-    pub x: u32,
-    pub y: u32,
-}
-/** Asks for the data of a tile in a custom source.
-
- `map` and `source_id` name the source that asks. Return quickly. Once the
- data is ready, pass it to mln_map_set_custom_geometry_source_tile_data() or
- mln_map_set_custom_vector_source_tile_data(). If it fails to load, report
- that with mln_map_set_custom_geometry_source_tile_error() or
- mln_map_set_custom_vector_source_tile_error().
-
- Lifetimes:
- `source_id` stays valid until the callback returns. The callback borrows
- `map`, so it must not release it.*/
-pub type mln_custom_source_fetch_tile_callback = ::core::option::Option<
-    unsafe extern "C" fn(
-        user_data: *mut ::core::ffi::c_void,
-        map: mln_map,
-        source_id: mln_buffer_view,
-        tile_id: mln_canonical_tile_id,
-    ),
->;
-/** Reports that a custom source no longer needs a tile.
-
- `map` and `source_id` name the source.
-
- Lifetimes:
- `source_id` stays valid until the callback returns. The callback borrows
- `map`, so it must not release it.*/
-pub type mln_custom_source_cancel_tile_callback = ::core::option::Option<
-    unsafe extern "C" fn(
-        user_data: *mut ::core::ffi::c_void,
-        map: mln_map,
-        source_id: mln_buffer_view,
-        tile_id: mln_canonical_tile_id,
-    ),
->;
-/** The callbacks and options of a custom geometry source.
-
- Zoom levels are whole numbers from 0 to 32.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_custom_geometry_source_options {
-    pub size: u32,
-    pub fields: mln_custom_geometry_source_option_fields,
-    pub fetch_tile: mln_custom_source_fetch_tile_callback,
-    pub cancel_tile: mln_custom_source_cancel_tile_callback,
-    pub user_data: *mut ::core::ffi::c_void,
-    pub min_zoom: f64,
-    pub max_zoom: f64,
-    /// How far, in pixels, simplified geometry can stray from the original.
-    pub tolerance: f64,
-    /// The width of a tile in pixels, a power of two no larger than 8192.
-    pub tile_size: u32,
-    /** The width in pixels of the margin around a tile that holds geometry from
- beyond its edges. `buffer` times 8192 / `tile_size` must be at most 65535.*/
-    pub buffer: u32,
-    /// Whether to cut geometry at the outer edge of a tile's margin.
-    pub clip: bool,
-    /// Whether to wrap geometry that crosses the antimeridian.
-    pub wrap: bool,
-    pub release_user_data: mln_user_data_release,
-    pub queue: mln_delivery_queue,
-}
-/** The callbacks and options of a custom vector source.
-
- Zoom levels are whole numbers from 0 to 32.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_custom_vector_source_options {
-    pub size: u32,
-    pub fields: mln_custom_vector_source_option_fields,
-    pub fetch_tile: mln_custom_source_fetch_tile_callback,
-    pub cancel_tile: mln_custom_source_cancel_tile_callback,
-    pub user_data: *mut ::core::ffi::c_void,
-    pub min_zoom: f64,
-    pub max_zoom: f64,
-    pub release_user_data: mln_user_data_release,
-    pub queue: mln_delivery_queue,
-}
-/// An image of 8-bit RGBA pixels whose colors are multiplied by their alpha.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_premultiplied_rgba8_image {
-    pub size: u32,
-    pub width: u32,
-    pub height: u32,
-    /** The number of bytes from the start of one row to the start of the next, at
- least `width` * 4.*/
-    pub stride: u32,
-    /// The rows of pixels, `stride` bytes apart, from the top row down.
-    pub pixels: *const u8,
-    pub byte_length: usize,
-}
-/** Options for a style image, as the
- [sprite](https://maplibre.org/maplibre-style-spec/sprite/) spec describes
- them.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_style_image_options {
-    pub size: u32,
-    pub fields: mln_style_image_option_fields,
-    /// The ranges of columns that stretch, in increasing order without overlap.
-    pub stretch_x: *const mln_image_stretch,
-    pub stretch_x_count: usize,
-    /// The ranges of rows that stretch, in increasing order without overlap.
-    pub stretch_y: *const mln_image_stretch,
-    pub stretch_y_count: usize,
-    pub content: mln_image_content,
-    pub text_fit_width: mln_style_image_text_fit,
-    pub text_fit_height: mln_style_image_text_fit,
-    pub pixel_ratio: f32,
-    pub sdf: bool,
-    /** Keeps the image after no layer uses it. Without this, the map can remove
- an image that it asked for through
- MLN_RUNTIME_EVENT_MAP_STYLE_IMAGE_MISSING.*/
-    pub keep_unused: bool,
-}
-/// An image in the map's style.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_style_image_info {
-    pub width: u32,
-    pub height: u32,
-    pub fields: mln_style_image_info_fields,
-    /** The premultiplied RGBA pixels, in rows of `width` * 4 bytes, from the top
- row down.*/
-    pub pixels: mln_buffer_view,
-    pub stretch_x: *const mln_image_stretch,
-    pub stretch_x_count: usize,
-    pub stretch_y: *const mln_image_stretch,
-    pub stretch_y_count: usize,
-    pub content: mln_image_content,
-    pub text_fit_width: mln_style_image_text_fit,
-    pub text_fit_height: mln_style_image_text_fit,
-    pub pixel_ratio: f32,
-    pub sdf: bool,
-    pub keep_unused: bool,
-}
-/** The default
- [transition](https://maplibre.org/maplibre-style-spec/transition/) for
- changes to a style's paint properties.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_style_transition_options {
-    pub size: u32,
-    pub fields: mln_style_transition_option_fields,
-    pub duration_ms: f64,
-    pub delay_ms: f64,
-    /// Whether symbols fade in and out as the map places them.
-    pub enable_placement_transitions: bool,
-}
 /** Tells the caller that work is ready for it.
 
  One call can stand for several pieces of ready work, so take all of it each
@@ -2202,19 +1908,6 @@ pub struct mln_wake {
     pub user_data: *mut ::core::ffi::c_void,
     pub release_user_data: mln_user_data_release,
     pub queue: mln_delivery_queue,
-}
-/// Options for mln_delivery_queue_create().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_delivery_queue_options {
-    pub size: u32,
-    /** Tells the caller when the empty queue gains calls. Dispatch the queue after
- each wake.*/
-    pub wake: mln_wake,
-    /** Runs in place of a registration's release function when the queue is
- released before that function can run. Null leaves that user data
- unreleased.*/
-    pub release_abandoned_user_data: mln_user_data_release,
 }
 /// A Vulkan non-dispatchable handle, such as a `VkImage`, as an integer.
 pub type mln_vulkan_non_dispatchable_handle = u64;
@@ -2322,6 +2015,18 @@ pub const MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD: mln_gpu_export_kind_flag = 16;
 pub type mln_gpu_export_kind_flag = u32;
 /// A set of mln_gpu_export_kind_flag bits.
 pub type mln_gpu_export_kind_flags = u32;
+/** 24-bit normalized depth and 8-bit stencil: VK_FORMAT_D24_UNORM_S8_UINT,
+ MTLPixelFormatDepth24Unorm_Stencil8, GL_DEPTH24_STENCIL8, or
+ WGPUTextureFormat_Depth24PlusStencil8.*/
+pub const MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH24_STENCIL8: mln_depth_stencil_format_flag = 1;
+/** 32-bit float depth and 8-bit stencil: VK_FORMAT_D32_SFLOAT_S8_UINT,
+ MTLPixelFormatDepth32Float_Stencil8, GL_DEPTH32F_STENCIL8, or
+ WGPUTextureFormat_Depth32FloatStencil8.*/
+pub const MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH32_FLOAT_STENCIL8: mln_depth_stencil_format_flag = 2;
+/// A format of depth and stencil textures, as a bit in a set.
+pub type mln_depth_stencil_format_flag = u32;
+/// A set of mln_depth_stencil_format_flag bits.
+pub type mln_depth_stencil_format_flags = u32;
 /// Options for attaching a render session to a map.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2357,6 +2062,17 @@ pub struct mln_render_session_attach_options {
  has work for mln_render_session_service_driver_work(). It isn't called
  again until a service runs.*/
     pub driver_work_wake: mln_wake,
+    /** Whether an exported ring keeps the depth and stencil of each frame for
+ you, so that you can draw into the frame depth-tested against the map, as
+ mln_frame_projection says. The getter of the device's API, such as
+ mln_acquired_frame_get_vulkan_texture(), gets a frame's depth texture on
+ the device, and mln_acquired_frame_get_opaque_fd() shares it across APIs
+ when mln_gpu_device_capabilities.depth_export_kinds has the ring's kind.
+ Keeping depth costs memory bandwidth, most on tile-based GPUs. A borrowed
+ ring keeps depth in the textures that you give it instead, and the other
+ targets keep none, so an attach to them with `keep_depth` fails with
+ MLN_STATUS_UNSUPPORTED.*/
+    pub keep_depth: bool,
 }
 /// What an attached render session supports.
 #[repr(C)]
@@ -2708,7 +2424,16 @@ pub struct mln_metal_borrowed_texture {
  which is usually `logical_size` times the map's scale factor. The textures
  must all have that size, the device's `MTLDevice`, one pixel format, one
  sample, and `MTLTextureUsageRenderTarget`. The ring holds up to
- MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+ MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, renders the
+ map's depth and stencil into it, and stores them. They must have the size of
+ `textures`, one pixel format of
+ mln_gpu_device_capabilities.depth_stencil_formats, one sample,
+ `MTLTextureUsageRenderTarget`, and a storage mode other than
+ `MTLStorageModeMemoryless`.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_metal_borrowed_textures_target {
@@ -2717,6 +2442,8 @@ pub struct mln_metal_borrowed_textures_target {
     pub physical_height: u32,
     pub textures: *const mln_metal_borrowed_texture,
     pub texture_count: usize,
+    pub depth_textures: *const mln_metal_borrowed_texture,
+    pub depth_texture_count: usize,
 }
 /// A Vulkan image of a borrowed ring.
 #[repr(C)]
@@ -2746,7 +2473,16 @@ pub type mln_vulkan_image_owner = u32;
  which is usually `logical_size` times the map's scale factor. Each image must
  have that size, `format`, and `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT`, and
  belong to the device's `VkDevice`. The ring holds up to
- MLN_TEXTURE_RING_MAX_DEPTH distinct images.*/
+ MLN_TEXTURE_RING_MAX_DEPTH distinct images.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, renders the
+ map's depth and stencil into it, stores them, and leaves it in
+ `depth_final_layout`, with `owner` as for the color image. They must have the
+ size of `textures`, `depth_format`, one sample, and
+ `VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT`, and their views both the
+ depth and the stencil aspect.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_vulkan_borrowed_textures_target {
@@ -2760,6 +2496,13 @@ pub struct mln_vulkan_borrowed_textures_target {
     /// The `VkImageLayout` that each frame leaves its image in.
     pub final_layout: u32,
     pub owner: mln_vulkan_image_owner,
+    pub depth_textures: *const mln_vulkan_borrowed_texture,
+    pub depth_texture_count: usize,
+    /** The depth images' `VkFormat`, of
+ mln_gpu_device_capabilities.depth_stencil_formats.*/
+    pub depth_format: u32,
+    /// The `VkImageLayout` that each frame leaves its depth image in.
+    pub depth_final_layout: u32,
 }
 /// An OpenGL texture of a borrowed ring.
 #[repr(C)]
@@ -2774,7 +2517,14 @@ pub struct mln_open_gl_borrowed_texture {
  `physical_width` and `physical_height` give the textures' size in pixels,
  which is usually `logical_size` times the map's scale factor. Each texture
  must be in your context's share group, with RGBA8 storage of that size. The
- ring holds up to MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+ ring holds up to MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, and renders the
+ map's depth and stencil into it. They must be `GL_TEXTURE_2D` textures in the
+ share group, with storage of the size of `textures` in a format of
+ mln_gpu_device_capabilities.depth_stencil_formats.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_open_gl_borrowed_textures_target {
@@ -2785,6 +2535,8 @@ pub struct mln_open_gl_borrowed_textures_target {
     pub texture_count: usize,
     /// The textures' target. It must be `GL_TEXTURE_2D`.
     pub target: u32,
+    pub depth_textures: *const mln_open_gl_borrowed_texture,
+    pub depth_texture_count: usize,
 }
 /// A WebGPU texture of a borrowed ring.
 #[repr(C)]
@@ -2802,7 +2554,15 @@ pub struct mln_web_gpu_borrowed_texture {
  which is usually `logical_size` times the map's scale factor. Each texture
  must be 2D with that size, `format`, one layer, one mip level, one sample,
  and `WGPUTextureUsage_RenderAttachment`. The ring holds up to
- MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+ MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, renders the
+ map's depth and stencil into it, and stores them. They must be 2D with the
+ size of `textures`, `depth_format`, one layer, one mip level, one sample, and
+ `WGPUTextureUsage_RenderAttachment`, and their views both the depth and the
+ stencil aspect.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_borrowed_textures_target {
@@ -2813,6 +2573,11 @@ pub struct mln_web_gpu_borrowed_textures_target {
     pub texture_count: usize,
     /// The textures' `WGPUTextureFormat`.
     pub format: u32,
+    pub depth_textures: *const mln_web_gpu_borrowed_texture,
+    pub depth_texture_count: usize,
+    /** The depth textures' `WGPUTextureFormat`, of
+ mln_gpu_device_capabilities.depth_stencil_formats.*/
+    pub depth_format: u32,
 }
 /// A DRM format and modifier that you can import.
 #[repr(C)]
@@ -2936,6 +2701,634 @@ pub struct mln_render_target {
     pub kind: mln_render_target_kind,
     pub data: mln_render_target_data,
 }
+pub const MLN_STYLE_SOURCE_TYPE_UNKNOWN: mln_style_source_type = 0;
+pub const MLN_STYLE_SOURCE_TYPE_VECTOR: mln_style_source_type = 1;
+pub const MLN_STYLE_SOURCE_TYPE_RASTER: mln_style_source_type = 2;
+pub const MLN_STYLE_SOURCE_TYPE_RASTER_DEM: mln_style_source_type = 3;
+pub const MLN_STYLE_SOURCE_TYPE_GEO_JSON: mln_style_source_type = 4;
+pub const MLN_STYLE_SOURCE_TYPE_IMAGE: mln_style_source_type = 5;
+pub const MLN_STYLE_SOURCE_TYPE_VIDEO: mln_style_source_type = 6;
+pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY: mln_style_source_type = 7;
+pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR: mln_style_source_type = 8;
+/// The type of a style source.
+pub type mln_style_source_type = u32;
+pub const MLN_STYLE_SOURCE_INFO_TILE_JSON: mln_style_source_info_field = 1;
+pub const MLN_STYLE_SOURCE_INFO_BOUNDS: mln_style_source_info_field = 2;
+pub const MLN_STYLE_SOURCE_INFO_TILE_SIZE: mln_style_source_info_field = 4;
+pub const MLN_STYLE_SOURCE_INFO_VECTOR_ENCODING: mln_style_source_info_field = 8;
+pub const MLN_STYLE_SOURCE_INFO_RASTER_ENCODING: mln_style_source_info_field = 16;
+pub const MLN_STYLE_SOURCE_INFO_GEO_JSON: mln_style_source_info_field = 32;
+/// The fields that mln_style_source_info sets.
+pub type mln_style_source_info_field = u32;
+/// A set of mln_style_source_info_field bits.
+pub type mln_style_source_info_fields = u32;
+pub const MLN_STYLE_TILE_SCHEME_XYZ: mln_style_tile_scheme = 0;
+pub const MLN_STYLE_TILE_SCHEME_TMS: mln_style_tile_scheme = 1;
+/// Whether a tileset counts tile rows from the north (XYZ) or the south (TMS).
+pub type mln_style_tile_scheme = u32;
+pub const MLN_STYLE_VECTOR_TILE_ENCODING_MVT: mln_style_vector_tile_encoding = 0;
+pub const MLN_STYLE_VECTOR_TILE_ENCODING_MLT: mln_style_vector_tile_encoding = 1;
+/// The format of vector tiles.
+pub type mln_style_vector_tile_encoding = u32;
+pub const MLN_STYLE_RASTER_DEM_ENCODING_MAPBOX: mln_style_raster_dem_encoding = 0;
+pub const MLN_STYLE_RASTER_DEM_ENCODING_TERRARIUM: mln_style_raster_dem_encoding = 1;
+/// How a raster DEM tile encodes elevation in its colors.
+pub type mln_style_raster_dem_encoding = u32;
+/// A range of image pixels, from `from` to `to`, that stretches to fit text.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_image_stretch {
+    pub from: f32,
+    pub to: f32,
+}
+/// The area of an image, in image pixels, that text fits inside.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_image_content {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+pub const MLN_STYLE_IMAGE_TEXT_FIT_STRETCH_OR_SHRINK: mln_style_image_text_fit = 0;
+pub const MLN_STYLE_IMAGE_TEXT_FIT_STRETCH_ONLY: mln_style_image_text_fit = 1;
+pub const MLN_STYLE_IMAGE_TEXT_FIT_PROPORTIONAL: mln_style_image_text_fit = 2;
+/// How an image stretches to fit text along one axis.
+pub type mln_style_image_text_fit = u32;
+pub const MLN_STYLE_LAYER_VISIBILITY_VISIBLE: mln_style_layer_visibility = 0;
+pub const MLN_STYLE_LAYER_VISIBILITY_NONE: mln_style_layer_visibility = 1;
+/// Whether a layer shows.
+pub type mln_style_layer_visibility = u32;
+pub const MLN_GEO_JSON_SOURCE_OPTION_MIN_ZOOM: mln_geo_json_source_option_field = 1;
+pub const MLN_GEO_JSON_SOURCE_OPTION_MAX_ZOOM: mln_geo_json_source_option_field = 2;
+pub const MLN_GEO_JSON_SOURCE_OPTION_TOLERANCE: mln_geo_json_source_option_field = 4;
+pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_MAX_ZOOM: mln_geo_json_source_option_field = 8;
+pub const MLN_GEO_JSON_SOURCE_OPTION_BUFFER: mln_geo_json_source_option_field = 16;
+pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_RADIUS: mln_geo_json_source_option_field = 32;
+pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_MIN_POINTS: mln_geo_json_source_option_field = 64;
+pub const MLN_GEO_JSON_SOURCE_OPTION_LINE_METRICS: mln_geo_json_source_option_field = 128;
+pub const MLN_GEO_JSON_SOURCE_OPTION_CLUSTER: mln_geo_json_source_option_field = 256;
+/// The fields that mln_geo_json_source_options sets.
+pub type mln_geo_json_source_option_field = u32;
+/// A set of mln_geo_json_source_option_field bits.
+pub type mln_geo_json_source_option_fields = u32;
+pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_MIN_ZOOM: mln_custom_geometry_source_option_field = 1;
+pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_MAX_ZOOM: mln_custom_geometry_source_option_field = 2;
+pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_TOLERANCE: mln_custom_geometry_source_option_field = 4;
+pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_TILE_SIZE: mln_custom_geometry_source_option_field = 8;
+pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_BUFFER: mln_custom_geometry_source_option_field = 16;
+pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_CLIP: mln_custom_geometry_source_option_field = 32;
+pub const MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_WRAP: mln_custom_geometry_source_option_field = 64;
+/// The fields that mln_custom_geometry_source_options sets.
+pub type mln_custom_geometry_source_option_field = u32;
+/// A set of mln_custom_geometry_source_option_field bits.
+pub type mln_custom_geometry_source_option_fields = u32;
+pub const MLN_CUSTOM_VECTOR_SOURCE_OPTION_MIN_ZOOM: mln_custom_vector_source_option_field = 1;
+pub const MLN_CUSTOM_VECTOR_SOURCE_OPTION_MAX_ZOOM: mln_custom_vector_source_option_field = 2;
+/// The fields that mln_custom_vector_source_options sets.
+pub type mln_custom_vector_source_option_field = u32;
+/// A set of mln_custom_vector_source_option_field bits.
+pub type mln_custom_vector_source_option_fields = u32;
+pub const MLN_STYLE_IMAGE_OPTION_PIXEL_RATIO: mln_style_image_option_field = 1;
+pub const MLN_STYLE_IMAGE_OPTION_SDF: mln_style_image_option_field = 2;
+pub const MLN_STYLE_IMAGE_OPTION_STRETCH_X: mln_style_image_option_field = 4;
+pub const MLN_STYLE_IMAGE_OPTION_STRETCH_Y: mln_style_image_option_field = 8;
+pub const MLN_STYLE_IMAGE_OPTION_CONTENT: mln_style_image_option_field = 16;
+pub const MLN_STYLE_IMAGE_OPTION_TEXT_FIT_WIDTH: mln_style_image_option_field = 32;
+pub const MLN_STYLE_IMAGE_OPTION_TEXT_FIT_HEIGHT: mln_style_image_option_field = 64;
+pub const MLN_STYLE_IMAGE_OPTION_KEEP_UNUSED: mln_style_image_option_field = 128;
+/// The fields that mln_style_image_options sets.
+pub type mln_style_image_option_field = u32;
+/// A set of mln_style_image_option_field bits.
+pub type mln_style_image_option_fields = u32;
+pub const MLN_STYLE_IMAGE_INFO_CONTENT: mln_style_image_info_field = 1;
+pub const MLN_STYLE_IMAGE_INFO_TEXT_FIT_WIDTH: mln_style_image_info_field = 2;
+pub const MLN_STYLE_IMAGE_INFO_TEXT_FIT_HEIGHT: mln_style_image_info_field = 4;
+/// The fields that mln_style_image_info sets.
+pub type mln_style_image_info_field = u32;
+/// A set of mln_style_image_info_field bits.
+pub type mln_style_image_info_fields = u32;
+pub const MLN_STYLE_TRANSITION_OPTION_DURATION: mln_style_transition_option_field = 1;
+pub const MLN_STYLE_TRANSITION_OPTION_DELAY: mln_style_transition_option_field = 2;
+pub const MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS: mln_style_transition_option_field = 4;
+/// The fields that mln_style_transition_options sets.
+pub type mln_style_transition_option_field = u32;
+/// A set of mln_style_transition_option_field bits.
+pub type mln_style_transition_option_fields = u32;
+/// The tiles of a source, as the style lists them.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_style_source_tile_info {
+    pub tile_urls: *const mln_buffer_view,
+    pub tile_url_count: usize,
+    pub min_zoom: f64,
+    pub max_zoom: f64,
+    pub scheme: mln_style_tile_scheme,
+}
+/** Options for a GeoJSON
+ [source](https://maplibre.org/maplibre-style-spec/sources/#geojson).
+
+ Zoom levels are whole numbers.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_geo_json_source_options {
+    pub size: u32,
+    pub fields: mln_geo_json_source_option_fields,
+    pub min_zoom: f64,
+    pub max_zoom: f64,
+    pub tolerance: f64,
+    /// The last zoom level that has clusters, at most 30.
+    pub cluster_max_zoom: f64,
+    /// The `clusterProperties` object, or empty for none.
+    pub cluster_properties: mln_buffer_view,
+    pub buffer: u32,
+    pub cluster_radius: u32,
+    /// At most 4294967295 on a 32-bit target.
+    pub cluster_min_points: u64,
+    pub line_metrics: bool,
+    pub cluster: bool,
+}
+/// A source in the map's style.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_style_source_info {
+    pub id: mln_buffer_view,
+    pub type_: mln_style_source_type,
+    pub fields: mln_style_source_info_fields,
+    pub is_volatile: bool,
+    pub attribution: mln_buffer_view,
+    pub url: mln_buffer_view,
+    /// The tiles that the style lists in the source itself, instead of at a URL.
+    pub tile_json: mln_style_source_tile_info,
+    pub bounds: mln_lat_lng_bounds,
+    pub tile_size: u32,
+    pub vector_encoding: mln_style_vector_tile_encoding,
+    pub raster_encoding: mln_style_raster_dem_encoding,
+    /// A GeoJSON source's options, with every field set.
+    pub geo_json: mln_geo_json_source_options,
+}
+/// A layer in the map's style.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_style_layer_info {
+    pub id: mln_buffer_view,
+    /** The layer's [type](https://maplibre.org/maplibre-style-spec/layers/#type),
+ such as `fill`.*/
+    pub type_: mln_buffer_view,
+    pub source_id: mln_buffer_view,
+    pub source_layer: mln_buffer_view,
+    /** The zoom level where the layer starts to show, or negative infinity when
+ the layer doesn't set one.*/
+    pub min_zoom: f64,
+    /** The zoom level where the layer stops showing, or infinity when the layer
+ doesn't set one.*/
+    pub max_zoom: f64,
+    pub visibility: mln_style_layer_visibility,
+}
+/// A tile's zoom level `z`, column `x`, and row `y`, with row 0 at the north.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_canonical_tile_id {
+    pub z: u32,
+    pub x: u32,
+    pub y: u32,
+}
+/** Asks for the data of a tile in a custom source.
+
+ `map` and `source_id` name the source that asks. Return quickly. Once the
+ data is ready, pass it to mln_map_set_custom_geometry_source_tile_data() or
+ mln_map_set_custom_vector_source_tile_data(). If it fails to load, report
+ that with mln_map_set_custom_geometry_source_tile_error() or
+ mln_map_set_custom_vector_source_tile_error().
+
+ Lifetimes:
+ `source_id` stays valid until the callback returns. The callback borrows
+ `map`, so it must not release it.*/
+pub type mln_custom_source_fetch_tile_callback = ::core::option::Option<
+    unsafe extern "C" fn(
+        user_data: *mut ::core::ffi::c_void,
+        map: mln_map,
+        source_id: mln_buffer_view,
+        tile_id: mln_canonical_tile_id,
+    ),
+>;
+/** Reports that a custom source no longer needs a tile.
+
+ `map` and `source_id` name the source.
+
+ Lifetimes:
+ `source_id` stays valid until the callback returns. The callback borrows
+ `map`, so it must not release it.*/
+pub type mln_custom_source_cancel_tile_callback = ::core::option::Option<
+    unsafe extern "C" fn(
+        user_data: *mut ::core::ffi::c_void,
+        map: mln_map,
+        source_id: mln_buffer_view,
+        tile_id: mln_canonical_tile_id,
+    ),
+>;
+/** The callbacks and options of a custom geometry source.
+
+ Zoom levels are whole numbers from 0 to 32.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_custom_geometry_source_options {
+    pub size: u32,
+    pub fields: mln_custom_geometry_source_option_fields,
+    pub fetch_tile: mln_custom_source_fetch_tile_callback,
+    pub cancel_tile: mln_custom_source_cancel_tile_callback,
+    pub user_data: *mut ::core::ffi::c_void,
+    pub min_zoom: f64,
+    pub max_zoom: f64,
+    /// How far, in pixels, simplified geometry can stray from the original.
+    pub tolerance: f64,
+    /// The width of a tile in pixels, a power of two no larger than 8192.
+    pub tile_size: u32,
+    /** The width in pixels of the margin around a tile that holds geometry from
+ beyond its edges. `buffer` times 8192 / `tile_size` must be at most 65535.*/
+    pub buffer: u32,
+    /// Whether to cut geometry at the outer edge of a tile's margin.
+    pub clip: bool,
+    /// Whether to wrap geometry that crosses the antimeridian.
+    pub wrap: bool,
+    pub release_user_data: mln_user_data_release,
+    pub queue: mln_delivery_queue,
+}
+/** The callbacks and options of a custom vector source.
+
+ Zoom levels are whole numbers from 0 to 32.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_custom_vector_source_options {
+    pub size: u32,
+    pub fields: mln_custom_vector_source_option_fields,
+    pub fetch_tile: mln_custom_source_fetch_tile_callback,
+    pub cancel_tile: mln_custom_source_cancel_tile_callback,
+    pub user_data: *mut ::core::ffi::c_void,
+    pub min_zoom: f64,
+    pub max_zoom: f64,
+    pub release_user_data: mln_user_data_release,
+    pub queue: mln_delivery_queue,
+}
+/// An image of 8-bit RGBA pixels whose colors are multiplied by their alpha.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_premultiplied_rgba8_image {
+    pub size: u32,
+    pub width: u32,
+    pub height: u32,
+    /** The number of bytes from the start of one row to the start of the next, at
+ least `width` * 4.*/
+    pub stride: u32,
+    /// The rows of pixels, `stride` bytes apart, from the top row down.
+    pub pixels: *const u8,
+    pub byte_length: usize,
+}
+/** Options for a style image, as the
+ [sprite](https://maplibre.org/maplibre-style-spec/sprite/) spec describes
+ them.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_style_image_options {
+    pub size: u32,
+    pub fields: mln_style_image_option_fields,
+    /// The ranges of columns that stretch, in increasing order without overlap.
+    pub stretch_x: *const mln_image_stretch,
+    pub stretch_x_count: usize,
+    /// The ranges of rows that stretch, in increasing order without overlap.
+    pub stretch_y: *const mln_image_stretch,
+    pub stretch_y_count: usize,
+    pub content: mln_image_content,
+    pub text_fit_width: mln_style_image_text_fit,
+    pub text_fit_height: mln_style_image_text_fit,
+    pub pixel_ratio: f32,
+    pub sdf: bool,
+    /** Keeps the image after no layer uses it. Without this, the map can remove
+ an image that it asked for through
+ MLN_RUNTIME_EVENT_MAP_STYLE_IMAGE_MISSING.*/
+    pub keep_unused: bool,
+}
+/// An image in the map's style.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_style_image_info {
+    pub width: u32,
+    pub height: u32,
+    pub fields: mln_style_image_info_fields,
+    /** The premultiplied RGBA pixels, in rows of `width` * 4 bytes, from the top
+ row down.*/
+    pub pixels: mln_buffer_view,
+    pub stretch_x: *const mln_image_stretch,
+    pub stretch_x_count: usize,
+    pub stretch_y: *const mln_image_stretch,
+    pub stretch_y_count: usize,
+    pub content: mln_image_content,
+    pub text_fit_width: mln_style_image_text_fit,
+    pub text_fit_height: mln_style_image_text_fit,
+    pub pixel_ratio: f32,
+    pub sdf: bool,
+    pub keep_unused: bool,
+}
+/** The default
+ [transition](https://maplibre.org/maplibre-style-spec/transition/) for
+ changes to a style's paint properties.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_style_transition_options {
+    pub size: u32,
+    pub fields: mln_style_transition_option_fields,
+    pub duration_ms: f64,
+    pub delay_ms: f64,
+    /// Whether symbols fade in and out as the map places them.
+    pub enable_placement_transitions: bool,
+}
+/** The frame that a custom layer draws into, as its callbacks get it.
+
+ The view and the frame projection are the ones that the frame draws the map
+ with, so they are never newer than the frame, unlike the map's camera.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_custom_layer_frame {
+    /// The camera, extent, and scale factor that the frame shows.
+    pub view: mln_map_view,
+    /// Where the frame draws the map, and the depth that it writes there.
+    pub frame_projection: mln_frame_projection,
+    /// The width of the frame's attachments, in physical pixels.
+    pub width: u32,
+    /// The height of the frame's attachments, in physical pixels.
+    pub height: u32,
+}
+/** The frame's Metal command buffer, outside the map's render pass.
+
+ End each encoder that you make on `command_buffer` before the callback
+ returns, and don't commit the buffer.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_metal_custom_layer_encoder {
+    /// The frame's `MTLCommandBuffer`, with no encoder open.
+    pub command_buffer: *mut ::core::ffi::c_void,
+}
+/** The frame's Vulkan command buffer, outside the map's render pass.
+
+ Record work such as copies, compute dispatches, and render passes of your
+ own, with the barriers that it needs. The map's render pass loads its
+ attachments after a barrier of its own, but it doesn't wait for writes to
+ your images: give those the barriers that your later reads need. Don't end
+ or submit `command_buffer`.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vulkan_custom_layer_encoder {
+    /** The device that the session renders on. Make the objects that your
+ commands use on `context.device`. Don't submit to `context.graphics_queue`
+ from a callback.*/
+    pub context: mln_vulkan_context_descriptor,
+    /// The frame's `VkCommandBuffer`, recording outside a render pass.
+    pub command_buffer: *mut ::core::ffi::c_void,
+}
+/** The frame's WebGPU command encoder, outside the map's render pass.
+
+ End each pass that you begin on `encoder` before the callback returns, and
+ don't finish the encoder.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_web_gpu_custom_layer_encoder {
+    /// The `WGPUDevice` that the session renders on.
+    pub device: *mut ::core::ffi::c_void,
+    /// The frame's `WGPUCommandEncoder`, with no pass open.
+    pub encoder: *mut ::core::ffi::c_void,
+}
+/** The GPU commands of a frame outside the map's render pass, by the backend
+ that the session renders with.
+
+ An OpenGL session has no variant: its context is current, and it draws
+ through no object that the callback needs.*/
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union mln_custom_layer_encoder_data {
+    pub metal: mln_metal_custom_layer_encoder,
+    pub vulkan: mln_vulkan_custom_layer_encoder,
+    pub web_gpu: mln_web_gpu_custom_layer_encoder,
+}
+/// What a custom layer's prerender callback gets.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct mln_custom_layer_prerender_parameters {
+    pub size: u32,
+    pub backend: mln_render_backend,
+    pub encoder: mln_custom_layer_encoder_data,
+    pub frame: mln_custom_layer_frame,
+}
+/** The map's Metal render pass, at a custom layer's place in the style.
+
+ Set your own pipeline state, depth-stencil state, buffers, textures, and
+ samplers on `encoder`, and any other state that your draws need. After the
+ callback returns, the map sets the state that its own draws need again. Don't
+ end `encoder`.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_metal_custom_layer_pass {
+    /// The pass's `MTLRenderCommandEncoder`.
+    pub encoder: *mut ::core::ffi::c_void,
+    /// The `MTLCommandBuffer` that `encoder` encodes into. Don't commit it.
+    pub command_buffer: *mut ::core::ffi::c_void,
+    /// The `MTLPixelFormat` of the pass's color attachment.
+    pub color_format: u64,
+    /** The `MTLPixelFormat` of the pass's depth attachment, or
+ `MTLPixelFormatInvalid` when it has none.*/
+    pub depth_format: u64,
+    /** The `MTLPixelFormat` of the pass's stencil attachment, or
+ `MTLPixelFormatInvalid` when it has none.*/
+    pub stencil_format: u64,
+    /// The sample count of the pass's attachments.
+    pub sample_count: u32,
+}
+/** The map's Vulkan render pass, at a custom layer's place in the style.
+
+ Record draws into `command_buffer`, with pipelines that you make for
+ `render_pass`, `subpass`, and `sample_count`. Bind your own pipeline,
+ descriptor sets, vertex and index buffers, and push constants, and set the
+ dynamic state that your pipelines have, such as the viewport and scissor.
+ After the callback returns, the map binds and sets again what its own draws
+ need. Your pipeline layouts can differ from the map's. Record nothing that a
+ render pass can't hold, and don't end the render pass.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vulkan_custom_layer_pass {
+    /** The device that the session renders on. Make the objects that your
+ commands use on `context.device`. Don't submit to `context.graphics_queue`
+ from a callback.*/
+    pub context: mln_vulkan_context_descriptor,
+    /// The frame's `VkCommandBuffer`, recording inside `render_pass`.
+    pub command_buffer: *mut ::core::ffi::c_void,
+    /// The `VkRenderPass` that `command_buffer` records in.
+    pub render_pass: mln_vulkan_non_dispatchable_handle,
+    /// The index of the subpass that `command_buffer` records in.
+    pub subpass: u32,
+    /// The `VkSampleCountFlagBits` of the render pass's attachments.
+    pub sample_count: u32,
+    /// The `VkFormat` of the render pass's color attachment.
+    pub color_format: u32,
+    /** The `VkFormat` of the render pass's depth-stencil attachment, or
+ `VK_FORMAT_UNDEFINED` when it has none.*/
+    pub depth_stencil_format: u32,
+}
+/** The map's OpenGL framebuffer, at a custom layer's place in the style.
+
+ The session's context is current, with `framebuffer` bound and the
+ viewport covering it. You can change the program, the vertex array, the
+ buffers bound to each target, the framebuffer, the viewport, the active
+ texture unit and the textures bound to each unit, the uniform buffer
+ bindings, and the scissor, depth, stencil, blend, color mask, cull face, and
+ line width state. After the callback returns, the map sets again what its
+ own draws need of these. The vertex array bound when the callback starts is
+ 0, so bind your own before you set vertex attributes. Leave any other state
+ as you found it, such as the sampler objects bound to texture units, the
+ pixel pack and unpack buffers and parameters, polygon offset, and
+ rasterizer discard. Don't clear or invalidate the framebuffer's attachments.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_open_gl_custom_layer_pass {
+    /// The framebuffer that the map draws into, or 0 for the default one.
+    pub framebuffer: u32,
+}
+/** The map's WebGPU render pass, at a custom layer's place in the style.
+
+ Set your own pipeline, bind groups, vertex and index buffers, viewport,
+ scissor rectangle, and stencil reference on `encoder`. After the callback
+ returns, the map sets again what its own draws need. Don't end `encoder`.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_web_gpu_custom_layer_pass {
+    /// The `WGPUDevice` that the session renders on.
+    pub device: *mut ::core::ffi::c_void,
+    /// The pass's `WGPURenderPassEncoder`.
+    pub encoder: *mut ::core::ffi::c_void,
+    /// The `WGPUTextureFormat` of the pass's color attachment.
+    pub color_format: u32,
+    /** The `WGPUTextureFormat` of the pass's depth-stencil attachment, or
+ `WGPUTextureFormat_Undefined` when it has none.*/
+    pub depth_stencil_format: u32,
+    /// The sample count of the pass's attachments.
+    pub sample_count: u32,
+}
+/** The map's render pass at a custom layer's place in the style, by the backend
+ that the session renders with.*/
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union mln_custom_layer_pass_data {
+    pub metal: mln_metal_custom_layer_pass,
+    pub vulkan: mln_vulkan_custom_layer_pass,
+    pub open_gl: mln_open_gl_custom_layer_pass,
+    pub web_gpu: mln_web_gpu_custom_layer_pass,
+}
+/// What a custom layer's render callback gets.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct mln_custom_layer_render_parameters {
+    pub size: u32,
+    pub backend: mln_render_backend,
+    pub pass: mln_custom_layer_pass_data,
+    pub frame: mln_custom_layer_frame,
+    /** The depth that a 2D layer at the layer's place in the style writes, as
+ mln_frame_projection describes, between `frame.frame_projection.far_depth` and
+ 1.
+
+ The map draws the opaque fragments of its 2D layers before the render
+ callback runs, those above the custom layer too. A fragment that you draw
+ at this depth, tested with less-or-equal, stays under those above that
+ wrote depth.*/
+    pub layer_depth: f64,
+}
+/** Records a custom layer's GPU work that can't run in the map's render pass,
+ such as drawing into textures of your own.
+
+ Each frame that shows the layer runs the prerender callbacks of its custom
+ layers, from the bottom of the style to the top, before the map begins its
+ render pass, and so before any render callback.
+
+ Threads:
+ Runs on the thread that runs the session's graphics work: a library thread,
+ or yours with MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD. It can't call the
+ library.
+
+ Lifetimes:
+ `parameters` and the objects it names stay valid until the callback returns.*/
+pub type mln_custom_layer_prerender_callback = ::core::option::Option<
+    unsafe extern "C" fn(
+        user_data: *mut ::core::ffi::c_void,
+        parameters: *const mln_custom_layer_prerender_parameters,
+    ),
+>;
+/** Draws a custom layer into the map's render pass, at its place in the style.
+
+ The map draws its layers below the custom layer before the callback, and
+ those above it after, except for the opaque fragments of 2D layers, which it
+ draws before either, as mln_custom_layer_render_parameters.layer_depth
+ describes. Draw through `frame.frame_projection.matrix` to depth-test against the
+ map's 3D layers.
+
+ Threads:
+ Runs on the thread that runs the session's graphics work, as
+ mln_custom_layer_prerender_callback says. It can't call the library.
+
+ Lifetimes:
+ `parameters` and the objects it names stay valid until the callback returns.*/
+pub type mln_custom_layer_render_callback = ::core::option::Option<
+    unsafe extern "C" fn(
+        user_data: *mut ::core::ffi::c_void,
+        parameters: *const mln_custom_layer_render_parameters,
+    ),
+>;
+/** Tells a custom layer that a session stopped drawing it.
+
+ `deinitialize` runs once a session that ran the layer's prerender or render
+ callback stops drawing the layer: when the layer leaves the style, or the
+ session detaches, is released, or replaces its device's backend. Destroy the
+ GPU objects that you made for that session then. The session's GPU no longer
+ uses them, and an OpenGL session's context is current. `context_lost` runs
+ instead when the session is abandoned. Its graphics objects may be gone
+ already, so forget yours without destroying them.
+
+ A later prerender or render callback is for a new session, which can render
+ on another device or backend.
+
+ Threads:
+ Runs on the thread that runs the session's graphics work, as
+ mln_custom_layer_prerender_callback says. It can't call the library.*/
+pub type mln_custom_layer_session_end_callback = ::core::option::Option<
+    unsafe extern "C" fn(user_data: *mut ::core::ffi::c_void),
+>;
+/** The callbacks of a custom layer, which draws with your own GPU commands in
+ the map's frame.
+
+ A session runs the callbacks only when it can hand you its commands as one
+ of mln_custom_layer_pass_data's variants, so a session on another backend,
+ such as WebGPU outside a browser, doesn't draw the layer. Leave unset the
+ callbacks that you don't need.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_custom_layer_host {
+    pub size: u32,
+    pub prerender: mln_custom_layer_prerender_callback,
+    pub render: mln_custom_layer_render_callback,
+    pub deinitialize: mln_custom_layer_session_end_callback,
+    pub context_lost: mln_custom_layer_session_end_callback,
+    pub user_data: *mut ::core::ffi::c_void,
+    pub release_user_data: mln_user_data_release,
+}
+/// Options for mln_delivery_queue_create().
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_delivery_queue_options {
+    pub size: u32,
+    /** Tells the caller when the empty queue gains calls. Dispatch the queue after
+ each wake.*/
+    pub wake: mln_wake,
+    /** Runs in place of a registration's release function when the queue is
+ released before that function can run. Null leaves that user data
+ unreleased.*/
+    pub release_abandoned_user_data: mln_user_data_release,
+}
 pub const MLN_GPU_DEVICE_OPTION_BACKEND: mln_gpu_device_option_field = 1;
 pub const MLN_GPU_DEVICE_OPTION_ADAPTER_INDEX: mln_gpu_device_option_field = 2;
 pub const MLN_GPU_DEVICE_OPTION_ADAPTER_UUID: mln_gpu_device_option_field = 4;
@@ -2999,6 +3392,13 @@ pub struct mln_gpu_device_capabilities {
     pub export_kinds: mln_gpu_export_kind_flags,
     /// The kinds of mln_gpu_sync that the device can signal and wait on.
     pub sync_kinds: mln_gpu_sync_kind_flags,
+    /// The formats of the depth textures that a borrowed ring takes.
+    pub depth_stencil_formats: mln_depth_stencil_format_flags,
+    /** The kinds of `export_kinds` whose rings also share each frame's depth
+ texture, with mln_render_session_attach_options.keep_depth. An IOSurface
+ or a dmabuf holds no depth format, so only MLN_GPU_EXPORT_KIND_OPAQUE_FD
+ can be here.*/
+    pub depth_export_kinds: mln_gpu_export_kind_flags,
 }
 /** Your Vulkan device and queue, for mln_gpu_device_wrap_vulkan().
 
@@ -3279,6 +3679,9 @@ pub struct mln_render_frame_result {
     pub needs_repaint: bool,
     /// The camera and extent that a rendered frame shows.
     pub view: mln_map_view,
+    /** Where a rendered frame drew the map, for drawing into its frame with
+ depth. All zero for a demand that rendered nothing.*/
+    pub frame_projection: mln_frame_projection,
     pub mode: mln_render_mode,
 }
 /// The frame results that mln_render_session_drain_frame_results() took.
@@ -3433,7 +3836,11 @@ pub struct mln_style_expression_info {
     /// True when the result doesn't depend on the zoom level.
     pub is_zoom_constant: bool,
 }
-/// The Metal texture of an acquired frame.
+/** The Metal texture of an acquired frame.
+
+ The depth members are set when the frame has a depth texture: one of a
+ borrowed ring's `depth_textures`, or an exported ring's with
+ mln_render_session_attach_options.keep_depth. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_metal_texture_frame {
@@ -3449,8 +3856,15 @@ pub struct mln_metal_texture_frame {
     pub device: *mut ::core::ffi::c_void,
     /// The texture's MTLPixelFormat.
     pub pixel_format: u64,
+    /// The MTLTexture that holds the frame's depth and stencil.
+    pub depth_texture: *mut ::core::ffi::c_void,
+    /// The depth texture's MTLPixelFormat.
+    pub depth_pixel_format: u64,
 }
-/// The Vulkan image of an acquired frame.
+/** The Vulkan image of an acquired frame.
+
+ The depth members are set when the frame has a depth image, as for
+ mln_metal_texture_frame. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_vulkan_texture_frame {
@@ -3470,8 +3884,19 @@ pub struct mln_vulkan_texture_frame {
     pub format: u32,
     /// The VkImageLayout that the frame left the image in.
     pub layout: u32,
+    /// The VkImage that holds the frame's depth and stencil.
+    pub depth_image: mln_vulkan_non_dispatchable_handle,
+    /// A VkImageView of the depth image's depth and stencil aspects.
+    pub depth_image_view: mln_vulkan_non_dispatchable_handle,
+    /// The depth image's VkFormat.
+    pub depth_format: u32,
+    /// The VkImageLayout that the frame left the depth image in.
+    pub depth_layout: u32,
 }
-/// The WebGPU texture of an acquired frame.
+/** The WebGPU texture of an acquired frame.
+
+ The depth members are set when the frame has a depth texture, as for
+ mln_metal_texture_frame. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_texture_frame {
@@ -3489,8 +3914,17 @@ pub struct mln_web_gpu_texture_frame {
     pub device: *mut ::core::ffi::c_void,
     /// The texture's WGPUTextureFormat.
     pub format: u32,
+    /// The WGPUTexture that holds the frame's depth and stencil.
+    pub depth_texture: *mut ::core::ffi::c_void,
+    /// A WGPUTextureView of the depth texture.
+    pub depth_texture_view: *mut ::core::ffi::c_void,
+    /// The depth texture's WGPUTextureFormat.
+    pub depth_format: u32,
 }
-/// The OpenGL texture of an acquired frame.
+/** The OpenGL texture of an acquired frame.
+
+ The depth members are set when the frame has a depth texture, as for
+ mln_metal_texture_frame. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_open_gl_texture_frame {
@@ -3502,6 +3936,11 @@ pub struct mln_open_gl_texture_frame {
     pub slot: u32,
     pub texture: u32,
     pub target: u32,
+    /// The `GL_TEXTURE_2D` texture that holds the frame's depth and stencil.
+    pub depth_texture: u32,
+    /** The depth texture's internal format, such as GL_DEPTH24_STENCIL8, or zero
+ for a borrowed ring's.*/
+    pub depth_internal_format: u32,
 }
 /// The IOSurface of an exported ring's acquired frame.
 #[repr(C)]
@@ -3584,7 +4023,19 @@ pub struct mln_dxgi_shared_texture_frame {
  glImportMemoryFdEXT() and GL_HANDLE_TYPE_OPAQUE_FD_EXT, and make the texture
  with GL_TEXTURE_TILING_EXT set to GL_OPTIMAL_TILING_EXT and
  glTexStorageMem2DEXT() at offset 0. Each frame leaves the image in
- VK_IMAGE_LAYOUT_GENERAL, released to VK_QUEUE_FAMILY_EXTERNAL.*/
+ VK_IMAGE_LAYOUT_GENERAL, released to VK_QUEUE_FAMILY_EXTERNAL.
+
+ With mln_render_session_attach_options.keep_depth, on a device whose
+ mln_gpu_device_capabilities.depth_export_kinds has
+ MLN_GPU_EXPORT_KIND_OPAQUE_FD, the depth members share the memory of the
+ frame's depth image in the same way. Otherwise `depth_fd` is -1 and the
+ others are zero. The depth image is 2D, of `depth_format`, with one mip
+ level, one layer, optimal tiling, and the usage
+ VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_USAGE_SAMPLED_BIT, and
+ VK_IMAGE_USAGE_TRANSFER_SRC_BIT. Each frame leaves it in
+ VK_IMAGE_LAYOUT_GENERAL, released to VK_QUEUE_FAMILY_EXTERNAL. In OpenGL,
+ make its texture with the internal format that mln_depth_stencil_format_flag
+ names for `depth_format`.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_opaque_fd_frame {
@@ -3603,6 +4054,14 @@ pub struct mln_opaque_fd_frame {
     pub dedicated: bool,
     /// The image's `VkFormat`: VK_FORMAT_R8G8B8A8_UNORM, OpenGL's GL_RGBA8.
     pub format: u32,
+    /// The file descriptor of the depth image's memory.
+    pub depth_fd: i32,
+    /// The size of the depth image's memory in bytes.
+    pub depth_allocation_size: u64,
+    /// Whether the memory is the depth image's own.
+    pub depth_dedicated: bool,
+    /// The depth image's `VkFormat`.
+    pub depth_format: u32,
 }
 /// The layout of the pixels that mln_render_session_read_texture() reads.
 #[repr(C)]

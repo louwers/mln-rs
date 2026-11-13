@@ -17,7 +17,7 @@ use std::io::Write as _;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 use ash::vk;
-use mln_gfx::{ExportKinds, SyncKind, SyncKinds};
+use mln_gfx::{DepthStencilFormat, DepthStencilFormats, ExportKinds, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::logging::{Event, EventSeverity, Log};
 use mln_util::sync::MutexExt;
@@ -257,6 +257,8 @@ pub(crate) struct Shared {
     dxgi: OnceLock<Result<crate::win32::TextureDevice, Error>>,
     /// The kinds that the device has exported an image of, probed once.
     export_kinds: OnceLock<ExportKinds>,
+    /// The kinds that the device has exported a depth image of, probed once.
+    depth_export_kinds: OnceLock<ExportKinds>,
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
     properties: vk::PhysicalDeviceProperties,
@@ -556,6 +558,7 @@ impl Device {
                 #[cfg(windows)]
                 dxgi: OnceLock::new(),
                 export_kinds: OnceLock::new(),
+                depth_export_kinds: OnceLock::new(),
                 physical_device,
                 device,
                 properties,
@@ -949,6 +952,7 @@ impl Device {
                 #[cfg(windows)]
                 dxgi: OnceLock::new(),
                 export_kinds: OnceLock::new(),
+                depth_export_kinds: OnceLock::new(),
                 physical_device,
                 device: ash_device,
                 properties,
@@ -1064,6 +1068,32 @@ impl Device {
     #[must_use]
     pub fn export_kinds(&self) -> ExportKinds {
         *self.shared.export_kinds.get_or_init(|| crate::exported_target::probe(self))
+    }
+
+    /// The kinds of [`export_kinds`](Self::export_kinds) whose rings share
+    /// each frame's depth image too: those it exported a depth image of,
+    /// once, when first asked.
+    #[must_use]
+    pub fn depth_export_kinds(&self) -> ExportKinds {
+        *self.shared.depth_export_kinds.get_or_init(|| crate::exported_target::probe_depth(self))
+    }
+
+    /// The formats of the depth and stencil images that frames draw into.
+    #[must_use]
+    pub fn depth_stencil_formats(&self) -> DepthStencilFormats {
+        DepthStencilFormat::BY_PREFERENCE.into_iter().fold(DepthStencilFormats::NONE, |formats, format| {
+            // SAFETY: a plain query of the GPU.
+            let properties = unsafe {
+                self.shared
+                    .instance()
+                    .get_physical_device_format_properties(self.shared.physical_device(), depth_vk_format(format))
+            };
+            if properties.optimal_tiling_features.contains(vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT) {
+                formats.with(format)
+            } else {
+                formats
+            }
+        })
     }
 
     /// The name of the GPU.
@@ -1211,4 +1241,19 @@ impl Shared {
         }
         result
     }
+}
+
+/// The `VkFormat` of `format`.
+#[must_use]
+pub fn depth_vk_format(format: DepthStencilFormat) -> vk::Format {
+    match format {
+        DepthStencilFormat::Depth24Stencil8 => vk::Format::D24_UNORM_S8_UINT,
+        DepthStencilFormat::Depth32FloatStencil8 => vk::Format::D32_SFLOAT_S8_UINT,
+    }
+}
+
+/// The depth and stencil format that `format` is, if it is one.
+#[must_use]
+pub fn depth_stencil_format(format: vk::Format) -> Option<DepthStencilFormat> {
+    DepthStencilFormat::BY_PREFERENCE.into_iter().find(|candidate| depth_vk_format(*candidate) == format)
 }

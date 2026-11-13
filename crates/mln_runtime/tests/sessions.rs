@@ -486,6 +486,90 @@ fn work_sent_after_a_resize_waits_for_it() {
     assert_eq!(before + 1, snapshot.generation);
 }
 
+/// A barrier on a core worker can finish before `barrier` returns, and a
+/// callback attached after it would then run on the sending thread: the
+/// callback of `send_then` runs on the session's thread every time.
+#[test]
+fn send_then_delivers_on_the_sessions_thread() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    let sender = std::thread::current().id();
+    for _ in 0..50 {
+        let (sent, received) = channel();
+        session
+            .send_then(RenderSession::barrier, move |result| sent.send((result, std::thread::current().id())).unwrap())
+            .unwrap();
+        let (result, thread) = received.recv_timeout(TIMEOUT).unwrap();
+        result.unwrap();
+        assert_ne!(sender, thread);
+    }
+    wait(session.detach());
+    // A failed send runs no callback.
+    let error = session.send_then(RenderSession::barrier, |_| panic!("the callback ran")).unwrap_err();
+    assert_eq!(ErrorKind::InvalidState, error.kind);
+}
+
+/// An attach, resize, detach or release on a core worker can finish before
+/// its call returns too, and a callback attached after it would then run on
+/// the sending thread: the callbacks of `attach_then` and `send_then` run on
+/// the session's thread every time, even when the sender is slow to attach
+/// them, as a host's thread that is preempted is.
+#[test]
+fn attach_then_and_send_then_deliver_the_lifecycle_on_the_sessions_thread() {
+    // Long enough for the session's thread to finish first.
+    const SLOW: std::time::Duration = std::time::Duration::from_millis(50);
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let sender = std::thread::current().id();
+    let (sent, received) = channel();
+    let delivered = move |name: &'static str| {
+        let sent = sent.clone();
+        move |result: Result<(), mln_runtime::Error>| sent.send((name, result, std::thread::current().id())).unwrap()
+    };
+    let check = || {
+        let (name, result, thread) = received.recv_timeout(TIMEOUT).unwrap();
+        result.unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        assert_ne!(sender, thread, "{name} ran on the sending thread");
+    };
+    // Sends with `send`, then takes a while to attach the callback.
+    let slowly = |send: fn(&RenderSession) -> Result<mln_runtime::Completion<()>, mln_runtime::Error>| {
+        move |session: &RenderSession| {
+            let completion = send(session)?;
+            std::thread::sleep(SLOW);
+            Ok(completion)
+        }
+    };
+    for round in 0..4 {
+        let session = map
+            .attach_then(offscreen(SIZE), AttachOptions::default(), |session, attached| {
+                std::thread::sleep(SLOW);
+                attached.on_complete(delivered("attach"));
+                session.clone()
+            })
+            .unwrap();
+        check();
+        for step in 1..=2 {
+            let extent = LogicalExtent::new(Size::new(SIZE.width + step, SIZE.height), 1.0);
+            let resize = move |session: &RenderSession| {
+                let resized = session.resize(extent)?;
+                std::thread::sleep(SLOW);
+                Ok(resized)
+            };
+            let resized = delivered("resize");
+            session.send_then(resize, move |result| resized(result.map(drop))).unwrap();
+            check();
+        }
+        // Detached on even rounds, and released attached on odd ones.
+        if round % 2 == 0 {
+            session.send_then(slowly(RenderSession::detach), delivered("detach")).unwrap();
+        } else {
+            session.send_then(slowly(RenderSession::release), delivered("release")).unwrap();
+        }
+        check();
+    }
+}
+
 // MARK: - Lifecycle
 
 #[test]
@@ -619,6 +703,26 @@ fn abandon_ends_pending_work_and_frees_the_map_at_once() {
 }
 
 #[test]
+fn an_abandon_from_a_completion_that_the_worker_delivers_is_busy() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    demand(&session, DemandMode::Force, 1);
+    take_one(&session);
+    let (sender, receiver) = channel();
+    let abandoned = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, abandoned.abandon().map_err(|error| error.kind)));
+    });
+    let (result, abandon) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(Err(ErrorKind::Busy), abandon);
+    assert_eq!(RenderSessionState::Attached, session.snapshot().unwrap().state);
+    // Off the worker's thread, the abandon waits for its call.
+    assert_eq!(0, session.abandon().unwrap());
+}
+
+#[test]
 fn an_abandon_that_keeps_graphics_counts_the_renderer_and_its_backend() {
     let runtime = runtime();
     let map = red_map(&runtime);
@@ -695,6 +799,30 @@ fn maintenance_work_runs_in_order_with_frames() {
     assert_eq!(1, result.len());
     assert_eq!((2, FrameDisposition::Rendered), (result[0].token.unwrap(), result[0].disposition));
     assert_eq!(ErrorKind::Unsupported, session.release_target().unwrap_err().kind);
+}
+
+#[test]
+fn maintenance_work_waits_behind_a_demand_for_map_commands() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+    let open = hold_runtime(&map);
+    let zoomed = zoom(&map, 2.0);
+    demand(&session, DemandMode::Force, 1);
+    // The work completes once the demand rendered, which waits for the zoom
+    // that the held runtime hasn't applied yet.
+    let (sender, receiver) = channel();
+    let drained = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, drained.drain_frame_results().unwrap()));
+    });
+    drop(open);
+    zoomed.wait().unwrap();
+    let (result, results) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(1, results.len(), "{results:?}");
+    assert_eq!((1, FrameDisposition::Rendered), (results[0].token.unwrap(), results[0].disposition));
 }
 
 #[test]

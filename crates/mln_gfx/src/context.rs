@@ -48,6 +48,10 @@ pub trait Context: Any {
 
     fn begin_frame(&self);
     fn end_frame(&self);
+    /// Waits until the GPU no longer uses what the work submitted so far
+    /// used, on the backends where dropping an object the GPU still uses is
+    /// unsafe, so that a custom layer can destroy its objects.
+    fn finish(&self) {}
     fn perform_cleanup(&self);
     fn reduce_memory_usage(&self);
 

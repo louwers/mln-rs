@@ -23,6 +23,7 @@ mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
+mln_math.workspace = true
 mln_sprite.workspace = true
 mln_storage.workspace = true
 mln_style_types.workspace = true

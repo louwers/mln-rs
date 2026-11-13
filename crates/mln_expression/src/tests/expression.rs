@@ -163,3 +163,24 @@ fn evaluate_feature_with_context_uses_every_input() {
     // Without a canonical tile, the feature has no tile geometry to test.
     assert_eq!(evaluate_feature_with_context(&*within, &feature, params), Ok(Value::Bool(false)));
 }
+
+// `upcase` and `downcase` map case as JS's `toUpperCase` and `toLowerCase`
+// do: Unicode's full, locale-independent mappings.
+#[test]
+fn upcase_and_downcase_use_full_case_mapping() {
+    let evaluate = |op: &str, text: &str| {
+        let document = serde_json::json!([op, text]);
+        let mut ctx = ParsingContext::new();
+        let parsed = ctx.parse_expression(&Convertible::from(&document), None).expect("parsed");
+        parsed.evaluate(&EvaluationContext::default())
+    };
+    let string = |s: &str| Ok(Value::String(s.to_owned()));
+
+    assert_eq!(evaluate("upcase", "weißkopfseeadler"), string("WEISSKOPFSEEADLER"));
+    assert_eq!(evaluate("upcase", "bênção ǆ"), string("BÊNÇÃO Ǆ"));
+    assert_eq!(evaluate("upcase", "Ὀδυσσεύς"), string("ὈΔΥΣΣΕΎΣ"));
+    assert_eq!(evaluate("downcase", "STRASSE AZƏRBAYCAN"), string("strasse azərbaycan"));
+    // A capital sigma lowercases to the final form only at the end of a word.
+    assert_eq!(evaluate("downcase", "ὈΔΥΣΣΕΎΣ"), string("ὀδυσσεύς"));
+    assert_eq!(evaluate("downcase", "Σ"), string("σ"));
+}

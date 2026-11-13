@@ -17,16 +17,6 @@ use mln_util::constants::EXTENT;
 pub const NORTH_POLE_Y: i16 = -32768;
 pub const SOUTH_POLE_Y: i16 = 32767;
 
-/// `std::min(a, b)`: `b < a ? b : a`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)`: `a < b ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SubdivisionResult {
     /// Flattened `x, y, x, y, ...` positions; every index below refers into
@@ -136,10 +126,10 @@ impl Subdivider {
             for i in 0..3 {
                 triangle[i * 2] = f64::from(self.vertices[triangle_indices[i] as usize * 2]);
                 triangle[i * 2 + 1] = f64::from(self.vertices[triangle_indices[i] as usize * 2 + 1]);
-                min_x = std_min(min_x, triangle[i * 2]);
-                max_x = std_max(max_x, triangle[i * 2]);
-                min_y = std_min(min_y, triangle[i * 2 + 1]);
-                max_y = std_max(max_y, triangle[i * 2 + 1]);
+                min_x = f64::min(min_x, triangle[i * 2]);
+                max_x = f64::max(max_x, triangle[i * 2]);
+                min_y = f64::min(min_y, triangle[i * 2 + 1]);
+                max_y = f64::max(max_y, triangle[i * 2 + 1]);
             }
             if min_x == max_x || min_y == max_y {
                 continue;
@@ -187,8 +177,8 @@ impl Subdivider {
 
             let t_top = (cell_row_y_top - a_y) / dir_y;
             let t_bottom = (cell_row_y_bottom - a_y) / dir_y;
-            let t_enter = std_min(t_top, t_bottom);
-            let t_exit = std_max(t_top, t_bottom);
+            let t_enter = f64::min(t_top, t_bottom);
+            let t_exit = f64::max(t_top, t_bottom);
 
             if (!is_parallel_x && (t_enter >= 1.0 || t_exit <= 0.0))
                 || (is_parallel_x && (a_y < cell_row_y_top || a_y > cell_row_y_bottom))
@@ -203,8 +193,8 @@ impl Subdivider {
                 ring.push(self.vertex_to_index(a_x + dir_x * t_enter, a_y + dir_y * t_enter));
             }
 
-            let enter_x = a_x + dir_x * std_max(t_enter, 0.0);
-            let exit_x = a_x + dir_x * std_min(t_exit, 1.0);
+            let enter_x = a_x + dir_x * f64::max(t_enter, 0.0);
+            let exit_x = a_x + dir_x * f64::min(t_exit, 1.0);
 
             if !is_parallel_y {
                 self.generate_intra_edge_vertices(&mut ring, a_x, a_y, b_x, b_y, enter_x, exit_x);
@@ -250,8 +240,8 @@ impl Subdivider {
         let dir_x = b_x - a_x;
         let dir_y = b_y - a_y;
         let is_parallel_x = dir_y == 0.0;
-        let left_x = if is_parallel_x { std_min(a_x, b_x) } else { std_min(enter_x, exit_x) };
-        let right_x = if is_parallel_x { std_max(a_x, b_x) } else { std_max(enter_x, exit_x) };
+        let left_x = if is_parallel_x { f64::min(a_x, b_x) } else { f64::min(enter_x, exit_x) };
+        let right_x = if is_parallel_x { f64::max(a_x, b_x) } else { f64::max(enter_x, exit_x) };
         let left_cell_x = (left_x / self.cell_size).floor() as i32 + 1;
         let right_cell_x = (right_x / self.cell_size).ceil() as i32 - 1;
         let left_to_right = if is_parallel_x { a_x < b_x } else { enter_x < exit_x };
@@ -301,8 +291,8 @@ impl Subdivider {
         if !is_parallel_x2 {
             let t2_top = (cell_row_y_top - b_y) / dir2_y;
             let t2_bottom = (cell_row_y_bottom - b_y) / dir2_y;
-            let t2_enter = std_min(t2_top, t2_bottom);
-            next_edge_enters = t2_enter < 1.0 && std_max(t2_top, t2_bottom) > 0.0;
+            let t2_enter = f64::min(t2_top, t2_bottom);
+            next_edge_enters = t2_enter < 1.0 && f64::max(t2_top, t2_bottom) > 0.0;
             enter_x = b_x + dir2_x * t2_enter;
         }
         if !next_edge_enters {
@@ -310,10 +300,10 @@ impl Subdivider {
             let dir3_y = a_y - c_y;
             let t3_top = (cell_row_y_top - c_y) / dir3_y;
             let t3_bottom = (cell_row_y_bottom - c_y) / dir3_y;
-            enter_x = c_x + dir3_x * std_min(t3_top, t3_bottom);
+            enter_x = c_x + dir3_x * f64::min(t3_top, t3_bottom);
         }
-        let left_cell_x = (std_min(enter_x, exit_x) / self.cell_size).floor() as i32 + 1;
-        let right_cell_x = (std_max(enter_x, exit_x) / self.cell_size).ceil() as i32 - 1;
+        let left_cell_x = (f64::min(enter_x, exit_x) / self.cell_size).floor() as i32 + 1;
+        let right_cell_x = (f64::max(enter_x, exit_x) / self.cell_size).ceil() as i32 - 1;
         let left_to_right = exit_x < enter_x;
 
         let boundary_y = if dir_y > 0.0 { cell_row_y_bottom } else { cell_row_y_top };

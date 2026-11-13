@@ -5,9 +5,6 @@
 // `std::normal_distribution<float>`. The engine is fully specified by the
 // standard; the distributions are libstdc++'s (x86-64 Linux, GCC 11 and
 // later), ported below so the atlas sees the same dash arrays as in C++.
-// The mt19937 and uniform_int code is the one of
-// tools/render-test/src/std_random.rs (checked there against the C++
-// library by //difftest/render_test).
 
 use mln_renderer::line_atlas::{LineAtlas, LinePatternCap};
 

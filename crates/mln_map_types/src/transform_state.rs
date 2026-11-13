@@ -68,16 +68,6 @@ fn round_for_accuracy(x: f64) -> f64 {
     if diff < K_EPSILON && diff > 0.0 { round_x } else { x }
 }
 
-/// `std::min` (returns `a` unless `b < a`).
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max` (returns `a` unless `a < b`).
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// `std::modf` fractional part (same sign as `x`).
 fn modf_fraction(x: f64) -> f64 {
     if x.is_infinite() {
@@ -468,12 +458,10 @@ impl TransformState {
         self.projection.get_projection_data(self, tile_id, mercator_matrix)
     }
 
-    /// `getProjMatrix(mat4&, uint16_t nearZ = 1, bool aligned = false)`.
-    pub fn get_proj_matrix(&self, proj_matrix: &mut Mat4, near_z: u16, aligned: bool) {
-        if self.size.is_empty() {
-            return;
-        }
-
+    /// The distance from the camera to the far plane of
+    /// [`get_proj_matrix`](Self::get_proj_matrix), in pixels at the zoom:
+    /// past the farthest point of the ground that the view shows.
+    pub fn get_far_z(&self) -> f64 {
         let camera_to_center_distance = f64::from(self.get_camera_to_center_distance());
         let offset = self.get_center_offset();
 
@@ -499,7 +487,19 @@ impl TransformState {
         let furthest_distance = camera_to_sea_level_distance / (1.0 - tan_multiple);
         // Add a bit extra to avoid precision problems when a fragment's
         // distance is exactly `furthestDistance`
-        let far_z = furthest_distance * 1.01;
+        furthest_distance * 1.01
+    }
+
+    /// `getProjMatrix(mat4&, uint16_t nearZ = 1, bool aligned = false)`.
+    pub fn get_proj_matrix(&self, proj_matrix: &mut Mat4, near_z: u16, aligned: bool) {
+        if self.size.is_empty() {
+            return;
+        }
+
+        let offset = self.get_center_offset();
+        let width = f64::from(self.size.width);
+        let height = f64::from(self.size.height);
+        let far_z = self.get_far_z();
 
         let camera = self.camera_state();
         let world_to_camera = camera.get_world_to_camera(self.scale, self.viewport_mode == ViewportMode::FlippedY);
@@ -642,7 +642,7 @@ impl TransformState {
 
         // Compute center point of the map
         let mercator_point = Point::new(position[0] + dx * travel, position[1] + dy * travel);
-        let zoom = std_min(zoom, self.scale_zoom(self.max_scale));
+        let zoom = f64::min(zoom, self.scale_zoom(self.max_scale));
         self.set_lat_lng_zoom(&lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped), zoom);
 
         let mercator_z = position[2] + dz * travel;
@@ -1009,9 +1009,9 @@ impl TransformState {
         )
     }
 
-    /// `static_cast<uint8_t>(std::max(0.0, getZoom()))`.
+    /// The zoom level, rounded down and clamped to the `u8` range.
     pub fn get_integer_zoom(&self) -> u8 {
-        std_max(0.0, self.get_zoom()) as u8
+        f64::max(0.0, self.get_zoom()) as u8
     }
 
     pub fn get_zoom_fraction(&self) -> f64 {
@@ -1436,7 +1436,7 @@ impl TransformState {
         // range toward a pole as far as the zoom allows.
         if self.is_globe_rendering() {
             let max_latitude = VerticalPerspectiveProjection::max_latitude(self, self.scale_zoom(*scale));
-            let max_y = Projection::world_size(*scale) / M2PI * mln_math::asinh(mln_math::deg2rad(max_latitude).tan());
+            let max_y = Projection::world_size(*scale) / M2PI * mln_math::deg2rad(max_latitude).tan().asinh();
             *y = mln_math::clamp_f64(*y, -max_y, max_y);
             return;
         }
@@ -1448,16 +1448,16 @@ impl TransformState {
         // areas on the Y axis.
         let ratio_y = (if self.rotated_north() { width } else { height }) / TILE_SIZE_D;
         // util::max: fmax
-        *scale = mln_math::max_f64(*scale, ratio_y);
+        *scale = mln_math::fmax(*scale, ratio_y);
 
         // Constrain min/max pan to avoid showing off-world areas on the Y axis.
         let max_y = (*scale * TILE_SIZE_D - (if self.rotated_north() { width } else { height })) / 2.0;
-        *y = std_max(-max_y, std_min(*y, max_y));
+        *y = f64::max(-max_y, f64::min(*y, max_y));
 
         if self.constrain_mode == ConstrainMode::WidthAndHeight {
             // Constrain min/max pan to avoid showing off-world areas on the X axis.
             let max_x = (*scale * TILE_SIZE_D - (if self.rotated_north() { height } else { width })) / 2.0;
-            *x = std_max(-max_x, std_min(*x, max_x));
+            *x = f64::max(-max_x, f64::min(*x, max_x));
         }
     }
 
@@ -1611,7 +1611,7 @@ impl TransformState {
         let sw = Projection::project(&self.bounds.southwest(), 1.0);
         let scale_x = f64::from(self.size.width) / (ne.x - sw.x);
         let scale_y = f64::from(self.size.height) / (sw.y - ne.y);
-        Some(self.scale_zoom(std_max(scale_x, scale_y)))
+        Some(self.scale_zoom(f64::max(scale_x, scale_y)))
     }
 
     /// Viewport center offset, from [size.width / 2, size.height / 2],
@@ -1708,7 +1708,7 @@ impl TransformState {
         let point = ScreenCoordinate::new(
             -constrained.longitude() * self.bc,
             if self.is_globe_rendering() {
-                self.cc * mln_math::asinh(latitude.tan())
+                self.cc * latitude.tan().asinh()
             } else {
                 0.5 * self.cc * ((1.0 + f) / (1.0 - f)).ln()
             },
@@ -1765,5 +1765,25 @@ impl TransformState {
         let mut top_point: Vec4 = [0.0; 4];
         matrix::transform_mat4(&mut top_point, &p, &self.get_coord_matrix());
         top_point[3] as f32 / self.get_camera_to_center_distance()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::constants::LATITUDE_MAX;
+
+    /// The globe's `asinh(tan(φ))` and the Mercator branch's
+    /// `0.5 * ln((1 + sin φ) / (1 - sin φ))` give the same y inside the
+    /// Mercator range, so the center doesn't jump when the projection
+    /// changes.
+    #[test]
+    fn globe_and_mercator_latitude_to_y_agree() {
+        for latitude in [-LATITUDE_MAX, -60.0, -1e-9, 0.0, 30.0, 80.0, LATITUDE_MAX] {
+            let phi = mln_math::deg2rad(latitude);
+            let globe = phi.tan().asinh();
+            let f = phi.sin();
+            let mercator = 0.5 * ((1.0 + f) / (1.0 - f)).ln();
+            assert!((globe - mercator).abs() <= 1e-12, "{latitude}: {globe} vs {mercator}");
+        }
     }
 }

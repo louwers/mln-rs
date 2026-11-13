@@ -20,7 +20,6 @@
 mod error;
 pub mod geometry_tile_data;
 pub mod mlt;
-pub mod stl_algo;
 pub mod vector_mlt_tile_data;
 pub mod vector_mvt_tile_data;
 

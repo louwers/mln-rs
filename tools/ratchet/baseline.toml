@@ -137,7 +137,6 @@
 "crates/mln_text/src/icu/ushape.rs" = 1
 "crates/mln_text/src/shaping.rs" = 6
 "crates/mln_text/src/tagged_string.rs" = 4
-"crates/mln_util/src/cstdlib.rs" = 2
 "crates/mln_util/src/geo.rs" = 3
 "crates/mln_util/src/image.rs" = 1
 "crates/mln_util/src/projection.rs" = 2
@@ -223,7 +222,6 @@
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 1
 "crates/mln_renderer/src/tile_parameters.rs" = 1
 "crates/mln_renderer/src/update_parameters.rs" = 1
-"crates/mln_renderer/src/util/tile_cover.rs" = 1
 "crates/mln_storage/src/asset_file_source.rs" = 1
 "crates/mln_storage/src/database_file_source.rs" = 1
 "crates/mln_storage/src/local_file_source.rs" = 1
@@ -244,7 +242,6 @@
 "crates/mln_style/src/sources/tile_source.rs" = 1
 "crates/mln_style/src/style_impl.rs" = 1
 "crates/mln_style/src/tests/property_expression.rs" = 1
-"crates/mln_style_types/src/position.rs" = 1
 "crates/mln_text/src/ft/face.rs" = 9
 "crates/mln_text/src/rasterize.rs" = 3
 "crates/mln_text/src/tagged_string.rs" = 1
@@ -268,7 +265,6 @@
 "tools/render-test/src/parser.rs" = 5
 "tools/render-test/src/render_test.rs" = 2
 "tools/render-test/src/runner.rs" = 10
-"tools/render-test/src/std_random.rs" = 1
 "tools/render-test/src/tests.rs" = 1
 "vendor/geojson/src/geojson_impl.rs" = 5
 "vendor/geojson/src/lib.rs" = 1

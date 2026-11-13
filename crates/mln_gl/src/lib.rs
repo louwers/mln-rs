@@ -27,16 +27,20 @@
 //! is EGL's, so a desktop context of another platform draws through it too.
 //!
 //! A [`RendererBackend`] renders on a [`Device`], an EGL share group or one
-//! context that its backends take turns in, into an `OffscreenTarget`'s
-//! framebuffer. A `SurfaceTarget` presents to a Wayland, X11 or Android
-//! window through EGL from a context of the window's display, and a
-//! `CanvasTarget` draws into the canvas of a WebGL2 context.
+//! context that its backends take turns in, or on Windows a WGL share group,
+//! into an `OffscreenTarget`'s framebuffer. A `SurfaceTarget` presents to a
+//! Wayland, X11 or Android window through EGL from a context of the window's
+//! display, or to a Win32 window through WGL from a context of its own, and a
+//! `CanvasTarget` draws into the canvas of a WebGL2 context. An
+//! `ExportedTarget` renders into dmabufs, or on Android into hardware
+//! buffers, that it allocates.
 
 // OpenGL through glow is the FFI here.
 #![allow(unsafe_code)]
 
 pub mod command_encoder;
 pub mod context;
+pub mod custom_layer;
 pub mod draw_target;
 pub mod drawable;
 pub mod drawable_builder;
@@ -62,24 +66,31 @@ pub mod canvas_target;
 pub mod device;
 #[cfg(not(target_arch = "wasm32"))]
 mod egl;
-#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod exported_target;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
+#[cfg(windows)]
+mod wgl;
+#[cfg(windows)]
+pub mod wgl_surface_target;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSurfaceTarget};
 #[cfg(target_arch = "wasm32")]
 pub use canvas_target::CanvasTarget;
 pub use context::Context;
+pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 #[cfg(not(target_arch = "wasm32"))]
 pub use device::{Api, Device, DeviceOptions};
-#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 pub use exported_target::ExportedTarget;
 #[cfg(not(target_arch = "wasm32"))]
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use surface_target::SurfaceTarget;
+#[cfg(windows)]
+pub use wgl_surface_target::SurfaceTarget;

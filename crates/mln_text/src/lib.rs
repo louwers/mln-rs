@@ -17,17 +17,14 @@ pub mod glyph_pbf;
 pub mod harfbuzz;
 pub mod harfbuzz_impl;
 pub mod hb_ft;
-pub mod hb_ucd;
 pub mod icu;
 pub mod local_glyph_rasterizer;
-pub mod shaping;
-pub mod tagged_string;
-pub mod woff;
-#[rustfmt::skip]
-mod hb_ucd_table;
 mod rasterize;
+pub mod shaping;
 #[cfg(test)]
 mod shaping_test;
+pub mod tagged_string;
+pub mod woff;
 
 pub use bidi::{BiDi, StyledText, apply_arabic_shaping, starts_right_to_left};
 pub use freetype::{FreeTypeFace, FreeTypeLibrary};

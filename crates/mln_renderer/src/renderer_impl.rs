@@ -10,10 +10,12 @@ use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameTarget, Handoff, RenderPassDescriptor, RendererBackend, ScissorRect, ShaderRegistry};
-use mln_map_types::MapDebugOptions;
+use mln_map_types::{MapDebugOptions, MapView};
+use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_util::Color;
 
+use crate::frame_projection::{self, FrameProjection};
 use crate::paint_parameters::PaintParameters;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
@@ -37,6 +39,8 @@ pub struct RendererImpl {
     render_state: RenderState,
     frame_count: u64,
     pub style_loaded: bool,
+    /// Where the last frame drew the map.
+    frame_projection: Option<FrameProjection>,
     // TODO(port): dynamicTextureAtlas (symbols, M5).
 }
 
@@ -58,6 +62,7 @@ impl RendererImpl {
             render_state: RenderState::Never,
             frame_count: 0,
             style_loaded: false,
+            frame_projection: None,
         }
     }
 
@@ -255,6 +260,26 @@ impl RendererImpl {
         let num_sublayers = PaintParameters::NUM_SUBLAYERS as usize;
         let depth_epsilon = PaintParameters::DEPTH_EPSILON;
 
+        // - CUSTOM LAYER PRERENDER ------------------------------------------
+        // Custom layers record their own work before the first pass, with the
+        // projection that the frame's result reports. The 3D layers draw into
+        // depth from 0 to the passes' depth range size, which the layer
+        // groups' count sets.
+        let frame_projection = frame_projection::compute(
+            &render_tree_parameters.transform_params,
+            1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon,
+            context.backend_type(),
+        );
+        parameters.custom_layer_frame = Some(CustomLayerFrame {
+            view: MapView::from_state(state, pixel_ratio),
+            projection: frame_projection,
+            width: renderable_size.width,
+            height: renderable_size.height,
+        });
+        for item in render_tree.get_layer_render_item_map().values() {
+            item.layer.borrow_mut().prerender(&parameters, &*image);
+        }
+
         // - 3D PASS -------------------------------------------------------
         // Renders any 3D layers bottom-to-top to unique FBOs with texture
         // attachments, but share the same depth rbo between them.
@@ -423,7 +448,21 @@ impl RendererImpl {
         }
 
         self.frame_count += 1;
+        self.frame_projection = Some(frame_projection);
         Some(handoff)
+    }
+
+    /// Where the last frame drew the map, or `None` before the first.
+    #[must_use]
+    pub fn frame_projection(&self) -> Option<FrameProjection> {
+        self.frame_projection
+    }
+
+    /// Tells the hosts of the custom layers that the renderer's graphics
+    /// objects are lost, and lets go of them, as when the session's device
+    /// goes away before the renderer.
+    pub fn lose_custom_layers(&mut self) {
+        self.orchestrator.visit_render_layers(|layer| layer.lose_context());
     }
 
     pub fn reduce_memory_use(&mut self) {

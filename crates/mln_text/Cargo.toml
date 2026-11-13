@@ -25,6 +25,7 @@ serde.workspace = true
 skrifa.workspace = true
 thiserror.workspace = true
 unicode-bidi.workspace = true
+unicode-properties.workspace = true
 wuff.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]

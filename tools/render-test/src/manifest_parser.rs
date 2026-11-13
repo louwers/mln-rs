@@ -8,7 +8,6 @@ use crate::filesystem;
 use crate::log::{self, Event};
 use crate::metadata::TestPaths;
 use crate::parser::read_json;
-use crate::std_random::{Mt19937, SeedSeq, shuffle};
 
 /// `Manifest`.
 #[derive(Clone, Debug, Default)]
@@ -53,11 +52,10 @@ impl Manifest {
         &self.probes
     }
 
-    /// `doShuffle(seed)`: the libstdc++ order (see `std_random.rs`).
+    /// Shuffles the tests into an order that depends only on `seed`. It is
+    /// not the order the C++ runner picks for the same seed.
     pub fn do_shuffle(&mut self, seed: u32) {
-        let sequence = SeedSeq::new(&[seed]);
-        let mut shuffler = Mt19937::from_seed_seq(&sequence);
-        shuffle(&mut self.test_paths, &mut shuffler);
+        fastrand::Rng::with_seed(u64::from(seed)).shuffle(&mut self.test_paths);
     }
 }
 

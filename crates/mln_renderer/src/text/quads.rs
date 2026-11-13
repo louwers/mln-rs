@@ -1,7 +1,7 @@
 // Ports src/mln/text/quads.hpp and src/mln/text/quads.cpp.
 
 use geometry::Point;
-use mln_math::{deg2radf, max_f32, min_f32};
+use mln_math::{deg2radf, fmaxf, fminf};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::image::{ImageMap, ImagePosition, ImageStretches, RectU16};
 use mln_style_types::{AlignmentType, SymbolPlacementType};
@@ -109,7 +109,7 @@ pub fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
 pub fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
     let mut sum: f32 = 0.0;
     for stretch in stretches {
-        sum += max_f32(min, min_f32(max, stretch.1)) - max_f32(min, min_f32(max, stretch.0));
+        sum += fmaxf(min, fminf(max, stretch.1)) - fmaxf(min, fminf(max, stretch.0));
     }
     sum
 }

@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::{ConsumerSync, GpuSync, SyncKind, SyncKinds};
+use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::size::Size;
 
@@ -23,6 +23,10 @@ use crate::renderer_backend::RendererBackend;
 pub struct BorrowedTextures {
     pub textures: Vec<wgpu::Texture>,
     pub size: Size,
+    /// The host's textures that frames draw their depth and stencil into
+    /// and store, one for each of `textures`, of their size and kind and one
+    /// depth and stencil format, or none for depth of the target's own.
+    pub depth_textures: Vec<wgpu::Texture>,
 }
 
 impl BorrowedTextures {
@@ -35,21 +39,45 @@ impl BorrowedTextures {
         (kinds, kinds)
     }
 
+    /// The formats of the depth textures that frames draw into on `device`.
+    #[must_use]
+    pub fn depth_stencil_formats(device: &wgpu::Device) -> DepthStencilFormats {
+        let formats = DepthStencilFormats::of(&[DepthStencilFormat::Depth24Stencil8]);
+        if device.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+            formats.with(DepthStencilFormat::Depth32FloatStencil8)
+        } else {
+            formats
+        }
+    }
+
     /// Checks the textures against their ring.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// texture of another size than the ring's, of another format than the
-    /// first, or that a frame can't render into.
+    /// first, or that a frame can't render into, for depth textures that
+    /// aren't one for each texture, and with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for depth textures of
+    /// no depth and stencil format.
     pub fn check(&self) -> Result<(), Error> {
         let Some(first) = self.textures.first() else {
             return Err(Error::invalid_argument("a ring needs at least one texture"));
         };
-        for texture in &self.textures {
+        if let Some(depth) = self.depth_textures.first() {
+            if self.depth_textures.len() != self.textures.len() {
+                return Err(Error::invalid_argument("a ring's depth textures must be one for each of its textures"));
+            }
+            if depth_stencil_format(depth.format()).is_none() {
+                return Err(Error::unsupported("a ring's depth textures must have a depth and stencil format"));
+            }
+        }
+        for texture in self.textures.iter().chain(&self.depth_textures) {
             let size = texture.size();
             if (size.width, size.height) != (self.size.width, self.size.height) {
                 return Err(Error::invalid_argument("each texture's size must match the ring's physical size"));
             }
-            if texture.format() != first.format() {
+            let kin =
+                if texture.format().is_depth_stencil_format() { self.depth_textures.first() } else { Some(first) };
+            if Some(texture.format()) != kin.map(wgpu::Texture::format) {
                 return Err(Error::invalid_argument("the ring's textures must share a format"));
             }
             if !texture.usage().contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
@@ -68,6 +96,20 @@ impl BorrowedTextures {
 
     fn format(&self) -> Option<wgpu::TextureFormat> {
         self.textures.first().map(wgpu::Texture::format)
+    }
+
+    fn depth_format(&self) -> Option<wgpu::TextureFormat> {
+        self.depth_textures.first().map(wgpu::Texture::format)
+    }
+}
+
+/// The depth and stencil format that `format` is, if it is one.
+#[must_use]
+pub fn depth_stencil_format(format: wgpu::TextureFormat) -> Option<DepthStencilFormat> {
+    match format {
+        wgpu::TextureFormat::Depth24PlusStencil8 => Some(DepthStencilFormat::Depth24Stencil8),
+        wgpu::TextureFormat::Depth32FloatStencil8 => Some(DepthStencilFormat::Depth32FloatStencil8),
+        _ => None,
     }
 }
 
@@ -92,6 +134,9 @@ impl TargetResource for Resource {
     }
 
     fn get_depth_stencil_texture_view(&self) -> Option<wgpu::TextureView> {
+        if let Some(depth) = self.textures.borrow().depth_textures.get(self.selected.get()) {
+            return Some(depth.create_view(&wgpu::TextureViewDescriptor::default()));
+        }
         let size = self.textures.borrow().size;
         let mut depth_stencil = self.depth_stencil.borrow_mut();
         if depth_stencil.as_ref().is_none_or(|(made, _)| *made != size) {
@@ -111,7 +156,7 @@ impl TargetResource for Resource {
     }
 
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        Some(self.depth_stencil_format)
+        Some(self.textures.borrow().depth_format().unwrap_or(self.depth_stencil_format))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -197,9 +242,11 @@ impl BorrowedTarget {
         if textures.textures.len() != self.depth() {
             return Err(Error::invalid_argument("a ring keeps its depth"));
         }
-        if textures.format() != self.resource.textures.borrow().format() {
-            return Err(Error::unsupported("a ring keeps its format"));
+        let current = self.resource.textures.borrow();
+        if (textures.format(), textures.depth_format()) != (current.format(), current.depth_format()) {
+            return Err(Error::unsupported("a ring keeps its formats, and its depth textures or their lack"));
         }
+        drop(current);
         textures.check()?;
         self.target.set_size(textures.size);
         *self.resource.textures.borrow_mut() = textures;

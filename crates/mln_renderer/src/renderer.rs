@@ -93,6 +93,13 @@ impl Renderer {
         impl_.render(&render_tree, update_parameters, target)
     }
 
+    /// Where the last frame that [`render`](Self::render) drew put the map,
+    /// or `None` before the first.
+    #[must_use]
+    pub fn frame_projection(&self) -> Option<crate::FrameProjection> {
+        self.impl_ref().frame_projection()
+    }
+
     // query: `Err` is the exception C++ throws out of the query (a
     // malformed tile).
     /// `queryRenderedFeatures(const ScreenLineString&, const RenderedQueryOptions&)`.
@@ -213,6 +220,13 @@ impl Renderer {
     #[must_use]
     pub fn get_tile_cache_enabled(&self) -> bool {
         self.impl_ref().orchestrator.get_tile_cache_enabled()
+    }
+
+    /// Tells the hosts of the custom layers that the renderer's graphics
+    /// objects are lost, so that they forget theirs, and lets go of them.
+    /// Call it before the renderer goes when its device or target went first.
+    pub fn lose_custom_layers(&mut self) {
+        self.impl_mut().lose_custom_layers();
     }
 
     pub fn reduce_memory_use(&mut self) {

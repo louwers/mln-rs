@@ -135,6 +135,28 @@ fn filters_tests_by_regex_search_on_the_path() {
 }
 
 #[test]
+fn shuffle_order_depends_only_on_the_seed() {
+    let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, String::new()).unwrap();
+    let ids = |m: &crate::manifest_parser::Manifest| -> Vec<String> {
+        m.get_test_paths().iter().map(|t| t.style_path.clone()).collect()
+    };
+    let shuffled = |seed| {
+        let mut m = manifest.clone();
+        m.do_shuffle(seed);
+        ids(&m)
+    };
+    let original = ids(&manifest);
+    let order = shuffled(1);
+    assert_eq!(order, shuffled(1));
+    assert_ne!(order, original);
+    assert_ne!(order, shuffled(2));
+    let (mut sorted, mut original_sorted) = (order.clone(), original);
+    sorted.sort_unstable();
+    original_sorted.sort_unstable();
+    assert_eq!(sorted, original_sorted);
+}
+
+#[test]
 fn parses_the_cpp_linux_manifest() {
     let manifest = ManifestParser::parse_manifest(CPP_MANIFEST, "background-color".to_string()).unwrap();
     assert_eq!(manifest.get_manifest_path(), "testdata/metrics");

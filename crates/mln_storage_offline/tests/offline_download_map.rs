@@ -56,9 +56,9 @@ fn resource_offline_usage_unset() {
     // `OfflineTest test{filename_test_fs}`.
     let run_loop = RunLoop::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
-    let dir = std::env::temp_dir().to_string_lossy().into_owned();
-    let filename = format!("{dir}/offline_download.db");
-    let _ = std::fs::remove_file(&filename);
+    // A database of this run's own, which goes when the test ends.
+    let dir = tempfile::tempdir().unwrap();
+    let filename = dir.path().join("offline_download.db").to_string_lossy().into_owned();
     let db = Rc::new(RefCell::new(OfflineDatabase::new(filename.as_str())));
     let size = Rc::new(Cell::new(0u64));
 

@@ -98,6 +98,13 @@ impl Registration {
         Ok(Self { user_data, release, queue, hold, accepted: AtomicBool::new(false) })
     }
 
+    /// The user data, for a registration without a queue whose callbacks
+    /// run where the library calls them.
+    pub(crate) fn user_data(&self) -> UserData {
+        debug_assert!(self.queue.is_none());
+        self.user_data
+    }
+
     /// Takes ownership of the user data: dropping the registration from here
     /// on releases it.
     pub(crate) fn accept(&self) {

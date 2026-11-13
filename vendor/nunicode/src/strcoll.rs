@@ -3,18 +3,22 @@
 // include/libnu/strcoll_internal.h, for the configuration of the vendored
 // copy: NU_WITH_Z_COLLATION (0-terminated strings, NU_UNLIMITED limits),
 // contractions enabled (NU_DISABLE_CONTRACTIONS is not defined), and
-// NU_FOLDING_FUNCTION = nu_toupper (NU_WITH_TOFOLD is not defined).
+// NU_FOLDING_FUNCTION = nu_toupper (NU_WITH_TOFOLD is not defined). The
+// case-insensitive comparison folds with `char::to_uppercase`, Unicode's full
+// uppercase mapping, in place of `nu_toupper`.
 //
 // Strings are 0-terminated C strings: reading at an embedded NUL or at the
 // end of the slice yields codepoint 0. Every `p < limit` test of the C code
 // is true for NU_UNLIMITED and is left out (commented where it was).
 
-use crate::casemap::nu_toupper;
+use core::char::ToUppercase;
+
 use crate::ducet::nu_ducet_weight;
 use crate::utf8::nu_utf8_read;
 
-/// A compound tail (C: `const char*` into a casemapping result, or null).
-type Tail = Option<&'static [u8]>;
+/// A compound tail: the rest of a codepoint's uppercase mapping (C: a
+/// `const char*` into a casemapping result, or null).
+type Tail = Option<ToUppercase>;
 
 /// `nu_compound_read_t`: `nu_default_compound_read` or
 /// `nu_nocase_compound_read`.
@@ -22,12 +26,6 @@ type Tail = Option<&'static [u8]>;
 pub enum CompoundRead {
     Default,
     Nocase,
-}
-
-/// `nu_casemap_read` on a tail: decodes the next codepoint and advances.
-fn casemap_read(t: &'static [u8]) -> (&'static [u8], u32) {
-    let (n, u) = nu_utf8_read(t, 0);
-    (&t[n.min(t.len())..], u)
 }
 
 fn compound_read(com: CompoundRead, s: &[u8], encoded: usize, unicode: &mut u32, tail: &mut Tail) -> usize {
@@ -40,10 +38,8 @@ fn compound_read(com: CompoundRead, s: &[u8], encoded: usize, unicode: &mut u32,
         }
         CompoundRead::Nocase => {
             // re-entry with tail != 0
-            if let Some(t) = *tail {
-                let (nt, u) = casemap_read(t);
-                *tail = Some(nt);
-                *unicode = u;
+            if let Some(t) = tail {
+                *unicode = t.next().map_or(0, u32::from);
 
                 if *unicode != 0 {
                     return encoded;
@@ -61,10 +57,12 @@ fn compound_read(com: CompoundRead, s: &[u8], encoded: usize, unicode: &mut u32,
                 return p;
             }
 
-            if let Some(map) = nu_toupper(*unicode) {
-                let (nt, u) = casemap_read(map);
-                *tail = Some(nt);
-                *unicode = u;
+            // A codepoint that is not a char (from invalid UTF-8) has no
+            // mapping.
+            if let Some(c) = char::from_u32(*unicode) {
+                let mut map = c.to_uppercase();
+                *unicode = map.next().map_or(0, u32::from);
+                *tail = Some(map);
             }
 
             p
@@ -74,7 +72,7 @@ fn compound_read(com: CompoundRead, s: &[u8], encoded: usize, unicode: &mut u32,
 
 /// `_compound_weight`.
 fn compound_weight(mut w: i32, encoded: &mut usize, s: &[u8], com: CompoundRead, tail: &mut Tail) -> i32 {
-    let mut tailp = *tail;
+    let mut tailp = tail.clone();
 
     let mut p = *encoded;
     let mut new_w: i32;
@@ -101,7 +99,7 @@ fn compound_weight(mut w: i32, encoded: &mut usize, s: &[u8], com: CompoundRead,
                 debug_assert!(consumed + w > 1);
 
                 np = *encoded;
-                tailp = *tail;
+                tailp = tail.clone();
 
                 for _ in 0..consumed - w {
                     // C passes a null `unicode` here.

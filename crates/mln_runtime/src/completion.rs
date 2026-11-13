@@ -128,18 +128,26 @@ impl<T: Send + 'static> Completion<T> {
     /// resolves the completion, or at once on this thread when the result is
     /// already there.
     pub fn on_complete(self, callback: impl FnOnce(Result<T, Error>) + Send + 'static) {
-        let result = {
-            let mut state = self.shared.state.lock_unpoisoned();
-            match std::mem::replace(&mut *state, State::Taken) {
-                State::Ready(result) => result,
-                State::Pending { waker, .. } => {
-                    *state = State::Pending { waker, callback: Some(Box::new(callback)) };
-                    return;
-                }
-                State::Taken => Err(Error::invalid_state("the completion's result was already taken")),
+        if let Some((callback, result)) = self.on_complete_unless_ready(callback) {
+            callback(result);
+        }
+    }
+
+    /// As [`on_complete`](Self::on_complete), except that a result that is
+    /// already there comes back with the callback, for the caller to run.
+    pub(crate) fn on_complete_unless_ready<F: FnOnce(Result<T, Error>) + Send + 'static>(
+        self,
+        callback: F,
+    ) -> Option<(F, Result<T, Error>)> {
+        let mut state = self.shared.state.lock_unpoisoned();
+        match std::mem::replace(&mut *state, State::Taken) {
+            State::Ready(result) => Some((callback, result)),
+            State::Pending { waker, .. } => {
+                *state = State::Pending { waker, callback: Some(Box::new(callback)) };
+                None
             }
-        };
-        callback(result);
+            State::Taken => Some((callback, Err(Error::invalid_state("the completion's result was already taken")))),
+        }
     }
 }
 

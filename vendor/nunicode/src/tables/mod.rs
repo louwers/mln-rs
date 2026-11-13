@@ -5,8 +5,4 @@ pub mod ducet;
 #[rustfmt::skip]
 pub mod ducet_switch;
 #[rustfmt::skip]
-pub mod tolower;
-#[rustfmt::skip]
 pub mod tounaccent;
-#[rustfmt::skip]
-pub mod toupper;

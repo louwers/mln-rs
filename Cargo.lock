@@ -2167,6 +2167,7 @@ dependencies = [
  "raw-window-handle",
  "serde_json",
  "thiserror 2.0.21",
+ "windows-sys 0.61.2",
  "winit",
 ]
 
@@ -2362,16 +2363,19 @@ dependencies = [
  "raw-window-handle",
  "wasm-bindgen",
  "web-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "mln-rs-headless"
 version = "0.0.11"
 dependencies = [
+ "glow",
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
@@ -2386,7 +2390,11 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vulkan",
+ "mln-rs-webgpu",
+ "naga",
  "serde_json",
+ "wgpu",
 ]
 
 [[package]]
@@ -2489,6 +2497,7 @@ version = "0.0.11"
 name = "mln-rs-render-test"
 version = "0.0.11"
 dependencies = [
+ "fastrand",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",
@@ -2528,7 +2537,6 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
- "mln-rs-nunicode",
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
  "mln-rs-shelf-pack",
@@ -2651,6 +2659,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "tempfile",
 ]
 
 [[package]]
@@ -2666,6 +2675,7 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-image",
  "mln-rs-map-types",
+ "mln-rs-math",
  "mln-rs-rapidjson",
  "mln-rs-sprite",
  "mln-rs-storage",
@@ -2737,6 +2747,7 @@ dependencies = [
  "skrifa 0.49.0",
  "thiserror 2.0.21",
  "unicode-bidi",
+ "unicode-properties",
  "wasm-bindgen",
  "web-sys",
  "wuff",
@@ -2782,7 +2793,6 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",
- "mln-rs-nunicode",
  "mln-rs-rapidjson",
  "mln-rs-style",
  "mln-rs-style-types",
@@ -2791,6 +2801,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "unicode-properties",
  "web-time",
 ]
 

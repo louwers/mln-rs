@@ -15,7 +15,6 @@ use mln_util::geometry::FeatureType;
 use mln_util::math::{angle_between, cross_product, dist_f64, normal, perp};
 
 use crate::Error;
-use crate::stl_algo::nth_element;
 
 /// `signedArea` (anonymous namespace). The products are C++ `int`
 /// arithmetic, which can overflow for coordinates near the int16 limits;
@@ -117,11 +116,12 @@ pub fn classify_rings(rings: &GeometryCollection) -> Vec<GeometryCollection> {
 }
 
 /// `limitHoles`: truncate polygon to the largest `maxHoles` inner rings by
-/// area, in the order libstdc++'s `std::nth_element` leaves them.
+/// absolute area. The order of the kept rings is unspecified, and so is which
+/// of several rings tied at the cut is kept.
 pub fn limit_holes(polygon: &mut GeometryCollection, max_holes: u32) {
     let max_holes = max_holes as usize;
     if polygon.len() > 1 + max_holes {
-        nth_element(&mut polygon[1..], max_holes, |a, b| signed_area(a).abs() > signed_area(b).abs());
+        polygon[1..].select_nth_unstable_by(max_holes, |a, b| signed_area(b).abs().total_cmp(&signed_area(a).abs()));
         polygon.truncate(1 + max_holes);
     }
 }
@@ -531,9 +531,9 @@ mod tests {
         // ensure we've kept the exterior ring
         assert_eq!(original[0], polygon[0]);
 
-        // ensure we've kept the two largest interior rings
-        assert_eq!(original[1], polygon[1]);
-        assert_eq!(original[3], polygon[2]);
+        // ensure we've kept the two largest interior rings, in either order
+        assert!(polygon[1..].contains(&original[1]));
+        assert!(polygon[1..].contains(&original[3]));
     }
     fn assert_ring_near(actual: &GeometryCoordinatesFloat, expected: &[(f32, f32)]) {
         assert_eq!(actual.len(), expected.len(), "{actual:?}");

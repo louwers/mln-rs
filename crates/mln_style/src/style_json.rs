@@ -90,6 +90,31 @@ impl Style {
         self.add_layer(layer, before_layer_id)
     }
 
+    /// Adds a custom layer named `id` that `host` draws, below the layer
+    /// named `before_layer_id`, or above every layer when it is `None`.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
+    /// style isn't loaded, with `NotFound` if the style has no layer named
+    /// `before_layer_id`, and with `AlreadyExists` if it has a layer named
+    /// `id`. The style drops `host` when it fails.
+    pub fn add_custom_layer(
+        &mut self,
+        id: &str,
+        host: std::sync::Arc<dyn crate::layers::CustomLayerHost>,
+        before_layer_id: Option<&str>,
+    ) -> Result<(), Error> {
+        self.require_loaded()?;
+        if let Some(before) = before_layer_id
+            && self.get_layer(before).is_none()
+        {
+            return Err(Error::not_found(format!("before_layer_id {} does not exist", quote(before))));
+        }
+        if self.get_layer(id).is_some() {
+            return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
+        }
+        self.add_layer(Box::new(crate::layers::CustomLayer::new(id, host)), before_layer_id)
+    }
+
     /// Moves the layer named `id` below the layer named `before_layer_id`,
     /// or above every layer when it is `None`. A move below itself changes
     /// nothing.

@@ -22,6 +22,7 @@ use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
+use crate::custom_layer::CustomLayerPass;
 use crate::draw_target::as_webgpu;
 
 pub struct RenderPass {
@@ -37,6 +38,9 @@ pub struct RenderPass {
     previous_depth_stencil_format: Option<wgpu::TextureFormat>,
     color_format_updated: bool,
     depth_format_updated: bool,
+    /// The formats of the pass's attachments, for a custom layer's pipelines.
+    color_format: Option<wgpu::TextureFormat>,
+    depth_stencil_format: Option<wgpu::TextureFormat>,
 }
 
 fn debug_groups_enabled() -> bool {
@@ -61,6 +65,8 @@ impl RenderPass {
             previous_depth_stencil_format: backend.get_depth_stencil_format(),
             color_format_updated: false,
             depth_format_updated: false,
+            color_format: None,
+            depth_stencil_format: None,
         };
 
         let mut encoder_guard = command_encoder.get_encoder();
@@ -87,6 +93,7 @@ impl RenderPass {
             backend.set_color_format(Some(color_format));
             pass.color_format_updated = true;
         }
+        pass.color_format = backend.get_color_format();
 
         let color_ops = wgpu::Operations {
             load: match descriptor.clear_color {
@@ -108,6 +115,7 @@ impl RenderPass {
             backend.set_depth_stencil_format(Some(depth_format));
             pass.depth_format_updated = true;
         }
+        pass.depth_stencil_format = depth_view.as_ref().and(backend.get_depth_stencil_format());
         let depth_stencil_attachment = depth_view.as_ref().map(|view| wgpu::RenderPassDepthStencilAttachment {
             view,
             depth_ops: Some(wgpu::Operations {
@@ -227,6 +235,40 @@ impl DebugGroupTarget for RenderPass {
 }
 
 impl render_pass::RenderPass for RenderPass {
+    /// Moves the pass to the host for the call and back, and forgets the
+    /// state that the pass knew, so the next draws set what they need.
+    fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        let backend = self.context.get_backend();
+        let (Some(device), Some(queue), Some(color_format)) =
+            (backend.get_device(), backend.get_queue(), self.color_format)
+        else {
+            return false;
+        };
+        let mut encoder = self.get_encoder();
+        let Some(pass) = encoder.take() else {
+            return false;
+        };
+        let mut lent = CustomLayerPass {
+            device,
+            queue,
+            pass,
+            color_format,
+            depth_stencil_format: self.depth_stencil_format,
+            sample_count: 1,
+        };
+        f(&mut lent);
+        *encoder = Some(lent.pass);
+        drop(encoder);
+        // The global uniform buffers are a bind group that draws set again.
+        *self.state.borrow_mut() = PassState::default();
+        if let Some(mut filter) = self.state_filter() {
+            let size = self.renderable_size;
+            filter.set_viewport(0.0, 0.0, size.width as f32, size.height as f32, 0.0, 1.0);
+            filter.set_scissor_rect(0, 0, size.width, size.height);
+        }
+        true
+    }
+
     fn add_debug_signpost(&self, name: &str) {
         if let Some(encoder) = self.encoder.borrow_mut().as_mut() {
             encoder.insert_debug_marker(name);

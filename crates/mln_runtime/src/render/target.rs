@@ -5,8 +5,8 @@ use std::sync::Arc;
 use mln_gfx::Window;
 pub use mln_gfx::backend::Type as BackendType;
 pub use mln_gfx::{
-    ConsumerSync, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedImage, ExportedRing, GpuSync, SyncKind,
-    SyncKinds,
+    ConsumerSync, DepthStencilFormat, DepthStencilFormats, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds,
+    ExportedImage, ExportedRing, FrameDepth, GpuSync, NativeTexture, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
 use mln_util::size::Size;
@@ -128,6 +128,55 @@ pub(crate) enum RingKind {
 pub struct FrameTexture {
     pub size: Size,
     pub kind: FrameTextureKind,
+    /// An exported ring's image as the API of the session's device names it,
+    /// for a host on the device, or `None` for a borrowed ring's texture.
+    pub native: Option<FrameTextureKind>,
+    /// The texture that holds the frame's depth and stencil: a borrowed
+    /// ring's depth texture, or an exported ring's that keeps depth.
+    pub depth: Option<FrameDepth>,
+}
+
+impl FrameTexture {
+    /// The frame's texture as the API of the session's device names it: a
+    /// borrowed ring's, or an exported ring's on its device.
+    #[must_use]
+    pub fn native_kind(&self) -> Option<&FrameTextureKind> {
+        match &self.kind {
+            FrameTextureKind::Exported(_) => self.native.as_ref(),
+            kind => Some(kind),
+        }
+    }
+
+    /// An exported ring's frame, of the session's `device`.
+    pub(crate) fn exported(frame: mln_gfx::ExportedFrame, device: &Device) -> FrameTexture {
+        FrameTexture {
+            size: frame.size,
+            kind: FrameTextureKind::Exported(frame.image),
+            native: native_kind(frame.texture, device),
+            depth: frame.depth,
+        }
+    }
+}
+
+/// `texture`, which `device` drew into, with the device.
+#[cfg_attr(target_family = "wasm", allow(unused_variables))]
+fn native_kind(texture: NativeTexture, device: &Device) -> Option<FrameTextureKind> {
+    #[allow(unreachable_patterns)]
+    match (texture, device) {
+        #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+        (NativeTexture::Vulkan { image, view, format, layout }, Device::Vulkan(device)) => {
+            use mln_vulkan::ash::vk::Handle as _;
+            Some(FrameTextureKind::Vulkan { image, view, device: device.raw().device.as_raw(), format, layout })
+        }
+        #[cfg(all(feature = "metal", target_vendor = "apple"))]
+        (NativeTexture::Metal { texture, pixel_format }, Device::Metal(device)) => Some(FrameTextureKind::Metal {
+            texture,
+            device: mln_mtl::objc2::rc::Retained::as_ptr(device.device()) as usize as u64,
+            pixel_format,
+        }),
+        (NativeTexture::OpenGl { texture, target, .. }, _) => Some(FrameTextureKind::OpenGl { texture, target }),
+        _ => None,
+    }
 }
 
 /// A [`FrameTexture`]'s backend objects.
@@ -229,6 +278,60 @@ impl BorrowedRing {
         }
     }
 
+    /// Whether `device` draws into the ring's depth textures: true for a ring
+    /// without them, or of OpenGL textures, whose names say no format, and
+    /// otherwise whether their format is one of the device's
+    /// [`depth_stencil_formats`](Device::depth_stencil_formats).
+    #[must_use]
+    pub fn takes_depth_on(&self, device: &Device) -> bool {
+        #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+        if let RingKind::Gl(_) = self.kind {
+            return true;
+        }
+        !self.has_depth()
+            || self.depth_stencil_format().is_some_and(|format| device.depth_stencil_formats().contains(format))
+    }
+
+    /// The format of the ring's depth textures, when it has them and their
+    /// format is a depth and stencil one that an API names.
+    #[must_use]
+    pub fn depth_stencil_format(&self) -> Option<DepthStencilFormat> {
+        match &self.kind {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            RingKind::Vulkan(images) => {
+                images.depth.as_ref().and_then(|depth| mln_vulkan::device::depth_stencil_format(depth.format))
+            }
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            RingKind::Metal(textures) => (textures.depth_pixel_format()
+                == Some(mln_mtl::objc2_metal::MTLPixelFormat::Depth32Float_Stencil8))
+            .then_some(DepthStencilFormat::Depth32FloatStencil8),
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            RingKind::WebGpu(textures) => textures
+                .depth_textures
+                .first()
+                .and_then(|texture| mln_webgpu::borrowed_target::depth_stencil_format(texture.format())),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
+    /// Whether the ring has depth textures.
+    #[must_use]
+    pub fn has_depth(&self) -> bool {
+        match &self.kind {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            RingKind::Vulkan(images) => images.depth.is_some(),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            RingKind::Metal(textures) => !textures.depth_textures.is_empty(),
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            RingKind::Gl(textures) => !textures.depth_textures.is_empty(),
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            RingKind::WebGpu(textures) => !textures.depth_textures.is_empty(),
+            #[allow(unreachable_patterns)]
+            _ => false,
+        }
+    }
+
     /// Whether the texture at `slot` is the one at `other`'s `other_slot`.
     #[cfg_attr(target_family = "wasm", allow(unused_variables))]
     pub(crate) fn same_texture(&self, slot: usize, other: &BorrowedRing, other_slot: usize) -> bool {
@@ -270,6 +373,17 @@ impl BorrowedRing {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (RingKind::Vulkan(images), Device::Vulkan(device)) => {
                 use mln_vulkan::ash::vk::Handle as _;
+                let depth = images.depth.as_ref().and_then(|depth| {
+                    depth.images.get(slot).map(|image| FrameDepth {
+                        texture: NativeTexture::Vulkan {
+                            image: image.image.as_raw(),
+                            view: image.view.as_raw(),
+                            format: depth.format.as_raw(),
+                            layout: depth.final_layout.as_raw(),
+                        },
+                        export: None,
+                    })
+                });
                 images.images.get(slot).map(|image| FrameTexture {
                     size: images.size,
                     kind: FrameTextureKind::Vulkan {
@@ -279,6 +393,8 @@ impl BorrowedRing {
                         format: images.format.as_raw(),
                         layout: images.final_layout.as_raw(),
                     },
+                    native: None,
+                    depth,
                 })
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
@@ -291,19 +407,37 @@ impl BorrowedRing {
                         device: Retained::as_ptr(device.device()) as usize as u64,
                         pixel_format: textures.pixel_format().0 as u64,
                     },
+                    native: None,
+                    depth: textures.depth_textures.get(slot).zip(textures.depth_pixel_format()).map(
+                        |(depth, pixel_format)| FrameDepth {
+                            texture: NativeTexture::Metal {
+                                texture: Retained::as_ptr(depth) as usize as u64,
+                                pixel_format: pixel_format.0 as u64,
+                            },
+                            export: None,
+                        },
+                    ),
                 })
             }
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            // GL_TEXTURE_2D.
             (RingKind::Gl(textures), Device::Gl(_)) => textures.textures.get(slot).map(|&texture| FrameTexture {
                 size: textures.size,
-                // GL_TEXTURE_2D.
                 kind: FrameTextureKind::OpenGl { texture, target: 0x0DE1 },
+                native: None,
+                depth: textures.depth_textures.get(slot).map(|&depth| FrameDepth {
+                    texture: NativeTexture::OpenGl { texture: depth, target: 0x0DE1, internal_format: 0 },
+                    export: None,
+                }),
             }),
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            (RingKind::WebGpu(textures), Device::WebGpu(_)) => textures
-                .textures
-                .get(slot)
-                .map(|_| FrameTexture { size: textures.size, kind: FrameTextureKind::WebGpu }),
+            (RingKind::WebGpu(textures), Device::WebGpu(_)) => textures.textures.get(slot).map(|_| FrameTexture {
+                size: textures.size,
+                kind: FrameTextureKind::WebGpu,
+                native: None,
+                depth: (!textures.depth_textures.is_empty())
+                    .then_some(FrameDepth { texture: NativeTexture::WebGpu, export: None }),
+            }),
             _ => None,
         }
     }
@@ -466,21 +600,28 @@ pub struct DeviceOptions {
     /// The GPU to use. `None` picks the default one.
     pub adapter: Option<Adapter>,
     /// The API that an OpenGL device renders with. Only Linux's and
-    /// FreeBSD's EGL renders desktop OpenGL. Other backends ignore it.
+    /// FreeBSD's EGL renders desktop OpenGL, and Windows' WGL renders it
+    /// only. Other backends ignore it.
     pub gl_api: GlApi,
     /// Whether the sessions of an OpenGL device take turns in one context
     /// instead of having one each. Other backends ignore it.
     pub gl_single_context: bool,
 }
 
-/// The OpenGL API that an OpenGL device renders with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+/// The OpenGL API that an OpenGL device renders with. By default the
+/// platform's: desktop OpenGL on Windows, and OpenGL ES elsewhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GlApi {
     /// OpenGL ES 3.0 or later.
-    #[default]
     Gles,
     /// Desktop OpenGL 3.3 or later.
     Gl,
+}
+
+impl Default for GlApi {
+    fn default() -> GlApi {
+        if cfg!(windows) { GlApi::Gl } else { GlApi::Gles }
+    }
 }
 
 /// A GPU, by what names it to a backend.
@@ -538,12 +679,18 @@ impl SurfaceType {
             BackendType::Vulkan => {
                 cfg!(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm")))) && windowing
             }
+            // EGL presents to these windows, and on Windows WGL to Win32
+            // windows.
             BackendType::OpenGL => {
-                cfg!(all(feature = "gl", unix, not(target_vendor = "apple")))
+                cfg!(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))
                     && windowing
                     && matches!(
                         self,
-                        SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::AndroidNdk | SurfaceType::OhosNdk
+                        SurfaceType::Win32
+                            | SurfaceType::Xlib
+                            | SurfaceType::Wayland
+                            | SurfaceType::AndroidNdk
+                            | SurfaceType::OhosNdk
                     )
             }
             // wgpu's Vulkan backend makes no OpenHarmony surface, and this
@@ -603,6 +750,24 @@ fn missing(error: &Error) -> bool {
 }
 
 impl Device {
+    /// Whether an abandon keeps a session's graphics objects on the device
+    /// until the process exits, which only a detach frees: OpenGL's and
+    /// WebGPU's, as the C API promises, since only the session's own thread
+    /// may destroy them, and the host's graphics objects behind them may be
+    /// going away.
+    pub(crate) fn abandon_keeps_graphics(&self) -> bool {
+        match *self {
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            Device::WebGpu(_) => true,
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(_) => false,
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(_) => false,
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            Device::Gl(_) => true,
+        }
+    }
+
     /// The library's device, on the platform's native backend: Metal on
     /// Apple's platforms, and Vulkan elsewhere, or OpenGL where there is no
     /// Vulkan. WebGPU (wgpu) takes the place of a native backend that isn't
@@ -723,6 +888,37 @@ impl Device {
         }
     }
 
+    /// The formats of the depth textures that a borrowed ring takes on the
+    /// device.
+    #[must_use]
+    pub fn depth_stencil_formats(&self) -> DepthStencilFormats {
+        match *self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(ref device) => device.depth_stencil_formats(),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(_) => mln_mtl::BorrowedTextures::depth_stencil_formats(),
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            Device::Gl(_) => mln_gl::BorrowedTextures::depth_stencil_formats(),
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            Device::WebGpu(ref device) => mln_webgpu::BorrowedTextures::depth_stencil_formats(device.device()),
+        }
+    }
+
+    /// The kinds of [`export_kinds`](Self::export_kinds) whose rings also
+    /// share each frame's depth texture, when they keep depth: only
+    /// [`ExportKind::OpaqueFd`], since an `IOSurface`, a dmabuf or an Android
+    /// hardware buffer holds no depth format. A ring of those keeps its depth
+    /// on the device.
+    #[must_use]
+    pub fn depth_export_kinds(&self) -> ExportKinds {
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => device.depth_export_kinds(),
+            #[allow(unreachable_patterns)]
+            _ => ExportKinds::NONE,
+        }
+    }
+
     /// The kinds of exported ring that sessions on the device share their
     /// images in: those that the device has exported an image of.
     #[must_use]
@@ -732,7 +928,7 @@ impl Device {
             Device::Vulkan(device) => device.export_kinds(),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(device) => mln_mtl::exported_target::export_kinds(device),
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => mln_gl::exported_target::export_kinds(device),
             #[allow(unreachable_patterns)]
             _ => ExportKinds::NONE,
@@ -760,10 +956,10 @@ impl Device {
                 let (producer, consumer) = mln_mtl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => {
                 let kind = mln_gl::exported_target::plan(device, ring)?;
-                let (producer, consumer) = mln_gl::exported_target::sync_kinds();
+                let (producer, consumer) = mln_gl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
             _ => {
@@ -787,8 +983,8 @@ impl Device {
             Device::Vulkan(device) => mln_vulkan::exported_target::sync_kinds(device),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(device) => mln_mtl::exported_target::sync_kinds(device),
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
-            Device::Gl(_) => mln_gl::exported_target::sync_kinds(),
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
+            Device::Gl(device) => mln_gl::exported_target::sync_kinds(device),
             _ => (SyncKinds::NONE, SyncKinds::NONE),
         }
     }

@@ -17,8 +17,6 @@ use mln_util::geometry::{FeatureType, Geometry, MultiPoint, Polygon, to_feature_
 use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 
-use crate::util::tile_cover::std_sort;
-
 pub type Bounds = Vec<Bound>;
 /// `std::map<uint32_t, Bounds>`.
 pub type BoundsMap = VecMap<u32, Bounds>;
@@ -250,7 +248,7 @@ fn scan_row(y: u32, active_bounds: &mut Bounds) -> Vec<TileSpan> {
         !(bound.current_point == bound.points.len() - 1 && bound.points[bound.current_point].y <= f64::from(y1))
     });
     // Sort the X-extents of each crossing bound by x_min, x_max
-    std_sort(&mut tile_range, |a, b| (a.xmin, a.xmax) < (b.xmin, b.xmax));
+    tile_range.sort_by_key(|span| (span.xmin, span.xmax));
 
     tile_range
 }

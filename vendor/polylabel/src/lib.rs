@@ -13,11 +13,6 @@ use geometry::{LinearRing, Point, Polygon};
 /// `polygon.at(0)` / `ring.at(0)` on an empty vector (`std::out_of_range`).
 const OUT_OF_RANGE: &str = "vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)";
 
-/// `std::min(a, b)`
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
 // get squared distance from a point to a segment
 #[must_use]
 pub fn get_seg_dist_sq(p: &Point<f64>, a: &Point<f64>, b: &Point<f64>) -> f64 {
@@ -62,7 +57,7 @@ pub fn point_to_polygon_dist(point: &Point<f64>, polygon: &Polygon<f64>) -> f64 
                 inside = !inside;
             }
 
-            min_dist_sq = std_min(min_dist_sq, get_seg_dist_sq(point, a, b));
+            min_dist_sq = f64::min(min_dist_sq, get_seg_dist_sq(point, a, b));
             j = i;
         }
     }
@@ -165,7 +160,7 @@ pub fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, S
 
     let size = Point::new(max.x - min.x, max.y - min.y);
 
-    let cell_size = std_min(size.x, size.y);
+    let cell_size = f64::min(size.x, size.y);
     let mut h = cell_size / 2.0;
 
     // a priority queue of cells in order of their "potential" (max distance

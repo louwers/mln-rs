@@ -13,7 +13,7 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_ulong, c_void};
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use khronos_egl as egl;
 use mln_gfx::command_encoder::CommandEncoder;
@@ -118,6 +118,91 @@ fn set_ohos_buffer_geometry(window: *mut c_void, size: Size) {
     }
 }
 
+/// An EGL display that the library initialized for windows of a native
+/// display, and how many windows use it.
+struct SharedDisplay {
+    native: usize,
+    display: usize,
+    users: usize,
+}
+
+/// The displays of the windows that present now, by native display. The
+/// last window of one terminates it: EGL hands out the same display for
+/// another native display at the same address, which a host's new Wayland
+/// or X11 connection may have once the old one closed, and that display
+/// would still hold the old connection's objects.
+static SHARED_DISPLAYS: Mutex<Vec<SharedDisplay>> = Mutex::new(Vec::new());
+
+/// A window's use of its EGL display, which it gives up when dropped: it
+/// terminates a display that the library initialized for the windows of a
+/// native display, after their last one.
+struct DisplayUse {
+    egl: &'static Egl,
+    display: egl::Display,
+    /// The native display, for a display of the windows' own.
+    native: Option<usize>,
+}
+
+impl DisplayUse {
+    /// The initialized EGL display of `native_display`, on `platform` where
+    /// EGL has platform displays. The windows of a native display share the
+    /// display that the library initialized for the first of them; a display
+    /// that someone else initialized stays theirs.
+    ///
+    /// # Safety
+    ///
+    /// `native_display` is a live display of `platform`, or EGL's default
+    /// one.
+    unsafe fn acquire(
+        egl: &'static Egl,
+        platform: Option<egl::Enum>,
+        native_display: *mut c_void,
+    ) -> Result<DisplayUse, String> {
+        let mut shared = SHARED_DISPLAYS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let native = native_display as usize;
+        if let Some(entry) = shared.iter_mut().find(|entry| entry.native == native) {
+            entry.users += 1;
+            // SAFETY: the display that EGL gave for the native display.
+            let display = unsafe { egl::Display::from_ptr(entry.display as egl::EGLDisplay) };
+            return Ok(DisplayUse { egl, display, native: Some(native) });
+        }
+        // SAFETY: the caller's contract.
+        let display = unsafe {
+            egl.upcast::<egl::EGL1_5>()
+                .zip(platform)
+                .and_then(|(egl15, platform)| {
+                    egl15.get_platform_display(platform, native_display, &[egl::ATTRIB_NONE]).ok()
+                })
+                .or_else(|| egl.get_display(native_display))
+        }
+        .ok_or("Failed to obtain an EGL display for the window.")?;
+        // EGL answers a query only on an initialized display. The default
+        // display is the process's, which the library never terminates.
+        let initialized_here = egl.query_string(Some(display), egl::VENDOR).is_err();
+        egl.initialize(display).map_err(|e| format!("eglInitialize() failed: {e}"))?;
+        let native = (initialized_here && native_display != egl::DEFAULT_DISPLAY).then_some(native);
+        if let Some(native) = native {
+            shared.push(SharedDisplay { native, display: display.as_ptr() as usize, users: 1 });
+        }
+        Ok(DisplayUse { egl, display, native })
+    }
+}
+
+impl Drop for DisplayUse {
+    fn drop(&mut self) {
+        let Some(native) = self.native else { return };
+        let mut shared = SHARED_DISPLAYS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(index) = shared.iter().position(|entry| entry.native == native) else { return };
+        shared[index].users -= 1;
+        if shared[index].users == 0 {
+            shared.remove(index);
+            if let Err(e) = self.egl.terminate(self.display) {
+                Log::error(Event::GraphicsBackend, format!("eglTerminate() failed: {e}"));
+            }
+        }
+    }
+}
+
 /// The context, and the window surface it is current on.
 struct EglWindow {
     egl: &'static Egl,
@@ -140,7 +225,10 @@ struct EglWindow {
     /// the surface, as an `OpenHarmony` window does with its consumer.
     on_surface: Cell<bool>,
     wl_egl_window: Cell<*mut c_void>,
-    /// What `handle` names, which stays open until the context is gone.
+    /// The display's use, given up after the context is gone.
+    _display_use: DisplayUse,
+    /// What `handle` names, which stays open until the context and the
+    /// display are gone.
     _window: Arc<dyn Window>,
 }
 
@@ -158,16 +246,8 @@ impl EglWindow {
         };
         // SAFETY: the native display is the live one of `window`, or EGL's
         // default one.
-        let display = unsafe {
-            egl.upcast::<egl::EGL1_5>()
-                .zip(platform)
-                .and_then(|(egl15, platform)| {
-                    egl15.get_platform_display(platform, native_display, &[egl::ATTRIB_NONE]).ok()
-                })
-                .or_else(|| egl.get_display(native_display))
-        }
-        .ok_or("Failed to obtain an EGL display for the window.")?;
-        egl.initialize(display).map_err(|e| format!("eglInitialize() failed: {e}"))?;
+        let display_use = unsafe { DisplayUse::acquire(egl, platform, native_display) }?;
+        let display = display_use.display;
         egl.bind_api(egl::OPENGL_ES_API).map_err(|e| format!("Error setting the EGL rendering API: {e}"))?;
         let attributes = [
             egl::RENDERABLE_TYPE,
@@ -245,6 +325,7 @@ impl EglWindow {
             surface: Cell::new(None),
             on_surface: Cell::new(false),
             wl_egl_window: Cell::new(std::ptr::null_mut()),
+            _display_use: display_use,
             _window: window,
         })
     }

@@ -18,6 +18,7 @@ use mln_gfx::frame::DrawTarget;
 use mln_gfx::render_pass::RenderPassDescriptor;
 
 use crate::context::Context;
+use crate::custom_layer::CustomLayerEncoder;
 use crate::draw_target::TargetResource;
 use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
@@ -86,6 +87,22 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         descriptor: &RenderPassDescriptor<'_>,
     ) -> Box<dyn mln_gfx::render_pass::RenderPass> {
         Box::new(RenderPass::new(self, name, descriptor))
+    }
+
+    /// Moves the encoder to the host for the call and back.
+    fn lend_to_custom_layer(&self, _target: &dyn DrawTarget, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        let backend = self.context.get_backend();
+        let (Some(device), Some(queue)) = (backend.get_device(), backend.get_queue()) else {
+            return false;
+        };
+        let mut slot = self.encoder.borrow_mut();
+        let Some(encoder) = slot.take() else {
+            return false;
+        };
+        let mut lent = CustomLayerEncoder { device, queue, encoder };
+        f(&mut lent);
+        *slot = Some(lent.encoder);
+        true
     }
 
     fn as_any(&self) -> &dyn Any {

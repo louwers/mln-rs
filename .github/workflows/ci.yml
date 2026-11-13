@@ -94,8 +94,9 @@ jobs:
           files: target/llvm-cov/lcov.info
 
   # maplibre-native-ffi's C ABI suite against crates/mln_c (`just c-abi-test`,
-  # tools/c-abi-test), its GPU fixtures on lavapipe: it fails when a case fails
-  # that tools/c-abi-test/expected-failures.txt doesn't list, or a listed case
+  # tools/c-abi-test), under its Vulkan preset on lavapipe and its OpenGL one on
+  # llvmpipe: each fails when a case fails that the preset's list
+  # (tools/c-abi-test/expected-failures*.txt) doesn't name, or a listed case
   # passes. Also that crates/mln_c's generated declarations are what its
   # headers generate (`just generate-c-abi`, which needs libclang).
   c-abi:
@@ -107,10 +108,12 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake libclang-dev libvulkan-dev libwayland-client0 libwayland-server0
+          sudo apt-get install -y --no-install-recommends cmake libclang-dev libvulkan-dev libwayland-client0 libwayland-server0 libwayland-egl1 libegl-dev libgles-dev
 
       - name: Install lavapipe
         uses: ./.github/actions/lavapipe
+        with:
+          egl: true
 
       - uses: taiki-e/install-action@v2
         with: { tool: just }
@@ -130,6 +133,10 @@ jobs:
 
       - name: Test
         run: just c-abi-test -v
+
+      - name: Test the OpenGL preset
+        if: ${{ !cancelled() }}
+        run: MLN_C_TEST_BACKEND=opengl just c-abi-test -v
 
   # The Cargo manifests: build each crates.io package from its packaged
   # sources, as the release does (RELEASING.md), and every test target, so a

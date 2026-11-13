@@ -27,6 +27,14 @@ pub trait RenderPass: DebugGroupTarget + Any {
     /// Clears the pass's stencil attachment to `value`, on the backends
     /// that can clear within a pass (`vulkan::RenderPass::clearStencil`).
     fn clear_stencil(&self, _value: u32) {}
+    /// Lends the pass's live encoder to a custom layer: `f` gets the
+    /// backend's `CustomLayerPass`, whose docs say what it may change. The
+    /// pass then forgets the state it knew, so its next draws set what they
+    /// need. Returns false, without calling `f`, when the pass has nothing to
+    /// encode with.
+    fn lend_to_custom_layer(&self, _f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        false
+    }
     fn as_any(&self) -> &dyn Any;
 }
 

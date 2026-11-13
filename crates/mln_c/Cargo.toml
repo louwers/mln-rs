@@ -52,8 +52,8 @@ objc2-quartz-core = { workspace = true, features = ["CADisplayLink", "CAFrameRat
 [target.'cfg(target_os = "android")'.dependencies]
 libc.workspace = true
 
-# The host's EGL contexts, textures and surfaces.
-[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
+# The host's EGL and WGL contexts, textures and surfaces.
+[target.'cfg(any(windows, all(unix, not(target_vendor = "apple"))))'.dependencies]
 mln_gl.workspace = true
 
 # The host's Vulkan devices, images and surfaces.
@@ -67,6 +67,11 @@ winit.workspace = true
 # The sync files of the exported ring test, whose hardware buffers it locks.
 [target.'cfg(target_os = "android")'.dev-dependencies]
 libc.workspace = true
+
+# The host's windows and WGL contexts of the OpenGL tests, which read the
+# frames back.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys.workspace = true
 
 [lints]
 workspace = true

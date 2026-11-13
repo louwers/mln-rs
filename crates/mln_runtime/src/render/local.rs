@@ -10,14 +10,12 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::{ConsumerSync, ExportKind, ExportedImage, ExportedRing, FrameTarget, RendererBackend, SyncKind, Window};
+use mln_gfx::{ConsumerSync, ExportKind, ExportedFrame, ExportedRing, FrameTarget, RendererBackend, SyncKind, Window};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use super::target::{
-    BorrowedRing, Device, DeviceOptions, FrameTexture, FrameTextureKind, RingKind, Surface, SurfaceKind,
-};
+use super::target::{BorrowedRing, Device, DeviceOptions, FrameTexture, RingKind, Surface, SurfaceKind};
 
 /// Frames read back: an offscreen target.
 trait Offscreen: FrameTarget {
@@ -134,7 +132,7 @@ trait Exported: FrameTarget {
     fn discard(&self, slot: usize);
     fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error>;
     fn size(&self) -> Size;
-    fn image(&self, slot: usize) -> Option<(Size, ExportedImage)>;
+    fn image(&self, slot: usize) -> Option<ExportedFrame>;
 }
 
 macro_rules! exported {
@@ -155,7 +153,7 @@ macro_rules! exported {
             fn size(&self) -> Size {
                 <$type>::size(self)
             }
-            fn image(&self, slot: usize) -> Option<(Size, ExportedImage)> {
+            fn image(&self, slot: usize) -> Option<ExportedFrame> {
                 <$type>::image(self, slot)
             }
         }
@@ -166,7 +164,7 @@ macro_rules! exported {
 exported!(mln_vulkan::ExportedTarget);
 #[cfg(all(feature = "metal", target_vendor = "apple"))]
 exported!(mln_mtl::ExportedTarget);
-#[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
 exported!(mln_gl::ExportedTarget);
 
 macro_rules! offscreen {
@@ -206,7 +204,7 @@ offscreen!(mln_vulkan::OffscreenTarget);
 presenting!(mln_vulkan::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 offscreen!(mln_gl::OffscreenTarget);
-#[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
+#[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
 presenting!(mln_gl::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 presenting!(mln_gl::HostSurfaceTarget);
@@ -342,7 +340,7 @@ impl Backend {
             Backend::Metal(backend) => {
                 Ok(Box::new(mln_mtl::ExportedTarget::new(backend.clone(), ring, kind, size, producer)?))
             }
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Backend::Gl(backend) => {
                 let Device::Gl(device) = device else {
                     return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
@@ -448,7 +446,7 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
             let (backend, target) = mln_gl::HostSurfaceTarget::with_backend(device, *host, size)?;
             Ok((Backend::Gl(backend), Box::new(target)))
         }
-        #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
+        #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
             let (backend, target) = mln_gl::SurfaceTarget::with_backend(window.clone(), size, true)?;
             Ok((Backend::Gl(backend), Box::new(target)))
@@ -680,9 +678,7 @@ impl LocalTarget {
     #[must_use]
     pub fn exported_texture(&self, slot: usize) -> Option<FrameTexture> {
         match &self.frames {
-            Frames::Exported(target) => {
-                target.image(slot).map(|(size, image)| FrameTexture { size, kind: FrameTextureKind::Exported(image) })
-            }
+            Frames::Exported(target) => target.image(slot).map(|frame| FrameTexture::exported(frame, &self.device)),
             _ => None,
         }
     }

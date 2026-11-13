@@ -2,6 +2,7 @@
 // src/mln/style/conversion/tileset.cpp and the SourceOptions converter of
 // src/mln/style/conversion/source_options.cpp.
 
+use mln_math::clamp_f64;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
 
@@ -92,12 +93,6 @@ pub(crate) fn sparse_member(value: &Convertible<'_>, error: &mut Error) -> Resul
     member.to_bool().ok_or_else(|| error.message = "invalid sparse".to_owned())
 }
 
-/// `util::clamp(value, min, max)`.
-fn clamp(value: f64, min: f64, max: f64) -> f64 {
-    let lower = if value < max { value } else { max };
-    if min < lower { lower } else { min }
-}
-
 impl Converter for Tileset {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
         let mut result = Tileset::default();
@@ -182,8 +177,8 @@ impl Converter for Tileset {
                 return None;
             };
 
-            let bottom = clamp(bottom, -90.0, 90.0);
-            let top = clamp(top, -90.0, 90.0);
+            let bottom = clamp_f64(bottom, -90.0, 90.0);
+            let top = clamp_f64(top, -90.0, 90.0);
             if top < bottom {
                 error.message = "bounds bottom latitude must be less than or equal to top latitude".to_owned();
                 return None;
