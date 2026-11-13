@@ -1,9 +1,6 @@
-// Ports the free functions of src/mln/tile/geometry_tile_data.cpp
-// (signedArea, toGeometryCollection, classifyRings, limitHoles, both
-// convertGeometry overloads, convertFeature, roundPolygonCorners), and
-// fixupPolygons on i_overlay instead of wagyu. and `ToGeometryCollection` from
-// geometry_tile_data.hpp. The interfaces (GeometryTileFeature & co.) are in
-// mln_tile_id::geometry_tile_data.
+// Polygon fixup runs on i_overlay, where C++ uses wagyu. The feature
+// interfaces (`GeometryTileFeature` and the rest) are in
+// `mln_tile_id::geometry_tile_data`.
 
 use std::f64::consts::PI;
 
@@ -20,9 +17,9 @@ use mln_util::math::{angle_between, cross_product, dist_f64, normal, perp};
 
 use crate::Error;
 
-/// `signedArea` (anonymous namespace). The products are C++ `int`
-/// arithmetic, which can overflow for coordinates near the int16 limits;
-/// x86-64 wraps.
+/// Twice the signed area of `ring`. The products are C++ `int` arithmetic,
+/// which can overflow for coordinates near the int16 limits; x86-64 wraps,
+/// and so does this.
 fn signed_area(ring: &GeometryCoordinates) -> f64 {
     let mut sum = 0.0;
 
@@ -67,8 +64,7 @@ pub fn fixup_polygons(rings: &GeometryCollection) -> GeometryCollection {
     result
 }
 
-/// `classifyRings`: classifies an array of rings into polygons with outer
-/// rings and holes.
+/// Classifies an array of rings into polygons with outer rings and holes.
 #[must_use]
 pub fn classify_rings(rings: &GeometryCollection) -> Vec<GeometryCollection> {
     let mut polygons: Vec<GeometryCollection> = Vec::new();
@@ -107,9 +103,9 @@ pub fn classify_rings(rings: &GeometryCollection) -> Vec<GeometryCollection> {
     polygons
 }
 
-/// `limitHoles`: truncate polygon to the largest `maxHoles` inner rings by
-/// absolute area. The order of the kept rings is unspecified, and so is which
-/// of several rings tied at the cut is kept.
+/// Truncates `polygon` to its `max_holes` largest inner rings by absolute
+/// area. The order of the kept rings is unspecified, and so is which of
+/// several rings tied at the cut is kept.
 pub fn limit_holes(polygon: &mut GeometryCollection, max_holes: u32) {
     let max_holes = max_holes as usize;
     if polygon.len() > 1 + max_holes {
@@ -118,11 +114,11 @@ pub fn limit_holes(polygon: &mut GeometryCollection, max_holes: u32) {
     }
 }
 
-/// `convertGeometry(const GeometryTileFeature&, const CanonicalTileID&)`:
-/// tile coordinates to longitude/latitude. Errors: `std::out_of_range` from
-/// `geometries.at(0)` for a point feature without rings. For
-/// `FeatureType::Unknown` the C++ asserts (debug builds) and returns
-/// `Point(NaN, NaN)`.
+/// Converts the geometry of a feature of `tile_id` from tile coordinates to
+/// longitude/latitude. Fails with [`Error::OutOfRange`] for a point feature
+/// without rings, where C++ throws from `geometries.at(0)`. A feature of
+/// `FeatureType::Unknown` fails a debug assertion and otherwise converts to
+/// `Point(NaN, NaN)`, as in C++.
 pub fn convert_geometry(
     geometry_tile_feature: &dyn GeometryTileFeature,
     tile_id: &CanonicalTileID,
@@ -195,18 +191,18 @@ pub fn convert_geometry(
     }
 }
 
-/// `static_cast<int16_t>(double)` as clang emits it on x86-64: cvttsd2si to
-/// int32 (0x80000000 for NaN and out-of-range values; undefined behaviour in
-/// C++), then the low 16 bits.
+/// Narrows `v` as clang emits `static_cast<int16_t>(double)` on x86-64:
+/// cvttsd2si to int32 (0x80000000 for NaN and out-of-range values;
+/// undefined behaviour in C++), then the low 16 bits.
 fn int16_cast_x86_64(v: f64) -> i16 {
     let i = if v.is_nan() || v >= 2_147_483_648.0 || v <= -2_147_483_649.0 { i32::MIN } else { v as i32 };
     i as i16
 }
 
-/// `convertGeometry(const Feature::geometry_type&, const CanonicalTileID&)`:
-/// longitude/latitude to tile coordinates. The C++ clamps *after* the
-/// narrowing cast, so the clamp has no effect; the cast is reproduced as
-/// x86-64 executes it (see `int16_cast_x86_64`).
+/// Converts `geometry` from longitude/latitude to the coordinates of
+/// `tile_id`. The C++ clamps *after* the narrowing cast, so the clamp has no
+/// effect; the cast is reproduced as x86-64 executes it (see
+/// `int16_cast_x86_64`).
 #[must_use]
 pub fn convert_geometry_to_tile(geometry: &Geometry<f64>, tile_id: &CanonicalTileID) -> GeometryCollection {
     let size = f64::from(EXTENT) * 2f64.powi(i32::from(tile_id.z));
@@ -241,8 +237,8 @@ pub fn convert_geometry_to_tile(geometry: &Geometry<f64>, tile_id: &CanonicalTil
     }
 }
 
-/// `convertFeature`: convert from `GeometryTileFeature` to Feature
-/// (eventually we should eliminate `GeometryTileFeature`).
+/// Converts a tile feature to a `Feature` in longitude/latitude, with its
+/// properties and id. Fails as [`convert_geometry`] does.
 pub fn convert_feature(
     geometry_tile_feature: &dyn GeometryTileFeature,
     tile_id: &CanonicalTileID,
@@ -253,7 +249,6 @@ pub fn convert_feature(
     Ok(feature)
 }
 
-/// `ToGeometryCollection`.
 #[must_use]
 pub fn to_geometry_collection(geom: &Geometry<i16>) -> GeometryCollection {
     match geom {
@@ -267,18 +262,15 @@ pub fn to_geometry_collection(geom: &Geometry<i16>) -> GeometryCollection {
     }
 }
 
-/// `GeometryCoordinateFloat`.
 pub type GeometryCoordinateFloat = Point<f32>;
-/// `GeometryCoordinatesFloat`.
 pub type GeometryCoordinatesFloat = Vec<GeometryCoordinateFloat>;
-/// `GeometryCollectionFloat`.
 pub type GeometryCollectionFloat = Vec<GeometryCoordinatesFloat>;
 
-/// `roundPolygonCorners`: replaces each corner of the closed rings of
-/// `polygon` with an arc that starts and ends `desired_corner_distance` tile
-/// units from the corner, or 20% of the shorter adjacent edge if that is
-/// less. Corners next to a zero-length edge, and corners turning by less than
-/// 5° (or nearly reversing), stay sharp. Each output ring is closed.
+/// Replaces each corner of the closed rings of `polygon` with an arc that
+/// starts and ends `desired_corner_distance` tile units from the corner, or
+/// 20% of the shorter adjacent edge if that is less. Corners next to a
+/// zero-length edge, and corners turning by less than 5° (or nearly
+/// reversing), stay sharp. Each output ring is closed.
 ///
 /// A ring needs its closing point: the last point is dropped before rounding.
 /// A ring of fewer than two points comes out empty.
@@ -372,7 +364,6 @@ pub fn round_polygon_corners(polygon: &GeometryCollection, desired_corner_distan
 
 #[cfg(test)]
 mod tests {
-    // Ports test/tile/geometry_tile_data.test.cpp.
     use super::*;
 
     fn ring(points: &[(i16, i16)]) -> GeometryCoordinates {

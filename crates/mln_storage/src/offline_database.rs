@@ -1,6 +1,3 @@
-// Ports platform/default/include/mln/storage/offline_database.hpp and
-// platform/default/src/mln/storage/offline_database.cpp.
-//
 // Failures are `DatabaseError`s, returned through `Result` and handled by
 // `handle_error`. `put_region_resource(s)` handle their errors themselves.
 //
@@ -99,7 +96,6 @@ fn tile_data(resource: &Resource) -> Option<&TileData> {
     resource.tile_data.as_ref().filter(|_| resource.kind == Kind::Tile)
 }
 
-/// `util::deleteFile` (src/mln/util/io.cpp).
 fn delete_file(filename: &str) -> DbResult<()> {
     match std::fs::remove_file(filename) {
         Ok(()) => Ok(()),
@@ -114,9 +110,8 @@ fn delete_file(filename: &str) -> DbResult<()> {
     }
 }
 
-/// `OfflineDatabase::DatabaseSizeChangeStats`: the database size (pages in
-/// use) when it was created. The C++ object keeps a pointer to the
-/// database; here the database is passed to the methods that query it.
+/// The database size (pages in use) when it was created. The database is
+/// passed to the methods that query it.
 struct DatabaseSizeChangeStats {
     page_size: u64,
     page_count: u64,
@@ -155,7 +150,6 @@ impl DatabaseSizeChangeStats {
     }
 }
 
-/// `OfflineDatabase`.
 pub struct OfflineDatabase {
     path: String,
     db: Option<Database>,
@@ -199,7 +193,6 @@ impl OfflineDatabase {
         format!("{}{}_mlnRange={}-{}", resource.url, sep, first, second)
     }
 
-    /// `OfflineDatabase(std::string path)`.
     pub fn new(path: impl Into<String>) -> Self {
         let mut db = OfflineDatabase {
             path: path.into(),
@@ -273,7 +266,6 @@ impl OfflineDatabase {
         }
     }
 
-    /// `changePath`.
     pub fn change_path(&mut self, path: &str) {
         Log::info(Event::Database, "Changing the database path.");
         self.cleanup();
@@ -535,16 +527,16 @@ impl OfflineDatabase {
         Ok(self.db.as_ref().expect("initialized database"))
     }
 
-    /// `Query{getStatement(sql)}` with the parameters bound, then `run()`
-    /// on a statement that returns no rows; returns `changes()`.
+    /// Runs `sql`, a statement that returns no rows, with `params` bound;
+    /// returns the number of rows changed.
     fn execute(&mut self, sql: &str, params: impl rusqlite::Params) -> DbResult<u64> {
         let conn = self.get_db()?.conn();
         let mut stmt = conn.prepare_cached(sql)?;
         Ok(stmt.execute(params)? as u64)
     }
 
-    /// `Query{getStatement(sql)}` with the parameters bound and one `run()`:
-    /// `f` reads the row, `None` when there is none.
+    /// Runs `sql` with `params` bound and steps once: `f` reads the row,
+    /// `None` when there is none.
     fn query_row<T>(
         &mut self,
         sql: &str,
@@ -560,15 +552,14 @@ impl OfflineDatabase {
         }
     }
 
-    /// `query.lastInsertRowId()` of the last statement.
+    /// The row id of the last statement's insert.
     fn last_insert_row_id(&mut self) -> DbResult<i64> {
         let conn = self.get_db()?.conn();
         Ok(conn.last_insert_rowid())
     }
 
-    /// `mapbox::sqlite::Transaction transaction(*db, mode)` around `f`: the
-    /// transaction commits after `f` succeeds and rolls back (in its
-    /// destructor) when `f` fails.
+    /// Runs `f` in a transaction that commits after `f` succeeds and rolls
+    /// back when `f` fails.
     fn with_transaction<T>(&mut self, mode: TransactionMode, f: impl FnOnce(&mut Self) -> DbResult<T>) -> DbResult<T> {
         let mut transaction = Transaction::new(self.get_db()?, mode)?;
         let value = f(self)?;
@@ -576,7 +567,6 @@ impl OfflineDatabase {
         Ok(value)
     }
 
-    /// `getPragma<int64_t>(sql)`.
     fn get_pragma_i64(&mut self, sql: &str) -> DbResult<i64> {
         Ok(self.query_row(sql, [], |row| Ok(sqlite3::get_i64(row, 0)?))?.unwrap_or(0))
     }
@@ -980,8 +970,8 @@ impl OfflineDatabase {
         Ok(true)
     }
 
-    /// `invalidateAmbientCache()`: force revalidation of the ambient cache's
-    /// tiles and resources with the server before using them.
+    /// Forces revalidation of the ambient cache's tiles and resources with
+    /// the server before using them.
     pub fn invalidate_ambient_cache(&mut self) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
@@ -1008,7 +998,7 @@ impl OfflineDatabase {
         self.exception_ptr(result, "invalidate ambient cache")
     }
 
-    /// `clearAmbientCache()`: clear the tile cache, freeing resources.
+    /// Clears the ambient cache, freeing space.
     pub fn clear_ambient_cache(&mut self) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
@@ -1039,7 +1029,6 @@ impl OfflineDatabase {
         self.exception_ptr(result, "clear ambient cache")
     }
 
-    /// `invalidateRegion(int64_t)`.
     pub fn invalidate_region(&mut self, region_id: i64) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
@@ -1087,7 +1076,6 @@ impl OfflineDatabase {
         result
     }
 
-    /// `listRegions()`.
     pub fn list_regions(&mut self) -> Result<OfflineRegions, DatabaseError> {
         let result = (|| -> DbResult<OfflineRegions> {
             let rows = {
@@ -1116,7 +1104,6 @@ impl OfflineDatabase {
         self.expected(result, "list regions")
     }
 
-    /// `getRegion(int64_t)`.
     pub fn get_region(&mut self, region_id: i64) -> Result<Option<OfflineRegion>, DatabaseError> {
         let result = (|| -> DbResult<Option<OfflineRegion>> {
             let row = self.query_row(
@@ -1141,7 +1128,6 @@ impl OfflineDatabase {
         self.expected(result, "get region")
     }
 
-    /// `createRegion(const OfflineRegionDefinition&, const OfflineRegionMetadata&)`.
     pub fn create_region(
         &mut self,
         definition: &OfflineRegionDefinition,
@@ -1164,7 +1150,6 @@ impl OfflineDatabase {
         self.expected(result, "create region")
     }
 
-    /// `mergeDatabase(const std::string& sideDatabasePath)`.
     pub fn merge_database(&mut self, side_database_path: &str) -> Result<OfflineRegions, DatabaseError> {
         self.check_flags()?;
 
@@ -1235,7 +1220,6 @@ impl OfflineDatabase {
         }
     }
 
-    /// `updateMetadata(int64_t, const OfflineRegionMetadata&)`.
     pub fn update_metadata(
         &mut self,
         region_id: i64,
@@ -1255,7 +1239,6 @@ impl OfflineDatabase {
         self.expected(result, "update region metadata")
     }
 
-    /// `deleteRegion(OfflineRegion&&)`.
     pub fn delete_region(&mut self, region: &OfflineRegion) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
@@ -1275,7 +1258,7 @@ impl OfflineDatabase {
         self.exception_ptr(result, "delete region")
     }
 
-    /// `getRegionResource(const Resource&)`: (response, stored size).
+    /// The region's stored response for `resource`, with its stored size.
     pub fn get_region_resource(&mut self, resource: &Resource) -> Option<(Response, u64)> {
         match self.get_internal(resource) {
             Ok(result) => result,
@@ -1286,14 +1269,12 @@ impl OfflineDatabase {
         }
     }
 
-    /// `hasRegionResource(const Resource&)`.
     pub fn has_region_resource(&mut self, resource: &Resource) -> Option<i64> {
         self.check_region_resource(resource).map(|(size, _)| size)
     }
 
-    /// `checkRegionResource(const Resource&)`: (stored size, whether the
-    /// stored copy can be used without revalidating it; see
-    /// `Response::is_usable`).
+    /// The stored size of the region's copy of `resource`, and whether it can
+    /// be used without revalidating it (see `Response::is_usable`).
     pub fn check_region_resource(&mut self, resource: &Resource) -> Option<(i64, bool)> {
         match self.has_internal(resource) {
             Ok(result) => result,
@@ -1304,7 +1285,6 @@ impl OfflineDatabase {
         }
     }
 
-    /// `putRegionResource(int64_t, const Resource&, const Response&)`.
     pub fn put_region_resource(&mut self, region_id: i64, resource: &Resource, response: &Response) -> u64 {
         let result = (|| -> DbResult<u64> {
             self.check_flags()?;
@@ -1322,8 +1302,6 @@ impl OfflineDatabase {
         })
     }
 
-    /// `putRegionResources(int64_t, const std::list<std::tuple<Resource,
-    /// Response>>&, OfflineRegionStatus&)`.
     pub fn put_region_resources(
         &mut self,
         region_id: i64,
@@ -1415,7 +1393,6 @@ impl OfflineDatabase {
         Ok(())
     }
 
-    /// `getRegionDefinition(int64_t)`.
     pub fn get_region_definition(&mut self, region_id: i64) -> Result<OfflineRegionDefinition, DatabaseError> {
         let result = (|| -> DbResult<OfflineRegionDefinition> {
             // `query.run(); query.get<std::string>(0)`: no row reads as "".
@@ -1430,7 +1407,6 @@ impl OfflineDatabase {
         self.expected(result, "load region")
     }
 
-    /// `getRegionCompletedStatus(int64_t)`.
     pub fn get_region_completed_status(&mut self, region_id: i64) -> Result<OfflineRegionStatus, DatabaseError> {
         let result = (|| -> DbResult<OfflineRegionStatus> {
             let mut result = OfflineRegionStatus::default();
@@ -1635,7 +1611,6 @@ impl OfflineDatabase {
         Ok(None)
     }
 
-    /// `setMaximumAmbientCacheSize(uint64_t)`.
     pub fn set_maximum_ambient_cache_size(&mut self, size: u64) -> Option<DatabaseError> {
         // Eviction uses the stored timestamps if this fails.
         self.flush_accessed();
@@ -1673,7 +1648,6 @@ impl OfflineDatabase {
         }
     }
 
-    /// `markUsedResources(int64_t, const std::list<Resource>&)`.
     pub fn mark_used_resources(&mut self, region_id: i64, resources: &[Resource]) {
         let result = (|| -> DbResult<()> {
             if self.db.is_none() {
@@ -1691,7 +1665,6 @@ impl OfflineDatabase {
         }
     }
 
-    /// `pack()`.
     pub fn pack(&mut self) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             if self.db.is_none() {
@@ -1702,12 +1675,10 @@ impl OfflineDatabase {
         self.exception_ptr(result, "pack storage")
     }
 
-    /// `runPackDatabaseAutomatically`.
     pub fn run_pack_database_automatically(&mut self, autopack: bool) {
         self.autopack = autopack;
     }
 
-    /// `reopenDatabaseReadOnly(bool)`.
     pub fn reopen_database_read_only(&mut self, read_only: bool) {
         if self.read_only == read_only {
             return;
@@ -1719,7 +1690,8 @@ impl OfflineDatabase {
         }
     }
 
-    /// `resetDatabase()`: C++ returns the exception (or null).
+    /// Deletes the database file and starts an empty one. Returns the error,
+    /// if any.
     pub fn reset_database(&mut self) -> Option<DatabaseError> {
         let result = self.remove_existing().and_then(|()| self.initialize());
         self.exception_ptr(result, "reset database")
@@ -1735,9 +1707,8 @@ impl OfflineDatabase {
     }
 }
 
-/// `query.bindBlob(n, metadata)`: `sqlite3_bind_blob` with the vector's
-/// `data()`, which is null for an empty vector, so empty metadata is stored
-/// as NULL.
+/// The metadata as a blob to bind. Empty metadata is stored as NULL, as C++
+/// binds an empty vector's null `data()`.
 fn metadata_blob(metadata: &OfflineRegionMetadata) -> Option<&[u8]> {
     if metadata.is_empty() { None } else { Some(metadata.as_slice()) }
 }

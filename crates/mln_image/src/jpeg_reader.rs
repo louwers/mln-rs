@@ -1,5 +1,3 @@
-// Ports platform/default/src/mln/util/jpeg_reader.cpp
-//
 // libjpeg is replaced by zune-jpeg, asked for libjpeg's default output color
 // space, of which C++ keeps the first three components (the one, replicated,
 // of a grayscale image):
@@ -22,7 +20,6 @@ use zune_jpeg::zune_core::bytestream::ZCursor;
 use zune_jpeg::zune_core::colorspace::ColorSpace;
 use zune_jpeg::zune_core::options::DecoderOptions;
 
-/// `mln::decodeJPEG(const uint8_t*, size_t)`.
 pub fn decode_jpeg(data: &[u8]) -> Result<PremultipliedImage, Error> {
     let invalid = |e: DecodeErrors| Error::invalid_argument(format!("JPEG Reader: libjpeg could not read image: {e}"));
     let options = DecoderOptions::default().set_strict_mode(true);

@@ -45,7 +45,7 @@ type Ready = Box<dyn FnOnce(Result<(), String>) + Send>;
 
 /// Where the shaper module is in this instance.
 enum Module {
-    /// `loader()` returns a promise of the module.
+    /// Not loaded yet; calling `loader` returns a promise of the module.
     NotLoaded {
         loader: js_sys::Function,
     },

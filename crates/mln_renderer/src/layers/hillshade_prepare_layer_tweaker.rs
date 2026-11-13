@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/hillshade_prepare_layer_tweaker.hpp,
-// src/mln/renderer/layers/hillshade_prepare_layer_tweaker.cpp and
-// src/mln/gfx/hillshade_prepare_drawable_data.hpp.
-
 use std::sync::Arc;
 
 use mln_gfx::LayerGroupBase;
@@ -18,7 +14,6 @@ use crate::geometry::dem_data::get_unpack_vector;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
 use crate::paint_parameters::PaintParameters;
 
-/// `gfx::HillshadePrepareDrawableData`.
 #[derive(Clone, Copy, Debug)]
 pub struct HillshadePrepareDrawableData {
     pub stride: i32,

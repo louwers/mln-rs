@@ -1,8 +1,3 @@
-// Ports src/mln/renderer/layers/color_relief_layer_tweaker.hpp,
-// src/mln/renderer/layers/color_relief_layer_tweaker.cpp
-// (MLN_UBO_CONSOLIDATION branches: the port's backend is WebGPU) and
-// src/mln/gfx/color_relief_drawable_data.hpp.
-
 use std::sync::Arc;
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
@@ -21,8 +16,8 @@ use super::cast_matrix;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
-/// `gfx::ColorReliefDrawableData`: per-tile DEM properties that are set
-/// during drawable creation and read by the tweaker during rendering.
+/// Per-tile DEM properties that are set during drawable creation and read by
+/// the tweaker during rendering.
 #[derive(Clone, Copy, Debug)]
 pub struct ColorReliefDrawableData {
     pub tile_props: ColorReliefTilePropsUBO,

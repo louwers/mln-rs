@@ -2,8 +2,6 @@
 // fixtures, read in place. `use_convert` reads through `convert` (C++: a
 // rapidjson document) instead of `parse`, and writes through `to_json` +
 // serde_json instead of `stringify`.
-// TODO(port): test/test_value.cpp tests geojson_value_impl.hpp, which the
-// core does not compile (not ported).
 
 use std::path::PathBuf;
 

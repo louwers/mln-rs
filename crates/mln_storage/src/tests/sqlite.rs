@@ -1,5 +1,3 @@
-// Ports test/storage/sqlite.test.cpp.
-
 use super::{FixtureLog, cpp_path};
 use crate::sqlite3::{self, Database, OpenFlag, Query, Statement, Transaction, TransactionMode};
 

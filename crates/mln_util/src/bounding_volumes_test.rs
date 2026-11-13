@@ -1,5 +1,3 @@
-// Ports test/util/bounding_volumes.test.cpp
-
 use std::f64::consts::PI;
 
 use super::*;

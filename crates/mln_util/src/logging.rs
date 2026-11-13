@@ -1,8 +1,3 @@
-// Ports include/mln/util/event.hpp + src/mln/util/event.cpp,
-// include/mln/util/logging.hpp + src/mln/util/logging.cpp and
-// platform/default/src/mln/util/logging_stderr.cpp (synchronous recording only; the log thread of
-// `useLogThread` is a TODO(port)).
-//
 // Rust addition: `Log::set_thread_observer` installs an observer for the
 // current thread only, taking precedence over the global one. The Rust test
 // harness runs tests in parallel threads of one process, so the C++
@@ -127,7 +122,6 @@ impl FromStr for Event {
     }
 }
 
-/// `Log::Observer`.
 pub trait Observer: Send + Sync {
     /// Returns true when the record was handled (then it is not printed).
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool;
@@ -139,7 +133,6 @@ thread_local! {
     static THREAD_OBSERVER: RefCell<Option<Box<dyn Observer>>> = const { RefCell::new(None) };
 }
 
-/// `mln::Log`.
 pub struct Log;
 
 impl Log {
@@ -174,9 +167,8 @@ impl Log {
         Self::record(EventSeverity::Error, event, -1, msg.as_ref());
     }
 
-    /// `Log::Record` with the event filters from event.hpp
-    /// (`disabledEventPermutations = {{Debug, Shader}}`; Debug is disabled in
-    /// release builds).
+    /// Records a log message, unless it is filtered out: `Debug` severity is
+    /// dropped for `Shader` events and in release builds.
     pub fn record(severity: EventSeverity, event: Event, code: i64, msg: &str) {
         if !cfg!(debug_assertions) && severity == EventSeverity::Debug {
             return;

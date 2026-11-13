@@ -1,9 +1,7 @@
-// Ports the tests of test/style/** that need `FormatSectionOverride`:
-// PropertyExpression.
-// FormatSectionOverride (test/style/property_expression.test.cpp),
-// GlobalStateExpression.FormatSectionOverrideUsesCapturedState
-// (test/style/expression/global_state.test.cpp) and Layer.SymbolLayerOverrides
-// (test/style/style_layer.test.cpp).
+// The style tests that need `FormatSectionOverride`:
+// PropertyExpression.FormatSectionOverride,
+// GlobalStateExpression.FormatSectionOverrideUsesCapturedState and
+// Layer.SymbolLayerOverrides.
 
 use std::sync::Arc;
 
@@ -57,7 +55,6 @@ impl GeometryTileFeature for StubGeometryTileFeature {
     }
 }
 
-/// `createOverride(exprType, propValue, propName)`.
 fn create_override(
     expr_type: Type,
     prop_value: PossiblyEvaluatedPropertyValue<Color>,
@@ -66,7 +63,7 @@ fn create_override(
     Arc::new(FormatSectionOverride::new(expr_type, prop_value, prop_name.to_owned()))
 }
 
-/// `parseExpression(json, expected)` of `global_state.test.cpp`.
+/// Parses an expression from JSON text, with an optional expected type.
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Box<dyn Expression>> {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut ctx = match expected {

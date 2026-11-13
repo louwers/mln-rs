@@ -1,5 +1,3 @@
-// Ports include/mln/style/transition_options.hpp.
-
 use std::time::Duration;
 
 use feature::{Value, ValueObject};
@@ -24,7 +22,6 @@ impl TransitionOptions {
         TransitionOptions { duration, delay, enable_placement_transitions }
     }
 
-    /// `TransitionOptions{{duration}}`.
     #[must_use]
     pub fn with_duration(duration: Duration) -> Self {
         TransitionOptions::new(Some(duration), None, true)

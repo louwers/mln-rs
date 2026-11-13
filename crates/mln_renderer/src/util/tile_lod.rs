@@ -1,5 +1,3 @@
-// Ports src/mln/util/tile_lod.hpp and src/mln/util/tile_lod.cpp.
-//
 // The C++ `TileZoomFunction::operator()` is `TileZoomFunction::call`.
 
 use mln_math::deg2rad;
@@ -68,8 +66,8 @@ impl TileZoomFunction {
         }
     }
 
-    /// `operator()`: distances share one unit (GL JS uses Mercator units at
-    /// zoom 0). Returns an unrounded zoom.
+    /// The zoom to load a tile at. Distances share one unit (GL JS uses
+    /// Mercator units at zoom 0). Returns an unrounded zoom.
     #[must_use]
     pub fn call(
         &self,

@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/value.hpp and
-// src/mln/style/expression/value.cpp.
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::value_to_json;
 use mln_style_types::{
@@ -23,7 +20,7 @@ use crate::type_::{self, Type};
 // dependent; a VecMap iterates in key order.
 pub type ObjectType = mln_vec_map::VecMap<String, Value>;
 
-/// `expression::Value`, same variant order as the C++ variant.
+/// An expression value, with the variants in the C++ variant's order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Value {
     #[default]
@@ -62,7 +59,7 @@ impl Value {
 
     #[must_use]
     pub fn is_safe_integer_f64(x: f64) -> bool {
-        // TODO(port): `static_cast<uint64_t>` of |x| >= 2^64 is UB in C++;
+        // `static_cast<uint64_t>` of |x| >= 2^64 is UB in C++;
         // `as` saturates.
         ((if x > 0.0 { x } else { -x }) as u64) <= Self::max_safe_integer()
     }
@@ -179,7 +176,6 @@ impl From<ObjectType> for Value {
     }
 }
 
-/// `typeOf`.
 #[must_use]
 pub fn type_of(value: &Value) -> Type {
     match value {
@@ -214,9 +210,9 @@ pub fn type_of(value: &Value) -> Type {
     }
 }
 
-/// `toString(value)` in GL JS: strings, numbers and booleans as
-/// `String(value)`, colors as `rgba(...)`, `null` as `""`, and every other
-/// value as [`stringify()`] writes it.
+/// Converts a value to a string as GL JS `toString(value)` does: strings,
+/// numbers and booleans as `String(value)`, colors as `rgba(...)`, `null` as
+/// `""`, and every other value as [`stringify()`] writes it.
 #[must_use]
 pub fn to_string(value: &Value) -> String {
     match value {
@@ -283,7 +279,6 @@ pub fn stringify(value: &Value) -> String {
     String::from_utf8(json).unwrap_or_default()
 }
 
-/// `ValueConverter<mln::Value>::toExpressionValue` (`FromMBGLValue`).
 pub fn from_mbgl_value(value: &MbglValue) -> Value {
     match value {
         MbglValue::Array(v) => Value::Array(v.iter().map(from_mbgl_value).collect()),
@@ -308,7 +303,6 @@ pub fn from_mbgl_value_owned(value: MbglValue) -> Value {
     }
 }
 
-/// `ValueConverter<mln::Value>::fromExpressionValue`.
 pub fn to_mbgl_value(value: &Value) -> MbglValue {
     match value {
         Value::Color(color) => color.serialize(),
@@ -367,16 +361,15 @@ pub fn to_mbgl_value(value: &Value) -> MbglValue {
     }
 }
 
-/// `ValueConverter<T>`: conversions between style value types and
-/// `expression::Value`, plus `valueTypeToExpressionType<T>()`.
+/// Conversions between a style value type and expression `Value`s, and the
+/// type's expression type.
 pub trait ValueConverter: Sized {
     fn expression_type() -> Type;
     fn to_expression_value(&self) -> Value;
     fn from_expression_value(value: &Value) -> Option<Self>;
 
-    /// `ValueConverter<std::vector<T>>::fromExpressionValue`: an array,
-    /// element-wise. C++ specializes it for `std::vector<Color>`
-    /// (`hillshade_conversions.cpp`), which also wraps a single color.
+    /// Converts an array element-wise. The `Color` implementation also wraps a
+    /// single color.
     fn vec_from_expression_value(value: &Value) -> Option<Vec<Self>> {
         match value {
             Value::Array(v) => v.iter().map(Self::from_expression_value).collect(),
@@ -399,7 +392,6 @@ pub fn value_type_to_expression_type<T: ValueConverter>() -> Type {
     T::expression_type()
 }
 
-/// `fromExpressionValues<T>`.
 #[must_use]
 pub fn from_expression_values<T: ValueConverter>(values: &[Option<Value>]) -> Vec<Option<T>> {
     values.iter().map(|value| value.as_ref().and_then(from_expression_value::<T>)).collect()
@@ -478,9 +470,8 @@ impl ValueConverter for Color {
         }
     }
 
-    /// `ValueConverter<std::vector<Color>>::fromExpressionValue`
-    /// (`hillshade_conversions.cpp)`: an array converts element-wise; a single
-    /// color is wrapped in a one-element vector.
+    /// An array converts element-wise; a single color is wrapped in a
+    /// one-element vector.
     fn vec_from_expression_value(value: &Value) -> Option<Vec<Self>> {
         if let Value::Array(values) = value {
             let mut result = Vec::with_capacity(values.len());
@@ -607,8 +598,7 @@ enum_value_converter!(
     VisibilityType,
 );
 
-/// `type::toString` re-exported next to the value helpers, as the C++ code
-/// calls both unqualified.
+/// The name of `t`, as `type_::to_string` writes it.
 #[must_use]
 pub fn type_to_string(t: &Type) -> String {
     type_::to_string(t)

@@ -1,5 +1,3 @@
-// Ports src/mln/tile/geometry_tile.hpp and src/mln/tile/geometry_tile.cpp.
-//
 // C++ `GeometryTile` is both the tile the TilePyramid owns and the target of
 // its worker's replies (an actor reference to `this`). Here the state the
 // replies change is `GeometryTileInner`, an `Rc` registered as the target of
@@ -22,9 +20,8 @@
 // onImagesAvailable forwarded to the worker), and LayoutResult carries the
 // glyph/image atlases of the shared DynamicTextureAtlas.
 //
-// TODO(port): image patches in GeometryTileRenderData (same-size runtime
-// image updates), queries, feature state, HarfBuzz shaping of font-face
-// glyphs in onGlyphsAvailable.
+// Not supported: image patches in GeometryTileRenderData (same-size runtime
+// image updates).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -89,7 +86,6 @@ impl Drop for LayoutAtlases {
     }
 }
 
-/// `GeometryTile::LayoutResult`.
 #[derive(Clone)]
 pub struct LayoutResult {
     pub layer_render_data: HashMap<String, LayerRenderData>,
@@ -123,7 +119,6 @@ impl LayoutResult {
         &self.atlases.image_atlas
     }
 
-    /// `getLayerRenderData(const style::Layer::Impl&)`.
     pub fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
         let result = self.layer_render_data.get(&layer_impl.id)?;
         if !std::ptr::eq(result.layer_properties.base_impl.get_type_info(), layer_impl.get_type_info()) {
@@ -134,12 +129,10 @@ impl LayoutResult {
     }
 }
 
-/// `GeometryTileRenderData`.
 struct GeometryTileRenderData {
     atlas_textures: Option<Rc<TileAtlasTextures>>,
     layout_result: Option<Rc<LayoutResult>>,
     bucket_geometry: Rc<BucketGeometry>,
-    // TODO(port): std::vector<ImagePatch> imagePatches (sprite updates).
 }
 
 impl TileRenderData for GeometryTileRenderData {
@@ -193,15 +186,12 @@ impl TileRenderData for GeometryTileRenderData {
             image_dynamic_texture.upload_deferred_images(context);
             *atlas_textures.icon.borrow_mut() = image_dynamic_texture.get_texture();
         }
-
-        // TODO(port): imagePatches (same-size runtime image updates).
     }
 
     fn prepare(&mut self, _parameters: &SourcePrepareParameters<'_>) {
         if self.layout_result.is_none() {
             // return
         }
-        // TODO(port): populateImagePatches (sprite image updates).
     }
 }
 
@@ -229,7 +219,7 @@ pub struct GeometryTileInner {
     /// soon as possible.
     obsolete: Arc<AtomicBool>,
 
-    /// `OptionalActor<GeometryTileWorker> worker`, behind its transport.
+    /// The tile's worker, behind its transport.
     worker: Box<dyn WorkerEndpoint>,
     mailbox: Arc<Mailbox>,
 
@@ -270,7 +260,6 @@ impl GeometryTileInner {
         self.mailbox.close();
     }
 
-    /// `setError(std::exception_ptr)`.
     pub fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
         // Without data, the worker has nothing to parse, so the tile is
@@ -281,7 +270,6 @@ impl GeometryTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    /// `setData(std::unique_ptr<const GeometryTileData>)`.
     pub fn set_data(&self, data: Option<SharedTileData>) {
         if self.obsolete.load(Ordering::SeqCst) {
             return;
@@ -303,8 +291,8 @@ impl GeometryTileInner {
         self.worker.send(WorkerMessage::SetData { data, available_images, correlation_id });
     }
 
-    /// `reset()`: resets the tile's data and layers and leaves the tile in
-    /// pending state, waiting for the new data and layers to come.
+    /// Resets the tile's data and layers and leaves the tile in pending
+    /// state, waiting for the new data and layers to come.
     pub fn reset(&self) {
         // If there is pending work, indicate that work has been cancelled.
         // Clear the pending status.
@@ -324,7 +312,6 @@ impl GeometryTileInner {
         self.worker.send(WorkerMessage::Reset { correlation_id });
     }
 
-    /// `onLayout(std::shared_ptr<LayoutResult>, correlationID)`.
     pub fn on_layout(&self, result: LayoutResult, result_correlation_id: u64) {
         self.base.loaded.set(true);
         self.base.renderable.set(!self.missing.get());
@@ -332,9 +319,6 @@ impl GeometryTileInner {
             self.base.pending.set(false);
             self.base.on_tile_action(TileOperation::EndParse);
         }
-
-        // TODO(port): bucket->check (symbol guards), whose failures go to
-        // the log.
 
         *self.layout_result.borrow_mut() = Some(Rc::new(result));
         *self.bucket_geometry.borrow_mut() = Rc::default();
@@ -346,7 +330,6 @@ impl GeometryTileInner {
         self.base.observer().on_tile_changed(&self.base);
     }
 
-    /// `onError(std::exception_ptr, correlationID)`.
     pub fn on_error(&self, err: Error, result_correlation_id: u64) {
         self.base.loaded.set(true);
         if result_correlation_id == self.correlation_id.get() {
@@ -356,7 +339,7 @@ impl GeometryTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    /// `getImages(ImageRequestPair)`: `imageManager->getImages(*this, pair)`.
+    /// Requests the images in `pair` from the image manager.
     pub fn get_images(&self, pair: ImageRequestPair) {
         let Some(this) = self.self_weak.upgrade() else {
             return;
@@ -365,7 +348,6 @@ impl GeometryTileInner {
         self.image_manager.get_images(&requestor, pair);
     }
 
-    /// `getGlyphs(GlyphDependencies)`.
     pub fn get_glyphs(&self, glyph_dependencies: GlyphDependencies) {
         if let Some(file_source) = &self.file_source {
             let Some(this) = self.self_weak.upgrade() else {
@@ -386,14 +368,12 @@ impl GeometryTileInner {
         }
     }
 
-    /// `getFeatureIndex()`.
     pub fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
         self.layout_result.borrow().as_ref().map(|result| result.feature_index.clone())
     }
 }
 
 impl GlyphRequestor for GeometryTileInner {
-    /// `onGlyphsAvailable(GlyphMap, HBShapeRequests)`.
     fn on_glyphs_available(&self, mut glyph_map: GlyphMap, requests: HBShapeRequests) {
         let mut results = HBShapeResults::new();
         let mut bidi = BiDi::new();
@@ -461,7 +441,7 @@ impl ImageRequestor for GeometryTileInner {
         &self.image_requestor_base
     }
 
-    /// `onRequestedImageAdded()`: parses again with the added image.
+    /// Parses again with the added image.
     fn on_requested_image_added(&self) {
         if self.is_obsolete() {
             return;
@@ -478,7 +458,6 @@ impl ImageRequestor for GeometryTileInner {
         self.worker.send(WorkerMessage::SetAvailableImages { available_images, correlation_id });
     }
 
-    /// `onImagesAvailable(images, patterns, versionMap, imageCorrelationID)`.
     fn on_images_available(
         &self,
         images: ImageMap,
@@ -495,14 +474,11 @@ impl ImageRequestor for GeometryTileInner {
     }
 }
 
-/// `GeometryTile`.
 pub struct GeometryTile {
     inner: Rc<GeometryTileInner>,
 }
 
 impl GeometryTile {
-    /// `GeometryTile(const OverscaledTileID&, std::string sourceID, const
-    /// TileParameters&, TileObserver*)`.
     #[must_use]
     pub fn new(
         id: OverscaledTileID,
@@ -689,12 +665,9 @@ impl Tile for GeometryTile {
 
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         self.inner.base.set_observer(observer);
-        // TODO(port): worker.self().invoke(&GeometryTileWorker::setObserver,
-        // observer) (symbol errors reported from the worker thread).
     }
 
     // layers: feature state
-    /// `setFeatureState(const LayerFeatureStates&)`.
     fn set_feature_state(&self, states: &crate::bucket::LayerFeatureStates) {
         let layout_result = self.inner.layout_result.borrow();
         let Some(layout_result) = layout_result.as_ref() else {
@@ -928,7 +901,7 @@ pub fn query_layer_source_features(
 }
 
 impl GeometryTile {
-    /// `getData()`: the tile data of the latest layout, if any.
+    /// Whether the latest layout has tile data.
     #[must_use]
     pub fn has_data(&self) -> bool {
         self.inner.layout_result.borrow().as_ref().is_some_and(|result| result.feature_index.get_data().is_some())

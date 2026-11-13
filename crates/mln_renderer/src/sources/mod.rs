@@ -1,6 +1,4 @@
-//! Ports `src/mln/renderer/sources`.
-//!
-//! TODO(port): the annotation source.
+//! The render sources: the renderer's side of each style source type.
 
 pub mod render_custom_geometry_source;
 pub mod render_custom_vector_source;

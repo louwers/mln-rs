@@ -1,10 +1,5 @@
-// Ports src/mln/shaders/segment.hpp
-
 use serde::{Deserialize, Serialize};
 
-/// `mln::SegmentBase`.
-// TODO(port): `mutable std::map<std::string, gfx::DrawScope> drawScopes` is
-// only used by the legacy (non-drawable) OpenGL path.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct SegmentBase {
     pub vertex_offset: usize,
@@ -17,8 +12,6 @@ pub struct SegmentBase {
 }
 
 impl SegmentBase {
-    /// `SegmentBase(vertexOffset, indexOffset, vertexLength = 0, indexLength
-    /// = 0, baseInstance = 0, instanceCount = 1, sortKey = 0)`
     #[must_use]
     pub fn new(vertex_offset: usize, index_offset: usize) -> Self {
         Self::with_lengths(vertex_offset, index_offset, 0, 0)
@@ -55,6 +48,6 @@ impl SegmentBase {
 
 pub type SegmentVector = Vec<SegmentBase>;
 
-/// `maxSegmentVertices`: a segment's vertices are addressed by 16-bit
+/// The most vertices a segment holds, since they are addressed by 16-bit
 /// indices.
 pub const MAX_SEGMENT_VERTICES: usize = u16::MAX as usize;

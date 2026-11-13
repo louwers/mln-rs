@@ -1,6 +1,3 @@
-// Ports include/mln/style/sources/geojson_source.hpp and
-// src/mln/style/sources/geojson_source.cpp.
-//
 // `GeoJSONSource` is a handle (see source.rs): `Clone` shares the source.
 
 use std::cell::{Cell, RefCell};
@@ -26,12 +23,9 @@ use crate::layer::layer_type_info::TileKind;
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl;
 
-/// `GeoJSONOptions::ClusterExpression`.
 pub type ClusterExpression = (Arc<dyn Expression>, Arc<dyn Expression>);
-/// `GeoJSONOptions::ClusterProperties` (`std::map`).
 pub type ClusterProperties = VecMap<String, ClusterExpression>;
 
-/// `style::GeoJSONOptions`.
 #[derive(Clone)]
 pub struct GeoJSONOptions {
     // GeoJSON-VT options
@@ -98,22 +92,19 @@ impl std::fmt::Debug for GeoJSONOptions {
 }
 
 impl GeoJSONOptions {
-    /// `GeoJSONOptions::defaultOptions()`: one shared instance.
+    /// The default options, as one shared instance.
     pub fn default_options() -> Arc<GeoJSONOptions> {
         static OPTIONS: OnceLock<Arc<GeoJSONOptions>> = OnceLock::new();
         OPTIONS.get_or_init(|| Arc::new(GeoJSONOptions::default())).clone()
     }
 }
 
-/// `GeoJSONData::TileFeatures` (`feature_collection<int16_t>`).
 pub type TileFeatures = Vec<Feature<i16>>;
-/// `GeoJSONData::Features` (`feature_collection<double>`).
 pub type Features = Vec<Feature<f64>>;
 
-/// `style::GeoJSONData`.
 pub trait GeoJSONData: Send + Sync {
-    /// `getTile(id, fn, runSynchronously)`: `callback` runs on the calling
-    /// thread, either right away or later from its `RunLoop`.
+    /// Gets the features of tile `id`. `callback` runs on the calling thread,
+    /// either right away or later from its `RunLoop`.
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool);
 
     // SuperclusterData: data that isn't clustered has no clusters, and
@@ -124,8 +115,8 @@ pub trait GeoJSONData: Send + Sync {
     fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, mln_util::Error>;
 }
 
-/// `GeoJSONData::create(geoJSON, sequencedScheduler, options)`. GeoJSON that
-/// can't be clustered, such as a non-point feature, fails with
+/// Prepares GeoJSON for tiling. GeoJSON that can't be clustered, such as a
+/// non-point feature, fails with
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
 pub fn create_geojson_data(
     geojson: &GeoJSON,
@@ -166,7 +157,6 @@ struct Inner {
     background: SchedulerPtr,
 }
 
-/// `style::GeoJSONSource`.
 #[derive(Clone)]
 pub struct GeoJSONSource {
     inner: Rc<Inner>,
@@ -182,7 +172,6 @@ impl std::fmt::Debug for GeoJSONSource {
 }
 
 impl GeoJSONSource {
-    /// `GeoJSONSource(std::string id, Arc<GeoJSONOptions>)`.
     pub fn new(id: impl Into<String>, options: Arc<GeoJSONOptions>) -> Self {
         let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), options));
         GeoJSONSource {
@@ -197,18 +186,17 @@ impl GeoJSONSource {
         }
     }
 
-    /// `GeoJSONSource(id)` with the default options.
+    /// Creates a source with the default options.
     pub fn with_default_options(id: impl Into<String>) -> Self {
         Self::new(id, GeoJSONOptions::default_options())
     }
 
-    /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
-    /// `setURL(url)`: set the url to a geojson file which can be fetched.
+    /// Sets the URL of a GeoJSON file to fetch.
     pub fn set_url(&self, url: &str) {
         *self.inner.url.borrow_mut() = Some(url.to_owned());
         self.drop_building_response();
@@ -221,7 +209,7 @@ impl GeoJSONSource {
         }
     }
 
-    /// `setGeoJSON(geoJSON)`. Fails as [`create_geojson_data`] does.
+    /// Sets the source's data. Fails as [`create_geojson_data`] does.
     pub fn set_geojson(&self, geojson: &GeoJSON) -> Result<(), mln_util::Error> {
         let data =
             create_geojson_data(geojson, self.inner.sequenced_scheduler.clone(), &self.impl_().get_options().clone())?;
@@ -247,7 +235,6 @@ impl GeoJSONSource {
         self.inner.request_generation.get()
     }
 
-    /// `setGeoJSONData(data)`.
     pub fn set_geojson_data(&self, geojson_data: Option<Arc<dyn GeoJSONData>>) {
         *self.inner.req.borrow_mut() = None;
         self.drop_building_response();
@@ -324,7 +311,7 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
                 if let Some(geojson) = convert_json_geojson(&data, &mut error) {
                     match create_geojson_data(&geojson, seq_scheduler, &options) {
                         Ok(created) => geojson_data = Some(created),
-                        // TODO(port): C++ lets the Supercluster exception
+                        // C++ lets the Supercluster exception
                         // escape the background task.
                         Err(e) => Log::error(Event::ParseStyle, format!("Failed to parse GeoJSON data: {e}")),
                     }

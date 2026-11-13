@@ -32,7 +32,7 @@ impl Observer for Recorder {
     }
 }
 
-/// `FixtureLog` for the calling thread.
+/// Captures the log records of the calling thread while it lives.
 pub struct FixtureLog {
     messages: Records,
 }

@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/texture2d.hpp and src/mln/mtl/texture2d.cpp
-//
 // Differences from C++:
 // - Textures that aren't render targets, which the CPU writes, don't allow
 //   GPU-optimized contents (see `create_metal_texture`).
@@ -81,7 +79,6 @@ impl Texture2D {
         self.texture_dirty = true;
     }
 
-    /// `getMetalTexture()`
     #[must_use]
     pub fn get_metal_texture(&self) -> Option<&MTLTexturePtr> {
         debug_assert!(self.metal_texture.is_some());

@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/texture2d.hpp and src/mln/webgpu/texture2d.cpp
-//
 // Port-only: the rendering stats count the textures and their memory, as the
 // OpenGL backend's do; the C++ WebGPU backend doesn't.
 
@@ -19,7 +17,8 @@ struct UploadCopyData {
     bytes_per_row: u32,
 }
 
-/// `prepareCopyData`: pad rows to 256 bytes when there is more than one row.
+/// Pads rows to 256 bytes when there is more than one row. `None` for an
+/// empty region.
 fn prepare_copy_data(pixel_data: &[u8], region_size: Size, pixel_stride: usize) -> Option<UploadCopyData> {
     if region_size.width == 0 || region_size.height == 0 {
         return None;

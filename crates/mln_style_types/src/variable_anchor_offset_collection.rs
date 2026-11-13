@@ -1,9 +1,3 @@
-// Ports include/mln/style/variable_anchor_offset_collection.hpp +
-// src/mln/style/variable_anchor_offset_collection.cpp, plus the
-// `util::Interpolator<VariableAnchorOffsetCollection>` specialization from
-// include/mln/util/interpolate.hpp (as `VariableAnchorOffsetCollection::interpolate`,
-// because C++ throws on mismatched inputs).
-
 use feature::Value;
 use mln_util::string::to_string_double;
 use serde::{Deserialize, Serialize};
@@ -70,8 +64,8 @@ impl VariableAnchorOffsetCollection {
         self.anchor_offsets.iter()
     }
 
-    /// `Interpolator<VariableAnchorOffsetCollection>` (float t; C++ throws a
-    /// `std::runtime_error` with these messages).
+    /// Interpolates the offsets of matching anchors. Fails, with the messages
+    /// C++ throws, when the collections' lengths or anchors differ.
     pub fn interpolate(a: &Self, b: &Self, t: f32) -> Result<Self, String> {
         if a.len() != b.len() {
             return Err(format!("Cannot interpolate values of different length. from: {a}, to: {b}"));

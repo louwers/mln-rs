@@ -1,5 +1,3 @@
-// Ports include/mln/map/map_options.hpp and src/mln/map/map_options.cpp.
-
 use mln_map_types::{ConstrainMode, MapMode, NorthOrientation, ViewportMode};
 use mln_util::size::Size;
 

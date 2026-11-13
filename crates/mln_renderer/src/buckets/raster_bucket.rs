@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/buckets/raster_bucket.hpp and raster_bucket.cpp
-//
 // The bucket is shared (`Arc<dyn Bucket>`) between the tile, which changes
 // its mask on the render thread (`RasterTile::setMask`), and the render
 // layers. The masked geometry (C++ `vertices`/`indices`/`segments`, mutated
@@ -26,7 +24,6 @@ use serde::{Deserialize, Serialize};
 use crate::bucket::{Bucket, BucketBase};
 use crate::tile_mask::TileMask;
 
-/// `RasterLayoutVertex = gfx::Vertex<TypeList<attributes::pos, attributes::texture_pos>>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct RasterLayoutVertex {
@@ -39,10 +36,8 @@ pub struct RasterLayoutVertex {
 pub struct RasterBucketGeometry {
     pub mask: TileMask,
     pub vertices: Vec<RasterLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub indices: Vec<u16>,
     pub segments: Vec<SegmentBase>,
-    /// `vertices.getLastModified()`.
     pub last_modified: Instant,
 }
 
@@ -57,24 +52,21 @@ impl RasterBucketGeometry {
         }
     }
 
-    /// `vertices.isModifiedAfter(t)`.
     #[must_use]
     pub fn is_modified_after(&self, t: Instant) -> bool {
         t < self.last_modified
     }
 }
 
-/// `TileMask{{0, 0, 0}}`.
 fn full_mask() -> TileMask {
     let mut mask = TileMask::new();
     mask.insert(CanonicalTileID::new(0, 0, 0));
     mask
 }
 
-/// `RasterBucket`.
-///
-/// Port-only: serde writes the image, which is what a worker sets
-/// (`tile/worker_codec`); the geometry is the tile's (`setMask`).
+/// A raster tile's image and the geometry that draws it. Serde writes the
+/// image, which is what a worker sets (`tile/worker_codec`); the geometry is
+/// the tile's (`set_mask`).
 #[derive(Serialize, Deserialize)]
 pub struct RasterBucket {
     pub base: BucketBase,
@@ -88,19 +80,16 @@ fn unmasked() -> Mutex<RasterBucketGeometry> {
 }
 
 impl RasterBucket {
-    /// `RasterBucket(PremultipliedImage&&)`.
     #[must_use]
     pub fn new(image: PremultipliedImage) -> Self {
         Self::with_shared_image(Some(Arc::new(image)))
     }
 
-    /// `RasterBucket(std::shared_ptr<PremultipliedImage>)`.
     #[must_use]
     pub fn with_shared_image(image: Option<Arc<PremultipliedImage>>) -> Self {
         RasterBucket { base: BucketBase::default(), image, geometry: unmasked() }
     }
 
-    /// `layoutVertex(Point<int16_t> p, Point<uint16_t> t)`.
     #[must_use]
     pub fn layout_vertex(p: Point<i16>, t: Point<u16>) -> RasterLayoutVertex {
         RasterLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
@@ -111,7 +100,6 @@ impl RasterBucket {
         self.geometry.lock()
     }
 
-    /// `clear()`.
     pub fn clear(&self) {
         let mut geometry = self.geometry();
         Self::clear_geometry(&mut geometry);
@@ -135,7 +123,6 @@ impl RasterBucket {
         geometry.last_modified = Instant::now();
     }
 
-    /// `setMask(TileMask&&)`.
     pub fn set_mask(&self, mask: TileMask) {
         const VERTEX_LENGTH: usize = 4;
 

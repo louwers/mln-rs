@@ -40,7 +40,6 @@ const SYNC_NATIVE_FENCE: egl::Enum = 0x3144;
 /// `EGL_SYNC_NATIVE_FENCE_FD_ANDROID`.
 const SYNC_NATIVE_FENCE_FD: egl::Int = 0x3145;
 
-/// `AHardwareBuffer_Desc`.
 #[repr(C)]
 struct Desc {
     width: u32,

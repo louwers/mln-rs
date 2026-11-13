@@ -1,5 +1,3 @@
-// Ports include/mln/style/style_property.hpp.
-
 use feature::Value;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -1,6 +1,3 @@
-// Ports include/mln/layermanager/heatmap_layer_factory.hpp +
-// src/mln/layermanager/heatmap_layer_factory.cpp (style half).
-
 use mln_conversion::Convertible;
 
 use super::layer_factory::{LayerFactory, get_source};

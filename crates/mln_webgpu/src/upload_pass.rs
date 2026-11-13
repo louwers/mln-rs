@@ -1,6 +1,3 @@
-// Ports include/mln/webgpu/upload_pass.hpp, src/mln/webgpu/upload_pass.cpp
-// and src/mln/webgpu/vertex_attribute.cpp (`VertexAttribute::getBuffer`)
-
 use std::rc::Rc;
 
 use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
@@ -23,8 +20,7 @@ pub struct UploadPass {
     context: Rc<Context>,
 }
 
-/// `struct VertexBuffer : gfx::VertexBufferBase`: the buffer attached to a
-/// shared vertex vector.
+/// The buffer attached to a shared vertex vector.
 struct VertexBuffer {
     resource: Rc<VertexBufferResource>,
 }
@@ -32,8 +28,8 @@ struct VertexBuffer {
 impl VertexBufferBase for VertexBuffer {}
 
 impl UploadPass {
-    /// C++ pushes the encoder's debug groups and `name` on the pass; WebGPU
-    /// upload-pass debug groups are no-ops.
+    /// Starts an upload pass. C++ pushes the encoder's debug groups and
+    /// `name` on the pass; WebGPU upload-pass debug groups are no-ops.
     pub fn new(command_encoder: &CommandEncoder, _name: &str) -> Self {
         UploadPass { context: command_encoder.get_context().clone() }
     }
@@ -78,7 +74,6 @@ impl UploadPass {
         )
     }
 
-    /// `getBuffer(const VertexVectorBasePtr&, usage, forceUpdate)`
     #[must_use]
     pub fn get_buffer(
         &self,
@@ -115,12 +110,11 @@ impl UploadPass {
         None
     }
 
-    /// `Context::getDefaultVertexBuffer(type, size)`: a shared buffer of at
-    /// least `vertex_count` default values of `data_type` for an attribute
-    /// the drawable doesn't provide: white for colors (Float4), full opacity
-    /// (Float2), zeros otherwise. The context keeps one per type, grown
-    /// geometrically. Each binding holds the buffer it was given, so a
-    /// replaced smaller one lives until no binding points at it.
+    /// A shared buffer of at least `vertex_count` default values of `data_type`
+    /// for an attribute the drawable doesn't provide: white for colors
+    /// (Float4), full opacity (Float2), zeros otherwise. The context keeps one
+    /// per type, grown geometrically. Each binding holds the buffer it was
+    /// given, so a replaced smaller one lives until no binding points at it.
     fn dummy_vertex_buffer(&self, data_type: AttributeDataType, vertex_count: usize) -> UniqueVertexBufferResource {
         let mut cache = self.context.dummy_vertex_buffers().borrow_mut();
         let cached_count = cache.get(&data_type).map_or(0, |(count, _)| *count);
@@ -141,7 +135,6 @@ impl UploadPass {
         buffer
     }
 
-    /// `webgpu::VertexAttribute::getBuffer(attrib, uploadPass, usage, forceUpdate)`
     pub fn get_attribute_buffer(
         &self,
         attrib: &mut VertexAttribute,

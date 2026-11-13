@@ -1,7 +1,3 @@
-// Ports the style-type parts of include/mln/style/conversion_impl.hpp:
-// `ValueFactory<T>`, `makeValue`, `makeStyleProperty`. (`Convertible` itself
-// is in mln_conversion.)
-
 use feature::Value;
 use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
 use mln_util::{Color, Padding};
@@ -12,9 +8,9 @@ use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 
-/// `ValueFactory<T>::make`, plus the `makeStyleProperty` kind of a constant
-/// (`Color`, `Padding` and `VariableAnchorOffsetCollection` constants are
-/// reported as expressions, as in C++).
+/// Makes a `Value` from a style value, and gives the style property kind of a
+/// constant (`Color`, `Padding` and `VariableAnchorOffsetCollection`
+/// constants are reported as expressions, as in C++).
 pub trait ValueFactory {
     fn make_value(&self) -> Value;
 
@@ -66,14 +62,13 @@ impl ValueFactory for VariableAnchorOffsetCollection {
     }
 }
 
-/// `ValueFactory<float>`: `Value(float)` holds a double.
+/// Widened to a double.
 impl ValueFactory for f32 {
     fn make_value(&self) -> Value {
         Value::Double(f64::from(*self))
     }
 }
 
-/// `ValueFactory<double>` (the generic `Value{arg}`).
 impl ValueFactory for f64 {
     fn make_value(&self) -> Value {
         Value::Double(*self)
@@ -92,7 +87,7 @@ impl ValueFactory for String {
     }
 }
 
-/// `ValueFactory<Position>`: the spherical coordinates as an array.
+/// The spherical coordinates as an array.
 impl ValueFactory for Position {
     fn make_value(&self) -> Value {
         self.get_spherical().make_value()
@@ -111,21 +106,19 @@ impl ValueFactory for Image {
     }
 }
 
-/// `ValueFactory<expression::Formatted>` (include/mln/style/expression/formatted.hpp).
 impl ValueFactory for Formatted {
     fn make_value(&self) -> Value {
         self.to_object()
     }
 }
 
-/// `ValueFactory<ColorRampPropertyValue>`.
 impl ValueFactory for ColorRampPropertyValue {
     fn make_value(&self) -> Value {
         self.get_expression().serialize()
     }
 }
 
-/// `ValueFactory<T>` for linear containers.
+/// An array of the elements' values.
 impl<T: ValueFactory, const N: usize> ValueFactory for [T; N] {
     fn make_value(&self) -> Value {
         Value::Array(self.iter().map(ValueFactory::make_value).collect())
@@ -138,7 +131,7 @@ impl<T: ValueFactory> ValueFactory for Vec<T> {
     }
 }
 
-/// `ValueFactory<T, enable_if_t<is_enum_v<T>>>` (the enum's name).
+/// Implements `ValueFactory` for enums, which make their names.
 macro_rules! enum_value_factory {
     ($($t:ty),* $(,)?) => {
         $(impl ValueFactory for $t {
@@ -170,12 +163,10 @@ enum_value_factory!(
     mln_style_types::VisibilityType,
 );
 
-/// `makeValue(arg)`.
 pub fn make_value<T: ValueFactory>(arg: &T) -> Value {
     arg.make_value()
 }
 
-/// `makeStyleProperty(const PropertyValue<T>&)`.
 pub fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> StyleProperty {
     match value {
         PropertyValue::Undefined => StyleProperty::default(),
@@ -184,7 +175,6 @@ pub fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> StylePr
     }
 }
 
-/// `makeStyleProperty(const TransitionOptions&)`.
 #[must_use]
 pub fn make_transition_style_property(value: &TransitionOptions) -> StyleProperty {
     if !value.is_defined() {
@@ -193,7 +183,6 @@ pub fn make_transition_style_property(value: &TransitionOptions) -> StylePropert
     StyleProperty::new(make_value(value), Kind::Transition)
 }
 
-/// `makeStyleProperty(const ColorRampPropertyValue&)`.
 #[must_use]
 pub fn make_color_ramp_style_property(value: &ColorRampPropertyValue) -> StyleProperty {
     if value.is_undefined() {

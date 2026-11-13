@@ -1,8 +1,3 @@
-// Ports src/mln/renderer/buckets/fill_extrusion_bucket.hpp and
-// fill_extrusion_bucket.cpp (`MLN_USE_FILL_EXTRUSION_INSTANCING`, on every
-// backend), plus the `PatternLayout` instantiation of
-// FillExtrusionLayerFactory::createLayout (layermanager/fill_extrusion_layer_factory.cpp).
-//
 // The vertex/index vectors are plain `Vec`s (the bucket is built on the
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
@@ -49,7 +44,6 @@ use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_v
 use crate::util::triangulate::triangulate;
 
 crate::paint_property_binders!(
-    /// `FillExtrusionBinders = PaintPropertyBinders<FillExtrusionPaintProperties::DataDrivenProperties>`.
     pub struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
         fill_extrusion_base: FillExtrusionBase => PaintPropertyBinder<f32>,
         fill_extrusion_color: FillExtrusionColor => PaintPropertyBinder<Color>,
@@ -58,9 +52,8 @@ crate::paint_property_binders!(
     }
 );
 
-/// `FillExtrusionLayoutVertex = gfx::Vertex<TypeList<attributes::pos,
-/// attributes::decimals_ed>>`: a vertex of the roof, and the wall instance
-/// from it to the next vertex of its ring.
+/// A vertex of the roof, and the wall instance from it to the next vertex of
+/// its ring.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct FillExtrusionLayoutVertex {
@@ -68,12 +61,10 @@ pub struct FillExtrusionLayoutVertex {
     pub a2: [u16; 2],
 }
 
-/// `FillExtrusionStaticVertex = gfx::Vertex<TypeList<attributes::pos>>`: a
-/// corner of the wall quad every instance draws, x picking the instance's
+/// A corner of the wall quad every instance draws: x picks the instance's
 /// vertex (0) or the next one (1), y the base (0) or the top (1).
 pub type FillExtrusionStaticVertex = [i16; 2];
 
-/// `EvaluatedLight = style::LightProperties::PossiblyEvaluated`.
 pub use crate::render_light::EvaluatedLight;
 
 #[derive(Serialize, Deserialize)]
@@ -82,7 +73,6 @@ pub struct FillExtrusionBucket {
     pub layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
 
     pub vertices: GeometryVec<FillExtrusionLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub triangles: GeometryVec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
     pub subdivision_granularity: SubdivisionGranularitySetting,
@@ -94,8 +84,9 @@ pub struct FillExtrusionBucket {
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
-/// `util::dist<uint16_t>(a, b)`: `static_cast<uint16_t>` of the double
-/// distance (x86-64: through a 32-bit conversion, keeping the low bits).
+/// The distance from `a` to `b`, cast to `u16` as C++'s
+/// `static_cast<uint16_t>` does on x86-64: through a wider integer, keeping
+/// the low bits.
 fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -103,7 +94,6 @@ fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
 }
 
 impl FillExtrusionBucket {
-    /// `FillExtrusionBucket(layout, layerPaintProperties, zoom, overscaling)`.
     #[must_use]
     pub fn new(
         layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
@@ -132,7 +122,6 @@ impl FillExtrusionBucket {
         self.subdivision_granularity = *value;
     }
 
-    /// `layoutVertex(p, edgeDistance, isDiscarded)`.
     #[must_use]
     pub fn layout_vertex(p: Point<f64>, edge_distance: u16, is_discarded: bool) -> FillExtrusionLayoutVertex {
         let int_part = Point::new(p.x.floor(), p.y.floor());
@@ -246,14 +235,12 @@ impl FillExtrusionBucket {
         Ok(())
     }
 
-    /// `lightColor(const EvaluatedLight&)`.
     #[must_use]
     pub fn light_color(light: &EvaluatedLight) -> [f32; 3] {
         let color = light.get::<LightColor>();
         [color.r, color.g, color.b]
     }
 
-    /// `lightPosition(const EvaluatedLight&, const TransformState&)`.
     pub fn light_position(light: &EvaluatedLight, state: &TransformState) -> [f32; 3] {
         let mut light_pos: Vec3f = light.get::<LightPosition>().get_cartesian();
         let mut light_mat: Mat3 = [0.0; 9];
@@ -267,7 +254,6 @@ impl FillExtrusionBucket {
         light_pos
     }
 
-    /// `lightIntensity(const EvaluatedLight&)`.
     #[must_use]
     pub fn light_intensity(light: &EvaluatedLight) -> f32 {
         *light.get::<LightIntensity>()
@@ -376,8 +362,7 @@ impl Bucket for FillExtrusionBucket {
     }
 }
 
-/// `PatternLayout<FillExtrusionBucket, FillExtrusionLayerProperties,
-/// FillExtrusionPattern, FillExtrusionLayoutProperties>` (no sort key).
+/// The pattern layout of fill-extrusion layers, which have no sort key.
 pub struct FillExtrusionLayoutSpec;
 
 impl PatternLayoutSpec for FillExtrusionLayoutSpec {

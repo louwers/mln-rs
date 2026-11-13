@@ -1,5 +1,3 @@
-// Ports src/mln/gl/offscreen_texture.hpp/.cpp and src/mln/gl/framebuffer.hpp
-//
 // The texture has no depth or stencil buffer, as in C++: without them every
 // depth and stencil test passes.
 
@@ -47,7 +45,6 @@ impl OffscreenTextureResource {
         OffscreenTextureResource { context: context.weak(), size, texture, framebuffer: Cell::new(None) }
     }
 
-    /// `Context::createFramebuffer(const gfx::Texture2D& color)`
     fn create_framebuffer(&self, context: &Context) -> Option<FramebufferID> {
         let gl = context.gl();
         self.texture.borrow_mut().create();
@@ -66,7 +63,6 @@ impl OffscreenTextureResource {
         }
     }
 
-    /// `readStillImage()`
     pub fn read_still_image(&self) -> PremultipliedImage {
         let mut image = PremultipliedImage::new(self.size);
         if let Some(context) = self.context.upgrade()
@@ -110,7 +106,6 @@ impl TargetResource for OffscreenTextureResource {
     }
 }
 
-/// `gl::OffscreenTexture`
 pub struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,

@@ -1,8 +1,3 @@
-// Ports src/mln/gfx/upload_pass.hpp
-//
-// TODO(port): the typed `createVertexBuffer<Vertex>` / `createIndexBuffer<DrawMode>`
-// helpers of the legacy program path.
-
 use std::any::Any;
 
 use mln_util::time::Instant;

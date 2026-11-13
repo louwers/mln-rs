@@ -1,5 +1,3 @@
-// Ports test/util/timer.test.cpp.
-//
 // All of them are `TEST_REQUIRES_ACCURATE_TIMING(...)`, i.e. `DISABLED_` on
 // the C++ CI; the timing ones are #[ignore]d here for the same reason (the
 // test machine is shared). Run them with `--test_arg=--ignored`.
@@ -13,7 +11,6 @@ use std::time::{Duration, Instant};
 
 use mln_actor::{RunLoop, Timer};
 
-/// `duration_cast<Milliseconds>(now - first).count()`.
 fn elapsed_ms(first: Instant) -> f64 {
     first.elapsed().as_millis() as f64
 }

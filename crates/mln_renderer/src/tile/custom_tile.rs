@@ -1,7 +1,3 @@
-// Ports src/mln/tile/custom_geometry_tile.{hpp,cpp} and
-// src/mln/tile/custom_vector_tile.{hpp,cpp}, with the request tracking of
-// ffi patches 0051, 0069 and 0070, and 0052's MLT data.
-//
 // A custom tile is a GeometryTile whose data a custom source's loader hands
 // it. It's generic over that data, as the loader is (see
 // mln_style::custom_tile_loader). Like the C++ tile, it has a mailbox of its
@@ -53,14 +49,12 @@ struct Link<D: Clone + Send + 'static> {
 }
 
 impl<D: Clone + Send + 'static> Link<D> {
-    /// `setTileData(data)`.
     fn set_tile_data(&self, data: D) {
         if let Some(tile) = self.tile.upgrade() {
             tile.set_data((self.convert)(data));
         }
     }
 
-    /// `setTileError(error)`.
     fn set_tile_error(&self, error: Error) {
         if let Some(tile) = self.tile.upgrade()
             && !tile.is_obsolete()
@@ -69,7 +63,6 @@ impl<D: Clone + Send + 'static> Link<D> {
         }
     }
 
-    /// `invalidateTileData()`.
     fn invalidate_tile_data(&self) {
         self.stale.set(true);
         if let Some(tile) = self.tile.upgrade() {
@@ -105,10 +98,8 @@ pub struct CustomTile<D: Clone + Send + 'static> {
     single_layer: bool,
 }
 
-/// `CustomGeometryTile`.
 pub type CustomGeometryTile = CustomTile<Arc<TileFeatures>>;
 
-/// `CustomVectorTile`.
 pub type CustomVectorTile = CustomTile<CustomVectorTileData>;
 
 impl<D: Clone + Send + 'static> CustomTile<D> {
@@ -135,17 +126,17 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
         CustomTile { tile, link, mailbox, single_layer }
     }
 
-    /// `setTileData(data)`, as the loader's message does.
+    /// Sets the tile's data, as the loader's message does.
     pub fn set_tile_data(&self, data: D) {
         self.link.set_tile_data(data);
     }
 
-    /// `setTileError(error)`, as the loader's message does.
+    /// Sets the tile's error, as the loader's message does.
     pub fn set_tile_error(&self, error: Error) {
         self.link.set_tile_error(error);
     }
 
-    /// `invalidateTileData()`, as the loader's message does.
+    /// Invalidates the tile data, as the loader's message does.
     pub fn invalidate_tile_data(&self) {
         self.link.invalidate_tile_data();
     }
@@ -161,10 +152,8 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
 }
 
 impl CustomGeometryTile {
-    /// `CustomGeometryTile(const OverscaledTileID&, std::string sourceID,
-    /// const TileParameters&, Immutable<TileOptions>,
-    /// ActorRef<CustomTileLoader>, TileObserver*)`, without the tile
-    /// options: the loader cuts the tile's features.
+    /// A custom geometry tile. It takes no tile options: the loader cuts the
+    /// tile's features.
     #[must_use]
     pub fn new(
         overscaled_tile_id: OverscaledTileID,
@@ -186,9 +175,7 @@ impl CustomGeometryTile {
 }
 
 impl CustomVectorTile {
-    /// `CustomVectorTile(const OverscaledTileID&, std::string sourceID,
-    /// const TileParameters&, ActorRef<CustomVectorTileLoader>,
-    /// TileObserver*, bool fastPFOREnabled)`: MLT data is decoded with
+    /// A custom vector tile, whose MLT data is decoded with
     /// `fast_pfor_enabled`.
     #[must_use]
     pub fn new(
@@ -330,7 +317,6 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         self.tile.get_query_padding(layers)
     }
 
-    /// `querySourceFeatures(result, options, globalState)`.
     fn query_source_features(
         &self,
         result: &mut Vec<mln_util::feature::Feature>,

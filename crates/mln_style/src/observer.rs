@@ -1,6 +1,3 @@
-// Ports src/mln/style/observer.hpp, src/mln/style/source_observer.hpp,
-// src/mln/style/layer_observer.hpp and src/mln/style/light_observer.hpp.
-//
 // The observer methods take `&self` (C++: non-const virtuals): the style
 // holds an `Rc<dyn Observer>`, and the map's implementation uses interior
 // mutability. `LayerObserver` / `LightObserver` are implemented by
@@ -14,7 +11,6 @@ use crate::source::Source;
 use crate::sprite::Sprite;
 use crate::style::StyleLoadError;
 
-/// `style::SourceObserver`.
 pub trait SourceObserver {
     fn on_source_loaded(&self, _source: &dyn Source) {}
     fn on_source_changed(&self, _source: &dyn Source) {}
@@ -22,7 +18,6 @@ pub trait SourceObserver {
     fn on_source_description_changed(&self, _source: &dyn Source) {}
 }
 
-/// `style::Observer`.
 pub trait Observer: SourceObserver {
     fn on_style_loading(&self) {}
     fn on_style_loaded(&self) {}

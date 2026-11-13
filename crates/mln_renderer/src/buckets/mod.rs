@@ -1,4 +1,4 @@
-//! Ports src/mln/renderer/buckets (the bucket types M3 renders).
+//! The bucket types: the vertex and index data a tile's layers draw.
 
 pub mod circle_bucket;
 pub mod debug_bucket; // layers: debug

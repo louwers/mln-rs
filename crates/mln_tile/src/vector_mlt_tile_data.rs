@@ -1,6 +1,3 @@
-// Ports src/mln/tile/vector_mlt_tile_data.hpp and
-// src/mln/tile/vector_mlt_tile_data.cpp.
-//
 // The tile is decoded by `mlt::MapLibreTile::decode` (crate::mlt, on the
 // mlt-core crate) where C++ calls `mlt::Decoder(fastPFOREnabled).decode`.
 //
@@ -29,8 +26,8 @@ use crate::mlt::{self, Coordinate, MapLibreTile, Property, Shape};
 
 static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
 
-/// `PropertyVisitor`: the `mln::Value` of an MLT property (32-bit integers
-/// widen to `int64_t`/`uint64_t`, `float` to `double`).
+/// The `Value` of an MLT property: 32-bit integers widen to 64 bits, `f32`
+/// to `f64`.
 fn property_value(property: Property<'_>) -> Value {
     match property {
         Property::Bool(b) => Value::Bool(b),
@@ -44,8 +41,8 @@ fn property_value(property: Property<'_>) -> Value {
     }
 }
 
-/// `PointConverter`: `static_cast<int16_t>(std::round(coord * scale))`,
-/// saturating out of range.
+/// Scales `coord` and rounds it to tile coordinates, saturating out of
+/// range.
 fn convert_point(scale: f64, coord: Coordinate) -> GeometryCoordinate {
     GeometryCoordinate::new((f64::from(coord.x) * scale).round() as i16, (f64::from(coord.y) * scale).round() as i16)
 }
@@ -54,7 +51,6 @@ fn convert_coords(scale: f64, coords: &[Coordinate]) -> GeometryCoordinates {
     coords.iter().map(|c| convert_point(scale, *c)).collect()
 }
 
-/// `VectorMLTTileFeature`.
 pub struct VectorMLTTileFeature<'l> {
     layer: &'l mlt::Layer,
     feature: &'l mlt::Feature,
@@ -89,14 +85,15 @@ impl<'l> VectorMLTTileFeature<'l> {
         self.feature
     }
 
-    /// `getValue`: `nullopt` for an unknown key or an absent value.
+    /// The value of the property `key`; `None` for an unknown key or an
+    /// absent value.
     pub fn try_get_value(&self, key: &str) -> Result<Option<Value>, mlt::Error> {
         Ok(self.feature.get_property(key, self.layer)?.map(property_value))
     }
 
-    /// `getProperties`: every column, `null_value` for an absent value. If a
-    /// column throws, the C++ map is already engaged: the next call returns
-    /// the columns read before it (here in wire order; C++ in hash order).
+    /// Every property, `null_value` for an absent value. If a column fails,
+    /// the next call returns the columns read before it, as the C++ map is
+    /// already engaged (here in wire order; C++ in hash order).
     pub fn try_get_properties(&self) -> Result<&PropertyMap, mlt::Error> {
         if let Some(properties) = self.properties.get() {
             return Ok(properties);
@@ -117,7 +114,6 @@ impl<'l> VectorMLTTileFeature<'l> {
     }
 }
 
-/// `VectorMLTTileFeature::getType`.
 fn feature_type(feature: &mlt::Feature) -> FeatureType {
     match feature.get_geometry().shape {
         Shape::Point(_) => FeatureType::Point,
@@ -193,7 +189,8 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
     }
 }
 
-/// `VectorMLTTileLayer`: holds the decoded tile, as C++ holds its `shared_ptr`.
+/// A layer of a decoded tile. It holds the tile, as C++ holds its
+/// `shared_ptr`.
 pub struct VectorMLTTileLayer {
     tile: Arc<MapLibreTile>,
     layer: usize,
@@ -206,8 +203,8 @@ impl VectorMLTTileLayer {
         &self.tile.get_layers()[self.layer]
     }
 
-    /// `getFeature(index)`. C++ indexes the feature vector unchecked; an index
-    /// past the end panics here.
+    /// The feature at `index`. Panics for an index past the end, where C++
+    /// indexes the feature vector unchecked.
     #[must_use]
     pub fn feature(&self, index: usize) -> VectorMLTTileFeature<'_> {
         let layer = self.layer();
@@ -276,15 +273,15 @@ struct State {
     tile: Option<Arc<MapLibreTile>>,
 }
 
-/// `VectorMLTTileData`: the tile is decoded on the first `getLayer` (or
-/// `layerNames`); a decoding error is logged and leaves it without layers.
+/// MapLibre Tile data. The tile is decoded on the first layer lookup (or
+/// [`layer_names`](Self::layer_names)); a decoding error is logged and leaves
+/// it without layers.
 pub struct VectorMLTTileData {
     state: Mutex<State>,
     fast_pfor_enabled: bool,
 }
 
 impl VectorMLTTileData {
-    /// `VectorMLTTileData(std::shared_ptr<const std::string>, bool fastPFOREnabled)`.
     #[must_use]
     pub fn new(data: Arc<Vec<u8>>, fast_pfor_enabled: bool) -> Self {
         VectorMLTTileData { state: Mutex::new(State { data: Some(data), tile: None }), fast_pfor_enabled }
@@ -307,14 +304,15 @@ impl VectorMLTTileData {
         state.tile.clone()
     }
 
-    /// `getLayer`, with its concrete type.
+    /// The first layer named `name`, with its concrete type.
     pub fn get_mlt_layer(&self, name: &str) -> Option<VectorMLTTileLayer> {
         let tile = self.tile()?;
         let layer = tile.get_layers().iter().position(|layer| layer.get_name() == name)?;
         Some(VectorMLTTileLayer { tile, layer })
     }
 
-    /// `layerNames()`: in tile order (MVT: sorted), duplicates included.
+    /// The names of the tile's layers, in tile order (MVT data lists them
+    /// sorted), duplicates included.
     pub fn layer_names(&self) -> Vec<String> {
         let decode = {
             let state = self.state.lock();

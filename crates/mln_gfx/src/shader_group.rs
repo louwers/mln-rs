@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/shader_group.hpp and src/mln/gfx/shader_group.cpp
-//
 // Deviation: the C++ group stores `shared_ptr<gfx::Shader>` and callers
 // `static_pointer_cast` to `ShaderProgramBase`. Every registered shader is a
 // program, so the port stores `ShaderProgramBasePtr` (upcast to `dyn Shader`
@@ -13,13 +11,11 @@ use crate::context::Context;
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 
-/// `StringIDSetsPair = pair<unordered_set<string_view>, unordered_set<size_t>>`
 pub type StringIDSetsPair = (HashSet<String>, HashSet<usize>);
 
 pub type PropertyHashType = u64;
 
-/// `ShaderGroup::globeDefine`: the define that compiles a shader's globe
-/// variant.
+/// The define that compiles a shader's globe variant.
 pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
 
 /// The data members of `gfx::ShaderGroup`.
@@ -46,7 +42,7 @@ pub trait ShaderGroup {
         true
     }
 
-    /// `get<T>(shaderName)`: the shader if its type name matches.
+    /// The shader named `shader_name`, if its type name is `type_name`.
     fn get_typed(&self, shader_name: &str, type_name: &str) -> Option<ShaderProgramBasePtr> {
         self.get_shader(shader_name).filter(|s| s.type_name() == type_name)
     }
@@ -66,14 +62,15 @@ pub trait ShaderGroup {
 
 pub type ShaderGroupPtr = Rc<dyn ShaderGroup>;
 
-/// `ShaderGroup::getShaderName(name, key)`: `name + '#' + hex(key)`.
+/// The name of the variant of shader `name` with property hash `key`:
+/// `name#<hex key>`.
 #[must_use]
 pub fn get_shader_name(name: &str, key: PropertyHashType) -> String {
     format!("{name}#{key:x}")
 }
 
-/// `ShaderGroup::propertyHash`: an order-independent hash of the property
-/// ids, the wrapping sum of their hashes. Only used as a cache key.
+/// An order-independent hash of the property ids, the wrapping sum of their
+/// hashes. Only used as a cache key.
 #[must_use]
 pub fn property_hash(properties_as_uniforms: &StringIDSetsPair) -> PropertyHashType {
     properties_as_uniforms.1.iter().fold(0u64, |acc, &id| acc.wrapping_add(crate::util_hash::hash(&[id as u64])))

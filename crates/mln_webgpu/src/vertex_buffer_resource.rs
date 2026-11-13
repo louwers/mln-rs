@@ -1,6 +1,3 @@
-// Ports include/mln/webgpu/vertex_buffer_resource.hpp, src/mln/webgpu/vertex_buffer_resource.cpp,
-// include/mln/webgpu/index_buffer_resource.hpp and src/mln/webgpu/index_buffer_resource.cpp
-//
 // Both are shared through `Rc` (gfx::AttributeBinding keeps a clone) and
 // updated in place, so the buffer sits behind a `RefCell`.
 
@@ -33,8 +30,8 @@ impl VertexBufferResource {
     pub fn get_buffer(&self) -> Ref<'_, BufferResource> {
         self.buffer.borrow()
     }
-    /// `std::chrono::duration<double> lastUpdated` is value-initialized
-    /// (zero) in C++: "never" is `None` here, earlier than any `Instant`.
+    /// When the buffer was last updated, `None` for never (C++'s zero
+    /// duration), which is earlier than any `Instant`.
     pub fn get_last_updated(&self) -> Option<Instant> {
         self.last_updated.get()
     }

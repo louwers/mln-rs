@@ -1,13 +1,6 @@
-// Ports include/mln/gfx/context.hpp and src/mln/gfx/context.cpp
-//
 // All methods take `&self`: the context is reached from everywhere
 // (`PaintParameters`, render layers, upload passes) and wgpu's API is `&self`
 // too; the backend keeps mutable state in cells.
-//
-// TODO(port): `createDynamicTexture`, `createRenderTarget` (RenderTarget is a
-// renderer type), `createRenderbuffer`, `createDrawScope`,
-// `visualizeStencilBuffer`/`visualizeDepthBuffer` (debug builds) and
-// `threadSafeAccessRenderingStats` arrive with their first user.
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
@@ -146,7 +139,7 @@ impl dyn Context {
         (self as &dyn Any).downcast_ref()
     }
 
-    /// `emplaceOrUpdateUniformBuffer<T>(ptr, const T* data)` for a `Pod` UBO.
+    /// `emplace_or_update_uniform_buffer` with the bytes of a `Pod` UBO.
     pub fn emplace_or_update_uniform_buffer_pod<T: bytemuck::Pod>(
         &self,
         ptr: &mut Option<UniformBufferPtr>,

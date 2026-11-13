@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/buffer_resource.hpp and src/mln/vulkan/buffer_resource.cpp
-//
 // A resource reaches the device through the backend state, and the frame it
 // is used in, the deletion queue and the rendering stats through a `Weak`
 // context: the context's global uniform buffers hold resources, so an `Rc`
@@ -41,7 +39,7 @@ pub(crate) fn unique_id() -> u64 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// `BufferAllocation`: a buffer and its memory, mapped.
+/// A buffer and its memory, mapped.
 pub struct BufferAllocation {
     id: u64,
     backend: Rc<BackendImpl>,
@@ -51,9 +49,8 @@ pub struct BufferAllocation {
 }
 
 impl BufferAllocation {
-    /// `create(allocInfo, bufferInfo)`: a buffer of `size` bytes in
-    /// host-visible memory, written (`MemoryLocation::CpuToGpu`) or read
-    /// (`GpuToCpu`) by the CPU.
+    /// Creates a buffer of `size` bytes in host-visible memory, written
+    /// (`MemoryLocation::CpuToGpu`) or read (`GpuToCpu`) by the CPU.
     pub fn create(
         backend: &Rc<BackendImpl>,
         size: usize,
@@ -124,7 +121,6 @@ impl BufferAllocation {
 }
 
 impl Drop for BufferAllocation {
-    /// `destroy()`
     fn drop(&mut self) {
         // SAFETY: the owner of the allocation waited for the commands that
         // use the buffer (the context's deletion queue), or never used it.
@@ -252,7 +248,7 @@ impl BufferResource {
         }
     }
 
-    /// `getVulkanBuffer()`: the buffer, null if its allocation failed.
+    /// The buffer, null if its allocation failed.
     pub fn get_vulkan_buffer(&self) -> vk::Buffer {
         self.buffer_allocation.as_ref().map_or(vk::Buffer::null(), |allocation| allocation.buffer())
     }
@@ -267,12 +263,11 @@ impl BufferResource {
         self.context.upgrade().map_or(0, |context| context.get_current_frame_resource_index())
     }
 
-    /// `getVulkanBufferOffset()`: where the current frame's copy starts.
+    /// Where the current frame's copy starts.
     pub fn get_vulkan_buffer_offset(&self) -> usize {
         self.get_vulkan_buffer_offset_of(self.current_frame())
     }
 
-    /// `getVulkanBufferOffset(resourceIndex)`
     pub fn get_vulkan_buffer_offset_of(&self, resource_index: u8) -> usize {
         usize::from(resource_index) * self.buffer_window_size
     }
@@ -341,8 +336,8 @@ impl BufferResource {
         self.version.set(version);
     }
 
-    /// `updateVulkanBuffer(destination, source)`: brings the copy of the
-    /// frame `frame` up to date with the buffer's contents.
+    /// Brings the copy of the frame `frame` up to date with the buffer's
+    /// contents.
     pub fn update_vulkan_buffer(&self, frame: u8) {
         if self.buffer_window_size == 0 {
             return;

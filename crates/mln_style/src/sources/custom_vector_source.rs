@@ -1,8 +1,3 @@
-// Ports include/mln/style/sources/custom_vector_source.hpp,
-// src/mln/style/sources/custom_vector_source.cpp and
-// src/mln/style/sources/custom_vector_source_impl.{hpp,cpp}, with ffi
-// patches 0051, 0052 and 0075.
-//
 // `CustomVectorSource` is a handle (see source.rs): `Clone` shares the
 // source. As for a custom geometry source, the host answers its tile
 // functions through a `Send` [`CustomVectorSourceHandle`].
@@ -25,7 +20,7 @@ use crate::layer::layer_type_info::TileKind;
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
-/// `style::TileDataFormat`: the encoding of a custom vector tile's bytes.
+/// The encoding of a custom vector tile's bytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TileDataFormat {
     /// Mapbox Vector Tile.
@@ -41,7 +36,6 @@ pub type CustomVectorTileData = (Option<Data>, TileDataFormat);
 /// The loader of a custom vector source.
 pub type CustomVectorTileLoader = CustomTileLoader<CustomVectorTileData>;
 
-/// `CustomVectorSource::Options`.
 #[derive(Clone)]
 pub struct Options {
     /// Asks the host for a tile's data, which it gives with
@@ -83,32 +77,29 @@ impl std::fmt::Debug for CustomVectorSourceHandle {
 }
 
 impl CustomVectorSourceHandle {
-    /// `setTileData(tileID, data, format)`: the tile's encoded bytes. `None`
-    /// is a tile without data.
+    /// Hands over the tile's encoded bytes. `None` is a tile without data.
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: Option<Data>, format: TileDataFormat) {
         self.loader.invoke(move |loader| loader.set_tile_data(&tile_id, (data, format)));
     }
 
-    /// `setTileError(tileID, error)`: the host failed to load the tile.
-    /// Invalidating the tile, or needing it again, asks for it again.
+    /// Reports that the host failed to load the tile. Invalidating the tile, or
+    /// needing it again, asks for it again.
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, &error));
     }
 
-    /// `invalidateTile(tileID)`: drops the tile's data, and asks the host for
-    /// it again if a tile needs it.
+    /// Drops the tile's data, and asks the host for it again if a tile needs
+    /// it.
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.loader.invoke(move |loader| loader.invalidate_tile(&tile_id));
     }
 
-    /// `invalidateRegion(bounds)`: invalidates every tile that the bounds
-    /// intersect.
+    /// Invalidates every tile that `bounds` intersect.
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
         self.loader.invoke(move |loader| loader.invalidate_region(&bounds));
     }
 }
 
-/// `CustomVectorSource::Impl`.
 #[derive(Clone)]
 pub struct Impl {
     base: ImplBase,
@@ -127,12 +118,10 @@ impl std::fmt::Debug for Impl {
 }
 
 impl Impl {
-    /// `Impl(std::string id, const CustomVectorSource::Options&)`.
     fn new(id: String, options: &Options) -> Self {
         Impl { base: ImplBase::new(SourceType::CustomMVTVector, id), zoom_range: options.zoom_range, loader_ref: None }
     }
 
-    /// `Impl(const Impl&, const ActorRef<CustomVectorTileLoader>&)`.
     fn with_loader(other: &Impl, loader_ref: PoolActorRef<CustomVectorTileLoader>) -> Self {
         Impl { loader_ref: Some(loader_ref), ..other.clone() }
     }
@@ -148,7 +137,7 @@ impl Impl {
         self.zoom_range
     }
 
-    /// `getTileLoader()`: `None` until the source is loaded.
+    /// The tile loader; `None` until the source is loaded.
     #[must_use]
     pub fn get_tile_loader(&self) -> Option<&PoolActorRef<CustomVectorTileLoader>> {
         self.loader_ref.as_ref()
@@ -174,8 +163,7 @@ struct Inner {
     loader: Actor<CustomVectorTileLoader>,
 }
 
-/// `style::CustomVectorSource`: a source whose tiles' encoded vector data
-/// the host gives on demand.
+/// A source whose tiles' encoded vector data the host gives on demand.
 #[derive(Clone)]
 pub struct CustomVectorSource {
     inner: Rc<Inner>,
@@ -188,7 +176,6 @@ impl std::fmt::Debug for CustomVectorSource {
 }
 
 impl CustomVectorSource {
-    /// `CustomVectorSource(std::string id, const Options&)`.
     pub fn new(id: impl Into<String>, options: Options) -> Self {
         let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), &options));
         let loader = Actor::new(scheduler::get_background(), |_| {
@@ -197,7 +184,6 @@ impl CustomVectorSource {
         CustomVectorSource { inner: Rc::new(Inner { base: SourceBase::new(impl_), loader }) }
     }
 
-    /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
@@ -209,22 +195,22 @@ impl CustomVectorSource {
         CustomVectorSourceHandle { loader: self.inner.loader.self_ref() }
     }
 
-    /// `setTileData(tileID, data, format)`; see [`CustomVectorSourceHandle`].
+    /// See [`CustomVectorSourceHandle::set_tile_data`].
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: Option<Data>, format: TileDataFormat) {
         self.handle().set_tile_data(tile_id, data, format);
     }
 
-    /// `setTileError(tileID, error)`; see [`CustomVectorSourceHandle`].
+    /// See [`CustomVectorSourceHandle::set_tile_error`].
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.handle().set_tile_error(tile_id, error);
     }
 
-    /// `invalidateTile(tileID)`; see [`CustomVectorSourceHandle`].
+    /// See [`CustomVectorSourceHandle::invalidate_tile`].
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.handle().invalidate_tile(tile_id);
     }
 
-    /// `invalidateRegion(bounds)`; see [`CustomVectorSourceHandle`].
+    /// See [`CustomVectorSourceHandle::invalidate_region`].
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
         self.handle().invalidate_region(bounds);
     }

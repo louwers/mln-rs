@@ -1,16 +1,17 @@
-//! Ports `include/mln/math/` (`angles.hpp`, `clamp.hpp`, `wrap.hpp`,
-//! `minmax.hpp`).
+//! Math helpers: angle conversion, clamping, wrapping, and floating-point
+//! minimum and maximum.
 //!
-//! `util::min`/`util::max` on floating-point types are `::fmin`/`::fmax`.
-//! Their NaN handling is specified, their choice between `-0.0` and `+0.0`
-//! is not; `fmin`/`fmax` here implement glibc's (and clang's inline
-//! `llvm.minnum`/`llvm.maxnum` lowering on x86-64): the first argument when
-//! the two compare equal. Don't use `f64::min`/`f64::max`
-//! where signed zeros matter: Rust leaves that choice unspecified.
+//! The floating-point minimum and maximum are `fmin`/`fmax`, as C++'s
+//! `util::min`/`util::max` are. Their NaN handling is specified, their
+//! choice between `-0.0` and `+0.0` is not; `fmin`/`fmax` here implement
+//! glibc's (and clang's inline `llvm.minnum`/`llvm.maxnum` lowering on
+//! x86-64): the first argument when the two compare equal. Don't use
+//! `f64::min`/`f64::max` where signed zeros matter: Rust leaves that choice
+//! unspecified.
 
 use std::f64::consts::PI;
 
-// --- Ports include/mln/math/angles.hpp ---
+// --- Angles ---
 
 /// Converts degrees to radians.
 #[must_use]
@@ -30,7 +31,7 @@ pub const fn rad2deg(rad: f64) -> f64 {
     rad * 180.0 / PI
 }
 
-// --- Ports include/mln/math/minmax.hpp ---
+// --- Min and max ---
 
 /// glibc `fmax`: NaN loses; equal operands (±0) return `a`.
 #[must_use]
@@ -80,7 +81,7 @@ pub fn fminf(a: f32, b: f32) -> f32 {
     }
 }
 
-// --- Ports include/mln/math/clamp.hpp ---
+// --- Clamp ---
 // `max(min_, min(max_, value))` over util::min/max, i.e. fmin/fmax for
 // floats. That means `clamp(NaN, a, b) == b`; keep it.
 
@@ -96,7 +97,7 @@ pub fn clamp_f32(value: f32, min_: f32, max_: f32) -> f32 {
     fmaxf(min_, fminf(max_, value))
 }
 
-// --- Ports include/mln/math/wrap.hpp ---
+// --- Wrap ---
 
 /// Constrains n to the given range (including min, excluding max) via modular
 /// arithmetic.

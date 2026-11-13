@@ -1,5 +1,3 @@
-// Ports src/mln/style/conversion/sprite.hpp + src/mln/style/conversion/sprite.cpp.
-
 use super::{Converter, Convertible, Error};
 use crate::sprite::Sprite;
 

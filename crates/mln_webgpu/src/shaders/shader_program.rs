@@ -1,14 +1,8 @@
-// Ports include/mln/shaders/webgpu/shader_program.hpp and
-// src/mln/shaders/webgpu/shader_program.cpp
-//
 // wgpu vs. Dawn: shader module creation runs inside a validation error scope
 // so that a WGSL compile error yields "no module" (the C++ null check); the
 // C++ backend gets null only on catastrophic failure and Dawn reports the
 // compile error asynchronously. On a browser's WebGPU the scope is skipped
 // (see `validated`).
-//
-// TODO(port): the `ShaderProgram(name, backend, vertexModule, fragmentModule)`
-// constructor for precompiled modules (unused on the M1 path).
 
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -220,7 +214,6 @@ impl ShaderProgram {
     /// Static name member (`is_shader_v`)
     pub const NAME: &'static str = "WebGPUShader";
 
-    /// `ShaderProgram(context, vertexSource, fragmentSource, attrs, texts, name)`
     pub fn new(
         context: &Context,
         vertex_source: &str,
@@ -242,8 +235,8 @@ impl ShaderProgram {
         program
     }
 
-    /// `ShaderProgram(Context&, vertexSource, fragmentSource)` (minimal
-    /// constructor; name "`ContextShader`").
+    /// A program named `ContextShader`, of `vertex_source` and
+    /// `fragment_source`.
     ///
     /// A `globalIndex` the sources declare in group 0 moves to a group of its
     /// own (see [`get_index_group`](Self::get_index_group)).
@@ -311,8 +304,9 @@ impl ShaderProgram {
         program
     }
 
-    /// `getRenderPipeline(renderable, vertexLayouts, ..., reuseHash,
-    /// cullMode)`. The renderable is unused in C++ and not passed.
+    /// The pipeline for the vertex layouts and modes, reused from earlier
+    /// calls with the same `reuse_hash`. C++ also takes a renderable, which
+    /// it doesn't use.
     #[allow(clippy::too_many_arguments)]
     pub fn get_render_pipeline(
         &self,

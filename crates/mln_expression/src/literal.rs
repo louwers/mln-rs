@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/literal.hpp and
-// src/mln/style/expression/literal.cpp.
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
@@ -18,7 +15,7 @@ fn check_number(n: f64) -> Value {
     if n > f64::MAX { Value::Number(f64::INFINITY) } else { Value::Number(n) }
 }
 
-/// `parseValue` of literal.cpp.
+/// Parses the JSON value of a literal.
 // C++'s signature: `ctx` is only passed on to the recursive calls.
 #[allow(clippy::only_used_in_recursion)]
 pub(crate) fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<Value> {

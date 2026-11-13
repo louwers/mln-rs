@@ -1,5 +1,3 @@
-// Ports src/mln/style/layer_impl.hpp + src/mln/style/layer_impl.cpp.
-//
 // C++ `Layer::Impl` is an abstract base class with data members. In Rust the
 // data members are `ImplBase` and the virtual interface is the `Impl` trait
 // (re-exported as `layer::Impl`); a concrete impl such as
@@ -18,7 +16,6 @@ use crate::filter::Filter;
 use crate::layer::LayerTypeInfo;
 use crate::serialization::shared_expression;
 
-/// `mln::FontStack` (`include/mln/util/font_stack.hpp`).
 pub type FontStack = Vec<String>;
 
 /// The data members of `Layer::Impl`.
@@ -40,7 +37,6 @@ pub struct ImplBase {
 }
 
 impl ImplBase {
-    /// `Impl(std::string layerID, std::string sourceID)`.
     #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         ImplBase {
@@ -113,7 +109,7 @@ impl std::ops::Deref for dyn Impl {
 }
 
 impl dyn Impl {
-    /// `static_cast<const FooLayer::Impl&>(impl)`, checked.
+    /// The impl as a `T`, if it is one.
     pub fn downcast_ref<T: Impl>(&self) -> Option<&T> {
         (self as &dyn Any).downcast_ref()
     }

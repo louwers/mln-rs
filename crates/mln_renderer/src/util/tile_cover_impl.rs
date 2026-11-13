@@ -1,5 +1,3 @@
-// Ports src/mln/util/tile_cover_impl.hpp and src/mln/util/tile_cover_impl.cpp.
-//
 // C++ undefined behaviour kept out of the port: `static_cast<int32_t>` of a
 // double outside the int32 range (or NaN) saturates here (`as i32`); unsigned
 // `uint32_t` arithmetic on `tileY` wraps (`wrapping_*`); shifts by the zoom
@@ -18,7 +16,6 @@ use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 
 pub type Bounds = Vec<Bound>;
-/// `std::map<uint32_t, Bounds>`.
 pub type BoundsMap = VecMap<u32, Bounds>;
 
 /// A chain of points from a local minimum to a local maximum. `winding`
@@ -253,9 +250,8 @@ fn scan_row(y: u32, active_bounds: &mut Bounds) -> Vec<TileSpan> {
     tile_range
 }
 
-/// `BuildBoundsMap`, the geometry visitor that builds the edge table. C++
-/// throws `std::domain_error` from the `LatLng` constructor when projecting
-/// a point with an out-of-range latitude; that is the `Err` here.
+/// The geometry visitor that builds the edge table. Projecting a point with
+/// an out-of-range latitude is an `Err`.
 struct BuildBoundsMap {
     zoom: i32,
     project: bool,
@@ -271,7 +267,6 @@ impl BuildBoundsMap {
         1i32.wrapping_shl(self.zoom as u32)
     }
 
-    /// `Projection::project(LatLng{p.y, p.x}, zoom)`.
     fn project_point(&self, p: &Point<f64>) -> Result<Point<f64>, Error> {
         Ok(Projection::project_zoom(&LatLng::new(p.y, p.x)?, self.zoom))
     }
@@ -319,7 +314,6 @@ impl BuildBoundsMap {
         Ok(())
     }
 
-    /// `apply_visitor(toBoundsMap, geom)`.
     fn apply(&self, geom: &Geometry<f64>) -> Result<BoundsMap, Error> {
         let mut et = BoundsMap::new();
         match geom {
@@ -345,8 +339,6 @@ impl BuildBoundsMap {
 
 type TileSpans = VecDeque<(i32, i32)>;
 
-/// `TileCover::Impl`.
-///
 /// Implements a modified scan-line algorithm to provide a streaming interface
 /// for tile cover on arbitrary shapes. A `BoundsMap` is generated from the
 /// input geometry where each tuple indicates the set of Bounds that start at a
@@ -366,8 +358,8 @@ pub struct Impl {
     zoom: i32,
     is_closed: bool,
 
-    /// `boundsMap` together with the `currentBounds` iterator into it: the
-    /// entries not yet moved into `active_bounds`, in key order.
+    /// The bounds map's entries not yet moved into `active_bounds`, in key
+    /// order.
     current_bounds: Peekable<mln_vec_map::IntoIter<u32, Bounds>>,
     /// List of bounds that begin at or before `tileY`
     active_bounds: Bounds,
@@ -379,8 +371,9 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// C++ default: `project = true`. Errors where C++ throws (a point with
-    /// an out-of-range latitude while projecting).
+    /// The cover of `geom` at zoom `z`, projecting the geometry if `project`
+    /// (C++ defaults it to true). Errors for a point with an out-of-range
+    /// latitude while projecting.
     pub fn new(z: i32, geom: &Geometry<f64>, project: bool) -> Result<Impl, Error> {
         let is_closed = to_feature_type(geom) == FeatureType::Polygon;
 

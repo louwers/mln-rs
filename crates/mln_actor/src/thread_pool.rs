@@ -1,10 +1,3 @@
-// Ports src/mln/util/thread_pool.hpp and src/mln/util/thread_pool.cpp:
-// `ThreadedSchedulerBase` / `ThreadedScheduler` with one queue per tag, and
-// `ThreadPool` (= `ParallelScheduler(3)`, 4 threads).
-//
-// TODO(port): `runOnRenderThread`/`runRenderJobs`, thread names/priorities
-// from platform settings.
-
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -35,11 +28,9 @@ struct Shared {
 }
 
 thread_local! {
-    /// `owningThreadPool`.
     static OWNING_THREAD_POOL: Cell<usize> = const { Cell::new(0) };
 }
 
-/// `ThreadedScheduler(n)`.
 pub struct ThreadedScheduler {
     shared: Arc<Shared>,
     threads: Vec<JoinHandle<()>>,
@@ -187,7 +178,7 @@ impl Drop for ThreadedScheduler {
     }
 }
 
-/// `ThreadPool`: `ParallelScheduler(3)`, i.e. four worker threads.
+/// A scheduler with four worker threads.
 pub struct ThreadPool {
     scheduler: ThreadedScheduler,
 }
@@ -220,7 +211,7 @@ impl Scheduler for ThreadPool {
     }
 }
 
-/// `SequencedScheduler`: `ThreadedScheduler(1)`.
+/// A scheduler with one worker thread, so its tasks run in order.
 pub struct SequencedScheduler {
     scheduler: ThreadedScheduler,
 }

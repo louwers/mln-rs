@@ -1,6 +1,3 @@
-// Ports src/mln/util/intersection_tests.hpp and
-// src/mln/util/intersection_tests.cpp.
-//
 // `GeometryCoordinates` is `&[Point<i16>]` here and `GeometryCollection` is
 // `&[Vec<Point<i16>>]` (mln_tile_id's GeometryCollection derefs to it), so
 // this util file needs no tile types. Integer arithmetic is C++ `int`

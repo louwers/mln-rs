@@ -1,8 +1,6 @@
-// Ports include/mln/shaders/heatmap_texture_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) HeatmapTexturePropsUBO` (80 bytes).
+/// The heatmap texture shader's properties uniform block (80 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct HeatmapTexturePropsUBO {

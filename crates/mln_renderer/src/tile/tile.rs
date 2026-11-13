@@ -1,6 +1,3 @@
-// Ports src/mln/tile/tile.hpp, src/mln/tile/tile.cpp,
-// include/mln/tile/tile_necessity.hpp and src/mln/tile/tile_operation.hpp.
-//
 // C++ `Tile` is an abstract class with data members. Tiles are owned by the
 // TilePyramid but also receive asynchronous replies (from their worker, the
 // file source or the GeoJSON data) on the render thread, which C++ reaches
@@ -26,7 +23,7 @@ use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileRenderData;
 
-/// `TileNecessity`: tiles can have two states: optional or required.
+/// Tiles can have two states: optional or required.
 /// - optional means that only low-cost actions should be taken to obtain
 ///   the data (e.g. load from cache, but accept stale data)
 /// - required means that every effort should be taken to obtain the data
@@ -37,7 +34,6 @@ pub enum TileNecessity {
     Required,
 }
 
-/// `TileOperation`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TileOperation {
@@ -61,14 +57,12 @@ pub enum TileOperation {
     NullOp,
 }
 
-/// `TileUpdateParameters`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TileUpdateParameters {
     pub minimum_update_interval: Duration,
     pub is_volatile: bool,
 }
 
-/// `Tile::Kind`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Kind {
@@ -106,7 +100,6 @@ pub struct TileBase {
 }
 
 impl TileBase {
-    /// `Tile(Kind, OverscaledTileID, std::string, TileObserver*)`.
     #[must_use]
     pub fn new(kind: Kind, id: OverscaledTileID, source_id: String, observer: Option<Rc<dyn TileObserver>>) -> Self {
         TileBase {
@@ -139,12 +132,10 @@ impl TileBase {
         self.observer.borrow().clone()
     }
 
-    /// `Tile::setObserver(TileObserver*)`.
     pub fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         *self.observer.borrow_mut() = observer;
     }
 
-    /// `setTriedCache()`.
     pub fn set_tried_cache(&self) {
         self.tried_optional.set(true);
         self.observer().on_tile_changed(self);
@@ -183,7 +174,6 @@ impl TileBase {
         self.loaded.get() && !self.pending.get()
     }
 
-    /// `dumpDebugLogs()`.
     pub fn dump_debug_logs(&self) {
         let kind_string = match self.kind {
             Kind::Geometry => "Geometry",
@@ -197,7 +187,6 @@ impl TileBase {
         Log::info(Event::General, format!("Tile::loaded: {}", if self.is_loaded() { "yes" } else { "no" }));
     }
 
-    /// `onTileAction(TileOperation)` (`TileLoaderObserver`).
     pub fn on_tile_action(&self, op: TileOperation) {
         self.observer().on_tile_action(&self.id(), &self.source_id, op);
     }
@@ -217,7 +206,7 @@ pub trait Tile: Any {
 
     fn set_update_parameters(&self, _parameters: &TileUpdateParameters) {}
 
-    /// `retryFailedLoad()`: requests the tile again if its last load failed.
+    /// Requests the tile again if its last load failed.
     fn retry_failed_load(&self) {}
 
     /// Mark this tile as no longer needed and cancel any pending work.
@@ -251,7 +240,6 @@ pub trait Tile: Any {
     fn set_mask(&self, _mask: TileMask) {}
 
     // layers: feature state
-    /// `setFeatureState(const LayerFeatureStates&)`.
     fn set_feature_state(&self, _states: &crate::bucket::LayerFeatureStates) {}
 
     /// "holdForFade" is used to keep tiles in the render tree after they're
@@ -274,8 +262,6 @@ pub trait Tile: Any {
 
     // query: the feature queries (tile.cpp: no-ops for tiles without
     // features).
-    /// `queryRenderedFeatures(result, queryGeometry, transformState, layers,
-    /// options, globalState, projMatrix, featureState)`.
     #[allow(clippy::too_many_arguments)]
     fn query_rendered_features(
         &self,
@@ -291,7 +277,6 @@ pub trait Tile: Any {
         Ok(())
     }
 
-    /// `querySourceFeatures(result, options, globalState)`.
     fn query_source_features(
         &self,
         _result: &mut Vec<mln_util::feature::Feature>,
@@ -301,7 +286,6 @@ pub trait Tile: Any {
         Ok(())
     }
 
-    /// `getQueryPadding(layers)`.
     fn get_query_padding(&self, _layers: &crate::geometry::feature_index::QueryLayers<'_>) -> f32 {
         0.0
     }

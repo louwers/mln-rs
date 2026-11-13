@@ -1,6 +1,3 @@
-// Ports include/mln/shaders/webgpu/wgsl_preprocessor.hpp and
-// src/mln/shaders/webgpu/wgsl_preprocessor.cpp (namespace webgpu::detail)
-
 use std::collections::HashMap;
 
 fn is_space(b: u8) -> bool {
@@ -58,8 +55,8 @@ struct ConditionalFrame {
     else_seen: bool,
 }
 
-/// `preprocessWGSL`: strips `#ifdef`/`#ifndef`/`#else`/`#endif` blocks
-/// according to `defines` (only key presence matters).
+/// Strips `#ifdef`/`#ifndef`/`#else`/`#endif` blocks according to
+/// `defines` (only key presence matters).
 #[must_use]
 pub fn preprocess_wgsl(source: &str, defines: &HashMap<String, bool>) -> String {
     let mut output = String::with_capacity(source.len());

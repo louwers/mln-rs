@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/renderable_resource.hpp and src/mln/vulkan/renderable_resource.cpp
-//
 // C++'s `SurfaceRenderableResource` is a base class the platforms derive
 // from, to make their surface and, headless, to read every frame back. Here
 // it is one type, the images of both kinds of target: the platform's part is
@@ -89,9 +87,8 @@ struct SurfaceState {
     read_texture: Option<Texture2D>,
 }
 
-/// `SurfaceRenderableResource`: a frame target's images, a swapchain's when
-/// there is a platform surface and its own otherwise, with a depth and
-/// stencil attachment.
+/// A frame target's images, a swapchain's when there is a platform surface
+/// and its own otherwise, with a depth and stencil attachment.
 pub struct SurfaceResource {
     backend: Rc<BackendImpl>,
     context: Weak<Context>,
@@ -166,7 +163,7 @@ impl SurfaceResource {
         surface_extent(&self.backend, surface)
     }
 
-    /// `getPlatformSurface()`: whether the resource presents to a surface.
+    /// Whether the resource presents to a surface.
     pub fn has_platform_surface(&self) -> bool {
         self.state.borrow().surface != vk::SurfaceKHR::null()
     }
@@ -191,26 +188,23 @@ impl SurfaceResource {
         self.state.borrow_mut().acquired_image_index = index;
     }
 
-    /// `getAcquiredImage()`
     pub fn get_acquired_image(&self) -> vk::Image {
         let state = self.state.borrow();
         state.swapchain_images.get(state.acquired_image_index as usize).copied().unwrap_or_default()
     }
 
-    /// `getAcquireSemaphore()`: the semaphore the frame `frame_index`
-    /// acquires its image with.
+    /// The semaphore the frame `frame_index` acquires its image with.
     pub fn get_acquire_semaphore(&self, frame_index: u8) -> vk::Semaphore {
         self.state.borrow().acquire_semaphores.get(usize::from(frame_index)).copied().unwrap_or_default()
     }
 
-    /// `getPresentSemaphore()`: the semaphore the acquired image is
-    /// presented with.
+    /// The semaphore the acquired image is presented with.
     pub fn get_present_semaphore(&self) -> vk::Semaphore {
         let state = self.state.borrow();
         state.present_semaphores.get(state.acquired_image_index as usize).copied().unwrap_or_default()
     }
 
-    /// `initColor(w, h)`: the color images of a resource without a surface.
+    /// Makes the color images of a resource without a surface.
     fn init_color(&self, state: &mut SurfaceState, w: u32, h: u32) {
         state.color_format = vk::Format::R8G8B8A8_UNORM;
         state.extent = vk::Extent2D { width: w, height: h };
@@ -238,7 +232,6 @@ impl SurfaceResource {
         }
     }
 
-    /// `initSwapchain(w, h)`
     fn init_swapchain(&self, state: &mut SurfaceState, w: u32, h: u32) -> Result<(), String> {
         let physical_device = self.backend.get_physical_device();
         let device = self.backend.get_device();
@@ -364,7 +357,6 @@ impl SurfaceResource {
         Ok(())
     }
 
-    /// `initDepthStencil()`
     fn init_depth_stencil(&self, state: &mut SurfaceState) {
         // check for depth format support
         let formats = [vk::Format::D24_UNORM_S8_UINT, vk::Format::D32_SFLOAT_S8_UINT, vk::Format::D16_UNORM_S8_UINT];
@@ -538,8 +530,8 @@ impl SurfaceResource {
         state.surface = vk::SurfaceKHR::null();
     }
 
-    /// `recreateSwapchain(recreateSurface)`: makes the swapchain, and the
-    /// surface if it was lost, again. Returns whether it did.
+    /// Makes the swapchain, and the surface if it was lost, again. Returns
+    /// whether it did.
     pub fn recreate_swapchain(&self, recreate_surface: bool) -> bool {
         let Some(context) = self.context.upgrade() else {
             return false;
@@ -573,14 +565,14 @@ impl SurfaceResource {
         self.init(&context, width, height)
     }
 
-    /// `setSize`: the size the swapchain is made with when the surface
-    /// doesn't give one.
+    /// Sets the size the swapchain is made with when the surface doesn't give
+    /// one.
     pub fn set_extent(&self, size: Size) {
         self.state.borrow_mut().extent = vk::Extent2D { width: size.width, height: size.height };
     }
 
-    /// `queueSurfaceRead()`: has the frame being recorded, or else the next
-    /// one, copied for `read_image`.
+    /// Has the frame being recorded, or else the next one, copied for
+    /// `read_image`.
     pub fn queue_surface_read(&self) {
         self.state.borrow_mut().surface_read = true;
     }
@@ -690,8 +682,8 @@ impl SurfaceResource {
         }
     }
 
-    /// `copySurfaceToReadTexture()`: records a copy of the acquired image
-    /// into the read texture, at the end of the frame.
+    /// Records a copy of the acquired image into the read texture, at the end
+    /// of the frame.
     fn copy_surface_to_read_texture(&self, context: &Context) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
@@ -747,7 +739,7 @@ impl SurfaceResource {
         }
     }
 
-    /// `readImage()`: the last frame copied for reading, if any.
+    /// The last frame copied for reading, if any.
     pub fn read_image(&self) -> Option<PremultipliedImage> {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
@@ -764,9 +756,9 @@ impl SurfaceResource {
 }
 
 impl SurfaceResource {
-    /// `swap()`: submits the frame, after the overlay has drawn over it and
-    /// it was copied for `read_image` if a read is queued. Returns whether
-    /// the frame had an image.
+    /// Submits the frame, after the overlay has drawn over it and it was copied
+    /// for `read_image` if a read is queued. Returns whether the frame had an
+    /// image.
     pub(crate) fn swap(&self) -> bool {
         let Some(context) = self.context.upgrade() else {
             return false;
@@ -820,7 +812,6 @@ impl TargetResource for SurfaceResource {
 }
 
 impl Drop for SurfaceResource {
-    /// `destroyResources()`
     fn drop(&mut self) {
         self.backend.wait_idle("surface deletion");
         let mut state = self.state.borrow_mut();

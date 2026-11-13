@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/custom_geometry_source_options.hpp and
-// src/mln/style/conversion/custom_geometry_source_options.cpp.
-
 use super::{Converter, Convertible, Error};
 use crate::sources::custom_geometry_source::Options;
 

@@ -1,5 +1,3 @@
-// Ports include/mln/actor/actor_ref.hpp.
-//
 // C++ `ActorRef<O>` is `(O* object, std::weak_ptr<Mailbox>)`; `invoke(fn,
 // args...)` pushes a message calling `object->*fn(args...)`. Here the target
 // is found through the mailbox (see mailbox.rs) and a message is a closure
@@ -26,8 +24,7 @@ impl<O: 'static> Clone for ActorRef<O> {
 }
 
 impl<O: 'static> ActorRef<O> {
-    /// `ActorRef(Object& object, std::weak_ptr<Mailbox>)`: `mailbox`'s
-    /// target is the object.
+    /// A reference that sends to `mailbox`, whose target is the object.
     pub fn new(mailbox: &Arc<Mailbox>) -> Self {
         ActorRef { weak_mailbox: Arc::downgrade(mailbox), _object: PhantomData }
     }

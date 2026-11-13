@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/coordinate.hpp +
-// src/mln/style/conversion/coordinate.cpp.
-
 use mln_util::LatLng;
 
 use super::{Converter, Convertible, Error};

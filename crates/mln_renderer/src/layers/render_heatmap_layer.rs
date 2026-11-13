@@ -1,11 +1,6 @@
-// Ports src/mln/renderer/layers/render_heatmap_layer.hpp and
-// src/mln/renderer/layers/render_heatmap_layer.cpp (drawable path).
-//
 // The tiles are drawn (additively, kernel density) into an offscreen
 // half-float render target; a second, non-tile layer group draws that
 // texture through the color ramp onto the map.
-//
-// TODO(port): queryIntersectsFeature (queries, M6; C++ returns false).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -65,7 +60,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HeatmapLayerImpl {
 const HEATMAP_SHADER_GROUP_NAME: &str = "HeatmapShader";
 const HEATMAP_TEXTURE_SHADER_GROUP_NAME: &str = "HeatmapTextureShader";
 
-/// `activateRenderTarget(renderTarget, activate, changes)`.
 pub(crate) fn activate_render_target(
     render_target: Option<&RenderTargetPtr>,
     activate: bool,
@@ -125,7 +119,6 @@ impl RenderHeatmapLayer {
         }
     }
 
-    /// `updateColorRamp()`.
     fn update_color_ramp(&mut self) {
         let mut color_value = self.unevaluated.get::<HeatmapColor>().get_value().clone();
         if color_value.is_undefined() {
@@ -144,8 +137,8 @@ impl RenderHeatmapLayer {
         self.render_target.as_ref().and_then(|target| target.borrow().get_layer_group(0).cloned())
     }
 
-    /// `removeTile(RenderPass, const OverscaledTileID&)`: the tile drawables
-    /// live in the render target's layer group.
+    /// Removes the tile's drawables, which live in the render target's layer
+    /// group.
     fn remove_tile(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) {
         let Some(layer_group) = self.render_target_layer_group() else {
             return;
@@ -157,7 +150,6 @@ impl RenderHeatmapLayer {
         tile_layer_group.remove_drawables(render_pass, tile_id);
     }
 
-    /// `updateTile(tileLayerGroup, renderPass, tileID, update)`.
     fn update_tile(
         &mut self,
         layer_group: &LayerGroupBasePtr,
@@ -323,8 +315,8 @@ impl RenderLayer for RenderHeatmapLayer {
 
         {
             // `renderTarget->getTexture()->setSize(size)`.
-            // TODO(port): the WebGPU offscreen texture's resize callback
-            // (handleResize) is not ported; the texture is resized, the
+            // The WebGPU offscreen texture has no resize callback
+            // (`handleResize`): the texture is resized, the
             // renderable keeps its size.
             let texture = self.render_target.as_ref().expect("render target").borrow().get_texture();
             if texture.borrow().get_size() != size {

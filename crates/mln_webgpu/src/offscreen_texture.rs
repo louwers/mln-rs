@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/offscreen_texture.hpp and src/mln/webgpu/offscreen_texture.cpp
-//
 // wgpu vs. Dawn/wgpu-native: the readback maps the staging buffer and blocks
 // with `Device::poll(PollType::Wait)` (C++: `wgpuInstanceWaitAny` on Dawn, a
 // 1000 x 1 ms `wgpuDevicePoll` loop on wgpu-native).
@@ -8,9 +6,9 @@
 // next frame's own submission ends with the copy, which C++ submits
 // separately on each read.
 //
-// TODO(port): the size-changed callback (`handleResize` / `setSizeListener`)
+// There is no size-changed callback (`handleResize` / `setSizeListener`)
 // that resizes the textures when someone calls `setSize` on the color
-// texture; nothing on the M1 path resizes them.
+// texture.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -289,7 +287,6 @@ impl TargetResource for OffscreenTextureResource {
     }
 }
 
-/// `webgpu::OffscreenTexture`
 pub struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,

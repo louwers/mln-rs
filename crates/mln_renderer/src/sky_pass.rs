@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/sky_pass.hpp and src/mln/renderer/sky_pass.cpp.
-
 use std::f64::consts::PI;
 
 use mln_gfx::color_mode::ColorMode;

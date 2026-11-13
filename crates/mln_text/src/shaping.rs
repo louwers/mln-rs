@@ -1,5 +1,3 @@
-// Ports src/mln/text/shaping.hpp and src/mln/text/shaping.cpp.
-//
 // Float types and the order of float operations follow the C++ exactly
 // (`double` section scales and line offsets, `float` positions); the
 // comments note where C++ promotes to double. getShaping returns Err where
@@ -24,7 +22,6 @@ use crate::tagged_string::{SectionOptions, TaggedString};
 /// labels.
 const ZWSP: u16 = 0x200b;
 
-/// `AnchorAlignment`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnchorAlignment {
     pub horizontal_align: f32,
@@ -37,7 +34,6 @@ impl AnchorAlignment {
         AnchorAlignment { horizontal_align: horizontal, vertical_align: vertical }
     }
 
-    /// `AnchorAlignment::getAnchorAlignment`.
     #[must_use]
     pub fn get_anchor_alignment(anchor: SymbolAnchorType) -> AnchorAlignment {
         let mut result = AnchorAlignment::new(0.5, 0.5);
@@ -76,7 +72,6 @@ pub fn get_anchor_justification(anchor: SymbolAnchorType) -> TextJustifyType {
     }
 }
 
-/// `PositionedIcon`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PositionedIcon {
     image: ImagePosition,
@@ -92,7 +87,6 @@ impl PositionedIcon {
         PositionedIcon { image, top, bottom, left, right, collision_padding }
     }
 
-    /// `PositionedIcon::shapeIcon`.
     #[must_use]
     pub fn shape_icon(image: &ImagePosition, icon_offset: &[f32; 2], icon_anchor: SymbolAnchorType) -> PositionedIcon {
         let anchor_align = AnchorAlignment::get_anchor_alignment(icon_anchor);
@@ -260,7 +254,8 @@ fn align(
     }
 }
 
-/// `justifyLine`: justify left = 0, right = 1, center = .5
+/// Shifts the glyphs by `justify` of the line's width (left = 0, right = 1,
+/// center = 0.5), and vertically by `line_offset`.
 fn justify_line(positioned_glyphs: &mut [PositionedGlyph], justify: f32, line_offset: f32) {
     if justify == 0.0 && line_offset == 0.0 {
         return;
@@ -275,7 +270,6 @@ fn justify_line(positioned_glyphs: &mut [PositionedGlyph], justify: f32, line_of
     }
 }
 
-/// `getGlyphAdvance`.
 fn get_glyph_advance(
     code_point: u16,
     section: &SectionOptions,
@@ -303,7 +297,6 @@ fn get_glyph_advance(
     }
 }
 
-/// `determineAverageLineWidth`.
 fn determine_average_line_width(
     logical_input: &TaggedString,
     spacing: f32,
@@ -329,7 +322,6 @@ fn determine_average_line_width(
     total_width / target_line_count as f32
 }
 
-/// `calculateBadness`.
 fn calculate_badness(line_width: f32, target_width: f32, penalty: f32, is_last_break: bool) -> f32 {
     // static_cast<float>(std::pow(lineWidth - targetWidth, 2)): pow of the
     // float difference in double, which is exact for a square.
@@ -348,7 +340,6 @@ fn calculate_badness(line_width: f32, target_width: f32, penalty: f32, is_last_b
     raggedness + penalty * penalty
 }
 
-/// `calculatePenalty`.
 fn calculate_penalty(code_point: u16, next_code_point: u16, penalizable_ideographic_break: bool) -> f32 {
     let mut penalty: f32 = 0.0;
     // Force break on newline
@@ -376,7 +367,7 @@ fn calculate_penalty(code_point: u16, next_code_point: u16, penalizable_ideograp
     penalty
 }
 
-/// `PotentialBreak` (`priorBreak` is an index into the list).
+/// A line break candidate. `prior_break` is an index into the list.
 #[derive(Clone, Copy, Debug)]
 struct PotentialBreak {
     index: usize,
@@ -385,7 +376,6 @@ struct PotentialBreak {
     badness: f32,
 }
 
-/// `evaluateBreak`.
 fn evaluate_break(
     break_index: usize,
     break_x: f32,
@@ -415,7 +405,6 @@ fn evaluate_break(
     PotentialBreak { index: break_index, x: break_x, prior_break: best_prior_break, badness: best_break_badness }
 }
 
-/// `leastBadBreaks`.
 fn least_bad_breaks(last_line_break: &PotentialBreak, potential_breaks: &[PotentialBreak]) -> VecSet<usize> {
     let mut least_bad_breaks = VecSet::from([last_line_break.index]);
     let mut prior_break = last_line_break.prior_break;
@@ -426,9 +415,9 @@ fn least_bad_breaks(last_line_break: &PotentialBreak, potential_breaks: &[Potent
     least_bad_breaks
 }
 
-/// `determineLineBreaks`. We determine line breaks based on shaped text in
-/// logical order. Working in visual order would be more intuitive, but we
-/// can't do that because the visual order may be changed by line breaks!
+/// Determines line breaks based on shaped text in logical order. Working in
+/// visual order would be more intuitive, but we can't do that because the
+/// visual order may be changed by line breaks!
 #[must_use]
 pub fn determine_line_breaks(
     logical_input: &TaggedString,
@@ -498,8 +487,9 @@ pub fn determine_line_breaks(
 
 const MAX_UPRIGHT_LETTER_RUN: usize = 3;
 
-/// `runIsUpright`: Longer uppercase runs are words, while short runs such
-/// as "JR" and "A1" are codes.
+/// Whether the run `start..end` stays upright in vertical text. Longer
+/// uppercase runs are words, while short runs such as "JR" and "A1" are
+/// codes.
 fn run_is_upright(line: &TaggedString, start: usize, end: usize) -> bool {
     let mut has_digit = false;
     let mut is_number = true;
@@ -514,15 +504,16 @@ fn run_is_upright(line: &TaggedString, start: usize, end: usize) -> bool {
     (has_digit && is_number) || is_short_uppercase_code
 }
 
-/// `isText` of determineLineVerticals / markSurroundedPunctuationUpright.
+/// Whether the character at `i` is text rather than an image or a shaped
+/// glyph.
 fn is_text(line: &TaggedString, i: usize) -> bool {
     let section = line.get_section(i);
     section.type_ == GlyphIDType::FontPBF && section.image_id.is_none()
 }
 
-/// `markSurroundedPunctuationUpright`: Punctuation such as the hyphen in
-/// "1-2" needs a vertical presentation form now that its neighbors are
-/// upright. The glyph is replaced during shaping.
+/// Punctuation such as the hyphen in "1-2" needs a vertical presentation
+/// form now that its neighbors are upright. The glyph is replaced during
+/// shaping.
 fn mark_surrounded_punctuation_upright(line: &TaggedString, verticals: &mut [bool]) {
     for i in 0..line.length() {
         if !verticals[i]
@@ -536,8 +527,8 @@ fn mark_surrounded_punctuation_upright(line: &TaggedString, verticals: &mut [boo
     }
 }
 
-/// `determineLineVerticals`: Keep words and combining marks together;
-/// images and shaped glyph IDs delimit runs.
+/// Which characters of `line` are upright in vertical text. Keeps words and
+/// combining marks together; images and shaped glyph IDs delimit runs.
 fn determine_line_verticals(line: &TaggedString) -> Vec<bool> {
     let mut verticals = vec![false; line.length()];
     for (i, vertical) in verticals.iter_mut().enumerate() {
@@ -572,7 +563,6 @@ fn determine_line_verticals(line: &TaggedString) -> Vec<bool> {
     verticals
 }
 
-/// `shapeLines`.
 #[allow(clippy::too_many_arguments)]
 fn shape_lines(
     shaping: &mut Shaping,
@@ -822,11 +812,10 @@ fn shape_lines(
     shaping.right = shaping.left + max_line_length;
 }
 
-/// `reorderShapedLines`: reorders lines that hold text HarfBuzz shaped,
-/// which come in logical order, into visual order. The bidi analysis covers
-/// the whole text, and sees each shaped section as characters of the
-/// section's direction, which it moves as a block without reversing them
-/// again.
+/// Reorders lines that hold text HarfBuzz shaped, which come in logical
+/// order, into visual order. The bidi analysis covers the whole text, and
+/// sees each shaped section as characters of the section's direction, which
+/// it moves as a block without reversing them again.
 fn reorder_shaped_lines(
     formatted_string: &TaggedString,
     bidi: &mut BiDi,
@@ -867,7 +856,6 @@ fn reorder_shaped_lines(
     Ok(())
 }
 
-/// `getShaping`.
 #[allow(clippy::too_many_arguments)]
 pub fn get_shaping(
     formatted_string: &TaggedString,

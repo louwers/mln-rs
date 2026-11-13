@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/descriptor_set.hpp and src/mln/vulkan/descriptor_set.cpp
-//
 // `DescriptorSetType` is in `shaders::layout`, with the bindings.
 //
 // Differences from C++:
@@ -80,7 +78,6 @@ impl DescriptorSetType {
     }
 }
 
-/// `DescriptorPoolGrowable::PoolInfo`
 pub struct PoolInfo {
     pub pool: vk::DescriptorPool,
     remaining_sets: u32,
@@ -88,8 +85,8 @@ pub struct PoolInfo {
     unused_sets: VecDeque<Vec<vk::DescriptorSet>>,
 }
 
-/// `DescriptorPoolGrowable`: the pools the sets of a type come from. Each
-/// new pool is `grow_factor` times the last.
+/// The pools the sets of a type come from. Each new pool is `grow_factor` times
+/// the last.
 pub struct DescriptorPoolGrowable {
     max_sets: u32,
     descriptor_storage_per_set: u32,
@@ -119,7 +116,6 @@ impl DescriptorPoolGrowable {
         }
     }
 
-    /// `createDescriptorPool(growablePool)`
     fn create_descriptor_pool(&mut self, device: &ash::Device) -> Option<usize> {
         let max_sets = (self.max_sets as f32 * self.grow_factor.powi(self.pools.len() as i32)) as u32;
         let mut sizes = Vec::new();
@@ -141,8 +137,8 @@ impl DescriptorPoolGrowable {
         self.current_pool_index
     }
 
-    /// `DescriptorSet::allocate()`: a set per frame in flight with `layout`,
-    /// and the pool they are from.
+    /// Allocates a set per frame in flight with `layout`. Returns them and
+    /// the index of the pool they are from.
     pub(crate) fn allocate(
         &mut self,
         device: &ash::Device,
@@ -185,7 +181,7 @@ impl DescriptorPoolGrowable {
     }
 }
 
-/// `DescriptorSet`: a descriptor set for each frame in flight.
+/// A descriptor set for each frame in flight.
 struct DescriptorSet {
     context: Weak<Context>,
     type_: DescriptorSetType,
@@ -206,7 +202,7 @@ impl DescriptorSet {
         }
     }
 
-    /// `allocate()`: whether the sets are there, allocating them if needed.
+    /// Allocates the sets if needed. Returns whether they are there.
     fn allocate(&mut self, context: &Context) -> bool {
         if !self.descriptor_sets.is_empty() {
             return true;
@@ -288,7 +284,7 @@ struct BufferBinding {
 
 const NO_BUFFER: BufferBinding = BufferBinding { id: u64::MAX, buffer: vk::Buffer::null(), offset: 0, range: 0 };
 
-/// `UniformDescriptorSet`: the descriptor sets of a uniform buffer array.
+/// The descriptor sets of a uniform buffer array.
 pub struct UniformDescriptorSet {
     set: DescriptorSet,
     /// What each frame's set holds, by binding.
@@ -311,10 +307,9 @@ impl UniformDescriptorSet {
         }
     }
 
-    /// `UniformBufferArray::bindDescriptorSets(encoder)`: points the frame's
-    /// set at the buffers of `uniforms`, each brought up to date with the
-    /// frame before, and binds it. A binding without a buffer gets the
-    /// context's placeholder.
+    /// Points the frame's set at the buffers of `uniforms`, each brought up to
+    /// date with the frame before, and binds it. A binding without a buffer
+    /// gets the context's placeholder.
     pub fn bind(&mut self, context: &Context, command_buffer: vk::CommandBuffer, uniforms: &UniformBufferArray) {
         let type_ = self.set.type_;
         let shape = type_.buffer_shape();
@@ -407,7 +402,7 @@ const NO_IMAGE: ImageBinding = ImageBinding {
     sampler: vk::Sampler::null(),
 };
 
-/// `ImageDescriptorSet`: the descriptor sets of a drawable's textures.
+/// The descriptor sets of a drawable's textures.
 pub struct ImageDescriptorSet {
     set: DescriptorSet,
     /// What each frame's set holds, by the texture's index in the shader.

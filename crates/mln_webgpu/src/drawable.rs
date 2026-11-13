@@ -1,8 +1,4 @@
-// Ports include/mln/webgpu/drawable.hpp, src/mln/webgpu/drawable_impl.hpp and
-// src/mln/webgpu/drawable.cpp
-//
 // Logging: the C++ `Log::Warning`/`Log::Error` calls print to stderr here.
-// TODO(port): route them through mln::Log once a logging port exists.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -121,7 +117,7 @@ fn wgpu_vertex_format_of(type_: AttributeDataType) -> wgpu::VertexFormat {
     }
 }
 
-/// `struct IndexBuffer : gfx::IndexBufferBase`: adapts `gfx::IndexBuffer`.
+/// The uploaded buffer of an index vector.
 struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
@@ -136,7 +132,6 @@ struct BindGroupRecord {
     bind_group: Rc<SharedBindGroup>,
 }
 
-/// `webgpu::Drawable::Impl`
 struct DrawableImpl {
     segments: Vec<UniqueDrawSegment>,
     indexes: Option<IndexVectorBasePtr>,
@@ -608,8 +603,8 @@ impl ShaderProgram {
     }
 }
 
-/// `UniqueBinding` in `Drawable::draw`: a vertex buffer slot. A draw reads
-/// the buffer from `vertex_resource`, so the slot holds no handle of it.
+/// A vertex buffer slot of a draw. A draw reads the buffer from
+/// `vertex_resource`, so the slot holds no handle of it.
 struct UniqueBinding {
     vertex_resource: Rc<dyn mln_gfx::vertex_buffer::VertexBufferResource>,
     stride: u32,

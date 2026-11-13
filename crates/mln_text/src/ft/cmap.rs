@@ -1,10 +1,3 @@
-// Ports the character-map parts of ../maplibre-native/vendor/freetype (2.13):
-// src/sfnt/ttcmap.c (`tt_face_build_cmaps`, the `tt_cmapN_validate`
-// functions at FT_VALIDATE_DEFAULT and the `tt_cmapN_char_index` lookups,
-// `tt_cmap14_char_var_index`), src/sfnt/sfobjs.c (`sfnt_find_encoding`) and
-// src/base/ftobjs.c (`find_unicode_charmap`, `find_variant_selector_charmap`,
-// `FT_Set_Charmap`, `FT_Get_Char_Index`, `FT_Face_GetCharVariantIndex`).
-//
 // The C code reads the cmap through pointers into the font file; reads the
 // C++ does past the end of the file (undefined behaviour) read as 0 here.
 
@@ -55,7 +48,7 @@ pub struct CharMap {
     pub format: u16,
     /// Absolute offset of the subtable in the font file (`ttcmap->data`).
     pub data: usize,
-    /// `TT_CMap::flags` (the validator's return value).
+    /// The validator's return value.
     pub flags: i32,
 }
 
@@ -456,12 +449,10 @@ pub fn find_variant_selector_charmap(charmaps: &[CharMap]) -> Option<usize> {
 #[derive(Clone, Copy)]
 pub struct LookupContext<'a> {
     pub data: &'a [u8],
-    /// `face->cmap_table + face->cmap_size`.
     pub cmap_limit: usize,
     pub num_glyphs: u32,
 }
 
-/// `cmap->clazz->char_index`.
 #[must_use]
 pub fn char_index(ctx: LookupContext, cm: &CharMap, char_code: u32) -> u32 {
     let b = Bytes(ctx.data);
@@ -814,7 +805,8 @@ pub fn get_char_index(ctx: LookupContext, charmap: Option<&CharMap>, charcode: u
     if result >= ctx.num_glyphs { 0 } else { result }
 }
 
-/// `FT_Face_GetCharVariantIndex` + `tt_cmap14_char_var_index`.
+/// The glyph index of `charcode` with `variant_selector`, from the face's
+/// format 14 subtable; 0 when there is none.
 #[must_use]
 pub fn get_char_variant_index(
     ctx: LookupContext,

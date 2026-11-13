@@ -1,5 +1,3 @@
-// Ports test/style/style_layer.test.cpp.
-
 use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};

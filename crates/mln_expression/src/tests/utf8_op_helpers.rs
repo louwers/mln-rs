@@ -1,5 +1,3 @@
-// Ports test/style/expression/utf8_op_helpers.test.cpp.
-
 use crate::utf8_op_helpers::{get_unicode_character_offset_on_validated_utf8, unicode_length_on_validated_utf8};
 
 // gtest: Utf8OpHelpers.unicodeLengthOnValidatedUtf8

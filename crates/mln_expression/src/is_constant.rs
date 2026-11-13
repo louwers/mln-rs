@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/is_constant.hpp and
-// src/mln/style/expression/is_constant.cpp.
-
 use crate::compound_expression::CompoundExpression;
 use crate::expression::{Dependency, Expression, Kind, downcast};
 use crate::literal::Literal;

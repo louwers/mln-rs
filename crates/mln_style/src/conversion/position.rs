@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/position.hpp +
-// src/mln/style/conversion/position.cpp.
-
 use mln_style_types::Position;
 
 use super::{Converter, Convertible, Error, convert};

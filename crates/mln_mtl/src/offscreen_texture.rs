@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/offscreen_texture.hpp and src/mln/mtl/offscreen_texture.cpp
-//
 // Port-only: the image is read back through a buffer kept for the reads.
 // After a read, the next frame's command buffer ends with a copy of the
 // color texture into it, so that a read right after that frame needs no work
@@ -206,7 +204,6 @@ impl TargetResource for OffscreenTextureResource {
     }
 }
 
-/// `mtl::OffscreenTexture`
 pub struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,
@@ -231,7 +228,7 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
         &self.target
     }
 
-    /// C++ asserts: nothing calls it.
+    /// Nothing calls it; C++ asserts so too.
     fn is_renderable(&self) -> bool {
         debug_assert!(false);
         true

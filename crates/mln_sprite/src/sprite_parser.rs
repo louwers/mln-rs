@@ -1,5 +1,3 @@
-// Ports src/mln/sprite/sprite_parser.hpp and src/mln/sprite/sprite_parser.cpp.
-//
 // The JSON is parsed with serde_json (`preserve_order`, so members come in
 // document order as with rapidjson). Deviations: syntax
 // error messages after "Failed to parse JSON: " are serde_json's, not
@@ -19,9 +17,8 @@ use mln_util::size::Size;
 use mln_util::string::to_string_double;
 use serde_json::Value as JSValue;
 
-/// `createStyleImage`: extracts an individual image from a spritesheet
-/// from the given location. Logs and returns `None` for invalid metrics or
-/// metadata.
+/// Extracts an individual image from a spritesheet at the given location.
+/// Logs and returns `None` for invalid metrics or metadata.
 #[allow(clippy::too_many_arguments)]
 #[must_use]
 pub fn create_style_image(
@@ -95,7 +92,7 @@ pub fn create_style_image(
     }
 }
 
-/// `value.HasMember(property)` + `value[property]`.
+/// The member `property` of `value`, if `value` is an object that has it.
 fn member<'a>(value: &'a JSValue, property: &str) -> Option<&'a JSValue> {
     value.as_object().and_then(|object| object.get(property))
 }
@@ -220,9 +217,9 @@ fn get_text_fit(value: &JSValue, property: &str, name: &str) -> Option<TextFit> 
     None
 }
 
-/// `parseSprite(id, image, json)`: parses an image and an associated JSON
-/// file and returns the sprite objects. C++ throws `std::runtime_error` (or
-/// the image decoder's exception).
+/// Parses an image and an associated JSON file and returns the sprite
+/// objects. Fails where C++ throws `std::runtime_error` or the image
+/// decoder's exception.
 pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
     let raster = decode_image(encoded_image)?;
     parse_sprite_images(id, &raster, json)

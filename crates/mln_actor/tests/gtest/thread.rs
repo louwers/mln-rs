@@ -1,5 +1,3 @@
-// Ports test/util/thread.test.cpp.
-
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::ThreadId;
@@ -188,9 +186,6 @@ fn concurrency() {
 
     let num_messages: usize = 100_000;
     let completed = Arc::new(AtomicUsize::new(num_messages));
-
-    // TODO(port): platform::Settings and EXPERIMENTAL_THREAD_PRIORITY_WORKER
-    // (thread priorities are not ported).
 
     let pool_worker = Actor::new(scheduler::get_background(), |_| PoolTestWorker);
     let pool_worker_ref = pool_worker.self_ref();

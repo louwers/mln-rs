@@ -1,6 +1,3 @@
-// Ports test/tile/custom_vector_tile.test.cpp, the tests of ffi patches 0051
-// and 0075, with a test of 0052's MLT data.
-//
 // As in custom_geometry_tile.rs, the loader is an actor on the test's run
 // loop, which the test reaches through messages.
 

@@ -1,6 +1,3 @@
-// Ports src/mln/style/projection_impl.hpp and the `Projection::Impl`
-// members of src/mln/style/projection.cpp.
-
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -9,7 +6,6 @@ use crate::property_value::PropertyValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::property_evaluator::PropertyEvaluator;
 
-/// `Projection::Impl`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Impl {
     pub type_: PropertyValue<ProjectionDefinition>,

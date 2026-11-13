@@ -1,5 +1,3 @@
-// Ports include/mln/style/source.hpp and src/mln/style/source.cpp.
-//
 // C++ `Source` is an abstract class with data members (`baseImpl`,
 // `observer`, `loaded`); the data is `SourceBase` and the virtual interface
 // is the `Source` trait.
@@ -31,7 +29,6 @@ pub use crate::source_impl::{Impl, ImplBase, downcast_arc};
 /// The data members of `Source`.
 pub struct SourceBase {
     base_impl: RefCell<Arc<dyn Impl>>,
-    /// `SourceObserver* observer` (default `&nullObserver`).
     observer: RefCell<Option<Rc<dyn SourceObserver>>>,
     loaded: Cell<bool>,
 }
@@ -45,12 +42,10 @@ impl std::fmt::Debug for SourceBase {
     }
 }
 
-/// `SourceObserver nullObserver`.
 struct NullSourceObserver;
 impl SourceObserver for NullSourceObserver {}
 
 impl SourceBase {
-    /// `Source(Immutable<Impl>)`.
     pub fn new(impl_: Arc<dyn Impl>) -> Self {
         SourceBase { base_impl: RefCell::new(impl_), observer: RefCell::new(None), loaded: Cell::new(false) }
     }
@@ -59,7 +54,6 @@ impl SourceBase {
         self.base_impl.borrow().clone()
     }
 
-    /// `baseImpl = std::move(newImpl)`.
     pub fn set_base_impl(&self, impl_: Arc<dyn Impl>) {
         *self.base_impl.borrow_mut() = impl_;
     }
@@ -84,16 +78,14 @@ impl SourceBase {
     }
 }
 
-/// `style::Source`.
 pub trait Source: Any {
     fn base(&self) -> &SourceBase;
 
-    /// `loadDescription(FileSource&)`.
     fn load_description(&self, file_source: &dyn FileSource);
 
     fn supports_layer_type(&self, type_info: &LayerTypeInfo) -> bool;
 
-    /// `createMutable()`: a copy of the current impl.
+    /// A copy of the current impl.
     fn create_mutable(&self) -> Box<dyn Impl>;
 
     // Non-virtual members of the C++ class.
@@ -169,7 +161,6 @@ fn mutate_impl(source: &dyn Source, f: impl FnOnce(&mut dyn Impl)) {
     source.base().observer().on_source_changed(source);
 }
 
-/// `setVolatile(bool)`.
 pub fn set_volatile(source: &dyn Source, set: bool) {
     if source.is_volatile() == set {
         return;
@@ -177,7 +168,6 @@ pub fn set_volatile(source: &dyn Source, set: bool) {
     mutate_impl(source, |impl_| impl_.base_mut().set_volatile(set));
 }
 
-/// `setPrefetchZoomDelta(std::optional<uint8_t>)`.
 pub fn set_prefetch_zoom_delta(source: &dyn Source, delta: Option<u8>) {
     if source.get_prefetch_zoom_delta() == delta {
         return;
@@ -185,7 +175,6 @@ pub fn set_prefetch_zoom_delta(source: &dyn Source, delta: Option<u8>) {
     mutate_impl(source, |impl_| impl_.base_mut().set_prefetch_zoom_delta(delta));
 }
 
-/// `setMinimumTileUpdateInterval(Duration)`.
 pub fn set_minimum_tile_update_interval(source: &dyn Source, interval: Duration) {
     if source.get_minimum_tile_update_interval() == interval {
         return;
@@ -193,7 +182,6 @@ pub fn set_minimum_tile_update_interval(source: &dyn Source, interval: Duration)
     mutate_impl(source, |impl_| impl_.base_mut().set_minimum_tile_update_interval(interval));
 }
 
-/// `setMaxOverscaleFactorForParentTiles(std::optional<uint8_t>)`.
 pub fn set_max_overscale_factor_for_parent_tiles(source: &dyn Source, overscale_factor: Option<u8>) {
     if source.get_max_overscale_factor_for_parent_tiles() == overscale_factor {
         return;

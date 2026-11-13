@@ -1,6 +1,3 @@
-// Ports include/mln/gl/drawable_gl_builder.hpp and
-// src/mln/gl/drawable_gl_builder.cpp
-
 use std::cell::RefCell;
 use std::rc::Rc;
 

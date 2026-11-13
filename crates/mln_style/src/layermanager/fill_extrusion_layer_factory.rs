@@ -1,6 +1,3 @@
-// Ports include/mln/layermanager/fill_extrusion_layer_factory.hpp +
-// src/mln/layermanager/fill_extrusion_layer_factory.cpp (style half).
-
 use mln_conversion::Convertible;
 
 use super::layer_factory::{LayerFactory, get_source};

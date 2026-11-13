@@ -1,5 +1,3 @@
-// Ports test/style/conversion/conversion_impl.test.cpp.
-
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -7,7 +5,7 @@ use feature::Value;
 
 use crate::conversion::{ConversionTraits, Convertible, Error};
 
-/// `MockConvertible`: counts its destructions.
+/// Counts its destructions.
 struct MockConvertible {
     counter: Rc<Cell<i32>>,
 }
@@ -18,7 +16,6 @@ impl Drop for MockConvertible {
     }
 }
 
-/// `ConversionTraits<MockConvertible>`.
 impl ConversionTraits for MockConvertible {
     fn is_undefined(&self) -> bool {
         false

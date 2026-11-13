@@ -1,6 +1,3 @@
-// Ports src/mln/style/expression/utf8_op_helpers.hpp and
-// src/mln/style/expression/utf8_op_helpers.cpp.
-
 fn is_continuation_byte(b: u8) -> bool {
     (b & 0xC0) == 0x80
 }

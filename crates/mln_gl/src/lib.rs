@@ -1,7 +1,6 @@
-//! Ports the C++ OpenGL backend (`src/mln/gl`, `include/mln/gl`,
-//! `include/mln/shaders/gl`, `src/mln/shaders/gl`, and the headless backend
-//! from platform/default) onto the `glow` bindings, which call OpenGL ES 3.0
-//! or desktop OpenGL 3.3 natively and WebGL2 in a browser.
+//! The OpenGL backend: the `mln_gfx` traits implemented on the `glow`
+//! bindings, which call OpenGL ES 3.0 or desktop OpenGL 3.3 natively and
+//! WebGL2 in a browser, with its shaders and render targets.
 //!
 //! The renderer drives every backend the way C++ drives Metal and WebGPU, so
 //! this backend differs from the C++ one where that one has code of its own

@@ -1,5 +1,3 @@
-// Ports src/mln/style/source_impl.hpp and src/mln/style/source_impl.cpp.
-//
 // C++ `Source::Impl` is an abstract class with data members; the data is
 // `ImplBase` and the virtual interface is the `Impl` trait (as for
 // `Layer::Impl`). `dyn Impl` derefs to its `ImplBase`.
@@ -12,7 +10,6 @@ use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
 
-/// `WarnIfOverscaleFactorCapsPrefetchDelta`.
 fn warn_if_overscale_factor_caps_prefetch_delta(overscale: Option<u8>, prefetch: Option<u8>) {
     let prefetch_delta = std::cmp::max(constants::DEFAULT_PREFETCH_ZOOM_DELTA, prefetch.unwrap_or(0));
     if let Some(overscale) = overscale
@@ -37,7 +34,6 @@ pub struct ImplBase {
 }
 
 impl ImplBase {
-    /// `Impl(SourceType, std::string)`.
     #[must_use]
     pub fn new(type_: SourceType, id: String) -> Self {
         ImplBase {

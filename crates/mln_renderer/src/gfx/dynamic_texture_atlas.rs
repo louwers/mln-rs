@@ -1,6 +1,3 @@
-// Ports include/mln/gfx/dynamic_texture_atlas.hpp and
-// src/mln/gfx/dynamic_texture_atlas.cpp.
-//
 // The atlas is shared by the render thread and the tile workers
 // (`DynamicTextureAtlasPtr`, C++ `std::shared_ptr`), so it is `Send + Sync`
 // with its state behind a mutex, as in C++. `Context::createDynamicTexture`
@@ -23,7 +20,6 @@ use serde::{Deserialize, Serialize};
 use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
 use crate::tile::worker_codec::fields;
 
-/// `ImageVersionMap`.
 pub type ImageVersionMap = HashMap<String, u32>;
 
 pub type DynamicTextureAtlasPtr = Arc<DynamicTextureAtlas>;
@@ -33,9 +29,9 @@ pub type DynamicTextureAtlasPtr = Arc<DynamicTextureAtlas>;
 /// another wasm instance it is the map side's mirror of that instance's
 /// atlas (`tile/worker_codec`), which sends the releases on.
 pub trait TextureAtlas: Send + Sync {
-    /// `removeTextures(textureHandles, dynamicTexture)`.
     fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>);
-    /// `removeUnusedDynamicTextures()` (render thread).
+    /// Drops the dynamic textures that are no longer in use. Render thread
+    /// only.
     fn remove_unused_dynamic_textures(&self);
 }
 
@@ -63,8 +59,8 @@ fn rect_without_extra_padding(rect: RectU16) -> RectU16 {
     }
 }
 
-/// `gfx::GlyphAtlas`. Port-only: serde writes the texture by key, as the
-/// worker instance's (`tile/worker_codec`).
+/// Where a tile's glyphs are in the dynamic texture. Serde writes the
+/// texture by key, as the worker instance's (`tile/worker_codec`).
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct GlyphAtlas {
     pub glyph_positions: GlyphPositions,
@@ -73,8 +69,8 @@ pub struct GlyphAtlas {
     pub dynamic_texture: Option<DynamicTexturePtr>,
 }
 
-/// `gfx::ImageAtlas`. Port-only: serde writes the texture by key, as the
-/// worker instance's (`tile/worker_codec`).
+/// Where a tile's icons and patterns are in the dynamic texture. Serde
+/// writes the texture by key, as the worker instance's (`tile/worker_codec`).
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ImageAtlas {
     #[serde(with = "sorted::map")]
@@ -86,7 +82,8 @@ pub struct ImageAtlas {
     pub dynamic_texture: Option<DynamicTexturePtr>,
 }
 
-/// `ImageAllocationKey`: (dynamic texture, image revision, usage).
+/// Identifies an image's allocation: (dynamic texture, image revision,
+/// usage).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct ImageAllocationKey {
     dynamic_texture: usize,
@@ -103,9 +100,9 @@ struct ImageAllocation {
     bin_id: i32,
 }
 
-/// `GlyphAllocationKey`: (dynamic texture, glyph). A glyph's allocation is
-/// shared by the font stacks that hold the same immutable glyph, which have
-/// the same pixels.
+/// Identifies a glyph's allocation: (dynamic texture, glyph). The font stacks
+/// that hold the same immutable glyph, which has the same pixels, share its
+/// allocation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct GlyphAllocationKey {
     dynamic_texture: usize,
@@ -137,7 +134,6 @@ struct State {
     glyph_allocation_keys: HashMap<BinKey, GlyphAllocationKey>,
 }
 
-/// `gfx::DynamicTextureAtlas`.
 #[derive(Default)]
 pub struct DynamicTextureAtlas {
     state: Mutex<State>,
@@ -164,7 +160,6 @@ impl DynamicTextureAtlas {
         DynamicTextureAtlas::default()
     }
 
-    /// `uploadGlyphs(const GlyphMap&)`.
     pub fn upload_glyphs(&self, glyphs: &GlyphMap) -> GlyphAtlas {
         let mut state = self.state.lock();
 
@@ -261,7 +256,6 @@ impl DynamicTextureAtlas {
         glyph_atlas
     }
 
-    /// `uploadIconsAndPatterns(icons, patterns, versionMap)`.
     pub fn upload_icons_and_patterns(
         &self,
         icons: &ImageMap,
@@ -433,7 +427,6 @@ impl DynamicTextureAtlas {
         image_atlas
     }
 
-    /// `reserveImage(dynamicTexture, image, type)`.
     fn reserve_image(
         state: &mut State,
         dynamic_texture: &DynamicTexturePtr,
@@ -462,7 +455,6 @@ impl DynamicTextureAtlas {
         tex_handle
     }
 
-    /// `reserveGlyph(dynamicTexture, glyph)`.
     fn reserve_glyph(
         state: &mut State,
         dynamic_texture: &DynamicTexturePtr,
@@ -489,7 +481,6 @@ impl DynamicTextureAtlas {
         tex_handle
     }
 
-    /// `releaseTexture(dynamicTexture, texHandle)`.
     fn release_texture(state: &mut State, dynamic_texture: &DynamicTexturePtr, tex_handle: &TextureHandle) {
         if !dynamic_texture.remove_texture(tex_handle) {
             return;
@@ -506,7 +497,6 @@ impl DynamicTextureAtlas {
         }
     }
 
-    /// `removeTextures(textureHandles, dynamicTexture)`.
     pub fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>) {
         let Some(dynamic_texture) = dynamic_texture else {
             return;
@@ -527,7 +517,8 @@ impl DynamicTextureAtlas {
         state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()).cloned().collect()
     }
 
-    /// `removeUnusedDynamicTextures()` (render thread).
+    /// Drops the empty dynamic textures that no atlas references any more,
+    /// so the last reference goes on the render thread. Render thread only.
     pub fn remove_unused_dynamic_textures(&self) {
         let mut state = self.state.lock();
 

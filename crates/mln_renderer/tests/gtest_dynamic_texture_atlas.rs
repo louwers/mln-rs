@@ -1,5 +1,3 @@
-// Ports test/renderer/dynamic_texture_atlas.test.cpp.
-//
 // The C++ fixture creates a HeadlessBackend and a BackendScope only to hand
 // the atlas a `gfx::Context`. The port's DynamicTextureAtlas takes no
 // context (its dynamic textures create their GPU texture in the upload
@@ -13,7 +11,6 @@ use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
 
-/// `makeGlyph(code)`.
 fn make_glyph(code: char) -> Arc<Glyph> {
     Arc::new(Glyph {
         id: GlyphID::new(code as u32),
@@ -22,17 +19,15 @@ fn make_glyph(code: char) -> Arc<Glyph> {
     })
 }
 
-/// `{{glyph->id, glyph}}`.
 fn glyphs(glyph: &Arc<Glyph>) -> Glyphs {
     Glyphs::from([(glyph.id, Some(glyph.clone()))])
 }
 
-/// `makeImage(id, sdf)`, of the default size {16, 16}.
+/// A 16×16 image named `id`.
 fn make_image(id: &str, sdf: bool) -> Arc<ImageImpl> {
     make_sized_image(id, sdf, Size::new(16, 16))
 }
 
-/// `makeImage(id, sdf, size)`.
 fn make_sized_image(id: &str, sdf: bool, size: Size) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
@@ -50,12 +45,10 @@ fn make_sized_image(id: &str, sdf: bool, size: Size) -> Arc<ImageImpl> {
     )
 }
 
-/// `{{image->id, image}}`.
 fn image_map(image: &Arc<ImageImpl>) -> ImageMap {
     ImageMap::from([(image.id.clone(), image.clone())])
 }
 
-/// `DynamicTextureAtlasTest`.
 struct DynamicTextureAtlasTest {
     atlas: DynamicTextureAtlas,
     atlases: Vec<ImageAtlas>,
@@ -82,7 +75,6 @@ impl DynamicTextureAtlasTest {
 }
 
 impl Drop for DynamicTextureAtlasTest {
-    /// `TearDown()`.
     fn drop(&mut self) {
         for image_atlas in &self.atlases {
             self.atlas.remove_textures(&image_atlas.texture_handles, &image_atlas.dynamic_texture);

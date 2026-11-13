@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/format_expression.hpp and
-// src/mln/style/expression/format_expression.cpp.
-
 use std::sync::Arc;
 
 use feature::{Value as MbglValue, ValueObject};
@@ -18,7 +15,6 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::{Value, from_expression_value, to_string, type_of};
 
-/// `FormatExpressionSection`.
 #[derive(Clone)]
 pub struct FormatExpressionSection {
     /// Content can be expression that evaluates to String or Image.

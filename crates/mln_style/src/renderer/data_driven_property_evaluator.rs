@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/data_driven_property_evaluator.hpp (a cut point of the C++ include cycle).
-
 use crate::expression::{Dependency, EvaluationContext, ValueConverter};
 use crate::property_expression::PropertyExpression;
 use crate::renderer::cross_faded_property_evaluator::Faded;
@@ -9,7 +7,6 @@ use crate::renderer::possibly_evaluated_property_value::{
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::property_evaluator::Evaluator;
 
-/// `DataDrivenPropertyEvaluator<T, useIntegerZoom>`.
 pub struct DataDrivenPropertyEvaluator<'a, T, const USE_INTEGER_ZOOM: bool = false> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,
@@ -68,7 +65,7 @@ impl<T: Clone + ValueConverter, const USE_INTEGER_ZOOM: bool> Evaluator<T>
     }
 }
 
-/// `DataDrivenPropertyEvaluator<Faded<T>>` (the C++ partial specialization).
+/// The data-driven evaluator of cross-faded values.
 pub struct DataDrivenFadedPropertyEvaluator<'a, T> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,

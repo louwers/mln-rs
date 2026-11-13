@@ -1,11 +1,8 @@
-// Ports include/mln/style/expression/image.hpp and
-// src/mln/style/expression/image.cpp (incl. `Converter<expression::Image>`).
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::{Convertible, Error};
 use serde::{Deserialize, Serialize};
 
-/// `expression::Image`: an image ID plus whether it is available.
+/// An image ID plus whether it is available.
 // The C++ default constructor leaves `available` uninitialized; here it is
 // false.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +44,6 @@ impl Image {
     }
 }
 
-/// `Converter<expression::Image>`.
 pub fn convert_image(value: &Convertible<'_>, error: &mut Error) -> Option<Image> {
     if value.is_array() {
         let image_parameters = value.array_member(0);

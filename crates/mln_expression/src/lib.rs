@@ -1,8 +1,7 @@
-//! Ports `src/mln/style/expression` + `include/mln/style/expression`.
+//! Style expressions: their types and values, parsing, and evaluation.
 //!
-//! Module-per-file, mirroring the C++ tree. `type`, `match`, `let` and `in`
-//! are Rust keywords, so those modules are `type_`, `match_`, `let_` and
-//! `in_`.
+//! Each expression has its own module. `type`, `match`, `let` and `in` are
+//! Rust keywords, so those modules are `type_`, `match_`, `let_` and `in_`.
 
 pub mod assertion;
 pub mod at;

@@ -1,6 +1,5 @@
-// Ports src/mln/util/http_timeout.hpp and src/mln/util/http_timeout.cpp
-// (`http::errorRetryTimeout`, `http::expirationTimeout`). They live here
-// rather than in mln_util because they take `Response::Error::Reason`.
+// HTTP retry and expiration timeouts. They live here rather than in
+// `mln_util` because they take a response error's `Reason`.
 
 use std::time::Duration;
 
@@ -14,9 +13,8 @@ fn until(timestamp: Timestamp) -> Duration {
     Duration::from_secs(u64::try_from(timestamp.secs_since_epoch() - now().secs_since_epoch()).unwrap_or(0))
 }
 
-/// `errorRetryTimeout(failedRequestReason, failedRequests, retryAfter)`: how
-/// long to wait before retrying a failed request; `None` when the failure
-/// doesn't call for a retry.
+/// How long to wait before retrying a failed request; `None` when the
+/// failure doesn't call for a retry.
 #[must_use]
 pub fn error_retry_timeout(
     failed_request_reason: Reason,
@@ -43,9 +41,8 @@ pub fn error_retry_timeout(
     }
 }
 
-/// `expirationTimeout(expires, expiredRequests)`: how long until a response
-/// expires, or, after it came back expired, the backoff before asking again;
-/// `None` when it never expires.
+/// How long until a response expires, or, after it came back expired, the
+/// backoff before asking again; `None` when it never expires.
 #[must_use]
 pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Option<Duration> {
     if expired_requests > 0 {
@@ -56,7 +53,6 @@ pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> 
 
 #[cfg(test)]
 mod tests {
-    // Ports test/util/http_timeout.test.cpp.
     use super::*;
 
     #[test]

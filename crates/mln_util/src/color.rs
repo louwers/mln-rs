@@ -1,5 +1,3 @@
-// Ports include/mln/util/color.hpp + src/mln/util/color.cpp.
-//
 // Note the central quirk, kept on purpose: Color stores a *premultiplied*
 // color, all four channels 0..1. `parse` premultiplies; `to_array` /
 // `stringify` un-premultiply back to 0..255 channels (with alpha rounded to
@@ -240,7 +238,6 @@ impl Color {
         premultiplied(r) == self.r && premultiplied(g) == self.g && premultiplied(b) == self.b && a as f32 == self.a
     }
 
-    /// `operator std::array<float, 4>`.
     #[must_use]
     pub fn to_float_array(&self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]

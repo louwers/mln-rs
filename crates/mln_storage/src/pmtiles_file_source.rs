@@ -1,6 +1,3 @@
-// Ports include/mln/storage/pmtiles_file_source.hpp and
-// platform/default/src/mln/storage/pmtiles_file_source.cpp.
-//
 // The work runs on the "PMTilesFileSource" thread (`util::Thread`) as in
 // C++: header, metadata and directories are read with range requests through
 // the ResourceLoader file source, whose callbacks come back to this thread.
@@ -12,8 +9,6 @@
 //
 // The resource options are shared with the thread behind a mutex
 // (C++: in the thread object, read back with a blocking `ask`).
-//
-// TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
 use std::fmt::Write as _;
@@ -47,10 +42,11 @@ const PMTILES_HEADER_LENGTH: u64 = 127;
 // limit so it doesn't grow unlimited
 const MAX_DIRECTORY_CACHE_ENTRIES: usize = 100;
 
-/// `pmtiles::deserialize_header`, with its checks and its exceptions' texts,
-/// then the fields through the pmtiles crate. Unlike C++, the crate refuses a
-/// compression or a tile type that the spec doesn't define; a compression
-/// that C++ would read and then refuse fails with C++'s message.
+/// Parses a PMTiles header with C++'s `pmtiles::deserialize_header` checks
+/// and error texts, then reads the fields through the pmtiles crate. Unlike
+/// C++, the crate refuses a compression or a tile type that the spec doesn't
+/// define; a compression that C++ would read and then refuse fails with
+/// C++'s message.
 fn deserialize_header(s: &[u8]) -> Result<Header, String> {
     if !s.starts_with(b"PMTiles") {
         return Err("pmtiles magic number exception".to_owned());
@@ -64,7 +60,8 @@ fn deserialize_header(s: &[u8]) -> Result<Header, String> {
     })
 }
 
-/// `pmtiles::zxy_to_tileid`, with its exceptions' texts.
+/// The tile id of `z/x/y`, with the C++ `pmtiles::zxy_to_tileid` error
+/// texts.
 fn zxy_to_tileid(z: u8, x: u32, y: u32) -> Result<TileId, &'static str> {
     TileCoord::new(z, x, y)
         .map(TileId::from)
@@ -80,9 +77,8 @@ fn extract_url(url: &str) -> String {
 }
 
 type ErrorPtr = Option<Box<ResourceError>>;
-/// `AsyncCallback` (`std::function<void(std::unique_ptr<Response::Error>)>`).
+/// Called when an asynchronous step finishes, with its error if it failed.
 type AsyncCallback = Rc<dyn Fn(ErrorPtr)>;
-/// `AsyncTileCallback`.
 type AsyncTileCallback = Rc<dyn Fn((u64, u32), ErrorPtr)>;
 
 fn error(reason: Reason, message: impl Into<String>) -> ResourceError {
@@ -123,7 +119,6 @@ impl State {
             .clone()
     }
 
-    /// `tasks[req] = getFileSource()->request(resource, callback)`.
     fn request(self: &Rc<Self>, req: u64, resource: &Resource, callback: impl FnMut(Response) + 'static) {
         let file_source = self.get_file_source();
         let request = file_source.request(resource, Box::new(callback));
@@ -530,7 +525,6 @@ impl State {
     }
 }
 
-/// `PMTilesFileSource::Impl`.
 pub struct PMTilesFileSourceThread {
     state: Rc<State>,
 }
@@ -706,8 +700,7 @@ impl Drop for PMTilesFileSourceThread {
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
-/// `PMTilesFileSource`: the `Pmtiles` file source (`pmtiles://` URLs of
-/// local or remote archives).
+/// The `Pmtiles` file source: `pmtiles://` URLs of local or remote archives.
 pub struct PMTilesFileSource {
     thread: Thread<PMTilesFileSourceThread>,
     resource_options: Arc<Mutex<ResourceOptions>>,

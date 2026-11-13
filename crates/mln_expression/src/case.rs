@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/case.hpp and
-// src/mln/style/expression/case.cpp.
-
 use mln_conversion::Convertible;
 
 use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};

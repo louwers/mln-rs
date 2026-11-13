@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/collator_expression.hpp and
-// src/mln/style/expression/collator_expression.cpp.
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 

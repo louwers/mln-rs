@@ -1,11 +1,3 @@
-// Ports the WebGPU `ShaderSource<BuiltIn, Backend::Type::WebGPU>`
-// specialisations: the WGSL strings are the `wgsl_sources` module's, but for
-// the fill extrusions' (`fill_extrusion_wgsl`); the attribute/texture tables
-// from src/mln/shaders/webgpu/*.cpp are below.
-//
-// TODO(port): the attribute/texture tables of the other shader types
-// (fill_extrusion.cpp, symbol.cpp, raster.cpp, ...) arrive with their layers.
-
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
@@ -54,7 +46,6 @@ pub struct WgslShaderSource {
     pub prelude: Option<&'static str>,
 }
 
-/// `shaders::AttributeInfo` (`include/mln/shaders/webgpu/shader_program.hpp`)
 #[derive(Clone, Copy, Debug)]
 pub struct AttributeInfo {
     pub index: usize,
@@ -62,14 +53,12 @@ pub struct AttributeInfo {
     pub id: usize,
 }
 
-/// `shaders::TextureInfo`
 #[derive(Clone, Copy, Debug)]
 pub struct TextureInfo {
     pub index: usize,
     pub id: usize,
 }
 
-/// `shaders::UniformBlockInfo`
 #[derive(Clone, Copy, Debug)]
 pub struct UniformBlockInfo {
     pub index: usize,
@@ -499,7 +488,8 @@ shader_source!(ATMOSPHERE_SHADER, ATMOSPHERE_SHADER, "AtmosphereShader", ATMOSPH
 const GLOBE_DEPTH_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
 shader_source!(GLOBE_DEPTH_SHADER, GLOBE_DEPTH_SHADER, "GlobeDepthShader", GLOBE_DEPTH_ATTRIBUTES, &[]);
 
-/// `ShaderSource<shader_id, WebGPU>`, or `None` for types not ported yet.
+/// The WebGPU source of `shader_id`, or `None` for the shaders without WGSL
+/// yet.
 #[must_use]
 pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
@@ -542,7 +532,6 @@ pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     }
 }
 
-/// `ShaderSource<BuiltIn::Prelude, WebGPU>::prelude` (common.hpp)
 #[must_use]
 pub fn prelude() -> &'static str {
     wgsl_sources::PRELUDE.prelude.expect("Prelude without prelude")

@@ -1,5 +1,3 @@
-// Ports include/mln/style/layer_properties.hpp.
-//
 // C++ `LayerProperties` is an abstract class with data members; as with
 // `Layer::Impl`, the data is `LayerPropertiesBase` and the virtual interface
 // is the `LayerProperties` trait. `dyn LayerProperties` derefs to its base.
@@ -66,7 +64,7 @@ impl std::ops::Deref for dyn LayerProperties {
     }
 }
 
-/// `static_cast<const Derived&>(*properties)`, checked.
+/// `properties` as a `D`; panics on a type mismatch.
 fn downcast_properties<'a, D: LayerProperties>(properties: &'a Arc<dyn LayerProperties>, what: &str) -> &'a D {
     match properties.downcast_ref::<D>() {
         Some(derived) => derived,
@@ -74,13 +72,12 @@ fn downcast_properties<'a, D: LayerProperties>(properties: &'a Arc<dyn LayerProp
     }
 }
 
-/// `getEvaluated<Derived>(properties)`. C++ uses `static_cast`; this panics on a
-/// type mismatch.
+/// The evaluated properties of `properties` as a `D`. Panics on a type
+/// mismatch.
 pub fn get_evaluated<D: HasEvaluated>(properties: &Arc<dyn LayerProperties>) -> &D::Evaluated {
     downcast_properties::<D>(properties, "get_evaluated").evaluated()
 }
 
-/// `getCrossfade<Derived>(properties)`.
 pub fn get_crossfade<D: HasCrossfade>(
     properties: &Arc<dyn LayerProperties>,
 ) -> &crate::renderer::property_evaluation_parameters::CrossfadeParameters {

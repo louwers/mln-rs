@@ -1,5 +1,3 @@
-// Ports test/tile/tile_coordinate.test.cpp.
-
 use std::cell::Cell;
 use std::rc::Rc;
 

@@ -1,5 +1,3 @@
-// Ports test/util/async_task.test.cpp.
-//
 // `RequestCoalescingMultithreaded` and `ThreadSafety` give a plain object a
 // `Mailbox` on a tagged background scheduler; the port's mailboxes pin their
 // target to one thread, so the worker is a pool `Actor` on the same

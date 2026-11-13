@@ -48,20 +48,19 @@ impl Failures {
     }
 }
 
-/// `future.get()`.
 #[track_caller]
 #[must_use]
 pub fn get<T>(future: &mpsc::Receiver<T>) -> T {
     future.recv_timeout(Duration::from_secs(60)).expect("future not ready after 60 s")
 }
 
-/// `future.get()` on a `std::future<void>`.
+/// Blocks until `future` is fulfilled; panics after 60 seconds.
 #[track_caller]
 pub fn wait(future: &mpsc::Receiver<()>) {
     future.recv_timeout(Duration::from_secs(60)).expect("future not ready after 60 s");
 }
 
-/// `future.wait_for(timeout) == std::future_status::ready`, then `get()`.
+/// Waits up to `timeout` for `future`'s value; `None` on timeout.
 #[must_use]
 pub fn wait_for<T>(future: &mpsc::Receiver<T>, timeout: Duration) -> Option<T> {
     future.recv_timeout(timeout).ok()

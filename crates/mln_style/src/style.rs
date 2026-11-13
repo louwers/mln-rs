@@ -1,5 +1,3 @@
-// Ports include/mln/style/style.hpp + src/mln/style/style.cpp.
-
 use std::sync::Arc;
 
 use feature::Value;
@@ -49,7 +47,6 @@ impl Style {
         Style { impl_: Box::new(Impl::new(pixel_ratio)) }
     }
 
-    /// `Style(std::shared_ptr<FileSource>, float pixelRatio, const TaggedScheduler&)`.
     #[must_use]
     pub fn with_file_source(
         file_source: Option<std::sync::Arc<dyn mln_storage::FileSource>>,
@@ -105,14 +102,14 @@ impl Style {
         self.impl_.set_transition_options(options);
     }
 
-    /// `setFallbackFontFaces(json)`: sets the font faces that every font
-    /// stack falls back to after the style's own, for the styles that load
-    /// after this call. `json` is an array of font files, each an object
-    /// with a `url` and an optional `unicode-range`, as in a font face of a
-    /// style's `font-faces`. It fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't
-    /// such an array. Without a font-face shaper, the map ignores them, as it
-    /// ignores a style's `font-faces`.
+    /// Sets the font faces that every font stack falls back to after the
+    /// style's own, for the styles that load after this call.
+    ///
+    /// `json` is an array of font files, each an object with a `url` and an
+    /// optional `unicode-range`, as in a font face of a style's `font-faces`.
+    /// It fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
+    /// `json` isn't such an array. Without a font-face shaper, the map ignores
+    /// them, as it ignores a style's `font-faces`.
     pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), Error> {
         let faces = crate::parser::parse_fallback_font_faces(json)?;
         self.set_fallback_font_face_list(faces);
@@ -142,7 +139,7 @@ impl Style {
     }
 
     // Sky
-    /// `setSky(std::unique_ptr<Sky>)`; `None` removes the sky.
+    /// Sets the sky; `None` removes it.
     pub fn set_sky(&mut self, sky: Option<Sky>) {
         self.impl_.mutated = true;
         self.impl_.set_sky(sky);

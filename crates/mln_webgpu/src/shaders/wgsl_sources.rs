@@ -25,7 +25,6 @@
 
 use super::shader_source::WgslShaderSource;
 
-/// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::WebGPU>`
 pub const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "AtmosphereShader",
     name: r"AtmosphereShader",
@@ -171,7 +170,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::WebGPU>`
 pub const BACKGROUND_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "BackgroundPatternShader",
     name: r"BackgroundPatternShader",
@@ -310,7 +308,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::WebGPU>`
 pub const BACKGROUND_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "BackgroundShader",
     name: r"BackgroundShader",
@@ -387,7 +384,6 @@ fn main() -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::WebGPU>`
 pub const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "CircleShader",
     name: r"CircleShader",
@@ -614,7 +610,6 @@ struct GlobalIndexUBO {
     ),
 };
 
-/// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::WebGPU>`
 pub const CLIPPING_MASK_PROGRAM: WgslShaderSource = WgslShaderSource {
     built_in: "ClippingMaskProgram",
     name: r"ClippingMaskProgram",
@@ -667,7 +662,6 @@ fn main() -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::WebGPU>`
 pub const COLLISION_BOX_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "CollisionBoxShader",
     name: r"CollisionBoxShader",
@@ -781,7 +775,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::WebGPU>`
 pub const COLLISION_CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "CollisionCircleShader",
     name: r"CollisionCircleShader",
@@ -924,7 +917,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::WebGPU>`
 pub const COLOR_RELIEF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "ColorReliefShader",
     name: r"ColorReliefShader",
@@ -1079,7 +1071,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::WebGPU>`
 pub const DEBUG_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "DebugShader",
     name: r"DebugShader",
@@ -1156,7 +1147,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionPatternShader",
     name: r"FillExtrusionPatternShader",
@@ -1433,7 +1423,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionShader",
     name: r"FillExtrusionShader",
@@ -1573,7 +1562,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_OUTLINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillOutlinePatternShader",
     name: r"FillOutlinePatternShader",
@@ -1865,7 +1853,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_OUTLINE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillOutlineShader",
     name: r"FillOutlineShader",
@@ -2010,7 +1997,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_OUTLINE_TRIANGULATED_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
     name: r"FillOutlineTriangulatedShader",
@@ -2150,7 +2136,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillPatternShader",
     name: r"FillPatternShader",
@@ -2429,7 +2414,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillShader",
     name: r"FillShader",
@@ -2556,7 +2540,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::WebGPU>`
 pub const GLOBE_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "GlobeDepthShader",
     name: r"GlobeDepthShader",
@@ -2597,7 +2580,6 @@ fn main() -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::WebGPU>`
 pub const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HeatmapShader",
     name: r"HeatmapShader",
@@ -2721,7 +2703,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::WebGPU>`
 pub const HEATMAP_TEXTURE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HeatmapTextureShader",
     name: r"HeatmapTextureShader",
@@ -2798,7 +2779,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::WebGPU>`
 pub const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HillshadePrepareShader",
     name: r"HillshadePrepareShader",
@@ -2910,7 +2890,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::WebGPU>`
 pub const HILLSHADE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HillshadeShader",
     name: r"HillshadeShader",
@@ -3128,7 +3107,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_GRADIENT_SDF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineGradientSDFShader",
     name: r"LineGradientSDFShader",
@@ -3430,7 +3408,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_GRADIENT_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineGradientShader",
     name: r"LineGradientShader",
@@ -3666,7 +3643,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LinePatternShader",
     name: r"LinePatternShader",
@@ -4000,7 +3976,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_SDF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineSDFShader",
     name: r"LineSDFShader",
@@ -4317,7 +4292,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineShader",
     name: r"LineShader",
@@ -4549,7 +4523,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::WebGPU>`
 pub const PRELUDE: WgslShaderSource = WgslShaderSource {
     built_in: "Prelude",
     name: r"Prelude",
@@ -4797,7 +4770,6 @@ fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
     ),
 };
 
-/// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::WebGPU>`
 pub const RASTER_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "RasterShader",
     name: r"RasterShader",
@@ -4923,7 +4895,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::WebGPU>`
 pub const SKY_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SkyShader",
     name: r"SkyShader",
@@ -4986,7 +4957,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::WebGPU>`
 pub const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SymbolIconShader",
     name: r"SymbolIconShader",
@@ -5263,7 +5233,6 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
     ),
 };
 
-/// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::WebGPU>`
 pub const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SymbolSDFShader",
     name: r"SymbolSDFShader",
@@ -5633,7 +5602,6 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
     ),
 };
 
-/// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::WebGPU>`
 pub const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SymbolTextAndIconShader",
     name: r"SymbolTextAndIconShader",
@@ -6020,7 +5988,6 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
     ),
 };
 
-/// `ShaderSource<BuiltIn::WideVectorShader, gfx::Backend::Type::WebGPU>`
 pub const WIDE_VECTOR_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "WideVectorShader",
     name: r"WideVectorShader",

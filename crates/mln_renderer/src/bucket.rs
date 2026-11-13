@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/bucket.hpp and src/mln/renderer/bucket.cpp
-//
 // C++ `Bucket` is an abstract class with data members: the data is
 // `BucketBase`, the virtual interface is the `Bucket` trait. Buckets are
 // built on the worker thread and then shared with the render thread
@@ -7,9 +5,6 @@
 // Bucket>`, `Bucket: Send + Sync`. The render thread only reads them, except
 // `upload` (an atomic flag, as in C++) and the geometry it moves out to draw
 // (bucket_geometry.rs).
-//
-// TODO(port): `registerAtCrossTileIndex`, `place`,
-// `updateVertices` (symbol buckets, M5), `getRenderThreadID`, `check`.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -29,13 +24,9 @@ use crate::render_layer::RenderLayer;
 
 pub type BucketPtr = Arc<dyn Bucket>;
 
-/// `FeatureStates = mln::unordered_map<std::string, FeatureState>`
-/// (util/feature.hpp).
 pub type FeatureStates = std::collections::HashMap<String, mln_style::expression::expression::FeatureState>;
-/// `LayerFeatureStates = mln::unordered_map<std::string, FeatureStates>`.
 pub type LayerFeatureStates = std::collections::HashMap<String, FeatureStates>;
 
-/// `Bucket::RetainedFeature`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetainedFeature {
     pub feature_id: String,
@@ -55,9 +46,9 @@ pub struct BucketBase {
     pub bucket_id: SimpleIdentity,
     pub retain_features_by_id: bool,
     pub retained_features: Vec<RetainedFeature>,
-    /// Port addition: bumped by `update` (feature state). C++ updates the
-    /// shared vertex vectors in place (`updateModified()`); the render
-    /// layers compare this to refresh their drawables' copies.
+    /// Bumped by `update` (feature state); the render layers compare it to
+    /// refresh their drawables' copies of the vertex data. C++ updates the
+    /// shared vertex vectors in place instead.
     #[serde(skip)]
     pub version: AtomicU64,
 }
@@ -107,10 +98,9 @@ pub trait Bucket: Any + Send + Sync {
         Ok(())
     }
 
-    /// `update(const FeatureStates&, const GeometryTileLayer&, layerID,
-    /// const ImagePositions&)`: re-evaluates the feature-state dependent
-    /// attribute values. `&self`: the bucket is shared (see the file
-    /// comment); implementations lock their binders.
+    /// Re-evaluates the feature-state dependent attribute values. Takes
+    /// `&self` because the bucket is shared (see the file comment);
+    /// implementations lock their binders.
     fn update(
         &self,
         _states: &FeatureStates,
@@ -164,7 +154,7 @@ pub trait Bucket: Any + Send + Sync {
 }
 
 impl dyn Bucket {
-    /// `static_cast<B&>(*bucket)`, checked.
+    /// Downcasts to the bucket type `B`; `None` if it is another type.
     pub fn downcast_ref<B: Bucket>(&self) -> Option<&B> {
         (self as &dyn Any).downcast_ref()
     }
@@ -172,7 +162,6 @@ impl dyn Bucket {
 
 static UNIDENTIFIED_FEATURE_INDEX: AtomicUsize = AtomicUsize::new(0);
 
-/// `Bucket::getRetainFeatureID(const GeometryTileFeature&)`.
 pub fn get_retain_feature_id(feature: &dyn GeometryTileFeature) -> String {
     if let Some(id_str) = feature_id_to_string(&feature.get_id())
         && !id_str.is_empty()

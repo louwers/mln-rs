@@ -226,8 +226,8 @@ impl Buffer {
     }
 }
 
-/// `sizeof(shaders::DebugUBO)` (`include/mln/shaders/debug_layer_ubo.hpp`),
-/// which `mln_gfx` has no struct for.
+/// The size of the debug layer's UBO (C++'s `shaders::DebugUBO`), which
+/// `mln_gfx` has no struct for.
 const DEBUG_UBO_SIZE: usize = 6 * 16;
 
 /// The buffers of each shader, with the size of what the renderer binds: a

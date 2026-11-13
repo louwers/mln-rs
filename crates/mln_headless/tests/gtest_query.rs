@@ -1,5 +1,3 @@
-// Ports test/api/query.test.cpp (a module of the gtest_api test crate).
-
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value};
@@ -55,12 +53,10 @@ impl QueryTest {
         self.0.render()
     }
 
-    /// `frontend.getRenderer()->queryRenderedFeatures(point, options)`.
     fn query_rendered_features(&self, point: &ScreenCoordinate, options: &RenderedQueryOptions) -> Vec<Feature> {
         self.0.frontend.with_renderer(|renderer| renderer.query_rendered_features_at_point(point, options)).unwrap()
     }
 
-    /// `frontend.getRenderer()->querySourceFeatures(sourceID, options)`.
     fn query_source_features(&self, source_id: &str, options: &SourceQueryOptions) -> Vec<Feature> {
         self.0.frontend.with_renderer(|renderer| renderer.query_source_features(source_id, options)).unwrap()
     }
@@ -74,14 +70,13 @@ fn ll(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).expect("LatLng")
 }
 
-/// `parseFilter(expression)`: `*conversion::convertJSON<Filter>(expression, error)`.
+/// Parses a filter from JSON, panicking if it isn't one.
 fn parse_filter(expression: &str) -> Filter {
     let json: serde_json::Value = serde_json::from_str(expression).expect("filter JSON");
     let mut error = Error::default();
     convert::<Filter>(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("filter: {}", error.message))
 }
 
-/// `Filter(expression)`.
 fn filter(expression: Box<dyn mln_style::expression::Expression>) -> Filter {
     Filter::new(Some(Arc::from(expression)), None)
 }
@@ -534,8 +529,6 @@ fn query_source_features_filter() {
     assert_eq!(features3.len(), 1);
 }
 
-/// `frontend.getRenderer()->queryFeatureExtensions(sourceID, feature,
-/// extension, extensionField, args)`.
 fn query_feature_extensions(
     test: &QueryTest,
     source_id: &str,
@@ -559,8 +552,8 @@ fn feature_collection(value: FeatureExtensionValue) -> Vec<feature::Feature<f64>
     }
 }
 
-/// `getTopClusterFeature(test)`: the top cluster of
-/// test/fixtures/supercluster/places.json, clustered at z0.
+/// The top cluster of `test/fixtures/supercluster/places.json`, clustered at
+/// z0.
 fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     test.0.file_source.set_response(Kind::Source, |resource| {
         assert_eq!("http://url", resource.url);

@@ -1,6 +1,3 @@
-// Ports include/mln/style/property_expression.hpp +
-// src/mln/style/property_expression.cpp.
-
 use std::sync::Arc;
 
 use mln_expression::expression::FeatureState;
@@ -26,13 +23,12 @@ fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<V
     Some(Arc::new(refs))
 }
 
-/// `PropertyExpressionBase`: a shared expression plus its precomputed
-/// constness flags.
+/// A shared expression plus its precomputed constness flags.
 ///
 /// C++ also caches `zoomCurve` (raw pointers into the shared expression).
 /// A Rust struct cannot hold borrows of its own `Arc`, so
 /// [`get_zoom_curve`](Self::get_zoom_curve) recomputes it with
-/// `findZoomCurveChecked` (a pure function of the expression).
+/// `find_zoom_curve_checked` (a pure function of the expression).
 #[derive(Debug)]
 pub struct PropertyExpressionBase {
     expression: Arc<dyn Expression>,
@@ -174,15 +170,12 @@ impl PropertyExpressionBase {
         self.global_state_refs.as_deref()
     }
 
-    // TODO(port): getGPUExpression (gfx::GPUExpression) with the renderer's
-    // GPU-expression path.
-
     #[must_use]
     pub fn get_dependencies(&self) -> Dependency {
         self.expression.dependencies()
     }
 
-    /// `getZoomCurve()` (recomputed, see the struct comment).
+    /// The expression's zoom curve (recomputed, see the struct comment).
     #[must_use]
     pub fn get_zoom_curve(&self) -> ZoomCurvePtr<'_> {
         if self.expression.has(Dependency::ZOOM) {
@@ -228,7 +221,6 @@ impl<'de> Deserialize<'de> for PropertyExpressionBase {
     }
 }
 
-/// `PropertyExpression<T>`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PropertyExpression<T> {
     base: PropertyExpressionBase,
@@ -254,7 +246,6 @@ impl<T> PropertyExpression<T> {
         PropertyExpression { base: PropertyExpressionBase::new(expression), default_value }
     }
 
-    /// `PropertyExpression(std::unique_ptr<Expression>, ...)`.
     pub fn from_box(expression: Box<dyn Expression>, default_value: Option<T>) -> Self {
         PropertyExpression::new(Arc::from(expression), default_value)
     }
@@ -283,14 +274,12 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         self.evaluate(&EvaluationContext::new(zoom), T::default())
     }
 
-    /// `evaluate(const GeometryTileFeature&, T finalDefaultValue)`.
     pub fn evaluate_feature(&self, feature: &dyn GeometryTileFeature, final_default_value: T) -> T {
         debug_assert!(self.is_zoom_constant());
         debug_assert!(!self.is_feature_constant());
         self.evaluate(&EvaluationContext::from_feature(Some(feature)), final_default_value)
     }
 
-    /// `evaluate(feature, availableImages, finalDefaultValue)`.
     pub fn evaluate_feature_images(
         &self,
         feature: &dyn GeometryTileFeature,
@@ -303,7 +292,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    /// `evaluate(feature, canonical, finalDefaultValue)`.
     pub fn evaluate_feature_canonical(
         &self,
         feature: &dyn GeometryTileFeature,
@@ -316,7 +304,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    /// `evaluate(feature, availableImages, canonical, finalDefaultValue)`.
     pub fn evaluate_feature_images_canonical(
         &self,
         feature: &dyn GeometryTileFeature,
@@ -332,12 +319,10 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    /// `evaluate(float zoom, const GeometryTileFeature&, T finalDefaultValue)`.
     pub fn evaluate_zoom_feature(&self, zoom: f32, feature: &dyn GeometryTileFeature, final_default_value: T) -> T {
         self.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(feature)), final_default_value)
     }
 
-    /// `evaluate(zoom, feature, availableImages, finalDefaultValue)`.
     pub fn evaluate_zoom_feature_images(
         &self,
         zoom: f32,
@@ -351,7 +336,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    /// `evaluate(zoom, feature, availableImages, canonical, finalDefaultValue)`.
     pub fn evaluate_zoom_feature_images_canonical(
         &self,
         zoom: f32,
@@ -368,7 +352,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    /// `evaluate(zoom, feature, canonical, finalDefaultValue)`.
     pub fn evaluate_zoom_feature_canonical(
         &self,
         zoom: f32,
@@ -382,7 +365,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    /// `evaluate(zoom, feature, const FeatureState&, finalDefaultValue)`.
     pub fn evaluate_zoom_feature_state(
         &self,
         zoom: f32,

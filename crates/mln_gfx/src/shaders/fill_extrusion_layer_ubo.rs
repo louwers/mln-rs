@@ -1,8 +1,6 @@
-// Ports include/mln/shaders/fill_extrusion_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) FillExtrusionDrawableUBO` (112 bytes).
+/// The fill extrusion shader's per-drawable uniform block (112 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillExtrusionDrawableUBO {
@@ -23,7 +21,7 @@ pub struct FillExtrusionDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<FillExtrusionDrawableUBO>() == 7 * 16);
 
-/// `struct alignas(16) FillExtrusionTilePropsUBO` (48 bytes).
+/// The fill extrusion shader's per-tile uniform block (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillExtrusionTilePropsUBO {

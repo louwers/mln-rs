@@ -1,4 +1,4 @@
-//! Ports src/mln/renderer/layers (the layer types M1 and M3 render).
+//! The render layers and their layer tweakers.
 
 pub mod background_layer_tweaker;
 pub mod circle_layer_tweaker;
@@ -50,14 +50,12 @@ use crate::bucket::{Bucket, BucketPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::render_tile::RenderTile;
 
-/// `getEvaluated<BackgroundLayerProperties>(properties)`.
 pub(crate) fn background_layer_properties(
     properties: &Arc<dyn LayerProperties>,
 ) -> &BackgroundPaintProperties::PossiblyEvaluated {
     get_evaluated::<BackgroundLayerProperties>(properties)
 }
 
-/// `getCrossfade<BackgroundLayerProperties>(properties)`.
 pub(crate) fn background_crossfade(properties: &Arc<dyn LayerProperties>) -> &CrossfadeParameters {
     get_crossfade::<BackgroundLayerProperties>(properties)
 }
@@ -82,11 +80,11 @@ pub fn drawable_binders_slot(bucket: &BucketPtr, layer_id: &str) -> Option<Rc<dy
     }) as Rc<dyn Any>)
 }
 
-/// C++ binders update the bucket's shared vertex vectors in place (feature
-/// state), and the drawables' attributes see the modification. The port's
-/// drawables hold copies: when the bucket's version moved since the copy,
-/// `refresh(attrs)` re-reads the data-driven attributes into the drawable's
-/// attribute array (new attributes are uploaded again).
+/// Refreshes the drawable's copies of the bucket's data-driven attributes
+/// when the bucket's version moved since the copy: `refresh(attrs)` re-reads
+/// them into the drawable's attribute array, and new attributes are uploaded
+/// again. C++ drawables share the bucket's vertex vectors, which the binders
+/// update in place (feature state).
 pub fn refresh_if_bucket_updated(
     drawable: &mut dyn Drawable,
     refresh: impl FnOnce(&mut mln_gfx::vertex_attribute::VertexAttributeArray),
@@ -107,9 +105,8 @@ pub fn refresh_if_bucket_updated(
     }
 }
 
-/// `drawable.getBucket()` + `drawable.getBinders()`: the drawable's slot
-/// (cloned, so that the drawable can be mutated while the binders are
-/// used); see `slot_bucket`.
+/// The drawable's bucket and binders slot, cloned so that the drawable can be
+/// mutated while the binders are used; see `slot_bucket`.
 pub fn get_drawable_binders(drawable: &dyn Drawable) -> Option<Rc<dyn Any>> {
     drawable.get_binders().cloned()
 }
@@ -143,13 +140,11 @@ pub fn drawable_render_tile_slot(owner: &Rc<Vec<RenderTile>>, tile: &RenderTile)
     Some(Rc::new(DrawableRenderTile { owner: owner.clone(), index }) as Rc<dyn Any>)
 }
 
-/// `drawable.getRenderTile()`.
 pub fn get_drawable_render_tile(drawable: &dyn Drawable) -> Option<&RenderTile> {
     let slot = drawable.get_render_tile()?.downcast_ref::<DrawableRenderTile>()?;
     Some(slot.tile())
 }
 
-/// `drawable.getLayerTweaker() == layerTweaker`.
 pub fn drawable_has_layer_tweaker(drawable: &dyn Drawable, layer_tweaker: &Option<LayerTweakerPtr>) -> bool {
     let current = drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>());
     match (current, layer_tweaker) {
@@ -166,9 +161,9 @@ pub fn shared_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorBasePtr 
     crate::bucket_geometry::released_vertices(vertices)
 }
 
-/// `checkTweakDrawable`: true if the drawable references the tweaker at
-/// `self_ptr`, or no tweaker at all. It takes a pointer because the running
-/// `execute` already borrows the tweaker's `RefCell` mutably.
+/// Whether the drawable references the tweaker at `self_ptr`, or no tweaker
+/// at all. It takes a pointer because the running `execute` already borrows
+/// the tweaker's `RefCell` mutably.
 pub fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &dyn Drawable, self_ptr: *const T) -> bool {
     match drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>()) {
         None => true,
@@ -176,9 +171,8 @@ pub fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &dyn Drawable, self_ptr: *c
     }
 }
 
-/// `RenderLayer::getRenderDataForPass(tile, pass)` as a free function, so
-/// the result borrows only the tile (the layers mutate themselves while
-/// they hold it).
+/// The tile's render data for `pass`. A free function, so that the result
+/// borrows only the tile (the layers mutate themselves while they hold it).
 pub fn render_data_for_pass<'a>(
     tile: &'a RenderTile,
     base_impl: &dyn mln_style::layer::Impl,
@@ -188,7 +182,6 @@ pub fn render_data_for_pass<'a>(
     if (render_data.layer_properties.render_passes & pass.underlying_type()) != 0 { Some(render_data) } else { None }
 }
 
-/// `util::cast<float>(mat4)`.
 #[must_use]
 pub fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
     std::array::from_fn(|i| m[i] as f32)
@@ -197,8 +190,7 @@ pub fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
 /// The `RenderLayer` members that manage a tile's drawables
 /// (`updateTile`, `removeTile`), for every render layer.
 pub trait TileDrawables: crate::render_layer::RenderLayer {
-    /// `removeTile(RenderPass, const OverscaledTileID&)`: remove all
-    /// drawables for the tile from the layer group.
+    /// Removes all drawables for the tile from the layer group.
     fn remove_tile(&mut self, render_pass: crate::render_pass::RenderPass, tile_id: &mln_tile_id::OverscaledTileID) {
         let Some(layer_group) = self.base().layer_group.clone() else {
             return;
@@ -210,10 +202,9 @@ pub trait TileDrawables: crate::render_layer::RenderLayer {
         tile_group.remove_drawables(render_pass, tile_id);
     }
 
-    /// `updateTile(renderPass, tileID, update)`: update the drawables for a
-    /// tile. `update` returns true if the drawable was updated or false if
-    /// it was skipped because it's for a previous style. Returns true if
-    /// drawables were updated.
+    /// Updates the drawables for a tile. `update` returns true if it updated
+    /// the drawable, false if it skipped it because it's for a previous
+    /// style. Returns true if drawables were updated.
     fn update_tile(
         &mut self,
         render_pass: crate::render_pass::RenderPass,

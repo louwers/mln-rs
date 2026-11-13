@@ -1,7 +1,3 @@
-// Ports src/mln/style/custom_tile_loader.hpp and
-// src/mln/style/custom_tile_loader.cpp, with the request tracking of ffi
-// patches 0069 and 0070.
-//
 // C++ has one loader class per custom source kind, each calling its own tile
 // class. The loader is generic over the data it hands to tiles, and reaches a
 // tile through `CustomTileSubscriber`, since the tiles live in mln_renderer.
@@ -19,8 +15,8 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 
-/// `style::TileFunction`: called with the canonical ID of a tile that the
-/// map needs, or no longer needs. It runs on a background thread.
+/// Called with the canonical ID of a tile that the map needs, or no longer
+/// needs. It runs on a background thread.
 pub type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
 
 /// A tile that receives a canonical tile's data from a custom source's
@@ -69,9 +65,8 @@ impl<D> TileState<D> {
     }
 }
 
-/// `style::CustomTileLoader`: asks the host for each canonical tile that a
-/// tile needs, once, and hands the host's answer to every tile that shares
-/// it.
+/// Asks the host for each canonical tile that a tile needs, once, and hands
+/// the host's answer to every tile that shares it.
 pub struct CustomTileLoader<D: Clone> {
     fetch_tile_function: Option<TileFunction>,
     cancel_tile_function: Option<TileFunction>,
@@ -82,7 +77,6 @@ pub struct CustomTileLoader<D: Clone> {
 }
 
 impl<D: Clone> CustomTileLoader<D> {
-    /// `CustomTileLoader(fetchTileFn, cancelTileFn)`.
     #[must_use]
     pub fn new(fetch_tile_function: Option<TileFunction>, cancel_tile_function: Option<TileFunction>) -> Self {
         CustomTileLoader {
@@ -93,9 +87,8 @@ impl<D: Clone> CustomTileLoader<D> {
         }
     }
 
-    /// `fetchTile(tileID, tileRef)`: the tile needs its data. It gets the
-    /// cached data if there is any; otherwise the host is asked for it,
-    /// unless it already was.
+    /// Records that the tile needs its data. It gets the cached data if there
+    /// is any; otherwise the host is asked for it, unless it already was.
     pub fn fetch_tile(
         &mut self,
         tile_id: &OverscaledTileID,
@@ -119,8 +112,8 @@ impl<D: Clone> CustomTileLoader<D> {
         }
     }
 
-    /// `cancelTile(tileID, tileRef)`: the tile no longer needs its data. It
-    /// stays subscribed, so it fetches again when it is next needed.
+    /// Records that the tile no longer needs its data. It stays subscribed, so
+    /// it fetches again when it is next needed.
     pub fn cancel_tile(&mut self, tile_id: &OverscaledTileID, key: SubscriberKey) {
         let canonical = tile_id.canonical;
         let Some(state) = self.tile_states.get_mut(&canonical) else {
@@ -136,8 +129,8 @@ impl<D: Clone> CustomTileLoader<D> {
         self.cancel_if_unneeded(&canonical);
     }
 
-    /// `removeTile(tileID, tileRef)`: the tile is gone. The cached data goes
-    /// with the last tile that shares it.
+    /// Forgets a tile that is gone. The cached data goes with the last tile
+    /// that shares it.
     pub fn remove_tile(&mut self, tile_id: &OverscaledTileID, key: SubscriberKey) {
         let canonical = tile_id.canonical;
         let Some(state) = self.tile_states.get_mut(&canonical) else {
@@ -163,8 +156,8 @@ impl<D: Clone> CustomTileLoader<D> {
         self.tile_states.get(tile_id).is_some_and(TileState::required)
     }
 
-    /// `setTileData(tileID, data)`: the host's data for a tile. It is dropped
-    /// unless a tile needs it.
+    /// Hands over the host's data for a tile. It is dropped unless a tile
+    /// needs it.
     pub fn set_tile_data(&mut self, tile_id: &CanonicalTileID, data: D) {
         let Some(state) = self.tile_states.get_mut(tile_id) else {
             return;
@@ -179,9 +172,8 @@ impl<D: Clone> CustomTileLoader<D> {
         self.data_cache.insert(*tile_id, data);
     }
 
-    /// `setTileError(tileID, error)`: the host failed to load a tile. The
-    /// tiles stay subscribed, so invalidating the failed tile or needing it
-    /// again fetches it again.
+    /// Reports that the host failed to load a tile. The tiles stay subscribed,
+    /// so invalidating the failed tile or needing it again fetches it again.
     pub fn set_tile_error(&mut self, tile_id: &CanonicalTileID, error: &Error) {
         let Some(state) = self.tile_states.get_mut(tile_id) else {
             return;
@@ -196,15 +188,13 @@ impl<D: Clone> CustomTileLoader<D> {
         self.data_cache.remove(tile_id);
     }
 
-    /// `invalidateTile(tileID)`.
     pub fn invalidate_tile(&mut self, tile_id: &CanonicalTileID) {
         if let Some(state) = self.tile_states.remove(tile_id) {
             self.invalidate(tile_id, &state);
         }
     }
 
-    /// `invalidateRegion(bounds)`: invalidates each tile that the bounds
-    /// intersect, at the tile's own zoom.
+    /// Invalidates each tile that `bounds` intersect, at the tile's own zoom.
     pub fn invalidate_region(&mut self, bounds: &LatLngBounds) {
         let mut tile_ranges: HashMap<u8, TileRange> = HashMap::new();
         let intersecting: Vec<CanonicalTileID> = self

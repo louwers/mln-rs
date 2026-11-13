@@ -1,5 +1,4 @@
-// Ports include/mln/util/padding.hpp + src/mln/util/padding.cpp. The
-// Interpolator<Padding> specialization is in interpolate.rs.
+// The `Interpolate` impl for `Padding` is in interpolate.rs.
 
 use feature::Value;
 use serde::{Deserialize, Serialize};
@@ -43,14 +42,13 @@ impl Padding {
         self.top != 0.0 || self.right != 0.0 || self.bottom != 0.0 || self.left != 0.0
     }
 
-    /// `toArray()`: the C++ returns `std::array<float, 4>`; this keeps the
-    /// seed's `[f64; 4]` (exact promotions of the same floats).
+    /// The edges as `[top, right, bottom, left]`, promoted to `f64`.
     #[must_use]
     pub fn to_array(&self) -> [f64; 4] {
         [f64::from(self.top), f64::from(self.right), f64::from(self.bottom), f64::from(self.left)]
     }
 
-    /// `toArray()` with the C++ element type.
+    /// The edges as `[top, right, bottom, left]`.
     #[must_use]
     pub fn to_float_array(&self) -> [f32; 4] {
         [self.top, self.right, self.bottom, self.left]

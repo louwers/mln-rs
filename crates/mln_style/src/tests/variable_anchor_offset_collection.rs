@@ -1,6 +1,3 @@
-// Ports test/style/variable_anchor_offset_collection.test.cpp (the type is
-// in mln_style_types, its converter in mln_style).
-
 use mln_conversion::Convertible;
 use mln_style_types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCollection};
 

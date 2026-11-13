@@ -1,5 +1,3 @@
-// Ports platform/default/src/mln/util/png_writer.cpp
-//
 // Encodes PNGs without a PNG library, exactly like C++: unpremultiply, one
 // IDAT chunk with filter type 0 on every scanline, zlib-compressed by
 // `util::compress`.
@@ -26,7 +24,6 @@ fn add_chunk(png: &mut Vec<u8>, type_: [u8; 4], data: &[u8]) {
     png.extend_from_slice(&network_byte_u32(checksum.sum()));
 }
 
-/// `mln::encodePNG(const PremultipliedImage&)`.
 #[must_use]
 pub fn encode_png(pre: &PremultipliedImage) -> Vec<u8> {
     // Make copy of the image so that we can unpremultiply it.

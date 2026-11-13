@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/render_static_data.hpp and src/mln/renderer/render_static_data.cpp
-// (the static geometry the layers draw with).
-
 use mln_gfx::ShaderRegistry;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_util::constants;
@@ -8,8 +5,6 @@ use mln_util::constants;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 
 pub struct RenderStaticData {
-    // TODO(port): tileVertexBuffer / quadTriangleIndexBuffer (uploaded for
-    // stencil clipping masks), depthRenderbuffer.
     pub has_3d: bool,
     pub uploaded: std::cell::Cell<bool>,
     pub shaders: Box<ShaderRegistry>,
@@ -27,36 +22,33 @@ impl RenderStaticData {
         }
     }
 
-    /// `upload(gfx::UploadPass&)`. Takes `&self` (the flag is a Cell): the
+    /// Uploads the static data. Takes `&self` (the flag is a `Cell`): the
     /// renderer calls it while `PaintParameters` borrows the static data.
     pub fn upload(&self, _upload_pass: &dyn mln_gfx::UploadPass) {
         if !self.uploaded.get() {
             // these are still used by stencil buffer rendering
-            // TODO(port): tileVertexBuffer / quadTriangleIndexBuffer.
             self.uploaded.set(true);
         }
     }
 
-    /// `tileVertices()`: `PositionOnlyLayoutAttributes` (`short2 a_pos`).
+    /// The tile's four corners, as position-only vertices (`a_pos`).
     #[must_use]
     pub fn tile_vertices() -> Vec<[i16; 2]> {
         let extent = constants::EXTENT as i16;
         vec![[0, 0], [extent, 0], [0, extent], [extent, extent]]
     }
 
-    /// `tileLineStripIndices()`: the tile's outline over `tile_vertices()`.
+    /// The tile's outline, as a line strip over `tile_vertices()`.
     #[must_use]
     pub fn tile_line_strip_indices() -> Vec<u16> {
         vec![0, 1, 3, 2, 0]
     }
 
-    /// `quadTriangleIndices()`.
     #[must_use]
     pub fn quad_triangle_indices() -> Vec<u16> {
         vec![0, 1, 2, 1, 2, 3]
     }
 
-    /// `rasterVertices()`.
     #[must_use]
     pub fn raster_vertices() -> Vec<crate::buckets::raster_bucket::RasterLayoutVertex> {
         use geometry::Point;
@@ -72,19 +64,16 @@ impl RenderStaticData {
         ]
     }
 
-    /// `rasterSegments()`.
     #[must_use]
     pub fn raster_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 
-    /// `fillExtrusionVertices()`.
     #[must_use]
     pub fn fill_extrusion_vertices() -> Vec<FillExtrusionStaticVertex> {
         vec![[1, 0], [1, 1], [0, 0], [0, 1]]
     }
 
-    /// `fillExtrusionTriangleIndices()`.
     #[must_use]
     pub fn fill_extrusion_triangle_indices() -> Vec<u16> {
         // ┌──────┐
@@ -95,20 +84,18 @@ impl RenderStaticData {
         vec![0, 2, 1, 1, 2, 3]
     }
 
-    /// `fillExtrusionSegment()`, drawing `instance_count` walls.
+    /// A segment that draws `instance_count` fill-extrusion walls.
     #[must_use]
     pub fn fill_extrusion_segment(instance_count: usize) -> SegmentBase {
         SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 6) }
     }
 
-    /// `tileTriangleSegments()`.
     #[must_use]
     pub fn tile_triangle_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 
     // dem-heatmap
-    /// `heatmapTextureVertices()`.
     #[must_use]
     pub fn heatmap_texture_vertices() -> Vec<crate::buckets::heatmap_bucket::HeatmapTextureLayoutVertex> {
         use geometry::Point;
@@ -122,7 +109,6 @@ impl RenderStaticData {
         ]
     }
 
-    /// `heatmapTextureSegments()`.
     #[must_use]
     pub fn heatmap_texture_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]

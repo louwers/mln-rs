@@ -1,7 +1,3 @@
-// Ports include/mln/style/expression/formatted.hpp and
-// src/mln/style/expression/formatted.cpp (incl.
-// `Converter<expression::Formatted>`).
-
 use std::fmt;
 
 use feature::{Value as MbglValue, ValueObject};
@@ -15,18 +11,14 @@ pub const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
 pub const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";
 pub const K_FORMATTED_SECTION_TEXT_COLOR: &str = "text-color";
 
-/// `mln::FontStack` (`include/mln/util/font_stack.hpp)`: an array of font
-/// names.
-// TODO(port): move to mln_util with the rest of util/font_stack.hpp.
+/// A list of font names.
 pub type FontStack = Vec<String>;
 
-/// `mln::fontStackToString`.
 #[must_use]
 pub fn font_stack_to_string(font_stack: &FontStack) -> String {
     font_stack.join(",")
 }
 
-/// `expression::FormattedSection`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FormattedSection {
     pub text: String,
@@ -53,7 +45,6 @@ impl FormattedSection {
     }
 }
 
-/// `expression::Formatted`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Formatted {
     pub sections: Vec<FormattedSection>,
@@ -89,7 +80,6 @@ impl fmt::Display for Formatted {
 }
 
 impl Formatted {
-    /// `Formatted(const char* plainU8String)`.
     #[must_use]
     pub fn from_plain(plain_u8_string: &str) -> Self {
         Formatted { sections: vec![FormattedSection::new(plain_u8_string.to_owned(), None, None, None)] }
@@ -135,8 +125,7 @@ impl Formatted {
     }
 }
 
-/// `Converter<Color>` (src/mln/style/conversion/constant.cpp), which the
-/// Formatted converter uses.
+/// Converts a color string, for the `Formatted` converter.
 fn convert_color(value: &Convertible<'_>, error: &mut Error) -> Option<Color> {
     let Some(string) = value.to_string() else {
         error.message = "value must be a string".to_owned();
@@ -151,7 +140,6 @@ fn convert_color(value: &Convertible<'_>, error: &mut Error) -> Option<Color> {
     color
 }
 
-/// `Converter<expression::Formatted>`.
 pub fn convert_formatted(value: &Convertible<'_>, error: &mut Error) -> Option<Formatted> {
     if value.is_array() {
         let mut sections = Vec::new();

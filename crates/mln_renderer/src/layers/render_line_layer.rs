@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/render_line_layer.hpp and
-// src/mln/renderer/layers/render_line_layer.cpp (drawable path).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -62,7 +59,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &LineLayerImpl {
 
 const POS_NORMAL_ATTRIB_NAME: &str = "a_pos_normal";
 
-/// `RenderLayer::applyColorRamp(colorValue, image, globalState)`.
 pub fn apply_color_ramp(
     color_value: &mln_style::color_ramp_property_value::ColorRampPropertyValue,
     image: &mut PremultipliedImage,
@@ -87,11 +83,8 @@ pub fn apply_color_ramp(
     true
 }
 
-/// `vertexAttrs->readDataDrivenPaintProperties<LineColor, LineBlur,
-/// LineOpacity, LineGapWidth, LineOffset, LineWidth, LineFloorWidth,
-/// LinePattern>(binders, evaluated, propertiesAsUniforms,
-/// idLineColorVertexAttribute)`.
-/// `RenderLineLayer::captureRenderedFeatures`.
+/// Captures the tile's rendered features in `stats`, skipping the features
+/// that draw fully transparent.
 fn capture_rendered_features(
     stats: &mut Stats,
     bucket: &LineBucket,
@@ -255,7 +248,7 @@ pub struct RenderLineLayer {
     line_gradient_shader_group: Option<ShaderGroupPtr>,
     line_sdf_shader_group: Option<ShaderGroupPtr>,
     line_gradient_sdf_shader_group: Option<ShaderGroupPtr>,
-    // TODO(port): used by the line-pattern branch.
+    // Used by the line-pattern branch.
     #[allow(dead_code)]
     line_pattern_shader_group: Option<ShaderGroupPtr>,
 }
@@ -301,7 +294,6 @@ impl RenderLineLayer {
     }
 
     // query
-    /// `getLineWidth(feature, zoom, featureState)`.
     fn get_line_width(
         &self,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
@@ -328,7 +320,6 @@ impl RenderLineLayer {
 }
 
 // query
-/// `offsetLine(rings, offset)` (`render_line_layer.cpp`).
 fn offset_line(
     rings: &mln_tile_id::geometry_tile_data::GeometryCollection,
     offset: f64,

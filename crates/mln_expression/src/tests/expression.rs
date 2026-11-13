@@ -1,5 +1,3 @@
-// Ports test/style/expression/expression.test.cpp.
-
 use std::path::PathBuf;
 
 use mln_conversion::Convertible;
@@ -51,7 +49,7 @@ fn parse(filename: &str) -> Result<Box<dyn Expression>, String> {
     })
 }
 
-/// `populateNames()`: every `<name>.a.json` in the fixture directory.
+/// The name of every `<name>.a.json` in the fixture directory.
 fn populate_names() -> Vec<String> {
     let ending = ".a.json";
     let mut names: Vec<String> = std::fs::read_dir(cpp_path("test/fixtures/expression_equality"))
@@ -88,8 +86,7 @@ fn expression_equality_case(param: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `TEST_P(ExpressionEqualityTest`, `ExpressionEquality`), instantiated over
-/// every fixture.
+/// Runs the expression equality check over every fixture.
 // gtest: ExpressionEqualityTest.ExpressionEquality
 #[test]
 fn expression_equality() {

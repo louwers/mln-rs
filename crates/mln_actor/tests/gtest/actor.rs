@@ -1,5 +1,3 @@
-// Ports test/actor/actor.test.cpp.
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;

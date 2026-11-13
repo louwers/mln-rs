@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/render_layer.hpp and src/mln/renderer/render_layer.cpp
-// (feature queries arrive with queries).
-//
 // C++ `RenderLayer` is an abstract class with data members; the data is
 // `RenderLayerBase` and the virtual interface is the `RenderLayer` trait.
 // Render layers are shared between the orchestrator, its ordered list and
@@ -45,7 +42,6 @@ use crate::update_parameters::UpdateParameters;
 pub type RenderLayerPtr = Rc<RefCell<dyn RenderLayer>>;
 pub type RenderLayerReferences = Vec<RenderLayerPtr>;
 
-/// `LayerRenderData`.
 #[derive(Clone)]
 pub struct LayerRenderData {
     pub bucket: BucketPtr,
@@ -69,7 +65,6 @@ impl Default for SymbolTranslate {
     }
 }
 
-/// `BucketPlacementData`.
 #[derive(Clone)]
 pub struct BucketPlacementData {
     pub bucket: BucketPtr,
@@ -91,10 +86,8 @@ impl BucketPlacementData {
     }
 }
 
-/// `LayerPlacementData = std::list<BucketPlacementData>`.
 pub type LayerPlacementData = Vec<BucketPlacementData>;
 
-/// `LayerPrepareParameters`.
 pub struct LayerPrepareParameters<'a> {
     pub source: Option<&'a dyn RenderSource>,
     /// conformance: `ImageManager& imageManager` (background-pattern).
@@ -104,7 +97,6 @@ pub struct LayerPrepareParameters<'a> {
     pub state: &'a TransformState,
 }
 
-/// `RenderLayer::Stats`.
 #[derive(Clone, Debug, Default)]
 pub struct Stats {
     /// The features this layer rendered in the current frame, filled by
@@ -113,14 +105,14 @@ pub struct Stats {
 }
 
 impl Stats {
-    /// `addRenderedFeature`: add an entry or merge with an existing one.
+    /// Adds an entry for the feature, or merges it into the existing one.
     pub fn add_rendered_feature(&mut self, feature_id: &str, bound: &NDCBound, tile_ids: HashSet<OverscaledTileID>) {
         mln_gfx::rendering_stats::add_rendered_feature(&mut self.rendered_features, feature_id, bound, tile_ids);
     }
 }
 
-/// `RenderLayer::unpack_mix_alpha`: the alpha of a packed pair of colors
-/// (as the paint property binders store them), interpolated by `t`.
+/// The alpha of a packed pair of colors (as the paint property binders store
+/// them), interpolated by `t`.
 #[must_use]
 pub fn unpack_mix_alpha(packed: &[f32; 4], t: f32) -> f32 {
     fn decode_alpha(encoded: f32) -> f32 {
@@ -254,9 +246,8 @@ fn minmax(range: (f64, f64), value: f64) -> (f64, f64) {
     (range.0.min(value), range.1.max(value))
 }
 
-/// `RenderLayer::computeFeatureNDCBound`: the NDC bounding box of
-/// `vertex_count` vertices from `get_vertex`, or `None` when they are
-/// degenerate or entirely outside the viewport.
+/// The NDC bounding box of `vertex_count` vertices from `get_vertex`, or
+/// `None` when they are degenerate or entirely outside the viewport.
 ///
 /// The vertices' bounding box is projected by its corners through
 /// `tile_matrix`, unless `pre_transformed`, in which case the vertices are
@@ -325,10 +316,10 @@ pub fn compute_feature_ndc_bound(
     None
 }
 
-/// `RenderLayer::computeFeatureNDCBound` on the globe: the NDC bound of
-/// `vertex_count` vertices in tile units (z in meters above the ground)
-/// from `get_vertex`, moved by `translation` and drawn through `projector`,
-/// or `None` when none of it is drawn inside the viewport.
+/// The NDC bound on the globe of `vertex_count` vertices in tile units (z in
+/// meters above the ground) from `get_vertex`, moved by `translation` and
+/// drawn through `projector`, or `None` when none of it is drawn inside the
+/// viewport.
 ///
 /// The box bends with the sphere and the horizon can cut through it, so its
 /// corners don't bound it: it is sampled every few degrees, keeping what the
@@ -472,11 +463,9 @@ pub struct RenderLayerBase {
     pub follower_data: LayerPlacementData,
     /// The projection variant this layer's drawables are built with.
     pub projection_variant: ProjectionVariant,
-    // TODO(port): sourceForState (feature state), hasRenderFailures.
 }
 
 impl RenderLayerBase {
-    /// `RenderLayer(Immutable<style::LayerProperties>)`.
     pub fn new(properties: Arc<dyn LayerProperties>) -> Self {
         let base_impl = properties.base_impl.clone();
         RenderLayerBase {
@@ -530,8 +519,7 @@ pub trait RenderLayer {
         self.is_3d()
     }
 
-    /// `prepare(const LayerPrepareParameters&)`: reads the source's render
-    /// tiles (`prepare_base`).
+    /// Reads the source's render tiles (`prepare_base`).
     fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) {
         prepare_base(self, parameters);
     }
@@ -633,7 +621,6 @@ pub trait RenderLayer {
         true
     }
 
-    /// `addRenderPassesFromTiles()`.
     fn add_render_passes_from_tiles(&mut self) {
         let base = self.base_mut();
         let render_tiles = base.render_tiles.clone().expect("renderTiles");
@@ -691,7 +678,6 @@ pub trait RenderLayer {
         &self.base().base_impl.id
     }
 
-    /// `transition(const TransitionParameters&, Immutable<style::Layer::Impl> newImpl)`.
     fn transition_with_impl(&mut self, parameters: &TransitionParameters, new_impl: Arc<dyn layer::Impl>) {
         self.base_mut().base_impl = new_impl;
         self.transition(parameters);
@@ -759,7 +745,6 @@ pub trait RenderLayer {
         false
     }
 
-    /// `setLayerGroup(LayerGroupBasePtr, UniqueChangeRequestVec&)`.
     fn set_layer_group(&mut self, layer_group: Option<LayerGroupBasePtr>, changes: &mut UniqueChangeRequestVec) {
         // Remove the active layer group, if any, before replacing it.
         let old = self.base().layer_group.clone();
@@ -816,7 +801,6 @@ pub fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &mut Lay
     };
     debug_assert!(source.is_enabled());
 
-    // TODO(port): sourceForState = params.source (feature state).
     let render_tiles = source.get_render_tiles();
     let render_tiles_owner = source.get_raw_render_tiles();
     let base = layer.base_mut();
@@ -828,7 +812,8 @@ pub fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &mut Lay
     layer.update_render_tile_ids();
 }
 
-/// `getRenderTileBucketID(tileID)` on the data members.
+/// The bucket id of the render tile `tile_id`, or `SimpleIdentity::EMPTY` if
+/// there is none.
 fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID) -> SimpleIdentity {
     base.render_tile_ids.get(tile_id).copied().unwrap_or(SimpleIdentity::EMPTY)
 }
@@ -851,7 +836,6 @@ pub fn activate_layer_group(
     }
 }
 
-/// `changeLayerIndex(const LayerGroupBasePtr&, int32_t, UniqueChangeRequestVec&)`.
 pub fn change_layer_index(group: &Option<LayerGroupBasePtr>, new_index: i32, changes: &mut UniqueChangeRequestVec) {
     if let Some(group) = group
         && group.borrow().get_layer_index() != new_index

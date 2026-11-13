@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/property_value.hpp +
-// src/mln/style/conversion/property_value.cpp.
-
 use mln_expression::formatted::Formatted;
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
@@ -19,8 +16,8 @@ use crate::expression::{Image, Kind, Literal, ParsingContext, ValueConverter, do
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 
-/// `Converter<PropertyValue<T>>::maybeConvertTokens`: only strings,
-/// `Formatted` and `Image` values can hold `{token}`s.
+/// Turns a constant with `{token}`s into an expression. Only strings,
+/// `Formatted` and `Image` values can hold tokens.
 pub trait MaybeConvertTokens: Sized {
     fn maybe_convert_tokens(self) -> PropertyValue<Self> {
         PropertyValue::Constant(self)
@@ -109,7 +106,6 @@ impl MaybeConvertTokens for Image {
     }
 }
 
-/// `convert<PropertyValue<T>>(value, error, allowDataExpressions, convertTokens)`.
 pub fn convert_property_value<T>(
     value: &Convertible<'_>,
     error: &mut Error,

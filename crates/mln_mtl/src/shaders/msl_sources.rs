@@ -26,7 +26,7 @@
 
 use super::shader_source::MslShaderSource;
 
-/// `shaders::prelude` (common.hpp): the start of every shader's source.
+/// The start of every shader's source.
 pub const PRELUDE: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
@@ -434,7 +434,6 @@ enum {
 
 "#;
 
-/// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::Metal>`
 pub const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "AtmosphereShader",
     name: r"AtmosphereShader",
@@ -593,7 +592,6 @@ half4 fragment fragmentMain(
 ",
 };
 
-/// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::Metal>`
 pub const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "BackgroundPatternShader",
     name: r"BackgroundPatternShader",
@@ -724,7 +722,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::Metal>`
 pub const BACKGROUND_SHADER: MslShaderSource = MslShaderSource {
     built_in: "BackgroundShader",
     name: r"BackgroundShader",
@@ -828,7 +825,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::Metal>`
 pub const CIRCLE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "CircleShader",
     name: r"CircleShader",
@@ -1095,7 +1091,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::Metal>`
 pub const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
     built_in: "ClippingMaskProgram",
     name: r"ClippingMaskProgram",
@@ -1152,7 +1147,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-/// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::Metal>`
 pub const COLLISION_BOX_SHADER: MslShaderSource = MslShaderSource {
     built_in: "CollisionBoxShader",
     name: r"CollisionBoxShader",
@@ -1259,7 +1253,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-/// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::Metal>`
 pub const COLLISION_CIRCLE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "CollisionCircleShader",
     name: r"CollisionCircleShader",
@@ -1386,7 +1379,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::Metal>`
 pub const COLOR_RELIEF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "ColorReliefShader",
     name: r"ColorReliefShader",
@@ -1540,7 +1532,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::Metal>`
 pub const DEBUG_SHADER: MslShaderSource = MslShaderSource {
     built_in: "DebugShader",
     name: r"DebugShader",
@@ -1605,7 +1596,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionInstancedShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionInstancedShader",
     name: r"FillExtrusionInstancedShader",
@@ -1796,7 +1786,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionPatternInstancedShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionPatternInstancedShader",
     name: r"FillExtrusionPatternInstancedShader",
@@ -2067,7 +2056,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionPatternShader",
     name: r"FillExtrusionPatternShader",
@@ -2309,7 +2297,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionShader",
     name: r"FillExtrusionShader",
@@ -2483,7 +2470,6 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::Metal>`
 pub const FILL_OUTLINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillOutlinePatternShader",
     name: r"FillOutlinePatternShader",
@@ -2800,7 +2786,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Metal>`
 pub const FILL_OUTLINE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillOutlineShader",
     name: r"FillOutlineShader",
@@ -3015,7 +3000,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::Metal>`
 pub const FILL_OUTLINE_TRIANGULATED_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
     name: r"FillOutlineTriangulatedShader",
@@ -3234,7 +3218,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Metal>`
 pub const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillPatternShader",
     name: r"FillPatternShader",
@@ -3536,7 +3519,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Metal>`
 pub const FILL_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillShader",
     name: r"FillShader",
@@ -3747,7 +3729,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::Metal>`
 pub const GLOBE_DEPTH_SHADER: MslShaderSource = MslShaderSource {
     built_in: "GlobeDepthShader",
     name: r"GlobeDepthShader",
@@ -3784,7 +3765,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-/// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::Metal>`
 pub const HEATMAP_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HeatmapShader",
     name: r"HeatmapShader",
@@ -3924,7 +3904,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 "#,
 };
 
-/// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::Metal>`
 pub const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HeatmapTextureShader",
     name: r"HeatmapTextureShader",
@@ -3990,7 +3969,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::Metal>`
 pub const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HillshadePrepareShader",
     name: r"HillshadePrepareShader",
@@ -4116,7 +4094,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::Metal>`
 pub const HILLSHADE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HillshadeShader",
     name: r"HillshadeShader",
@@ -4364,7 +4341,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::Metal>`
 pub const LINE_GRADIENT_SDF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineGradientSDFShader",
     name: r"LineGradientSDFShader",
@@ -4760,7 +4736,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::Metal>`
 pub const LINE_GRADIENT_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineGradientShader",
     name: r"LineGradientShader",
@@ -5111,7 +5086,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::Metal>`
 pub const LINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LinePatternShader",
     name: r"LinePatternShader",
@@ -5543,7 +5517,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::Metal>`
 pub const LINE_SDF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineSDFShader",
     name: r"LineSDFShader",
@@ -5948,7 +5921,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::Metal>`
 pub const LINE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineShader",
     name: r"LineShader",
@@ -6312,7 +6284,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::Metal>`
 pub const RASTER_SHADER: MslShaderSource = MslShaderSource {
     built_in: "RasterShader",
     name: r"RasterShader",
@@ -6434,7 +6405,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::Metal>`
 pub const SKY_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SkyShader",
     name: r"SkyShader",
@@ -6508,7 +6478,6 @@ half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::Metal>`
 pub const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SymbolIconShader",
     name: r"SymbolIconShader",
@@ -6772,7 +6741,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::Metal>`
 pub const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SymbolSDFShader",
     name: r"SymbolSDFShader",
@@ -7114,7 +7082,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::Metal>`
 pub const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SymbolTextAndIconShader",
     name: r"SymbolTextAndIconShader",
@@ -7474,7 +7441,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::WideVectorShader, gfx::Backend::Type::Metal>`
 pub const WIDE_VECTOR_SHADER: MslShaderSource = MslShaderSource {
     built_in: "WideVectorShader",
     name: r"WideVectorShader",

@@ -1,5 +1,4 @@
-// Ports test/style/conversion/function.test.cpp. TokenStrings is in
-// conversion/function.rs.
+// The TokenStrings test is in conversion/function.rs.
 
 use mln_conversion::{Convertible, Error};
 

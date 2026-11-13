@@ -1,5 +1,3 @@
-// Ports src/mln/text/check_max_angle.hpp and src/mln/text/check_max_angle.cpp.
-
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
@@ -7,18 +5,17 @@ use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
 
 use crate::geometry::anchor::Anchor;
 
-/// `util::dist<float>(a, b)` on `Point<int16_t>` (util/math.hpp): the
-/// differences are `int`, `std::sqrt` of the `int` sum is a double sqrt,
-/// then narrowed to float. The sum is formed in f64, which is exact where
-/// the C++ `int` sum does not overflow.
+/// The distance from `a` to `b` as C++ computes it: the differences are
+/// integers, and the square root of their sum is taken in `f64`, then
+/// narrowed to `f32`. The sum is formed in `f64`, which is exact where the
+/// C++ `int` sum does not overflow.
 fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
     let dx = f64::from(i32::from(b.x) - i32::from(a.x));
     let dy = f64::from(i32::from(b.y) - i32::from(a.y));
     (dx * dx + dy * dy).sqrt() as f32
 }
 
-/// `util::angle_to(a, b)` on `Point<int16_t>`: `std::atan2` of the `int`
-/// differences, in double.
+/// The angle from `b` to `a`: `atan2` of the integer differences, in `f64`.
 fn angle_to(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
     f64::from(i32::from(a.y) - i32::from(b.y)).atan2(f64::from(i32::from(a.x) - i32::from(b.x)))
 }
@@ -29,8 +26,8 @@ struct Corner {
     angle_delta: f32,
 }
 
-/// `checkMaxAngle`: whether the label fits on the line without the sum of
-/// the angles within `window_size` exceeding `max_angle`.
+/// Whether the label fits on the line without the sum of the angles within
+/// `window_size` exceeding `max_angle`.
 #[must_use]
 pub fn check_max_angle(
     line: &GeometryCoordinates,

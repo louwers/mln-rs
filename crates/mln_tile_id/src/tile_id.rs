@@ -1,6 +1,3 @@
-// Ports include/mln/tile/tile_id.hpp, src/mln/tile/tile_id_io.cpp and
-// src/mln/tile/tile_id_hash.cpp.
-//
 // Integer arithmetic follows the C++ types: `uint8_t`/`uint32_t` arithmetic
 // wraps, shifts are `wrapping_sh*` (x86 masks the shift count, which is what
 // the C++ code compiles to where it would be UB), and the narrowing casts in
@@ -93,21 +90,17 @@ pub struct OverscaledTileID {
 }
 
 impl OverscaledTileID {
-    /// `OverscaledTileID(uint8_t overscaledZ, int16_t wrap, CanonicalTileID)`.
     #[must_use]
     pub fn new(overscaled_z: u8, wrap: i16, canonical: CanonicalTileID) -> Self {
         debug_assert!(overscaled_z >= canonical.z);
         OverscaledTileID { overscaled_z, wrap, canonical }
     }
 
-    /// `OverscaledTileID(uint8_t overscaledZ, int16_t wrap, uint8_t z,
-    /// uint32_t x, uint32_t y)`.
     #[must_use]
     pub fn with_zxy(overscaled_z: u8, wrap: i16, z: u8, x: u32, y: u32) -> Self {
         Self::new(overscaled_z, wrap, CanonicalTileID::new(z, x, y))
     }
 
-    /// `OverscaledTileID(uint8_t z, uint32_t x, uint32_t y)`.
     #[must_use]
     pub fn from_zxy(z: u8, x: u32, y: u32) -> Self {
         OverscaledTileID { overscaled_z: z, wrap: 0, canonical: CanonicalTileID::new(z, x, y) }
@@ -145,7 +138,6 @@ impl OverscaledTileID {
     }
 }
 
-/// `explicit OverscaledTileID(const CanonicalTileID&)`.
 impl From<CanonicalTileID> for OverscaledTileID {
     fn from(canonical: CanonicalTileID) -> Self {
         OverscaledTileID::new(canonical.z, 0, canonical)
@@ -170,7 +162,6 @@ pub struct UnwrappedTileID {
 }
 
 impl UnwrappedTileID {
-    /// `UnwrappedTileID(uint8_t z, int64_t x, int64_t y)`.
     #[must_use]
     pub fn new(z: u8, x: i64, y: i64) -> Self {
         let dim = 1i64.wrapping_shl(u32::from(z));
@@ -186,7 +177,6 @@ impl UnwrappedTileID {
         UnwrappedTileID { wrap, canonical: CanonicalTileID::new(z, canonical_x, canonical_y) }
     }
 
-    /// `UnwrappedTileID(int16_t wrap, CanonicalTileID)`.
     #[must_use]
     pub const fn with_wrap(wrap: i16, canonical: CanonicalTileID) -> Self {
         UnwrappedTileID { wrap, canonical }

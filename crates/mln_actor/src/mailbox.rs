@@ -1,11 +1,8 @@
-// Ports include/mln/actor/mailbox.hpp, src/mln/actor/mailbox.cpp and
-// include/mln/actor/message.hpp.
-//
 // A C++ message holds a reference to its target object; the mailbox runs
 // it on the scheduler's thread. Here the target lives in the registry of the
 // thread that opened the mailbox (see local_object.rs) and a message is a
 // closure over the target. So a mailbox's scheduler must run its tasks on
-// that thread (a RunLoop; actors on thread pools are a TODO(port)).
+// that thread (a RunLoop).
 //
 // Locking: C++ uses a pushing mutex, a recursive receiving mutex, a queue
 // mutex and an Idle/Processing/Abandoned state to keep `close()` from
@@ -25,7 +22,7 @@ use parking_lot::Mutex;
 use crate::local_object;
 use crate::scheduler::{Scheduler, WeakScheduler};
 
-/// `actor::Message`: a call on the mailbox's target object.
+/// A call on the mailbox's target object.
 pub type Message = Box<dyn FnOnce(&dyn Any) + Send + 'static>;
 
 struct State {
@@ -44,7 +41,7 @@ pub struct Mailbox {
 }
 
 impl Mailbox {
-    /// `Mailbox()`: not open yet; messages queue until `open`.
+    /// Creates a mailbox that is not open yet; messages queue until `open`.
     #[must_use]
     pub fn new() -> Arc<Mailbox> {
         Arc::new_cyclic(|weak_self| Mailbox {
@@ -77,14 +74,13 @@ impl Mailbox {
         }
     }
 
-    /// `open(const TaggedScheduler&)`.
     pub fn open_tagged(&self, scheduler: &Arc<dyn Scheduler + Send + Sync>, tag: SimpleIdentity, object: Rc<dyn Any>) {
         self.state.lock().scheduler_tag = Some(tag);
         self.open(scheduler, object);
     }
 
-    /// `close()`: no message runs after this returns. Call it on the target's
-    /// thread (it unregisters the target there).
+    /// No message runs after this returns. Call it on the target's thread (it
+    /// unregisters the target there).
     pub fn close(&self) {
         let object = {
             let mut state = self.state.lock();
@@ -97,7 +93,6 @@ impl Mailbox {
         drop(object);
     }
 
-    /// `push(std::unique_ptr<Message>)`.
     pub fn push(&self, message: Message) {
         let mut state = self.state.lock();
         if state.closed {
@@ -111,7 +106,7 @@ impl Mailbox {
         }
     }
 
-    /// `receive()`: runs the first message, and schedules the next one.
+    /// Runs the first message, and schedules the next one.
     pub fn receive(&self) {
         let (message, was_empty) = {
             let mut state = self.state.lock();

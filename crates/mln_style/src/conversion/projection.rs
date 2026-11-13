@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/projection.hpp +
-// src/mln/style/conversion/projection.cpp.
-
 use mln_style_types::ProjectionDefinition;
 
 use super::{Converter, Convertible, Error, convert_property_value};

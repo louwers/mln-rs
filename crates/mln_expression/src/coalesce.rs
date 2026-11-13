@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/coalesce.hpp and
-// src/mln/style/expression/coalesce.cpp.
-
 use mln_conversion::Convertible;
 
 use crate::check_subtype::check_subtype;

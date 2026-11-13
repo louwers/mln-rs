@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/tile_layer_group.hpp and src/mln/vulkan/tile_layer_group.cpp
-
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::renderer::layer_group::{self, LayerGroupBaseData};

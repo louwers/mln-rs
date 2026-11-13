@@ -1,5 +1,3 @@
-// Ports include/mln/gl/renderer_backend.hpp and src/mln/gl/renderer_backend.cpp
-//
 // The GL functions and the platform's context are shared (`Rc<BackendImpl>`)
 // by the backend and its context: resources reach them through the context,
 // as C++'s do through `Context& -> getBackend()`.
@@ -87,15 +85,15 @@ impl BackendImpl {
     }
 }
 
-/// `gl::RendererBackend`: a renderer's GL context.
+/// A renderer's GL context.
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
 }
 
 impl RendererBackend {
-    /// `RendererBackend()`: a backend on a context of `device`'s share
-    /// group, which the backend makes current around its frames.
+    /// A backend on a context of `device`'s share group, which the backend
+    /// makes current around its frames.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes
     /// no context, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
@@ -106,7 +104,7 @@ impl RendererBackend {
         Ok(Self::from_parts(gl, platform))
     }
 
-    /// `RendererBackend()`, on the functions of `platform`'s context.
+    /// A backend on the functions of `platform`'s context.
     #[cfg(not(target_family = "wasm"))]
     pub(crate) fn from_parts(gl: Gl, platform: Box<dyn PlatformContext>) -> Self {
         #[allow(clippy::arc_with_non_send_sync)]
@@ -114,7 +112,7 @@ impl RendererBackend {
         RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(BackendImpl { gl, platform }) }
     }
 
-    /// `RendererBackend()`, on a canvas's WebGL2 context.
+    /// A backend on a canvas's WebGL2 context.
     #[cfg(target_family = "wasm")]
     pub(crate) fn from_parts(webgl2: web_sys::WebGl2RenderingContext, platform: Box<dyn PlatformContext>) -> Self {
         #[allow(clippy::arc_with_non_send_sync)]
@@ -145,7 +143,7 @@ impl RendererBackend {
         self.impl_.gl()
     }
 
-    /// `context.reset()`, with the context current: its objects are deleted
+    /// Drops the context, deleting its objects with the context current
     /// (`Context::release_resources`).
     pub(crate) fn reset_context(&mut self) {
         if let Some(context) = self.base.reset_context()
@@ -157,8 +155,9 @@ impl RendererBackend {
         }
     }
 
-    /// `activate()`. Where another renderer used the context since the
-    /// backend's last frame, the context forgets the GL state it cached.
+    /// Makes the backend's context current. Where another renderer used the
+    /// context since the backend's last frame, the context forgets the GL state
+    /// it cached.
     pub fn activate(&self) {
         self.impl_.make_current();
         if self.impl_.take_state_lost()
@@ -169,19 +168,16 @@ impl RendererBackend {
         }
     }
 
-    /// `deactivate()`
     pub fn deactivate(&self) {
         self.impl_.done_current();
     }
 
-    /// `createContext()`
     pub fn create_context(&self) -> Rc<Context> {
         Context::new(self.impl_.clone())
     }
 
-    /// `initShaders`: register one `ShaderGroupGL` per built-in shader. A
-    /// duplicate registration is an error, which C++ throws and the port
-    /// logs.
+    /// Registers one shader group per built-in shader. A duplicate
+    /// registration is an error, which C++ throws and this logs.
     pub fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
         for &shader_id in REGISTERED_SHADERS {
             let Some(source) = shader_source(shader_id) else {

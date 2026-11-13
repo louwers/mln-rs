@@ -144,8 +144,7 @@ impl Observer for Recorder {
     }
 }
 
-/// `FixtureLog` (`test/src/mln/test/fixture_log_observer.cpp`) for the
-/// calling thread.
+/// Records the calling thread's log messages for a test to check.
 pub struct FixtureLog {
     messages: Arc<Mutex<Vec<(Message, bool)>>>,
 }
@@ -198,7 +197,8 @@ pub fn warning(code: i64, msg: &str) -> Message {
     Message { severity: EventSeverity::Warning, event: Event::Database, code, msg: msg.to_owned() }
 }
 
-/// `std::mt19937` (default seed 5489), for the C++ tests' `randomString`.
+/// A Mersenne Twister (`std::mt19937`, default seed 5489), so `random_string`
+/// gives the C++ tests' strings.
 pub struct Mt19937 {
     mt: [u32; 624],
     index: usize,
@@ -235,27 +235,25 @@ impl Mt19937 {
     }
 }
 
-/// `randomString(size)` (`offline_database.test.cpp`, `offline_download.test.cpp)`:
-/// the low byte of each `std::mt19937` draw.
+/// `size` pseudo-random bytes: the low byte of each `Mt19937` draw.
 pub fn random_string(size: usize) -> crate::response::Data {
     let mut random = Mt19937::new(5489);
     Arc::new((0..size).map(|_| random.next_u32() as u8).collect())
 }
 
-/// `util::copyFile(destination, source)`: like `std::ifstream` +
-/// `std::ofstream`, a directory as the source opens and copies nothing.
+/// Copies `source` to `destination`. A directory as the source copies
+/// nothing, as in C++.
 pub fn copy_file(destination: &str, source: &std::path::Path) {
     let mut src = std::fs::File::open(source).unwrap_or_else(|e| panic!("Cannot read file {}: {e}", source.display()));
     let mut dst = std::fs::File::create(destination).unwrap_or_else(|e| panic!("Cannot write file {destination}: {e}"));
     let _ = std::io::copy(&mut src, &mut dst);
 }
 
-/// `util::deleteFile` for test cleanup (missing files are fine).
+/// Deletes `filename` for test cleanup; a missing file is fine.
 pub fn delete_file(filename: &str) {
     let _ = std::fs::remove_file(filename);
 }
 
-/// `util::read_file(filename).size()`.
 pub fn file_size(filename: &str) -> usize {
     std::fs::read(filename).unwrap_or_else(|e| panic!("Cannot read file {filename}: {e}")).len()
 }

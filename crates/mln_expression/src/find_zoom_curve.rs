@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/find_zoom_curve.hpp and
-// src/mln/style/expression/find_zoom_curve.cpp.
-
 use crate::coalesce::Coalesce;
 use crate::compound_expression::CompoundExpression;
 use crate::expression::{Dependency, Expression, Kind, downcast};
@@ -38,10 +35,9 @@ impl std::fmt::Debug for ZoomCurve<'_> {
     }
 }
 
-/// `ZoomCurveOrError`.
 pub type ZoomCurveOrError<'a> = Option<ZoomCurve<'a>>;
 
-/// `ZoomCurvePtr`: `variant<std::nullptr_t, const Interpolate*, const Step*>`.
+/// The zoom curve of an expression: none, an interpolate or a step.
 #[derive(Clone, Copy)]
 pub enum ZoomCurvePtr<'a> {
     Null,
@@ -131,7 +127,7 @@ pub fn find_zoom_curve_checked(e: &dyn Expression) -> ZoomCurvePtr<'_> {
     }
     match find_zoom_curve(e).expect("zoom-dependent expression without a zoom curve") {
         ZoomCurve::Error(err) => {
-            // TODO(port): Log::Error(Event::Style, "Invalid Expression: " + err.message)
+            // C++ also logs "Invalid Expression: <message>" here.
             let _ = err;
             ZoomCurvePtr::Null
         }

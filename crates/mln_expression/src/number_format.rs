@@ -1,7 +1,3 @@
-// Ports include/mln/style/expression/number_format.hpp and
-// src/mln/style/expression/number_format.cpp. The platform number format is
-// the `locale` module's.
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 
@@ -18,13 +14,15 @@ const CURRENCY_KEY: &str = "currency";
 const MIN_FRACTION_DIGITS_KEY: &str = "min-fraction-digits";
 const MAX_FRACTION_DIGITS_KEY: &str = "max-fraction-digits";
 
-/// `platform::formatNumber`: `number` in a BCP 47 locale, or in the
-/// platform's default locale when the locale is empty, malformed or its
-/// language unsupported, rounded half to even to at most `max` fraction
-/// digits and padded to at least `min`. Omitted limits default to 0 and 3,
-/// or to the currency's digits for currency, and an explicit maximum wins
-/// over a minimum. With an ISO 4217 currency code, it formats as an amount of
-/// that currency, with the locale's pattern and symbol.
+/// Formats `number` in a BCP 47 locale.
+///
+/// The platform's default locale stands in when the locale is empty,
+/// malformed or its language unsupported. The number is rounded half to even
+/// to at most `max` fraction digits and padded to at least `min`. Omitted
+/// limits default to 0 and 3, or to the currency's digits for currency, and
+/// an explicit maximum wins over a minimum. With an ISO 4217 currency code, it
+/// formats as an amount of that currency, with the locale's pattern and
+/// symbol.
 ///
 /// # Errors
 ///
@@ -62,7 +60,8 @@ fn opt_equal(l: Option<&dyn Expression>, r: Option<&dyn Expression>) -> bool {
     }
 }
 
-/// `static_cast<uint8_t>(double)`: through int32 on x86-64.
+/// Truncates `d` to `u8` through `i32`, as C++ `static_cast<uint8_t>(double)`
+/// does on x86-64.
 fn static_cast_u8(d: f64) -> u8 {
     (if d > -2_147_483_649.0 && d < 2_147_483_648.0 { d as i32 } else { i32::MIN }) as u8
 }

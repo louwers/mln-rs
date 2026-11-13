@@ -1,5 +1,3 @@
-// Ports test/tile/raster_dem_tile.test.cpp.
-
 use std::rc::Rc;
 use std::sync::Arc;
 

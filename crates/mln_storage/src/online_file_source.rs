@@ -1,7 +1,3 @@
-// Ports include/mln/storage/online_file_source.hpp and
-// platform/default/src/mln/storage/online_file_source.cpp, with
-// maplibre-native-ffi's patch 0068 (a resource transform can fail a request).
-//
 // The requests run on the "OnlineFileSource" thread (`util::Thread`) as in
 // C++: an `OnlineFileRequest` per caller request, scheduled by a
 // `util::Timer` (first request at once, then revalidation when the response
@@ -15,8 +11,6 @@
 //
 // `OnlineFileRequest::actor()` (the transformed URL's way back) is a mailbox
 // on the online thread whose target finds the request by id.
-//
-// TODO(port): thread priority.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -50,7 +44,6 @@ use crate::response::{Reason, ResourceError, Response};
 /// For testing only
 pub const ONLINE_STATUS_KEY: &str = "online-status";
 
-/// `OnlineFileRequest`
 struct OnlineFileRequest {
     id: u64,
     state: Weak<ThreadState>,
@@ -88,7 +81,6 @@ struct OnlineFileRequestRef {
 }
 
 impl OnlineFileRequestRef {
-    /// `OnlineFileRequest::setTransformResult(ResourceTransform::Result)`.
     fn set_transform_result(&self, result: TransformResult) {
         if let Some(state) = self.state.upgrade()
             && let Some(req) = state.get(self.id)
@@ -106,7 +98,7 @@ impl Drop for OnlineFileRequest {
     }
 }
 
-/// `PendingRequests`: a FIFO preferring regular over low priority requests.
+/// A FIFO preferring regular over low priority requests.
 #[derive(Default)]
 struct PendingRequests {
     regular: VecDeque<u64>,
@@ -161,14 +153,12 @@ struct ThreadState {
     tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
 }
 
-/// `OnlineFileSourceThread`
 pub struct OnlineFileSourceThread {
     state: Rc<ThreadState>,
     _reachability: AsyncTask,
     reachability_id: u64,
 }
 
-/// `interpolateExpiration(current, prior, expired)`
 fn interpolate_expiration(current: Timestamp, prior: Option<Timestamp>, expired: &mut bool) -> Timestamp {
     let now = now();
     if current > now {
@@ -202,7 +192,7 @@ fn interpolate_expiration(current: Timestamp, prior: Option<Timestamp>, expired:
     Timestamp::from_secs(now.secs_since_epoch() + delta.max(minimum))
 }
 
-/// `sanitizeURL`: the URL without its query string.
+/// The URL without its query string.
 fn sanitize_url(url: &str) -> &str {
     match url.find('?') {
         Some(query_index) => &url[..query_index],
@@ -215,13 +205,11 @@ impl ThreadState {
         self.tasks.borrow().get(&id).cloned()
     }
 
-    /// `add(OnlineFileRequest*)`
     fn add(&self, req: &OnlineFileRequest) {
         self.all_requests.borrow_mut().insert(req.id);
         self.transform(req);
     }
 
-    /// `transform(OnlineFileRequest*)`
     fn transform(&self, req: &OnlineFileRequest) {
         req.transform_failed.set(false);
         let transform = self.resource_transform.borrow().clone();
@@ -247,7 +235,6 @@ impl ThreadState {
         }
     }
 
-    /// `remove(OnlineFileRequest*)`
     fn remove(self: &Rc<Self>, id: u64) {
         self.all_requests.borrow_mut().remove(&id);
         let was_active = self.active_requests.borrow_mut().remove(&id);
@@ -258,7 +245,6 @@ impl ThreadState {
         }
     }
 
-    /// `activateOrQueueRequest(OnlineFileRequest*)`
     fn activate_or_queue_request(self: &Rc<Self>, id: u64) {
         let Some(req) = self.get(id) else {
             return;
@@ -275,7 +261,6 @@ impl ThreadState {
         }
     }
 
-    /// `activateRequest(OnlineFileRequest*)`
     fn activate_request(self: &Rc<Self>, req: &Rc<OnlineFileRequest>) {
         let weak = Rc::downgrade(self);
         let id = req.id;
@@ -306,7 +291,6 @@ impl ThreadState {
         }
     }
 
-    /// `activatePendingRequest()`
     fn activate_pending_request(self: &Rc<Self>) {
         let next = self.pending_requests.borrow_mut().pop();
         if let Some(id) = next
@@ -324,7 +308,6 @@ impl ThreadState {
         self.active_requests.borrow().contains(&id)
     }
 
-    /// `networkIsReachableAgain()`
     fn network_is_reachable_again(&self) {
         let requests: Vec<Rc<OnlineFileRequest>> =
             self.all_requests.borrow().iter().filter_map(|id| self.get(*id)).collect();
@@ -340,7 +323,6 @@ impl ThreadState {
 }
 
 impl OnlineFileRequest {
-    /// `setTransformResult(ResourceTransform::Result)`
     fn set_transform_result(&self, result: TransformResult) {
         self.transforming.set(false);
         match result {
@@ -357,7 +339,6 @@ impl OnlineFileRequest {
         }
     }
 
-    /// `actor()`
     fn actor(&self) -> ActorRef<OnlineFileRequestRef> {
         let mut mailbox = self.mailbox.borrow_mut();
         // Lazy constructed because this can be costly and the
@@ -369,7 +350,6 @@ impl OnlineFileRequest {
         ActorRef::new(mailbox)
     }
 
-    /// `activate()`
     fn activate(&self) {
         // Force an immediate first request if we don't have an expiration time.
         let prior_expires = self.resource.borrow().prior_expires;
@@ -418,8 +398,7 @@ impl OnlineFileRequest {
         });
     }
 
-    /// `getUpdateInterval(std::optional<Timestamp> expires)`: when to request
-    /// the resource again, or `None` for never.
+    /// When to request the resource again, or `None` for never.
     fn get_update_interval(&self, expires: Option<Timestamp>) -> Option<Duration> {
         // Calculate a timeout that depends on how many consecutive errors
         // we've encountered, and on the expiration time, if present.
@@ -500,7 +479,6 @@ impl OnlineFileRequest {
         (self.callback)(response);
     }
 
-    /// `networkIsReachableAgain()`
     fn network_is_reachable_again(&self) {
         // We need all requests to fail at least once before we are going to
         // start retrying them, and we only immediately restart request that
@@ -535,7 +513,6 @@ impl OnlineFileSourceThread {
         OnlineFileSourceThread { state, _reachability: reachability, reachability_id }
     }
 
-    /// `request(AsyncRequest* req, Resource, const ActorRef<FileSourceRequest>&)`
     pub fn request(&self, req: u64, resource: Resource, r: &ActorRef<FileSourceRequestState>) {
         let r = r.clone();
         let callback = move |res: Response| {
@@ -560,14 +537,12 @@ impl OnlineFileSourceThread {
         self.state.add(&request);
     }
 
-    /// `cancel(AsyncRequest* req)`
     pub fn cancel(&self, req: u64) {
         self.state.remove(req);
         let task = self.state.tasks.borrow_mut().remove(&req);
         drop(task);
     }
 
-    /// `setResourceTransform(ResourceTransform)`
     fn set_resource_transform(&self, transform: Option<ResourceTransform>) {
         *self.state.resource_transform.borrow_mut() = transform;
     }
@@ -580,7 +555,6 @@ impl OnlineFileSourceThread {
         *self.state.resource_options.borrow_mut() = options;
     }
 
-    /// `setOnlineStatus(bool)`
     fn set_online_status(&self, status: bool) {
         self.state.online.set(status);
         if status {
@@ -601,7 +575,7 @@ impl Drop for OnlineFileSourceThread {
     }
 }
 
-/// `OnlineFileSource`: the `Network` file source.
+/// The `Network` file source.
 pub struct OnlineFileSource {
     cached_resource_options: Mutex<ResourceOptions>,
     cached_maximum_concurrent_requests: Mutex<u32>,
@@ -614,7 +588,6 @@ impl OnlineFileSource {
     #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         let ro = resource_options.clone();
-        // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_NETWORK).
         let thread = Thread::new("OnlineFileSource", move |_| OnlineFileSourceThread::new(ro));
         OnlineFileSource {
             cached_resource_options: Mutex::new(resource_options.clone()),

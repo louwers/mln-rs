@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/cross_faded_property_evaluator.hpp + .cpp (a cut point of the C++ include cycle).
-
 use mln_util::interpolate::Interpolate;
 use serde::{Deserialize, Serialize};
 
@@ -8,21 +6,18 @@ use crate::property_expression::PropertyExpression;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::property_evaluator::Evaluator;
 
-/// `Faded<T>`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Faded<T> {
     pub from: T,
     pub to: T,
 }
 
-/// `Interpolator<Faded<T>> : Uninterpolated`.
 impl<T: Clone> Interpolate for Faded<T> {
     fn interpolate(&self, _to: &Self, _t: f64) -> Self {
         self.clone()
     }
 }
 
-/// `CrossFadedPropertyEvaluator<T>`.
 pub struct CrossFadedPropertyEvaluator<'a, T> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,

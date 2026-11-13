@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/paint_property_binder.hpp and the
-// `readDataDrivenPaintProperties` / `readDataDrivenPaintProperty` members of
-// include/mln/gfx/vertex_attribute.hpp.
-//
 // The C++ class hierarchy (`PaintPropertyBinder<T, UniformValueType,
 // PossiblyEvaluatedType, As...>` with Constant / SourceFunction /
 // CompositeFunction / ConstantCrossFaded / CompositeCrossFaded subclasses)
@@ -48,22 +44,19 @@ pub struct FeatureVertexRange {
     pub end: usize,
 }
 
-/// `std::map<std::string, std::vector<FeatureVertexRange>>`.
 pub type FeatureVertexRangeMap = VecMap<String, Vec<FeatureVertexRange>>;
 
-/// `InterleavedVertexBuffer`: the data-driven attribute values of all the
-/// binders of one `PaintPropertyBinders`, one interleaved vertex per layout
+/// The data-driven attribute values of all the binders of one
+/// `paint_property_binders!` struct, one interleaved vertex per layout
 /// vertex.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct InterleavedVertexBuffer {
     pub stride: usize,
     pub vertex_count: usize,
-    /// `gfx::VertexVectorPtr<uint8_t> sharedVertexVector`.
     pub shared_vertex_vector: GeometryVec<u8>,
 }
 
 impl InterleavedVertexBuffer {
-    /// `set<T>(index, offset, value)`.
     pub fn set(&mut self, index: usize, offset: usize, value: &[u8]) {
         let start = self.stride * index + offset;
         let data = self.shared_vertex_vector.get_mut();
@@ -71,14 +64,14 @@ impl InterleavedVertexBuffer {
         data[start..start + value.len()].copy_from_slice(value);
     }
 
-    /// `get<T>(index, offset)`, `len` = `sizeof(T)`, or `None` when the
-    /// vertex is out of range.
+    /// The `len` bytes at `offset` in vertex `index`, or `None` when they are
+    /// out of range.
     pub fn try_get(&self, index: usize, offset: usize, len: usize) -> Option<Vec<u8>> {
         let start = self.stride.checked_mul(index)?.checked_add(offset)?;
         self.shared_vertex_vector.data().get(start..start.checked_add(len)?).map(<[u8]>::to_vec)
     }
 
-    /// `get<T>(index, offset)`, `len` = `sizeof(T)`.
+    /// The `len` bytes at `offset` in vertex `index`.
     pub fn get(&self, index: usize, offset: usize, len: usize) -> Vec<u8> {
         let start = self.stride * index + offset;
         let data = self.shared_vertex_vector.data();
@@ -86,7 +79,8 @@ impl InterleavedVertexBuffer {
         data[start..start + len].to_vec()
     }
 
-    /// `extendVertexFormat<T>()`, with `sizeof(T)` and `alignof(T)`.
+    /// Appends a field of `size` bytes, aligned to `alignment`, to the vertex
+    /// format and returns its offset.
     pub fn extend_vertex_format(&mut self, size: usize, alignment: usize) -> usize {
         let mut offset = self.stride & (alignment - 1);
         if offset != 0 {
@@ -104,14 +98,12 @@ impl InterleavedVertexBuffer {
 /// (`float` and `Color` in circle, fill and line): `attributeValue(v)` and
 /// the attribute's type (`A::Type`).
 pub trait BinderValue: Clone + Default + ValueConverter + StatisticValue + std::fmt::Debug {
-    /// `A::Dimensions` (the floats of `attributeValue`).
+    /// The number of floats `attribute_value` uses.
     const DIMENSIONS: usize;
-    /// `A::Type::DataType`.
     const BASE_DATA_TYPE: AttributeDataType;
-    /// `ZoomInterpolatedAttributeType<A::Type>::DataType`.
     const INTERPOLATED_DATA_TYPE: AttributeDataType;
 
-    /// `attributeValue(v)`; only the first `DIMENSIONS` entries are used.
+    /// The attribute's floats; only the first `DIMENSIONS` entries are used.
     fn attribute_value(&self) -> [f32; 2];
 }
 
@@ -120,14 +112,13 @@ impl BinderValue for f32 {
     const BASE_DATA_TYPE: AttributeDataType = AttributeDataType::Float;
     const INTERPOLATED_DATA_TYPE: AttributeDataType = AttributeDataType::Float2;
 
-    /// `attributeValue(float v)`: `{{v}}`.
     fn attribute_value(&self) -> [f32; 2] {
         [*self, 0.0]
     }
 }
 
-/// `packUint8Pair<float>(a, b)`: `static_cast<uint16_t>(a) * 256 +
-/// static_cast<uint16_t>(b)` (an `int`), returned as `uint16_t`.
+/// Packs two values into a `u16`: `a as u16 * 256 + b as u16`, computed as an
+/// `i32` and truncated, as C++ does.
 fn pack_uint8_pair(a: f32, b: f32) -> u16 {
     (i32::from(a as u16) * 256 + i32::from(b as u16)) as u16
 }
@@ -168,11 +159,14 @@ fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
 /// The data of a `PaintPropertyBinder` subclass.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PaintPropertyBinderKind<T> {
-    /// `ConstantPaintPropertyBinder<T, A>`
-    Constant { constant: T },
-    /// `SourceFunctionPaintPropertyBinder<T, A>`
-    SourceFunction { expression: PropertyExpression<T>, default_value: T, feature_map: FeatureVertexRangeMap },
-    /// `CompositeFunctionPaintPropertyBinder<T, A>`
+    Constant {
+        constant: T,
+    },
+    SourceFunction {
+        expression: PropertyExpression<T>,
+        default_value: T,
+        feature_map: FeatureVertexRangeMap,
+    },
     CompositeFunction {
         expression: PropertyExpression<T>,
         default_value: T,
@@ -182,7 +176,6 @@ pub enum PaintPropertyBinderKind<T> {
 }
 
 impl<T: BinderValue> PaintPropertyBinderKind<T> {
-    /// `updateVertexVector(start, end, feature, state)`.
     fn update_vertex_vector(
         &self,
         statistics: &mut PaintPropertyStatistics<T>,
@@ -229,19 +222,18 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
     }
 }
 
-/// `PaintPropertyBinder<T, T, PossiblyEvaluatedPropertyValue<T>, A>`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PaintPropertyBinder<T> {
     pub kind: PaintPropertyBinderKind<T>,
     pub statistics: PaintPropertyStatistics<T>,
-    /// `interleavedVertexBuffer != nullptr` (set by `setInterleavedBuffer`).
+    /// Whether `set_interleaved_buffer` gave the binder vertex data.
     pub has_interleaved_buffer: bool,
-    /// `std::numeric_limits<size_t>::max()` until `setInterleavedBuffer`.
+    /// The binder's offset in the interleaved vertex; `usize::MAX` until
+    /// `set_interleaved_buffer`.
     pub vertex_offset: usize,
 }
 
 impl<T: BinderValue> PaintPropertyBinder<T> {
-    /// `PaintPropertyBinder::create(value, zoom, defaultValue)`.
     pub fn create(value: &PossiblyEvaluatedPropertyValue<T>, zoom: f32, default_value: T) -> Self {
         let kind = match value {
             PossiblyEvaluatedPropertyValue::Constant(constant) => {
@@ -272,14 +264,14 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    /// `sizeof(ZoomInterpolatedVertexType<A>)`: `2 * DIMENSIONS` floats.
+    /// The size in bytes of the zoom-interpolated vertex: `2 * DIMENSIONS`
+    /// floats.
     fn zoom_interpolated_size() -> usize {
         2 * T::DIMENSIONS * 4
     }
 
-    /// `setInterleavedBuffer(InterleavedVertexBuffer&)`: the function
-    /// binders extend the vertex format by their zoom-interpolated vertex;
-    /// the constant binder keeps the base no-op.
+    /// Adds the binder's zoom-interpolated vertex to the vertex format. The
+    /// constant binder has no vertex data and does nothing.
     pub fn set_interleaved_buffer(&mut self, buffer: &mut InterleavedVertexBuffer) {
         if let PaintPropertyBinderKind::Constant { .. } = self.kind {
             return;
@@ -292,18 +284,14 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    /// `getVertexCount()`.
     pub fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         if self.has_interleaved_buffer { buffer.vertex_count } else { 0 }
     }
 
-    /// `isInterpolated()`.
     pub fn is_interpolated(&self) -> bool {
         matches!(self.kind, PaintPropertyBinderKind::CompositeFunction { .. })
     }
 
-    /// `populateVertexVector(feature, length, index, patternPositions,
-    /// patternDependencies, canonical, formattedSection)`.
     #[allow(clippy::too_many_arguments)]
     pub fn populate_vertex_vector(
         &mut self,
@@ -378,7 +366,6 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    /// `updateVertexVectors(states, layer, imagePositions)`.
     pub fn update_vertex_vectors(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
@@ -407,7 +394,8 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    /// `interpolationFactor(currentZoom)` (the single element of the tuple).
+    /// The factor that interpolates between the vertex's two zoom stops; 0
+    /// unless the binder is a composite function.
     pub fn interpolation_factor(&self, current_zoom: f32) -> f32 {
         match &self.kind {
             PaintPropertyBinderKind::Constant { .. } | PaintPropertyBinderKind::SourceFunction { .. } => 0.0,
@@ -423,7 +411,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    /// `uniformValue(currentValue)` (the single element of the tuple).
+    /// The property's value as a uniform.
     pub fn uniform_value(&self, current_value: &PossiblyEvaluatedPropertyValue<T>) -> T {
         match &self.kind {
             PaintPropertyBinderKind::Constant { constant } => current_value.constant_or(constant),
@@ -432,9 +420,8 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    /// `getVertexValue(index)`: the zoom-interpolated vertex (`2 *
-    /// DIMENSIONS` floats), or `None` when `index` is out of range (C++
-    /// throws `std::out_of_range`).
+    /// The zoom-interpolated vertex (`2 * DIMENSIONS` floats), or `None` when
+    /// `index` is out of range (where C++ throws).
     pub fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Option<Vec<f32>> {
         let n = T::DIMENSIONS;
         Some(match &self.kind {
@@ -451,7 +438,6 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         })
     }
 
-    /// `applyPaintProperty<TAttribute>(attrIndex, attrib)`.
     pub fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
@@ -476,9 +462,9 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 /// The data of a cross-faded `PaintPropertyBinder` subclass.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CrossFadedPaintPropertyBinderKind<T> {
-    /// `ConstantCrossFadedPaintPropertyBinder<T, A1, A2>`
-    Constant { constant: Faded<T> },
-    /// `CompositeCrossFadedPaintPropertyBinder<T, A1, A2>`
+    Constant {
+        constant: Faded<T>,
+    },
     Composite {
         expression: PropertyExpression<T>,
         default_value: T,
@@ -491,9 +477,8 @@ pub enum CrossFadedPaintPropertyBinderKind<T> {
     },
 }
 
-/// `PaintPropertyBinder<T, std::array<uint16_t, 4>,
-/// PossiblyEvaluatedPropertyValue<Faded<T>>, A1, A2>` (the `*-pattern`
-/// properties; `A1`/`A2` are `ushort4` attributes).
+/// The binder of a `*-pattern` property, whose two attributes are four `u16`s
+/// each.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CrossFadedPaintPropertyBinder<T> {
     pub kind: CrossFadedPaintPropertyBinderKind<T>,
@@ -501,11 +486,10 @@ pub struct CrossFadedPaintPropertyBinder<T> {
     pub vertex_offset: usize,
 }
 
-/// `sizeof(ZoomInterpolatedVertexType<A1>)` for `ushort4`: `ushort8`.
+/// The size of a zoom-interpolated pattern vertex: eight `u16`s.
 const PATTERN_ZOOM_INTERPOLATED_SIZE: usize = 16;
 
 impl CrossFadedPaintPropertyBinder<Image> {
-    /// `PaintPropertyBinder::create(value, zoom, defaultValue)`.
     #[must_use]
     pub fn create(value: &PossiblyEvaluatedFadedPropertyValue<Image>, zoom: f32, default_value: Image) -> Self {
         let kind = match value {
@@ -524,7 +508,8 @@ impl CrossFadedPaintPropertyBinder<Image> {
         CrossFadedPaintPropertyBinder { kind, has_interleaved_buffer: false, vertex_offset: usize::MAX }
     }
 
-    /// `setInterleavedBuffer`: only the composite binder has vertex data.
+    /// Adds the binder's vertex data to the vertex format; only the composite
+    /// binder has any.
     pub fn set_interleaved_buffer(&mut self, buffer: &mut InterleavedVertexBuffer) {
         if let CrossFadedPaintPropertyBinderKind::Constant { .. } = self.kind {
             return;
@@ -541,13 +526,12 @@ impl CrossFadedPaintPropertyBinder<Image> {
         if self.has_interleaved_buffer { buffer.vertex_count } else { 0 }
     }
 
-    /// `isInterpolated()`: the base `false` for both.
+    /// Whether the binder interpolates by zoom: never for pattern binders.
     #[must_use]
     pub fn is_interpolated(&self) -> bool {
         false
     }
 
-    /// `populateVertexVector(...)`.
     pub fn populate_vertex_vector(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
@@ -594,14 +578,14 @@ impl CrossFadedPaintPropertyBinder<Image> {
         }
     }
 
-    /// `interpolationFactor(float)`: `{0, 0}` for both.
+    /// The zoom interpolation factors, always (0, 0) for pattern binders.
     #[must_use]
     pub fn interpolation_factor(&self, _current_zoom: f32) -> (f32, f32) {
         (0.0, 0.0)
     }
 
-    /// `applyPaintProperty<TAttribute>(attrIndex, attrib)`: both attributes
-    /// (`attrIndex` 0 and 1) get the same interleaved data in C++.
+    /// Points `attrib` at the interleaved pattern data. Both attributes
+    /// (`attr_index` 0 and 1) get the same data, as in C++.
     pub fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
@@ -622,9 +606,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
 /// `PaintPropertyBinder`), as `PaintPropertyBinders` and
 /// `readDataDrivenPaintProperty` use it.
 pub trait PaintPropertyBinderBase {
-    /// `setInterleavedBuffer(InterleavedVertexBuffer&)`.
     fn set_interleaved(&mut self, buffer: &mut InterleavedVertexBuffer);
-    /// `populateVertexVector(...)`.
     #[allow(clippy::too_many_arguments)]
     fn populate(
         &mut self,
@@ -637,8 +619,8 @@ pub trait PaintPropertyBinderBase {
         canonical: &CanonicalTileID,
         formatted_section: &Value,
     );
-    /// `updateVertexVectors(states, layer, imagePositions)` (the base no-op
-    /// for the constant and cross-faded binders).
+    /// Rewrites the vertex data that depends on feature state. The default,
+    /// for the constant and cross-faded binders, does nothing.
     fn update_vectors(
         &mut self,
         _buffer: &mut InterleavedVertexBuffer,
@@ -650,9 +632,7 @@ pub trait PaintPropertyBinderBase {
     fn depends_on_feature_state(&self) -> bool {
         false
     }
-    /// `getVertexCount()`.
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize;
-    /// `applyPaintProperty<Attribute>(attrIndex, attrib)`.
     fn apply(
         &self,
         buffer: &InterleavedVertexBuffer,
@@ -741,9 +721,8 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
     }
 }
 
-/// `VertexAttributeArray::readDataDrivenPaintProperty<P>(binder, isConstant,
-/// propertiesAsUniforms, dataDrivenAttrId)`: one property with its
-/// `AttributeNames`.
+/// Adds the attributes `attribute_names` of one property to `attrs`, or
+/// records them as uniforms if the property is constant.
 #[allow(clippy::too_many_arguments)]
 pub fn read_data_driven_paint_property(
     attrs: &mut VertexAttributeArray,
@@ -770,10 +749,10 @@ pub fn read_data_driven_paint_property(
     }
 }
 
-/// `PaintPropertyBinders<TypeList<Ps...>>` for one layer type's
-/// data-driven paint properties: a struct with one binder per property
-/// (fields in the C++ type-list order, which is also the interleaved
-/// vertex order) and the shared `InterleavedVertexBuffer`.
+/// Declares the binders of one layer type's data-driven paint properties: a
+/// struct with one binder per property (fields in the C++ type-list order,
+/// which is also the interleaved vertex order) and the shared
+/// `InterleavedVertexBuffer`.
 #[macro_export]
 macro_rules! paint_property_binders {
     (
@@ -790,7 +769,6 @@ macro_rules! paint_property_binders {
         }
 
         impl $name {
-            /// `PaintPropertyBinders(const EvaluatedProperties&, float z)`.
             pub fn new(properties: &$props, z: f32) -> Self {
                 let mut result = $name {
                     interleaved_vertex_buffer: Default::default(),
@@ -805,9 +783,6 @@ macro_rules! paint_property_binders {
                 result
             }
 
-            /// `populateVertexVectors(feature, length, index,
-            /// patternPositions, patternDependencies, canonical,
-            /// formattedSection = {})`.
             #[allow(clippy::too_many_arguments)]
             pub fn populate_vertex_vectors(
                 &mut self,
@@ -842,7 +817,6 @@ macro_rules! paint_property_binders {
                 // copies the vector when it builds drawables.
             }
 
-            /// `updateVertexVectors(states, layer, imagePositions)`.
             pub fn update_vertex_vectors(
                 &mut self,
                 states: &$crate::bucket::FeatureStates,

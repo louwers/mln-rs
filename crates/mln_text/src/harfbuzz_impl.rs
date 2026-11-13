@@ -1,6 +1,3 @@
-// Ports src/mln/text/harfbuzz_impl.hpp and src/mln/text/harfbuzz_impl.cpp
-// on HarfRust.
-//
 // The C++ shapes with HarfBuzz 8.2.0 built with HB_TINY on an hb-ft font
 // (`hb_ft_font_create`). The port shapes with HarfRust on:
 // - `HbFtFont` (crate::hb_ft): hb-ft's glyph mapping and advances on the
@@ -32,16 +29,15 @@ use crate::hb_ft::HbFtFont;
 /// Tables HarfBuzz never reads when built with `HB_TINY`.
 const HB_TINY_HIDDEN_TABLES: [&[u8; 4]; 7] = [b"morx", b"mort", b"kerx", b"kern", b"ankr", b"trak", b"feat"];
 
-/// `getDefaultLanguage()`: `hb_language_get_default()`, which with
-/// `HB_NO_SETLOCALE` is `hb_language_from_string ("C")` = "c".
+/// HarfBuzz's default language, which with `HB_NO_SETLOCALE` is "c".
 fn get_default_language() -> Language {
     Language::new("c").expect("non-empty")
 }
 
-/// `getUnicodeScript(u)`: combining marks inherit the script of their
-/// bases, regardless of their own script. Called on UTF-16 code units, as
-/// in C++ (surrogates are classified on their own). Uses the Unicode
-/// version of HarfRust's own tables.
+/// The script of `u`, as an ISO 15924 tag. Combining marks inherit the
+/// script of their bases, regardless of their own script. Called on UTF-16
+/// code units, as in C++ (surrogates are classified on their own). Uses the
+/// Unicode version of HarfRust's own tables.
 #[must_use]
 pub fn get_unicode_script(u: u32) -> [u8; 4] {
     if char::from_u32(u).is_some_and(|c| c.general_category() == GeneralCategory::NonspacingMark) {
@@ -53,7 +49,6 @@ pub fn get_unicode_script(u: u32) -> [u8; 4] {
 /// Shape plans by script tag and right-to-left direction.
 type ShapePlans = HashMap<([u8; 4], bool), Arc<ShapePlan>>;
 
-/// `HBShaper::Impl`.
 pub struct Impl {
     type_: GlyphIDType,
     face: FreeTypeFace,
@@ -117,7 +112,8 @@ fn hb_tiny_font(face: &FreeTypeFace) -> Option<Font> {
 }
 
 impl Impl {
-    /// `HBShaper::Impl::Impl`: `hb_ft_font_create` + `hb_buffer_create`.
+    /// A shaper for the font in `font_file_data`, whose glyphs have type
+    /// `type_`.
     pub fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, lib: &FreeTypeLibrary) -> Self {
         let face = FreeTypeFace::from_memory(font_file_data, lib);
         let font = if face.is_valid() { hb_tiny_font(&face) } else { None };
@@ -154,7 +150,6 @@ impl Impl {
             .clone()
     }
 
-    /// `HBShaper::Impl::createComplexGlyphIDs`.
     pub fn create_complex_glyph_ids(
         &self,
         text: &[u16],

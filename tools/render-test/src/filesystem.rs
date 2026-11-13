@@ -25,7 +25,6 @@ impl Grammar {
         c == b'/' || (self.windows && c == b'\\')
     }
 
-    /// `path::generic_string()`.
     fn generic(self, path: &str) -> Cow<'_, str> {
         if self.windows && path.contains('\\') { Cow::Owned(path.replace('\\', "/")) } else { Cow::Borrowed(path) }
     }
@@ -49,8 +48,8 @@ impl Grammar {
         }
     }
 
-    /// `path::is_relative()`: an absolute path has a root directory, and on
-    /// Windows a root name before it.
+    /// Whether `path` is relative. An absolute path has a root directory,
+    /// and on Windows a root name before it.
     fn is_relative(self, path: &str) -> bool {
         let root = self.root_name_len(path);
         let has_root_directory = path.as_bytes().get(root).is_some_and(|&c| self.is_separator(c));
@@ -87,17 +86,14 @@ impl Grammar {
         path.as_bytes()[root..].iter().rposition(|&c| self.is_separator(c)).map_or(root, |i| root + i + 1)
     }
 
-    /// `path::filename()`.
     fn filename(self, path: &str) -> &str {
         &path[self.filename_start(path)..]
     }
 
-    /// `path::remove_filename()`.
     fn remove_filename(self, path: &str) -> String {
         self.generic(&path[..self.filename_start(path)]).into_owned()
     }
 
-    /// `path::stem()`.
     fn stem(self, path: &str) -> &str {
         let name = self.filename(path);
         if name == "." || name == ".." {
@@ -109,7 +105,8 @@ impl Grammar {
         }
     }
 
-    /// `path::lexically_normal()` ([fs.path.generic] normal form).
+    /// `path` in normal form ([fs.path.generic]), as `path::lexically_normal`
+    /// returns it.
     fn lexically_normal(self, path: &str) -> String {
         if path.is_empty() {
             return String::new();
@@ -178,7 +175,6 @@ impl Grammar {
     }
 }
 
-/// `path::is_relative()`.
 #[must_use]
 pub fn is_relative(path: &str) -> bool {
     NATIVE.is_relative(path)
@@ -193,31 +189,31 @@ pub fn join(base: &str, rel: &str) -> String {
     NATIVE.join(base, rel)
 }
 
-/// `path::filename()`: the part after the last separator (empty for `"a/"`).
+/// The part of `path` after the last separator (empty for `"a/"`).
 #[must_use]
 pub fn filename(path: &str) -> &str {
     NATIVE.filename(path)
 }
 
-/// `path::remove_filename()`: keeps the trailing separator.
+/// `path` without its filename, keeping the trailing separator.
 #[must_use]
 pub fn remove_filename(path: &str) -> String {
     NATIVE.remove_filename(path)
 }
 
-/// `path::stem()`.
 #[must_use]
 pub fn stem(path: &str) -> &str {
     NATIVE.stem(path)
 }
 
-/// `std::filesystem::exists` (follows symlinks).
+/// Whether `path` exists, following symlinks.
 #[must_use]
 pub fn exists(path: &str) -> bool {
     Path::new(path).exists()
 }
 
-/// `path::lexically_normal()` ([fs.path.generic] normal form).
+/// `path` in normal form ([fs.path.generic]), as `path::lexically_normal`
+/// returns it.
 #[must_use]
 pub fn lexically_normal(path: &str) -> String {
     NATIVE.lexically_normal(path)
@@ -256,7 +252,7 @@ pub fn recursive_directory_entries(root: &str) -> io::Result<Vec<String>> {
     Ok(out)
 }
 
-/// `directory_entry::is_regular_file()` (follows symlinks).
+/// Whether `path` is a regular file, following symlinks.
 #[must_use]
 pub fn is_regular_file(path: &str) -> bool {
     fs::metadata(path).is_ok_and(|m| m.is_file())

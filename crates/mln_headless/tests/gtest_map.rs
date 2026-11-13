@@ -1,7 +1,3 @@
-// Ports test/map/map.test.cpp (the `Map` and `BackgroundLayer` gtests).
-// test/map/prefetch.test.cpp is the module below; the fixture (`MapTest`,
-// `StubMapObserver`, `checkImage`, `FakeFileSource`) is in support/mod.rs.
-//
 // Markers: `// gtest: Group.Name` above each ported test; tests that need
 // code that is not ported yet are `#[ignore]`d with the missing part.
 
@@ -74,7 +70,6 @@ fn insets(top: f64, left: f64, bottom: f64, right: f64) -> EdgeInsets {
     EdgeInsets::new(top, left, bottom, right).expect("EdgeInsets")
 }
 
-/// `std::make_unique<style::Image>(id, image, pixelRatio)`.
 #[must_use]
 pub fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32) -> Arc<mln_style::image::Impl> {
     Arc::new(
@@ -622,8 +617,8 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
     }
 }
 
-/// `MapTest<MainResourceLoader> test{cachePath, assetPath}`, over
-/// `file_sources`.
+/// A map test that loads through a `MainResourceLoader` from `file_sources`,
+/// with these cache and asset paths.
 fn main_resource_loader_test(
     file_sources: &FileSourceManager,
     cache_path: &str,
@@ -641,7 +636,6 @@ fn main_resource_loader_test(
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
-/// `getFileSource(FileSourceType::Database, ResourceOptions{})`.
 fn database_file_source(file_sources: &FileSourceManager) -> Arc<dyn FileSource> {
     file_sources.get_file_source(FileSourceType::Database, &ResourceOptions::default()).expect("database file source")
 }
@@ -1059,7 +1053,6 @@ fn style_loaded_signal() {
     assert!(!emitted.get());
 }
 
-/// `MapTest<OnlineFileSource> test(ResourceOptions::Default())`.
 fn online_file_source_test() -> MapTest<OnlineFileSource> {
     let run_loop = RunLoop::new();
     let file_source = Arc::new(OnlineFileSource::new(&ResourceOptions::default()));
@@ -2943,8 +2936,6 @@ fn continuous_map_finishes_loading_when_its_tiles_fail() {
 }
 
 // gtest: Map.ObserveTileLifecycle
-// TODO(port): the half of the gtest that checks the pre/post compile events
-// of the fill and fill-outline shaders (MapObserver has no shader callbacks).
 #[test]
 fn observe_tile_lifecycle() {
     use TileOperation::*;
@@ -3557,7 +3548,7 @@ fn globe_bounded_source_loads_finer_tiles() {
 
 // gtest: Map.LineLayerDepthDistribution
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509"]
+#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509"]
 fn line_layer_depth_distribution() {
     const LAYER_COUNT: u32 = 1 << 11;
 
@@ -3606,7 +3597,7 @@ fn line_layer_depth_distribution() {
 
 // gtest: Map.SetFrustumOffset
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2560"]
+#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2560"]
 fn set_frustum_offset() {
     let test = MapTest::new();
 
@@ -4452,8 +4443,9 @@ fn fallback_font_faces_cover_every_font_stack() {
     assert!(requested.borrow().iter().any(|url| url == "fallback.ttf"));
 }
 
-/// `ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange`
-/// for a layer type: "line", "heatmap" or "color-relief".
+/// Checks that a color ramp renders the current global state after a change
+/// to an unrelated state property, for a layer type: "line", "heatmap" or
+/// "color-relief".
 fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     let ramp_property = if type_ == "line" { "line-gradient".to_owned() } else { format!("{type_}-color") };
     let ramp = |color: &str| {
@@ -4622,9 +4614,8 @@ fn sourceless_layers_render_after_leaving_zoom_range() {
     assert_eq!(image.data, again.data);
 }
 
-/// `InactiveLayerCase`: a source, a layer object without "id", "source",
-/// "minzoom" or "maxzoom", and a layer of the same source that renders
-/// nothing.
+/// A source, a layer object without "id", "source", "minzoom" or "maxzoom",
+/// and a layer of the same source that renders nothing.
 #[derive(Clone, Copy)]
 struct InactiveLayerCase {
     source: &'static str,

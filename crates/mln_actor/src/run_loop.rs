@@ -1,7 +1,3 @@
-// Ports include/mln/util/run_loop.hpp and platform/default/src/mln/util/run_loop.cpp
-// (the libuv loop): `invoke`, `runOnce`, `run`, `stop`, `waitForEmpty`, and
-// the async handles behind `util::AsyncTask`.
-//
 // libuv is replaced by a plain loop: `run_once` is `uv_run(UV_RUN_NOWAIT)`,
 // i.e. it runs every async handle that was signalled, in registration order
 // (the loop's own task queue first, as its handle is created in the RunLoop
@@ -19,9 +15,6 @@
 // Timers (`util::Timer`, timer.rs) run first in `run_once`, as `uv_run` runs
 // due timers before the poll phase; a blocking `run()` sleeps until the next
 // timer is due. Timers do not keep `run()` alive (libuv unrefs them).
-//
-// TODO(port): fd watches (`addWatch`/`removeWatch`, only for libcurl),
-// `invokeCancellable`, `setPlatformCallback`.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -164,7 +157,7 @@ impl Drop for EnteredRunLoop {
     }
 }
 
-/// `util::RunLoop`. Cheap to clone: clones refer to the same loop.
+/// A thread's event loop. Cheap to clone: clones refer to the same loop.
 #[derive(Clone)]
 pub struct RunLoop {
     inner: Rc<Inner>,
@@ -179,9 +172,7 @@ pub struct RunLoopHandle {
 }
 
 impl RunLoop {
-    /// `RunLoop(Type::Default)` / `RunLoop(Type::New)`: creates a loop and
-    /// makes it the current scheduler of this thread
-    /// (`Scheduler::SetCurrent(this)`).
+    /// Creates a loop and makes it the current scheduler of this thread.
     #[must_use]
     pub fn new() -> Self {
         let core = Arc::new(Core::new());
@@ -232,10 +223,9 @@ impl RunLoop {
         EnteredRunLoop { previous, previous_scheduler }
     }
 
-    /// `RunLoop::Get()`. C++ asserts that the thread has a current `RunLoop`;
-    /// the port creates one on first use instead, which is what the test
-    /// harnesses do first thing in C++ (and what `Scheduler::GetCurrent()`
-    /// does).
+    /// Returns this thread's current `RunLoop`, creating one on first use.
+    /// C++ asserts that the thread has one; creating it is what the C++ test
+    /// harnesses do first thing (and what `get_current` does).
     #[must_use]
     pub fn get() -> RunLoop {
         let existing = CURRENT.with(|c| c.borrow().clone());
@@ -300,9 +290,9 @@ impl RunLoop {
         did_work
     }
 
-    /// `run()`: `uv_run(loop, UV_RUN_DEFAULT)` until `stop()`. It blocks, so
-    /// a host that runs on the browser's event loop doesn't call it: it
-    /// drives the loop with `run_once` instead (see `set_waker`).
+    /// Runs the loop until `stop`. It blocks, so a host that runs on the
+    /// browser's event loop doesn't call it: it drives the loop with
+    /// `run_once` instead (see `set_waker`).
     pub fn run(&self) {
         let core = &self.inner.core;
         core.stopped.store(false, Ordering::SeqCst);
@@ -356,7 +346,7 @@ impl RunLoop {
         self.inner.timers.borrow_mut().push(Rc::downgrade(timer));
     }
 
-    /// `stop()`: `invoke([&] { uv_unref(holder) })`.
+    /// Makes `run` return once the tasks queued before this one have run.
     pub fn stop(&self) {
         self.handle().stop();
     }
@@ -369,7 +359,6 @@ impl RunLoop {
         self.inner.core.clone()
     }
 
-    /// `RunLoop::waitForEmpty`.
     pub fn wait_for_empty(&self) {
         loop {
             if self.inner.core.remaining() == 0 {
@@ -416,12 +405,11 @@ impl RunLoopHandle {
         *self.core.waker.lock() = waker;
     }
 
-    /// `RunLoop::invoke` from any thread.
+    /// Invokes `task` on the loop, from any thread.
     pub fn invoke(&self, task: impl FnOnce() + Send + 'static) {
         self.core.push(Box::new(task));
     }
 
-    /// `RunLoop::stop()`.
     pub fn stop(&self) {
         let core = Arc::downgrade(&self.core);
         self.invoke(move || {

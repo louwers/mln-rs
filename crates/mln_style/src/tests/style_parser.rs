@@ -1,5 +1,3 @@
-// Ports test/style/style_parser.test.cpp.
-
 use std::path::PathBuf;
 
 use mln_util::logging::{Event, EventSeverity, Log};
@@ -13,7 +11,7 @@ fn fixtures_dir() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/style_parser")
 }
 
-/// `populateNames`: every `<name>.info.json` in the fixture directory.
+/// The name of every `<name>.info.json` in the fixture directory.
 fn fixture_names() -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(fixtures_dir())
         .unwrap()
@@ -62,7 +60,7 @@ fn parse_style_fixture(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `TEST_P(StyleParserTest`, `ParseStyle`), instantiated over every fixture.
+/// Runs the style parser test over every fixture.
 // gtest: StyleParserTest.ParseStyle
 #[test]
 fn parse_style() {

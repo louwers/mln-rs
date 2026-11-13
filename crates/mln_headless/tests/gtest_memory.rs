@@ -1,7 +1,3 @@
-// Ports test/util/memory.test.cpp: render a vector and a raster style
-// (fixtures in test/fixtures/resources) through Map -> HeadlessFrontend,
-// and, on request, measure a map's memory footprint.
-
 mod support;
 
 use std::cell::RefCell;
@@ -24,7 +20,6 @@ struct MemoryTest {
     run_loop: RunLoop,
 }
 
-/// `getType(res)`.
 fn get_type(res: &Resource) -> &'static str {
     if res.url.contains("hybrid") || res.url.contains("satellite") { "raster" } else { "vector" }
 }
@@ -63,9 +58,6 @@ impl MemoryTest {
         MemoryTest { file_source, run_loop }
     }
 
-    /// `MapAdapter map(frontend, test.fileSource,
-    /// MapOptions().withMapMode(MapMode::Static).withSize(frontend.getSize())
-    /// .withPixelRatio(ratio))`.
     fn map(&self, frontend: &HeadlessFrontend, ratio: f32) -> Map {
         let map = Map::with_file_source(
             self.file_source.clone(),
@@ -120,8 +112,8 @@ fn should_run_footprint() -> bool {
     }
 }
 
-/// `mln::test::getCurrentRSS()` (test/src/mln/test/getrss.cpp, Linux:
-/// `/proc/self/statm` resident pages times the page size).
+/// The resident set size in bytes: the resident pages in `/proc/self/statm`
+/// times the page size.
 fn get_current_rss() -> usize {
     let statm = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
     let resident: usize = statm.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);

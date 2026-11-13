@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/heatmap_texture_layer_tweaker.hpp and
-// src/mln/renderer/layers/heatmap_texture_layer_tweaker.cpp.
-
 use std::sync::Arc;
 
 use mln_gfx::LayerGroupBase;

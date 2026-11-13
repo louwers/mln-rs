@@ -1,7 +1,6 @@
-// Ports test/storage/sync_file_source.test.cpp: a file source that answers
-// inside `request`, under a Map that loads a style through it. A separate
-// test target because it needs mln_map and mln_headless, which
-// depend on mln_storage.
+// A file source that answers inside `request`, under a `Map` that loads a
+// style through it. A separate test target because it needs `mln_map` and
+// `mln_headless`, which depend on `mln_storage`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,13 +18,11 @@ fn read_file(relative: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("Cannot read file {}: {e}", path.display()))
 }
 
-/// C++ returns `nullptr` as the request; the port's requests are never null,
-/// so it returns one that does nothing.
+/// A request that does nothing, for a file source that has already answered.
 struct NoRequest;
 
 impl AsyncRequest for NoRequest {}
 
-/// `SyncFileSource`.
 #[derive(Default)]
 struct SyncFileSource {
     assets: Mutex<HashMap<String, Arc<Vec<u8>>>>,

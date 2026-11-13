@@ -1,13 +1,10 @@
-// Ports include/mln/util/geometry.hpp: `FeatureType`, `ToFeatureType` and
-// `forEachPoint`. The geometry type aliases are the
-// `geometry` crate's types (`Point`, `LineString`, ...), re-exported
-// here under their mln names.
+// The geometry types are the `geometry` crate's (`Point`, `LineString`,
+// ...), re-exported here.
 
 pub use geometry::{
     Geometry, GeometryCollection, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
 
-/// `mln::FeatureType`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum FeatureType {
@@ -18,7 +15,7 @@ pub enum FeatureType {
     Polygon = 3,
 }
 
-/// `mln::ToFeatureType` applied to a geometry.
+/// The feature type of `geometry`.
 pub fn to_feature_type<T>(geometry: &Geometry<T>) -> FeatureType {
     match geometry {
         Geometry::Point(_) | Geometry::MultiPoint(_) => FeatureType::Point,
@@ -28,8 +25,8 @@ pub fn to_feature_type<T>(geometry: &Geometry<T>) -> FeatureType {
     }
 }
 
-/// `mln::forEachPoint`: calls `f` with every point of `geometry`, in order,
-/// down through its rings, parts and collections.
+/// Calls `f` with every point of `geometry`, in order, down through its
+/// rings, parts and collections.
 pub fn for_each_point<T>(geometry: &Geometry<T>, f: &mut impl FnMut(&Point<T>)) {
     let mut each = |points: &[Point<T>]| points.iter().for_each(&mut *f);
     match geometry {
@@ -41,8 +38,6 @@ pub fn for_each_point<T>(geometry: &Geometry<T>, f: &mut impl FnMut(&Point<T>)) 
         Geometry::GeometryCollection(geometries) => geometries.iter().for_each(|g| for_each_point(g, f)),
     }
 }
-
-// TODO(port): convertPoint, with its first user.
 
 #[cfg(test)]
 mod tests {

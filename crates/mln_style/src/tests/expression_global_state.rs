@@ -1,7 +1,7 @@
-// Ports the tests of test/style/expression/global_state.test.cpp on style
-// types (PropertyExpression, PropertyValue, Filter, ColorRampPropertyValue).
-// The expression-only ones are in mln_expression's tests, the
-// FormatSectionOverride one in mln_renderer's.
+// The global state tests on style types (PropertyExpression, PropertyValue,
+// Filter, ColorRampPropertyValue). The expression-only ones are in
+// mln_expression's tests, the FormatSectionOverride one in
+// tests/format_section_override_test.rs.
 
 use std::sync::Arc;
 
@@ -17,7 +17,6 @@ use crate::expression::{Dependency, EvaluationContext, Expression, GlobalStateMa
 use crate::filter::Filter;
 use crate::property_expression::PropertyExpression;
 
-/// `parseExpression(json, expected)`.
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Box<dyn Expression>> {
     let document = parse_json(json);
     let mut ctx = match expected {

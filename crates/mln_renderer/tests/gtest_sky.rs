@@ -1,6 +1,6 @@
-// Ports test/style/conversion/sky.test.cpp. Its tests evaluate through
-// RenderSky, which is in mln_renderer, so they live here rather than with the
-// style's conversion tests.
+// The sky conversion tests evaluate through `RenderSky`, which is in
+// mln_renderer, so they live here rather than with the style's conversion
+// tests.
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -1,5 +1,3 @@
-// Ports src/mln/gfx/vertex_vector.hpp
-
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
@@ -8,7 +6,7 @@ use std::rc::Rc;
 use mln_util::host_bytes::HostBytes;
 use mln_util::time::Instant;
 
-/// `gfx::VertexBufferBase`: backend buffer attached to a shared vertex vector.
+/// A backend buffer attached to a shared vertex vector.
 pub trait VertexBufferBase: Any {}
 
 impl dyn VertexBufferBase {
@@ -41,7 +39,6 @@ impl Default for VertexVectorBaseData {
     }
 }
 
-/// `gfx::VertexVectorBase`
 pub trait VertexVectorBase: Any {
     fn vertex_vector_base(&self) -> &VertexVectorBaseData;
     /// The raw bytes of all vertices (`getRawData()`, `getRawCount() * getRawSize()`
@@ -102,9 +99,9 @@ pub trait VertexVectorBase: Any {
 
 pub type VertexVectorBasePtr = Rc<dyn VertexVectorBase>;
 
-/// `gfx::VertexVector<V>` for plain-old-data vertex types. The vertices sit
-/// in a `RefCell` so that `set_buffer` can free them through the shared
-/// pointer.
+/// Vertices of a plain-old-data type, and the backend buffer they were
+/// uploaded to. The vertices sit in a `RefCell` so that `set_buffer` can free
+/// them through the shared pointer.
 pub struct VertexVector<V: bytemuck::Pod> {
     base: VertexVectorBaseData,
     v: RefCell<Vec<V>>,

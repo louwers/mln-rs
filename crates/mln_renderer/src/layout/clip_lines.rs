@@ -1,6 +1,3 @@
-// Ports src/mln/layout/clip_lines.hpp and src/mln/layout/clip_lines.cpp
-// (`util::clipLines`): clips lines to the box [x1, x2) x [y1, y2).
-
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
 
 /// The C++ intersection expression
@@ -11,7 +8,8 @@ fn intersect(a0: i16, a1: i16, edge: i16, b0: i16, b1: i16) -> i16 {
     (f32::from(a0) + (i32::from(a1) - i32::from(a0)) as f32 * t).round() as i16
 }
 
-/// `util::clipLines`.
+/// Clips `lines` to the box `[x1, x2) × [y1, y2)`. A segment that crosses
+/// the box is cut where it meets an edge, so it can end on `x2` or `y2`.
 #[must_use]
 pub fn clip_lines(lines: &GeometryCollection, x1: i16, y1: i16, x2: i16, y2: i16) -> GeometryCollection {
     let mut clipped_lines = GeometryCollection::new();

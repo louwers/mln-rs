@@ -1,5 +1,3 @@
-// Ports test/storage/offline_database.test.cpp.
-//
 // C++ writes test/fixtures/offline_database/offline.db (and
 // offline_sideload.db) next to the fixtures; every port writes a fresh file
 // in the temporary directory instead (the Rust harness runs tests in

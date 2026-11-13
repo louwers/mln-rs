@@ -441,8 +441,9 @@ mod tests {
         }
     }
 
-    /// `TcpConnector`, except that a connect to one of `dropped` hangs as
-    /// for a host that drops the SYN. Records the addresses tried.
+    /// Connects like ureq's `TcpConnector`, except that a connect to one of
+    /// `dropped` hangs as for a host that drops the SYN. Records the
+    /// addresses tried.
     #[derive(Debug)]
     struct DroppingConnector {
         dropped: Vec<SocketAddr>,

@@ -1,7 +1,3 @@
-// Ports include/mln/style/sources/custom_geometry_source.hpp,
-// src/mln/style/sources/custom_geometry_source.cpp and
-// src/mln/style/sources/custom_geometry_source_impl.{hpp,cpp}.
-//
 // `CustomGeometrySource` is a handle (see source.rs): `Clone` shares the
 // source. A source isn't `Send`, while the host's tile functions run on a
 // background thread, so the host answers through a
@@ -28,8 +24,7 @@ use crate::layer::layer_type_info::TileKind;
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
-/// `CustomGeometrySource::TileOptions`: how the host's GeoJSON is cut into
-/// tiles, as for a GeoJSON source.
+/// How the host's GeoJSON is cut into tiles, as for a GeoJSON source.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TileOptions {
     pub tolerance: f64,
@@ -47,7 +42,6 @@ impl Default for TileOptions {
     }
 }
 
-/// `CustomGeometrySource::Options`.
 #[derive(Clone)]
 pub struct Options {
     /// Asks the host for a tile's data, which it gives with
@@ -132,8 +126,8 @@ impl std::fmt::Debug for CustomGeometrySourceHandle {
 }
 
 impl CustomGeometrySourceHandle {
-    /// `setTileData(tileID, data)`: the tile's features. The GeoJSON is cut
-    /// to the tile on the background thread, and only if a tile needs it.
+    /// Hands over the tile's features. The GeoJSON is cut to the tile on the
+    /// background thread, and only if a tile needs it.
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJSON) {
         let options = self.tile_options.clone();
         self.loader.invoke(move |loader| {
@@ -144,26 +138,24 @@ impl CustomGeometrySourceHandle {
         });
     }
 
-    /// `setTileError(tileID, error)`: the host failed to load the tile.
-    /// Invalidating the tile, or needing it again, asks for it again.
+    /// Reports that the host failed to load the tile. Invalidating the tile, or
+    /// needing it again, asks for it again.
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, &error));
     }
 
-    /// `invalidateTile(tileID)`: drops the tile's data, and asks the host for
-    /// it again if a tile needs it.
+    /// Drops the tile's data, and asks the host for it again if a tile needs
+    /// it.
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.loader.invoke(move |loader| loader.invalidate_tile(&tile_id));
     }
 
-    /// `invalidateRegion(bounds)`: invalidates every tile that the bounds
-    /// intersect.
+    /// Invalidates every tile that `bounds` intersect.
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
         self.loader.invoke(move |loader| loader.invalidate_region(&bounds));
     }
 }
 
-/// `CustomGeometrySource::Impl`.
 #[derive(Clone)]
 pub struct Impl {
     base: ImplBase,
@@ -184,7 +176,6 @@ impl std::fmt::Debug for Impl {
 }
 
 impl Impl {
-    /// `Impl(std::string id, const CustomGeometrySource::Options&)`.
     fn new(id: String, options: &Options) -> Self {
         Impl {
             base: ImplBase::new(SourceType::CustomVector, id),
@@ -194,7 +185,6 @@ impl Impl {
         }
     }
 
-    /// `Impl(const Impl&, const ActorRef<CustomTileLoader>&)`.
     fn with_loader(other: &Impl, loader_ref: PoolActorRef<CustomGeometryTileLoader>) -> Self {
         Impl { loader_ref: Some(loader_ref), ..other.clone() }
     }
@@ -217,7 +207,7 @@ impl Impl {
         self.zoom_range
     }
 
-    /// `getTileLoader()`: `None` until the source is loaded.
+    /// The tile loader; `None` until the source is loaded.
     #[must_use]
     pub fn get_tile_loader(&self) -> Option<&PoolActorRef<CustomGeometryTileLoader>> {
         self.loader_ref.as_ref()
@@ -243,8 +233,7 @@ struct Inner {
     loader: Actor<CustomGeometryTileLoader>,
 }
 
-/// `style::CustomGeometrySource`: a source whose tiles' GeoJSON the host
-/// gives on demand.
+/// A source whose tiles' GeoJSON the host gives on demand.
 #[derive(Clone)]
 pub struct CustomGeometrySource {
     inner: Rc<Inner>,
@@ -257,8 +246,8 @@ impl std::fmt::Debug for CustomGeometrySource {
 }
 
 impl CustomGeometrySource {
-    /// `CustomGeometrySource(std::string id, const Options&)`. `Err` for a
-    /// tile size that isn't a power of two up to the tile extent.
+    /// Creates the source. Fails for a tile size that isn't a power of two up
+    /// to the tile extent.
     pub fn new(id: impl Into<String>, options: Options) -> Result<Self, CustomGeometrySourceError> {
         let tile_size = options.tile_options.tile_size;
         if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
@@ -271,7 +260,6 @@ impl CustomGeometrySource {
         Ok(CustomGeometrySource { inner: Rc::new(Inner { base: SourceBase::new(impl_), loader }) })
     }
 
-    /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
@@ -286,22 +274,22 @@ impl CustomGeometrySource {
         }
     }
 
-    /// `setTileData(tileID, data)`; see [`CustomGeometrySourceHandle`].
+    /// See [`CustomGeometrySourceHandle::set_tile_data`].
     pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJSON) {
         self.handle().set_tile_data(tile_id, data);
     }
 
-    /// `setTileError(tileID, error)`; see [`CustomGeometrySourceHandle`].
+    /// See [`CustomGeometrySourceHandle::set_tile_error`].
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.handle().set_tile_error(tile_id, error);
     }
 
-    /// `invalidateTile(tileID)`; see [`CustomGeometrySourceHandle`].
+    /// See [`CustomGeometrySourceHandle::invalidate_tile`].
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.handle().invalidate_tile(tile_id);
     }
 
-    /// `invalidateRegion(bounds)`; see [`CustomGeometrySourceHandle`].
+    /// See [`CustomGeometrySourceHandle::invalidate_region`].
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
         self.handle().invalidate_region(bounds);
     }

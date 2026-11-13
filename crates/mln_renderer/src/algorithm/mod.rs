@@ -1,6 +1,5 @@
-//! Ports `src/mln/algorithm`.
-//!
-//! TODO(port): `generate_clip_ids`.
+//! Tile-pyramid algorithms: choosing the renderable tiles and computing
+//! their masks.
 
 pub mod update_renderables;
 pub mod update_tile_masks;

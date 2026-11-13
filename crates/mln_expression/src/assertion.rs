@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/assertion.hpp and
-// src/mln/style/expression/assertion.cpp.
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 

@@ -1,5 +1,3 @@
-// Ports src/mln/gfx/render_pass.hpp
-//
 // Not to be confused with `crate::renderer::render_pass::RenderPass`, the
 // `mln::RenderPass` bitmask (Opaque/Translucent/Pass3D).
 
@@ -10,7 +8,6 @@ use mln_util::Color;
 use crate::debug_group::{DebugGroup, DebugGroupTarget};
 use crate::frame::DrawTarget;
 
-/// `gfx::RenderPassDescriptor`
 #[derive(Clone, Copy)]
 pub struct RenderPassDescriptor<'a> {
     pub target: &'a dyn DrawTarget,
@@ -19,9 +16,9 @@ pub struct RenderPassDescriptor<'a> {
     pub clear_stencil: Option<i32>,
 }
 
-/// `gfx::RenderPass`. All methods take `&self` so that a pass can be used
-/// while the owning `PaintParameters` is borrowed elsewhere; backends keep
-/// their encoder state behind a `RefCell`.
+/// A pass that draws into a target. All methods take `&self` so that a pass
+/// can be used while the owning `PaintParameters` is borrowed elsewhere;
+/// backends keep their encoder state behind a `RefCell`.
 pub trait RenderPass: DebugGroupTarget + Any {
     fn add_debug_signpost(&self, _name: &str) {}
     /// Clears the pass's stencil attachment to `value`, on the backends

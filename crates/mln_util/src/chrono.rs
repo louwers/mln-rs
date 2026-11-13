@@ -1,28 +1,24 @@
-// Ports the wall-clock half of include/mln/util/chrono.hpp: `Timestamp` and
-// its helpers (rfc1123, iso8601, parseTimestamp). Durations and the monotonic
-// clock are std::time's `Duration` and crate::time's `Instant`.
+// Durations and the monotonic clock are std::time's `Duration` and
+// crate::time's `Instant`; this module has the wall-clock `Timestamp`.
 
-/// `mln::Timestamp`: `std::chrono::time_point<std::chrono::system_clock,
-/// Seconds>`, a signed count of seconds since the Unix epoch.
+/// A wall-clock time: a signed count of seconds since the Unix epoch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(i64);
 
 impl Timestamp {
-    /// `Timestamp(Seconds(secs))`.
     #[must_use]
     pub const fn from_secs(secs: i64) -> Self {
         Timestamp(secs)
     }
 
-    /// `time_since_epoch().count()`.
     #[must_use]
     pub const fn secs_since_epoch(self) -> i64 {
         self.0
     }
 }
 
-/// `util::now()` (`platform::now()`: `time_point_cast<Seconds>(system_clock::now())`,
-/// which truncates toward zero).
+/// Returns the current wall-clock time, truncated toward zero to whole
+/// seconds.
 #[must_use]
 pub fn now() -> Timestamp {
     let secs = match crate::time::SystemTime::now().duration_since(crate::time::UNIX_EPOCH) {
@@ -55,9 +51,10 @@ fn gmtime(secs: i64) -> (usize, i64, usize, i64, i64, i64, i64) {
     (wday, mday, (month - 1) as usize, year, hour, min, sec)
 }
 
-/// `util::rfc1123(Timestamp)`: e.g. "Sun, 06 Nov 1994 08:49:37 GMT". Unlike
-/// `httpdate::fmt_http_date`, which panics outside the years 1970 to 9999,
-/// it formats any timestamp, such as a cached response's modification date.
+/// Formats `timestamp` as an RFC 1123 date, e.g. "Sun, 06 Nov 1994 08:49:37
+/// GMT". Unlike `httpdate::fmt_http_date`, which panics outside the years
+/// 1970 to 9999, it formats any timestamp, such as a cached response's
+/// modification date.
 #[must_use]
 pub fn rfc1123(timestamp: Timestamp) -> String {
     const WEEK: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -66,7 +63,8 @@ pub fn rfc1123(timestamp: Timestamp) -> String {
     format!("{}, {:02} {} {:4} {:02}:{:02}:{:02} GMT", WEEK[wday], mday, MONTHS[month], year, hour, min, sec)
 }
 
-/// `util::iso8601(Timestamp)`: e.g. "1994-11-06 08:49:37" (UTC).
+/// Formats `timestamp` as an ISO 8601 date in UTC, e.g. "1994-11-06
+/// 08:49:37".
 #[must_use]
 pub fn iso8601(timestamp: Timestamp) -> String {
     let (_, mday, month, year, hour, min, sec) = gmtime(timestamp.secs_since_epoch());
@@ -83,7 +81,6 @@ pub fn parse_http_date(date: &str) -> Option<Timestamp> {
     Some(Timestamp::from_secs(i64::try_from(since_epoch.as_secs()).ok()?))
 }
 
-/// `util::parseTimestamp(int32_t)`.
 #[must_use]
 pub fn parse_timestamp_i32(timestamp: i32) -> Timestamp {
     Timestamp::from_secs(i64::from(timestamp))

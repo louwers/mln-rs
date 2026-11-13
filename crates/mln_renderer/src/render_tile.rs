@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/render_tile.hpp and src/mln/renderer/render_tile.cpp.
-//
 // C++ `RenderTile` keeps a `Tile&`. A Rust RenderTile cannot borrow the tile
 // out of the TilePyramid for the frame, so it copies what it reads from the
 // tile (its id and hold-for-fade state) when it is created and prepared;
@@ -23,7 +21,6 @@ use crate::render_source::SourcePrepareParameters;
 use crate::tile::tile::Tile;
 use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 
-/// `util::rotate(Point<float>, float angle)` (util/math.hpp).
 fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     let cos = angle.cos();
     let sin = angle.sin();
@@ -32,7 +29,6 @@ fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     Point::new(x, y)
 }
 
-/// `RenderTile`.
 pub struct RenderTile {
     pub id: UnwrappedTileID,
     /// The projection contract for this tile; `matrix` is its main matrix.
@@ -43,7 +39,6 @@ pub struct RenderTile {
 
     /// `tile.id`.
     tile_id: OverscaledTileID,
-    /// `tile.holdForFade()`.
     tile_hold_for_fade: bool,
     // The following members are reset at placement stage.
     render_data: Option<Box<dyn TileRenderData>>,
@@ -51,7 +46,6 @@ pub struct RenderTile {
 }
 
 impl RenderTile {
-    /// `RenderTile(UnwrappedTileID, Tile&)`.
     pub fn new(id: UnwrappedTileID, tile: &dyn Tile) -> Self {
         RenderTile {
             id,
@@ -66,8 +60,7 @@ impl RenderTile {
         }
     }
 
-    /// `tileUnitTranslation(id, translation, anchor, state)` (static): the
-    /// layer's translation in tile units, rotated for its anchor.
+    /// The layer's translation in tile units, rotated for its anchor.
     pub fn tile_unit_translation(
         id: &UnwrappedTileID,
         translation: &[f32; 2],
@@ -138,8 +131,8 @@ impl RenderTile {
         self.render_data().upload(upload_pass);
     }
 
-    /// `prepare(const SourcePrepareParameters&)`; `tile` is the tile this
-    /// `RenderTile` was created for.
+    /// Prepares the render tile for drawing; `tile` is the tile it was
+    /// created for.
     pub fn prepare(&mut self, tile: &dyn Tile, parameters: &SourcePrepareParameters<'_>) {
         let mut render_data = tile.create_render_data();
         render_data.prepare(parameters);
@@ -178,6 +171,4 @@ impl RenderTile {
         self.projection = transform.state.get_projection_data_with(&self.id, &transform.proj_matrix);
         self.matrix = self.projection.main_matrix;
     }
-
-    // TODO(port): setFeatureState (feature state, M6).
 }

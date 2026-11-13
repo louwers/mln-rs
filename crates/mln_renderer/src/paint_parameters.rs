@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/paint_parameters.hpp and src/mln/renderer/paint_parameters.cpp
-// (the Metal and WebGPU branches, which are the same, and the Vulkan one).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -33,7 +30,6 @@ use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 
-/// `TransformParameters`.
 pub struct TransformParameters {
     pub proj_matrix: Mat4,
     pub aligned_proj_matrix: Mat4,
@@ -83,9 +79,8 @@ pub struct PaintParameters<'a> {
     /// renderer sets it from the render tree's parameters).
     pub evaluated_light: crate::render_light::EvaluatedLight,
     pub static_data: &'a RenderStaticData,
-    /// `LineAtlas& lineAtlas`: the orchestrator's atlas (`RenderTree::
-    /// getLineAtlas()`); `new` starts with an empty one, the renderer
-    /// assigns the orchestrator's.
+    /// The orchestrator's line atlas. `new` starts with an empty one, and the
+    /// renderer assigns the orchestrator's.
     pub line_atlas: Rc<RefCell<LineAtlas>>,
     pub pattern_atlas: Rc<RefCell<PatternAtlas>>,
 
@@ -199,13 +194,11 @@ impl<'a> PaintParameters<'a> {
         }
     }
 
-    /// `matrixForTile(const UnwrappedTileID&, bool aligned = false)`.
     #[must_use]
     pub fn matrix_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> Mat4 {
         self.projection_data_for_tile(tile_id, aligned).main_matrix
     }
 
-    /// `projectionDataForTile(const UnwrappedTileID&, bool aligned = false)`.
     #[must_use]
     pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
         self.state.get_projection_data_with(
@@ -292,7 +285,8 @@ impl<'a> PaintParameters<'a> {
         self.context.rendering_stats().stencil_clears += 1;
     }
 
-    /// `renderTileClippingMasks(const RenderTiles&)`, with the tile ids.
+    /// Renders the clipping masks of `tile_ids`, unless the mask already
+    /// covers exactly them; false if there is no render pass.
     pub fn render_tile_clipping_masks_for(&mut self, tile_ids: &[UnwrappedTileID]) -> bool {
         // We can avoid updating the mask if it already contains the same set
         // of tiles.

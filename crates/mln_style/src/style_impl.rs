@@ -1,5 +1,3 @@
-// Ports src/mln/style/style_impl.hpp + src/mln/style/style_impl.cpp.
-//
 // Deviations (structural; see also layer.rs):
 // - C++ `Style::Impl` is the `LayerObserver`, `LightObserver`,
 //   `SkyObserver` and `ProjectionObserver` of its layers, light, sky and
@@ -81,7 +79,6 @@ fn shared_observer(shared: &RefCell<SpriteShared>) -> Rc<dyn Observer> {
     shared.borrow().observer()
 }
 
-/// `Style::Impl::onSpriteLoaded`.
 fn on_sprite_loaded(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, images: Vec<Arc<image::Impl>>) {
     {
         let mut shared = shared.borrow_mut();
@@ -110,7 +107,6 @@ fn on_sprite_loaded(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, ima
     observer.on_sprite_loaded(sprite);
 }
 
-/// `Style::Impl::onSpriteError`.
 fn on_sprite_error(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, error: Error) {
     shared.borrow_mut().last_error = Some(error.clone());
     Log::error(Event::Style, format!("Failed to load sprite: {error}"));
@@ -125,7 +121,6 @@ fn on_sprite_error(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, erro
     observer.on_sprite_error(sprite, error);
 }
 
-/// `Style::Impl::onSpriteRequested`.
 fn on_sprite_requested(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>) {
     shared_observer(shared).on_sprite_requested(sprite);
 }
@@ -168,7 +163,6 @@ impl StyleSourceObserver {
 }
 
 impl SourceObserver for StyleSourceObserver {
-    /// `onSourceLoaded(Source&)`.
     fn on_source_loaded(&self, source: &dyn Source) {
         // sources.update(source): see get_source_impls.
         if let Some(observer) = self.observer() {
@@ -177,7 +171,6 @@ impl SourceObserver for StyleSourceObserver {
         }
     }
 
-    /// `onSourceChanged(Source&)`.
     fn on_source_changed(&self, source: &dyn Source) {
         // sources.update(source): see get_source_impls.
         if let Some(observer) = self.observer() {
@@ -186,7 +179,6 @@ impl SourceObserver for StyleSourceObserver {
         }
     }
 
-    /// `onSourceError(Source&, std::exception_ptr)`.
     fn on_source_error(&self, source: &dyn Source, error: Error) {
         let Some(shared) = self.shared.upgrade() else {
             return;
@@ -198,7 +190,6 @@ impl SourceObserver for StyleSourceObserver {
         observer.on_resource_error(error);
     }
 
-    /// `onSourceDescriptionChanged(Source&)`.
     fn on_source_description_changed(&self, source: &dyn Source) {
         // sources.update(source): see get_source_impls.
         if let Some(observer) = self.observer() {
@@ -216,13 +207,11 @@ impl SourceObserver for StyleSourceObserver {
 /// with the changes made through the sources.
 type SourceImplsCache = (ImmutableVector<dyn source::Impl>, ImmutableVector<dyn source::Impl>);
 
-/// `Style::Impl`.
 pub struct Impl {
     // C++ declares fileSource first and destroys members in reverse order,
     // so the sprite loader (and its requests) goes before the file source;
     // Rust drops fields in declaration order.
     sprite_loader: SpriteLoader,
-    /// `styleRequest`
     style_request: Option<Box<dyn AsyncRequest>>,
     /// Responses to `style_request` waiting for `process_style_responses`.
     style_responses: Rc<RefCell<VecDeque<Response>>>,
@@ -292,7 +281,6 @@ impl Impl {
         )
     }
 
-    /// `Impl(std::shared_ptr<FileSource>, float pixelRatio, const TaggedScheduler&)`.
     #[must_use]
     pub fn with_file_source(
         file_source: Option<Arc<dyn FileSource>>,
@@ -466,8 +454,8 @@ impl Impl {
 
         for layer in std::mem::take(&mut parser.layers) {
             // The parser drops duplicate layer ids, so this cannot fail for
-            // a source-less M1 style. TODO(port): C++ throws here for a layer
-            // incompatible with its source.
+            // a source-less M1 style. A layer incompatible with its source is
+            // logged and skipped (C++ throws).
             if let Err(error) = self.add_layer(layer, None) {
                 Log::error(Event::ParseStyle, error.to_string());
             }
@@ -665,14 +653,14 @@ impl Impl {
         self.layers.get(id)
     }
 
-    /// `Layer* getLayer(id)` for mutation: the guard notifies this style
-    /// (`onLayerChanged`) when dropped if the layer changed.
+    /// The layer `id`, for mutation: the guard notifies this style
+    /// (`on_layer_changed`) when dropped if the layer changed.
     pub fn get_layer_mut(&mut self, id: &str) -> Option<LayerRefMut<'_>> {
         let before = self.layers.get(id)?.base_impl();
         Some(LayerRefMut { style: self, id: id.to_owned(), before })
     }
 
-    /// `addLayer(std::unique_ptr<Layer>, before)`. See
+    /// Adds a layer before the layer `before`, or on top. See
     /// [`Style::add_layer`](crate::Style::add_layer).
     pub fn add_layer(&mut self, layer: Box<dyn Layer>, before: Option<&str>) -> Result<&mut dyn Layer, Error> {
         // TODO: verify source
@@ -736,7 +724,7 @@ impl Impl {
         &self.light
     }
 
-    /// `Light* getLight()` for mutation (see `get_layer_mut`).
+    /// The light, for mutation (see `get_layer_mut`).
     pub fn get_light_mut(&mut self) -> LightRefMut<'_> {
         let before = self.light.impl_.clone();
         LightRefMut { style: self, before }
@@ -744,8 +732,7 @@ impl Impl {
 
     // Sky
 
-    /// `setSky(std::unique_ptr<Sky>)`: `None` removes the sky, as C++'s
-    /// `nullptr` does.
+    /// Sets the sky; `None` removes it.
     pub fn set_sky(&mut self, sky: Option<Sky>) {
         self.sky = sky;
         self.observer().on_update();
@@ -755,7 +742,7 @@ impl Impl {
         self.sky.as_ref()
     }
 
-    /// `Sky* getSky()` for mutation (see `get_layer_mut`).
+    /// The sky, if there is one, for mutation (see `get_layer_mut`).
     pub fn get_sky_mut(&mut self) -> Option<SkyRefMut<'_>> {
         let observer = self.observer();
         let sky = self.sky.as_mut()?;
@@ -774,7 +761,7 @@ impl Impl {
         &self.projection
     }
 
-    /// `Projection* getProjection()` for mutation (see `get_layer_mut`).
+    /// The projection, for mutation (see `get_layer_mut`).
     pub fn get_projection_mut(&mut self) -> ProjectionRefMut<'_> {
         let before = self.projection.impl_.clone();
         ProjectionRefMut { style: self, before }
@@ -794,7 +781,7 @@ impl Impl {
         self.shared.borrow().images.iter().find(|image| image.id == id).cloned()
     }
 
-    /// `addImage(std::unique_ptr<style::Image>)` (by impl).
+    /// Adds an image, replacing the image with the same id.
     pub fn add_image(&mut self, image: Arc<image::Impl>) {
         let mut new_images = (*self.shared.borrow().images).clone();
         let it = new_images.partition_point(|a| a.id < image.id);
@@ -837,10 +824,10 @@ impl Impl {
         self.shared.borrow().images.clone()
     }
 
-    /// `getSourceImpls()`. Applies the C++ `sources.update(source)` of the
-    /// `SourceObserver` callbacks: a source whose impl changed since the
+    /// The impls of the sources. A source whose impl changed since the
     /// collection last stored it gets its current impl (one new vector per
-    /// change, as C++ makes one per update).
+    /// change, as C++ makes one per update in its `SourceObserver`
+    /// callbacks).
     pub fn get_source_impls(&self) -> ImmutableVector<dyn source::Impl> {
         let impls = self.sources.get_impls();
         let current = |impl_: &Arc<dyn source::Impl>| -> Arc<dyn source::Impl> {
@@ -945,7 +932,6 @@ impl Impl {
 
     // LayerObserver implementation.
 
-    /// `onLayerChanged(Layer&)`.
     pub fn on_layer_changed(&mut self, id: &str) {
         let global_state = self.global_state.clone();
         if let Some(layer) = self.layers.get_mut(id) {

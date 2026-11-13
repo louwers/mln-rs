@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/uniform_buffer.hpp and src/mln/webgpu/uniform_buffer.cpp
-//
 // `webgpu::UniformBufferArray` only overrides `bind` (a no-op: bind groups
 // are built per drawable in `Drawable::draw`) and `copy`, so the port uses
 // `gfx::UniformBufferArray` directly.
@@ -32,8 +30,8 @@ pub struct UniformBuffer {
     /// place. Bind groups still bind the whole padded buffer, because some
     /// UBOs hold less data than their shader struct.
     size: usize,
-    /// C++ keeps `Context&`; only device and queue are used. Holding the
-    /// backend state rather than `Rc<Context>` avoids an Rc cycle through the
+    /// The backend state, for its device and queue. Holding it rather than
+    /// `Rc<Context>` (C++ keeps `Context&`) avoids an Rc cycle through the
     /// context's global uniform buffer array.
     backend: Rc<BackendImpl>,
     /// The context whose stats count this buffer. Weak for the same reason;
@@ -49,8 +47,7 @@ pub struct UniformBuffer {
 }
 
 impl UniformBuffer {
-    /// `UniformBuffer(context, data, size)`; `data == None` is the C++ null
-    /// pointer.
+    /// A uniform buffer of `size` bytes, holding `data` if there is any.
     pub fn new(context: &Context, data: Option<&[u8]>, size: usize) -> Self {
         Self::with_backend(context.get_backend().clone(), context.weak(), data, size)
     }

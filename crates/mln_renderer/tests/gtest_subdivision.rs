@@ -1,7 +1,3 @@
-// Ports test/util/subdivision.test.cpp (util::subdividePolygon and
-// util::createTileMesh live in mln_renderer::util, GlobeTileMesh in
-// mln_renderer::globe_tile_mesh).
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
@@ -71,9 +67,7 @@ fn panic_message(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 struct GlobeTestVertex {
-    /// `Point<int16_t> position`
     position: [i16; 2],
-    /// `Point<uint16_t> texture`
     texture: [u16; 2],
 }
 
@@ -207,7 +201,6 @@ fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
     assert_eq!(exposed, outline);
 }
 
-/// `StubGeometryTileFeature(type, geometry)`.
 struct StubGeometryTileFeature {
     properties: PropertyMap,
     type_: FeatureType,

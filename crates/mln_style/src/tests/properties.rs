@@ -1,5 +1,3 @@
-// Ports test/style/properties.test.cpp.
-
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -168,8 +166,8 @@ fn transition_completes_and_drops_prior() {
     assert!(!t1.has_transition());
 }
 
-/// `PossiblyEvaluated::evaluate<P>(z, feature, ...)` (properties.hpp), as the
-/// circle layer and the line bucket call it.
+/// `PossiblyEvaluated::evaluate::<P>(z, feature, ...)`, as the circle layer
+/// and the line bucket call it.
 #[test]
 fn possibly_evaluated_evaluate_per_feature() {
     use mln_expression::dsl::{get_str, number};

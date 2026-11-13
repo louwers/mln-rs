@@ -1,8 +1,5 @@
-// Ports include/mln/style/layer.hpp + src/mln/style/layer.cpp.
-//
 // C++ `Layer` is an abstract class: the virtual members are the required
 // methods of the `Layer` trait, the non-virtual ones are provided methods.
-// The public `Immutable<Impl> baseImpl` member is `base_impl()`.
 //
 // Deviation (structural, no behaviour change): C++ layers hold a
 // `LayerObserver*` (the owning `Style::Impl`) and every setter calls
@@ -31,36 +28,35 @@ use crate::style_property::StyleProperty;
 
 /// The enums nested in C++ `LayerTypeInfo`.
 pub mod layer_type_info {
-    /// `Source::Required` if the layer type requires a source.
+    /// Whether the layer type requires a source.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Source {
         Required,
         NotRequired,
     }
 
-    /// `Pass3D::Required` if the layer type requires the 3D rendering pass.
+    /// Whether the layer type requires the 3D rendering pass.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Pass3D {
         Required,
         NotRequired,
     }
 
-    /// `Layout::Required` if the layer type requires layouting.
+    /// Whether the layer type requires layouting.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Layout {
         Required,
         NotRequired,
     }
 
-    /// `FadingTiles::Required` if the layer type requires rendering on fading tiles.
+    /// Whether the layer type requires rendering on fading tiles.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum FadingTiles {
         Required,
         NotRequired,
     }
 
-    /// `CrossTileIndex::Required` if the layer type requires cross-tile
-    /// indexing and placement.
+    /// Whether the layer type requires cross-tile indexing and placement.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum CrossTileIndex {
         Required,
@@ -93,7 +89,6 @@ pub struct LayerTypeInfo {
     pub tile_kind: layer_type_info::TileKind,
 }
 
-/// `Layer::PropertyScope`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PropertyScope {
     Paint,
@@ -107,14 +102,14 @@ pub trait Layer: Any + Send + Sync {
     /// The `baseImpl` member.
     fn base_impl(&self) -> Arc<dyn Impl>;
 
-    /// `auto impl_ = mutableBaseImpl(); f(*impl_); baseImpl = std::move(impl_);`
-    /// for the base members.
+    /// Calls `f` on a copy of the base members and stores the result as the
+    /// new impl.
     fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase));
 
     fn get_property(&self, name: &str) -> StyleProperty;
 
-    /// `virtual Value serialize() const`; implementations start from
-    /// [`serialize_base`] (C++ `Layer::serialize()`).
+    /// Serializes the layer as a style JSON value; implementations start from
+    /// [`serialize_base`].
     fn serialize(&self) -> Value;
 
     /// Create a layer, copying all properties except id and paint properties
@@ -123,7 +118,6 @@ pub trait Layer: Any + Send + Sync {
 
     fn set_property_internal(&mut self, name: &str, value: &Convertible<'_>) -> Option<Error>;
 
-    /// `virtual setProperty(name, value, scope)`.
     fn set_property(&mut self, name: &str, value: &Convertible<'_>, scope: Option<PropertyScope>) -> Option<Error> {
         set_property_base(self, name, value, scope)
     }
@@ -262,7 +256,8 @@ fn evaluate_visibility_expression(expression: &dyn Expression, global_state: &Gl
     VisibilityType::Visible
 }
 
-/// C++ `Layer::serialize()` (the base part every layer type extends).
+/// Serializes the members every layer type has, for `Layer::serialize` to
+/// extend.
 pub fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
     let mut result = ValueObject::new();
     result.insert("id".to_owned(), Value::String(layer.get_id()));
@@ -305,7 +300,6 @@ pub fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
     Value::Object(result)
 }
 
-/// C++ `Layer::serializeProperty`.
 pub fn serialize_property(out: &mut Value, property: &StyleProperty, property_name: &str, is_paint: bool) {
     let Value::Object(object) = out else {
         debug_assert!(false, "serialize_property: not an object");
@@ -322,7 +316,6 @@ pub fn serialize_property(out: &mut Value, property: &StyleProperty, property_na
     }
 }
 
-/// C++ `Layer::setProperty` (the base implementation).
 pub fn set_property_base(
     layer: &mut (impl Layer + ?Sized),
     name: &str,
@@ -379,7 +372,6 @@ pub fn set_property_base(
     Some(error)
 }
 
-/// C++ `Layer::setVisibility(const Convertible&)` (private overload).
 fn set_visibility_value(layer: &mut (impl Layer + ?Sized), value: &Convertible<'_>) -> Option<Error> {
     if value.is_undefined() {
         layer.set_visibility(VisibilityType::Visible);

@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/drawable_tweaker.hpp
-
 use std::rc::Rc;
 
 use crate::drawable::Drawable;

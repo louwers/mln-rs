@@ -1,12 +1,5 @@
-// Ports include/mln/util/tileset.hpp (the `Scheme` that Resource::tile
-// takes).
-//
-// TODO(port): `Tileset` itself (tiles, zoom range, attribution, scheme,
-// encodings, bounds) with the tile sources (M4).
-
 use serde::{Deserialize, Serialize};
 
-/// `Tileset::Scheme`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Scheme {
     #[default]
@@ -14,7 +7,7 @@ pub enum Scheme {
     TMS,
 }
 
-/// `Tileset::RasterEncoding`. (Added by `sources` with the tile sources.)
+/// How a raster DEM tileset encodes elevation in its pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RasterEncoding {
     /// Mapbox DEM
@@ -27,7 +20,6 @@ pub enum RasterEncoding {
     Custom { red_factor: f32, green_factor: f32, blue_factor: f32, base_shift: f32 },
 }
 
-/// `Tileset::VectorEncoding`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum VectorEncoding {
     /// Mapbox Vector Tiles (MVT)
@@ -55,8 +47,6 @@ pub struct Tileset {
 }
 
 impl Default for Tileset {
-    /// `Tileset(tiles = {}, zoomRange = {0, DEFAULT_MAX_ZOOM}, attribution =
-    /// {}, scheme = XYZ, rasterEncoding = nullopt, encoding = nullopt)`.
     fn default() -> Self {
         Tileset {
             tiles: Vec::new(),

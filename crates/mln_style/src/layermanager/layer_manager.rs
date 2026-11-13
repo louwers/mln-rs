@@ -1,8 +1,3 @@
-// Ports include/mln/layermanager/layer_manager.hpp,
-// src/mln/layermanager/layer_manager.cpp and
-// platform/default/src/mln/layermanager/layer_manager.cpp
-// (`LayerManagerDefault`), style half.
-
 use std::sync::OnceLock;
 
 use mln_conversion::{Convertible, Error};
@@ -33,7 +28,6 @@ impl LayerManager {
         INSTANCE.get_or_init(LayerManager::new_default)
     }
 
-    /// `LayerManagerDefault::LayerManagerDefault()`.
     fn new_default() -> Self {
         let mut manager = LayerManager { factories: Vec::new(), type_to_factory: VecMap::new() };
         manager.add_layer_type(Box::new(FillLayerFactory));

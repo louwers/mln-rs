@@ -1,7 +1,3 @@
-// Ports include/mln/actor/scheduler.hpp and src/mln/actor/scheduler.cpp:
-// the `Scheduler` interface, `GetCurrent`/`SetCurrent`, `GetBackground`,
-// `bindOnce`, `scheduleAndReplyValue` and `TaggedScheduler`.
-//
 // `mapbox::base::WeakPtr<Scheduler>` is `Weak<dyn Scheduler + Send + Sync>`:
 // schedulers that other threads post to live in an `Arc` (a RunLoop's
 // `RunLoopHandle`, a `ThreadPool`).
@@ -9,8 +5,6 @@
 // Port-only: a host without threads installs a `CooperativeScheduler` at
 // startup (`install_cooperative`), which `GetBackground` and `GetSequenced`
 // then return (cooperative_scheduler.rs).
-//
-// TODO(port): `runOnRenderThread`/`runRenderJobs`.
 
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock, Weak};
@@ -40,7 +34,6 @@ pub trait Scheduler {
     /// from a task provided to this scheduler.
     fn wait_for_empty(&self);
 
-    /// `waitForEmpty(tag)`.
     fn wait_for_empty_tagged(&self, _tag: SimpleIdentity) {
         self.wait_for_empty();
     }
@@ -53,13 +46,12 @@ thread_local! {
     static LOCAL_SCHEDULER: RefCell<Option<SchedulerPtr>> = const { RefCell::new(None) };
 }
 
-/// `Scheduler::SetCurrent`.
 pub fn set_current(scheduler: Option<SchedulerPtr>) {
     LOCAL_SCHEDULER.with(|s| *s.borrow_mut() = scheduler);
 }
 
-/// `Scheduler::GetCurrent(init = true)`: creates the thread's `RunLoop` if it
-/// has no scheduler yet.
+/// Returns this thread's scheduler, creating the thread's `RunLoop` if it has
+/// no scheduler yet.
 #[must_use]
 pub fn get_current() -> SchedulerPtr {
     if let Some(scheduler) = try_get_current() {
@@ -70,7 +62,6 @@ pub fn get_current() -> SchedulerPtr {
     try_get_current().expect("RunLoop sets the current scheduler")
 }
 
-/// `Scheduler::GetCurrent(false)`.
 #[must_use]
 pub fn try_get_current() -> Option<SchedulerPtr> {
     LOCAL_SCHEDULER.with(|s| s.borrow().clone())
@@ -105,9 +96,8 @@ pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
     COOPERATIVE.get()
 }
 
-/// `Scheduler::GetBackground()`: the process-wide thread pool, created on
-/// first use and kept alive by its users (or the installed cooperative
-/// scheduler).
+/// Returns the process-wide thread pool, created on first use and kept alive
+/// by its users (or the installed cooperative scheduler).
 pub fn get_background() -> SchedulerPtr {
     static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
     if let Some(cooperative) = cooperative() {
@@ -122,9 +112,9 @@ pub fn get_background() -> SchedulerPtr {
     scheduler
 }
 
-/// `Scheduler::GetSequenced()`: one of 10 process-wide
-/// single-thread schedulers, round robin, each created on first use and
-/// kept alive by its users (or the installed cooperative scheduler).
+/// Returns one of 10 process-wide single-thread schedulers, round robin, each
+/// created on first use and kept alive by its users (or the installed
+/// cooperative scheduler).
 pub fn get_sequenced() -> SchedulerPtr {
     const SCHEDULERS_COUNT: usize = 10;
     struct State {
@@ -149,8 +139,8 @@ pub fn get_sequenced() -> SchedulerPtr {
     result
 }
 
-/// `Scheduler::bindOnce(fn)`: a function that, when called, schedules `fn`
-/// on `scheduler` (if it is still alive). Repeated calls do nothing.
+/// Returns a function that, when called, schedules `task` on `scheduler` (if
+/// it is still alive). Repeated calls do nothing.
 pub fn bind_once(scheduler: &SchedulerPtr, task: Task) -> impl FnMut() + Send + 'static {
     let scheduler = Arc::downgrade(scheduler);
     let mut scheduled = Some(task);
@@ -164,8 +154,8 @@ pub fn bind_once(scheduler: &SchedulerPtr, task: Task) -> impl FnMut() + Send + 
     }
 }
 
-/// `scheduleAndReplyValue(tag, task, reply)`: runs `task` on `scheduler`
-/// and then `reply(result)` on the current thread's scheduler.
+/// Runs `task` on `scheduler` and then `reply(result)` on the current
+/// thread's scheduler.
 ///
 /// C++ captures `reply` in the closure that travels through the pool; here
 /// it stays on the calling thread (it usually holds thread-local state such
@@ -225,7 +215,7 @@ pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
     );
 }
 
-/// `TaggedScheduler`: a scheduler plus the tag its tasks are queued under.
+/// A scheduler plus the tag its tasks are queued under.
 #[derive(Clone)]
 pub struct TaggedScheduler {
     pub tag: SimpleIdentity,

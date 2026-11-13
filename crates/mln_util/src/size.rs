@@ -1,5 +1,3 @@
-// Ports include/mln/util/size.hpp
-
 use serde::{Deserialize, Serialize};
 
 /// A width/height pair in (logical or physical) pixels.
@@ -15,7 +13,7 @@ impl Size {
         Size { width, height }
     }
 
-    /// C++ multiplies two `uint32_t`s, which wraps on overflow.
+    /// The area, wrapping on overflow as C++'s `uint32_t` product does.
     #[must_use]
     pub const fn area(&self) -> u32 {
         self.width.wrapping_mul(self.height)

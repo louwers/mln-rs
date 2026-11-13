@@ -1,7 +1,3 @@
-// Ports src/mln/map/projection_base.hpp and
-// src/mln/map/mercator_projection.cpp: C++'s `ProjectionBase` subclasses are
-// the variants of `Projection`.
-
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;

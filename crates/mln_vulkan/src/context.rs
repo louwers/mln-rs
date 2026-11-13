@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/context.hpp and src/mln/vulkan/context.cpp
-//
 // Resources hold a `Weak<Context>` where C++ holds `Context&`, and the
 // device through `Rc<BackendImpl>`: a resource that outlives its context is
 // destroyed when dropped, instead of through the context's deletion queue.
@@ -26,10 +24,6 @@
 //   of date) are logged. A frame that acquires no image, for a swapchain or
 //   a surface that couldn't be made again, is recorded without a
 //   framebuffer for the frame target, and submitted without presenting.
-//
-// TODO(port): `createDynamicTexture`, `createRenderTarget`,
-// `createRenderbufferResource` and the render jobs of the backend thread
-// pool (`runRenderJobs` in `beginFrame`), as in the WebGPU backend.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
@@ -97,12 +91,11 @@ struct GlobeClipMaskInstance {
     transition: [f32; 4],
 }
 
-/// `DeletionTask`: destroys something once the frame it was last used in is
-/// done.
+/// Destroys something once the frame it was last used in is done.
 pub type DeletionTask = Box<dyn FnOnce(&Context)>;
 
-/// `FrameResources`: what a frame in flight records into and waits on, and
-/// what is destroyed when it is done.
+/// What a frame in flight records into and waits on, and what is destroyed
+/// when it is done.
 struct FrameResources {
     command_buffer: vk::CommandBuffer,
     flight_frame_fence: vk::Fence,
@@ -135,7 +128,7 @@ struct Clipping {
     pipeline_info: PipelineInfo,
 }
 
-/// `GlobeClipMesh`: a tile's pole-capped mesh for its globe clip mask.
+/// A tile's pole-capped mesh for its globe clip mask.
 struct GlobeClipMesh {
     vertices: BufferResource,
     indices: BufferResource,
@@ -208,7 +201,6 @@ struct FrameSync {
     timeline: bool,
 }
 
-/// `buildUniformDescriptorSetLayout` and `buildImageDescriptorSetLayout`
 fn build_descriptor_set_layout(
     backend: &BackendImpl,
     type_: DescriptorSetType,
@@ -273,9 +265,9 @@ fn build_pipeline_layout(
 }
 
 impl Context {
-    /// `Context(RendererBackend&)`, or an error if the device can't make
-    /// the frames' command buffers, the descriptor set layouts or the
-    /// pipeline layouts.
+    /// Creates the context of `backend`, or an error if the device can't make
+    /// the frames' command buffers, the descriptor set layouts or the pipeline
+    /// layouts.
     pub fn new(backend: Rc<BackendImpl>) -> Result<Rc<Context>, String> {
         let storage = |type_: DescriptorSetType| type_.buffer_shape().storage as u32;
         let uniform = |type_: DescriptorSetType| type_.buffer_shape().uniform as u32;
@@ -324,8 +316,8 @@ impl Context {
         Ok(context)
     }
 
-    /// `initFrameResources()`: the command buffer and the fence of each
-    /// frame in flight, the descriptor set layouts and the pipeline layouts.
+    /// Makes the command buffer and the fence of each frame in flight, the
+    /// descriptor set layouts and the pipeline layouts.
     fn init_frame_resources(&self) -> Result<(), String> {
         let backend = &self.backend;
         let device = backend.get_device();
@@ -385,7 +377,6 @@ impl Context {
         self.weak_self.clone()
     }
 
-    /// `getBackend()`
     pub fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
     }
@@ -401,9 +392,9 @@ impl Context {
         }
     }
 
-    /// `destroyResources()`: waits for the device, runs the deletion queues
-    /// and destroys what the context made. Called before the backend lets go
-    /// of the context, and when it is dropped.
+    /// Waits for the device, runs the deletion queues and destroys what the
+    /// context made. Called before the backend lets go of the context, and when
+    /// it is dropped.
     pub(crate) fn destroy_resources(&self) {
         if self.destroyed.replace(true) {
             return;
@@ -460,8 +451,8 @@ impl Context {
         }
     }
 
-    /// `enqueueDeletion(function)`: runs `function` when the frame being
-    /// recorded, or the last one, is done.
+    /// Runs `function` when the frame being recorded, or the last one, is
+    /// done.
     pub fn enqueue_deletion(&self, function: DeletionTask) {
         let index = usize::from(self.frame_resource_index.get());
         let mut frames = self.frame_resources.borrow_mut();
@@ -473,7 +464,6 @@ impl Context {
         }
     }
 
-    /// `FrameResources::runDeletionQueue(context)`
     fn run_deletion_queue(&self, index: usize) {
         let tasks = self.frame_resources.borrow_mut().get_mut(index).map(|f| std::mem::take(&mut f.deletion_queue));
         for task in tasks.into_iter().flatten() {
@@ -489,8 +479,8 @@ impl Context {
         }
     }
 
-    /// `submitOneTimeCommand(function)`: records `function`'s commands into
-    /// a command buffer of their own, and waits for them.
+    /// Records `function`'s commands into a command buffer of their own, and
+    /// waits for them.
     pub fn submit_one_time_command(&self, function: impl FnOnce(vk::CommandBuffer)) {
         let device = self.backend.get_device();
         let allocate_info = vk::CommandBufferAllocateInfo::default()
@@ -552,8 +542,8 @@ impl Context {
         self.frame_recording.get() && self.frame_image_acquired.get()
     }
 
-    /// `requestSurfaceUpdate(useDelay)`: has the swapchain rebuilt, a few
-    /// frames from now or before the next one.
+    /// Has the swapchain rebuilt, a few frames from now or, without
+    /// `use_delay`, before the next one.
     pub fn request_surface_update(&self, use_delay: bool) {
         if self.surface_update_requested.get() {
             if !use_delay {
@@ -565,7 +555,6 @@ impl Context {
         self.surface_update_latency.set(if use_delay { self.backend.get_max_frames() as i32 * 3 } else { 0 });
     }
 
-    /// `updateSurface()`
     fn update_surface(&self) {
         let Some(surface) = self.surface.borrow().upgrade() else {
             return;
@@ -586,7 +575,8 @@ impl Context {
         self.surface_update_requested.set(false);
     }
 
-    /// `waitFrame()`: waits for the frame of the current frame resources.
+    /// Waits for the frame of the current frame resources. Returns false if
+    /// there is none or the wait fails.
     pub fn wait_frame(&self) -> bool {
         let fence = self
             .frame_resources
@@ -623,8 +613,8 @@ impl Context {
         self.queue_wait.set(true);
     }
 
-    /// `submitFrame()`: ends the frame's command buffer, submits it and,
-    /// with a platform surface, presents the image.
+    /// Ends the frame's command buffer, submits it and, with a platform
+    /// surface, presents the image.
     pub fn submit_frame(&self) {
         let frame_sync = std::mem::take(&mut *self.frame_sync.borrow_mut());
         if !self.frame_recording.replace(false) {
@@ -721,7 +711,6 @@ impl Context {
         }
     }
 
-    /// `createBuffer(data, size, usage, persistent)`
     pub fn create_buffer(
         &self,
         data: Option<&[u8]>,
@@ -732,9 +721,8 @@ impl Context {
         BufferResource::new(self, data, size, usage, persistent)
     }
 
-    /// `createProgram(name, vertex, fragment, programParameters,
-    /// additionalDefines)`, with `source`'s stages and prelude: compiles the
-    /// two stages with the program's defines and `additional_defines`.
+    /// Compiles the two stages of `source`, with its prelude, the program's
+    /// defines and `additional_defines`.
     pub fn create_program(
         &self,
         name: String,
@@ -777,13 +765,13 @@ impl Context {
         Some(ShaderProgram::new(name, self, vertex_shader, fragment_shader))
     }
 
-    /// `createTexture2D()` with the concrete type.
+    /// Creates a texture, of the concrete type.
     pub fn create_vulkan_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self)))
     }
 
-    /// `getDummyBuffer()`: bound where a buffer or a vertex attribute has
-    /// no data. Shaders don't read it.
+    /// A buffer bound where a buffer or a vertex attribute has no data.
+    /// Shaders don't read it.
     pub fn get_dummy_buffer(&self) -> vk::Buffer {
         if let Some(buffer) = self.dummy_buffer.borrow().as_ref() {
             return buffer.get_vulkan_buffer();
@@ -797,7 +785,7 @@ impl Context {
         handle
     }
 
-    /// `getDummyTexture()`: bound where a shader's texture has no image.
+    /// A texture bound where a shader's texture has no image.
     pub fn get_dummy_texture(&self) -> Option<ImageBinding> {
         let mut dummy = self.dummy_texture.borrow_mut();
         let texture = if let Some(texture) = dummy.as_mut() {
@@ -821,7 +809,6 @@ impl Context {
         })
     }
 
-    /// `getDescriptorSetLayout(type)`
     pub fn get_descriptor_set_layout(&self, type_: DescriptorSetType) -> vk::DescriptorSetLayout {
         self.descriptor_set_layouts.get()[type_ as usize]
     }
@@ -853,14 +840,14 @@ impl Context {
         self.descriptor_pools.borrow_mut()[type_ as usize].give_back(pool_index, sets);
     }
 
-    /// `getGeneralPipelineLayout()`: the four descriptor sets, and the
-    /// drawable's index as the push constant.
+    /// The layout of the drawable pipelines: the four descriptor sets, and
+    /// the drawable's index as the push constant.
     pub fn get_general_pipeline_layout(&self) -> vk::PipelineLayout {
         self.general_pipeline_layout.get()
     }
 
-    /// `getPushConstantPipelineLayout()`: the layout of the clip mask
-    /// pipelines, whose push constants are matrices.
+    /// The layout of the clip mask pipelines, whose push constants are
+    /// matrices.
     pub fn get_push_constant_pipeline_layout(&self) -> vk::PipelineLayout {
         self.push_constant_pipeline_layout.get()
     }
@@ -990,7 +977,6 @@ impl Context {
             .map(|(key, _)| (key.color_format, key.depth_format))
     }
 
-    /// `getCurrentFrameResourceIndex()`
     pub fn get_current_frame_resource_index(&self) -> u8 {
         self.frame_resource_index.get()
     }
@@ -1001,7 +987,7 @@ impl Context {
         self.frame_serial.get()
     }
 
-    /// `getCommandBuffer()`: the command buffer of the frame.
+    /// The command buffer of the frame.
     pub fn get_command_buffer(&self) -> vk::CommandBuffer {
         self.frame_resources
             .borrow()
@@ -1063,7 +1049,6 @@ impl Context {
         true
     }
 
-    /// `renderTileClippingMasks(renderPass, staticData, tileUBOs)`
     fn render_tile_clipping_masks_impl(
         &self,
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
@@ -1153,8 +1138,8 @@ impl Context {
         true
     }
 
-    /// `renderGlobeTileClippingMasks(renderPass, staticData, masks)`, with
-    /// `mesh` making a tile's mesh in place of C++'s `rawGlobeTileMesh`.
+    /// Draws the globe's tile clipping masks, with `mesh` making a tile's
+    /// mesh in place of C++'s `rawGlobeTileMesh`.
     fn render_globe_tile_clipping_masks_impl(
         &self,
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
@@ -1463,7 +1448,8 @@ impl GfxContext for Context {
 
     fn reduce_memory_usage(&self) {}
 
-    /// `createOffscreenTexture(size, type)`: neither depth nor stencil.
+    /// Creates an offscreen texture of `size` with `type_` channels, with
+    /// neither depth nor stencil.
     fn create_offscreen_texture(
         &self,
         size: Size,

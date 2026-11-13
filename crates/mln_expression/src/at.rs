@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/at.hpp and
-// src/mln/style/expression/at.cpp.
-
 use mln_conversion::Convertible;
 use mln_util::string::to_string_double;
 

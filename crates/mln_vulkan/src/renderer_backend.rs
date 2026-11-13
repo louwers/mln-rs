@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/renderer_backend.hpp and src/mln/vulkan/renderer_backend.cpp
-//
 // The device and its queue are the `Device`'s, which every backend on it
 // shares. What a backend makes on the device, its command pool and its
 // allocator, is shared (`Rc<BackendImpl>`) by the backend, its context and
@@ -188,8 +186,8 @@ impl BackendImpl {
         self.device.shared.with_queue(|queue| unsafe { loader.queue_present(queue, info) })
     }
 
-    /// `setDebugName(object, name)`: names an object for the validation
-    /// layer's messages and for debuggers.
+    /// Names an object for the validation layer's messages and for
+    /// debuggers.
     pub fn set_debug_name<T: vk::Handle>(&self, object: T, name: &str) {
         let Some(debug_utils) = self.device.shared.debug_utils() else {
             return;
@@ -258,7 +256,6 @@ impl BackendImpl {
 }
 
 impl Drop for BackendImpl {
-    /// `destroyResources()`
     fn drop(&mut self) {
         self.wait_idle("backend shutdown");
         // SAFETY: every user of the pool and the allocator held this struct,
@@ -270,7 +267,7 @@ impl Drop for BackendImpl {
     }
 }
 
-/// `vulkan::RendererBackend`: a renderer's instance, device and context.
+/// A renderer's instance, device and context.
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
@@ -320,8 +317,8 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 ];
 
 impl RendererBackend {
-    /// `RendererBackend()` and `init()`: a backend on `device` for offscreen
-    /// and borrowed targets, with one frame in flight.
+    /// A backend on `device` for offscreen and borrowed targets, with one
+    /// frame in flight.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan
     /// call fails.
@@ -329,8 +326,8 @@ impl RendererBackend {
         Self::with_frames(device, 1)
     }
 
-    /// `RendererBackend()` and `init()`: a backend on `device` that presents
-    /// to windows, with two frames in flight.
+    /// A backend on `device` that presents to windows, with two frames in
+    /// flight.
     ///
     /// Fails as [`new`](Self::new) does, and with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the device can't
@@ -371,21 +368,20 @@ impl RendererBackend {
         self.impl_.get_device_properties().device_type == vk::PhysicalDeviceType::CPU
     }
 
-    /// `context.reset()`, which also releases what the context holds
+    /// Drops the context, releasing what it holds
     /// (`Context::destroy_resources`).
     pub(crate) fn reset_context(&mut self) {
         self.base.reset_context();
         self.context.destroy_resources();
     }
 
-    /// `createContext()`: the context made with the backend.
+    /// The context made with the backend.
     pub fn create_context(&self) -> Rc<Context> {
         self.context.clone()
     }
 
-    /// `initShaders`: register one `vulkan::ShaderGroup` per built-in
-    /// shader. A duplicate registration is an error, which C++ throws and
-    /// the port logs.
+    /// Registers one shader group per built-in shader. A duplicate
+    /// registration is an error, which C++ throws and this logs.
     pub fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
         for &shader_id in REGISTERED_SHADERS {
             let Some(source) = shader_source(shader_id) else {

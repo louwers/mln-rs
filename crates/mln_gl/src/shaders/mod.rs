@@ -1,4 +1,4 @@
-//! Ports include/mln/shaders/gl and src/mln/shaders/gl.
+//! The OpenGL shaders: their GLSL, sources, programs and shader groups.
 
 /// The C++ core's GLSL, with the port's changes.
 #[rustfmt::skip]

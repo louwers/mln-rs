@@ -1,32 +1,25 @@
-// Ports the style calls of render-test/runner.cpp (`resetContext`,
-// `map.getStyle().getDefaultCamera()`) and render-test/parser.cpp (the
-// operations' `map.getStyle()...` bodies) over mln_style::Style, so that
-// the map (map.rs) only has to hand over the map's style.
-
 use mln_conversion::Convertible;
 use mln_map_types::CameraOptions;
 use mln_style::Style;
 
 use crate::runner::MapError;
 
-/// `map.getStyle().loadJSON(json)`. Errors reach the map's events, as in C++.
+/// Loads the style from `json`. Errors reach the map's events, as in C++.
 pub fn load_json(style: &mut Style, json: &str) {
     style.load_json(json);
 }
 
-/// `map.getStyle().loadURL(url)`.
 pub fn load_url(style: &mut Style, url: &str) {
     style.load_url(url);
 }
 
-/// `map.getStyle().getDefaultCamera()`.
 #[must_use]
 pub fn default_camera(style: &Style) -> CameraOptions {
     style.get_default_camera()
 }
 
-/// `set{Paint|Layout}Property`: `getLayer(layerName)`, then
-/// `layer->setProperty(propertyName, value)`, whose error the runner ignores.
+/// Sets the paint or layout property `property_name` of the layer
+/// `layer_name`. The runner ignores an error from setting the property.
 pub fn set_layer_property(
     style: &mut Style,
     layer_name: &str,
@@ -40,7 +33,7 @@ pub fn set_layer_property(
     Ok(())
 }
 
-/// `setLayerZoomRange`: `layer->setMinZoom(min)`, `layer->setMaxZoom(max)`.
+/// Sets the zoom range of the layer `layer_name`.
 pub fn set_layer_zoom_range(style: &mut Style, layer_name: &str, min_zoom: f32, max_zoom: f32) -> Result<(), MapError> {
     let Some(mut layer) = style.get_layer_mut(layer_name) else {
         return Err(MapError::LayerNotFound);
@@ -50,8 +43,7 @@ pub fn set_layer_zoom_range(style: &mut Style, layer_name: &str, min_zoom: f32, 
     Ok(())
 }
 
-/// `addLayer`: `convertJSON<std::unique_ptr<Layer>>(json)`, then
-/// `style.addLayer(layer)`.
+/// Parses a layer from `json` and adds it to the style.
 pub fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
@@ -65,9 +57,8 @@ pub fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
     style.add_layer(layer, None).map_err(|e| MapError::Exception(e.to_string()))
 }
 
-/// `setFilter`: `convert<style::Filter>(filter)` (a conversion error
-/// first), then `getLayer(layerName)` (`LayerNotFound`), then
-/// `layer->setFilter(filter)`.
+/// Converts `filter` (a conversion error first) and sets it on the layer
+/// `layer_name` (`LayerNotFound` if there is none).
 pub fn set_layer_filter(style: &mut Style, layer_name: &str, filter: &serde_json::Value) -> Result<(), MapError> {
     let mut error = mln_conversion::Error::default();
     let Some(filter) =
@@ -82,20 +73,20 @@ pub fn set_layer_filter(style: &mut Style, layer_name: &str, filter: &serde_json
     Ok(())
 }
 
-/// `setGlobalStateProperty`: `style.setGlobalStateProperty(name, value)`;
-/// its error (style not loaded) is not caught by the runner.
+/// Sets the global state property `name`. Its error (style not loaded) is
+/// a [`MapError::Exception`], as the C++ runner doesn't catch it.
 pub fn set_global_state_property(style: &mut Style, name: &str, value: &feature::Value) -> Result<(), MapError> {
     style.set_global_state_property(name, value).map_err(|e| MapError::Exception(e.to_string()))
 }
 
-/// `removeLayer`: `bool(style.removeLayer(layerName))`.
+/// Removes the layer `layer_name`, and returns whether there was one.
 pub fn remove_layer(style: &mut Style, layer_name: &str) -> bool {
     style.remove_layer(layer_name).is_some()
 }
 
-/// `addSource`: `convertJSON<std::unique_ptr<Source>>(json, error,
-/// sourceName)`, then `style.addSource(source)` (which throws, uncaught, on
-/// a duplicate id).
+/// Parses a source named `source_name` from `json` and adds it to the
+/// style. A duplicate id is a [`MapError::Exception`], as C++ throws an
+/// exception the runner doesn't catch.
 pub fn add_source(style: &mut Style, source_name: &str, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
@@ -110,8 +101,8 @@ pub fn add_source(style: &mut Style, source_name: &str, json: &str) -> Result<()
     style.add_source(source).map_err(|e| MapError::Exception(e.to_string()))
 }
 
-/// `setLight` (conformance): `convert<style::Light>(json)`, then
-/// `style.setLight(std::make_unique<Light>(impl))`.
+/// Parses a light from `json` and sets it on the style (for the conformance
+/// suite).
 pub fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
@@ -126,7 +117,7 @@ pub fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
     Ok(())
 }
 
-/// `removeSource`: `bool(style.removeSource(sourceName))`.
+/// Removes the source `source_name`, and returns whether there was one.
 pub fn remove_source(style: &mut Style, source_name: &str) -> bool {
     style.remove_source(source_name).is_some()
 }

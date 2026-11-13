@@ -1,9 +1,7 @@
-//! Ports the `include/mln/map` vocabulary that crates below the map need
-//! (cut point, like `mln_style_types`): `camera.hpp` (style's default
-//! camera), `camera_momentum.hpp`, `mode.hpp`, `projection_mode.hpp`,
-//! `bound_options.hpp`, and the projection `TransformState` draws with
-//! (`projection_base.hpp` and its subclasses). The `Map` itself is in
-//! `mln_map`, which re-exports these.
+//! The map vocabulary that crates below the map need: camera options and
+//! momentum, map modes, bound options, the transform state, and the
+//! projection it draws with. The `Map` itself is in `mln_map`, which
+//! re-exports these.
 
 pub mod bound_options;
 pub mod camera;

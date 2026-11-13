@@ -1,4 +1,5 @@
-//! Ports `render-test/` (the C++ render-test runner) for the Rust core.
+//! The render-test runner: renders the style tests of the render suite and
+//! compares them with their expected images and results.
 //!
 //! The runner core reaches the map through [`runner::TestRunnerImpl`],
 //! implemented over the real map in [`map`]. `--self-check` runs the full

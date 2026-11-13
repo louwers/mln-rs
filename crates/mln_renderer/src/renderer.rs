@@ -1,9 +1,3 @@
-// Ports include/mln/renderer/renderer.hpp, src/mln/renderer/renderer.cpp,
-// src/mln/renderer/renderer_impl.hpp and src/mln/renderer/renderer_impl.cpp
-// (the non-OpenGL branches). The Metal branch's autorelease pool is the Metal
-// backend's (mln_mtl renderer_backend.rs), and its frame capture, off in
-// C++, is not ported.
-//
 // C++ keeps a `gfx::RendererBackend&`; the frontend owns the backend, so the
 // renderer shares it through an `Rc`.
 
@@ -54,21 +48,17 @@ pub struct Renderer {
     style_loaded: bool,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
-    // TODO(port): dynamicTextureAtlas (symbols, M5).
 }
 
 impl Renderer {
-    /// `Renderer(gfx::RendererBackend&, float pixelRatio, const
-    /// std::optional<std::string>& localFontFamily = std::nullopt)`: a
-    /// renderer with a glyph cache of its own. `local_font_family` is the
+    /// A renderer with a glyph cache of its own. `local_font_family` is the
     /// platform's `LocalGlyphRasterizer`'s (see `DefaultLocalGlyphRasterizer`).
     pub fn new(backend: Rc<dyn RendererBackend>, pixel_ratio: f32, local_font_family: Option<String>) -> Self {
         Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default())
     }
 
-    /// `Renderer(gfx::RendererBackend&, float pixelRatio, localFontFamily,
-    /// std::shared_ptr<GlyphCache>)`: renderers given the same `GlyphCache`
-    /// share the glyphs they parse from glyph PBFs.
+    /// A renderer that uses `glyph_cache`: renderers given the same
+    /// `GlyphCache` share the glyphs they parse from glyph PBFs.
     pub fn with_glyph_cache(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
@@ -146,7 +136,6 @@ impl Renderer {
 
     // query: `Err` is the exception C++ throws out of the query (a
     // malformed tile).
-    /// `queryRenderedFeatures(const ScreenLineString&, const RenderedQueryOptions&)`.
     pub fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -155,7 +144,6 @@ impl Renderer {
         self.orchestrator.query_rendered_features(geometry, options)
     }
 
-    /// `queryRenderedFeatures(const ScreenCoordinate&, const RenderedQueryOptions&)`.
     pub fn query_rendered_features_at_point(
         &self,
         point: &mln_util::geo::ScreenCoordinate,
@@ -164,7 +152,6 @@ impl Renderer {
         self.orchestrator.query_rendered_features(&[*point], options)
     }
 
-    /// `queryRenderedFeatures(const ScreenBox&, const RenderedQueryOptions&)`.
     pub fn query_rendered_features_in_box(
         &self,
         min: &mln_util::geo::ScreenCoordinate,
@@ -178,7 +165,6 @@ impl Renderer {
         )
     }
 
-    /// `querySourceFeatures(sourceID, options)`.
     pub fn query_source_features(
         &self,
         source_id: &str,
@@ -187,12 +173,11 @@ impl Renderer {
         self.orchestrator.query_source_features(source_id, options)
     }
 
-    /// `queryFeatureExtensions(sourceID, feature, extension, extensionField,
-    /// args)`: for a GeoJSON source with `cluster` on, the "supercluster"
-    /// extension's "children", "leaves" or "expansion-zoom" of a cluster
-    /// feature (one with a `cluster_id` property). Anything else is a null
-    /// value. `Err` is the `std::runtime_error` C++ throws for a cluster ID
-    /// the source doesn't have.
+    /// Queries a feature extension: for a GeoJSON source with `cluster` on,
+    /// the "supercluster" extension's "children", "leaves" or
+    /// "expansion-zoom" of a cluster feature (one with a `cluster_id`
+    /// property). Anything else is a null value. `Err` for a cluster ID the
+    /// source doesn't have.
     pub fn query_feature_extensions(
         &self,
         source_id: &str,
@@ -204,23 +189,17 @@ impl Renderer {
         self.orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 
-    /// `getPlacedSymbolsData()`.
     #[must_use]
     pub fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
         self.orchestrator.get_placed_symbols_data()
     }
 
-    /// `dumpDebugLogs()`: logs every render source's tiles and the image
-    /// manager's state.
+    /// Logs every render source's tiles and the image manager's state.
     pub fn dump_debug_logs(&self) {
         self.orchestrator.dump_debug_logs();
     }
 
-    // TODO(port): queryPointAnnotations, queryShapeAnnotations,
-    // queryFeatureExtensions.
-
     // layers: feature state
-    /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.
     pub fn set_feature_state(
         &mut self,
         source_id: &str,
@@ -231,7 +210,6 @@ impl Renderer {
         self.orchestrator.set_feature_state(source_id, source_layer_id, feature_id, state);
     }
 
-    /// `getFeatureState(sourceID, sourceLayerID, featureID)`.
     #[must_use]
     pub fn get_feature_state(
         &self,
@@ -242,7 +220,6 @@ impl Renderer {
         self.orchestrator.get_feature_state(source_id, source_layer_id, feature_id)
     }
 
-    /// `removeFeatureState(sourceID, sourceLayerID, featureID, stateKey)`.
     pub fn remove_feature_state(
         &mut self,
         source_id: &str,
@@ -293,7 +270,6 @@ impl Renderer {
     ) -> Option<Handoff> {
         let backend = self.backend.clone();
         let context = backend.get_context();
-        // TODO(port): context.setObserver(this) (shader compile callbacks).
 
         let image = target.begin_frame()?;
         context.begin_frame();
@@ -306,7 +282,6 @@ impl Renderer {
             backend.init_shaders(&static_data.shaders, &program_parameters);
 
             // Notify post-shader registration
-            // TODO(port): observer->onRegisterShaders(*staticData->shaders).
             self.static_data = Some(static_data);
         }
 
@@ -377,7 +352,6 @@ impl Renderer {
             static_data.upload(&*upload_pass);
             parameters.line_atlas.borrow_mut().upload(&*upload_pass);
             parameters.pattern_atlas.borrow_mut().upload(&*upload_pass); // conformance
-            // TODO(port): patternAtlas.upload (patterns).
         }
 
         // - LAYER GROUP UPDATE --------------------------------------------

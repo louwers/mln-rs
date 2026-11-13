@@ -1,5 +1,3 @@
-// Ports include/mln/map/projection_mode.hpp
-
 /// Holds values for Axonometric rendering. All fields are optional.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectionMode {

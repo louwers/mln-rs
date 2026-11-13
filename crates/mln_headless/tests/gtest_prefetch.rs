@@ -1,5 +1,3 @@
-// Ports test/map/prefetch.test.cpp (a module of the gtest_map test crate).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,7 +12,8 @@ use mln_util::size::Size;
 
 use crate::support::*;
 
-/// `std::stoi(str)`: the leading (optionally signed) decimal integer.
+/// Parses the leading, optionally signed, decimal integer of `s`, as
+/// `std::stoi` does.
 fn stoi(s: &str) -> i32 {
     let trimmed = s.trim_start();
     let end = trimmed

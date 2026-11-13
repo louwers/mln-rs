@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion.hpp (Error) and the Convertible part of
-// include/mln/style/conversion_impl.hpp.
-//
 // C++ builds its own vtable over inline storage so that one `Convertible`
 // can wrap rapidjson values, NSDictionary, QVariant, JNI values, ... The Rust
 // equivalent is a trait object: `ConversionTraits` is the C++
@@ -12,7 +9,6 @@
 
 use feature::Value;
 
-/// `mln::style::conversion::Error`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct Error {
@@ -51,10 +47,10 @@ pub trait ConversionTraits {
     /// `i64`, then `f64`.
     fn to_value(&self) -> Option<Value>;
 
-    /// `toGeoJSON(value, error)`: the front end's GeoJSON conversion. The
-    /// JSON front end runs `mapbox::geojson::convert` and reports its
-    /// exception message in `error`. A front end without one reports an
-    /// error (added by `sources` for the GeoJSON source).
+    /// Converts the value to GeoJSON. The JSON front end runs
+    /// `geojson::convert` and reports its error message in `error`. A front
+    /// end without a GeoJSON conversion reports an error (added by `sources`
+    /// for the GeoJSON source).
     fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJSON> {
         error.message = "GeoJSON conversion is not supported by this value type".to_owned();
         None
@@ -66,8 +62,7 @@ enum Inner<'a> {
     Owned(Box<dyn ConversionTraits + 'a>),
 }
 
-/// `mln::style::conversion::Convertible`: a type-erased, read-only view of a
-/// JSON-like value.
+/// A type-erased, read-only view of a JSON-like value.
 pub struct Convertible<'a> {
     inner: Inner<'a>,
 }
@@ -149,7 +144,6 @@ impl<'a> Convertible<'a> {
         self.traits().to_value()
     }
 
-    /// `toGeoJSON(value, error)`.
     pub fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJSON> {
         self.traits().to_geojson(error)
     }
@@ -167,7 +161,6 @@ impl<'a, T: ConversionTraits> From<&'a T> for Convertible<'a> {
     }
 }
 
-/// `toGeoJSON(value, error)`.
 pub fn to_geojson(v: &Convertible<'_>, error: &mut Error) -> Option<geojson::GeoJSON> {
     v.to_geojson(error)
 }

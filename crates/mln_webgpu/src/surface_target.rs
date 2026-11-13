@@ -1,6 +1,4 @@
-// Ports the window-surface part of platform/glfw/glfw_webgpu_backend.hpp and
-// platform/glfw/glfw_webgpu_backend_impl.ipp (the Linux, wgpu-native branch):
-// frames presented to a `wgpu::Surface`. The window stays with the host,
+// Frames presented to a `wgpu::Surface`. The window stays with the host,
 // which makes the surface, or hands its window over for the target to make
 // one, and reports framebuffer resizes through `resize`.
 //
@@ -44,10 +42,8 @@ use crate::command_encoder::CommandEncoder;
 use crate::draw_target::{DrawTarget, TargetResource};
 use crate::renderer_backend::RendererBackend;
 
-/// `maxConsecutiveErrors`
 const MAX_CONSECUTIVE_ERRORS: i32 = 3;
 
-/// `backendTypeToString`
 fn backend_type_to_string(backend: wgpu::Backend) -> &'static str {
     match backend {
         wgpu::Backend::Noop => "Null",
@@ -120,7 +116,7 @@ struct SurfaceState {
     vsync_present_mode: Cell<wgpu::PresentMode>,
     /// What `glfwGetFramebufferSize` returns in C++.
     framebuffer_size: Cell<Size>,
-    /// `static auto lastSwapTime` in `swap()`.
+    /// When `swap` last ran.
     last_swap_time: Cell<Instant>,
 
     readback_requested: Cell<bool>,
@@ -154,12 +150,11 @@ impl SurfaceState {
         }
     }
 
-    /// `processEvents()`: `wgpuDevicePoll(device, false)`.
+    /// Polls the device without waiting.
     fn process_events(&self) {
         let _ = self.device.poll(wgpu::PollType::Poll);
     }
 
-    /// `swap()`: presents the current frame.
     /// Presents the current frame. Returns whether there was one.
     fn swap(&self) -> bool {
         let mut presented = false;
@@ -223,7 +218,6 @@ impl SurfaceState {
         presented
     }
 
-    /// `getCurrentTextureView()`
     fn get_current_texture_view(&self) -> Option<wgpu::TextureView> {
         // Port: a surface that had no size to configure with yet (or was
         // just set) is configured once it has one.
@@ -294,7 +288,6 @@ impl SurfaceState {
         Some(view)
     }
 
-    /// `getDepthStencilView()`
     fn get_depth_stencil_view(&self) -> Option<wgpu::TextureView> {
         if self.depth_stencil.borrow().is_none() {
             let size = self.framebuffer_size.get();
@@ -303,7 +296,6 @@ impl SurfaceState {
         self.depth_stencil.borrow().as_ref().map(|(_, view)| view.clone())
     }
 
-    /// `reconfigureSurface()`
     fn reconfigure_surface(&self) {
         // Wait for any in-progress frame: never in progress (file comment).
 
@@ -341,7 +333,6 @@ impl SurfaceState {
         self.consecutive_errors.set(0);
     }
 
-    /// `createDepthStencilTexture(width, height)`
     fn create_depth_stencil_texture(&self, width: u32, height: u32) {
         self.depth_stencil.borrow_mut().take();
 
@@ -452,7 +443,7 @@ impl SurfaceState {
     }
 }
 
-/// `WebGPURenderableResource`: the swapchain's texture as a draw target.
+/// The swapchain's texture as a draw target.
 struct SurfaceResource {
     state: Rc<SurfaceState>,
 }
@@ -617,8 +608,7 @@ impl SurfaceTarget {
         self.state.framebuffer_size.get()
     }
 
-    /// `setFramebufferSize(Size)`: draws the next frame at `size` physical
-    /// pixels.
+    /// Draws the next frame at `size` physical pixels.
     pub fn resize(&self, size: Size) {
         if self.state.framebuffer_size.replace(size) != size {
             self.image.set_size(size);
@@ -626,7 +616,6 @@ impl SurfaceTarget {
         }
     }
 
-    /// `processEvents()`
     pub fn process_events(&self) {
         self.state.process_events();
     }

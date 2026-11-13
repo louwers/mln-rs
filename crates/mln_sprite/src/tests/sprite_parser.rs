@@ -1,5 +1,3 @@
-// Ports test/sprite/sprite_parser.test.cpp.
-
 use std::collections::BTreeSet;
 
 use mln_image::decode_image;

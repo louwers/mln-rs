@@ -17,13 +17,11 @@ use parking_lot::Mutex;
 
 /// A font file loaded for shaping: what `HBShaper` does for `GlyphManager`.
 pub trait FontFaceShaper {
-    /// `HBShaper::createComplexGlyphIDs`: appends the glyphs of `text`
-    /// (UTF-16), one run of one direction in logical order, in visual order,
-    /// and their positions.
+    /// Appends the glyphs of `text` (UTF-16), one run of one direction in
+    /// logical order, in visual order, and their positions.
     fn shape(&self, text: &[u16], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>);
 
-    /// `HBShaper::rasterizeGlyph`: the glyph's coverage at 24 px, before the
-    /// SDF transform.
+    /// Rasterizes the glyph: its coverage at 24 px, before the SDF transform.
     fn rasterize(&self, glyph: &GlyphID) -> Glyph;
 }
 
@@ -34,9 +32,9 @@ pub trait FontFaceEngine: Send + Sync {
     /// thread. It may be called again, before or after `ready` was called.
     fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>);
 
-    /// `HBShaper(type, fontFileData)`, once `prepare` reported the engine
-    /// ready: `None` when `data` isn't a font the engine can read. The
-    /// shaper may keep `data` (the response's bytes) instead of copying it.
+    /// Loads a font, once `prepare` reported the engine ready: `None` when
+    /// `data` isn't a font the engine can read. The shaper may keep `data`
+    /// (the response's bytes) instead of copying it.
     fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>>;
 }
 

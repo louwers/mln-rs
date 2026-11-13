@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/layer_group.hpp and src/mln/vulkan/layer_group.cpp
-
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::renderer::layer_group::{self, LayerGroupBaseData};
@@ -30,8 +28,8 @@ impl LayerGroup {
     }
 }
 
-/// `uniformBuffers.bindDescriptorSets(encoder)` for a layer group: binds
-/// its buffers as the layer set of the pass being drawn.
+/// Binds a layer group's uniform buffers as the layer set of the pass being
+/// drawn.
 pub(crate) fn bind_layer_uniform_buffers(
     descriptor_set: &mut Option<UniformDescriptorSet>,
     uniform_buffers: &UniformBufferArray,

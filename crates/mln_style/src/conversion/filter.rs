@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/filter.hpp +
-// src/mln/style/conversion/filter.cpp (legacy filters to expressions).
-
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
@@ -191,7 +188,6 @@ fn convert_legacy_filter_array(
     Some(output)
 }
 
-/// `convertLegacyFilter`.
 pub fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error) -> ParseResult {
     if values.is_undefined() {
         return Some(Box::new(Literal::new(Value::Bool(true))));
@@ -246,7 +242,6 @@ pub fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error) -> Par
     }
 }
 
-/// `serializeLegacyFilter`.
 #[must_use]
 pub fn serialize_legacy_filter(values: &Convertible<'_>) -> Option<MbglValue> {
     if values.is_undefined() {

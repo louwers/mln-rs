@@ -1,7 +1,3 @@
-// Ports test/style/expression/global_state.test.cpp (minus the tests on
-// PropertyExpression, PropertyValue, Filter, ColorRampPropertyValue and
-// FormatSectionOverride, which are mln_style / renderer types; see below).
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 use mln_vec_map::VecSet;

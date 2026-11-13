@@ -1,5 +1,3 @@
-// Ports include/mln/util/subdivision.hpp and src/mln/util/subdivision.cpp.
-//
 // The C++ lives in util/, but it takes tile ids and tile geometry, so the
 // port lives in mln_renderer, as util/tile_cover.rs does. C++ throws
 // `std::out_of_range` and `std::invalid_argument` for a vertex outside the

@@ -1,7 +1,6 @@
-// Ports the presenting part of platform/glfw/metal_backend.h and
-// platform/glfw/metal_backend.mm: frames presented to a `CAMetalLayer`. The
-// window stays with the host (such as examples/desktop), which makes the
-// layer and reports framebuffer resizes through `resize`.
+// Frames presented to a `CAMetalLayer`. The window stays with the host (such
+// as examples/desktop), which makes the layer and reports framebuffer resizes
+// through `resize`.
 //
 // Differences from C++:
 // - C++ takes the next drawable and a new command buffer in every `bind()`,
@@ -184,7 +183,7 @@ impl SurfaceState {
     }
 }
 
-/// `MetalRenderableResource`: the layer's drawable as a draw target.
+/// The layer's drawable as a draw target.
 struct SurfaceResource {
     state: Rc<SurfaceState>,
 }
@@ -308,7 +307,7 @@ impl SurfaceTarget {
         self.size.get()
     }
 
-    /// `setSize(Size)`: the size of the drawables, in pixels.
+    /// Sets the size of the drawables, in pixels.
     pub fn resize(&self, size: Size) {
         self.size.set(size);
         self.image.set_size(size);

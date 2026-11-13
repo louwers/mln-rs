@@ -1,5 +1,3 @@
-// Ports test/util/tile_cover.test.cpp.
-//
 // The gtest groups `TileCover`, `TileCoverStream` and `TileCount` are the
 // modules `tile_cover`, `tile_cover_stream` and `tile_count`.
 
@@ -25,22 +23,18 @@ fn ll(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).unwrap()
 }
 
-/// `UnwrappedTileID{z, x, y}`.
 fn uw(z: u8, x: i64, y: i64) -> UnwrappedTileID {
     UnwrappedTileID::new(z, x, y)
 }
 
-/// `OverscaledTileID{z, x, y}`.
 fn os(z: u8, x: u32, y: u32) -> OverscaledTileID {
     OverscaledTileID::from_zxy(z, x, y)
 }
 
-/// `OverscaledTileID{overscaledZ, wrap, {z, x, y}}`.
 fn osw(overscaled_z: u8, wrap: i16, z: u8, x: u32, y: u32) -> OverscaledTileID {
     OverscaledTileID::new(overscaled_z, wrap, CanonicalTileID::new(z, x, y))
 }
 
-/// `CanonicalTileID{z, x, y}`.
 fn cn(z: u8, x: u32, y: u32) -> CanonicalTileID {
     CanonicalTileID::new(z, x, y)
 }
@@ -65,7 +59,6 @@ fn transform(width: u32, height: u32) -> Transform {
     transform
 }
 
-/// `{transform.getState()}`.
 fn params(transform: &Transform) -> TileCoverParameters {
     TileCoverParameters::new(transform.get_state().clone())
 }
@@ -83,7 +76,7 @@ fn san_francisco_wrapped() -> LatLngBounds {
     LatLngBounds::hull(ll(37.6609, 238.5744), ll(37.8271, 238.3204))
 }
 
-/// `std::rand()` stand-in for the fuzz tests: a fixed-seed LCG (the C
+/// A stand-in for `std::rand()` in the fuzz tests: a fixed-seed LCG (the C
 /// standard's sample `rand`), so runs are reproducible. C++ seeds libc
 /// `rand` with `time(nullptr)`.
 struct Lcg(u32);
@@ -769,8 +762,8 @@ mod tile_cover {
         }
     }
 
-    /// `setUpGlobe(transform, size, center, zoom, pitch, bearing)` (C++
-    /// defaults `pitch` and `bearing` to 0).
+    /// Sets up `transform` for a globe test. C++ defaults `pitch` and
+    /// `bearing` to 0.
     fn set_up_globe(transform: &mut Transform, size: Size, center: LatLng, zoom: f64, pitch: f64, bearing: f64) {
         transform.resize(size).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));

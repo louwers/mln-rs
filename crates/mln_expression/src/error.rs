@@ -1,5 +1,3 @@
-// Ports include/mln/style/expression/error.hpp.
-
 use feature::Value as MbglValue;
 
 use crate::expression::{

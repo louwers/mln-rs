@@ -1,5 +1,3 @@
-// Ports include/mln/gl/uniform_buffer_gl.hpp and src/mln/gl/uniform_buffer_gl.cpp
-//
 // `UniformBufferArrayGL` only adds `bind` to the gfx array; the port keeps
 // the gfx struct, and the context binds what a drawable's shader reads
 // (`Context::bind_uniform_blocks`).
@@ -52,7 +50,6 @@ pub struct UniformBuffer {
 }
 
 impl UniformBuffer {
-    /// `createUniformBuffer(data, size, persistent, ssbo)`
     pub fn new(context: &Context, data: &[u8], elements: bool) -> Self {
         {
             let mut stats = context.rendering_stats();

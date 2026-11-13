@@ -1,6 +1,3 @@
-// Ports test/storage/http_file_source.test.cpp against the test server
-// (mln_test_server, one per test) instead of the C++ one on port 3000.
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;

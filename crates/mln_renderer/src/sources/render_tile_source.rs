@@ -1,10 +1,3 @@
-// Ports src/mln/renderer/sources/render_tile_source.hpp and
-// src/mln/renderer/sources/render_tile_source.cpp (RenderTileSource and
-// TileSourceRenderItem).
-//
-// TODO(port): RenderTileSetSource (vector/raster sources, M4), queries and
-// feature state.
-//
 // layers: debug: TileSourceRenderItem::updateDebugDrawables, with the tile
 // borders and the parse status and timestamp text as polylines
 // (MLN_ENABLE_POLYLINE_DRAWABLES, set for WebGPU), and
@@ -60,7 +53,6 @@ use crate::tile::tile::Tile;
 use crate::tile_pyramid::TilePyramid;
 use crate::util::subdivision::subdivide_vertex_line;
 
-/// `TileSourceRenderItem`.
 pub struct TileSourceRenderItem {
     render_tiles: Rc<Vec<RenderTile>>,
     name: String,
@@ -335,7 +327,6 @@ impl RenderItem for TileSourceRenderItem {
 
 // layers: debug --------------------------------------------------------------
 
-/// `PolylineLayerImpl`.
 #[derive(Debug)]
 struct PolylineLayerImpl {
     base: layer::ImplBase,
@@ -366,7 +357,6 @@ impl layer::Impl for PolylineLayerImpl {
     }
 }
 
-/// `PolylineLayerProperties`.
 #[derive(Debug)]
 struct PolylineLayerProperties {
     base: LayerPropertiesBase,
@@ -384,7 +374,7 @@ impl LayerProperties for PolylineLayerProperties {
     }
 }
 
-/// `PolylineLayerTweaker`: the uniforms of a debug layer group's polylines.
+/// Sets the uniforms of a debug layer group's polylines.
 pub struct PolylineLayerTweaker {
     base: LayerTweakerBase,
     props_ubo: LineEvaluatedPropsUBO,
@@ -494,15 +484,13 @@ impl LayerTweaker for PolylineLayerTweaker {
     }
 }
 
-/// `util::rotate(Point<float>, float)`.
 fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     let cos = angle.cos();
     let sin = angle.sin();
     Point::new(cos * a.x - sin * a.y, sin * a.x + cos * a.y)
 }
 
-/// `RenderTileSource`: base class for render sources that provide render
-/// tiles.
+/// The base of the render sources that provide render tiles.
 pub struct RenderTileSource {
     pub base: RenderSourceBase,
     pub tile_pyramid: TilePyramid,
@@ -516,8 +504,8 @@ pub struct RenderTileSource {
 }
 
 impl RenderTileSource {
-    /// `RenderTileSource(Immutable<style::Source::Impl>, const TaggedScheduler&)`,
-    /// without the thread pool (see `TileCache::new`).
+    /// A render tile source for `impl_`. Takes no thread pool (see
+    /// `TileCache::new`).
     pub fn new(impl_: Arc<dyn source::Impl>) -> Self {
         let base = RenderSourceBase::new(impl_);
         let mut tile_pyramid = TilePyramid::new();
@@ -534,7 +522,6 @@ impl RenderTileSource {
     }
 
     // layers: feature state
-    /// `setFeatureState(sourceLayerID, featureID, state)`.
     pub fn set_feature_state(
         &mut self,
         source_layer_id: Option<&str>,
@@ -544,7 +531,6 @@ impl RenderTileSource {
         self.feature_state.update_state(source_layer_id, feature_id, state);
     }
 
-    /// `getFeatureState(state, sourceLayerID, featureID)`.
     pub fn get_feature_state(
         &self,
         source_layer_id: Option<&str>,
@@ -553,7 +539,6 @@ impl RenderTileSource {
         self.feature_state.get_state(source_layer_id, feature_id)
     }
 
-    /// `removeFeatureState(sourceLayerID, featureID, stateKey)`.
     pub fn remove_feature_state(
         &mut self,
         source_layer_id: Option<&str>,
@@ -564,8 +549,6 @@ impl RenderTileSource {
     }
 
     // query
-    /// `queryRenderedFeatures(geometry, transformState, layers, options,
-    /// globalState, projMatrix)`.
     pub fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -586,7 +569,6 @@ impl RenderTileSource {
         )
     }
 
-    /// `querySourceFeatures(options, globalState)`.
     pub fn query_source_features(
         &self,
         options: &crate::query::SourceQueryOptions,

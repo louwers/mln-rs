@@ -1,8 +1,3 @@
-// Ports include/mln/storage/offline.hpp and
-// platform/default/src/mln/storage/offline.cpp: offline region
-// definitions (and their private JSON encoding), metadata, status and
-// `OfflineRegion`.
-//
 // rapidjson parsing is serde_json (as everywhere in the port); `IsDouble()`
 // is `is_f64()` (a number written with a fraction or exponent, or an integer
 // too large for 64 bits).
@@ -174,8 +169,8 @@ impl OfflineRegionDefinition {
     }
 }
 
-/// `decodeOfflineRegionDefinition(const std::string&)`. A definition that
-/// isn't one fails with [`ErrorKind::Native`](mln_util::ErrorKind), and one
+/// Decodes a region definition from JSON. A definition that isn't one fails
+/// with [`ErrorKind::Native`](mln_util::ErrorKind), and one
 /// with invalid values with the constructors' error.
 pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDefinition, Error> {
     let malformed = || Error::native("Malformed offline region definition");
@@ -247,7 +242,6 @@ pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDe
     }
 }
 
-/// `encodeOfflineRegionDefinition(const OfflineRegionDefinition&)`.
 #[must_use]
 pub fn encode_offline_region_definition(region: &OfflineRegionDefinition) -> String {
     let mut json = Map::new();
@@ -279,10 +273,10 @@ pub fn encode_offline_region_definition(region: &OfflineRegionDefinition) -> Str
 /// implementation; it just stores and retrieves a BLOB.
 pub type OfflineRegionMetadata = Vec<u8>;
 
-/// `OfflineRegionDownloadState`: a region is either inactive (not
-/// downloading, but previously-downloaded resources are available for use),
-/// or active (resources are being downloaded or will be downloaded, if
-/// necessary, when network access is available).
+/// A region is either inactive (not downloading, but previously-downloaded
+/// resources are available for use), or active (resources are being
+/// downloaded or will be downloaded, if necessary, when network access is
+/// available).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OfflineRegionDownloadState {
     #[default]
@@ -290,10 +284,9 @@ pub enum OfflineRegionDownloadState {
     Active,
 }
 
-/// `OfflineRegionStatus`: a region's status includes its active/inactive
-/// state as well as counts of the number of resources that have completed
-/// downloading, their total size in bytes, and the total number of
-/// resources that are required.
+/// A region's status: its active/inactive state, the number of resources
+/// that have completed downloading and their total size in bytes, and the
+/// total number of resources that are required.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OfflineRegionStatus {
     pub download_state: OfflineRegionDownloadState,
@@ -329,18 +322,17 @@ pub struct OfflineRegionStatus {
 }
 
 impl OfflineRegionStatus {
-    /// `complete()`.
     #[must_use]
     pub fn complete(&self) -> bool {
         self.completed_resource_count >= self.required_resource_count
     }
 }
 
-/// `OfflineRegionObserver`: a region can have a single observer, which gets
-/// notified whenever a change to the region's status occurs. The methods
-/// run on the database thread. They take `&self` (C++: non-const virtuals):
-/// the download calls them re-entrantly, e.g. an observer that deactivates
-/// the download from `statusChanged` gets a nested `statusChanged`.
+/// A region can have a single observer, which gets notified whenever a
+/// change to the region's status occurs. The methods run on the database
+/// thread. They take `&self`: the download calls them re-entrantly, e.g. an
+/// observer that deactivates the download from `status_changed` gets a
+/// nested `status_changed`.
 pub trait OfflineRegionObserver {
     /// Notified of a change in the status of an offline region.
     fn status_changed(&self, _status: OfflineRegionStatus) {}
@@ -360,5 +352,4 @@ pub struct OfflineRegion {
     pub metadata: OfflineRegionMetadata,
 }
 
-/// `OfflineRegions`.
 pub type OfflineRegions = Vec<OfflineRegion>;

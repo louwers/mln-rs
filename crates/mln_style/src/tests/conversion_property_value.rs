@@ -1,5 +1,3 @@
-// Ports test/style/conversion/property_value.test.cpp.
-
 use feature::Value;
 use mln_conversion::{Convertible, Error};
 use mln_style_types::{SymbolAnchorType, VariableAnchorOffsetCollection};

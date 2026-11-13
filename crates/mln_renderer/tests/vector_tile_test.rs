@@ -1,6 +1,3 @@
-// Ports the VectorTile tests of test/tile/vector_tile.test.cpp (the
-// VectorTileData ones are mln_tile's).
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -26,7 +23,6 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
 use parking_lot::Mutex;
 
-/// `VectorTileTest`.
 struct VectorTileTest {
     run_loop: RunLoop,
     transform: Transform,

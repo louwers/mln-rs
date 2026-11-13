@@ -1,6 +1,3 @@
-// Ports test/style/expression/dependency.test.cpp (its unused
-// FormatSectionOverride helper is a renderer type).
-
 use crate::collator_expression::CollatorExpression;
 use crate::dsl::*;
 use crate::expression::{Dependency, Expression};

@@ -1,6 +1,3 @@
-// Ports include/mln/mtl/drawable.hpp, src/mln/mtl/drawable_impl.hpp and
-// src/mln/mtl/drawable.cpp
-//
 // Differences from C++:
 // - The bindings' buffer indexes come from the shader (`upload`; see
 //   upload_pass.rs).
@@ -46,14 +43,13 @@ use crate::uniform_buffer::bind_uniform_buffer_array;
 use crate::upload_pass::UploadPass;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
-/// `struct IndexBuffer : gfx::IndexBufferBase`: adapts `gfx::IndexBuffer`.
+/// The uploaded buffer of an index vector.
 struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
 
 impl IndexBufferBase for IndexBuffer {}
 
-/// `mtl::Drawable::Impl`
 struct DrawableImpl {
     segments: Vec<UniqueDrawSegment>,
     vertex_desc: Option<MTLVertexDescriptorPtr>,

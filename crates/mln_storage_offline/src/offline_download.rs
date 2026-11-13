@@ -1,6 +1,3 @@
-// Ports platform/default/include/mln/storage/offline_download.hpp and
-// platform/default/src/mln/storage/offline_download.cpp.
-//
 // C++ holds the OfflineDatabase and the online FileSource by reference; here
 // they are shared (`Rc<RefCell<OfflineDatabase>>`, `Arc<dyn FileSource>`).
 // The download's state is behind `Rc` with interior mutability, because the
@@ -49,13 +46,12 @@ use mln_vec_map::VecMap;
 const K_RESOURCES_BATCH_SIZE: usize = 64;
 const K_MARK_BATCH_SIZE: usize = 200;
 
-/// `ResourceCallback` of `ensureResource`: reads a style or TileJSON, and
-/// returns why it can't when it can't.
+/// Reads a downloaded style or TileJSON, and returns why it can't when it
+/// can't.
 type ResponseCallback = Rc<dyn Fn(&Response) -> Result<(), String>>;
 
 // Generic functions
 
-/// `coveringZoomRange(definition, type, tileSize, zoomRange)`.
 fn covering_zoom_range(
     definition: &OfflineRegionDefinition,
     type_: SourceType,
@@ -77,7 +73,6 @@ fn covering_zoom_range(
     Range::new(min_z as u8, max_z as u8)
 }
 
-/// `tileCover(definition, type, tileSize, zoomRange, fn)`.
 fn tile_cover(
     definition: &OfflineRegionDefinition,
     type_: SourceType,
@@ -103,7 +98,6 @@ fn tile_cover(
     }
 }
 
-/// `tileCount(definition, type, tileSize, zoomRange)`.
 fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size: u16, zoom_range: Range<u8>) -> u64 {
     let clamped_zoom_range = covering_zoom_range(definition, type_, tile_size, zoom_range);
 
@@ -121,7 +115,7 @@ fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size
 /// A task of [`invoke_cancellable`], until it runs or is cancelled.
 type CancellableTask = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
 
-/// `WorkRequest`: dropping it cancels the task if it has not run.
+/// A queued task. Dropping it cancels the task if it has not run.
 struct WorkRequest {
     task: CancellableTask,
 }
@@ -134,9 +128,9 @@ impl Drop for WorkRequest {
     }
 }
 
-/// `util::RunLoop::Get()->invokeCancellable(fn)`: runs `f` on the current
-/// `RunLoop` unless the returned request is dropped first. The task stays on
-/// this thread (a `LocalObject`); the loop gets a `Send` handle to it.
+/// Runs `f` on the current `RunLoop` unless the returned request is dropped
+/// first. The task stays on this thread (a `LocalObject`); the loop gets a
+/// `Send` handle to it.
 fn invoke_cancellable(f: impl FnOnce() + 'static) -> Box<dyn AsyncRequest> {
     let task: CancellableTask = Rc::new(RefCell::new(Some(Box::new(f))));
     let handle = LocalObject::from_rc(task.clone());
@@ -175,8 +169,8 @@ struct Inner {
     traversal: Cell<u64>,
 }
 
-/// `OfflineDownload`: the download of an offline region's resources. Not
-/// `Clone`: tests and observers hold a `WeakOfflineDownload`.
+/// The download of an offline region's resources. Not `Clone`: tests and
+/// observers hold a `WeakOfflineDownload`.
 pub struct OfflineDownload {
     inner: Rc<Inner>,
 }
@@ -189,14 +183,14 @@ pub struct WeakOfflineDownload {
 }
 
 impl WeakOfflineDownload {
-    /// `setState` on the download, if it still exists.
+    /// Sets the download's state, if the download still exists.
     pub fn set_state(&self, state: OfflineRegionDownloadState) {
         if let Some(inner) = self.inner.upgrade() {
             inner.set_state(state);
         }
     }
 
-    /// `getStatus` of the download, if it still exists.
+    /// The download's status, if the download still exists.
     #[must_use]
     pub fn get_status(&self) -> Option<OfflineRegionStatus> {
         self.inner.upgrade().map(|inner| inner.get_status())
@@ -204,7 +198,6 @@ impl WeakOfflineDownload {
 }
 
 impl OfflineDownload {
-    /// `OfflineDownload(int64_t id, OfflineRegionDefinition, OfflineDatabase&, FileSource& onlineFileSource)`.
     pub fn new(
         id: i64,
         definition: OfflineRegionDefinition,
@@ -237,17 +230,14 @@ impl OfflineDownload {
         WeakOfflineDownload { inner: Rc::downgrade(&self.inner) }
     }
 
-    /// `setObserver(std::unique_ptr<OfflineRegionObserver>)`.
     pub fn set_observer(&self, observer: Option<Rc<dyn OfflineRegionObserver>>) {
         *self.inner.observer.borrow_mut() = observer.unwrap_or_else(|| Rc::new(NullObserver));
     }
 
-    /// `setState(OfflineRegionDownloadState)`.
     pub fn set_state(&self, state: OfflineRegionDownloadState) {
         self.inner.set_state(state);
     }
 
-    /// `getStatus()`.
     #[must_use]
     pub fn get_status(&self) -> OfflineRegionStatus {
         self.inner.get_status()
@@ -268,13 +258,11 @@ impl Inner {
         self.observer.borrow().clone()
     }
 
-    /// `observer->statusChanged(status)`.
     fn notify_status_changed(&self) {
         let status = *self.status.borrow();
         self.observer().status_changed(status);
     }
 
-    /// `requests.insert(requests.begin(), nullptr)`.
     fn insert_request(&self) -> u64 {
         let id = self.next_request_id.get();
         self.next_request_id.set(id + 1);

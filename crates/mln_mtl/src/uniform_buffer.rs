@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/uniform_buffer.hpp and src/mln/mtl/uniform_buffer.cpp
-//
 // `mtl::UniformBufferArray` only adds `bindMtl` to the gfx array, so the
 // port keeps the gfx struct and binds it with `bind_uniform_buffer_array`.
 
@@ -27,7 +25,6 @@ impl UniformBuffer {
         UniformBuffer { buffer }
     }
 
-    /// `createUniformBuffer(data, size, persistent)`
     pub fn create(context: &Context, data: &[u8], persistent: bool) -> Self {
         UniformBuffer::new(BufferResource::new(
             context,
@@ -78,9 +75,8 @@ impl uniform_buffer::UniformBuffer for UniformBuffer {
     }
 }
 
-/// `UniformBufferArray::bindMtl`: binds each buffer at its id, to the
-/// vertex and fragment functions both except for the reserved vertex-only
-/// and fragment-only ids.
+/// Binds each buffer of `array` at its id, to the vertex and fragment functions
+/// both except for the reserved vertex-only and fragment-only ids.
 pub fn bind_uniform_buffer_array(array: &UniformBufferArray, render_pass: &RenderPass) {
     for id in 0..array.allocated_size() {
         let Some(uniform_buffer) = array.get(id) else {

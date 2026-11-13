@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/tile_layer_group.hpp and src/mln/mtl/tile_layer_group.cpp
-
 use std::cell::OnceCell;
 
 use mln_gfx::depth_mode::DepthMode;

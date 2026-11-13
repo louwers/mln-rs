@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/render_raster_layer.hpp and
-// src/mln/renderer/layers/render_raster_layer.cpp (drawable path).
-//
 // Differences in mechanics, not in output:
 // - C++ keeps the GPU texture in the (shared) RasterBucket; here the layer
 //   keeps one texture per bucket id (`textures`), because buckets are Send +
@@ -81,9 +78,7 @@ pub struct RenderRasterLayer {
     /// `bucket.texture2d`, per bucket.
     textures: HashMap<SimpleIdentity, Texture2DPtr>,
 
-    /// `const ImageSourceRenderData* imageData`.
     image_data: Option<Rc<ImageSourceRenderData>>,
-    /// `LayerGroupPtr imageLayerGroup`.
     image_layer_group: Option<LayerGroupBasePtr>,
 }
 
@@ -107,8 +102,8 @@ impl RenderRasterLayer {
         }
     }
 
-    /// `setTextures(builder, bucket)`: create the bucket's texture if needed
-    /// and attach it to both image slots.
+    /// Creates the bucket's texture if needed and attaches it to both image
+    /// slots.
     fn set_textures(&mut self, context: &dyn Context, builder: &mut dyn DrawableBuilder, bucket: &RasterBucket) {
         let Some(image) = &bucket.image else {
             return;

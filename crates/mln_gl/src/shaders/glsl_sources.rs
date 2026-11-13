@@ -63,7 +63,6 @@
 
 use super::shader_source::GlslShaderSource;
 
-/// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::OpenGL>`
 pub const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "AtmosphereShader",
     name: r"AtmosphereShader",
@@ -196,7 +195,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::OpenGL>`
 pub const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundPatternShader",
     name: r"BackgroundPatternShader",
@@ -282,7 +280,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::OpenGL>`
 pub const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundShader",
     name: r"BackgroundShader",
@@ -312,7 +309,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::OpenGL>`
 pub const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CircleShader",
     name: r"CircleShader",
@@ -570,7 +566,6 @@ lowp float stroke_opacity = u_stroke_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::OpenGL>`
 pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     built_in: "ClippingMaskProgram",
     name: r"ClippingMaskProgram",
@@ -594,7 +589,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::OpenGL>`
 pub const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionBoxShader",
     name: r"CollisionBoxShader",
@@ -679,7 +673,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::OpenGL>`
 pub const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionCircleShader",
     name: r"CollisionCircleShader",
@@ -802,7 +795,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::OpenGL>`
 pub const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "ColorReliefShader",
     name: r"ColorReliefShader",
@@ -913,7 +905,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::OpenGL>`
 pub const DEBUG_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "DebugShader",
     name: r"DebugShader",
@@ -956,7 +947,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionInstancedShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionInstancedShader",
     name: r"FillExtrusionInstancedShader",
@@ -1104,7 +1094,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionPatternInstancedShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternInstancedShader",
     name: r"FillExtrusionPatternInstancedShader",
@@ -1352,7 +1341,6 @@ mediump vec4 pattern_to = u_pattern_to;
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternShader",
     name: r"FillExtrusionPatternShader",
@@ -1588,7 +1576,6 @@ mediump vec4 pattern_to = u_pattern_to;
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionShader",
     name: r"FillExtrusionShader",
@@ -1724,7 +1711,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlinePatternShader",
     name: r"FillOutlinePatternShader",
@@ -1929,7 +1915,6 @@ mediump vec4 pattern_to = u_pattern_to;
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineShader",
     name: r"FillOutlineShader",
@@ -2029,7 +2014,6 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
     name: r"FillOutlineTriangulatedShader",
@@ -2149,7 +2133,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillPatternShader",
     name: r"FillPatternShader",
@@ -2347,7 +2330,6 @@ mediump vec4 pattern_to = u_pattern_to;
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillShader",
     name: r"FillShader",
@@ -2428,7 +2410,6 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::OpenGL>`
 pub const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "GlobeDepthShader",
     name: r"GlobeDepthShader",
@@ -2444,7 +2425,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::OpenGL>`
 pub const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapShader",
     name: r"HeatmapShader",
@@ -2566,7 +2546,6 @@ highp float weight = u_weight;
 ",
 };
 
-/// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::OpenGL>`
 pub const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapTextureShader",
     name: r"HeatmapTextureShader",
@@ -2624,7 +2603,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::OpenGL>`
 pub const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadePrepareShader",
     name: r"HillshadePrepareShader",
@@ -2730,7 +2708,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::OpenGL>`
 pub const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadeShader",
     name: r"HillshadeShader",
@@ -2938,7 +2915,6 @@ void main() {
 "#,
 };
 
-/// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientSDFShader",
     name: r"LineGradientSDFShader",
@@ -3223,7 +3199,6 @@ lowp float floorwidth = u_floorwidth;
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientShader",
     name: r"LineGradientShader",
@@ -3457,7 +3432,6 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LinePatternShader",
     name: r"LinePatternShader",
@@ -3784,7 +3758,6 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineSDFShader",
     name: r"LineSDFShader",
@@ -4073,7 +4046,6 @@ lowp float floorwidth = u_floorwidth;
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineShader",
     name: r"LineShader",
@@ -4311,7 +4283,6 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::OpenGL>`
 pub const PRELUDE: GlslShaderSource = GlslShaderSource {
     built_in: "Prelude",
     name: r"Prelude",
@@ -4582,7 +4553,6 @@ bool clippedAtAntimeridian(highp float tileX) {
 ",
 };
 
-/// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::OpenGL>`
 pub const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "RasterShader",
     name: r"RasterShader",
@@ -4682,7 +4652,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::OpenGL>`
 pub const SKY_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SkyShader",
     name: r"SkyShader",
@@ -4726,7 +4695,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::OpenGL>`
 pub const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolIconShader",
     name: r"SymbolIconShader",
@@ -4958,7 +4926,6 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::OpenGL>`
 pub const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolSDFShader",
     name: r"SymbolSDFShader",
@@ -5304,7 +5271,6 @@ lowp float halo_blur = u_halo_blur;
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::OpenGL>`
 pub const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolTextAndIconShader",
     name: r"SymbolTextAndIconShader",
@@ -5667,7 +5633,6 @@ lowp float halo_blur = u_halo_blur;
 ",
 };
 
-/// `ShaderSource<BuiltIn::WideVectorShader, gfx::Backend::Type::OpenGL>`
 pub const WIDE_VECTOR_SHADER: GlslShaderSource =
     GlslShaderSource { built_in: "WideVectorShader", name: r"WideVectorShader", vertex: r"", fragment: r"" };
 

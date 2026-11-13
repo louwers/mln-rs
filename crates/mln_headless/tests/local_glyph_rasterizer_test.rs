@@ -1,5 +1,3 @@
-// Ports test/text/local_glyph_rasterizer.test.cpp.
-//
 // LoadLocalCJKGlyph in glyph_manager.test.cpp exercises the
 // platform-independent part of LocalGlyphRasterizer. This test renders a
 // map with the platform's local glyph rasterizer. Only the NoLocal* cases
@@ -30,9 +28,9 @@ fn read_file(relative: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// `test::getImageDiff` (test/src/mln/test/util.cpp). The C++ writes
-/// `<base>/actual.png` next to the fixture; the port writes it to
-/// `target/tmp/local_glyph_rasterizer_test` instead.
+/// The share of pixels of `actual` that differ from `<base>/expected.png`
+/// (1 for a different size). Writes `actual` to
+/// `target/tmp/local_glyph_rasterizer_test` rather than next to the fixture.
 fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64) -> f64 {
     let expected = decode_image(&read_file(&format!("{base}/expected.png"))).expect("decode expected.png");
 
@@ -58,13 +56,11 @@ fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64)
     pixels as f64 / (f64::from(expected.size.width) * f64::from(expected.size.height))
 }
 
-/// `test::checkImage(base, actual, imageThreshold, pixelThreshold)`.
 fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
     let diff = get_image_diff(base, actual, pixel_threshold);
     assert!(diff <= image_threshold, "{base}: difference {diff} > {image_threshold}");
 }
 
-/// `LocalGlyphRasterizerTest`.
 struct LocalGlyphRasterizerTest {
     _run_loop: RunLoop,
     frontend: HeadlessFrontend,
@@ -72,8 +68,7 @@ struct LocalGlyphRasterizerTest {
 }
 
 impl LocalGlyphRasterizerTest {
-    /// `LocalGlyphRasterizerTest(fontFamily)`.
-    // TODO(port): the C++ passes `fontFamily` to the HeadlessFrontend's
+    // The C++ passes `fontFamily` to the HeadlessFrontend's
     // LocalGlyphRasterizer; the port's platform/default rasterizer refuses
     // every glyph (as C++'s does without a font family), so only `None` is
     // supported here.

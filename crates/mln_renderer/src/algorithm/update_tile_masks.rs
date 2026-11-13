@@ -1,16 +1,12 @@
-// Ports src/mln/algorithm/update_tile_masks.hpp.
-
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 
 use crate::tile::tile::Tile;
 use crate::tile_mask::TileMask;
 
-/// `tileNeedsMask(tile)`.
 fn tile_needs_mask(tile: &dyn Tile) -> bool {
     tile.base().used_by_rendered_layers.get()
 }
 
-/// `computeTileMasks(root, ref, begin, end, mask)`.
 fn compute_tile_masks(
     root: &CanonicalTileID,
     ref_: &UnwrappedTileID,
@@ -49,10 +45,9 @@ fn compute_tile_masks(
     ));
 }
 
-/// `updateTileMasks(renderables)`: updates the `TileMasks` for all renderable
-/// tiles (sorted by id). A `TileMask` describes all regions within a
-/// renderable tile that are *not* covered by other renderable tiles, as
-/// tile ids relative to the tile (see the C++ header for the picture).
+/// Updates the `TileMask`s of all renderable tiles, which are sorted by id.
+/// A tile's mask describes the regions of the tile that are *not* covered by
+/// other renderable tiles, as tile ids relative to the tile.
 pub fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
     for (i, (id, tile)) in renderables.iter().enumerate() {
         if !tile_needs_mask(*tile) {
@@ -72,7 +67,6 @@ pub fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
     }
 }
 
-// Ports test/algorithm/update_tile_masks.test.cpp.
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;

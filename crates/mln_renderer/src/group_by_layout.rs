@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/group_by_layout.hpp and
-// src/mln/renderer/group_by_layout.cpp.
-//
 // Deviation: C++ groups into an `unordered_map` keyed by `LayoutGroupKey`
 // and the worker iterates it in hash order; the port keeps the groups in
 // the order their first layer appears. Groups are independent (one bucket
@@ -15,7 +12,6 @@ use mln_style::layer::LayerTypeInfo;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
 
-/// `LayoutGroupKey`.
 pub struct LayoutGroupKey {
     // Direct comparable fields (fast path)
     pub type_info: &'static LayerTypeInfo,
@@ -91,10 +87,9 @@ fn create_group_key(impl_: &Arc<dyn layer::Impl>) -> LayoutGroupKey {
     }
 }
 
-/// `GroupMap`: the groups with their keys, in first-appearance order.
+/// The groups with their keys, in first-appearance order.
 pub type GroupMap = Vec<(LayoutGroupKey, Vec<Arc<dyn LayerProperties>>)>;
 
-/// `groupLayers(layers)`.
 pub fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
     let mut group_map: GroupMap = Vec::with_capacity(layers.len());
 

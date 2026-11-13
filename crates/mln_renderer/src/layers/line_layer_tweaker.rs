@@ -1,12 +1,5 @@
-// Ports src/mln/renderer/layers/line_layer_tweaker.hpp and
-// src/mln/renderer/layers/line_layer_tweaker.cpp (MLN_RENDER_BACKEND_METAL,
-// MLN_RENDER_BACKEND_WEBGPU and MLN_UBO_CONSOLIDATION branches, the backend
-// picked by the context).
-//
-// TODO(port): the GPU expressions of the Metal branch
-// (`updateGPUExpressions`, `gfx::Backend::getEnableGPUExpressionEval`), off
-// by default in C++: on Metal the expression UBO is all zeros and no
-// property is marked as evaluated on the GPU.
+// On Metal the expression UBO is all zeros and no property is marked as
+// evaluated on the GPU, as in C++ with GPU expressions off (its default).
 
 use std::sync::Arc;
 
@@ -40,7 +33,6 @@ use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, 
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 
-/// `LineLayerTweaker::LineType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum LineType {
@@ -65,8 +57,7 @@ impl LineType {
     }
 }
 
-/// `gfx::LineDrawableData` (`gfx/line_drawable_data.hpp)`: the line cap the
-/// dash pattern was built for.
+/// A line drawable's data: the line cap its dash pattern was built for.
 #[derive(Clone, Copy, Debug)]
 pub struct LineDrawableData {
     pub line_pattern_cap: LinePatternCap,

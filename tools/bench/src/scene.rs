@@ -127,13 +127,13 @@ pub fn basemap_style(fixtures: &Path) -> String {
 /// When the map draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// `MapMode::Static`: [`Scene::render_still`] draws a complete frame.
+    /// A static map: [`Scene::render_still`] draws a complete frame.
     Still,
-    /// `MapMode::Continuous`, drawn only when the case calls
+    /// A continuous map, drawn only when the case calls
     /// [`Scene::render_frame`], as a host on a display clock does.
     OnDemand,
-    /// `MapMode::Continuous`, drawn whenever the map updates, as the run
-    /// loop delivers the update.
+    /// A continuous map, drawn whenever the map updates, as the run loop
+    /// delivers the update.
     Driven,
 }
 

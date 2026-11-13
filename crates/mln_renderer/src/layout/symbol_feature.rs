@@ -1,5 +1,3 @@
-// Ports src/mln/layout/symbol_feature.hpp.
-//
 // C++ keeps the tile's `GeometryTileFeature` (which may borrow the source
 // layer the SymbolLayout holds). A Rust feature borrows its layer, and the
 // layout lives across worker messages, so a SymbolFeature keeps an owned
@@ -12,7 +10,6 @@ use mln_text::TaggedString;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::FeatureType;
 
-/// `SymbolFeature`.
 #[derive(Clone, Debug)]
 pub struct SymbolFeature {
     feature_type: FeatureType,
@@ -30,7 +27,6 @@ pub struct SymbolFeature {
 }
 
 impl SymbolFeature {
-    /// `SymbolFeature(std::unique_ptr<GeometryTileFeature>)`.
     pub fn new(feature: &dyn GeometryTileFeature) -> Self {
         let geometry = feature.get_geometries().clone();
         SymbolFeature {

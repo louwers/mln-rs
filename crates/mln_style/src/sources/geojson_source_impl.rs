@@ -1,7 +1,3 @@
-// Ports src/mln/style/sources/geojson_source_impl.hpp and
-// src/mln/style/sources/geojson_source_impl.cpp (GeoJSONSource::Impl,
-// GeoJSONVTData, SuperclusterData and GeoJSONData::create).
-
 use std::sync::{Arc, Weak};
 
 use feature::{Feature, PropertyMap, Value};
@@ -22,21 +18,20 @@ use super::geojson_source::{Features, GeoJSONData, GeoJSONOptions, TileFeatures}
 use crate::expression::{Expression, from_expression_value};
 use crate::source_impl::{self, ImplBase};
 
-/// `geoJSONVT_impl->getTile(z, x, y).features`. C++ `getTile` throws
-/// `std::runtime_error` for a zoom above maxZoom or a missing parent tile;
-/// the port logs it and hands out an empty tile.
+/// The features of tile `id`. For a zoom above the maximum zoom or a missing
+/// parent tile, `get_tile` fails (C++ throws); this logs the error and hands
+/// out an empty tile.
 fn geojsonvt_tile_features(vt: &Mutex<geojson_vt::GeoJSONVT>, id: &CanonicalTileID) -> TileFeatures {
     match vt.lock().get_tile(id.z, id.x, id.y) {
         Ok(tile) => tile.features.clone(),
         Err(e) => {
-            // TODO(port): C++ lets the exception propagate.
+            // C++ lets the exception propagate; here it is logged.
             Log::error(Event::General, e);
             TileFeatures::new()
         }
     }
 }
 
-/// `GeoJSONVTData`.
 struct GeoJSONVTData {
     /// Accessed on worker thread.
     impl_: Arc<Mutex<geojson_vt::GeoJSONVT>>,
@@ -78,7 +73,6 @@ impl GeoJSONData for GeoJSONVTData {
     }
 }
 
-/// `SuperclusterData`.
 struct SuperclusterData {
     impl_: supercluster::Supercluster,
 }
@@ -107,7 +101,6 @@ impl GeoJSONData for SuperclusterData {
     }
 }
 
-/// `evaluateFeature<Value>(f, expression, accumulated)`.
 fn evaluate_feature(f: &Feature<f64>, expression: &Arc<dyn Expression>, accumulated: Option<&Value>) -> Value {
     if let Ok(result) = evaluate_accumulated(expression.as_ref(), accumulated, f)
         && let Some(typed) = from_expression_value::<Value>(&result)
@@ -117,7 +110,6 @@ fn evaluate_feature(f: &Feature<f64>, expression: &Arc<dyn Expression>, accumula
     Value::default()
 }
 
-/// `GeoJSONData::create(geoJSON, sequencedScheduler, options)`.
 pub(super) fn create(
     geojson: &GeoJSON,
     sequenced_scheduler: SchedulerPtr,
@@ -186,9 +178,6 @@ pub(super) fn create(
     }))
 }
 
-/// `GeoJSONSource::Impl`.
-/// Cloning it is the C++ copy constructor (`Impl(const Impl&) = default`
-/// via `createMutable`).
 #[derive(Debug, Clone)]
 pub struct Impl {
     base: ImplBase,
@@ -199,14 +188,12 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// `Impl(std::string id, Arc<GeoJSONOptions>)`.
     #[must_use]
     pub fn new(id: String, options: Arc<GeoJSONOptions>) -> Self {
         let synchronous_update = options.synchronous_update;
         Impl { base: ImplBase::new(SourceType::GeoJSON, id), options, data: None, synchronous_update }
     }
 
-    /// `Impl(const GeoJSONSource::Impl&, std::shared_ptr<GeoJSONData>)`.
     #[must_use]
     pub fn with_data(other: &Impl, data: Option<Arc<dyn GeoJSONData>>) -> Self {
         Impl {
@@ -222,7 +209,7 @@ impl Impl {
         Range::new(self.options.minzoom, self.options.maxzoom)
     }
 
-    /// `std::weak_ptr<GeoJSONData> getData()` (`None` = an empty `weak_ptr`).
+    /// A weak reference to the data, if there is any.
     pub fn get_data(&self) -> Option<Weak<dyn GeoJSONData>> {
         self.data.as_ref().map(Arc::downgrade)
     }

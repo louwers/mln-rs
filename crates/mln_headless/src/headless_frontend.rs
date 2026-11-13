@@ -1,8 +1,3 @@
-// Ports platform/default/include/mln/gfx/headless_frontend.hpp and
-// platform/default/src/mln/gfx/headless_frontend.cpp: a map's renderer
-// drawing into an offscreen target on the calling thread, for tests, tools
-// and snapshots.
-//
 // C++ renders with the one backend it was built with. The frontend renders
 // on the device it is given, or on WebGPU, or on the backend the
 // environment variable MLN_RENDER_BACKEND names for the test harness:
@@ -23,7 +18,6 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-/// `HeadlessFrontend::RenderResult`.
 pub struct RenderResult {
     pub image: PremultipliedImage,
     pub stats: RenderingStats,
@@ -76,14 +70,12 @@ pub fn harness_device() -> Result<Device, Error> {
     Device::with_backend(backend, options)
 }
 
-/// `{static_cast<uint32_t>(size.width * pixelRatio), static_cast<uint32_t>(size.height * pixelRatio)}`.
 fn physical_size(size: Size, pixel_ratio: f32) -> Size {
     Size::new((size.width as f32 * pixel_ratio) as u32, (size.height as f32 * pixel_ratio) as u32)
 }
 
 impl HeadlessFrontend {
-    /// `HeadlessFrontend(Size, float pixelRatio)` with
-    /// `invalidateOnUpdate = true`, on [`harness_device`].
+    /// A frontend that invalidates on update, on [`harness_device`].
     ///
     /// Fails as [`harness_device`] does, and with the backend's error when
     /// it can't render on the device.
@@ -91,17 +83,14 @@ impl HeadlessFrontend {
         Self::with_options(size, pixel_ratio, true)
     }
 
-    /// `HeadlessFrontend(Size, float pixelRatio, ..., invalidateOnUpdate)`:
-    /// its renderer has a glyph cache of its own.
-    // TODO(port): localFontFamily.
+    /// A frontend whose renderer has a glyph cache of its own.
     pub fn with_options(size: Size, pixel_ratio: f32, invalidate_on_update: bool) -> Result<Self, Error> {
         Self::with_glyph_cache(size, pixel_ratio, invalidate_on_update, Arc::default())
     }
 
-    /// `HeadlessFrontend(Size, float pixelRatio, ..., invalidateOnUpdate,
-    /// std::shared_ptr<GlyphCache>)`: frontends given the same `GlyphCache`
-    /// share the glyphs their renderers parse from glyph PBFs, also across
-    /// threads.
+    /// A frontend whose renderer uses `glyph_cache`. Frontends given the same
+    /// `GlyphCache` share the glyphs their renderers parse from glyph PBFs,
+    /// also across threads.
     pub fn with_glyph_cache(
         size: Size,
         pixel_ratio: f32,
@@ -144,7 +133,7 @@ impl HeadlessFrontend {
         Ok(HeadlessFrontend { shared })
     }
 
-    /// `HeadlessFrontend(float pixelRatio, ...)`: a 256x256 frontend.
+    /// A 256x256 frontend.
     pub fn with_pixel_ratio(pixel_ratio: f32) -> Result<Self, Error> {
         Self::new(Size::new(256, 256), pixel_ratio)
     }
@@ -193,12 +182,11 @@ impl HeadlessFrontend {
         *self.shared.updates.borrow_mut() = Some(reader);
     }
 
-    /// `getRenderer()`: runs `f` with the renderer (C++ returns a pointer).
+    /// Runs `f` with the renderer.
     pub fn with_renderer<R>(&self, f: impl FnOnce(&mut Renderer) -> R) -> R {
         f(&mut self.shared.renderer())
     }
 
-    /// `getBackend()`.
     #[must_use]
     pub fn get_backend(&self) -> &dyn RendererBackend {
         &*self.shared.backend

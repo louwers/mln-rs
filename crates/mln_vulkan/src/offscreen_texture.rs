@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/offscreen_texture.hpp and src/mln/vulkan/offscreen_texture.cpp
-//
 // Differences from C++:
 // - The render pass is the context's for the texture's format
 //   (`Context::get_render_pass`).
@@ -70,8 +68,8 @@ impl OffscreenTextureResource {
         self.color_texture.clone()
     }
 
-    /// `createRenderPass()`: the render pass and the framebuffer over the
-    /// color texture.
+    /// Makes the render pass and the framebuffer over the color texture, if
+    /// they aren't made yet.
     fn create_render_pass(&self) {
         if self.framebuffer.get() != vk::Framebuffer::null() {
             return;
@@ -148,8 +146,7 @@ impl Drop for OffscreenTextureResource {
     }
 }
 
-/// `vulkan::OffscreenTexture`: a draw target over a color texture, without
-/// depth or stencil.
+/// A draw target over a color texture, without depth or stencil.
 pub struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,

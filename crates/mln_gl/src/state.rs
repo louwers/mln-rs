@@ -1,5 +1,3 @@
-// Ports src/mln/gl/state.hpp and src/mln/gl/value.hpp/.cpp
-//
 // C++ wraps each piece of GL state in a `State<value::T>` that remembers the
 // value it last set, and the context has one member per piece. The port
 // keeps them in one struct of `Cached` values. Only the states the drawable
@@ -89,8 +87,8 @@ pub struct State {
 }
 
 impl State {
-    /// `Context::setDirtyState`: forgets what GL was last told, after code
-    /// outside the backend has used the context.
+    /// Forgets what GL was last told, after code outside the backend has used
+    /// the context.
     pub fn set_dirty(&self) {
         self.program.set(Cached::Dirty);
         self.vertex_array.set(Cached::Dirty);
@@ -141,7 +139,6 @@ impl State {
         }
     }
 
-    /// `value::Program`
     pub fn use_program(&self, gl: &Gl, program: Option<ProgramID>) {
         if changed(&self.program, program) {
             // SAFETY: the program is alive, or none.
@@ -156,7 +153,6 @@ impl State {
         }
     }
 
-    /// `value::BindVertexArray`
     pub fn bind_vertex_array(&self, gl: &Gl, vertex_array: Option<VertexArrayID>) {
         if changed(&self.vertex_array, vertex_array) {
             // SAFETY: the vertex array is alive, or none.
@@ -164,7 +160,6 @@ impl State {
         }
     }
 
-    /// `value::BindFramebuffer`
     pub fn bind_framebuffer(&self, gl: &Gl, framebuffer: Option<FramebufferID>) {
         if changed(&self.framebuffer, framebuffer) {
             // SAFETY: the framebuffer is alive, or the default one.
@@ -172,8 +167,8 @@ impl State {
         }
     }
 
-    /// `value::ActiveTextureUnit` and `value::BindTexture`: binds `texture`
-    /// to `unit`, which becomes the active one if GL has to be told.
+    /// Binds `texture` to `unit`, which becomes the active one if GL has to
+    /// be told.
     pub fn bind_texture(&self, gl: &Gl, unit: u32, texture: Option<TextureID>) {
         let Some(cell) = self.textures.get(unit as usize) else {
             debug_assert!(false, "texture unit out of range");
@@ -239,7 +234,6 @@ impl State {
         }
     }
 
-    /// `Context::setDepthMode`
     pub fn set_depth_mode(&self, gl: &Gl, depth: &DepthMode) {
         if depth.func == DepthFunctionType::Always && depth.mask != DepthMaskType::ReadWrite {
             Self::capability(gl, &self.depth_test, glow::DEPTH_TEST, false);
@@ -269,7 +263,6 @@ impl State {
         }
     }
 
-    /// `Context::setStencilMode`
     pub fn set_stencil_mode(&self, gl: &Gl, stencil: &StencilMode) {
         if stencil.test == Test::Always && stencil.mask == 0 {
             Self::capability(gl, &self.stencil_test, glow::STENCIL_TEST, false);
@@ -302,7 +295,6 @@ impl State {
         }
     }
 
-    /// `Context::setColorMode`
     pub fn set_color_mode(&self, gl: &Gl, color: &ColorMode) {
         match color.blend_function {
             mln_gfx::color_mode::BlendFunction::Replace => Self::capability(gl, &self.blend, glow::BLEND, false),
@@ -338,7 +330,6 @@ impl State {
         }
     }
 
-    /// `Context::setCullFaceMode`
     pub fn set_cull_face_mode(&self, gl: &Gl, mode: &CullFaceMode) {
         Self::capability(gl, &self.cull_face, glow::CULL_FACE, mode.enabled);
         // These shouldn't need to be updated when face culling is disabled,
@@ -354,8 +345,8 @@ impl State {
         }
     }
 
-    /// `value::ScissorTest`: restricts drawing to `rect`, or to nothing less
-    /// than the framebuffer without one.
+    /// Restricts drawing to `rect`, or to nothing less than the framebuffer
+    /// without one.
     pub fn set_scissor(&self, gl: &Gl, rect: Option<Rect>) {
         if !changed(&self.scissor, rect) {
             return;
@@ -372,7 +363,6 @@ impl State {
         }
     }
 
-    /// `value::Viewport`
     pub fn set_viewport(&self, gl: &Gl, rect: Rect) {
         if changed(&self.viewport, rect) {
             // SAFETY: the sizes aren't negative.
@@ -380,7 +370,6 @@ impl State {
         }
     }
 
-    /// `value::LineWidth`
     pub fn set_line_width(&self, gl: &Gl, width: f32) {
         if changed(&self.line_width, width) {
             // SAFETY: the width is positive (`DrawMode`).
@@ -388,7 +377,6 @@ impl State {
         }
     }
 
-    /// `value::PixelStorePack`
     pub fn set_pixel_store_pack_alignment(&self, gl: &Gl, alignment: i32) {
         if changed(&self.pixel_store_pack_alignment, alignment) {
             // SAFETY: an alignment GL defines.
@@ -396,7 +384,6 @@ impl State {
         }
     }
 
-    /// `value::PixelStoreUnpack`
     pub fn set_pixel_store_unpack_alignment(&self, gl: &Gl, alignment: i32) {
         if changed(&self.pixel_store_unpack_alignment, alignment) {
             // SAFETY: an alignment GL defines.
@@ -404,8 +391,8 @@ impl State {
         }
     }
 
-    /// `Context::clear`: clears the buffers given a value, all of each: the
-    /// scissor test and the buffers' write masks would restrict it.
+    /// Clears the buffers given a value, all of each: the scissor test and
+    /// the buffers' write masks would restrict it.
     pub fn clear(&self, gl: &Gl, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
         let mut mask = 0;
         if let Some(color) = color {

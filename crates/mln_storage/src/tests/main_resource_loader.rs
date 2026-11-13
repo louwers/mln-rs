@@ -1,6 +1,5 @@
-// Ports test/storage/main_resource_loader.test.cpp against the test server
-// (mln_test_server; C++: 127.0.0.1:3000). Every test takes `serial()`:
-// NetworkStatus is process-wide, and gtest runs one test at a time.
+// The tests run against the test server (`mln_test_server`). Every test
+// takes `serial()`: `NetworkStatus` is process-wide.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -145,7 +144,8 @@ fn volatile_storage_policy() {
     run_loop.run();
 }
 
-/// `CacheRevalidateSame` and `CacheRevalidateModified` share their structure.
+/// Caches the response at `path`, then requests it again so that it is
+/// revalidated with the server; `check` inspects the second response.
 fn cache_revalidate(path: &str, check: fn(&Response)) {
     let _serial = serial();
     let file_sources = FileSourceManager::new();
@@ -338,8 +338,8 @@ fn http_issue_1369() {
     run_loop.run();
 }
 
-/// `OptionalNonExpired` and `OptionalExpired`: a cached value is returned for a
-/// cache-only request whether it has expired or not.
+/// A cached value is returned for a cache-only request whether it has
+/// expired or not.
 fn optional_cached(expires: Timestamp) {
     let _serial = serial();
     let file_sources = FileSourceManager::new();

@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/semiliteral.hpp and
-// src/mln/style/expression/semiliteral.cpp.
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 

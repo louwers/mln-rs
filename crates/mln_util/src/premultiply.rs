@@ -1,11 +1,9 @@
-// Ports src/mln/util/premultiply.cpp and include/mln/util/premultiply.hpp
-
 use std::num::NonZeroU32;
 
 use crate::image::{PremultipliedImage, UnassociatedImage};
 
-/// `util::premultiply(UnassociatedImage&&)`: `c = (c * a + 127) / 255` in
-/// `int` arithmetic.
+/// Multiplies each color channel by alpha: `c = (c * a + 127) / 255` in
+/// integer arithmetic.
 #[must_use]
 pub fn premultiply(src: UnassociatedImage) -> PremultipliedImage {
     let (size, mut data) = src.into_parts();
@@ -19,10 +17,9 @@ pub fn premultiply(src: UnassociatedImage) -> PremultipliedImage {
     PremultipliedImage::from_vec(size, data)
 }
 
-/// `util::unpremultiply(PremultipliedImage&&)`: for `a != 0`,
-/// `c = static_cast<uint8_t>((255 * c + (a / 2)) / a)`. The cast wraps
-/// modulo 256 when `c > a` (not a valid premultiplied pixel); `as u8` does
-/// the same.
+/// Divides each color channel by alpha: for `a != 0`,
+/// `c = ((255 * c + (a / 2)) / a) as u8`. The cast wraps modulo 256 when
+/// `c > a` (not a valid premultiplied pixel), as the C++ `static_cast` does.
 #[must_use]
 pub fn unpremultiply(src: PremultipliedImage) -> UnassociatedImage {
     let (size, mut data) = src.into_parts();

@@ -1,5 +1,5 @@
-// Ports FreeTypeFace::rasterizeGlyph (src/mln/text/freetype.cpp) and the
-// FreeType path it takes:
+// Glyph rasterization, following the FreeType path that C++
+// `FreeTypeFace::rasterizeGlyph` takes:
 // - `FT_Load_Glyph(face, glyph, FT_LOAD_DEFAULT)` at 24 px: hinted with the
 //   font's TrueType instructions or PostScript hints, or autohinted when a
 //   TrueType font has no hinting programs. The hinted outline comes from
@@ -8,12 +8,12 @@
 //   coordinates and implied midpoints. The advance is FreeType's
 //   `ft_glyphslot_grid_fit_metrics` rounding of the hinted advance.
 // - `FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL)`: the bitmap box of
-//   `ft_glyphslot_preset_bitmap` and the smooth rasterizer (`ft::grays`, a
-//   port of ftgrays.c), oversampled for glyphs flagged as overlapping.
+//   `ft_glyphslot_preset_bitmap` and the smooth rasterizer (`ft::grays`,
+//   after ftgrays.c), oversampled for glyphs flagged as overlapping.
 //
-// TODO(port): embedded bitmap glyphs (CBDT/sbix/EBDT, e.g. color emoji
-// fonts without outlines) give an empty glyph here.
-// TODO(port): FT_Load_Glyph failures leave the previous glyph in FreeType's
+// Embedded bitmap glyphs (CBDT/sbix/EBDT, e.g. color emoji fonts without
+// outlines) give an empty glyph.
+// FT_Load_Glyph failures leave the previous glyph in FreeType's
 // glyph slot, which the C++ then renders; here a glyph that cannot be loaded
 // is empty.
 
@@ -93,7 +93,6 @@ fn pix_round(x: i64) -> i64 {
     (x + 32) & !63
 }
 
-/// `FreeTypeFace::rasterizeGlyph`.
 pub fn rasterize_glyph(face: &FreeTypeFace, glyph: GlyphID) -> Glyph {
     let border = u32::from(Glyph::BORDER_SIZE);
     let mut fixed_metrics = Glyph { id: glyph, ..Glyph::default() };
@@ -136,7 +135,6 @@ pub fn rasterize_glyph(face: &FreeTypeFace, glyph: GlyphID) -> Glyph {
     let buffer = if overflow || collector.segments.is_empty() {
         if overflow {
             // Raster_Overflow: nothing is rendered.
-            // TODO(port): check what the glyph slot holds then.
             width = 0;
             rows = 0;
         }

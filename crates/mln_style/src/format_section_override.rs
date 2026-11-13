@@ -1,9 +1,6 @@
-// Ports include/mln/style/expression/format_section_override.hpp and the
-// `setOverrides`/`setOverride` half of `FormatSectionOverrides`
-// (src/mln/style/layers/symbol_layer_impl.hpp). In mln_style, with the
-// `PossiblyEvaluatedPropertyValue` it wraps (renderer/, a cut point). The
-// only overridable property is `text-color`, so the template is instantiated
-// for `Color`.
+// The `format-section-override` expression, and the functions that install it
+// in a symbol layer's paint properties. The only overridable property is
+// `text-color`, so the expression is for `Color` values.
 
 use std::sync::Arc;
 
@@ -20,7 +17,6 @@ use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaint
 use crate::property_expression::PropertyExpression;
 use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 
-/// `FormatSectionOverride<Color>`.
 pub struct FormatSectionOverride {
     base: ExpressionBase,
     default_value: PossiblyEvaluatedPropertyValue<Color>,
@@ -107,8 +103,6 @@ impl Expression for FormatSectionOverride {
     }
 }
 
-/// `SymbolLayerPaintPropertyOverrides::setOverrides(layout, evaluated,
-/// unevaluated, globalState)` (`setOverride<TextColor>`).
 pub fn set_overrides(
     overrides: &SymbolLayoutProperties::Unevaluated,
     overridable: &mut SymbolPaintProperties::PossiblyEvaluated,

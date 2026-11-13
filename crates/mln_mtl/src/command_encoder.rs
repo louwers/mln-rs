@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/command_encoder.hpp and src/mln/mtl/command_encoder.cpp
-//
 // Debug groups exist on Metal command encoders, which belong to the passes,
 // so the encoder keeps a stack of names that each pass pushes when it is
 // created. C++ also pushes a group onto the passes already open; the

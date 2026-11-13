@@ -1,5 +1,3 @@
-// Ports test/style/property_expression.test.cpp.
-
 use feature::Value as MbglValue;
 use geometry::{Geometry, Point};
 use mln_expression::dsl::create_expression_from_str;
@@ -86,7 +84,7 @@ fn defaults() {
     assert_eq!(Dependency::FEATURE, no_default.get_dependencies());
 }
 
-/// `interpolate(linear()`, number(get("property")), 1.0, literal(v))
+/// `["interpolate", ["linear"], ["number", ["get", "property"]], 1, v]`.
 fn inner(v: f64) -> Box<dyn crate::expression::Expression> {
     interpolate(linear(), number(get_str("property"), None), vec![(1.0, num(v))])
 }
@@ -175,9 +173,6 @@ fn issue8460() {
     assert_near(600.0, fn2.evaluate_zoom_feature(19.0, &one_integer(), -1.0), 0.00);
 }
 
-// TODO(port): TEST(PropertyExpression, FormatSectionOverride) needs
-// FormatSectionOverride (renderer, M5).
-
 // gtest: PropertyExpression.ImageExpression
 #[test]
 fn image_expression() {
@@ -237,7 +232,7 @@ fn image_expression() {
     }
 }
 
-/// `convertGeometry(geometry, canonical)` (lon/lat to tile coordinates).
+/// Converts `geometry` from lon/lat to tile coordinates.
 fn convert_geometry(geometry: &Geometry<f64>, canonical: &CanonicalTileID) -> GeometryCollection {
     mln_tile::geometry_tile_data::convert_geometry_to_tile(geometry, canonical)
 }
@@ -250,7 +245,6 @@ fn pts(points: &[(f64, f64)]) -> Vec<Point<f64>> {
     points.iter().map(|&(x, y)| pt(x, y)).collect()
 }
 
-/// `createExpression(R"(["<op>", <geojson> ])")`.
 fn create_geo_expression(op: &str, geojson: &str) -> Option<Box<dyn crate::expression::Expression>> {
     create_expression_from_str(&format!(r#"["{op}", {geojson} ]"#))
 }
@@ -434,7 +428,6 @@ fn expect_near(expected: f64, actual: f64, tolerance: f64) {
     assert!((expected - actual).abs() <= tolerance, "expected {expected} ± {tolerance}, got {actual}");
 }
 
-/// `mln::util::read_file("test/fixtures/geometry_data/<name>")`.
 fn read_geometry_data(name: &str) -> String {
     super::util::read_file(&format!("test/fixtures/geometry_data/{name}"))
 }

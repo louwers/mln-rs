@@ -1,8 +1,7 @@
-// Ports src/mln/tile/vector_mvt_tile_data.hpp and
-// src/mln/tile/vector_mvt_tile_data.cpp, reading the tiles with fast-mvt's
-// lazy reader where the C++ uses mapbox::vector_tile. Like it, the lazy
-// reader decodes a layer when it is asked for and a feature when it is
-// read, and reads tags and geometry from the tile's bytes.
+// Tiles are read with fast-mvt's lazy reader, where C++ uses
+// `mapbox::vector_tile`. Like that, the lazy reader decodes a layer when it
+// is asked for and a feature when it is read, and reads tags and geometry
+// from the tile's bytes.
 //
 // Errors: a tile whose layers can't be found, or a layer that fast-mvt
 // can't decode, is a `get_layer` error, and a feature it can't decode a
@@ -37,7 +36,6 @@ const POINT: i32 = 1;
 const LINESTRING: i32 = 2;
 const POLYGON: i32 = 3;
 
-/// `VectorMVTTileFeature`.
 pub struct VectorMVTTileFeature<'l> {
     layer: &'l MvtLazyLayer<'l>,
     feature: MvtLazyFeature<'l, 'l>,
@@ -63,8 +61,8 @@ impl<'l> VectorMVTTileFeature<'l> {
         let _ = self.error.set(MlnError::native(error.to_string()));
     }
 
-    /// `getValue`: the value of the first tag whose key is `key`; `None`
-    /// for none or a null value. Errors: a malformed tag before it.
+    /// The value of the first tag whose key is `key`; `None` for none or a
+    /// null value. Fails for a malformed tag before it.
     pub fn try_get_value(&self, key: &str) -> Result<Option<Value>, Error> {
         for property in self.feature.properties() {
             let (tag_key, value) = property?;
@@ -78,8 +76,8 @@ impl<'l> VectorMVTTileFeature<'l> {
         Ok(None)
     }
 
-    /// `getProperties` (computed once; an error is returned again by the
-    /// next call). A repeated key keeps its first value, as in C++.
+    /// Every property, computed once; an error is returned again by the next
+    /// call. A repeated key keeps its first value, as in C++.
     pub fn try_get_properties(&self) -> Result<&PropertyMap, Error> {
         if let Some(properties) = self.properties.get() {
             return Ok(properties);
@@ -226,14 +224,15 @@ fn zigzag(value: u32) -> i32 {
     (value >> 1) as i32 ^ -((value & 1) as i32)
 }
 
-/// `VectorMVTTileLayer`: a layer of a [`VectorMVTTileData`], decoded.
+/// A layer of a [`VectorMVTTileData`], decoded.
 pub struct VectorMVTTileLayer<'d> {
     layer: MvtLazyLayer<'d>,
 }
 
 impl VectorMVTTileLayer<'_> {
-    /// `getFeature(i)`: `std::out_of_range` past the end, fast-mvt's
-    /// error for a feature it can't decode.
+    /// The feature at `i`. Fails with [`Error::OutOfRange`] past the end, as
+    /// C++ throws `std::out_of_range`, and with fast-mvt's error for a
+    /// feature it can't decode.
     pub fn try_get_feature(&self, i: usize) -> Result<VectorMVTTileFeature<'_>, Error> {
         match self.layer.feature(i) {
             Some(feature) => Ok(VectorMVTTileFeature::new(&self.layer, feature?)),
@@ -315,10 +314,9 @@ struct LayerEntry {
     data: Range<usize>,
 }
 
-/// `VectorMVTTileData`: the layers are found lazily, on the first
-/// `getLayer`, so the object can be made on the main thread cheaply.
+/// Mapbox Vector Tile data. The layers are found lazily, on the first layer
+/// lookup, so the object can be made on the main thread cheaply.
 pub struct VectorMVTTileData {
-    /// C++ `std::shared_ptr<const std::string>`.
     data: Arc<Vec<u8>>,
     /// The tile's layers in tile order. `OnceLock` (not `OnceCell`): the
     /// tile data is shared with the tile worker thread (`mln_renderer`'s
@@ -353,8 +351,9 @@ impl VectorMVTTileData {
         Ok(self.layers.get_or_init(|| layers))
     }
 
-    /// `getLayer`: the first layer named `name`, decoded, `None` for none.
-    /// Errors: finding the tile's layers, and decoding the layer.
+    /// The first layer named `name`, decoded; `None` if there is none.
+    /// Fails if the tile's layers can't be found or the layer can't be
+    /// decoded.
     pub fn try_get_layer(&self, name: &str) -> Result<Option<VectorMVTTileLayer<'_>>, Error> {
         let entry = self.layers()?.iter().find(|entry| self.data.get(entry.name.clone()) == Some(name.as_bytes()));
         let Some(data) = entry.and_then(|entry| self.data.get(entry.data.clone())) else {
@@ -363,8 +362,8 @@ impl VectorMVTTileData {
         Ok(Some(VectorMVTTileLayer { layer: MvtLazyLayer::decode(data)? }))
     }
 
-    /// `layerNames()`: each name once, in byte order (C++ lists the keys of
-    /// a `std::map`).
+    /// The names of the tile's layers, each once, in byte order (C++ lists
+    /// the keys of a `std::map`).
     pub fn layer_names(&self) -> Result<Vec<String>, Error> {
         let names: BTreeSet<&[u8]> =
             self.layers()?.iter().filter_map(|entry| self.data.get(entry.name.clone())).collect();
@@ -373,7 +372,7 @@ impl VectorMVTTileData {
 }
 
 impl GeometryTileData for VectorMVTTileData {
-    /// `clone()`: shares the data, not the layers found in it.
+    /// Shares the data, not the layers found in it.
     fn clone_data(&self) -> Box<dyn GeometryTileData> {
         Box::new(VectorMVTTileData::new(self.data.clone()))
     }

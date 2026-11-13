@@ -1,5 +1,3 @@
-// Ports include/mln/style/types.hpp + src/mln/style/types.cpp.
-//
 // Variant order and discriminants follow the C++ enums, except that
 // `SourceType` has no `Video` or `Annotations`: mln-rs has neither source.
 // `TextVariableAnchorType` is an alias of `SymbolAnchorType` as in C++.
@@ -343,9 +341,8 @@ style_spec_names!(HillshadeMethodType {
     Multidirectional => "multidirectional",
 });
 
-/// `template <class T> struct Interpolator<T, enable_if_t<is_enum_v<T>>> :
-/// Uninterpolated` (include/mln/util/interpolate.hpp): returns the first
-/// value.
+/// Implements `Interpolate` for enums, which aren't interpolated:
+/// interpolation returns the first value.
 macro_rules! uninterpolated_enums {
     ($($t:ty),* $(,)?) => {
         $(impl mln_util::interpolate::Interpolate for $t {

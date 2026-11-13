@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/comparison.hpp and
-// src/mln/style/expression/comparison.cpp.
-
 use mln_conversion::Convertible;
 
 use crate::assertion::Assertion;
@@ -30,8 +27,8 @@ fn neq(a: &Value, b: &Value) -> bool {
     a != b
 }
 
-/// `lhs.match([&](const std::string& a) {...}, [&](double a) {...})` for the
-/// ordering operators.
+/// Orders two strings with `s` or two numbers with `d`, for the ordering
+/// operators.
 fn ordered(lhs: &Value, rhs: &Value, s: fn(&str, &str) -> bool, d: fn(f64, f64) -> bool) -> bool {
     match lhs {
         Value::String(a) => s(a, rhs.as_str().expect("string operand")),

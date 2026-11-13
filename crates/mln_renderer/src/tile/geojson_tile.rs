@@ -1,5 +1,3 @@
-// Ports src/mln/tile/geojson_tile.hpp and src/mln/tile/geojson_tile.cpp.
-//
 // The C++ getTile callback holds a WeakPtr to the tile and compares the data
 // it was requested for with the tile's current data; here it holds a `Weak`
 // to the tile's state and the data pointer.
@@ -26,15 +24,12 @@ fn data_address(data: &Arc<dyn GeoJSONData>) -> *const () {
     Arc::as_ptr(data).cast::<()>()
 }
 
-/// `GeoJSONTile`.
 pub struct GeoJSONTile {
     tile: GeometryTile,
     data: Rc<RefCell<Option<Arc<dyn GeoJSONData>>>>,
 }
 
 impl GeoJSONTile {
-    /// `GeoJSONTile(const OverscaledTileID&, std::string sourceID, const
-    /// TileParameters&, std::shared_ptr<style::GeoJSONData>, TileObserver*)`.
     pub fn new(
         overscaled_tile_id: OverscaledTileID,
         source_id: String,
@@ -50,7 +45,6 @@ impl GeoJSONTile {
         tile
     }
 
-    /// `updateData(data, needsRelayout, runSynchronously)`.
     pub fn update_data(&self, data: Arc<dyn GeoJSONData>, needs_relayout: bool, run_synchronously: bool) {
         let requested = data.clone();
         *self.data.borrow_mut() = Some(data);
@@ -169,7 +163,6 @@ impl Tile for GeoJSONTile {
         self.tile.get_query_padding(layers)
     }
 
-    /// `querySourceFeatures(result, options, globalState)`.
     fn query_source_features(
         &self,
         result: &mut Vec<mln_util::feature::Feature>,

@@ -1,8 +1,3 @@
-// Ports include/mln/style/projection_definition.hpp +
-// src/mln/style/projection_definition.cpp, plus the
-// `util::Interpolator<ProjectionDefinition>` specialization from
-// include/mln/util/interpolate.hpp.
-
 use feature::Value;
 use mln_util::interpolate::{Interpolate, interpolate};
 
@@ -21,7 +16,6 @@ const MERCATOR_NAME: &str = "mercator";
 const VERTICAL_PERSPECTIVE_NAME: &str = "vertical-perspective";
 const GLOBE_NAME: &str = "globe";
 
-/// `projectionTypeName`.
 #[must_use]
 pub fn projection_type_name(type_: ProjectionType) -> &'static str {
     match type_ {
@@ -31,7 +25,6 @@ pub fn projection_type_name(type_: ProjectionType) -> &'static str {
     }
 }
 
-/// `projectionTypeFromName`.
 #[must_use]
 pub fn projection_type_from_name(name: &str) -> Option<ProjectionType> {
     match name {
@@ -64,26 +57,24 @@ impl Default for ProjectionDefinition {
 }
 
 impl ProjectionDefinition {
-    /// `explicit ProjectionDefinition(ProjectionType)`.
     #[must_use]
     pub fn new(type_: ProjectionType) -> Self {
         ProjectionDefinition { from: type_, to: type_, transition: 1.0 }
     }
 
-    /// `ProjectionDefinition(ProjectionType from, ProjectionType to, double transition)`.
     #[must_use]
     pub fn between(from: ProjectionType, to: ProjectionType, transition: f64) -> Self {
         ProjectionDefinition { from, to, transition }
     }
 
-    /// `explicit ProjectionDefinition(std::string_view)`; asserts the name is
-    /// one of `projection_type_name`'s.
+    /// The single projection named `name`. Debug builds assert that the name
+    /// is one of `projection_type_name`'s; release builds fall back to
+    /// Mercator.
     #[must_use]
     pub fn from_name(name: &str) -> Self {
         ProjectionDefinition::new(type_from_name_or_mercator(name))
     }
 
-    /// `ProjectionDefinition(std::string_view from, std::string_view to, double transition)`.
     #[must_use]
     pub fn between_names(from: &str, to: &str, transition: f64) -> Self {
         ProjectionDefinition::between(type_from_name_or_mercator(from), type_from_name_or_mercator(to), transition)
@@ -155,7 +146,6 @@ impl ProjectionDefinition {
     }
 }
 
-/// `Interpolator<ProjectionDefinition>`.
 impl Interpolate for ProjectionDefinition {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         if self.from == self.to && to.from == to.to {

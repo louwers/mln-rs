@@ -1,6 +1,3 @@
-// Ports src/mln/style/rapidjson_conversion.hpp: the JSON front end of
-// Convertible, on serde_json instead of rapidjson.
-//
 // Differences that come from the JSON library, not from this file:
 // serde_json parses the integer literal `-0` as the double
 // -0.0 (rapidjson: unsigned 0), rounds long decimals correctly (rapidjson's
@@ -108,8 +105,8 @@ impl ConversionTraits for serde_json::Value {
     }
 }
 
-/// C++ catches the `std::exception` from `mapbox::geojson::convert` and
-/// stores its `what()` in the error.
+/// Converts `value` to GeoJSON, storing the conversion's error message in
+/// `error` when it fails.
 pub(crate) fn to_geojson(value: &serde_json::Value, error: &mut Error) -> Option<geojson::GeoJSON> {
     match geojson::convert(value) {
         Ok(geojson) => Some(geojson),

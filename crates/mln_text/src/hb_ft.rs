@@ -1,14 +1,13 @@
-// Ports the font functions of ../maplibre-native/vendor/harfbuzz/src/hb-ft.cc
-// (HarfBuzz 8.2.0) that HarfBuzz calls while shaping horizontal text, as
-// HarfRust `FontFuncs` over the ported FreeType face:
-// `hb_ft_get_nominal_glyph(s)`, `hb_ft_get_variation_glyph`,
-// `hb_ft_get_glyph_h_advances`, plus `hb_ft_font_changed`'s scale. Under
+// HarfRust `FontFuncs` over the FreeType face: the font functions of
+// HarfBuzz 8.2.0's hb-ft.cc that HarfBuzz calls while shaping horizontal
+// text (`hb_ft_get_nominal_glyph(s)`, `hb_ft_get_variation_glyph`,
+// `hb_ft_get_glyph_h_advances`, plus `hb_ft_font_changed`'s scale). Under
 // HarfBuzz's "Old MIT" license (LICENSE-HarfBuzz).
 //
 // hb-ft also registers extents, contour-point, kerning and vertical
-// callbacks; the C++ core's HarfBuzz is built with HB_TINY, whose shaping
+// callbacks; the C++ core's HarfBuzz is built with `HB_TINY`, whose shaping
 // never calls them for horizontal text (no fallback mark positioning or
-// kerning, no hinting), so they are not ported. `glyph_extents` returns
+// kerning, no hinting), so they are left out here. `glyph_extents` returns
 // `None`, which keeps HarfRust's fallback mark positioning from moving marks
 // (see `harfbuzz_impl.rs`).
 
@@ -20,11 +19,10 @@ use crate::ft::cmap::Encoding;
 /// `hb_ft_font_t` for one face.
 pub struct HbFtFont<'a> {
     face: &'a FreeTypeFace,
-    /// `ft_font->symbol`: the selected charmap is a symbol charmap.
+    /// Whether the selected charmap is a symbol charmap.
     symbol: bool,
-    /// `font->face->table.OS2->get_font_page ()`.
     font_page: u16,
-    /// `font->x_scale < 0 ? -1 : +1` (`HAVE_FT_GET_TRANSFORM` is not defined).
+    /// -1 when the font's x scale is negative, +1 otherwise.
     x_mult: f32,
 }
 

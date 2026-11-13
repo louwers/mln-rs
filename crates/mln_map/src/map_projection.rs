@@ -1,5 +1,3 @@
-// Ports include/mln/map/map_projection.hpp and src/mln/map/map_projection.cpp.
-//
 // gtests-core: added for test/map/map.test.cpp (LatLngForPixelUnwrapped,
 // PixelForLatLngAfterZoomAroundAPointAcrossTheAntimeridian).
 
@@ -22,12 +20,10 @@ const _: () = {
 };
 
 impl MapProjection {
-    /// `MapProjection(const Map&)`.
     pub fn new(map: &Map) -> Self {
         Self::from_state(map.get_transform_state())
     }
 
-    /// `MapProjection(const TransformState&)`.
     pub fn from_state(state: TransformState) -> Self {
         MapProjection { state }
     }

@@ -1,13 +1,11 @@
-// Ports src/mln/sprite/sprite_loader_observer.hpp.
-
 use std::sync::Arc;
 
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
 use mln_util::error::Error;
 
-/// `SpriteLoaderObserver`. Methods take `&self` (observers use interior
-/// mutability); the default implementations do nothing.
+/// Receives a sprite loader's results. Methods take `&self` (observers use
+/// interior mutability); the default implementations do nothing.
 pub trait SpriteLoaderObserver {
     fn on_sprite_loaded(&self, _sprite: Option<Sprite>, _images: Vec<Arc<Impl>>) {}
 

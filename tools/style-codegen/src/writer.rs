@@ -75,8 +75,8 @@ impl Writer {
         }
     }
 
-    /// `{keyword} {module}::{items};` on one line, or one item group per
-    /// line, as rustfmt breaks it, when that is wider than [`MAX_WIDTH`].
+    /// Writes `{keyword} {module}::{items};` on one line, or one item group
+    /// per line, as rustfmt breaks it, when that is wider than [`MAX_WIDTH`].
     pub fn use_items(&mut self, keyword: &str, module: &str, items: &[String]) {
         let one_line = if items.len() == 1 {
             format!("{keyword} {module}::{};", items[0])

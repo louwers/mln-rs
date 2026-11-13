@@ -1,5 +1,3 @@
-// Ports include/mln/shaders/shader_program_base.hpp
-
 use std::any::Any;
 use std::rc::Rc;
 
@@ -8,9 +6,8 @@ use mln_util::identity::SimpleIdentity;
 use crate::shader::Shader;
 use crate::vertex_attribute::{ElementType, VertexAttributeArray};
 
-/// `gfx::ShaderProgramBase`
 pub trait ShaderProgramBase: Shader {
-    /// `getID()`: the `shaderProgramID` assigned at construction.
+    /// The program id assigned at construction.
     fn get_id(&self) -> SimpleIdentity;
     /// Gets the sampler location for a texture id
     fn get_sampler_location(&self, id: usize) -> Option<usize>;

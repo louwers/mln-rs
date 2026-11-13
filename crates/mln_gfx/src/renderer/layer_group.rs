@@ -1,6 +1,3 @@
-// Ports include/mln/renderer/layer_group.hpp, src/mln/renderer/layer_group.cpp
-// and src/mln/renderer/tile_layer_group.cpp
-//
 // Moved down from the renderer (see the crate docs): the backends implement
 // the layer groups. Differences from C++:
 // - `layerTweakers` / `addLayerTweaker` / `runTweakers` stay in mln_renderer
@@ -27,7 +24,6 @@ use crate::renderer::render_pass::RenderPass;
 use crate::uniform_buffer::UniformBufferArray;
 use crate::upload_pass::UploadPass;
 
-/// `LayerGroupBase::Type`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Type {
@@ -52,7 +48,7 @@ impl LayerGroupBaseData {
     }
 }
 
-/// `LayerGroupBase`: a layer-like group of drawables, not a group of layers.
+/// A layer-like group of drawables, not a group of layers.
 pub trait LayerGroupBase: Any {
     fn base(&self) -> &LayerGroupBaseData;
     fn base_mut(&mut self) -> &mut LayerGroupBaseData;
@@ -106,11 +102,11 @@ pub trait LayerGroupBase: Any {
     }
 }
 
-/// `std::shared_ptr<LayerGroupBase>` (also used for `TileLayerGroupPtr` and
-/// `LayerGroupPtr`; reach the concrete group with `as_tile_layer_group_mut`).
+/// A shared layer group of either kind. Reach the concrete group with
+/// `as_tile_layer_group_mut`.
 pub type LayerGroupBasePtr = Rc<RefCell<dyn LayerGroupBase>>;
 
-/// `LayerGroupBase::addDrawable`: init the drawable's tweakers.
+/// Initializes the tweakers of a drawable added to a group.
 fn init_drawable_tweakers(drawable: &mut dyn Drawable) {
     let tweakers = drawable.get_tweakers().clone();
     for tweaker in tweakers {
@@ -118,7 +114,6 @@ fn init_drawable_tweakers(drawable: &mut dyn Drawable) {
     }
 }
 
-/// `TileLayerGroupTileKey`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TileLayerGroupTileKey {
     pub render_pass: RenderPass,
@@ -132,8 +127,8 @@ fn sort_key(drawable: &dyn Drawable) -> SortKey {
     (drawable.get_draw_priority(), drawable.get_id())
 }
 
-/// `TileLayerGroup`: a layer group for tile-based drawables. Backends embed
-/// it and implement `LayerGroupBase` (render/upload, uniform buffers).
+/// A layer group for tile-based drawables. Backends embed it and implement
+/// `LayerGroupBase` (render/upload, uniform buffers).
 pub struct TileLayerGroup {
     pub base: LayerGroupBaseData,
     /// When stencil clipping is enabled for the layer, this is the set of
@@ -229,7 +224,7 @@ impl TileLayerGroup {
     }
 }
 
-/// `LayerGroup`: a layer group for non-tile-based drawables.
+/// A layer group for drawables that are not tied to tiles.
 pub struct LayerGroup {
     pub base: LayerGroupBaseData,
     drawables: BTreeMap<SortKey, UniqueDrawable>,
@@ -259,8 +254,9 @@ impl LayerGroup {
         self.drawables.len()
     }
 
-    /// C++ re-inserts the kept drawables into a new set so that a raised
-    /// priority is re-sorted; the port re-keys them the same way.
+    /// Removes the drawables for which `f` returns true and returns how many
+    /// it removed. The kept ones are re-keyed, so a raised priority is
+    /// re-sorted.
     pub fn remove_drawables_if(&mut self, mut f: impl FnMut(&mut dyn Drawable) -> bool) -> usize {
         let old_size = self.drawables.len();
         let old = std::mem::take(&mut self.drawables);
@@ -280,7 +276,6 @@ impl LayerGroup {
     }
 }
 
-/// `visitLayerGroupDrawables(layerGroup, f)`
 pub fn visit_layer_group_drawables(layer_group: &mut dyn LayerGroupBase, f: impl FnMut(&mut dyn Drawable)) {
     match layer_group.get_type() {
         Type::LayerGroup => {

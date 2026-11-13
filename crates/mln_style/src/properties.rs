@@ -1,6 +1,3 @@
-// Ports src/mln/style/properties.hpp: `Transitioning<Value>`,
-// `Transitionable<Value>` and the `Properties<Ps...>` template.
-//
 // C++ `Properties<Ps...>` builds tuples indexed by property tag types
 // (`Transitionable`, `Unevaluated`, `PossiblyEvaluated`, `Evaluated`).
 // Rust has no variadic generics, so a layer's property set is declared with
@@ -107,7 +104,6 @@ impl<T: Clone + Debug + PartialEq + 'static> PropertyValueLike for PropertyValue
     }
 }
 
-/// `Transitioning<Value>`.
 #[derive(Clone, Debug, Default)]
 pub struct Transitioning<V> {
     // C++: `mutable std::optional<recursive_wrapper<Transitioning<Value>>>`;
@@ -134,13 +130,11 @@ enum Stage {
 }
 
 impl<V: PropertyValueLike> Transitioning<V> {
-    /// `explicit Transitioning(Value)`.
     pub fn new(value: V) -> Self {
         Transitioning { prior: RefCell::new(None), start: None, delay: Duration::ZERO, duration: Duration::ZERO, value }
     }
 
-    /// `Transitioning(Value, Transitioning<Value> prior, const TransitionOptions&, TimePoint now)`:
-    /// a transition from `prior` that starts at `now`, or one that has
+    /// A transition from `prior` that starts at `now`, or one that has
     /// already ended for `None`.
     pub fn with_prior(value: V, prior: Transitioning<V>, transition: &TransitionOptions, now: Option<Instant>) -> Self {
         Transitioning {
@@ -228,7 +222,6 @@ impl<V: PropertyValueLike> Transitioning<V> {
     }
 }
 
-/// `Transitionable<Value>`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transitionable<V> {
     pub value: V,
@@ -255,38 +248,32 @@ impl<V: PropertyValueLike> Transitionable<V> {
 /// The member typedefs and statics of a C++ property tag type
 /// (`struct BackgroundColor : PaintProperty<Color> { static Color defaultValue(); }`).
 pub trait Property: 'static {
-    /// `P::Type`.
     type Type: Clone + Debug;
     /// The `Value` of `P::TransitionableType = Transitionable<Value>` and
     /// `P::UnevaluatedType = Transitioning<Value>`.
     type Value: PropertyValueLike<Type = Self::Type>;
-    /// `P::PossiblyEvaluatedType`. Paint properties also need it to be
-    /// `Interpolate` (transitions); layout values (images, formatted text)
+    /// The type of a possibly-evaluated value. Paint properties also need it
+    /// to be `Interpolate` (transitions); layout values (images, formatted text)
     /// are never interpolated, so the bound is on the paint paths.
     type PossiblyEvaluatedType: Clone + Debug;
-    /// `P::EvaluatorType`.
     type EvaluatorType<'a>: Evaluator<Self::Type, ResultType = Self::PossiblyEvaluatedType>;
 
     const IS_DATA_DRIVEN: bool;
 
-    /// `P::defaultValue()`.
     fn default_value() -> Self::Type;
 
-    /// `Evaluator(parameters, P::defaultValue())`.
     fn evaluator(parameters: &PropertyEvaluationParameters, default_value: Self::Type) -> Self::EvaluatorType<'_>;
 
-    /// `PossiblyEvaluatedType::isConstant()` (true for plain values), for
-    /// `ConstantsMask`.
+    /// Whether a possibly-evaluated value is constant (always, for plain
+    /// values), for the constants mask.
     fn possibly_evaluated_is_constant(_value: &Self::PossiblyEvaluatedType) -> bool {
         true
     }
 
-    /// `PossiblyEvaluated::getDependencies(const P&)`.
     fn possibly_evaluated_dependencies(_value: &Self::PossiblyEvaluatedType) -> Dependency {
         Dependency::NONE
     }
 
-    /// `PossiblyEvaluated::collectGlobalStateRefs(const P&, ...)`.
     fn possibly_evaluated_global_state_refs(_value: &Self::PossiblyEvaluatedType) -> Option<&VecSet<String>> {
         None
     }
@@ -314,10 +301,9 @@ pub enum FeatureEvaluationExtra<'a> {
     ImagesCanonical(&'a VecSet<String>, &'a CanonicalTileID),
 }
 
-/// `template <class T> static T evaluate(float, const GeometryTileFeature&, [const
-/// CanonicalTileID&,] const T& t, const T&) { return t; }`. C++ has no
-/// overload for a plain value with feature state or images: such a call
-/// does not compile, so it does not happen here either.
+/// Evaluates a plain value for a feature: the value itself. C++ has no
+/// overload for a plain value with feature state or images: such a call does
+/// not compile, so it does not happen here either.
 pub fn evaluate_constant<T: Clone>(value: &T, extra: FeatureEvaluationExtra<'_>) -> T {
     match extra {
         FeatureEvaluationExtra::None | FeatureEvaluationExtra::Canonical(_) => value.clone(),
@@ -360,16 +346,16 @@ pub fn evaluate_cross_faded<T>() -> T {
     unreachable!("C++ PossiblyEvaluated::evaluate<P> does not compile for a cross-faded property")
 }
 
-/// `IndexedTuple::get<P>()`: field access by property tag type. The
-/// generated structs also have inherent `get::<P>()` / `get_mut::<P>()`.
+/// Field access by property tag type. The generated structs also have
+/// inherent `get::<P>()` / `get_mut::<P>()`.
 pub trait Field<P> {
     type Output;
     fn field(&self) -> &Self::Output;
     fn field_mut(&mut self) -> &mut Self::Output;
 }
 
-/// `Unevaluated::maybeEvaluate<P>`: evaluate the property if necessary, or
-/// produce a copy of the previous value if appropriate.
+/// Evaluates the property if necessary, or copies the previous value where
+/// that is appropriate.
 pub fn maybe_evaluate<P: Property>(
     property: &Transitioning<P::Value>,
     parameters: &PropertyEvaluationParameters,
@@ -469,7 +455,6 @@ macro_rules! paint_properties {
                     result
                 }
 
-                /// `evaluate(const PropertyEvaluationParameters&)`.
                 pub fn evaluate(
                     &self,
                     parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
@@ -482,9 +467,8 @@ macro_rules! paint_properties {
                     }
                 }
 
-                /// `evaluate(const PropertyEvaluationParameters&, const PossiblyEvaluated& previous)`:
-                /// optionally evaluate each property or produce a copy of the
-                /// previous value, if appropriate.
+                /// Evaluates each property, or copies its value from
+                /// `previous` where that is appropriate.
                 pub fn evaluate_with_previous(
                     &self,
                     parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
@@ -508,7 +492,6 @@ macro_rules! paint_properties {
                     })+
                 }
 
-                // TODO(port): updateGPUExpressions (gfx::GPUExpression).
             }
 
             impl PossiblyEvaluated {
@@ -525,8 +508,8 @@ macro_rules! paint_properties {
                     })+
                 }
 
-                /// `ConstantsMask<DataDrivenProperties>::getMask`: bit i is set
-                /// when the i-th data-driven property is constant.
+                /// Bit i is set when the i-th data-driven property is
+                /// constant.
                 pub fn constants_mask(&self) -> u64 {
                     let mut result = 0u64;
                     let mut _index = 0u32;
@@ -545,13 +528,12 @@ macro_rules! paint_properties {
     };
 }
 
-/// `PossiblyEvaluated::evaluate<P>(z, feature, ...)`, the per-property
-/// overloads.
+/// Defines `PossiblyEvaluated::evaluate::<P>(z, feature, ...)` and its
+/// variants, which evaluate one property for a feature.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __possibly_evaluated_feature_methods {
     () => {
-        /// `evaluate<P>(float z, const GeometryTileFeature& feature)`.
         pub fn evaluate<P>(
             &self,
             z: f32,
@@ -570,7 +552,6 @@ macro_rules! __possibly_evaluated_feature_methods {
             )
         }
 
-        /// `evaluate<P>(float z, const GeometryTileFeature&, const CanonicalTileID&)`.
         pub fn evaluate_canonical<P>(
             &self,
             z: f32,
@@ -590,7 +571,6 @@ macro_rules! __possibly_evaluated_feature_methods {
             )
         }
 
-        /// `evaluate<P>(float z, const GeometryTileFeature&, const FeatureState&)`.
         pub fn evaluate_state<P>(
             &self,
             z: f32,
@@ -610,7 +590,6 @@ macro_rules! __possibly_evaluated_feature_methods {
             )
         }
 
-        /// `evaluate<P>(float z, const GeometryTileFeature&, const std::set<std::string>& availableImages)`.
         pub fn evaluate_images<P>(
             &self,
             z: f32,
@@ -630,7 +609,6 @@ macro_rules! __possibly_evaluated_feature_methods {
             )
         }
 
-        /// `evaluate<P>(float z, const GeometryTileFeature&, availableImages, const CanonicalTileID&)`.
         pub fn evaluate_images_canonical<P>(
             &self,
             z: f32,
@@ -684,7 +662,6 @@ macro_rules! __properties_field_impls {
         })+
 
         impl $s {
-            /// `get<P>()`.
             pub fn get<P>(&self) -> &<Self as $crate::properties::Field<P>>::Output
             where
                 Self: $crate::properties::Field<P>,
@@ -692,7 +669,7 @@ macro_rules! __properties_field_impls {
                 <Self as $crate::properties::Field<P>>::field(self)
             }
 
-            /// `get<P>()` (mutable).
+            /// The field of property `P`, mutably.
             pub fn get_mut<P>(&mut self) -> &mut <Self as $crate::properties::Field<P>>::Output
             where
                 Self: $crate::properties::Field<P>,
@@ -707,7 +684,6 @@ macro_rules! __properties_field_impls {
 /// (`!!t.textColor`): C++ calls it on both `expression::FormattedSection` and
 /// `expression::FormatExpressionSection`.
 pub trait OverridableSection {
-    /// `!!section.textColor`.
     fn has_text_color(&self) -> bool;
 }
 

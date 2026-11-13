@@ -1,6 +1,3 @@
-// Ports src/mln/tile/tile_loader.hpp and src/mln/tile/tile_loader_impl.hpp
-// (for VectorTile; raster tiles later).
-//
 // C++ `TileLoader<T>` holds `T& tile` and request callbacks capture `this`.
 // Here the loader state is an `Rc<RefCell<..>>` the callbacks reach through
 // a `Weak` (a dropped loader = C++ `shared->aborted`), and the tile is the
@@ -22,7 +19,6 @@ use crate::tile::geometry_tile_worker::SharedTileData;
 use crate::tile::tile::{TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile_parameters::TileParameters;
 
-/// `getCantLoadTileError()`.
 fn get_cant_load_tile_error() -> Error {
     Error::native("Can't load tile.")
 }
@@ -32,7 +28,7 @@ fn get_cant_load_tile_error() -> Error {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VectorTileEncoding {
     Mvt,
-    /// `VectorMLTTile` with `fastPFOREnabled`.
+    /// MLT, decoded with `fast_pfor_enabled`.
     Mlt {
         fast_pfor_enabled: bool,
     },
@@ -41,13 +37,13 @@ pub enum VectorTileEncoding {
 /// What a loader does with the tile it loads (`T` in C++).
 pub trait LoaderTile {
     fn set_error(&self, err: Error);
-    /// `setLoading()`: the tile waits for data again.
+    /// Makes the tile wait for data again.
     fn set_loading(&self);
     fn set_tried_cache(&self);
     fn on_tile_action(&self, op: TileOperation);
     fn set_metadata(&self, modified: Option<mln_util::chrono::Timestamp>, expires: Option<mln_util::chrono::Timestamp>);
-    /// `setData(data)`. Without data, the tile is in the tileset and has nothing in it: it's
-    /// renderable and draws nothing.
+    /// Sets the tile's data. Without data, the tile is in the tileset and has
+    /// nothing in it: it's renderable and draws nothing.
     fn set_data(&self, data: Option<Data>, encoding: VectorTileEncoding);
     /// Loads the tile without data for a tile the tileset doesn't have at this zoom level. The
     /// tile isn't renderable, so the pyramid draws a tile from another zoom level in its place.
@@ -78,7 +74,6 @@ impl LoaderTile for GeometryTileInner {
         self.base.on_tile_action(op);
     }
 
-    /// `VectorTile::setMetadata(modified, expires)`.
     fn set_metadata(
         &self,
         modified: Option<mln_util::chrono::Timestamp>,
@@ -88,7 +83,6 @@ impl LoaderTile for GeometryTileInner {
         self.base.expires.set(expires);
     }
 
-    /// `VectorMVTTile::setData(data)` / `VectorMLTTile::setData(data)`.
     fn set_data(&self, data: Option<Data>, encoding: VectorTileEncoding) {
         if !self.is_obsolete() {
             self.missing.set(false);
@@ -128,7 +122,6 @@ struct State {
     update_parameters: TileUpdateParameters,
 }
 
-/// `TileLoader<T>`.
 pub struct TileLoader {
     state: Rc<RefCell<State>>,
 }
@@ -138,8 +131,6 @@ fn tile_of(state: &Rc<RefCell<State>>) -> Option<Rc<dyn LoaderTile>> {
 }
 
 impl TileLoader {
-    /// `TileLoader(T& tile, const OverscaledTileID&, const TileParameters&,
-    /// const Tileset&)`.
     pub fn new(
         tile: Weak<dyn LoaderTile>,
         encoding: VectorTileEncoding,
@@ -240,8 +231,8 @@ impl TileLoader {
         }
     }
 
-    /// `retryFailedLoad()`: requests a required tile whose last response was
-    /// an error again, and makes it wait for the answer.
+    /// Requests a required tile whose last response was an error again, and
+    /// makes it wait for the answer.
     pub fn retry_failed_load(&self) {
         {
             let mut state = self.state.borrow_mut();
@@ -261,18 +252,17 @@ fn has_pending_network_request(state: &State) -> bool {
     state.resource.loading_method == LoadingMethod::NetworkOnly && state.request.is_some()
 }
 
-/// `makeRequired()`: called when the tile is one of the ideal tiles that we
-/// want to show definitely. The tile source should try to make every effort
-/// (e.g. fetch from internet, or revalidate existing resources).
+/// Called when the tile is one of the ideal tiles that we want to show
+/// definitely. The tile source should try to make every effort (e.g. fetch
+/// from internet, or revalidate existing resources).
 fn make_required(state: &Rc<RefCell<State>>) {
     if state.borrow().request.is_none() {
         load_from_network(state);
     }
 }
 
-/// `makeOptional()`: called when the zoom level no longer corresponds to the
-/// displayed one, but we're still interested in retaining the tile, e.g. for
-/// backfill.
+/// Called when the zoom level no longer corresponds to the displayed one, but
+/// we're still interested in retaining the tile, e.g. for backfill.
 fn make_optional(state: &Rc<RefCell<State>>) {
     let mut state = state.borrow_mut();
     if has_pending_network_request(&state) {

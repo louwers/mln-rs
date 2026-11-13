@@ -1,5 +1,3 @@
-// Ports test/style/conversion/padding.test.cpp.
-
 use mln_conversion::Convertible;
 use mln_util::Padding;
 

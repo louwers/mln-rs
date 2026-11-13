@@ -1,5 +1,3 @@
-// Ports test/style/expression/util.test.cpp.
-
 use crate::util::rgba;
 
 // gtest: Expression.Util_rgba

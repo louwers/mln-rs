@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/renderer_backend.hpp and src/mln/mtl/renderer_backend.cpp
-//
 // The device and command queue are shared (`Rc<BackendImpl>`) by the backend
 // and its context: resources reach them through the context, as C++'s do
 // through `Context& -> getBackend()`.
@@ -55,7 +53,7 @@ impl BackendImpl {
     }
 }
 
-/// `mtl::RendererBackend`: a renderer's context on a [`Device`].
+/// A renderer's context on a [`Device`].
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
@@ -150,7 +148,7 @@ impl RendererBackend {
         self.impl_.get_command_queue()
     }
 
-    /// `context.reset()`, which also releases what the context caches
+    /// Drops the context, releasing what it caches first
     /// (`Context::release_cached_resources`).
     pub(crate) fn reset_context(&mut self) {
         if let Some(context) = self.base.reset_context()
@@ -160,7 +158,7 @@ impl RendererBackend {
         }
     }
 
-    /// `activate()`: opens the autorelease pool of a frame.
+    /// Opens the autorelease pool of a frame.
     pub fn activate(&self) {
         // SAFETY: `deactivate` pops it on this thread, after the pools
         // opened inside the scope (BackendScopes nest on one thread).
@@ -168,8 +166,7 @@ impl RendererBackend {
         self.autorelease_pools.borrow_mut().push(pool);
     }
 
-    /// `deactivate()`: drains the autorelease pool of the innermost
-    /// `activate`.
+    /// Drains the autorelease pool of the innermost `activate`.
     pub fn deactivate(&self) {
         if let Some(pool) = self.autorelease_pools.borrow_mut().pop() {
             // SAFETY: `pool` is the innermost pool: the scopes opened inside
@@ -178,14 +175,12 @@ impl RendererBackend {
         }
     }
 
-    /// `createContext()`
     pub fn create_context(&self) -> Rc<Context> {
         Context::new(self.impl_.clone())
     }
 
-    /// `initShaders`: register one `mtl::ShaderGroup` per built-in shader.
-    /// A duplicate registration is an error, which C++ throws and the port
-    /// logs.
+    /// Registers one shader group per built-in shader. A duplicate
+    /// registration is an error, which C++ throws and this logs.
     pub fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
         for &shader_id in REGISTERED_SHADERS {
             let Some(source) = shader_source(shader_id) else {

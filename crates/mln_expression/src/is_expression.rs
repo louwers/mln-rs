@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/is_expression.hpp and
-// src/mln/style/expression/is_expression.cpp.
-
 use mln_conversion::Convertible;
 
 use crate::compound_expression::CompoundExpression;

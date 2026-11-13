@@ -1,8 +1,3 @@
-// Ports src/mln/tile/vector_tile.hpp, src/mln/tile/vector_tile.cpp,
-// src/mln/tile/vector_mvt_tile.hpp and src/mln/tile/vector_mvt_tile.cpp
-// and src/mln/tile/vector_mlt_tile.{hpp,cpp}: `VectorTile` with the
-// encoding of its subclass (VectorMVTTile or VectorMLTTile).
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -19,15 +14,13 @@ use crate::tile::tile_observer::TileObserver;
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::TileRenderData;
 
-/// `VectorMVTTile` / `VectorMLTTile` (a `VectorTile`).
+/// A vector tile, MVT or MLT.
 pub struct VectorTile {
     tile: GeometryTile,
     loader: Option<TileLoader>,
 }
 
 impl VectorTile {
-    /// `VectorMVTTile(id, sourceID, parameters, tileset, observer)` /
-    /// `VectorMLTTile(..., fastPFOREnabled)`.
     #[must_use]
     pub fn new(
         id: OverscaledTileID,
@@ -50,7 +43,7 @@ impl VectorTile {
 }
 
 impl Drop for VectorTile {
-    /// `~VectorMVTTile()`: the loader goes first, then the tile cancels.
+    /// The loader goes first, then the tile cancels.
     fn drop(&mut self) {
         self.loader = None;
         self.tile.cancel();

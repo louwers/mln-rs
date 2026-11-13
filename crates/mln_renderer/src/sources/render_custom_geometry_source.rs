@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/sources/render_custom_geometry_source.hpp and
-// src/mln/renderer/sources/render_custom_geometry_source.cpp.
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,20 +14,17 @@ use crate::tile::custom_tile::CustomGeometryTile;
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
-/// `RenderCustomGeometrySource`.
 pub struct RenderCustomGeometrySource {
     tile_source: RenderTileSource,
 }
 
 impl RenderCustomGeometrySource {
-    /// `RenderCustomGeometrySource(Immutable<style::CustomGeometrySource::Impl>, const TaggedScheduler&)`.
     #[must_use]
     pub fn new(impl_: Arc<custom_geometry_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderCustomGeometrySource { tile_source: RenderTileSource::new(impl_) }
     }
 
-    /// `impl()`.
     fn impl_(&self) -> Arc<custom_geometry_source::Impl> {
         downcast_arc::<custom_geometry_source::Impl>(&self.tile_source.base.base_impl)
     }

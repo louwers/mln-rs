@@ -1,8 +1,3 @@
-// Ports include/mln/style/expression/within.hpp,
-// src/mln/style/expression/within.cpp and the int64_t instantiations of
-// src/mln/util/geometry_util.{hpp,cpp} (point/line-in-polygon tests), whose
-// only user is this expression.
-//
 // Integer arithmetic on tile coordinates wraps where the C++ int64_t
 // arithmetic could overflow (UB in C++; it wraps on the targets we build
 // for). Rings and lines with fewer than two points walk no edges (C++ reads
@@ -26,9 +21,8 @@ use crate::value::Value;
 
 // --- util/geometry_util ---
 
-/// `GeometryBBox<int64_t>`: minX, minY, maxX, maxY.
+/// A bounding box: min x, min y, max x, max y.
 type WithinBBox = [i64; 4];
-/// `DefaultWithinBBox`.
 const DEFAULT_WITHIN_BBOX: WithinBBox = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
 
 type TilePolygon = Vec<Vec<Point<i64>>>;
@@ -157,7 +151,6 @@ fn line_string_within_polygons(line: &[Point<i64>], polygons: &[TilePolygon]) ->
 
 // --- within.cpp ---
 
-/// `latLonToTileCoodinates`.
 fn lat_lon_to_tile_coordinates(point: &Point<f64>, canonical: &CanonicalTileID) -> Point<i64> {
     let size = f64::from(EXTENT) * 2f64.powi(i32::from(canonical.z));
 
@@ -217,13 +210,12 @@ fn update_point(p: &mut Point<i64>, bbox: &mut WithinBBox, poly_bbox: &WithinBBo
     update_bbox(bbox, p);
 }
 
-/// `util::EXTENT * canonical.x`: an int32 times a uint32 is a uint32
-/// product in C++, widened to `int64_t` afterwards.
+/// `EXTENT * coordinate`, wrapping as in C++: an int32 times a uint32 is a
+/// uint32 product there, widened to `int64_t` afterwards.
 fn tile_shift(coordinate: u32) -> i64 {
     i64::from((EXTENT as u32).wrapping_mul(coordinate))
 }
 
-/// `static_cast<int64_t>(util::EXTENT * std::pow(2, canonical.z))`.
 fn world_size(canonical: &CanonicalTileID) -> i64 {
     (f64::from(EXTENT) * 2f64.powi(i32::from(canonical.z))) as i64
 }
@@ -340,7 +332,6 @@ fn get_polygon_info(geometry: &Geometry<f64>, ctx: &mut ParsingContext) -> Optio
     None
 }
 
-/// `expression::Within`.
 pub struct Within {
     base: ExpressionBase,
     geojson_source: geojson::GeoJSON,
@@ -396,7 +387,6 @@ impl Within {
     }
 }
 
-/// `valueConverter(const rapidjson_value&)`.
 fn value_converter(v: &serde_json::Value) -> MbglValue {
     match v {
         serde_json::Value::Number(n) => {

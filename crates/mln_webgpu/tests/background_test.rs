@@ -72,10 +72,10 @@ impl std::ops::Deref for Headless {
 
 const EXTENT: i16 = 8192;
 
-/// `PaintParameters::numSublayers` and `depthEpsilon`.
 const NUM_SUBLAYERS: u32 = 3;
 const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
-/// `1 - (numLayerGroups() + 2) * numSublayers * depthEpsilon` for one layer group.
+/// `1 - (layer_groups + 2) * NUM_SUBLAYERS * DEPTH_EPSILON`, for one layer
+/// group.
 const DEPTH_RANGE_SIZE: f32 = 1.0 - ((1 + 2) * NUM_SUBLAYERS) as f32 * DEPTH_EPSILON;
 
 /// The gfx-facing part of the renderer's `PaintParameters`, with the values
@@ -88,7 +88,7 @@ struct TestPaintParameters<'a> {
     scissor_rect: ScissorRect,
     current_layer: u32,
     opaque_pass_cutoff: u32,
-    /// `stencilModeForClipping` result (one clipped tile).
+    /// What `stencil_mode_for_clipping` returns (one clipped tile).
     clip_stencil: StencilMode,
 }
 

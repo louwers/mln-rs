@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/tile_layer_group.hpp and src/mln/webgpu/tile_layer_group.cpp
-
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable::Drawable as _;
 use mln_gfx::paint_parameters::PaintParameters;

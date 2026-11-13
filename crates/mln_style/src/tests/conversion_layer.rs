@@ -1,5 +1,3 @@
-// Ports test/style/conversion/layer.test.cpp.
-
 use std::time::Duration;
 
 use feature::Value;
@@ -94,8 +92,8 @@ fn object_member_len(value: &Value, member: &str) -> usize {
     }
 }
 
-/// `stringifyLayer(value)` (a `PrettyWriter` in C++; the text only feeds the
-/// round trip, so its whitespace does not matter).
+/// The layer as JSON text. The text only feeds the round trip, so its
+/// whitespace does not matter.
 fn stringify_layer(value: &Value) -> String {
     serde_json::to_string_pretty(&value_to_json(value)).unwrap()
 }

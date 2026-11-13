@@ -1,11 +1,7 @@
-// Ports src/mln/style/layers/layer_properties.hpp.ejs and
-// layer_properties.cpp.ejs: emits crates/mln_style/src/layers/<type>_layer_properties.rs.
-
 use crate::defaults::{default_value, rust_value};
 use crate::spec::{LayerSpec, Property};
 use crate::types::{
-    camelize, camelize_with_leading_lowercase, evaluated_type, expression_type_rust, is_color_ramp, is_data_driven,
-    is_overridable, layout_property_type_cpp, paint_property_type_cpp, snake,
+    camelize, evaluated_type, expression_type_rust, is_color_ramp, is_data_driven, is_overridable, snake,
 };
 use crate::writer::{MAX_WIDTH, Writer, imports_for, layer_file_name};
 
@@ -15,36 +11,20 @@ pub fn has_crossfade(type_: &str) -> bool {
     matches!(type_, "background" | "fill" | "line" | "fill-extrusion")
 }
 
-/// The C++ tag declaration, as the doc comment of the Rust tag (inside the
-/// macro call, which passes it on).
-fn cpp_tag_comment(w: &mut Writer, property: &Property, base: &str, layout: bool) {
-    let t = evaluated_type(property);
-    if is_color_ramp(property) {
-        w.line(&format!("    /// `struct {} : {base} {{}};`", camelize(&property.name)));
-        return;
-    }
-    w.line(&format!("    /// `struct {} : {base}`:", camelize(&property.name)));
-    if layout {
-        w.line(&format!("    /// `static constexpr const char *name() {{ return \"{}\"; }}`,", property.name));
-    }
-    let end = if is_overridable(property) { "," } else { "." };
-    w.line(&format!(
-        "    /// `static {} defaultValue() {{ return {}; }}`{end}",
-        t.cpp(),
-        default_value(property).cpp()
-    ));
-    if is_overridable(property) {
-        w.line(&format!("    /// `static constexpr const char *name() {{ return \"{}\"; }}`, ...", property.name));
-    }
+/// The doc comment of a property tag (inside the macro call, which passes it
+/// on): the property's style-spec name.
+fn tag_comment(w: &mut Writer, property: &Property, layout: bool) {
+    let kind = if layout { "layout" } else { "paint" };
+    w.line(&format!("    /// The `{}` {kind} property.", property.name));
 }
 
-fn emit_tag(w: &mut Writer, property: &Property, layer_type: &str, layout: bool) {
+fn emit_tag(w: &mut Writer, property: &Property, layout: bool) {
     let name = camelize(&property.name);
     let t = evaluated_type(property);
     if layout {
         let macro_name = if is_data_driven(property) { "data_driven_layout_property" } else { "layout_property" };
         w.line(&format!("crate::{macro_name}!("));
-        cpp_tag_comment(w, property, &layout_property_type_cpp(property), true);
+        tag_comment(w, property, true);
         let default = rust_value(&default_value(property), &t);
         let decl = format!("    pub struct {name}: {} = {default}, name = \"{}\"", t.rust(), property.name);
         if decl.len() <= MAX_WIDTH {
@@ -66,14 +46,13 @@ fn emit_tag(w: &mut Writer, property: &Property, layer_type: &str, layout: bool)
         _ => "paint_property",
     };
     w.line(&format!("crate::{macro_name}!("));
-    cpp_tag_comment(w, property, &paint_property_type_cpp(property, layer_type), false);
+    tag_comment(w, property, false);
     if is_color_ramp(property) {
         w.line(&format!("    pub struct {name}"));
     } else {
         let default = rust_value(&default_value(property), &t);
         let mut options = String::new();
         if property.name == "line-floor-width" {
-            // `using EvaluatorType = DataDrivenPropertyEvaluator<float, true>;`
             options.push_str(", use_integer_zoom = true");
         }
         w.line(&format!("    pub struct {name}: {} = {default}{options}", t.rust()));
@@ -82,22 +61,19 @@ fn emit_tag(w: &mut Writer, property: &Property, layer_type: &str, layout: bool)
     if is_overridable(property) {
         w.blank();
         w.line(&format!("impl {name} {{"));
-        w.line("    /// `static constexpr const char *name()`.");
+        w.line("    /// The property's style-spec name.");
         w.line("    #[must_use]");
         w.line("    pub const fn name() -> &'static str {");
         w.line(&format!("        \"{}\"", property.name));
         w.line("    }");
         w.blank();
-        w.line("    /// `static constexpr auto expressionType()`.");
+        w.line("    /// The expression type of the property's values.");
         w.line("    #[must_use]");
         w.line("    pub fn expression_type() -> Type {");
         w.line(&format!("        {}", expression_type_rust(property.type_(), property.value())));
         w.line("    }");
         w.blank();
-        w.line(&format!(
-            "    /// `template<typename T> static bool hasOverride(const T& t) {{ return !!t.{}; }}`.",
-            camelize_with_leading_lowercase(&property.name)
-        ));
+        w.line("    /// Whether the section `t` overrides this property.");
         w.line("    pub fn has_override<T: OverridableSection>(t: &T) -> bool {");
         w.line(&format!("        t.has_{}()", snake(&property.name)));
         w.line("    }");
@@ -108,7 +84,7 @@ fn emit_tag(w: &mut Writer, property: &Property, layer_type: &str, layout: bool)
 
 fn emit_set(w: &mut Writer, macro_name: &str, class: &str, properties: &[Property]) {
     w.line(&format!("crate::{macro_name}!("));
-    w.line(&format!("    /// `class {class} : public Properties<...>`, the properties in field order."));
+    w.line("    /// The properties, in field order.");
     w.line("    #[allow(non_snake_case)]");
     w.line(&format!("    pub mod {class} {{"));
     for p in properties {
@@ -129,10 +105,6 @@ pub fn emit(layer: &LayerSpec) -> String {
 
     w.line("// This file is generated by //tools/style-codegen from the style spec");
     w.line("// (tools/style-codegen/v8.json). Do not edit.");
-    w.line("//");
-    w.line(&format!("// Ports src/mln/style/layers/{file}_layer_properties.hpp +"));
-    w.line(&format!("// src/mln/style/layers/{file}_layer_properties.cpp (generated in C++ from"));
-    w.line("// src/mln/style/layers/layer_properties.{hpp,cpp}.ejs).");
     w.blank();
 
     let mut imports = imports_for(layer.layout_properties.iter().chain(&layer.paint_properties), false);
@@ -156,10 +128,10 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.blank();
 
     for p in &layer.layout_properties {
-        emit_tag(&mut w, p, &layer.type_, true);
+        emit_tag(&mut w, p, true);
     }
     for p in &layer.paint_properties {
-        emit_tag(&mut w, p, &layer.type_, false);
+        emit_tag(&mut w, p, false);
     }
 
     if has_layout {
@@ -168,7 +140,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     emit_set(&mut w, "paint_properties", &format!("{t}PaintProperties"), &layer.paint_properties);
 
     let pe = format!("{t}PaintProperties::PossiblyEvaluated");
-    w.line(&format!("/// `{t}LayerProperties final : public LayerProperties`."));
+    w.line(&format!("/// The evaluated properties of a {} layer.", layer.type_));
     w.line("#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]");
     w.line(&format!("pub struct {t}LayerProperties {{"));
     w.line("    pub base: LayerPropertiesBase,");
@@ -181,7 +153,6 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.blank();
 
     w.line(&format!("impl {t}LayerProperties {{"));
-    w.line(&format!("    /// `explicit {t}LayerProperties(Immutable<{t}Layer::Impl>)`."));
     w.line(&format!("    pub fn new(impl_: Arc<{t}LayerImpl>) -> Self {{"));
     w.line(&format!("        {t}LayerProperties {{"));
     w.line("            base: LayerPropertiesBase::new(impl_),");
@@ -193,9 +164,6 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.line("    }");
     w.blank();
     if crossfade {
-        w.line(&format!(
-            "    /// `{t}LayerProperties(Immutable<{t}Layer::Impl>, CrossfadeParameters, {t}PaintProperties::PossiblyEvaluated)`."
-        ));
         w.line("    pub fn with_evaluated(");
         w.line(&format!("        impl_: Arc<{t}LayerImpl>,"));
         w.line("        crossfade: CrossfadeParameters,");
@@ -208,9 +176,6 @@ pub fn emit(layer: &LayerSpec) -> String {
         w.line("        }");
         w.line("    }");
     } else {
-        w.line(&format!(
-            "    /// `{t}LayerProperties(Immutable<{t}Layer::Impl>, {t}PaintProperties::PossiblyEvaluated)`."
-        ));
         w.line("    pub fn with_evaluated(");
         w.line(&format!("        impl_: Arc<{t}LayerImpl>,"));
         w.line(&format!("        evaluated: {pe},"));

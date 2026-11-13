@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/context.hpp and src/mln/mtl/context.cpp
-//
 // Resources hold an `Rc<Context>` where C++ holds `Context&`, except buffer
 // resources, which hold a `Weak` (see buffer_resource.rs). So that the
 // context can be freed, it keeps no `Rc` to anything that points back at
@@ -14,10 +12,6 @@
 // - The globe's clip mask meshes come from the caller, which C++ makes with
 //   the renderer's `rawGlobeTileMesh` (see
 //   `gfx::Context::render_globe_tile_clipping_masks`).
-//
-// TODO(port): `createDynamicTexture`, `createRenderTarget`,
-// `createRenderbufferResource` and the render jobs of the backend thread
-// pool, as in the WebGPU backend.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
@@ -96,14 +90,13 @@ pub struct Context {
     stencil_state_formats: Cell<Option<AttachmentFormats>>,
 }
 
-/// `GlobeClipMesh`: a tile's pole-capped mesh for its globe clip mask.
+/// A tile's pole-capped mesh for its globe clip mask.
 struct GlobeClipMesh {
     vertices: MTLBufferPtr,
     indices: MTLBufferPtr,
     index_count: usize,
 }
 
-/// `clipMaskStencilMode`
 fn clip_mask_stencil_mode() -> StencilMode {
     StencilMode {
         test: Test::Always,
@@ -115,7 +108,6 @@ fn clip_mask_stencil_mode() -> StencilMode {
     }
 }
 
-/// `clipMaskDepthMode`
 fn clip_mask_depth_mode() -> DepthMode {
     DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly, range: Range::new(0.0, 1.0) }
 }
@@ -160,7 +152,6 @@ fn map_operation(op: StencilOpType) -> MTLStencilOperation {
 }
 
 impl Context {
-    /// `Context(RendererBackend&)`
     #[must_use]
     pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
@@ -191,7 +182,6 @@ impl Context {
         self.weak_self.clone()
     }
 
-    /// `getBackend()`
     pub fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
     }
@@ -206,7 +196,6 @@ impl Context {
         self.globe_clip_meshes.borrow_mut().clear();
     }
 
-    /// `createBuffer(data, size, usage, isIndexBuffer, persistent)`
     pub fn create_buffer(
         &self,
         data: Option<&[u8]>,
@@ -217,9 +206,8 @@ impl Context {
         BufferResource::new(self, data, size, BUFFER_USAGE, is_index_buffer, persistent)
     }
 
-    /// `createProgram(name, source, vertexName, fragmentName,
-    /// programParameters, additionalDefines)`: compiles `source` with the
-    /// program's defines and `additional_defines` as preprocessor macros.
+    /// Compiles `source` with the program's defines and `additional_defines`
+    /// as preprocessor macros.
     pub fn create_program(
         &self,
         name: String,
@@ -276,12 +264,11 @@ impl Context {
         Some(ShaderProgram::new(name, self.backend.clone(), vertex_function, fragment_function))
     }
 
-    /// `createTexture2D()` with the concrete type.
+    /// Creates a texture, of the concrete type.
     pub fn create_mtl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self.rc())))
     }
 
-    /// `createOffscreenTexture(size, type, depth, stencil)`
     pub fn create_offscreen_texture_with(
         &self,
         size: Size,
@@ -292,9 +279,8 @@ impl Context {
         OffscreenTexture::new(self.rc(), size, type_, depth, stencil)
     }
 
-    /// `makeDepthStencilState(depthMode, stencilMode, renderable)`: applies
-    /// only the modes whose attachment the pass has (Metal's validation
-    /// rejects a depth test without a depth attachment).
+    /// A depth-stencil state of the modes whose attachment `render_pass` has
+    /// (Metal's validation rejects a depth test without a depth attachment).
     pub fn make_depth_stencil_state(
         &self,
         depth_mode: &DepthMode,
@@ -327,9 +313,8 @@ impl Context {
         buffer_resource::new_metal_buffer(self.backend.get_device(), Some(data), data.len(), BUFFER_USAGE)
     }
 
-    /// `getTileVertexBuffer()`: `RenderStaticData::tileVertices()`, the four
-    /// corners of the tile extent as short2 (inlined: `RenderStaticData` is a
-    /// renderer type).
+    /// The four corners of the tile extent as short2. They are written out
+    /// here because C++'s `RenderStaticData` is a renderer type.
     pub fn get_tile_vertex_buffer(&self) -> Option<MTLBufferPtr> {
         let mut cached = self.tile_vertex_buffer.borrow_mut();
         if cached.is_none() {
@@ -340,7 +325,7 @@ impl Context {
         cached.clone()
     }
 
-    /// `getTileIndexBuffer()`: `RenderStaticData::quadTriangleIndices()`.
+    /// The indices of the two triangles of a tile quad.
     pub fn get_tile_index_buffer(&self) -> Option<MTLBufferPtr> {
         let mut cached = self.tile_index_buffer.borrow_mut();
         if cached.is_none() {
@@ -350,8 +335,8 @@ impl Context {
         cached.clone()
     }
 
-    /// `getEmptyVertexBuffer()`: bound where an attribute's values come from
-    /// a uniform instead. Shaders don't read it, but Metal requires a
+    /// An empty vertex buffer, bound where an attribute's values come from a
+    /// uniform instead. Shaders don't read it, but Metal requires a
     /// binding.
     pub fn get_empty_vertex_buffer(&self) -> Option<MTLBufferPtr> {
         let mut cached = self.empty_vertex_buffer.borrow_mut();
@@ -388,8 +373,7 @@ impl Context {
         }
     }
 
-    /// `clipMaskDepthStencilStateFor(renderable)`: sets the depth-stencil
-    /// state clip masks are drawn with.
+    /// Sets the depth-stencil state clip masks are drawn with.
     fn set_clip_mask_depth_stencil_state(&self, render_pass: &RenderPass) {
         if self.clip_mask_depth_stencil_state.borrow().is_none() {
             *self.clip_mask_depth_stencil_state.borrow_mut() =
@@ -402,8 +386,8 @@ impl Context {
         render_pass.set_depth_stencil_state(self.clip_mask_depth_stencil_state.borrow().as_ref());
     }
 
-    /// `makeClipMaskPipelineState(shader, renderable)`: a pipeline state for
-    /// a clip mask shader over the position-only tile vertex layout.
+    /// A pipeline state for a clip mask shader over the position-only tile
+    /// vertex layout, for attachments of `formats`.
     fn make_clip_mask_pipeline_state(
         shader: &ShaderProgram,
         formats: AttachmentFormats,
@@ -443,7 +427,6 @@ impl Context {
         )
     }
 
-    /// `renderTileClippingMasks(renderPass, staticData, tileUBOs)`
     fn render_tile_clipping_masks_impl(
         &self,
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
@@ -513,8 +496,8 @@ impl Context {
         true
     }
 
-    /// `renderGlobeTileClippingMasks(renderPass, staticData, masks)`, with
-    /// `mesh` making a tile's mesh in place of C++'s `rawGlobeTileMesh`.
+    /// Draws the globe's tile clipping masks, with `mesh` making a tile's
+    /// mesh in place of C++'s `rawGlobeTileMesh`.
     fn render_globe_tile_clipping_masks_impl(
         &self,
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
@@ -629,7 +612,8 @@ impl GfxContext for Context {
 
     fn reduce_memory_usage(&self) {}
 
-    /// `createOffscreenTexture(size, type)`: neither depth nor stencil.
+    /// Creates an offscreen texture of `size` with `type_` channels, with
+    /// neither depth nor stencil.
     fn create_offscreen_texture(
         &self,
         size: Size,

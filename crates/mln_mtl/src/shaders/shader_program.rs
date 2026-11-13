@@ -1,6 +1,3 @@
-// Ports include/mln/shaders/mtl/shader_program.hpp and
-// src/mln/shaders/mtl/shader_program.cpp
-//
 // Differences from C++:
 // - `mtl::VertexAttribute` adds a buffer index to the gfx attribute, which
 //   the port's gfx attribute array can't hold; the program keeps the buffer
@@ -59,7 +56,6 @@ fn metal_blend_factor(factor: ColorBlendFactorType) -> MTLBlendFactor {
     }
 }
 
-/// `mtl::ShaderProgram`
 pub struct ShaderProgram {
     shader_program_id: SimpleIdentity,
     shader_name: String,
@@ -105,8 +101,7 @@ impl ShaderProgram {
         &self.shader_name
     }
 
-    /// `getRenderPipelineState(renderable, vertexDescriptor, colorMode,
-    /// reuseHash)`: the state for a pass with `formats`, reused from earlier
+    /// The pipeline state for a pass with `formats`, reused from earlier
     /// calls with the same `reuse_hash`.
     pub fn get_render_pipeline_state(
         &self,

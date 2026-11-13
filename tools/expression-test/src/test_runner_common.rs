@@ -1,9 +1,5 @@
-// Ports expression-test/test_runner_common.cpp: the comparison rules of the
-// C++ (and GL JS) expression harness.
-
 use feature::Value;
 
-/// `numericValue<double>`.
 fn numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Uint(t) => Some(*t as f64),
@@ -146,7 +142,6 @@ pub fn color_output_equal(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// `deepEqual(const std::optional<Value>&, const std::optional<Value>&)`.
 #[must_use]
 pub fn deep_equal_opt(a: &Option<Value>, b: &Option<Value>) -> bool {
     match (a, b) {

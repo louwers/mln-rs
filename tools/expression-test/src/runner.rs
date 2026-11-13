@@ -1,6 +1,3 @@
-// Ports expression-test/expression_test_runner.hpp and
-// expression-test/expression_test_runner.cpp (minus UPDATE mode).
-
 use std::fmt::Write;
 
 use feature::{Value, ValueObject};
@@ -129,7 +126,6 @@ fn evaluate_expression(data_inputs: &[crate::parser::Input], expression: &dyn Ex
     result.outputs = Some(Value::Array(outputs));
 }
 
-/// `runExpressionTest`.
 pub fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
     let mut output = TestRunOutput { id: id.to_owned(), ..Default::default() };
 

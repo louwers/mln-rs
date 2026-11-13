@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/source_state.hpp and src/mln/renderer/source_state.cpp
-//
 // `coalesceChanges(std::vector<RenderTile>&)` calls `tile.setFeatureState`
 // on every render tile; a Rust RenderTile has no reference to its Tile, so
 // `coalesce_changes` takes the tiles of the render source's pyramid (the same
@@ -21,7 +19,6 @@ use crate::tile::tile::Tile;
 /// shares the state of the sources it leaves alone with the update before.
 pub type FeatureStatesBySource = BTreeMap<String, Arc<LayerFeatureStates>>;
 
-/// `SourceFeatureState`.
 #[derive(Debug, Default)]
 pub struct SourceFeatureState {
     current_states: LayerFeatureStates,
@@ -39,7 +36,6 @@ impl SourceFeatureState {
         Self::default()
     }
 
-    /// `updateState(sourceLayerID, featureID, newState)`.
     pub fn update_state(&mut self, source_layer_id: Option<&str>, feature_id: &str, new_state: &FeatureState) {
         let source_layer = source_layer_id.unwrap_or("").to_owned();
         for (key, value) in new_state {
@@ -158,7 +154,6 @@ impl SourceFeatureState {
         }
     }
 
-    /// `getState(result, sourceLayerID, featureID)`.
     #[must_use]
     pub fn get_state(&self, source_layer_id: Option<&str>, feature_id: &str) -> FeatureState {
         let source_layer = source_layer_id.unwrap_or("");
@@ -190,11 +185,11 @@ impl SourceFeatureState {
         result
     }
 
-    /// `coalesceChanges(tiles)`: folds the queued changes and deletions into
-    /// the current states and brings each tile's buckets up to date. A tile
-    /// that holds the previous version gets this frame's changes; a tile with
-    /// new buckets, or one that was not rendered in a frame with changes,
-    /// gets the whole state; a tile that is up to date gets nothing.
+    /// Folds the queued changes and deletions into the current states and
+    /// brings each tile's buckets up to date. A tile that holds the previous
+    /// version gets this frame's changes; a tile with new buckets, or one that
+    /// was not rendered in a frame with changes, gets the whole state; a tile
+    /// that is up to date gets nothing.
     pub fn coalesce_changes<'a>(&mut self, tiles: impl IntoIterator<Item = &'a dyn Tile>) {
         let mut changes: LayerFeatureStates = LayerFeatureStates::new();
         let state_changes = std::mem::take(&mut self.state_changes);
@@ -250,7 +245,6 @@ impl SourceFeatureState {
         }
     }
 
-    /// `removeState(sourceLayerID, featureID, stateKey)`.
     pub fn remove_state(&mut self, source_layer_id: Option<&str>, feature_id: Option<&str>, state_key: Option<&str>) {
         let source_layer = source_layer_id.unwrap_or("");
 

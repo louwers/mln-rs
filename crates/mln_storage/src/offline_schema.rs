@@ -1,6 +1,3 @@
-// Ports platform/default/include/mln/storage/offline_schema.hpp (generated
-// from offline_schema.sql; same string).
-
 pub const OFFLINE_DATABASE_SCHEMA: &str = "CREATE TABLE resources (
   id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   url TEXT NOT NULL,

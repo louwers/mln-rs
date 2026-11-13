@@ -1,6 +1,3 @@
-// Ports expression-test/main.cpp: `expression-test [-f filter] [--verbose]
-// [--write-expected-failures <path>] [test names...]`.
-
 use expression_test::{find_metrics_dir, print_stats, run};
 
 fn main() {

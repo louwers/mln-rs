@@ -1,5 +1,3 @@
-// Ports test/tile/vector_tile.test.cpp.
-//
 // VectorTile.setError, VectorTile.onError and VectorTile.Issue8542 need
 // VectorMVTTile, TileParameters and the renderer: they are in
 // crates/mln_renderer/tests/vector_tile_test.rs.

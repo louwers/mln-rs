@@ -1,5 +1,3 @@
-// Ports src/mln/geometry/anchor.hpp.
-
 use geometry::Point;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +10,6 @@ pub struct Anchor {
 }
 
 impl Anchor {
-    /// `Anchor(x, y, angle, segment = std::nullopt)`.
     #[must_use]
     pub fn new(x: f32, y: f32, angle: f32, segment: Option<usize>) -> Self {
         Anchor { point: Point::new(x, y), angle, segment }

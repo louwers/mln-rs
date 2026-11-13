@@ -1,7 +1,3 @@
-// Ports include/mln/vulkan/vertex_buffer_resource.hpp,
-// src/mln/vulkan/vertex_buffer_resource.cpp and their index buffer
-// counterparts (index_buffer_resource.hpp/.cpp)
-
 use std::cell::Cell;
 
 use mln_gfx::context::Context as _;
@@ -27,7 +23,6 @@ impl VertexBufferResource {
         VertexBufferResource { buffer, last_updated: Cell::new(None) }
     }
 
-    /// `get()`
     pub fn get(&self) -> &BufferResource {
         &self.buffer
     }
@@ -75,7 +70,6 @@ impl IndexBufferResource {
         IndexBufferResource { buffer }
     }
 
-    /// `get()`
     pub fn get(&self) -> &BufferResource {
         &self.buffer
     }

@@ -1,7 +1,6 @@
-//! Ports `src/mln/util` + `include/mln/util`.
-//!
-//! Module-per-file, mirroring the C++ tree. Files not yet ported arrive with
-//! their first users.
+//! Utilities shared by the other crates: geometry, math, colors, images,
+//! time, strings, URLs, logging, threading helpers and more, one module per
+//! file.
 
 pub mod color;
 pub mod compression;

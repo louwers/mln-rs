@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/raster_layer_tweaker.hpp and
-// src/mln/renderer/layers/raster_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
-// branches: the port's backend is WebGPU).
-
 use std::sync::Arc;
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;

@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/paint_property_statistics.hpp
-
 use std::marker::PhantomData;
 
 use mln_util::Color;
@@ -25,7 +23,6 @@ impl StatisticValue for Color {
     }
 }
 
-/// `PaintPropertyStatistics<T>`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct PaintPropertyStatistics<T> {
@@ -41,7 +38,8 @@ impl<T> Default for PaintPropertyStatistics<T> {
 }
 
 impl<T: StatisticValue> PaintPropertyStatistics<T> {
-    /// `max()`: always empty for the primary template.
+    /// The largest value added; always `None` for value types other than
+    /// `f32`.
     #[must_use]
     pub fn max(&self) -> Option<f32> {
         self.max

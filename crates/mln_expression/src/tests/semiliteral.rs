@@ -1,5 +1,3 @@
-// Ports test/style/expression/semiliteral.test.cpp.
-
 use feature::Feature;
 use mln_conversion::Convertible;
 

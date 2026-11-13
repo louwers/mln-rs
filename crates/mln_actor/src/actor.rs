@@ -1,6 +1,5 @@
-// Ports include/mln/actor/actor.hpp for objects that may run on any thread
-// of a scheduler (a ThreadPool), with the mailbox semantics of
-// src/mln/actor/mailbox.cpp. Added by `sources` for GeometryTileWorker.
+// Actors whose objects may run on any thread of a scheduler (a
+// `ThreadPool`), with the same message semantics as `mailbox.rs`.
 //
 // `mailbox.rs` pins its target to the thread that opened it (the object is
 // not `Send`). A pool actor's object is `Send` and lives behind a mutex:
@@ -13,12 +12,10 @@
 // receiving mutex does, and drops the object afterwards. `abandon()` stops
 // pushes without waiting.
 //
-// gtests-core: closing from inside one of the actor's own messages (C++:
-// the recursive receiving mutex lets an actor destroy itself, see
-// test/actor/actor.test.cpp DestructionAllowedInReceiveOnSameThread) does
-// not wait: it closes the queue, and `receive()` drops the object once that
-// message returns (C++ destroys it during the message, which Rust's `&mut O`
-// borrow rules out).
+// Closing from inside one of the actor's own messages does not wait: it
+// closes the queue, and `receive()` drops the object once that message
+// returns. (C++'s recursive receiving mutex lets an actor destroy itself
+// during the message, which Rust's `&mut O` borrow rules out.)
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,7 +51,6 @@ pub struct PoolMailbox<O: Send + 'static> {
 }
 
 impl<O: Send + 'static> PoolMailbox<O> {
-    /// `push(std::unique_ptr<Message>)`.
     fn push(&self, message: PoolMessage<O>) {
         if self.abandoned.load(Ordering::SeqCst) {
             return;
@@ -73,7 +69,7 @@ impl<O: Send + 'static> PoolMailbox<O> {
         }
     }
 
-    /// `receive()`: runs the first message, and schedules the next one.
+    /// Runs the first message, and schedules the next one.
     fn receive(&self) {
         let mut object = self.object.lock();
         let Some(target) = object.as_mut() else {
@@ -127,13 +123,13 @@ impl<O: Send + 'static> PoolMailbox<O> {
         }
     }
 
-    /// `abandon()`: drops pushes from now on.
+    /// Drops pushes from now on, without waiting for a running message.
     pub fn abandon(&self) {
         self.abandoned.store(true, Ordering::SeqCst);
     }
 
-    /// `close()`: blocks until no message is running; no message runs
-    /// afterwards. Returns the object.
+    /// Blocks until no message is running; no message runs afterwards.
+    /// Returns the object.
     fn close(&self) -> Option<O> {
         self.abandon();
         if *self.receiving_thread.lock() == Some(std::thread::current().id()) {
@@ -153,7 +149,7 @@ impl<O: Send + 'static> PoolMailbox<O> {
     }
 }
 
-/// `ActorRef<O>` to a pool actor. Sending to a reference whose actor is gone
+/// A reference to a pool actor. Sending to a reference whose actor is gone
 /// does nothing.
 pub struct PoolActorRef<O: Send + 'static> {
     mailbox: Weak<PoolMailbox<O>>,
@@ -186,7 +182,7 @@ impl<O: Send + 'static> PoolActorRef<O> {
     }
 }
 
-/// `Actor<O>`: owns the object; messages run on `scheduler`'s threads.
+/// Owns the object; messages run on the scheduler's threads.
 pub struct Actor<O: Send + 'static> {
     /// `retainer`: keeps the scheduler alive.
     _retainer: SchedulerPtr,
@@ -194,13 +190,12 @@ pub struct Actor<O: Send + 'static> {
 }
 
 impl<O: Send + 'static> Actor<O> {
-    /// `Actor(const TaggedScheduler&, args...)`: `make` gets the actor's own
-    /// reference, as an `O(ActorRef<O>, ...)` constructor does.
+    /// Creates the actor on `scheduler`. `make` receives the actor's own
+    /// reference and builds the object.
     pub fn new_tagged(scheduler: &TaggedScheduler, make: impl FnOnce(PoolActorRef<O>) -> O) -> Self {
         Self::create(scheduler.get().clone(), Some(scheduler.tag), make)
     }
 
-    /// `Actor(std::shared_ptr<Scheduler>, args...)`.
     pub fn new(scheduler: SchedulerPtr, make: impl FnOnce(PoolActorRef<O>) -> O) -> Self {
         Self::create(scheduler, None, make)
     }
@@ -225,7 +220,6 @@ impl<O: Send + 'static> Actor<O> {
         Actor { _retainer: scheduler, mailbox }
     }
 
-    /// `self()`.
     #[must_use]
     pub fn self_ref(&self) -> PoolActorRef<O> {
         PoolActorRef { mailbox: Arc::downgrade(&self.mailbox) }

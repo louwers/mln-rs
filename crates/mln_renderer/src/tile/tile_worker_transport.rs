@@ -101,21 +101,21 @@ pub trait TileWorkerTransport {
     ) -> Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>>;
 }
 
-/// `ActorRef<GeometryTile>`: the tile's mailbox.
+/// Replies go to the tile's mailbox.
 impl TileEndpoint for ActorRef<GeometryTileInner> {
     fn send(&self, message: TileMessage) {
         self.invoke(move |tile: &GeometryTileInner| tile.handle_worker_message(message));
     }
 }
 
-/// `ActorRef<RasterTile>`: the tile's mailbox.
+/// Replies go to the tile's mailbox.
 impl TileEndpoint<RasterTileMessage> for ActorRef<RasterTileInner> {
     fn send(&self, message: RasterTileMessage) {
         self.invoke(move |tile: &RasterTileInner| tile.handle_worker_message(message));
     }
 }
 
-/// `ActorRef<RasterDEMTile>`: the tile's mailbox.
+/// Replies go to the tile's mailbox.
 impl TileEndpoint<RasterDEMTileMessage> for ActorRef<RasterDEMTileInner> {
     fn send(&self, message: RasterDEMTileMessage) {
         self.invoke(move |tile: &RasterDEMTileInner| tile.handle_worker_message(message));
@@ -182,7 +182,6 @@ impl TileWorkerTransport for InProcessTransport {
         }
     }
 
-    /// `worker(parameters.threadPool, ActorRef<RasterTile>(*this, mailbox))`.
     fn create_raster(
         &self,
         tile: Box<dyn TileEndpoint<RasterTileMessage>>,
@@ -190,7 +189,6 @@ impl TileWorkerTransport for InProcessTransport {
         Box::new(PoolWorker::new(Actor::new_tagged(&self.thread_pool, move |_| RasterTileWorker::new(tile))))
     }
 
-    /// `worker(parameters.threadPool, ActorRef<RasterDEMTile>(*this, mailbox))`.
     fn create_raster_dem(
         &self,
         tile: Box<dyn TileEndpoint<RasterDEMTileMessage>>,
@@ -213,34 +211,30 @@ impl<W: Send + 'static> PoolWorker<W> {
 }
 
 impl WorkerEndpoint for PoolWorker<GeometryTileWorker> {
-    /// `worker.self().invoke(fn, args...)`.
     fn send(&self, message: WorkerMessage) {
         self.actor_ref.invoke(move |worker: &mut GeometryTileWorker| worker.handle(message));
     }
 }
 
 impl WorkerEndpoint<RasterWorkerMessage> for PoolWorker<RasterTileWorker> {
-    /// `worker.self().invoke(fn, args...)`.
     fn send(&self, message: RasterWorkerMessage) {
         self.actor_ref.invoke(move |worker: &mut RasterTileWorker| worker.handle(message));
     }
 }
 
 impl WorkerEndpoint<RasterDEMWorkerMessage> for PoolWorker<RasterDEMTileWorker> {
-    /// `worker.self().invoke(fn, args...)`.
     fn send(&self, message: RasterDEMWorkerMessage) {
         self.actor_ref.invoke(move |worker: &mut RasterDEMTileWorker| worker.handle(message));
     }
 }
 
-/// `OptionalActor<GeometryTileWorker>` with an object: the worker on the
-/// render thread, for synchronous updates.
+/// The worker on the render thread, for synchronous updates.
 ///
-/// C++ makes a nested call into the worker directly, e.g. the glyph and
-/// image managers answering inside `parse` from what they already hold.
-/// The worker can't be re-entered here, so a nested message waits in
-/// `nested` and is handled as soon as the message being handled returns,
-/// before `send` returns to its caller.
+/// The worker can't be re-entered, so a message sent while another is being
+/// handled (e.g. the glyph and image managers answering inside `parse` from
+/// what they already hold) waits in `nested`. It is handled as soon as the
+/// message being handled returns, before `send` returns to its caller. C++
+/// makes such a nested call into the worker directly.
 struct SynchronousWorker {
     worker: RefCell<GeometryTileWorker>,
     nested: RefCell<VecDeque<WorkerMessage>>,
@@ -253,7 +247,7 @@ impl SynchronousWorker {
 }
 
 impl WorkerEndpoint for SynchronousWorker {
-    /// `worker.self().invoke(fn, args...)`: a direct call.
+    /// Handles the message with a direct call.
     fn send(&self, message: WorkerMessage) {
         let Ok(mut worker) = self.worker.try_borrow_mut() else {
             self.nested.borrow_mut().push_back(message);

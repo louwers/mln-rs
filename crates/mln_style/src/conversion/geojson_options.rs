@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/geojson_options.hpp and
-// src/mln/style/conversion/geojson_options.cpp.
-
 use std::sync::Arc;
 
 use super::{Converter, Convertible, Error};

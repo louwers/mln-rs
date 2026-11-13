@@ -1,19 +1,17 @@
-// Ports include/mln/gfx/color_mode.hpp
-
 use mln_util::Color;
 
 use crate::types::{ColorBlendEquationType, ColorBlendFactorType};
 
-/// `ColorMode::LinearBlend<E>`: the equation is the variant of
-/// `BlendFunction`; the factors are data.
+/// The factors of a linear blend. The equation is the `BlendFunction`
+/// variant that holds them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LinearBlend {
     pub src_factor: ColorBlendFactorType,
     pub dst_factor: ColorBlendFactorType,
 }
 
-/// `ColorMode::BlendFunction = variant<Replace, Add, Subtract, ReverseSubtract>`
-/// (same variant order, so `which()` is the discriminant).
+/// A blend equation and its factors. The variants are in C++'s order, which
+/// `which` returns as an index.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BlendFunction {
     Replace,
@@ -23,7 +21,6 @@ pub enum BlendFunction {
 }
 
 impl BlendFunction {
-    /// `variant::which()`
     #[must_use]
     pub fn which(&self) -> usize {
         match self {
@@ -44,7 +41,7 @@ impl BlendFunction {
         }
     }
 
-    /// `srcFactor` of the active alternative (`Replace`: One).
+    /// The source blend factor (`One` for `Replace`).
     #[must_use]
     pub fn src_factor(&self) -> ColorBlendFactorType {
         match self {
@@ -53,7 +50,7 @@ impl BlendFunction {
         }
     }
 
-    /// `dstFactor` of the active alternative (`Replace`: Zero).
+    /// The destination blend factor (`Zero` for `Replace`).
     #[must_use]
     pub fn dst_factor(&self) -> ColorBlendFactorType {
         match self {
@@ -63,7 +60,6 @@ impl BlendFunction {
     }
 }
 
-/// `ColorMode::Mask`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Mask {
     pub r: bool,
@@ -120,8 +116,7 @@ impl ColorMode {
         }
     }
 
-    /// `ColorMode::hash()`.
-    // TODO(port): C++ uses util::hash (boost hash_combine); the value is only
+    // C++ uses util::hash (boost hash_combine); the value is only
     // used as a pipeline cache key, so any stable combination works.
     #[must_use]
     pub fn hash(&self) -> u64 {

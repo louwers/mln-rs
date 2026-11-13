@@ -1,5 +1,3 @@
-// Ports render-test/render_test.cpp (`mln::runRenderTests`).
-//
 // Options that C++ does not have:
 // - `--output <dir>` (required): where actual.png, diff.png and the HTML
 //   report go. C++ writes them next to the tests and the manifest; this
@@ -73,8 +71,8 @@ const HELP: &str = "  render-test {OPTIONS}
                                         (default 0: on the map's thread pool)
 ";
 
-/// `ArgumentsTuple` plus the options C++ does not have. Serialized for the
-/// workers of `--jobs` (jobs.rs).
+/// The runner's command-line options. Serialized for the workers of
+/// `--jobs` (jobs.rs).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Arguments {
     pub recycle_map: bool,
@@ -100,8 +98,8 @@ pub struct Arguments {
     pub worker_program: Option<PathBuf>,
 }
 
-/// `parseArguments(argc, argv)` (args.hxx). C++ calls `exit(code)`; here
-/// `Err(code)` is returned after the same messages.
+/// Parses the command-line arguments. Prints the same messages as C++, and
+/// returns `Err(code)` where C++ calls `exit(code)`.
 pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
     let mut recycle_map = false;
     let mut shuffle = false;
@@ -255,7 +253,7 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
     if update_results != UpdateResults::No {
         log::error(
             Event::General,
-            "TODO(port): --update is not supported: the port never writes baselines into \
+            "--update is not supported: the runner never writes baselines into \
              ../maplibre-native (add an alternate expectation by hand for a justified difference)",
         );
         return Err(1);
@@ -278,7 +276,6 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
     })
 }
 
-/// `runWithAlternateSources(runner, metadata, errored, passed)`.
 fn run_with_alternate_sources(
     runner: &mut TestRunner,
     metadata: &mut TestMetadata,
@@ -497,8 +494,9 @@ pub struct RunResult {
     pub metadatas: Vec<TestMetadata>,
 }
 
-/// `mln::runRenderTests(argc, argv, testStatus)`. `factory` creates the map
-/// for a test (`None`: only `--self-check` can pass).
+/// Runs the render tests with the command-line `args`, and returns the exit
+/// code. `factory` creates the map for a test (`None`: only `--self-check`
+/// can pass).
 #[must_use]
 pub fn run_render_tests(args: &[String], factory: Option<ImplFactory>) -> i32 {
     // A worker of a `--jobs` run (jobs.rs).
@@ -513,15 +511,13 @@ pub fn run_render_tests(args: &[String], factory: Option<ImplFactory>) -> i32 {
     }
 }
 
-/// `runRenderTests` after argument parsing.
+/// Runs the render tests with parsed `arguments`.
 pub fn run_render_tests_with(arguments: &Arguments, factory: Option<ImplFactory>) -> RunResult {
     let early = |return_code: i32| RunResult { return_code, stats: TestStatistics::default(), metadatas: Vec::new() };
 
     let Arguments { recycle_map, shuffle, online, seed, manifest_path, test_filter, .. } = arguments.clone();
 
     crate::file_source::ProxyFileSource::set_offline(!online);
-    // TODO(port): NetworkStatus::Set(online ? Online : Offline) (online file
-    // source).
 
     let Some(mut manifest_data) = ManifestParser::parse_manifest(&manifest_path, test_filter) else {
         return early(5);

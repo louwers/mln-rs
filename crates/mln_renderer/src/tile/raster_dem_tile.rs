@@ -1,7 +1,3 @@
-// Ports src/mln/tile/raster_dem_tile.hpp, src/mln/tile/raster_dem_tile.cpp,
-// src/mln/tile/raster_dem_tile_worker.hpp and
-// src/mln/tile/raster_dem_tile_worker.cpp.
-//
 // Same structure as raster_tile.rs: the state the worker's replies change
 // is `RasterDEMTileInner`, the target of the tile's mailbox, and the tile
 // and its worker exchange only `RasterDEMWorkerMessage`s and
@@ -35,7 +31,7 @@ use crate::tile_mask::TileMask;
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
 
-/// `DEMTileNeighbors`: a bitmask of the backfilled neighbors.
+/// A bitmask of the neighbors backfilled into the tile's DEM.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DEMTileNeighbors(pub u8);
 
@@ -76,7 +72,6 @@ impl std::ops::BitAnd for DEMTileNeighbors {
 /// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterDEMWorkerMessage {
-    /// `parse(data, correlationID, encoding)`.
     Parse {
         #[serde(with = "shared_bytes::option")]
         data: Option<Data>,
@@ -90,13 +85,10 @@ pub enum RasterDEMWorkerMessage {
 /// for a worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterDEMTileMessage {
-    /// `onParsed(std::move(bucket), correlationID)`.
     Parsed { bucket: Option<Arc<HillshadeBucket>>, correlation_id: u64 },
-    /// `onError(std::current_exception(), correlationID)`.
     Error { error: Error, correlation_id: u64 },
 }
 
-/// `RasterDEMTileWorker`.
 pub struct RasterDEMTileWorker {
     /// The tile, which gets the replies in the order of their parses
     /// although images may decode asynchronously (`ordered_replies.rs`).
@@ -104,7 +96,6 @@ pub struct RasterDEMTileWorker {
 }
 
 impl RasterDEMTileWorker {
-    /// `RasterDEMTileWorker(ActorRef<RasterDEMTileWorker>, ActorRef<RasterDEMTile>)`.
     #[must_use]
     pub fn new(parent: Box<dyn TileEndpoint<RasterDEMTileMessage>>) -> Self {
         RasterDEMTileWorker { parent: OrderedReplies::new(parent) }
@@ -119,9 +110,8 @@ impl RasterDEMTileWorker {
         }
     }
 
-    /// `parse(data, correlationID, encoding)`. The reply goes once the
-    /// image has decoded, which may be after this returns (decoder.rs in
-    /// `mln_image`).
+    /// Decodes `data` on the worker. The reply goes once the image has
+    /// decoded, which may be after this returns (decoder.rs in `mln_image`).
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64, encoding: RasterEncoding) {
         let parent = self.parent.slot();
         let Some(data) = data else {
@@ -158,7 +148,7 @@ pub struct RasterDEMTileInner {
     /// backfilled; there are max 8 possible neighboring tiles, so each bit
     /// represents one neighbor
     pub neighboring_tiles: Cell<DEMTileNeighbors>,
-    /// `Actor<RasterDEMTileWorker> worker`, behind its transport.
+    /// The tile's worker, behind its transport.
     worker: Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>>,
     mailbox: Arc<Mailbox>,
 }
@@ -172,7 +162,6 @@ impl RasterDEMTileInner {
         }
     }
 
-    /// `onParsed(std::unique_ptr<HillshadeBucket>, correlationID)`.
     pub fn on_parsed(&self, result: Option<Arc<HillshadeBucket>>, result_correlation_id: u64) {
         if !self.obsolete.get() {
             let renderable = result.is_some() || !self.missing.get();
@@ -187,7 +176,6 @@ impl RasterDEMTileInner {
         }
     }
 
-    /// `onError(std::exception_ptr, correlationID)`.
     pub fn on_error(&self, err: Error, result_correlation_id: u64) {
         self.base.loaded.set(true);
         if result_correlation_id == self.correlation_id.get() {
@@ -197,7 +185,6 @@ impl RasterDEMTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    /// `markObsolete()`.
     fn mark_obsolete(&self) {
         self.obsolete.set(true);
         if self.base.pending.get() {
@@ -210,7 +197,6 @@ impl RasterDEMTileInner {
 }
 
 impl LoaderTile for RasterDEMTileInner {
-    /// `setError(std::exception_ptr)`.
     fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
         self.base.observer().on_tile_error(&self.base, err);
@@ -228,13 +214,11 @@ impl LoaderTile for RasterDEMTileInner {
         self.base.on_tile_action(op);
     }
 
-    /// `setMetadata(modified, expires)`.
     fn set_metadata(&self, modified: Option<Timestamp>, expires: Option<Timestamp>) {
         self.base.modified.set(modified);
         self.base.expires.set(expires);
     }
 
-    /// `setData(data)`.
     fn set_data(&self, data: Option<Data>, _encoding: VectorTileEncoding) {
         self.parse(data, false);
     }
@@ -261,14 +245,12 @@ impl RasterDEMTileInner {
     }
 }
 
-/// `RasterDEMTile`.
 pub struct RasterDEMTile {
     inner: Rc<RasterDEMTileInner>,
     loader: Option<TileLoader>,
 }
 
 impl RasterDEMTile {
-    /// `RasterDEMTile(id, sourceID, parameters, tileset, observer)`.
     #[must_use]
     pub fn new(
         id: OverscaledTileID,
@@ -317,19 +299,16 @@ impl RasterDEMTile {
         &self.inner
     }
 
-    /// `getBucket()`.
     #[must_use]
     pub fn get_bucket(&self) -> Option<Arc<HillshadeBucket>> {
         self.inner.bucket.borrow().clone()
     }
 
-    /// `neighboringTiles`.
     #[must_use]
     pub fn neighboring_tiles(&self) -> DEMTileNeighbors {
         self.inner.neighboring_tiles.get()
     }
 
-    /// `backfillBorder(const RasterDEMTile& borderTile, DEMTileNeighbors mask)`.
     pub fn backfill_border(&self, border_tile: &RasterDEMTile, mask: DEMTileNeighbors) {
         let id = self.inner.base.id();
         let border_id = border_tile.inner.base.id();

@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/command_encoder.hpp and src/mln/webgpu/command_encoder.cpp
-//
 // Debug groups are no-ops in C++ ("handled at the render pass level"); the
 // names are tracked for `visitDebugGroups` only.
 //
@@ -43,7 +41,6 @@ impl CommandEncoder {
         &self.context
     }
 
-    /// `getEncoder()`
     pub fn get_encoder(&self) -> RefMut<'_, Option<wgpu::CommandEncoder>> {
         self.encoder.borrow_mut()
     }

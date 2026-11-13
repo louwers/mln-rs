@@ -1,5 +1,3 @@
-// Ports src/mln/util/tile_range.hpp.
-
 use geometry::Point;
 use mln_math::{clamp_f64, wrap};
 use mln_util::constants;
@@ -9,7 +7,6 @@ use mln_util::range::Range;
 
 use crate::tile_id::CanonicalTileID;
 
-/// `util::TileRange`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileRange {
     pub range: Range<Point<u32>>,

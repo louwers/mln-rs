@@ -22,7 +22,7 @@ pub fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
 }
 
-/// `util::read_file` on a C++ test fixture.
+/// Reads a C++ test fixture.
 #[must_use]
 pub fn read_file(relative: &str) -> Vec<u8> {
     let path = cpp_path(relative);
@@ -37,8 +37,7 @@ impl Observer for NullObserver {
     }
 }
 
-/// `Log::setObserver(std::make_unique<Log::NullObserver>())` for the
-/// calling thread, undone on drop.
+/// Silences the calling thread's log until dropped.
 pub struct SquelchLog;
 
 impl SquelchLog {

@@ -1,5 +1,3 @@
-// Ports include/mln/style/expression/interpolator.hpp.
-
 use mln_util::UnitBezier;
 use mln_util::interpolate::interpolation_factor;
 

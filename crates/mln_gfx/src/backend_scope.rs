@@ -1,10 +1,7 @@
-// Ports include/mln/gfx/backend_scope.hpp and src/mln/renderer/backend_scope.cpp
-//
 // The C++ scopes form a thread-local doubly linked list and re-activate the
 // prior scope's backend when a nested scope for a *different* backend ends.
-// TODO(port): that cross-backend hand-over (deactivate prior / re-activate
-// on drop) needs a reference to the prior backend; the port tracks only the
-// backend ids, so nesting different backends does not toggle the outer one.
+// Here the scopes track only the backend ids, so nesting different
+// backends does not toggle the outer one.
 // Nesting the same backend (the common case) behaves as in C++: activated
 // once, deactivated once.
 

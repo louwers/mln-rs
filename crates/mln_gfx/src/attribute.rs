@@ -1,11 +1,3 @@
-// Ports the run-time parts of src/mln/gfx/attribute.hpp used by the
-// drawable path: `AttributeDescriptor`, `AttributeBinding`,
-// `AttributeBindingArray`.
-//
-// TODO(port): the compile-time attribute type lists (`AttributeType`,
-// `Vertex<...>`, `AttributeBindings<TypeList>`, MBGL_DEFINE_ATTRIBUTE) belong
-// to the legacy program path and arrive with the first user.
-
 use std::rc::Rc;
 
 use crate::gfx_types::AttributeDataType;
@@ -17,8 +9,8 @@ pub struct AttributeDescriptor {
     pub offset: u32,
 }
 
-/// `gfx::AttributeBinding`. `vertexBufferResource` is a raw pointer in C++;
-/// here an `Rc` clone, compared by address as C++ compares the pointer.
+/// A vertex attribute bound to a vertex buffer. The buffer is an `Rc` clone,
+/// compared by address as C++ compares the raw pointer.
 #[derive(Clone)]
 pub struct AttributeBinding {
     pub attribute: AttributeDescriptor,
@@ -43,5 +35,4 @@ impl PartialEq for AttributeBinding {
     }
 }
 
-/// `std::vector<std::optional<gfx::AttributeBinding>>`
 pub type AttributeBindingArray = Vec<Option<AttributeBinding>>;

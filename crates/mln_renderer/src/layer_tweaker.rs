@@ -1,7 +1,3 @@
-// Ports include/mln/renderer/layer_tweaker.hpp and src/mln/renderer/layer_tweaker.cpp
-// (+ RenderTile::translateVtxMatrix from src/mln/renderer/render_tile.cpp,
-// which getTileMatrix calls).
-//
 // C++ `LayerTweaker` is an abstract class with data members: the data is
 // `LayerTweakerBase`, the virtual `execute` is the `LayerTweaker` trait.
 // Tweakers are shared (`std::shared_ptr`) by the render layer and, weakly, by
@@ -49,9 +45,8 @@ impl LayerTweakerBase {
         }
     }
 
-    /// `uploadProjectionUBOs(layerUniforms, ubos, context)`: upload the
-    /// per-drawable projection blocks of this layer, indexed like the
-    /// drawable UBO array.
+    /// Uploads the per-drawable projection blocks of this layer, indexed like
+    /// the drawable UBO array.
     pub fn upload_projection_ubos(
         &mut self,
         layer_uniforms: &mut UniformBufferArray,
@@ -91,8 +86,6 @@ pub fn layer_tweaker_slot(tweaker: &LayerTweakerPtr) -> Option<Rc<dyn Any>> {
     Some(Rc::new(tweaker.clone()) as Rc<dyn Any>)
 }
 
-/// `LayerTweaker::getTileMatrix(tileID, parameters, translation, anchor,
-/// nearClipped, inViewportPixelUnits, drawable, aligned = false)`.
 #[allow(clippy::too_many_arguments)]
 pub fn get_tile_matrix(
     tile_id: &UnwrappedTileID,
@@ -117,9 +110,7 @@ pub fn get_tile_matrix(
     )
 }
 
-/// `LayerTweaker::getProjectionData(tileID, parameters, translation, anchor,
-/// nearClipped, inViewportPixelUnits, drawable, aligned = false)`: the
-/// projection contract for this tile, `getTileMatrix` plus the per-tile
+/// The projection data for this tile: the tile matrix plus the per-tile
 /// projection fields.
 #[allow(clippy::too_many_arguments)]
 pub fn get_projection_data(
@@ -154,7 +145,6 @@ pub fn get_projection_data(
     data
 }
 
-/// `LayerTweaker::toProjectionUBO`.
 #[must_use]
 pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     ProjectionUBO {
@@ -168,9 +158,9 @@ pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     }
 }
 
-/// `LayerTweaker::globeExtrudeScale`: radians per pixel on the sphere for a
-/// tile (GL JS `globeExtrudeScale`). `latitude_scale` is the cosine of the
-/// center latitude on the globe and 1 on Mercator.
+/// Radians per pixel on the sphere for a tile, as GL JS `globeExtrudeScale`.
+/// `latitude_scale` is the cosine of the center latitude on the globe and 1
+/// on Mercator.
 #[must_use]
 pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
     (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
@@ -202,7 +192,6 @@ pub fn get_tile_matrix_for(
     translate_vtx_matrix(tile_id, &tile_matrix, translation, anchor, transform_state, in_viewport_pixel_units)
 }
 
-/// `multiplyWithProjectionMatrix(mat4&, const TransformParameters&, nearClipped, aligned)`.
 pub fn multiply_with_projection_matrix(
     matrix: &mut Mat4,
     transform_params: &TransformParameters,
@@ -222,8 +211,6 @@ pub fn multiply_with_projection_matrix(
     matrix::multiply(matrix, proj_matrix_ref, &b);
 }
 
-/// `RenderTile::translateVtxMatrix(id, tileMatrix, translation, anchor,
-/// state, inViewportPixelUnits)` (`src/mln/renderer/render_tile.cpp`).
 pub fn translate_vtx_matrix(
     id: &UnwrappedTileID,
     tile_matrix: &Mat4,

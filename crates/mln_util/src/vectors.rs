@@ -1,5 +1,3 @@
-// Ports include/mln/util/vectors.hpp
-//
 // The `mln::vector` functions become named functions
 // (`vec2_gl_fmod` for `gl_fmod(vec2, double)`, ...).
 // Variadic `concatenate` and `vec` become fixed-arity functions whose output
@@ -25,9 +23,8 @@ pub fn slice<const START: usize, const COUNT: usize, T: Copy, const N: usize>(ar
     std::array::from_fn(|i| array[START + i])
 }
 
-/// `detail::as_array<T>`: a scalar is a one-element array, an array is
-/// itself. C++ also `static_cast`s other arithmetic types to `T`; here the
-/// caller converts first.
+/// A value as an array: a scalar is a one-element array, an array is itself.
+/// Other arithmetic types aren't converted to `T`: the caller converts first.
 pub trait AsArray<T: Copy> {
     const LEN: usize;
     fn write_to(&self, out: &mut [T]);
@@ -54,7 +51,7 @@ impl<T: Copy, const M: usize> AsArray<T> for [T; M] {
     }
 }
 
-/// `vector::vec<T>(a, b)`: OpenGL-style construction, e.g.
+/// Builds a vector from two parts, OpenGL-style, e.g.
 /// `vec_from2::<f64, _, _, 3>(&vec2, &1.0)`.
 pub fn vec_from2<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, const N: usize>(a: &A, b: &B) -> [T; N] {
     const { assert!(A::LEN + B::LEN == N, "vec: output size must match the arguments") };
@@ -64,7 +61,6 @@ pub fn vec_from2<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, const N: usize
     result
 }
 
-/// `vector::vec<T>(a, b, c)`.
 pub fn vec_from3<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, C: AsArray<T>, const N: usize>(
     a: &A,
     b: &B,
@@ -78,7 +74,6 @@ pub fn vec_from3<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, C: AsArray<T>,
     result
 }
 
-/// `vector::vec<T>(a, b, c, d)`.
 pub fn vec_from4<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, C: AsArray<T>, D: AsArray<T>, const N: usize>(
     a: &A,
     b: &B,
@@ -96,12 +91,10 @@ pub fn vec_from4<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, C: AsArray<T>,
 
 // --- namespace vector ---
 
-// TODO(port): use mln_util::math::gl_fmod once util/math.hpp is ported.
 fn gl_fmod(x: f64, y: f64) -> f64 {
     x - y * (x / y).floor()
 }
 
-/// `vector::gl_fmod(vec2, double)`.
 #[must_use]
 pub fn vec2_gl_fmod(a: &Vec2, b: f64) -> Vec2 {
     [gl_fmod(a[0], b), gl_fmod(a[1], b)]

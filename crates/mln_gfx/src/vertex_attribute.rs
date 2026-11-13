@@ -1,10 +1,5 @@
-// Ports include/mln/gfx/vertex_attribute.hpp and src/mln/gfx/vertex_attribute.cpp
-//
 // The WebGPU subclasses (include/mln/webgpu/vertex_attribute.hpp) add no
 // data, so `create()`/`copy()` are not virtual here.
-//
-// TODO(port): `readDataDrivenPaintProperties` (data-driven paint property
-// binders) arrives with the first layer type that uses binders (M3).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,8 +11,7 @@ use crate::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 use crate::vertex_buffer::UniqueVertexBufferResource;
 use crate::vertex_vector::VertexVectorBasePtr;
 
-/// `VertexAttribute::ElementType = variant<int32_t, ushort8, int2, int3, int4,
-/// float, float2, float3, float4, matf3, matf4>` (same order).
+/// The value of one vertex attribute element, in C++'s variant order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ElementType {
     Int(i32),
@@ -148,8 +142,8 @@ impl VertexAttribute {
         self.items.reserve(count);
     }
 
-    /// `set<T>(i, value)`: marks the attribute dirty when the value (or its
-    /// alternative) changes.
+    /// Sets element `i`, marking the attribute dirty when the value (or its
+    /// variant) changes.
     pub fn set(&mut self, i: usize, value: ElementType) -> &ElementType {
         if self.items.len() < i + 1 {
             let n = self.items.len().max(i + 1);
@@ -253,14 +247,14 @@ impl VertexAttribute {
 
 pub type UniqueVertexAttribute = Box<VertexAttribute>;
 
-/// `gfx::VertexAttributeArray`: attributes by id.
+/// Vertex attributes by id.
 #[derive(Default)]
 pub struct VertexAttributeArray {
     attrs: [Option<UniqueVertexAttribute>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
 }
 
-/// `std::shared_ptr<VertexAttributeArray>`; drawables, builders and upload
-/// passes mutate it through the shared pointer.
+/// A shared attribute array. Drawables, builders and upload passes mutate it
+/// through the shared handle.
 pub type VertexAttributeArrayPtr = Rc<RefCell<VertexAttributeArray>>;
 
 impl VertexAttributeArray {
@@ -332,10 +326,10 @@ impl VertexAttributeArray {
         }
     }
 
-    /// `resolve(overrides, foundDelegate, missingDelegate)`: for each id, call
-    /// `found(id, default, override)` when this array has the attribute,
-    /// otherwise `missing(id, override)` when only the override exists.
-    /// The override is mutable, as through C++'s `unique_ptr` deref.
+    /// For each id, calls `found(id, default, override)` when this array has
+    /// the attribute, otherwise `missing(id, override)` when only the
+    /// override exists. The override is mutable, as through C++'s
+    /// `unique_ptr` deref.
     pub fn resolve(
         &self,
         overrides: &mut VertexAttributeArray,

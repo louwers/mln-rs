@@ -1,16 +1,13 @@
-// Ports include/mln/util/identity.hpp and src/mln/util/identity.cpp
-
 use std::fmt;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 // This is not in the type declaration to minimize include dependencies (C++).
 static NEXT_ID: AtomicI64 = AtomicI64::new(1);
 
-/// `util::SimpleIdentity`: a simple unique identifier.
+/// A simple unique identifier.
 ///
-/// `SimpleIdentity::new()` (the C++ default constructor) takes the next value
-/// of a process-wide counter starting at 1; `EMPTY` is 0. Ordering and
-/// equality compare the id, as in C++.
+/// `new` takes the next value of a process-wide counter starting at 1;
+/// `EMPTY` is 0. Ordering and equality compare the id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SimpleIdentity {
     unique_id: i64,
@@ -19,10 +16,9 @@ pub struct SimpleIdentity {
 impl SimpleIdentity {
     const EMPTY_ID: i64 = 0;
 
-    /// `SimpleIdentity::Empty`.
     pub const EMPTY: SimpleIdentity = SimpleIdentity { unique_id: Self::EMPTY_ID };
 
-    /// `SimpleIdentity()`: a new unique identity.
+    /// Returns a new unique identity.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         SimpleIdentity { unique_id: NEXT_ID.fetch_add(1, Ordering::Relaxed) }
@@ -39,7 +35,7 @@ impl SimpleIdentity {
     }
 }
 
-/// `util::toString(const SimpleIdentity&)`: `"{<id>}"`.
+/// Formats the identity as `{<id>}`.
 impl fmt::Display for SimpleIdentity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{{}}}", self.unique_id)

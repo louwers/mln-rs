@@ -1,14 +1,7 @@
-// Ports include/mln/gfx/drawable_builder.hpp, src/mln/gfx/drawable_builder.cpp,
-// src/mln/gfx/drawable_builder_impl.hpp and the non-polyline parts of
-// src/mln/gfx/drawable_builder_impl.cpp
-//
 // Same split as `Drawable`: `DrawableBuilderBase` holds the C++ data members
 // (including the private `Impl`), the trait has the virtuals
 // (`create_drawable`, `create_segment`, `init`) and provided methods for the
 // rest.
-//
-// TODO(port): addWideVectorPolylineLocal/Global and the wide-vector setup in
-// flush (Impl::Mode::WideVector*): no user on the WebGPU path.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -34,7 +27,6 @@ use crate::types::DepthMaskType;
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 use crate::vertex_vector::VertexVector;
 
-/// `DrawableBuilder::Impl::Mode`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     /// building primitive drawables. Not implemented
@@ -49,10 +41,8 @@ pub enum Mode {
     Custom,
 }
 
-/// `DrawableBuilder::Impl::VT = gfx::detail::VertexType<AttributeType<int16_t, 2>>`
 pub type VT = [i16; 2];
 
-/// `DrawableBuilder::Impl::LineLayoutVertex`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LineLayoutVertex {
@@ -60,7 +50,6 @@ pub struct LineLayoutVertex {
     pub a2: [u8; 4],
 }
 
-/// `DrawableBuilder::Impl`
 pub struct DrawableBuilderImpl {
     pub vertices: VertexVector<VT>,
     pub raw_vertices: Vec<u8>,
@@ -68,16 +57,14 @@ pub struct DrawableBuilderImpl {
     pub build_indexes: Vec<u16>,
     pub shared_indexes: Option<IndexVectorBasePtr>,
     pub segments: Vec<UniqueDrawSegment>,
-    /// C++ initializes this to `static_cast<AttributeDataType>(-1)` = 255 =
-    /// `Invalid`.
+    /// Starts as `Invalid` (255), as C++ initializes it to
+    /// `static_cast<AttributeDataType>(-1)`.
     pub raw_vertices_type: AttributeDataType,
     pub color_mode: ColorMode,
     pub cull_face_mode: CullFaceMode,
     mode: Mode,
     pub polyline_vertices: Vec<LineLayoutVertex>,
     pub polyline_indexes: Vec<u16>,
-    // TODO(port): wideVectorVertices, wideVectorInstanceData,
-    // wideVectorIndexes.
 }
 
 impl Default for DrawableBuilderImpl {
@@ -104,7 +91,6 @@ impl DrawableBuilderImpl {
         if target != self.mode && self.vertex_count() != 0 {
             // C++ logs "DrawableBuilder mode mismatch. Target is <target>,
             // current is <mode>" and asserts.
-            // TODO(port): mln::Log once a logging port exists.
             debug_assert!(false, "DrawableBuilder mode mismatch. Target is {target:?}, current is {:?}", self.mode);
             return false;
         }
@@ -116,8 +102,8 @@ impl DrawableBuilderImpl {
         self.mode
     }
 
-    /// C++ `bool setMode(Mode value) { return mode == value; }` - a quirk: it
-    /// does not set anything. Ported as is.
+    /// Returns whether the mode is `value`. Despite the name it sets
+    /// nothing, as in C++.
     pub fn set_mode(&self, value: Mode) -> bool {
         self.mode == value
     }
@@ -136,7 +122,6 @@ impl DrawableBuilderImpl {
         self.segments.clear();
     }
 
-    /// `layoutVertex(p, e, round, up, dir, linesofar)`.
     #[must_use]
     pub fn layout_vertex(
         p: Point<i16>,
@@ -250,8 +235,6 @@ pub trait DrawableBuilder {
     /// Close the current drawable, using a new one for any further work
     fn flush(&mut self, context: &dyn Context) {
         if self.cur_vertex_count() != 0 {
-            // TODO(port): impl->setupForWideVectors for `Mode::WideVectorLocal`
-            // and `Mode::WideVectorGlobal`.
             if self.base().impl_.get_mode() == Mode::Polylines {
                 // setup for polylines
                 self.setup_for_polylines(context);
@@ -516,7 +499,6 @@ pub trait DrawableBuilder {
         impl_.polyline_indexes = indexes;
     }
 
-    /// `Impl::setupForPolylines(context, builder)`.
     fn setup_for_polylines(&mut self, context: &dyn Context) {
         // setup vertex attributes
         self.set_vertex_attr_id(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE);

@@ -1,8 +1,5 @@
-// Ports include/mln/map/camera_momentum.hpp, from maplibre-native-ffi's
-// patch 0085 (gesture momentum).
-//
-// On top of the header, the `PAN`, `ZOOM`, `BEARING` and `PITCH` constants
-// are maplibre-native-ffi's C API defaults for each part
+// The `PAN`, `ZOOM`, `BEARING` and `PITCH` constants are
+// maplibre-native-ffi's C API defaults for each part
 // (`momentum_defaults` and `resolve_momentum_snap` in its src/map/map.cpp),
 // which Orbis's orb-camera also names, so that hosts and the gesture
 // recognizer start from the same glide.
@@ -11,7 +8,6 @@ use std::time::Duration;
 
 use mln_util::geo::ScreenCoordinate;
 
-/// `MomentumDecay::Model`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MomentumDecayModel {
     /// The speed halves every `half_life`, until it drops to `stop_speed`.
@@ -22,8 +18,7 @@ pub enum MomentumDecayModel {
     Ease,
 }
 
-/// `MomentumDecay::Easing`: a unit cubic Bézier, from (0, 0) to (1, 1), with
-/// these control points.
+/// A unit cubic Bézier, from (0, 0) to (1, 1), with these control points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MomentumEasing {
     pub x1: f64,

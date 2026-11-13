@@ -1,8 +1,6 @@
-// Ports include/mln/shaders/raster_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) RasterDrawableUBO` (64 bytes).
+/// The raster shader's per-drawable uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct RasterDrawableUBO {

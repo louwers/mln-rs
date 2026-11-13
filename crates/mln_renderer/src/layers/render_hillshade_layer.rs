@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/render_hillshade_layer.hpp and
-// src/mln/renderer/layers/render_hillshade_layer.cpp (drawable path).
-//
 // Each DEM tile is first drawn into its own render target by the prepare
 // shader (slopes from the DEM), then the tile drawable shades that texture.
 //
@@ -88,7 +85,7 @@ pub struct RenderHillshadeLayer {
 
     prepare_layer_tweaker: Option<LayerTweakerPtr>,
 
-    /// `bucket.renderTarget` with the bucket's prepare generation, per
+    /// Each bucket's render target, with the bucket's prepare generation, by
     /// bucket id.
     bucket_render_targets: HashMap<SimpleIdentity, (RenderTargetPtr, u64)>,
 }
@@ -113,13 +110,11 @@ impl RenderHillshadeLayer {
         }
     }
 
-    /// `addRenderTarget(renderTarget, changes)`.
     fn add_render_target(&mut self, render_target: &RenderTargetPtr, changes: &mut UniqueChangeRequestVec) {
         activate_render_target(Some(render_target), true, changes);
         self.activated_render_targets.push(render_target.clone());
     }
 
-    /// `removeRenderTargets(changes)`.
     fn remove_render_targets(&mut self, changes: &mut UniqueChangeRequestVec) {
         for render_target in &self.activated_render_targets {
             activate_render_target(Some(render_target), false, changes);

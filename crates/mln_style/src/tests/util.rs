@@ -23,7 +23,7 @@ impl Observer for Recorder {
     }
 }
 
-/// `FixtureLog`: records this thread's log messages while alive.
+/// Records this thread's log messages while alive.
 pub struct FixtureLog {
     messages: Arc<Mutex<Vec<(LogMessage, bool)>>>,
 }
@@ -49,12 +49,11 @@ impl FixtureLog {
         count
     }
 
-    /// `unchecked()`: the messages no `count` call has matched.
+    /// The messages no `count` call has matched.
     pub fn unchecked(&self) -> Vec<LogMessage> {
         self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
     }
 
-    /// `empty()`.
     pub fn is_empty(&self) -> bool {
         self.messages.lock().is_empty()
     }
@@ -70,27 +69,25 @@ impl Drop for FixtureLog {
     }
 }
 
-/// `mln::util::read_file(path)` for a path relative to the C++ repository
-/// (in the copy of the files these tests read, testdata/).
+/// Reads a file of testdata/, the copy of the C++ repository's files that
+/// these tests read, by its path relative to the repository.
 pub fn read_file(relative: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// `mln::util::read_file(path)` as bytes.
+/// Reads a file of testdata/ as bytes.
 pub fn read_file_bytes(relative: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// `convertJSON<T>(json, error, args...)` (style/conversion/json.hpp).
 pub fn parse_json(json: &str) -> serde_json::Value {
     serde_json::from_str(json).expect("test JSON must parse")
 }
 
 pub use mln_conversion::value_to_json;
 
-/// Ports `test/include/mln/test/stub_geometry_tile_feature.hpp`.
 pub struct StubGeometryTileFeature {
     pub properties: feature::PropertyMap,
     pub id: feature::Identifier,
@@ -108,7 +105,6 @@ impl StubGeometryTileFeature {
         }
     }
 
-    /// `StubGeometryTileFeature(FeatureType, GeometryCollection)`.
     pub fn with_geometry(
         type_: mln_util::geometry::FeatureType,
         geometry: mln_tile_id::geometry_tile_data::GeometryCollection,
@@ -121,7 +117,7 @@ impl StubGeometryTileFeature {
         }
     }
 
-    /// `StubGeometryTileFeature(id, type, geometry, properties)` (no geometry).
+    /// A feature with an id, a type and properties, and no geometry.
     pub fn with_id_type(
         id: feature::Identifier,
         type_: mln_util::geometry::FeatureType,
@@ -158,7 +154,6 @@ impl mln_tile_id::geometry_tile_data::GeometryTileFeature for StubGeometryTileFe
     }
 }
 
-/// `PropertyMap{{key, value}}`.
 pub fn property_map(entries: &[(&str, feature::Value)]) -> feature::PropertyMap {
     entries.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
 }

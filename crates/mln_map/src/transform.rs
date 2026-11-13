@@ -1,8 +1,3 @@
-// Ports src/mln/map/transform.hpp and src/mln/map/transform.cpp, with
-// maplibre-native-ffi's patches 0015 (independent camera animations,
-// maplibre/maplibre-native#4637), 0043 (cancel transitions by id) and 0085
-// (gesture momentum).
-//
 // The C++ transition lambdas capture `this`. Here a command's frame function
 // takes the state as an argument and returns the camera at its progress,
 // which `apply_transitions` composes with the other commands' cameras.
@@ -67,7 +62,6 @@ fn normalize_angle(mut angle: f64, anchor_angle: f64) -> f64 {
     angle
 }
 
-/// `util::angle_between` (util/math.hpp).
 fn angle_between(a: &Point<f64>, b: &Point<f64>) -> f64 {
     (a.x * b.y - a.y * b.x).atan2(a.x * b.x + a.y * b.y)
 }
@@ -92,21 +86,19 @@ fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<La
     Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e.message)).ok()
 }
 
-/// `std::to_string(double)`: `%f`.
+/// Formats `value` with six decimals, as `std::to_string(double)` does.
 fn std_to_string(value: f64) -> String {
     format!("{value:.6}")
 }
 
-/// `TransformObserver` (src/mln/map/transform.hpp).
-///
-/// The camera callbacks take a [`CameraChange`].
+/// Receives the transform's camera changes. The callbacks that start and end
+/// a change take a [`CameraChange`].
 pub trait TransformObserver {
     fn on_camera_will_change(&self, _change: CameraChange) {}
     fn on_camera_is_changing(&self) {}
     fn on_camera_did_change(&self, _change: CameraChange) {}
 }
 
-/// `TransformObserver::nullObserver()`.
 pub struct NullTransformObserver;
 impl TransformObserver for NullTransformObserver {}
 
@@ -114,7 +106,6 @@ impl TransformObserver for NullTransformObserver {}
 /// center or padding the frame could not compute (logged), which keeps the
 /// current one.
 type FrameFn = Rc<dyn Fn(&TransformState, f64) -> CameraOptions>;
-/// `std::function<ProjectionDefinition(double zoom)>`.
 pub type ProjectionForZoomFn = Rc<dyn Fn(f64) -> ProjectionDefinition>;
 
 // `Transform::CameraField`.
@@ -127,7 +118,7 @@ const ALTITUDE: u16 = 1 << 5;
 const ROLL: u16 = 1 << 6;
 const FOV: u16 = 1 << 7;
 
-/// `Transform::cameraFields`: the fields a command sets.
+/// The fields a command sets.
 fn camera_fields(camera: &CameraOptions) -> u16 {
     let field = |set: bool, field: u16| if set { field } else { 0 };
     field(camera.center.is_some(), CENTER)
@@ -140,7 +131,7 @@ fn camera_fields(camera: &CameraOptions) -> u16 {
         | field(camera.fov.is_some(), FOV)
 }
 
-/// `Transform::Transition`: one camera command.
+/// One camera command.
 struct Transition {
     /// Remaining property ownership; replacement removes fields from this
     /// mask.
@@ -258,8 +249,8 @@ fn nanos_from_secs(seconds: f64) -> Option<Duration> {
     (seconds >= 0.0 && seconds * 1e9 < u64::MAX as f64).then(|| Duration::from_nanos((seconds * 1e9) as u64))
 }
 
-/// `MomentumState::Glide`: how far one part moves, over how long, and along
-/// which curve.
+/// How far one part of a momentum moves, over how long, and along which
+/// curve.
 #[derive(Clone, Copy, Default)]
 struct Glide {
     distance: f64,
@@ -350,7 +341,7 @@ fn bezier(easing: &MomentumEasing) -> UnitBezier {
     UnitBezier::new(easing.x1, easing.y1, easing.x2, easing.y2)
 }
 
-/// `MomentumState::Part`: one part of a running momentum.
+/// One part of a running momentum.
 #[derive(Clone, Copy, Default)]
 struct MomentumPart {
     /// The fields that this part needs to keep moving or to settle.
@@ -380,7 +371,7 @@ const MOMENTUM_ZOOM: usize = 0;
 const MOMENTUM_BEARING: usize = 1;
 const MOMENTUM_PITCH: usize = 2;
 
-/// `Transform::MomentumState`: a momentum under way.
+/// A momentum under way.
 struct MomentumState {
     options: CameraMomentum,
     /// The pan's distance, with its direction.
@@ -543,7 +534,6 @@ impl Transform {
         }
     }
 
-    /// `Transform(const TransformState&)`.
     pub fn from_state(state: TransformState) -> Self {
         Transform {
             observer: Rc::new(NullTransformObserver),
@@ -1174,9 +1164,9 @@ impl Transform {
         self.move_by_with_anchor(offset, None, animation)
     }
 
-    /// `moveBy(offset, anchor, animation)`: a drag on the globe turns the
-    /// planet so that the location under `anchor` follows the cursor.
-    /// `Err`: as [`move_by`](Self::move_by).
+    /// Moves the map by `offset`. A drag on the globe turns the planet so
+    /// that the location under `anchor` follows the cursor. Fails as
+    /// [`move_by`](Self::move_by) does.
     pub fn move_by_with_anchor(
         &mut self,
         offset: &ScreenCoordinate,
@@ -1322,7 +1312,6 @@ impl Transform {
         Ok(())
     }
 
-    /// `getLatLng(LatLng::WrapMode = LatLng::Wrapped)`.
     pub fn get_lat_lng(&self, wrap: WrapMode) -> LatLng {
         self.state.get_lat_lng(wrap)
     }
@@ -1789,8 +1778,8 @@ impl Transform {
         self.finish_transitions(&finished);
     }
 
-    /// `releaseFields`: takes `fields` from the running commands, and returns
-    /// the ones left with no fields, which the caller finishes.
+    /// Takes `fields` from the running commands, and returns the ones left
+    /// with no fields, which the caller finishes.
     fn release_fields(&mut self, fields: u16) -> Vec<Rc<Transition>> {
         let mut finished = Vec::new();
         for active in &self.transitions {
@@ -2218,9 +2207,9 @@ impl Transform {
         self.finish_transitions(&finished);
     }
 
-    /// `cancelTransitions(uint64_t transitionId)`: cancels the commands whose
-    /// [`AnimationOptions::transition_id`] equals `transition_id`, leaves the
-    /// others running, and returns whether any command ended.
+    /// Cancels the commands whose [`AnimationOptions::transition_id`] equals
+    /// `transition_id`, leaves the others running, and returns whether any
+    /// command ended.
     pub fn cancel_transitions_with_id(&mut self, transition_id: u64) -> bool {
         let (finished, running): (Vec<_>, Vec<_>) = std::mem::take(&mut self.transitions)
             .into_iter()
@@ -2399,7 +2388,7 @@ impl Transform {
         point
     }
 
-    /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Wrapped)`.
+    /// The location under `point`, in screen coordinates (y down).
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
     /// or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {

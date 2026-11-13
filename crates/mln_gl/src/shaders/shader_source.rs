@@ -1,10 +1,3 @@
-// Ports the OpenGL `ShaderSource<BuiltIn, Backend::Type::OpenGL>`
-// specialisations and `ShaderInfo<BuiltIn, Backend::Type::OpenGL>`
-// (include/mln/shaders/gl/shader_info.hpp, src/mln/shaders/gl/shader_info.cpp):
-// the GLSL strings come from include/mln/shaders/gl/*.hpp through the
-// `glsl_sources` module, and the uniform block, attribute and texture tables
-// are below.
-//
 // Differences from C++:
 // - The ids are the port's (shader_defines.rs, C++'s consolidated ones), so a
 //   shader's uniform blocks bind where the renderer puts their buffers.
@@ -116,8 +109,8 @@ pub struct GlslShaderSource {
     pub fragment: &'static str,
 }
 
-/// `shaders::UniformBlockInfo`: the uniform block `name` binds to the binding
-/// point `id`, where the buffer of that id is bound.
+/// The uniform block `name` binds to the binding point `id`, where the
+/// buffer of that id is bound.
 #[derive(Clone, Copy, Debug)]
 pub struct UniformBlockInfo {
     pub name: &'static str,
@@ -129,14 +122,14 @@ pub struct UniformBlockInfo {
     pub element_size: usize,
 }
 
-/// `shaders::AttributeInfo`: the vertex attribute `name` reads attribute `id`.
+/// The vertex attribute `name` reads attribute `id`.
 #[derive(Clone, Copy, Debug)]
 pub struct AttributeInfo {
     pub name: &'static str,
     pub id: usize,
 }
 
-/// `shaders::TextureInfo`: the sampler `name` reads texture `id`.
+/// The sampler `name` reads texture `id`.
 #[derive(Clone, Copy, Debug)]
 pub struct TextureInfo {
     pub name: &'static str,
@@ -831,8 +824,8 @@ shader_source!(
     &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE), tex("u_texture_icon", ID_SYMBOL_IMAGE_ICON_TEXTURE)]
 );
 
-/// `ShaderSource<shader_id, gfx::Backend::Type::OpenGL>`, for the shaders the
-/// port's renderer draws with.
+/// The OpenGL source of `shader_id`, for the shaders the renderer draws
+/// with.
 #[must_use]
 pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {

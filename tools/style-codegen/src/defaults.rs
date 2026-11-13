@@ -1,6 +1,3 @@
-// Ports `formatNumber`, `parseCSSColor` and `defaultValue` of
-// scripts/generate-style-code.mjs.
-//
 // The JS emits a C++ initializer (`0.85f`, `{{0.f, 0.f}}`, `Color::black()`,
 // `{}` ...). Here `default_value` builds the same initializer as a small
 // tree (`Init`), and `rust_value` prints the Rust expression for the value
@@ -31,9 +28,7 @@ pub enum Init {
     Braced(Vec<Init>),
     /// A string literal (`JSON.stringify(property.default)`).
     StringLiteral(String),
-    /// `Type::Variant`.
     Enumerator(String, String),
-    /// `Color::black()` / `Color::white()`.
     ColorBlack,
     ColorWhite,
     /// `{ r, g, b, a }` / `Color{r, g, b, a}` with the JS double values.
@@ -41,7 +36,7 @@ pub enum Init {
 }
 
 impl Init {
-    /// The C++ spelling, as the template writes it (for comments).
+    /// The C++ spelling, as the template writes it (for error messages).
     pub fn cpp(&self) -> String {
         match self {
             Init::FloatLiteral(text) => format!("{text}{}f", if text.contains('.') { "" } else { "." }),
@@ -59,8 +54,8 @@ impl Init {
     }
 }
 
-/// `Number.prototype.toString()` (shortest round-trip digits, JS exponent
-/// rules), for the doubles the JS prints.
+/// Formats `value` as JS `Number.prototype.toString()` does (shortest
+/// round-trip digits, JS exponent rules), for the doubles the JS prints.
 #[must_use]
 pub fn js_number(value: f64) -> String {
     if value.is_nan() {
@@ -94,7 +89,8 @@ pub fn js_number(value: f64) -> String {
     format!("{sign}{body}")
 }
 
-/// `num.toString()` for a `property.default` that is a JS number.
+/// Formats a `property.default` that is a JS number as JS `num.toString()`
+/// does.
 fn js_to_string(value: &Value) -> String {
     match value {
         Value::Number(n) => match (n.as_i64(), n.as_u64()) {
@@ -106,8 +102,9 @@ fn js_to_string(value: &Value) -> String {
     }
 }
 
-/// `formatNumber(property, num = 0)`: `num.toString()` plus an `f` suffix
-/// when `evaluatedType(property) === "float" || property.type === "number"`.
+/// A number default (0 when `num` is `None`): a float literal when the
+/// evaluated type is float or the property type is `number`, else the raw
+/// value.
 fn format_number(evaluated: &EvaluatedType, property_type: &str, num: Option<&Value>) -> Init {
     let num = num.cloned().unwrap_or(Value::from(0));
     if *evaluated == EvaluatedType::Float || property_type == "number" {
@@ -117,8 +114,8 @@ fn format_number(evaluated: &EvaluatedType, property_type: &str, num: Option<&Va
     }
 }
 
-/// `parseCSSColor`: the csscolorparser crate's bytes, premultiplied in JS
-/// doubles.
+/// Parses a CSS color into the csscolorparser crate's bytes, premultiplied in
+/// JS doubles.
 fn parse_css_color(s: &str) -> [f64; 4] {
     let color = csscolorparser::parse(s).unwrap_or_else(|_| panic!("Could not parse CSS color {s:?}"));
     // The JS parser keeps the alpha as a double; the crate keeps a float.
@@ -251,7 +248,6 @@ fn default_of(q: &DefaultQuery<'_>) -> Init {
     }
 }
 
-/// `defaultValue(property)`.
 #[must_use]
 pub fn default_value(property: &Property) -> Init {
     default_of(&DefaultQuery {

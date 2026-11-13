@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/types.hpp
-
 use serde::{Deserialize, Serialize};
 
 /// Color blending equation type

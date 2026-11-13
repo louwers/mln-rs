@@ -1,6 +1,3 @@
-// Ports the style-side tests of test/style/source.test.cpp (the ones that
-// need no RenderSource; those are in mln_renderer/tests/source_test.rs).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -33,8 +30,7 @@ type SourceHandler = Box<dyn Fn(&dyn Source)>;
 /// A test's handler for a source error.
 type SourceErrorHandler = Box<dyn Fn(&dyn Source, mln_util::Error)>;
 
-/// `StubStyleObserver` (`test/src/mln/test/stub_style_observer.hpp`), the
-/// `SourceObserver` half.
+/// A source observer that calls the test's handlers.
 #[derive(Default)]
 struct StubStyleObserver {
     source_loaded: RefCell<Option<SourceHandler>>,

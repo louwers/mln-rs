@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/texture2d.hpp
-
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -32,7 +30,8 @@ impl Default for SamplerState {
     }
 }
 
-/// `gfx::Texture2D`. The chaining setters return nothing here.
+/// A backend texture. Unlike C++'s, the setters don't return the texture for
+/// chaining.
 pub trait Texture2D: Any {
     fn set_sampler_configuration(&mut self, sampler_state: SamplerState);
     fn set_format(&mut self, pixel_format: TexturePixelType, channel_type: TextureChannelDataType);
@@ -46,7 +45,7 @@ pub trait Texture2D: Any {
     fn create(&mut self);
     fn upload_data(&mut self, pixel_data: Option<&[u8]>, size: Size);
     fn upload_sub_region(&mut self, pixel_data: Option<&[u8]>, size: Size, x_offset: u16, y_offset: u16);
-    /// `upload()`: upload the image set with `set_image`.
+    /// Uploads the image set with `set_image`.
     fn upload(&mut self);
     fn needs_upload(&self) -> bool;
 }
@@ -63,11 +62,11 @@ impl dyn Texture2D {
     }
 }
 
-/// `std::shared_ptr<Texture2D>`, mutated through the shared pointer (e.g.
-/// `setSamplerConfiguration` in tweakers), hence the `RefCell`.
+/// A shared texture, mutated through the shared handle (e.g.
+/// `set_sampler_configuration` in tweakers), hence the `RefCell`.
 pub type Texture2DPtr = Rc<RefCell<dyn Texture2D>>;
 
-/// `Texture2D::upload(const Image&)` for premultiplied RGBA images.
+/// Uploads a premultiplied RGBA image to `texture`, setting its format.
 pub fn upload_image(texture: &mut dyn Texture2D, img: &PremultipliedImage) {
     texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
     let data = if img.data.is_empty() { None } else { Some(img.data.as_slice()) };

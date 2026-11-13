@@ -80,8 +80,8 @@ impl Validation {
     }
 }
 
-/// `vkDebugUtilsCallback`: logs a validation message. `user_data` is not
-/// null when an error aborts the process.
+/// The debug messenger's callback: logs a validation message. `user_data` is
+/// not null when an error aborts the process.
 unsafe extern "system" fn debug_utils_callback(
     severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     _types: vk::DebugUtilsMessageTypeFlagsEXT,

@@ -1,6 +1,3 @@
-// Ports include/mln/style/image.hpp, src/mln/style/image.cpp,
-// src/mln/style/image_impl.hpp and src/mln/style/image_impl.cpp.
-//
 // Cut point (added by storage): the sprite loader (mln_sprite) creates
 // `style::Image::Impl`s and the style (mln_style) stores them, so the types
 // live below both; `mln_style::image` re-exports them.
@@ -17,12 +14,9 @@ use mln_util::serialization::shared;
 use mln_util::size::Size;
 use serde::{Deserialize, Serialize};
 
-/// `style::ImageStretch`.
 pub type ImageStretch = (f32, f32);
-/// `style::ImageStretches`.
 pub type ImageStretches = Vec<ImageStretch>;
 
-/// `style::TextFit`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TextFit {
     StretchOrShrink,
@@ -30,7 +24,6 @@ pub enum TextFit {
     Proportional,
 }
 
-/// `style::ImageContent`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImageContent {
     pub left: f32,
@@ -39,7 +32,6 @@ pub struct ImageContent {
     pub bottom: f32,
 }
 
-/// `style::Image::Impl`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub id: String,
@@ -67,7 +59,7 @@ pub struct Impl {
 }
 
 impl PartialEq for Impl {
-    /// C++ `operator<` / `==` on image impls compare ids.
+    /// Image impls compare by id, as in C++.
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
@@ -111,8 +103,7 @@ fn validate_content(content: &ImageContent, size: Size) -> bool {
 }
 
 impl Impl {
-    /// `Image::Impl(id, image, pixelRatio, sdf, stretchX, stretchY, content,
-    /// textFitWidth, textFitHeight)`. Fails with
+    /// Creates an image. Fails with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty image,
     /// a pixel ratio that isn't positive, or stretches or a content area
     /// outside the image.
@@ -154,15 +145,12 @@ impl Impl {
     }
 }
 
-/// `style::Image`.
 #[derive(Clone, Debug)]
 pub struct Image {
     pub base_impl: Arc<Impl>,
 }
 
 impl Image {
-    /// `Image(id, image, pixelRatio, sdf, stretchX, stretchY, content,
-    /// textFitWidth, textFitHeight)`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -190,7 +178,6 @@ impl Image {
         })
     }
 
-    /// `explicit Image(Immutable<Impl>)`.
     #[must_use]
     pub fn from_impl(base_impl: Arc<Impl>) -> Self {
         Image { base_impl }
@@ -242,24 +229,21 @@ impl Image {
     }
 }
 
-/// `enum class ImageType : bool`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ImageType {
     Icon,
     Pattern,
 }
 
-/// `ImageMap = mln::unordered_map<std::string, Immutable<style::Image::Impl>>`.
+/// Images by id.
 ///
-/// A `VecMap`: `DynamicTextureAtlas::upload_icons_and_patterns` reserves
-/// atlas space in iteration order, and a `HashMap`'s order changes from
-/// process to process, which moved icons in the atlas and changed rendered
-/// pixels between runs (sargunv/mln-rs#2).
+/// A `VecMap` rather than a `HashMap`:
+/// `DynamicTextureAtlas::upload_icons_and_patterns` reserves atlas space in
+/// iteration order, and a `HashMap`'s order changes from process to process,
+/// which would move icons in the atlas and change rendered pixels between runs.
 pub type ImageMap = mln_vec_map::VecMap<String, Arc<Impl>>;
-/// `ImageDependencies = mln::unordered_map<std::string, ImageType>`.
 pub type ImageDependencies = std::collections::HashMap<String, ImageType>;
 
-/// `Rect<uint16_t>` (util/rect.hpp).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RectU16 {
     pub x: u16,
@@ -268,7 +252,7 @@ pub struct RectU16 {
     pub h: u16,
 }
 
-/// `ImagePosition`: an image's place in an atlas.
+/// An image's place in an atlas.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImagePosition {
     pub padded_rect: RectU16,
@@ -285,7 +269,6 @@ pub struct ImagePosition {
 impl ImagePosition {
     pub const PADDING: u16 = 1;
 
-    /// `ImagePosition(const Rect<uint16_t>&, const style::Image::Impl&, uint32_t version = 0)`.
     #[must_use]
     pub fn new(rect: RectU16, image: &Impl, version: u32) -> Self {
         ImagePosition {
@@ -301,7 +284,8 @@ impl ImagePosition {
         }
     }
 
-    /// `tl()`: the `int` sums narrowed to `uint16_t`.
+    /// The top-left corner inside the padding; the sums are computed in `i32`
+    /// and narrowed to `u16`, as in C++.
     #[must_use]
     pub fn tl(&self) -> [u16; 2] {
         [
@@ -310,7 +294,6 @@ impl ImagePosition {
         ]
     }
 
-    /// `br()`.
     #[must_use]
     pub fn br(&self) -> [u16; 2] {
         [
@@ -319,7 +302,6 @@ impl ImagePosition {
         ]
     }
 
-    /// `tlbr()`.
     #[must_use]
     pub fn tlbr(&self) -> [u16; 4] {
         let tl = self.tl();
@@ -327,7 +309,6 @@ impl ImagePosition {
         [tl[0], tl[1], br[0], br[1]]
     }
 
-    /// `displaySize()`.
     #[must_use]
     pub fn display_size(&self) -> [f32; 2] {
         [
@@ -337,7 +318,6 @@ impl ImagePosition {
     }
 }
 
-/// `ImagePositions = mln::unordered_map<std::string, ImagePosition>`.
 pub type ImagePositions = std::collections::HashMap<String, ImagePosition>;
 
 /// Port-only: the `shared::Kind` of the images of an `ImageMap`, which cross

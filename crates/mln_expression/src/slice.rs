@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/slice.hpp and
-// src/mln/style/expression/slice.cpp.
-
 use mln_conversion::Convertible;
 
 use crate::expression::{
@@ -15,8 +12,8 @@ fn normalize_index(index: i32, length: i32) -> i32 {
     if index < 0 { index.wrapping_add(length) } else { index }
 }
 
-/// `static_cast<int>(double)` as clang compiles it on x86-64: out of range
-/// and NaN give `INT_MIN`.
+/// Truncates `f` to `i32` as C++ `static_cast<int>(double)` does when clang
+/// compiles it on x86-64: out of range and NaN give `i32::MIN`.
 fn static_cast_int(f: f64) -> i32 {
     if f > -2_147_483_649.0 && f < 2_147_483_648.0 { f as i32 } else { i32::MIN }
 }
@@ -55,7 +52,7 @@ impl Slice {
         }
         to_index_value = to_index_value.min(length);
 
-        // TODO(port): C++ reads `array[index]` for a negative normalized
+        // C++ reads `array[index]` for a negative normalized
         // `fromIndex` (undefined behaviour); the port starts at 0.
         let mut result = Vec::with_capacity((to_index_value - from_index_value) as usize);
         for index in from_index_value.max(0)..to_index_value {
@@ -114,7 +111,7 @@ impl Expression for Slice {
 
     fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
         let evaluated_input = self.input.evaluate(params)?;
-        // TODO(port): C++ checks `!fromIndex` (the expression, never null)
+        // C++ checks `!fromIndex` (the expression, never null)
         // instead of the result here and then dereferences a failed result
         // (undefined behaviour); the port returns the error.
         let evaluated_from_index = self.from_index.evaluate(params)?;

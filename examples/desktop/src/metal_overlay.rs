@@ -62,8 +62,8 @@ fragment float4 fragmentMain(VertexOut in [[stage_in]],
 /// The vertex buffer's slot; the screen size takes the next.
 const VERTEX_BUFFER: usize = 0;
 const SCREEN_SIZE_BUFFER: usize = 1;
-/// `epaint::Vertex`: position and texture coordinates as f32 pairs, then
-/// the color as four bytes.
+/// The size of an `epaint::Vertex`: position and texture coordinates as f32
+/// pairs, then the color as four bytes.
 const VERTEX_STRIDE: usize = 20;
 
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;

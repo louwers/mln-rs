@@ -1,9 +1,7 @@
-// Ports include/mln/shaders/sky_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) SkyPropsUBO` (64 bytes). The colors are the
-/// premultiplied `mln::Color` as r, g, b, a floats.
+/// The sky properties uniform block (64 bytes). The colors are premultiplied
+/// r, g, b, a floats.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct SkyPropsUBO {
@@ -18,7 +16,7 @@ pub struct SkyPropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<SkyPropsUBO>() == 4 * 16);
 
-/// `struct alignas(16) AtmospherePropsUBO` (96 bytes).
+/// The atmosphere properties uniform block (96 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct AtmospherePropsUBO {

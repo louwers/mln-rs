@@ -1,5 +1,3 @@
-// Ports src/mln/util/url.hpp and src/mln/util/url.cpp.
-//
 // Positions are byte offsets, `Segment = (position, length)` as
 // `std::pair<size_t, size_t>`. `usize::MAX` is `std::string::npos`; the
 // size_t arithmetic wraps as in C++ (`substr` clamps, see `substr`).
@@ -35,7 +33,6 @@ fn hex_value(c: u8) -> Option<u8> {
     }
 }
 
-/// `std::string::find(c, pos)`.
 fn find(s: &[u8], c: u8, pos: usize) -> usize {
     if pos >= s.len() {
         return NPOS;
@@ -43,8 +40,8 @@ fn find(s: &[u8], c: u8, pos: usize) -> usize {
     s[pos..].iter().position(|&b| b == c).map_or(NPOS, |i| pos + i)
 }
 
-/// `std::string::substr(pos, count)` on bytes (C++ throws for `pos >
-/// size()`; callers here never pass that).
+/// Up to `count` bytes of `s` from `pos`, clamped to the end of `s`. Empty
+/// if either end falls inside a UTF-8 character.
 #[must_use]
 pub fn substr(s: &str, pos: usize, count: usize) -> &str {
     let pos = pos.min(s.len());
@@ -52,7 +49,6 @@ pub fn substr(s: &str, pos: usize, count: usize) -> &str {
     s.get(pos..end).unwrap_or("")
 }
 
-/// `util::percentEncode`.
 #[must_use]
 pub fn percent_encode(input: &str) -> String {
     let mut encoded = String::new();
@@ -68,7 +64,7 @@ pub fn percent_encode(input: &str) -> String {
     encoded
 }
 
-/// `util::percentDecode`. Returns bytes: a `%xx` may produce any byte.
+/// Decodes `%xx` escapes. Returns bytes: a `%xx` may produce any byte.
 #[must_use]
 pub fn percent_decode(input: &str) -> Vec<u8> {
     let bytes = input.as_bytes();
@@ -89,7 +85,6 @@ pub fn percent_decode(input: &str) -> Vec<u8> {
     decoded
 }
 
-/// `util::URL`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct URL {
     pub query: Segment,
@@ -146,7 +141,6 @@ impl URL {
 
 #[cfg(test)]
 mod tests {
-    // Ports test/util/url.test.cpp.
     use super::*;
 
     fn url(s: &str) -> URL {

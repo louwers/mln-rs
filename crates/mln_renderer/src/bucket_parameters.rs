@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/bucket_parameters.hpp and bucket_parameters.cpp
-
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
@@ -8,7 +6,6 @@ use mln_style::layer::LayerTypeInfo;
 use mln_tile_id::OverscaledTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-/// `BucketParameters`.
 #[derive(Clone, Debug)]
 pub struct BucketParameters {
     pub tile_id: OverscaledTileID,

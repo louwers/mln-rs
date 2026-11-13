@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/buckets/fill_bucket.hpp and fill_bucket.cpp
-// (`MLN_TRIANGULATE_FILL_OUTLINES` = 1, as for the WebGPU backend: the
-// outlines are generated both as triangulated lines and as line primitives).
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -35,7 +31,6 @@ use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyB
 use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
-    /// `FillBinders = PaintPropertyBinders<FillPaintProperties::DataDrivenProperties>`.
     pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
         fill_color: FillColor => PaintPropertyBinder<Color>,
         fill_opacity: FillOpacity => PaintPropertyBinder<f32>,
@@ -44,7 +39,6 @@ crate::paint_property_binders!(
     }
 );
 
-/// `FillLayoutVertex = gfx::Vertex<TypeList<attributes::pos>>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct FillLayoutVertex {
@@ -57,16 +51,13 @@ pub struct FillBucket {
 
     // MLN_TRIANGULATE_FILL_OUTLINES
     pub line_vertices: GeometryVec<LineLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub line_indexes: GeometryVec<u16>,
     pub line_segments: Vec<SegmentBase>,
 
-    /// `gfx::IndexVector<gfx::Lines>`.
     pub basic_lines: GeometryVec<u16>,
     pub basic_line_segments: Vec<SegmentBase>,
 
     pub vertices: GeometryVec<FillLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub triangles: GeometryVec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
     pub subdivision_granularity: SubdivisionGranularitySetting,
@@ -84,7 +75,6 @@ pub struct FillBucket {
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl FillBucket {
-    /// `FillBucket(layout, layerPaintProperties, zoom, overscaling)`.
     #[must_use]
     pub fn new(
         _layout: &FillLayoutProperties::PossiblyEvaluated,
@@ -119,7 +109,6 @@ impl FillBucket {
         self.subdivision_granularity = *value;
     }
 
-    /// `layoutVertex(Point<int16_t> p)`.
     #[must_use]
     pub fn layout_vertex(p: GeometryCoordinate) -> FillLayoutVertex {
         FillLayoutVertex { a1: [p.x, p.y] }

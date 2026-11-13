@@ -1,5 +1,5 @@
-//! Ports the backend-independent parts of `include/mln/shaders` and
-//! `src/mln/shaders`.
+//! The backend-independent shader code: uniform buffer layouts, binding ids
+//! and defines, shader groups and program bases.
 
 pub mod background_layer_ubo;
 pub mod circle_layer_ubo;

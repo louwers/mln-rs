@@ -1,7 +1,3 @@
-// Ports include/mln/style/expression/distance.hpp,
-// src/mln/style/expression/distance.cpp and the double instantiations of
-// src/mln/util/geometry_util.{hpp,cpp}, whose only user is this expression.
-//
 // Distances are in meters, measured with a cheap ruler at the latitude of
 // the feature's first point.
 
@@ -27,9 +23,8 @@ use crate::value::Value;
 
 // --- util/geometry_util ---
 
-/// `GeometryBBox<double>`: minX, minY, maxX, maxY.
+/// A bounding box: min x, min y, max x, max y.
 type DistanceBBox = [f64; 4];
-/// `DefaultDistanceBBox`.
 const DEFAULT_DISTANCE_BBOX: DistanceBBox = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
 
 fn update_bbox(bbox: &mut DistanceBBox, p: &Point<f64>) {
@@ -407,7 +402,8 @@ fn polygon_to_polygon_distance(
     dist
 }
 
-/// `<distance, range1, range2>`, ordered by the distance alone.
+/// A distance and the two index ranges it was measured between, ordered by the
+/// distance alone.
 #[derive(Clone, Copy)]
 struct DistPair(f64, IndexRange, IndexRange);
 
@@ -865,9 +861,9 @@ fn polygon_to_geometry_distance(polygon: &Polygon<f64>, geo_set: &Geometry<f64>)
     }
 }
 
-/// `calculateDistance`: NaN when either geometry is invalid. Errors: the
-/// `std::out_of_range` of `convertGeometry` for a point feature without
-/// rings.
+/// The distance from the feature to `geo_set`; NaN when either geometry is
+/// invalid. Fails with the error of `convert_geometry` for a point feature
+/// without rings.
 fn calculate_distance(
     feature: &dyn GeometryTileFeature,
     canonical: &CanonicalTileID,
@@ -948,8 +944,7 @@ fn get_geometry(geometry: &Geometry<f64>, ctx: &mut ParsingContext) -> Option<Ge
     None
 }
 
-/// `expression::Distance`: the distance in meters from the feature to a
-/// GeoJSON geometry.
+/// The distance in meters from the feature to a GeoJSON geometry.
 pub struct Distance {
     base: ExpressionBase,
     geojson_source: geojson::GeoJSON,
@@ -990,7 +985,6 @@ impl Distance {
     }
 }
 
-/// `convertValue(const rapidjson_value&)`.
 fn convert_value(v: &serde_json::Value) -> MbglValue {
     match v {
         serde_json::Value::Number(n) => {

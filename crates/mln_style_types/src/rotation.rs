@@ -1,7 +1,3 @@
-// Ports include/mln/style/rotation.hpp, plus the
-// `util::Interpolator<style::Rotation>` specialization from
-// include/mln/util/interpolate.hpp (orphan rule: it lives next to the type).
-
 use mln_util::interpolate::Interpolate;
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +34,7 @@ impl From<f64> for Rotation {
     }
 }
 
-/// `Interpolator<style::Rotation>` (double t only in C++; `%` is `fmod`).
+/// Interpolates along the shorter way around the period.
 impl Interpolate for Rotation {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         let a = self;

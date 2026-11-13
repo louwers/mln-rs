@@ -1,14 +1,9 @@
-// Ports include/mln/style/position.hpp, plus the
-// `util::Interpolator<style::Position>` specialization from
-// include/mln/util/interpolate.hpp (it has to live next to the type: orphan
-// rule).
-
 use mln_math::deg2radf;
 use mln_util::interpolate::Interpolate;
 use serde::{Deserialize, Serialize};
 
-/// `mln::style::Position`: a spherical position (radial, azimuthal, polar)
-/// with its cached cartesian form.
+/// A spherical position (radial, azimuthal, polar) with its cached cartesian
+/// form.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Position {
     radial: f32,
@@ -72,9 +67,8 @@ impl PartialEq for Position {
     }
 }
 
-/// `Interpolator<style::Position>`: C++ only has the float-t overload, so a
-/// double t is narrowed to float first, then the cartesian arrays are
-/// interpolated with float arithmetic (`Interpolator<std::array<float, 3>>`).
+/// Narrows a double t to float first, then interpolates the cartesian arrays
+/// with float arithmetic, as C++ does (it only has the float-t overload).
 impl Interpolate for Position {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         let t = t as f32;

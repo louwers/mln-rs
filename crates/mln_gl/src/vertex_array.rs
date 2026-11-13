@@ -1,6 +1,3 @@
-// Ports src/mln/gl/vertex_array.hpp/.cpp and `value::VertexAttribute::Set`
-// (src/mln/gl/value.cpp)
-//
 // C++ keeps a `State` per attribute of a vertex array, to leave out the
 // calls that wouldn't change it. A vertex array here is bound once, when it
 // is made, so it keeps none.
@@ -21,13 +18,11 @@ pub struct VertexArray {
 }
 
 impl VertexArray {
-    /// `Context::createVertexArray()` and `VertexArray::bind(context,
-    /// indexBuffer, bindings)`: a vertex array of `index_buffer` and of the
-    /// attributes of `bindings` that have a buffer, each read from
-    /// `vertex_offset` vertices into its data, and of those of
-    /// `instance_bindings`, which step once an instance, from
-    /// `base_instance` on. OpenGL ES 3.0 draws take neither a base vertex nor
-    /// a base instance, so the offsets are the vertex array's.
+    /// Creates a vertex array of `index_buffer` and of the attributes of
+    /// `bindings` that have a buffer, each read from `vertex_offset` vertices
+    /// into its data, and of those of `instance_bindings`, which step once an
+    /// instance, from `base_instance` on. OpenGL ES 3.0 draws take neither a
+    /// base vertex nor a base instance, so the offsets are the vertex array's.
     pub fn new(
         context: &Context,
         index_buffer: BufferID,
@@ -83,7 +78,6 @@ impl VertexArray {
         }
     }
 
-    /// `getID()`
     #[must_use]
     pub fn get_id(&self) -> VertexArrayID {
         self.id

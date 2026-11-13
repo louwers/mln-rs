@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/render_source.hpp, src/mln/renderer/render_source.cpp
-// and src/mln/renderer/render_source_observer.hpp.
-//
 // C++ `RenderSource` is an abstract class with data members and the
 // `TileObserver` of its tiles. The data is `RenderSourceBase`; the tile
 // observer half is `RenderSourceTileObserver`, an `Rc` the tiles share
@@ -32,7 +29,6 @@ use crate::tile::tile::{TileBase, TileOperation};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile_parameters::TileParameters;
 
-/// `SourcePrepareParameters`.
 pub struct SourcePrepareParameters<'a> {
     pub transform: &'a TransformParameters,
     pub debug_options: MapDebugOptions,
@@ -40,9 +36,8 @@ pub struct SourcePrepareParameters<'a> {
     pub source_name: String,
 }
 
-/// `RenderTiles = std::shared_ptr<const std::vector<std::reference_wrapper<
-/// const RenderTile>>>`: a shared selection of the `RenderTiles` of an
-/// `Immutable<std::vector<RenderTile>>`, kept alive by it.
+/// A shared selection of the render tiles of an `Rc<Vec<RenderTile>>`,
+/// which it keeps alive.
 #[derive(Clone)]
 pub struct RenderTiles {
     owner: Rc<Vec<RenderTile>>,
@@ -74,15 +69,15 @@ impl RenderTiles {
         self.indices.get(i).map(|&i| &self.owner[i])
     }
 
-    /// The `Immutable<std::vector<RenderTile>>` the selection points into.
+    /// The tiles the selection points into.
     #[must_use]
     pub fn owner(&self) -> &Rc<Vec<RenderTile>> {
         &self.owner
     }
 }
 
-/// `RenderSourceObserver`. C++ passes the `RenderSource&`; the orchestrator
-/// only reads its id.
+/// Observes the render sources' tiles. The callbacks get the source's id,
+/// which is all the orchestrator reads of the source.
 pub trait RenderSourceObserver {
     fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {}
     fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, _error: Error) {}
@@ -90,7 +85,6 @@ pub trait RenderSourceObserver {
     }
 }
 
-/// `RenderSourceObserver nullObserver`.
 pub struct NullRenderSourceObserver;
 impl RenderSourceObserver for NullRenderSourceObserver {}
 
@@ -107,17 +101,14 @@ impl RenderSourceTileObserver {
 }
 
 impl TileObserver for RenderSourceTileObserver {
-    /// `RenderSource::onTileChanged(Tile&)`.
     fn on_tile_changed(&self, tile: &TileBase) {
         self.observer().on_tile_changed(&self.source_id, &tile.id());
     }
 
-    /// `RenderSource::onTileError(Tile&, std::exception_ptr)`.
     fn on_tile_error(&self, tile: &TileBase, error: Error) {
         self.observer().on_tile_error(&self.source_id, &tile.id(), error);
     }
 
-    /// `RenderSource::onTileAction(OverscaledTileID, std::string, TileOperation)`.
     fn on_tile_action(&self, id: &OverscaledTileID, source_id: &str, op: TileOperation) {
         self.observer().on_tile_action(&self.source_id, op, id, source_id);
     }
@@ -132,7 +123,6 @@ pub struct RenderSourceBase {
 }
 
 impl RenderSourceBase {
-    /// `RenderSource(Immutable<style::Source::Impl>)`.
     pub fn new(impl_: Arc<dyn source::Impl>) -> Self {
         let source_id = impl_.id.clone();
         RenderSourceBase {
@@ -152,8 +142,6 @@ impl RenderSourceBase {
     }
 }
 
-/// `RenderSource`.
-// TODO(port): queryFeatureExtensions, getImageRenderData.
 pub trait RenderSource {
     fn base(&self) -> &RenderSourceBase;
     fn base_mut(&mut self) -> &mut RenderSourceBase;
@@ -206,7 +194,6 @@ pub trait RenderSource {
     }
 
     // layers: feature state
-    /// `setFeatureState(sourceLayerID, featureID, state)`.
     fn set_feature_state(
         &mut self,
         _source_layer_id: Option<&str>,
@@ -220,7 +207,6 @@ pub trait RenderSource {
     /// `states` again changes nothing.
     fn set_feature_states(&mut self, _states: Option<&std::sync::Arc<crate::bucket::LayerFeatureStates>>) {}
 
-    /// `getFeatureState(state, sourceLayerID, featureID)`.
     fn get_feature_state(
         &self,
         _source_layer_id: Option<&str>,
@@ -229,7 +215,6 @@ pub trait RenderSource {
         mln_style::expression::expression::FeatureState::default()
     }
 
-    /// `removeFeatureState(sourceLayerID, featureID, stateKey)`.
     fn remove_feature_state(
         &mut self,
         _source_layer_id: Option<&str>,
@@ -239,9 +224,8 @@ pub trait RenderSource {
     }
 
     // query
-    /// `queryRenderedFeatures(geometry, transformState, layers, options,
-    /// globalState, projMatrix)`; sources without features return nothing.
-    /// `Err`: the exception C++ throws out of the query (a malformed tile).
+    /// Queries the rendered features in `geometry`; sources without features
+    /// return nothing. `Err` if the query fails (a malformed tile).
     #[allow(clippy::too_many_arguments)]
     fn query_rendered_features(
         &self,
@@ -255,7 +239,6 @@ pub trait RenderSource {
         Ok(crate::geometry::feature_index::QueryResults::default())
     }
 
-    /// `querySourceFeatures(options, globalState)`.
     fn query_source_features(
         &self,
         _options: &crate::query::SourceQueryOptions,
@@ -264,8 +247,8 @@ pub trait RenderSource {
         Ok(Vec::new())
     }
 
-    /// `queryFeatureExtensions(feature, extension, extensionField, args)`:
-    /// sources without extensions return a null value.
+    /// Queries a feature extension; sources without extensions return a null
+    /// value.
     fn query_feature_extensions(
         &self,
         _feature: &mln_util::feature::Feature,
@@ -282,7 +265,7 @@ pub trait RenderSource {
 
     fn reduce_memory_use(&mut self);
 
-    /// `retryFailedTiles()`: requests the tiles whose load failed again.
+    /// Requests the tiles whose load failed again.
     fn retry_failed_tiles(&mut self) {}
 
     fn dump_debug_logs(&self);
@@ -302,13 +285,12 @@ pub trait RenderSource {
         self.base().enabled
     }
 
-    /// `setObserver(RenderSourceObserver*)`.
     fn set_observer(&self, observer: Rc<dyn RenderSourceObserver>) {
         *self.base().tile_observer.observer.borrow_mut() = observer;
     }
 }
 
-/// `RenderSource::create(impl, threadPool)`, without the thread pool (see
+/// Creates the render source of a style source. Takes no thread pool (see
 /// `TileCache::new`).
 pub fn create(impl_: &Arc<dyn source::Impl>) -> Option<Box<dyn RenderSource>> {
     match impl_.type_ {

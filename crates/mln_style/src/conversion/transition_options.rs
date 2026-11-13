@@ -1,14 +1,10 @@
-// Ports include/mln/style/conversion/transition_options.hpp +
-// src/mln/style/conversion/transition_options.cpp.
-
 use std::time::Duration;
 
 use super::{Converter, Convertible, Error};
 use crate::transition_options::TransitionOptions;
 
-/// `std::chrono::milliseconds(int64_t(number))`: truncated to whole
-/// milliseconds; a negative number, below the style spec's minimum of 0,
-/// gives zero, as does NaN.
+/// `number` milliseconds, truncated to whole milliseconds; a negative
+/// number, below the style spec's minimum of 0, gives zero, as does NaN.
 fn whole_milliseconds(number: f32) -> Duration {
     Duration::from_millis(number as u64)
 }

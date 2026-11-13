@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/render_circle_layer.hpp and
-// src/mln/renderer/layers/render_circle_layer.cpp (drawable path).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -54,7 +51,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &CircleLayerImpl {
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
 
-/// `RenderCircleLayer::captureRenderedFeatures`.
 fn capture_rendered_features(
     stats: &mut Stats,
     bucket: &CircleBucket,
@@ -233,10 +229,6 @@ fn capture_rendered_features(
     );
 }
 
-/// `vertexAttrs->readDataDrivenPaintProperties<CircleColor, CircleRadius,
-/// CircleBlur, CircleOpacity, CircleStrokeColor, CircleStrokeWidth,
-/// CircleStrokeOpacity>(binders, evaluated, propertiesAsUniforms,
-/// idCircleColorVertexAttribute)`.
 fn read_circle_attributes(
     attrs: &mut mln_gfx::vertex_attribute::VertexAttributeArray,
     b: &CircleBinders,
@@ -319,7 +311,6 @@ fn read_circle_attributes(
 }
 
 // query
-/// `projectPoint(p, projector, size)`.
 fn project_point(
     p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
     projector: &mln_map_types::TileProjector<'_>,
@@ -333,7 +324,6 @@ fn project_point(
     )
 }
 
-/// `projectQueryGeometry(queryGeometry, posMatrix, size)`.
 fn project_query_geometry(
     query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
     projector: &mln_map_types::TileProjector<'_>,

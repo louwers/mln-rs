@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/layer.hpp +
-// src/mln/style/conversion/layer.cpp.
-
 use super::{Convertible, Error};
 use crate::layer::{Layer, PropertyScope, layer_type_info};
 use crate::layermanager::LayerManager;
@@ -15,7 +12,6 @@ fn set_object_member(layer: &mut Box<dyn Layer>, value: &Convertible<'_>, member
     true
 }
 
-/// `setPaintProperties(Layer&, const Convertible&)`.
 pub fn set_paint_properties(layer: &mut dyn Layer, value: &Convertible<'_>) -> Option<Error> {
     let paint_value = value.object_member("paint")?;
     if !paint_value.is_object() {
@@ -24,7 +20,6 @@ pub fn set_paint_properties(layer: &mut dyn Layer, value: &Convertible<'_>) -> O
     paint_value.each_member(|k, v| layer.set_property(k, v, Some(PropertyScope::Paint)))
 }
 
-/// `convert<std::unique_ptr<Layer>>(value, error)`.
 pub fn convert_layer(value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Layer>> {
     if !value.is_object() {
         error.message = "layer must be an object".to_owned();

@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/rotation.hpp +
-// src/mln/style/conversion/rotation.cpp.
-
 use mln_style_types::Rotation;
 
 use super::{Converter, Convertible, Error};

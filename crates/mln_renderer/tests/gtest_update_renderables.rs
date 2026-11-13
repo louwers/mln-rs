@@ -1,6 +1,3 @@
-// Ports test/algorithm/update_renderables.test.cpp, with the MockSource /
-// MockTileData of test/src/mln/test/mock.hpp.
-//
 // C++ logs `RenderTileAction`s with a reference to the tile object and
 // compares them by address. The port's `update_renderables` names tiles by
 // their storage key, so the mock gives every MockTileData a serial number and
@@ -38,12 +35,10 @@ enum ActionLogEntry {
 }
 use ActionLogEntry::*;
 
-/// `OverscaledTileID{overscaledZ, wrap, {z, x, y}}`.
 fn oid(overscaled_z: u8, wrap: i16, (z, x, y): (u8, u32, u32)) -> OverscaledTileID {
     OverscaledTileID::with_zxy(overscaled_z, wrap, z, x, y)
 }
 
-/// `UnwrappedTileID{z, x, y}`.
 fn uid(z: u8, x: i64, y: i64) -> UnwrappedTileID {
     UnwrappedTileID::new(z, x, y)
 }
@@ -84,7 +79,8 @@ impl MockSource {
         }
     }
 
-    /// `createTileData`: replaces the existing `MockTileData` object, if any.
+    /// Creates the tile's data, replacing the existing `MockTileData`
+    /// object, if any.
     fn create_tile_data(&mut self, tile_id: OverscaledTileID) -> TileRef {
         let tile = MockTileData::new(tile_id, &mut self.next_serial);
         let serial = tile.serial;
@@ -92,27 +88,22 @@ impl MockSource {
         TileRef { tile_id, serial }
     }
 
-    /// `source.dataTiles[id].get()`.
     fn existing_tile(&self, tile_id: OverscaledTileID) -> TileRef {
         let tile = &self.data_tiles[&tile_id];
         TileRef { tile_id, serial: tile.serial }
     }
 
-    /// `tile->...`: the tile must still be the object `tile` points to.
+    /// The tile's data; the tile must still be the object `tile` points to.
     fn tile_mut(&mut self, tile: TileRef) -> &mut MockTileData {
         let data = self.data_tiles.get_mut(&tile.tile_id).expect("dangling tile");
         assert_eq!(data.serial, tile.serial, "dangling tile");
         data
     }
 
-    /// `source.dataTiles[id]->...`.
     fn data_tile_mut(&mut self, tile_id: OverscaledTileID) -> &mut MockTileData {
         self.data_tiles.get_mut(&tile_id).expect("null tile")
     }
 
-    /// `algorithm::updateRenderables(getTileData, createTileData,
-    /// retainTileData, renderTile, source.idealTiles, source.dataTiles,
-    /// source.zoomRange[, maxParentOverscaleFactor])`.
     fn update_renderables(&mut self, max_parent_overscale_factor: Option<u8>) {
         let ideal_tiles: Vec<OverscaledTileID> = self.ideal_tiles.iter().copied().collect();
         let zoom_range = self.zoom_range;

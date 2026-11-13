@@ -1,5 +1,3 @@
-// Ports include/mln/storage/resource.hpp and src/mln/storage/resource.cpp.
-
 use std::time::Duration;
 
 use mln_util::chrono::Timestamp;
@@ -12,7 +10,7 @@ use mln_util::url::{URL, percent_encode, substr};
 
 use crate::response::Data;
 
-/// `Resource::Kind` (the values are stored in the offline database).
+/// The kind of a resource. The values are stored in the offline database.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Kind {
@@ -26,7 +24,6 @@ pub enum Kind {
     Image,
 }
 
-/// `Resource::Priority`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Priority {
     #[default]
@@ -34,7 +31,6 @@ pub enum Priority {
     Low,
 }
 
-/// `Resource::Usage`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Usage {
     #[default]
@@ -42,7 +38,6 @@ pub enum Usage {
     Offline,
 }
 
-/// `Resource::StoragePolicy`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StoragePolicy {
     #[default]
@@ -50,7 +45,6 @@ pub enum StoragePolicy {
     Volatile,
 }
 
-/// `Resource::TileData`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TileData {
     pub url_template: String,
@@ -60,7 +54,7 @@ pub struct TileData {
     pub z: i8,
 }
 
-/// `Resource::LoadingMethod` (a bitmask).
+/// A bitmask of the ways a resource may be loaded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LoadingMethod(pub u8);
 
@@ -129,7 +123,6 @@ fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
 }
 
 impl Resource {
-    /// `Resource(kind, url, tileData = nullopt, loadingMethod = All)`.
     pub fn new(kind: Kind, url: impl Into<String>) -> Self {
         Self::with_tile_data(kind, url, None, LoadingMethod::All)
     }
@@ -165,7 +158,6 @@ impl Resource {
         self.usage = u;
     }
 
-    /// `hasLoadingMethod`.
     #[must_use]
     pub fn has_loading_method(&self, method: LoadingMethod) -> bool {
         (self.loading_method.0 & method.0) != 0
@@ -231,7 +223,6 @@ impl Resource {
         Resource::new(Kind::Glyphs, url)
     }
 
-    /// `Resource::tile(urlTemplate, pixelRatio, x, y, z, scheme, loadingMethod = All)`.
     #[must_use]
     pub fn tile(
         url_template: &str,
@@ -282,7 +273,6 @@ impl Resource {
 
 #[cfg(test)]
 mod tests {
-    // Ports test/storage/resource.test.cpp.
     use super::*;
 
     fn tile(url: &str, ratio: f32, x: i32, y: i32, z: i8, scheme: Scheme) -> Resource {

@@ -1,5 +1,3 @@
-// Ports include/mln/style/projection.hpp + src/mln/style/projection.cpp.
-//
 // As for the light (see light.rs), the C++ `ProjectionObserver* observer`
 // (src/mln/style/projection_observer.hpp) is replaced by the
 // `ProjectionRefMut` guard of `Style::Impl::get_projection_mut`, which calls
@@ -29,19 +27,16 @@ impl Default for Projection {
 }
 
 impl Projection {
-    /// `Projection()`.
     #[must_use]
     pub fn new() -> Self {
         Projection::from_impl(Arc::new(Impl::default()))
     }
 
-    /// `explicit Projection(Immutable<Impl>)`.
     #[must_use]
     pub fn from_impl(impl_: Arc<Impl>) -> Self {
         Projection { impl_ }
     }
 
-    /// `mutableImpl()`.
     #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         (*self.impl_).clone()

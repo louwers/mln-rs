@@ -1,5 +1,3 @@
-// Ports src/mln/layout/pattern_layout.hpp
-//
 // The C++ template `PatternLayout<BucketType, LayerPropertiesType,
 // PatternPropertyType, LayoutPropertiesType, SortKeyPropertyType>` is
 // `PatternLayout<S: PatternLayoutSpec>`; the fill and line specs are below.
@@ -39,7 +37,6 @@ use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::render_layer::LayerRenderData;
 
-/// `PatternDependency`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PatternDependency {
     pub min: String,
@@ -47,11 +44,10 @@ pub struct PatternDependency {
     pub max: String,
 }
 
-/// `PatternLayerMap = mln::unordered_map<std::string, PatternDependency>`.
 pub type PatternLayerMap = HashMap<String, PatternDependency>;
 
-/// `PatternFeature` (the feature itself is re-read from the source layer,
-/// see the file comment).
+/// A feature the filter accepted. The feature itself is read from the source
+/// layer again (see the file comment).
 #[derive(Clone, Debug)]
 pub struct PatternFeature {
     pub i: usize,
@@ -68,21 +64,15 @@ impl PatternFeature {
 
 /// The template arguments of a `PatternLayout` instantiation.
 pub trait PatternLayoutSpec: 'static {
-    /// `BucketType`
     type Bucket: Bucket;
-    /// `LayoutPropertiesType::PossiblyEvaluated`
     type Layout: Clone + Send + Sync;
 
-    /// `leaderLayerProperties->layerImpl().layout.evaluate(parameters)`.
     fn evaluate_layout(
         properties: &Arc<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout;
-    /// `getEvaluated<LayerPropertiesType>(p).get<PatternPropertyType>()`.
     fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image>;
-    /// `PatternPropertyType::defaultValue()`.
     fn pattern_default() -> Image;
-    /// `layout.get<SortKeyPropertyType>().evaluate(feature, zoom, canonical, default)`.
     fn sort_key(
         layout: &Self::Layout,
         feature: &dyn GeometryTileFeature,
@@ -91,19 +81,17 @@ pub trait PatternLayoutSpec: 'static {
     ) -> f32;
     /// The sort key when it is the same for every feature.
     fn constant_sort_key(layout: &Self::Layout) -> Option<f32>;
-    /// `std::make_shared<BucketType>(layout, layerPropertiesMap, zoom, overscaling)`.
     fn create_bucket(
         layout: &Self::Layout,
         layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self::Bucket;
-    /// `bucket->setSubdivisionGranularity(value)` for the buckets that have
-    /// it (C++ checks with `if constexpr (requires ...)`).
+    /// Sets the subdivision granularity on the buckets that have one. The
+    /// default does nothing.
     fn set_subdivision_granularity(_bucket: &mut Self::Bucket, _value: &SubdivisionGranularitySetting) {}
 }
 
-/// `PatternLayout<...>`.
 pub struct PatternLayout<S: PatternLayoutSpec> {
     pub layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
     pub bucket_leader_id: String,
@@ -118,19 +106,18 @@ pub struct PatternLayout<S: PatternLayoutSpec> {
     pub has_pattern: bool,
     pub retain_features_by_id: bool,
 
-    /// `const std::unique_ptr<GeometryTileLayer> sourceLayer` (see
+    /// The source layer the layout gets its features from again (see
     /// layout.rs); `None` when built from a borrowed layer.
     pub source_layer: Option<SourceLayer>,
 }
 
-/// `constantOr(Faded<expression::Image>{.from = "", .to = ""})`.
 fn empty_faded() -> Faded<Image> {
     Faded { from: Image::new(""), to: Image::new("") }
 }
 
 impl<S: PatternLayoutSpec> PatternLayout<S> {
-    /// `PatternLayout(parameters, group, sourceLayer, layoutParameters)`.
-    /// `sorted` selects the `SortKeyPropertyType` instantiation.
+    /// Creates the layout from a borrowed source layer. `sorted` selects the
+    /// sort-key variant (see the file comment).
     pub fn new(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
@@ -281,8 +268,8 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         })
     }
 
-    /// `PatternLayout(parameters, group, std::move(sourceLayer),
-    /// layoutParameters)` as the factories call it.
+    /// Creates the layout and keeps `source_layer`, as the layer factories
+    /// do.
     pub fn with_source_layer(
         parameters: &mut LayoutParameters<'_>,
         group: &[Arc<dyn LayerProperties>],
@@ -302,14 +289,13 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         Ok(layout)
     }
 
-    /// `hasDependencies()`.
     pub fn has_dependencies(&self) -> bool {
         self.has_pattern
     }
 
-    /// `createBucket(patternPositions, featureIndex, renderData, firstLoad,
-    /// showCollisionBoxes, canonical)`. `insert_feature` is
-    /// `featureIndex->insert(geometries, i, sourceLayerID, bucketLeaderID)`.
+    /// Creates the bucket from the source layer. `insert_feature(geometries,
+    /// i, source_layer_id, bucket_leader_id)` adds a feature to the feature
+    /// index.
     pub fn create_bucket_with(
         &mut self,
         source_layer: &dyn GeometryTileLayer,
@@ -368,8 +354,6 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     }
 }
 
-/// `PatternLayout<FillBucket, FillLayerProperties, FillPattern,
-/// FillLayoutProperties[, FillSortKey]>`.
 pub struct FillLayoutSpec;
 
 impl PatternLayoutSpec for FillLayoutSpec {
@@ -413,8 +397,6 @@ impl PatternLayoutSpec for FillLayoutSpec {
     }
 }
 
-/// `PatternLayout<LineBucket, LineLayerProperties, LinePattern,
-/// LineLayoutProperties[, LineSortKey]>`.
 pub struct LineLayoutSpec;
 
 impl PatternLayoutSpec for LineLayoutSpec {
@@ -458,9 +440,8 @@ impl PatternLayoutSpec for LineLayoutSpec {
     }
 }
 
-/// `FillLayout*` / `LineLayout*`: whether the factory picks the sorted
-/// instantiation (`layout.get<SortKey>().isUndefined()` on the leader's
-/// unevaluated layout).
+/// Whether a fill layout sorts its features: whether the leader's
+/// unevaluated layout sets `fill-sort-key`.
 pub fn fill_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
     let properties = (**leader).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
     !properties.layer_impl().layout.get::<FillSortKey>().is_undefined()

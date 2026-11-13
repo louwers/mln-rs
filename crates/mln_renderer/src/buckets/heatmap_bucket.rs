@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/buckets/heatmap_bucket.hpp and heatmap_bucket.cpp
-//
 // As in circle_bucket.rs, the vertex/index vectors are plain `Vec`s (the
 // bucket is built on the worker thread and shared with `Arc`); the render
 // layer copies them into the shared gfx vectors its drawables reference.
@@ -32,15 +30,13 @@ use crate::paint_property_binder::PaintPropertyBinder;
 use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
-    /// `HeatmapBinders = PaintPropertyBinders<HeatmapPaintProperties::DataDrivenProperties>`.
     pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
         heatmap_radius: HeatmapRadius => PaintPropertyBinder<f32>,
         heatmap_weight: HeatmapWeight => PaintPropertyBinder<f32>,
     }
 );
 
-/// `HeatmapLayoutVertex = gfx::Vertex<TypeList<attributes::pos>>` (also
-/// `HeatmapTextureLayoutVertex`).
+/// A heatmap layout vertex, also used for the heatmap texture's quad.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct HeatmapLayoutVertex {
@@ -53,7 +49,6 @@ pub type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 pub struct HeatmapBucket {
     pub base: BucketBase,
     pub vertices: GeometryVec<HeatmapLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub triangles: GeometryVec<u16>,
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s like the other buckets' binders (the bucket is
@@ -65,7 +60,6 @@ pub struct HeatmapBucket {
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl HeatmapBucket {
-    /// `HeatmapBucket(const BucketParameters&, const std::vector<Immutable<style::LayerProperties>>&)`.
     pub fn new(parameters: &BucketParameters, layers: &[Arc<dyn LayerProperties>]) -> Self {
         let mut paint_property_binders = VecMap::new();
         for layer in layers {
@@ -87,8 +81,8 @@ impl HeatmapBucket {
         }
     }
 
-    /// `vertex(Point<int16_t> p, float ex, float ey)`: `p.x * 2` is an
-    /// `int`, plus a `float`, converted to `int16_t` (truncation).
+    /// The layout vertex for `p` with extrusion (`ex`, `ey`). As in C++,
+    /// `p.x * 2` is an integer, added to a float and truncated to `i16`.
     #[must_use]
     pub fn vertex(p: GeometryCoordinate, ex: f32, ey: f32) -> HeatmapLayoutVertex {
         HeatmapLayoutVertex {
@@ -99,7 +93,6 @@ impl HeatmapBucket {
         }
     }
 
-    /// `textureVertex(Point<int16_t> p)`.
     #[must_use]
     pub fn texture_vertex(p: GeometryCoordinate) -> HeatmapTextureLayoutVertex {
         HeatmapLayoutVertex { a1: [p.x, p.y] }

@@ -792,8 +792,8 @@ fn restore(egl: &Egl, display: egl::Display, previous: Previous) -> Result<(), e
     }
 }
 
-/// `EGLBackendImpl`: an OpenGL ES 3.0 or desktop OpenGL context, and the 1x1
-/// pbuffer it is current on, or the host's surface it presents to, or none.
+/// An OpenGL ES 3.0 or desktop OpenGL context, and the 1x1 pbuffer it is
+/// current on, or the host's surface it presents to, or none.
 struct EglContext {
     egl: &'static Egl,
     display: egl::Display,

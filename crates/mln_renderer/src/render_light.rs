@@ -1,16 +1,11 @@
-// Ports src/mln/renderer/render_light.hpp and src/mln/renderer/render_light.cpp.
-
 use std::sync::Arc;
 
 use mln_style::light::{self, LightProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 
-/// `TransitioningLight = style::LightProperties::Unevaluated`.
 pub type TransitioningLight = LightProperties::Unevaluated;
-/// `EvaluatedLight = style::LightProperties::PossiblyEvaluated`.
 pub type EvaluatedLight = LightProperties::PossiblyEvaluated;
 
-/// `RenderLight`.
 pub struct RenderLight {
     pub impl_: Arc<light::Impl>,
     transitioning: TransitioningLight,
@@ -18,7 +13,6 @@ pub struct RenderLight {
 }
 
 impl RenderLight {
-    /// `RenderLight(Immutable<style::Light::Impl>)`.
     #[must_use]
     pub fn new(impl_: Arc<light::Impl>) -> Self {
         let transitioning = impl_.properties.untransitioned();

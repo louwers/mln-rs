@@ -1,4 +1,4 @@
-//! Ports src/mln/style/sources and include/mln/style/sources.
+//! The style source types.
 
 pub mod custom_geometry_source;
 pub mod custom_vector_source;

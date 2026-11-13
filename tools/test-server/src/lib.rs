@@ -1,5 +1,5 @@
-//! Ports `test/src/mln/test/http_server.cpp` (`mln::test::HttpServer`, the
-//! cpp-httplib server the C++ unit tests start on 127.0.0.1:3000) on an
+//! The HTTP server the tests load from, with the routes of the cpp-httplib
+//! server the C++ unit tests start on 127.0.0.1:3000. It runs on an
 //! [httpmock](https://github.com/httpmock/httpmock) `MockServer`: each C++
 //! `server->Get(path, handler)` is a mock, in the same order.
 //!
@@ -30,8 +30,8 @@ use std::time::Duration;
 use httpmock::{HttpMockRequest, HttpMockResponse, MockServer};
 use mln_util::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32, rfc1123};
 
-/// `httplib::Response` as the routes fill it: `status == -1` until a route
-/// sets one.
+/// A route's response as it fills it, like an `httplib::Response`: `status`
+/// is -1 until the route sets one.
 struct Reply {
     status: i32,
     headers: Vec<(String, String)>,
@@ -134,13 +134,13 @@ fn parse_range(value: &str, len: usize) -> Option<(usize, usize)> {
     (start <= end && start < len).then_some((start, end.min(len - 1)))
 }
 
-/// `mln::test::HttpServer`: serves the routes until dropped.
+/// Serves the routes until dropped.
 pub struct HttpServer {
     server: MockServer,
 }
 
 impl HttpServer {
-    /// `HttpServer()`: starts the server with `runServer`'s routes.
+    /// Starts a server with the routes, on a free port.
     #[must_use]
     pub fn new() -> Self {
         let server = MockServer::start();
@@ -373,14 +373,15 @@ impl HttpServer {
         self.server.port()
     }
 
-    /// `http://127.0.0.1:<port><path>` (C++: `http://127.0.0.1:3000<path>`).
+    /// The URL of `path` on this server, `http://127.0.0.1:<port><path>`
+    /// (C++: `http://127.0.0.1:3000<path>`).
     #[must_use]
     pub fn url(&self, path: &str) -> String {
         format!("http://127.0.0.1:{}{path}", self.port())
     }
 
-    /// `util::read_file("test/fixtures/map/online/" + file)` as `/online/`
-    /// serves it (with this server's address in the JSON files).
+    /// The bytes of `test/fixtures/map/online/<file>` as `/online/` serves
+    /// it, with this server's address in the JSON files.
     #[must_use]
     pub fn online_fixture(&self, file: &str) -> Vec<u8> {
         online_fixture(&base_url(self.port()), file)
@@ -393,14 +394,13 @@ impl Default for HttpServer {
     }
 }
 
-/// `http://127.0.0.1:<port>/`.
 fn base_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/")
 }
 
-/// `test/fixtures/map/online/<file>`, with `base` for the C++ server's
-/// address in the JSON files. C++'s `util::read_file` throws when the file is
-/// missing; the route then answers with no content.
+/// The bytes of `test/fixtures/map/online/<file>`, with `base` for the C++
+/// server's address in the JSON files. Empty for a missing file, where C++'s
+/// `util::read_file` throws; the route then answers with no content.
 #[expect(
     clippy::case_sensitive_file_extension_comparisons,
     reason = "the JSON fixtures end in a lower-case `.json`; other names are served as they are"

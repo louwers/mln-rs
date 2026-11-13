@@ -1,5 +1,3 @@
-// Ports include/mln/util/geo.hpp + src/mln/util/geo.cpp.
-//
 // The C++ tile-ID constructors (`LatLng(CanonicalTileID)`,
 // `LatLng(UnwrappedTileID)`, `LatLngBounds(CanonicalTileID)`) can't name
 // the tile ID types here (mln_tile_id depends on mln_util), so they take the
@@ -13,9 +11,7 @@ use crate::error::Error;
 
 pub type ScreenCoordinate = Point<f64>;
 pub type ScreenLineString = Vec<Point<f64>>;
-// TODO(port): ScreenBox (mapbox::geometry::box<double>) with its first user.
 
-/// `LatLng::WrapMode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WrapMode {
     Unwrapped,
@@ -76,13 +72,12 @@ impl LatLng {
         LatLng { lat, lon }
     }
 
-    /// `LatLng(const CanonicalTileID&)`: the top left of the tile.
+    /// The top left corner of the tile `z/x/y`.
     #[must_use]
     pub fn from_canonical_tile(z: u8, x: u32, y: u32) -> Self {
         LatLng::new_unchecked(lat_(z, i64::from(y)), lon_(z, i64::from(x)))
     }
 
-    /// `LatLng(const UnwrappedTileID&)`.
     #[must_use]
     pub fn from_unwrapped_tile(z: u8, x: u32, y: u32, wrap: i16) -> Self {
         LatLng::new_unchecked(lat_(z, i64::from(y)), lon_(z, i64::from(x)) + f64::from(wrap) * constants::DEGREES_MAX)
@@ -132,7 +127,6 @@ pub struct LatLngBounds {
 }
 
 impl LatLngBounds {
-    /// `LatLngBounds(LatLng sw, LatLng ne)` (private in C++).
     const fn from_corners(sw: LatLng, ne: LatLng) -> Self {
         LatLngBounds { sw, ne, bounded: true }
     }
@@ -181,7 +175,7 @@ impl LatLngBounds {
         }
     }
 
-    /// `LatLngBounds(const CanonicalTileID&)`: the tile's exact boundaries.
+    /// The exact boundaries of the tile `z/x/y`.
     #[must_use]
     pub fn from_canonical_tile(z: u8, x: u32, y: u32) -> Self {
         LatLngBounds::from_corners(
@@ -230,8 +224,8 @@ impl LatLngBounds {
         LatLng::new_unchecked(self.north(), self.west())
     }
 
-    /// C++ constructs the `LatLng` in a `noexcept` function, so a longitude sum
-    /// that overflows to infinity terminates; this panics.
+    /// Panics if the longitude sum overflows to infinity (C++ constructs the
+    /// `LatLng` in a `noexcept` function, so it terminates).
     #[must_use]
     pub fn center(&self) -> LatLng {
         LatLng::new(
@@ -281,8 +275,6 @@ impl LatLngBounds {
     pub fn crosses_antimeridian(&self) -> bool {
         self.sw.wrapped().longitude() > self.ne.wrapped().longitude()
     }
-
-    // TODO(port): contains(const CanonicalTileID&) (util::TileRange).
 
     #[must_use]
     pub fn contains(&self, point: &LatLng) -> bool {

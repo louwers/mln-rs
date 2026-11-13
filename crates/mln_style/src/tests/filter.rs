@@ -1,5 +1,3 @@
-// Ports test/style/filter.test.cpp.
-
 use feature::{Identifier, Value};
 use mln_conversion::Convertible;
 use mln_util::geometry::FeatureType;

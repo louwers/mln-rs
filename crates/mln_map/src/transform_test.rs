@@ -1,7 +1,3 @@
-// Ports test/map/transform.test.cpp (TEST(Transform, *), TEST(Camera, *),
-// TEST(TransformState, *), and the globe's TEST(VerticalPerspectiveProjection, *),
-// TEST(GlobeTransform, *) and TEST(TileProjector, *)).
-//
 // The C++ AnimationOptions callbacks capture the Transform by reference and
 // assert on it. The Rust callbacks can't borrow the Transform that is calling
 // them (`ease_to`/`update_transitions` hold it mutably), so they record that
@@ -91,7 +87,6 @@ fn assert_near(val1: f64, val2: f64, abs_error: f64) {
 
 const ABS_DOUBLE_ERROR: f64 = 1e-5;
 
-/// `EXPECT_THAT(arg, Vec3NearEquals1E5(vec))`.
 #[track_caller]
 fn assert_vec3_near_1e5(arg: &Vec3, vec: &Vec3) {
     let near = (vec[0] - arg[0]).abs() <= ABS_DOUBLE_ERROR
@@ -112,12 +107,12 @@ impl Drop for ScopedTrace {
     }
 }
 
-/// `std::hypot(x, y, z)`.
 fn hypot3(x: f64, y: f64, z: f64) -> f64 {
     (x * x + y * y + z * z).sqrt()
 }
 
-/// `std::clamp(value, lo, hi)`: `value < lo ? lo : hi < value ? hi : value`.
+/// Clamps `value` to `lo..=hi` as `std::clamp` does:
+/// `value < lo ? lo : hi < value ? hi : value`.
 fn std_clamp(value: f64, lo: f64, hi: f64) -> f64 {
     if value < lo {
         lo
@@ -1917,7 +1912,6 @@ fn tile_coordinates_to_sphere() {
     assert!(south[1] < -0.99);
 }
 
-/// `setUpGlobe(transform, center, zoom, bearing = 0, pitch = 0)`.
 fn set_up_globe(transform: &mut Transform, center: &LatLng, zoom: f64, bearing: f64, pitch: f64) {
     transform.resize(Size::new(800, 600)).unwrap();
     transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));

@@ -1,8 +1,6 @@
-// Ports include/mln/shaders/color_relief_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) ColorReliefDrawableUBO` (64 bytes).
+/// The color relief shader's per-drawable uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct ColorReliefDrawableUBO {
@@ -11,7 +9,7 @@ pub struct ColorReliefDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<ColorReliefDrawableUBO>() == 64);
 
-/// `struct alignas(16) ColorReliefTilePropsUBO` (32 bytes).
+/// The color relief shader's per-tile uniform block (32 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct ColorReliefTilePropsUBO {
@@ -23,7 +21,7 @@ pub struct ColorReliefTilePropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<ColorReliefTilePropsUBO>() == 32);
 
-/// `struct alignas(16) ColorReliefEvaluatedPropsUBO` (16 bytes).
+/// The color relief shader's evaluated properties uniform block (16 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct ColorReliefEvaluatedPropsUBO {

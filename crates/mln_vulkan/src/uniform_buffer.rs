@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/uniform_buffer.hpp and src/mln/vulkan/uniform_buffer.cpp
-//
 // `vulkan::UniformBufferArray` adds a descriptor set to the gfx array and
 // marks it dirty when a buffer is set. The port keeps the gfx struct, which
 // has no hook for that, next to a `descriptor_set::UniformDescriptorSet`
@@ -31,7 +29,6 @@ impl UniformBuffer {
         UniformBuffer { buffer, storage }
     }
 
-    /// `createUniformBuffer(data, size, persistent, ssbo)`
     pub fn create(context: &Context, data: &[u8], persistent: bool, ssbo: bool) -> Self {
         let usage = if ssbo { vk::BufferUsageFlags::STORAGE_BUFFER } else { vk::BufferUsageFlags::UNIFORM_BUFFER };
         UniformBuffer::new(context.create_buffer(Some(data), data.len(), usage, persistent), ssbo)

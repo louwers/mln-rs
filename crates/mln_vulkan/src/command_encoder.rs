@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/command_encoder.hpp and src/mln/vulkan/command_encoder.cpp
-
 use std::any::Any;
 use std::rc::Rc;
 
@@ -14,7 +12,7 @@ use crate::custom_layer::CustomLayerEncoder;
 use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
 
-/// `vulkan::CommandEncoder`: records into the command buffer of a frame.
+/// Records into the command buffer of a frame.
 pub struct CommandEncoder {
     context: Rc<Context>,
     command_buffer: vk::CommandBuffer,

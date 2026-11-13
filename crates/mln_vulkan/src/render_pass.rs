@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/render_pass.hpp and src/mln/vulkan/render_pass.cpp
-//
 // Differences from C++:
 // - The pass keeps the render pass, the extent and the command buffer it
 //   records with, which C++ reads from the descriptor's renderable and the
@@ -144,7 +142,6 @@ impl render_pass::RenderPass for RenderPass {
         self.context.get_backend().insert_debug_label(self.command_buffer, name);
     }
 
-    /// `clearStencil(value)`
     fn clear_stencil(&self, value: u32) {
         if !self.encoding {
             return;

@@ -1,7 +1,3 @@
-// Ports include/mln/style/conversion/function.hpp +
-// src/mln/style/conversion/function.cpp (legacy `{"stops": ...}` functions
-// to expressions).
-//
 // Quirk kept: the conversion interpolates with ColorSpace::RGB; the legacy
 // "colorSpace" member is not read.
 
@@ -26,7 +22,7 @@ use crate::property_expression::PropertyExpression;
 
 const TOKEN_RESERVED_CHARS: &[u8] = b"{}";
 
-/// `hasTokens`: whether `source` contains a `{token}`.
+/// Whether `source` contains a `{token}`.
 #[must_use]
 pub fn has_tokens(source: &str) -> bool {
     let bytes = source.as_bytes();
@@ -100,7 +96,6 @@ pub fn convert_token_string_to_expression(source: &str) -> Box<dyn Expression> {
     }
 }
 
-/// `convertFunctionToExpression<T>(value, error, convertTokens)`.
 pub fn convert_function_to_expression<T>(
     value: &Convertible<'_>,
     error: &mut Error,
@@ -284,8 +279,8 @@ fn convert_literal(
     }
 }
 
-/// `std::map<double, std::unique_ptr<Expression>>` as function.cpp builds it
-/// (ordered by `<`; `emplace` keeps the first value of a key).
+/// Stops ordered by `<`, where `emplace` keeps the first value of a key, as
+/// C++'s function conversion builds them.
 #[derive(Default)]
 struct DoubleStops {
     stops: Vec<(f64, Box<dyn Expression>)>,
@@ -447,7 +442,7 @@ fn interpolate(
     result.expect("convertFunctionToExpression: createInterpolate failed")
 }
 
-/// `categorical<T>` for `int64_t` and `std::string` labels.
+/// A `match` on `property` over integer or string labels.
 fn categorical<T: MatchLabel>(
     type_: Type,
     property: &str,
@@ -464,7 +459,6 @@ fn categorical<T: MatchLabel>(
     ))
 }
 
-/// `categorical<bool>`.
 fn categorical_bool(
     type_: Type,
     property: &str,
@@ -697,7 +691,6 @@ fn composite<M: InnerStops>(
     }
 }
 
-/// `convertFunctionToExpression(type::Type, const Convertible&, Error&, bool convertTokens)`.
 pub fn convert_function_to_expression_for_type(
     type_: &Type,
     value: &Convertible<'_>,

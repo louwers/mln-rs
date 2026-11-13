@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/parsing_context.hpp and
-// src/mln/style/expression/parsing_context.cpp.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -39,8 +36,8 @@ use crate::type_::Type;
 use crate::value::Value;
 use crate::within::Within;
 
-/// `expression::ParsingError`. `Display` writes `key: message`, or the
-/// message alone when the key is empty, as `getCombinedErrors` does.
+/// An expression parsing error. `Display` writes `key: message`, or the
+/// message alone when the key is empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
 pub struct ParsingError {
     pub message: String,
@@ -56,13 +53,11 @@ impl std::fmt::Display for ParsingError {
     }
 }
 
-/// `expression::ParseResult` (`std::optional<std::unique_ptr<Expression>>`).
 pub type ParseResult = Option<Box<dyn Expression>>;
 
 /// The bindings of a `let` scope (`std::map<std::string, std::shared_ptr<Expression>>`).
 pub type Bindings = VecMap<String, Arc<dyn Expression>>;
 
-/// `detail::Scope`.
 pub struct Scope {
     bindings: Bindings,
     parent: Option<Rc<Scope>>,
@@ -107,7 +102,6 @@ pub enum TypeAnnotationOption {
     Omit,
 }
 
-/// `expression::ParsingContext`.
 pub struct ParsingContext {
     key: String,
     expected: Option<Type>,
@@ -198,8 +192,8 @@ fn expression_registry(name: &str) -> Option<ParseFunction> {
     })
 }
 
-/// `isExpression(const std::string&)`: whether `name` is in the expression
-/// registry (not the compound-expression registry).
+/// Whether `name` is in the expression registry (not the compound-expression
+/// registry).
 #[must_use]
 pub fn is_expression_name(name: &str) -> bool {
     expression_registry(name).is_some()
@@ -211,12 +205,10 @@ impl ParsingContext {
         Self::default()
     }
 
-    /// `ParsingContext(std::string key)`.
     pub fn with_key(key: impl Into<String>) -> Self {
         ParsingContext { key: key.into(), ..Default::default() }
     }
 
-    /// `explicit ParsingContext(type::Type expected)`.
     #[must_use]
     pub fn with_expected(expected: Type) -> Self {
         ParsingContext { expected: Some(expected), ..Default::default() }

@@ -1,5 +1,3 @@
-// Ports include/mln/renderer/query.hpp.
-
 use mln_style::filter::Filter;
 
 /// Options for query rendered features.
@@ -34,8 +32,8 @@ impl SourceQueryOptions {
     }
 }
 
-/// `FeatureExtensionValue`: the result of
-/// `Renderer::query_feature_extensions`, a value or a feature collection.
+/// The result of `Renderer::query_feature_extensions`: a value or a feature
+/// collection.
 #[derive(Clone, Debug, PartialEq)]
 pub enum FeatureExtensionValue {
     Value(feature::Value),

@@ -1,7 +1,3 @@
-// Ports test/renderer/feature_tracking.test.cpp: the features a map with
-// `MapOptions::capture_rendered_features` reports as rendered in the last
-// frame, and their bounds in normalized device coordinates.
-
 mod support;
 
 use std::sync::Arc;
@@ -46,7 +42,6 @@ const FIXTURE_BASE: &str = "test/fixtures/";
 const GLYPH_PATH: &str = "test/fixtures/resources/glyphs.pbf";
 const MARKER_PATH: &str = "test/fixtures/sprites/default_marker.png";
 
-/// `FeatureTrackingTest::defaultGeometry()`.
 const DEFAULT_GEOMETRY: &str = r#"{"type": "FeatureCollection", "features": [
     {"type": "Feature", "id": "pt0", "properties": {"name": "0", "opacity": 0.5},
      "geometry": {"type": "Point", "coordinates": [0.01, 0.02]}},
@@ -67,7 +62,6 @@ fn constant<T>(value: T) -> PropertyValue<T> {
     PropertyValue::Constant(value)
 }
 
-/// `FeatureTrackingTest`.
 struct FeatureTrackingTest {
     map: Map,
     frontend: HeadlessFrontend,
@@ -164,8 +158,9 @@ impl FeatureTrackingTest {
         FeatureTrackingTest { map, frontend, _run_loop: run_loop }
     }
 
-    /// `run(images, imageThreshold, pixelThreshold = 0.1)`: renders, and
-    /// compares with `test/fixtures/feature_tracking`/<image>/expected.png.
+    /// Renders, and compares the image with
+    /// `test/fixtures/feature_tracking/<image>/expected.png` at a pixel
+    /// threshold of 0.1.
     fn run(&mut self, image: Option<&str>, image_threshold: f64) -> RenderResult {
         let result = self.frontend.render(&mut self.map).expect("render");
         if let Some(image) = image {
@@ -564,8 +559,8 @@ fn ndc_bound_fill_extrusion() {
     });
 }
 
-/// `GlobeFeatureTrackingTest::geometry()`: `near` faces the camera; `far` is
-/// inside the Mercator viewport and behind the globe's horizon.
+/// Features for the globe test: `near` faces the camera; `far` is inside the
+/// Mercator viewport and behind the globe's horizon.
 const GLOBE_GEOMETRY: &str = r#"{"type": "FeatureCollection", "features": [
     {"type": "Feature", "id": "near", "properties": {"name": "0"},
      "geometry": {"type": "Point", "coordinates": [60, 50]}},
@@ -581,7 +576,7 @@ const GLOBE_GEOMETRY: &str = r#"{"type": "FeatureCollection", "features": [
      "geometry": {"type": "Polygon", "coordinates": [[[83, -3], [88, -3], [88, 3], [83, 3], [83, -3]]]}}
 ]}"#;
 
-/// `GlobeFeatureTrackingTest`: the globe at zoom 0, centered on 0, 0.
+/// The globe at zoom 0, centered on 0, 0.
 fn globe_test() -> FeatureTrackingTest {
     let mut test = FeatureTrackingTest::with_geojson(
         GLOBE_GEOMETRY,

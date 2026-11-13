@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/polyline_generator.hpp and src/mln/gfx/polyline_generator.cpp
-//
 // The C++ template takes `gfx::VertexVector<V>&` / `gfx::IndexVector<Triangles>&`
 // and `std::function`s; here the vertices and indexes are plain `Vec`s (the
 // line bucket's storage) and the functions are `fn` pointers. The float
@@ -49,7 +47,6 @@ const LINE_DISTANCE_SCALE: f32 = 1.0 / 2.0;
 /// The maximum line distance, in tile units, that fits in the buffer.
 const MAX_LINE_DISTANCE: f32 = (1u32 << LINE_DISTANCE_BUFFER_BITS) as f32 / LINE_DISTANCE_SCALE;
 
-/// `PolylineGeneratorDistances`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PolylineGeneratorDistances {
     clip_start: f64,
@@ -76,7 +73,6 @@ impl PolylineGeneratorDistances {
     }
 }
 
-/// `PolylineGeneratorOptions`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PolylineGeneratorOptions {
     pub type_: FeatureType,
@@ -104,12 +100,11 @@ impl Default for PolylineGeneratorOptions {
     }
 }
 
-/// `LayoutVertexFunc`: `(p, e, round, up, dir, linesofar) -> vertex`.
+/// `(p, e, round, up, dir, linesofar) -> vertex`.
 pub type LayoutVertexFunc<V> = fn(Point<i16>, Point<f64>, bool, bool, i8, i32) -> V;
-/// `CreateSegmentFunc`: `(vertexOffset, indexOffset) -> segment` (a
-/// `std::function`: the drawable builder's captures the builder).
+/// `(vertex_offset, index_offset) -> segment`. A closure, because the
+/// drawable builder's captures the builder.
 pub type CreateSegmentFunc<'a, S> = &'a dyn Fn(usize, usize) -> S;
-/// `GetSegmentFunc`.
 pub type GetSegmentFunc<S> = fn(&mut S) -> &mut SegmentBase;
 
 #[derive(Clone, Copy)]
@@ -130,15 +125,12 @@ fn sub(a: Point<f64>, b: Point<f64>) -> Point<f64> {
 fn mul(a: Point<f64>, s: f64) -> Point<f64> {
     Point::new(a.x * s, a.y * s)
 }
-/// `util::perp`
 fn perp(a: Point<f64>) -> Point<f64> {
     Point::new(-a.y, a.x)
 }
-/// `util::mag<double>`
 fn mag(a: Point<f64>) -> f64 {
     (a.x * a.x + a.y * a.y).sqrt()
 }
-/// `util::unit<double>`
 fn unit(a: Point<f64>) -> Point<f64> {
     let magnitude = mag(a);
     if magnitude == 0.0 {
@@ -146,31 +138,27 @@ fn unit(a: Point<f64>) -> Point<f64> {
     }
     mul(a, 1.0 / magnitude)
 }
-/// `util::round` (`::round`: halfway cases away from zero).
+/// Rounds each coordinate, halfway cases away from zero.
 fn round(a: Point<f64>) -> Point<f64> {
     Point::new(a.x.round(), a.y.round())
 }
-/// `point<int16_t> - point<int16_t>`: the `int` difference narrowed back to
-/// `int16_t`.
+/// `a - b`, computed in `i32` and narrowed back to `i16` as in C++.
 fn sub_i16(a: GeometryCoordinate, b: GeometryCoordinate) -> GeometryCoordinate {
     Point::new((i32::from(a.x) - i32::from(b.x)) as i16, (i32::from(a.y) - i32::from(b.y)) as i16)
 }
-/// `point<int16_t> + point<int16_t>`.
 fn add_i16(a: GeometryCoordinate, b: GeometryCoordinate) -> GeometryCoordinate {
     Point::new((i32::from(a.x) + i32::from(b.x)) as i16, (i32::from(a.y) + i32::from(b.y)) as i16)
 }
-/// `convertPoint<double>(Point<int16_t>)`
 fn to_f64(a: GeometryCoordinate) -> Point<f64> {
     Point::new(f64::from(a.x), f64::from(a.y))
 }
-/// `convertPoint<int16_t>(Point<double>)`: `static_cast<int16_t>`; the
-/// values are rounded tile coordinates, in range. Out of range is UB in C++;
-/// this truncates through `int` as clang does on x86-64.
+/// Casts to `i16`. The values are rounded tile coordinates, in range. Out of
+/// range is UB in C++; this truncates through `i32` as clang does on x86-64.
 fn to_i16(a: Point<f64>) -> GeometryCoordinate {
     Point::new(a.x as i32 as i16, a.y as i32 as i16)
 }
-/// `util::dist<double>(Point<int16_t>, Point<int16_t>)`: `int` arithmetic,
-/// then `std::sqrt(int)`.
+/// The distance between `a` and `b`. The squares are summed in wrapping
+/// `i32` arithmetic, as C++ sums them in `int`, before the square root.
 #[must_use]
 pub fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
     let dx = i32::from(b.x) - i32::from(a.x);
@@ -178,7 +166,6 @@ pub fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
     f64::from(dx.wrapping_mul(dx).wrapping_add(dy.wrapping_mul(dy))).sqrt()
 }
 
-/// `gfx::PolylineGenerator<PolylineLayoutVertex, PolylineSegment>`.
 pub struct PolylineGenerator<'a, V, S> {
     vertices: &'a mut Vec<V>,
     layout_vertex: LayoutVertexFunc<V>,

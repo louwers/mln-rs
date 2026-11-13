@@ -1,7 +1,3 @@
-// Ports render-test/file_source.hpp and render-test/file_source.cpp
-// (`ProxyFileSource`), plus the file sources of
-// `TestRunner::registerProxyFileSource` (render-test/runner.cpp).
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -53,7 +49,7 @@ impl Drop for PendingRequest {
     }
 }
 
-/// `ProxyFileSource`: loads everything cache-only from the database while
+/// A file source that loads everything cache-only from the database while
 /// offline and maps the test URLs (`local://`, `http://localhost:2900/`) to
 /// the `http://` URLs the cache stores.
 pub struct ProxyFileSource {
@@ -112,7 +108,8 @@ impl ProxyFileSource {
     }
 }
 
-/// `str.compare(0, prefix.size(), prefix) == 0` + `replace(0, n, "http://")`.
+/// Replaces `prefix` at the start of `s` with `http://`, and returns whether
+/// `s` started with it.
 fn replace_prefix(s: &mut String, prefix: &str) -> bool {
     if s.starts_with(prefix) {
         s.replace_range(..prefix.len(), "http://");

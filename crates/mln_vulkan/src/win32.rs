@@ -30,7 +30,6 @@ use windows::core::{BOOL, GUID, HRESULT, Interface as _, PCWSTR, s, w};
 /// which Vulkan names `VK_FORMAT_B8G8R8A8_UNORM`.
 pub(crate) const FORMAT: u32 = DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32;
 
-/// `CreateDXGIFactory1`.
 type CreateFactory = unsafe extern "system" fn(riid: *const GUID, factory: *mut *mut c_void) -> HRESULT;
 /// `D3D11CreateDevice`, with the interfaces as raw pointers.
 type CreateDevice = unsafe extern "system" fn(

@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/render_color_relief_layer.hpp and
-// src/mln/renderer/layers/render_color_relief_layer.cpp (drawable path).
-//
 // Differences in mechanics, not in output:
 // - C++ re-applies the vertex attributes and creates new DEM textures for
 //   existing tile drawables every frame; the port rebuilds a tile's
@@ -8,8 +5,6 @@
 //   DEM texture per bucket id.
 // - The elevation stops texture is created anew when the ramp changes (C++
 //   re-uploads into the same texture; its size may change with the ramp).
-//
-// TODO(port): queryIntersectsFeature (C++ returns false).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -133,7 +128,6 @@ impl RenderColorReliefLayer {
         layer
     }
 
-    /// `updateColorRamp()`.
     fn update_color_ramp(&mut self) {
         // Get the color property value, using default if undefined
         let mut color_value = self.unevaluated.get::<ColorReliefColor>().get_value().clone();

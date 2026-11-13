@@ -1,5 +1,3 @@
-// Ports test/actor/actor_ref.test.cpp.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

@@ -1,5 +1,3 @@
-// Ports test/text/glyph_cache.test.cpp.
-
 use std::sync::Arc;
 
 use mln_text::glyph::{Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphRange};

@@ -20,21 +20,20 @@ impl Stops {
         Stops { stops: Vec::new() }
     }
 
-    /// `std::map::lower_bound`: the first index whose key is not less than
-    /// `key`.
+    /// The first index whose key is not less than `key`.
     #[must_use]
     pub fn lower_bound(&self, key: f64) -> usize {
         self.stops.partition_point(|(k, _)| *k < key)
     }
 
-    /// `std::map::upper_bound`: the first index whose key is greater than
-    /// `key`.
+    /// The first index whose key is greater than `key`.
     #[must_use]
     pub fn upper_bound(&self, key: f64) -> usize {
         self.stops.partition_point(|(k, _)| key.partial_cmp(k) != Some(Ordering::Less))
     }
 
-    /// `std::map::emplace`: inserts unless an equivalent key exists.
+    /// Inserts `value` at `key` unless `key` is already present; returns
+    /// whether it inserted.
     pub fn emplace(&mut self, key: f64, value: Box<dyn Expression>) -> bool {
         let i = self.lower_bound(key);
         if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
@@ -78,7 +77,7 @@ impl Stops {
         self.stops.iter().map(|(_, v)| v)
     }
 
-    /// `Expression::childrenEqual` over two stop maps.
+    /// Whether both have the same stops with equal outputs.
     #[must_use]
     pub fn children_equal(&self, rhs: &Stops) -> bool {
         if self.stops.len() != rhs.stops.len() {
@@ -88,8 +87,8 @@ impl Stops {
     }
 }
 
-/// `getCoveringStops`: the smallest range of stops that covers the interval
-/// [lower, upper].
+/// The smallest range of stops that covers the interval from `lower` to
+/// `upper`.
 #[must_use]
 pub fn get_covering_stops(stops: &Stops, lower: f64, upper: f64) -> Range<f32> {
     debug_assert!(!stops.is_empty());

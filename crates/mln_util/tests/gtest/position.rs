@@ -1,5 +1,3 @@
-// Ports test/util/position.test.cpp.
-
 use mln_style_types::Position;
 
 use crate::assert_near;

@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/tile_mask.hpp.
-
 use std::collections::BTreeSet;
 
 use mln_tile_id::CanonicalTileID;

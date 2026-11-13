@@ -1,6 +1,3 @@
-// Ports src/mln/util/camera.hpp and src/mln/util/camera.cpp (util::Camera
-// and the FreeCameraOptions methods).
-//
 // It lives here rather than in mln_util because camera.cpp also implements
 // `FreeCameraOptions` (map/camera.hpp).
 
@@ -77,7 +74,6 @@ fn update_transform_position(transform: &mut Mat4, position: &Vec3) {
     transform[14] = position[2];
 }
 
-/// `util::Camera`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
     orientation: Quaternion,
@@ -189,8 +185,7 @@ impl Camera {
         &self.orientation
     }
 
-    /// `getOrientation(double& roll, double& pitch, double& bearing)`,
-    /// returned as `(roll, pitch, bearing)`.
+    /// The camera's orientation as `(roll, pitch, bearing)`.
     #[must_use]
     pub fn get_orientation_angles(&self) -> (f64, f64, f64) {
         let f = self.forward();

@@ -1,8 +1,3 @@
-// Ports the Vulkan `ShaderSource<BuiltIn, Backend::Type::Vulkan>`
-// specialisations: the GLSL strings come from include/mln/shaders/vulkan/*.hpp
-// through the `glsl_sources` module; the attribute and texture tables from
-// src/mln/shaders/vulkan/*.cpp are below.
-//
 // The tables describe the vertex layout the port's renderer produces, which
 // is C++'s with MLN_USE_FILL_EXTRUSION_INSTANCING on and
 // MLN_USE_SYMBOL_INSTANCING off: the symbol tables are the non-instanced ones,
@@ -63,11 +58,10 @@ pub struct GlslShaderSource {
     pub fragment: &'static str,
 }
 
-/// `shaders::AttributeInfo` (`include/mln/shaders/vulkan/shader_program.hpp)`:
-/// the vertex or instance attribute `id` is the input at
+/// The vertex or instance attribute `id` is the input at
 /// `layout(location = index)`. C++'s `ubo`, the storage buffer an instanced
-/// attribute is also read through, is not ported: every attribute is a vertex
-/// input.
+/// attribute is also read through, has no counterpart: every attribute is a
+/// vertex input.
 #[derive(Clone, Copy, Debug)]
 pub struct AttributeInfo {
     pub index: usize,
@@ -75,7 +69,7 @@ pub struct AttributeInfo {
     pub id: usize,
 }
 
-/// `shaders::TextureInfo`: texture `id` binds in the image set at
+/// Texture `id` binds in the image set at
 /// `layout::image_texture_binding(index)`, and its sampler at
 /// `layout::image_sampler_binding(index)`.
 #[derive(Clone, Copy, Debug)]
@@ -466,8 +460,8 @@ shader_source!(
     &[tex(0, ID_SYMBOL_IMAGE_TEXTURE), tex(1, ID_SYMBOL_IMAGE_ICON_TEXTURE)]
 );
 
-/// `ShaderSource<shader_id, Vulkan>`, or `None` for the shaders the port's
-/// renderer doesn't draw with: the wide vector.
+/// The Vulkan source of `shader_id`, or `None` for the shaders the renderer
+/// doesn't draw with: the wide vector.
 #[must_use]
 pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {

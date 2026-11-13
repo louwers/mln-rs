@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/render_background_layer.hpp and
-// src/mln/renderer/layers/render_background_layer.cpp (drawable path).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -41,7 +38,7 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &BackgroundLayerImpl {
 const BACKGROUND_PLAIN_SHADER_NAME: &str = "BackgroundShader";
 const BACKGROUND_PATTERN_SHADER_NAME: &str = "BackgroundPatternShader";
 
-/// `addPatternIfNeeded(id, params)` (conformance).
+/// Adds the image `id` to the pattern atlas if it isn't there yet.
 fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
     if params.pattern_atlas.borrow().get_pattern(id).is_none()
         && let Some(image) = params.image_manager.get_image(id)

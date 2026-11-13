@@ -1,5 +1,3 @@
-// Ports include/mln/style/color_ramp_property_value.hpp.
-
 use std::sync::Arc;
 
 use mln_expression::value::from_expression_value;
@@ -56,7 +54,6 @@ impl From<ColorRampPropertyValue> for ColorRampParts {
 }
 
 impl ColorRampPropertyValue {
-    /// `ColorRampPropertyValue(std::shared_ptr<expression::Expression>)`.
     #[must_use]
     pub fn new(value: Option<Arc<dyn Expression>>) -> Self {
         let global_state_refs = match &value {
@@ -75,7 +72,6 @@ impl ColorRampPropertyValue {
         self.value.is_none()
     }
 
-    /// `evaluate(double rampEvaluationParameter, const GlobalStateMap* globalState)`.
     #[must_use]
     pub fn evaluate_ramp(&self, ramp_evaluation_parameter: f64, global_state: Option<&GlobalStateMap>) -> Color {
         let value = self.value.as_ref().expect("ColorRampPropertyValue::evaluate on an undefined value");
@@ -99,7 +95,7 @@ impl ColorRampPropertyValue {
         false
     }
 
-    /// `getExpression()`; C++ requires a defined value.
+    /// The expression of a defined value. Panics when the value is undefined.
     #[must_use]
     pub fn get_expression(&self) -> &dyn Expression {
         self.value.as_deref().expect("ColorRampPropertyValue::get_expression on an undefined value")

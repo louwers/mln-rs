@@ -1,5 +1,3 @@
-// Ports src/mln/geometry/line_atlas.hpp and src/mln/geometry/line_atlas.cpp
-//
 // The C++ `std::map<size_t, DashPatternTexture>` is keyed by a hash of the
 // two dash arrays and the cap ("We're not handling hash collisions here");
 // the port keys by the values themselves (the float bits), which is the same
@@ -13,7 +11,6 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
-/// `LinePatternPos`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LinePatternPos {
     pub width: f32,
@@ -21,14 +18,12 @@ pub struct LinePatternPos {
     pub y: f32,
 }
 
-/// `enum class LinePatternCap : bool`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LinePatternCap {
     Square = 0,
     Round = 1,
 }
 
-/// `DashRange`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DashRange {
     pub left: f32,
@@ -63,7 +58,6 @@ fn get_dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
     ranges
 }
 
-/// `static_cast<uint8_t>(fmaxf(0.0f, fminf(255.0f, v)))`.
 fn to_alpha(v: f32) -> u8 {
     mln_math::fmaxf(0.0, mln_math::fminf(255.0, v)) as u8
 }
@@ -200,13 +194,11 @@ fn add_dash_pattern(
     }
 }
 
-/// `std::variant<AlphaImage, gfx::Texture2DPtr> texture`.
 enum DashTexture {
     Image(AlphaImage),
     Texture(Texture2DPtr),
 }
 
-/// `DashPatternTexture`.
 pub struct DashPatternTexture {
     from: LinePatternPos,
     to: LinePatternPos,
@@ -299,7 +291,6 @@ fn dash_key(from: &[f32], to: &[f32], cap: LinePatternCap) -> DashKey {
     (from.iter().map(|v| v.to_bits()).collect(), to.iter().map(|v| v.to_bits()).collect(), cap)
 }
 
-/// `LineAtlas`.
 #[derive(Default)]
 pub struct LineAtlas {
     textures: VecMap<DashKey, DashPatternTexture>,

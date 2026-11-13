@@ -1,7 +1,6 @@
-// Ports test/storage/online_file_source.test.cpp against the test server
-// (mln_test_server, one per test) instead of the C++ one on port 3000. The
-// tests that request through the network take `serial()`: NetworkStatus is
-// process-wide and C++ runs one test at a time.
+// The tests run against a test server (`mln_test_server`), one per test.
+// The tests that request through the network take `serial()`:
+// `NetworkStatus` is process-wide.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/expression.hpp and
-// src/mln/style/expression/expression.cpp.
-//
 // C++ `Expression` is an abstract base class with `kind`, `type` and
 // `dependencies` fields; here every expression type embeds an
 // `ExpressionBase` and implements the `Expression` trait. C++ downcasts with
@@ -22,12 +19,9 @@ use crate::literal::Literal;
 use crate::type_::Type;
 use crate::value::{Value, from_mbgl_value};
 
-/// `mln::FeatureState` (util/feature.hpp).
 pub type FeatureState = ValueObject;
-/// `mln::GlobalStateMap` (util/feature.hpp).
 pub type GlobalStateMap = ValueObject;
 
-/// `expression::EvaluationError`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct EvaluationError {
@@ -40,13 +34,11 @@ impl EvaluationError {
     }
 }
 
-/// `expression::Result<T>`.
 pub type EvalResult<T> = Result<T, EvaluationError>;
 
-/// `expression::EvaluationResult`.
 pub type EvaluationResult = Result<Value, EvaluationError>;
 
-/// `expression::EvaluationContext`. The C++ pointers are borrows.
+/// The inputs an expression is evaluated with.
 #[derive(Clone, Copy, Default)]
 pub struct EvaluationContext<'a> {
     pub zoom: Option<f32>,
@@ -66,31 +58,26 @@ pub struct EvaluationContext<'a> {
 }
 
 impl<'a> EvaluationContext<'a> {
-    /// `EvaluationContext(float zoom)`.
     #[must_use]
     pub fn new(zoom: f32) -> Self {
         EvaluationContext { zoom: Some(zoom), ..Default::default() }
     }
 
-    /// `EvaluationContext(GeometryTileFeature const*)`.
     #[must_use]
     pub fn from_feature(feature: Option<&'a dyn GeometryTileFeature>) -> Self {
         EvaluationContext { feature, ..Default::default() }
     }
 
-    /// `EvaluationContext(float zoom, GeometryTileFeature const*)`.
     #[must_use]
     pub fn with_zoom_feature(zoom: f32, feature: Option<&'a dyn GeometryTileFeature>) -> Self {
         EvaluationContext { zoom: Some(zoom), feature, ..Default::default() }
     }
 
-    /// `EvaluationContext(std::optional<mln::Value> accumulated, GeometryTileFeature const*)`.
     #[must_use]
     pub fn from_accumulated(accumulated: Option<&'a MbglValue>, feature: Option<&'a dyn GeometryTileFeature>) -> Self {
         EvaluationContext { accumulated, feature, ..Default::default() }
     }
 
-    /// `EvaluationContext(float zoom, GeometryTileFeature const*, const FeatureState*)`.
     #[must_use]
     pub fn with_zoom_feature_state(
         zoom: f32,
@@ -100,8 +87,6 @@ impl<'a> EvaluationContext<'a> {
         EvaluationContext { zoom: Some(zoom), feature, feature_state: state, ..Default::default() }
     }
 
-    /// `EvaluationContext(std::optional<float> zoom, GeometryTileFeature const*,
-    /// std::optional<double> colorRampParameter)`.
     #[must_use]
     pub fn with_color_ramp(
         zoom: Option<f32>,
@@ -165,7 +150,6 @@ impl<'a> EvaluationContext<'a> {
     }
 }
 
-/// `expression::Kind`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum Kind {
@@ -199,7 +183,7 @@ pub enum Kind {
     Semiliteral,
 }
 
-/// `expression::Dependency`, a bit set.
+/// The inputs an expression depends on, as a bit set.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Dependency(pub u32);
 
@@ -246,7 +230,6 @@ impl std::ops::BitOrAssign for Dependency {
     }
 }
 
-/// `operator<<(std::ostream&, Dependency)`.
 impl fmt::Display for Dependency {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if *self == Dependency::NONE {
@@ -297,7 +280,6 @@ impl ExpressionBase {
     }
 }
 
-/// `expression::Expression`.
 pub trait Expression: Any + Send + Sync {
     fn base(&self) -> &ExpressionBase;
 
@@ -364,17 +346,17 @@ impl fmt::Debug for dyn Expression {
     }
 }
 
-/// `static_cast<const T*>(&expression)` after a kind check.
+/// `e` as a `T`, if it is one.
 pub fn downcast<T: Expression>(e: &dyn Expression) -> Option<&T> {
     (e as &dyn Any).downcast_ref()
 }
 
-/// `Expression::depsOf` for an optional child.
+/// The dependencies of an optional child; none when it is absent.
 pub fn deps_of_opt<E: std::ops::Deref<Target = dyn Expression>>(e: &Option<E>) -> Dependency {
     e.as_ref().map_or(Dependency::NONE, |e| e.dependencies())
 }
 
-/// `Expression::collectDependencies` over a container of children.
+/// The union of the dependencies of `container`'s expressions.
 pub fn collect_dependencies<'a, I, E>(container: I) -> Dependency
 where
     I: IntoIterator<Item = &'a E>,
@@ -383,7 +365,7 @@ where
     container.into_iter().fold(Dependency::NONE, |a, e| a | e.dependencies())
 }
 
-/// `Expression::childrenEqual` for vectors of expressions.
+/// Whether two lists of expressions are equal, element by element.
 pub fn children_equal<E, F>(lhs: &[E], rhs: &[F]) -> bool
 where
     E: std::ops::Deref<Target = dyn Expression>,
@@ -471,7 +453,6 @@ impl GeometryTileFeature for GeoJSONFeature<'_> {
     }
 }
 
-/// `Expression::evaluate(zoom, feature, colorRampParameter)`.
 pub fn evaluate_feature(
     e: &dyn Expression,
     zoom: Option<f32>,
@@ -482,7 +463,6 @@ pub fn evaluate_feature(
     e.evaluate(&EvaluationContext::with_color_ramp(zoom, Some(&f), color_ramp_parameter))
 }
 
-/// `Expression::evaluate(zoom, feature, colorRampParameter, availableImages)`.
 pub fn evaluate_feature_with_images(
     e: &dyn Expression,
     zoom: Option<f32>,
@@ -497,7 +477,6 @@ pub fn evaluate_feature_with_images(
     )
 }
 
-/// `Expression::evaluate(zoom, feature, colorRampParameter, availableImages, canonical)`.
 pub fn evaluate_feature_with_canonical(
     e: &dyn Expression,
     zoom: Option<f32>,
@@ -514,7 +493,6 @@ pub fn evaluate_feature_with_canonical(
     )
 }
 
-/// `Expression::evaluate(accumulated, feature)`.
 pub fn evaluate_accumulated(
     e: &dyn Expression,
     accumulated: Option<&MbglValue>,
@@ -524,8 +502,8 @@ pub fn evaluate_accumulated(
     e.evaluate(&EvaluationContext::from_accumulated(accumulated, Some(&f)))
 }
 
-/// `Expression::evaluate(feature, params)`: evaluates against a GeoJSON
-/// feature and every other input of `params`, whose own feature is ignored.
+/// Evaluates `e` against a GeoJSON feature and every other input of `params`,
+/// whose own feature is ignored.
 /// When `params` names a canonical tile, the feature's geometry is placed in
 /// that tile, as the within and distance expressions need.
 pub fn evaluate_feature_with_context(
@@ -551,7 +529,8 @@ pub(crate) fn evaluate_ref<'a>(
     }
 }
 
-/// `toExpressionValue(mln::Value)`, used by the feature accessors.
+/// Converts a feature value to an expression value, for the feature
+/// accessors.
 pub(crate) fn mbgl_to_expression_value(v: &MbglValue) -> Value {
     from_mbgl_value(v)
 }

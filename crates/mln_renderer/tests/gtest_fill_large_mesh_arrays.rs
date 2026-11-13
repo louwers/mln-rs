@@ -1,6 +1,3 @@
-// Ports test/gfx/fill_large_mesh_arrays.test.cpp (gfx::fillLargeMeshArrays
-// lives in mln_renderer::gfx::fill_large_mesh_arrays).
-
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_renderer::gfx::fill_large_mesh_arrays::{MeshLines, fill_large_mesh_arrays};
 
@@ -67,10 +64,8 @@ fn merge(meshes: &[Mesh]) -> Mesh {
 struct Buffers {
     vertices: Vec<[i16; 2]>,
     triangle_segments: Vec<SegmentBase>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     triangles: Vec<u16>,
     line_segments: Vec<SegmentBase>,
-    /// `gfx::IndexVector<gfx::Lines>`.
     lines: Vec<u16>,
 }
 
@@ -119,7 +114,7 @@ fn drawn(
     primitives
 }
 
-/// `drawn<Size>(mesh, indexes)`: the primitives the mesh itself draws.
+/// The primitives of `size` indices that the mesh itself draws.
 fn mesh_drawn(mesh: &Mesh, size: usize, indexes: &[u32]) -> Vec<Vec<i16>> {
     let mut primitives = Vec::new();
     let mut i = 0;

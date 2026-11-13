@@ -1,5 +1,3 @@
-// Ports test/renderer/image_manager.test.cpp.
-//
 // C++ requestors are stack objects whose destructor calls
 // `ImageManager::removeRequestor`; here they are `Rc`s (the manager keeps
 // `Weak`s) and `Drop` calls `remove_requestor_key`, which is what the
@@ -19,8 +17,7 @@ use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-/// `util::read_file("test/fixtures/...")`, from the copy of the C++ files
-/// (testdata/).
+/// Reads a test fixture from the copy of the C++ files (testdata/).
 fn read_file(relative: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
@@ -61,7 +58,6 @@ impl Drop for FixtureLog {
     }
 }
 
-/// `makeMutable<style::Image::Impl>(id, PremultipliedImage(size), pixelRatio, sdf)`.
 fn make_image(id: &str, size: Size, pixel_ratio: f32, sdf: bool) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
@@ -131,13 +127,12 @@ impl ImageRequestor for StubImageRequestor {
 }
 
 impl Drop for StubImageRequestor {
-    /// `~ImageRequestor()`: `imageManager->removeRequestor(*this)`.
+    /// Removes the requestor from the image manager.
     fn drop(&mut self) {
         self.image_manager.remove_requestor_key(std::ptr::from_ref::<Self>(self).cast::<()>() as usize);
     }
 }
 
-/// `imageManager->getImages(requestor, std::make_pair(dependencies, id))`.
 fn get_images(
     image_manager: &ImageManager,
     requestor: &Rc<StubImageRequestor>,

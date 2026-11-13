@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/circle_layer_tweaker.hpp and
-// src/mln/renderer/layers/circle_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
-// branches: the port's backend is WebGPU).
-
 use std::sync::Arc;
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
@@ -40,7 +36,8 @@ impl CircleLayerTweaker {
     }
 }
 
-/// `constOrDefault<P>(evaluated)`: `evaluated.get<P>().constantOr(P::defaultValue())`.
+/// The constant value of paint property `$p`, or its default if it isn't
+/// constant.
 macro_rules! const_or_default {
     ($evaluated:expr, $p:ty) => {
         $evaluated.get::<$p>().constant_or(&<$p>::default_value())

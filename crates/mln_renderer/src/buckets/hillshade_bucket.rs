@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/buckets/hillshade_bucket.hpp and hillshade_bucket.cpp
-//
 // As RasterBucket (see raster_bucket.rs), the bucket is shared
 // (`Arc<dyn Bucket>`) between its tile, which changes the mask and
 // backfills the DEM borders on the render thread, and the render layers.
@@ -28,7 +26,6 @@ use crate::bucket::{Bucket, BucketBase};
 use crate::geometry::dem_data::DEMData;
 use crate::tile_mask::TileMask;
 
-/// `HillshadeLayoutVertex = gfx::Vertex<TypeList<attributes::pos, attributes::texture_pos>>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct HillshadeLayoutVertex {
@@ -41,25 +38,21 @@ pub struct HillshadeLayoutVertex {
 pub struct HillshadeBucketGeometry {
     pub mask: TileMask,
     pub vertices: Vec<HillshadeLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub indices: Vec<u16>,
     pub segments: Vec<SegmentBase>,
-    /// `vertices.getLastModified()`.
     pub last_modified: Instant,
 }
 
-/// `TileMask{{0, 0, 0}}`.
 fn full_mask() -> TileMask {
     let mut mask = TileMask::new();
     mask.insert(CanonicalTileID::new(0, 0, 0));
     mask
 }
 
-/// `HillshadeBucket`.
-///
-/// Port-only: serde writes the DEM, border included, which is what a worker
-/// sets (`tile/worker_codec`) and the tile backfills from its neighbours; the
-/// geometry is the tile's (`setMask`) and the render state this side's.
+/// A raster-dem tile's DEM and the geometry that draws it. Serde writes the
+/// DEM, border included, which is what a worker sets (`tile/worker_codec`)
+/// and the tile backfills from its neighbours; the geometry is the tile's
+/// (`set_mask`) and the render state this side's.
 #[derive(Serialize, Deserialize)]
 pub struct HillshadeBucket {
     pub base: BucketBase,
@@ -84,13 +77,12 @@ fn unmasked() -> Mutex<HillshadeBucketGeometry> {
 }
 
 impl HillshadeBucket {
-    /// `HillshadeBucket(PremultipliedImage&&, Tileset::RasterEncoding)`;
-    /// the `DEMData` constructor's exception is the `Err`.
+    /// Builds the bucket from a DEM image; `Err` if `DEMData::new` rejects
+    /// the image.
     pub fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
         Ok(Self::with_dem_data(DEMData::new(image, encoding)?))
     }
 
-    /// `HillshadeBucket(DEMData&&)`.
     #[must_use]
     pub fn with_dem_data(demdata: DEMData) -> Self {
         HillshadeBucket {
@@ -102,7 +94,6 @@ impl HillshadeBucket {
         }
     }
 
-    /// `layoutVertex(Point<int16_t> p, Point<uint16_t> t)`.
     #[must_use]
     pub fn layout_vertex(p: Point<i16>, t: Point<u16>) -> HillshadeLayoutVertex {
         HillshadeLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
@@ -113,12 +104,10 @@ impl HillshadeBucket {
         self.geometry.lock()
     }
 
-    /// `getDEMData() const`.
     pub fn get_dem_data(&self) -> RwLockReadGuard<'_, DEMData> {
         self.demdata.read()
     }
 
-    /// `getDEMData()`.
     pub fn get_dem_data_mut(&self) -> RwLockWriteGuard<'_, DEMData> {
         self.demdata.write()
     }
@@ -131,7 +120,6 @@ impl HillshadeBucket {
         self.prepared.store(prepared_state, Ordering::SeqCst);
     }
 
-    /// `renderTargetPrepared = false`.
     pub fn reset_render_target_prepared(&self) {
         self.render_target_generation.fetch_add(1, Ordering::SeqCst);
     }
@@ -141,7 +129,6 @@ impl HillshadeBucket {
         self.render_target_generation.load(Ordering::SeqCst)
     }
 
-    /// `clear()`.
     pub fn clear(&self) {
         let mut geometry = self.geometry();
         Self::clear_geometry(&mut geometry);
@@ -156,7 +143,6 @@ impl HillshadeBucket {
         geometry.last_modified = Instant::now();
     }
 
-    /// `setMask(TileMask&&)`.
     pub fn set_mask(&self, mask: TileMask) {
         const VERTEX_LENGTH: usize = 4;
 

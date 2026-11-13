@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/possibly_evaluated_property_value.hpp (a cut point of the C++ include cycle).
-
 use mln_expression::expression::FeatureState;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
@@ -11,7 +9,8 @@ use crate::expression::{Dependency, ValueConverter};
 use crate::property_expression::PropertyExpression;
 use crate::renderer::cross_faded_property_evaluator::Faded;
 
-/// `PossiblyEvaluatedPropertyValue<T>`: `variant<T, PropertyExpression<T>>`.
+/// A property value evaluated as far as possible without a feature: a
+/// constant, or an expression that depends on the feature.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PossiblyEvaluatedPropertyValue<T> {
     Constant(T),
@@ -55,7 +54,6 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
         }
     }
 
-    /// `evaluate(const Feature&, float zoom, T defaultValue)`.
     pub fn evaluate_feature(&self, feature: &dyn GeometryTileFeature, zoom: f32, default_value: T) -> T
     where
         T: ValueConverter,
@@ -68,7 +66,6 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
         }
     }
 
-    /// `evaluate(const Feature&, float zoom, const CanonicalTileID&, T defaultValue)`.
     pub fn evaluate_feature_canonical(
         &self,
         feature: &dyn GeometryTileFeature,
@@ -87,7 +84,6 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
         }
     }
 
-    /// `evaluate(const Feature&, float zoom, const FeatureState&, T defaultValue)`.
     pub fn evaluate_feature_state(
         &self,
         feature: &dyn GeometryTileFeature,
@@ -121,9 +117,8 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
     }
 }
 
-/// `PossiblyEvaluatedPropertyValue<Faded<T>>`, the C++ partial
-/// specialization: `variant<Faded<T>, PropertyExpression<T>>` (the
-/// expression yields a `T`, not a `Faded<T>`), for the cross-faded
+/// A possibly-evaluated cross-faded value: a constant `Faded<T>`, or an
+/// expression (which yields a `T`, not a `Faded<T>`). For the cross-faded
 /// data-driven properties (fill-pattern, line-pattern, fill-extrusion-pattern).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PossiblyEvaluatedFadedPropertyValue<T> {
@@ -153,7 +148,6 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
         self.constant().unwrap_or_else(|| t.clone())
     }
 
-    /// `evaluate(const Feature&, float zoom, availableImages, canonical, T defaultValue)`.
     pub fn evaluate(
         &self,
         feature: &dyn GeometryTileFeature,
@@ -207,16 +201,15 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
     }
 }
 
-/// `Interpolator<PossiblyEvaluatedPropertyValue<Faded<T>>>`: both overloads
-/// return `a` (constant `Faded` values are `Uninterpolated`, and a non-constant
-/// pair returns `a` as for every possibly-evaluated value).
+/// Returns `self` (constant `Faded` values aren't interpolated, and a
+/// non-constant pair returns the first value as for every possibly-evaluated
+/// value).
 impl<T: Clone> Interpolate for PossiblyEvaluatedFadedPropertyValue<T> {
     fn interpolate(&self, _to: &Self, _t: f64) -> Self {
         self.clone()
     }
 }
 
-/// `Interpolator<PossiblyEvaluatedPropertyValue<T>>` (both overloads).
 impl<T: Clone + Interpolate> Interpolate for PossiblyEvaluatedPropertyValue<T> {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         match (self, to) {

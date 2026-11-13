@@ -1,5 +1,3 @@
-// Ports src/mln/style/parser.hpp + src/mln/style/parser.cpp.
-//
 // C++ parses with rapidjson; the port parses with serde_json (with
 // `preserve_order`, so members iterate in document order as in rapidjson).
 // Deviation: the message of a JSON syntax error is serde_json's, not
@@ -31,7 +29,6 @@ pub type StyleParseResult = Result<(), mln_util::Error>;
 pub struct Parser {
     pub sprites: Vec<Sprite>,
     pub glyph_url: String,
-    /// `std::shared_ptr<FontFaces> fontFaces` (symbols: `MLN_TEXT_SHAPING_HARFBUZZ`).
     pub font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
     pub sources: Vec<Box<dyn Source>>,
     pub layers: Vec<Box<dyn Layer>>,
@@ -388,7 +385,6 @@ struct LayerEntry<'a> {
     layer: Option<Box<dyn Layer>>,
 }
 
-/// `Parser::parseLayer(id, value, layer)`.
 fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack: &mut Vec<String>) {
     let Some(entry) = layers_map.get(id) else {
         return;
@@ -444,16 +440,15 @@ fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack
     }
 }
 
-/// `formatJSONParseError` (src/mln/util/rapidjson.cpp), with `serde_json`'s
-/// message instead of rapidjson's (see the file comment).
+/// The message of a JSON syntax error: `serde_json`'s, instead of rapidjson's
+/// (see the file comment).
 fn format_json_parse_error(error: &serde_json::Error) -> String {
     error.to_string()
 }
 
-/// `parseFontFile(faceName, fontFile, warnings)`: a font file of a font
-/// face, an object with a `url`, and with an optional `unicode-range` that
-/// limits the code points the font draws. Adds a warning for each range it
-/// can't read, and skips the range.
+/// Parses a font file of a font face: an object with a `url`, and with an
+/// optional `unicode-range` that limits the code points the font draws. Adds a
+/// warning for each range it can't read, and skips the range.
 fn parse_font_file(
     face_name: &str,
     font_file: &serde_json::Map<String, serde_json::Value>,
@@ -499,11 +494,10 @@ fn parse_font_file(
     font_face
 }
 
-/// `parseFallbackFontFaces(json)`: fallback font faces from `json`, an
-/// array of font files in the format of a font face in a style's
-/// `font-faces`, without a font name. It fails with
-/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't such
-/// an array.
+/// Parses fallback font faces from `json`, an array of font files in the format
+/// of a font face in a style's `font-faces`, without a font name. It fails with
+/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't such an
+/// array.
 pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFaces, mln_util::Error> {
     let document: serde_json::Value = serde_json::from_str(json)
         .map_err(|error| mln_util::Error::invalid_argument(format_json_parse_error(&error)))?;

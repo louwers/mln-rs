@@ -1,13 +1,8 @@
-// Ports src/mln/style/layers/heatmap_layer_impl.hpp +
-// src/mln/style/layers/heatmap_layer_impl.cpp. `staticTypeInfo()` is generated
-// in C++ (layer.cpp.ejs); here it is in heatmap_layer.rs.
-
 use serde::{Deserialize, Serialize};
 
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::heatmap_layer_properties::HeatmapPaintProperties;
 
-/// `HeatmapLayer::Impl`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
@@ -15,15 +10,13 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// `using Layer::Impl::Impl;` (`Impl(std::string layerID, std::string sourceID)`).
     #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         Impl { base: ImplBase::new(layer_id, source_id), paint: HeatmapPaintProperties::Transitionable::default() }
     }
 }
 
-/// `HeatmapLayer::Impl : public Layer::Impl`: the base members read as
-/// `impl_.id`, `impl_.visibility`, ... as in C++.
+/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
 impl std::ops::Deref for Impl {
     type Target = ImplBase;
     fn deref(&self) -> &ImplBase {

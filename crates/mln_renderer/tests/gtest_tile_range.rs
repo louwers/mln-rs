@@ -1,6 +1,3 @@
-// Ports test/util/tile_range.test.cpp (util::TileRange lives in
-// mln_tile_id::tile_range).
-
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::tile_range::TileRange;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -13,7 +10,6 @@ fn c(z: u8, x: u32, y: u32) -> CanonicalTileID {
     CanonicalTileID::new(z, x, y)
 }
 
-/// `LatLngBounds(const CanonicalTileID&)`.
 fn bounds_from(id: CanonicalTileID) -> LatLngBounds {
     LatLngBounds::from_canonical_tile(id.z, id.x, id.y)
 }

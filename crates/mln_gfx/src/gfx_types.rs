@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/gfx_types.hpp
-
 /// Graphic primitive type enumeration
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]

@@ -1,6 +1,3 @@
-// Ports include/mln/storage/resource_options.hpp and
-// src/mln/storage/resource_options.cpp.
-
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 
 /// Where file sources keep their cache and find their assets.

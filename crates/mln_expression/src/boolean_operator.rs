@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/boolean_operator.hpp and
-// src/mln/style/expression/boolean_operator.cpp.
-
 use mln_conversion::Convertible;
 
 use crate::expression::{

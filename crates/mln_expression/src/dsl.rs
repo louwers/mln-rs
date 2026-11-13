@@ -1,7 +1,3 @@
-// Ports include/mln/style/expression/dsl.hpp,
-// src/mln/style/expression/dsl_impl.hpp and
-// src/mln/style/expression/dsl.cpp.
-//
 // This convenience API does little to no expression validation or
 // type-checking, and is intended for use only by test and other non-production
 // code (and the legacy function conversion).
@@ -35,10 +31,9 @@ pub fn compound(op: &str, args: Vec<Box<dyn Expression>>) -> Box<dyn Expression>
     result.expect("dsl::compound")
 }
 
-/// `dsl::createExpression(const char*)`: parses JSON text.
+/// Parses an expression from JSON text.
 #[must_use]
 pub fn create_expression_from_str(expr: &str) -> Option<Box<dyn Expression>> {
-    // TODO(port): rapidjson `Parse<0>`; serde_json accepts the same JSON.
     let document: serde_json::Value = serde_json::from_str(expr).ok()?;
     let mut ctx = ParsingContext::new();
     ctx.parse_expression(&Convertible::from(&document), None)

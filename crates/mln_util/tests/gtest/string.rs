@@ -1,5 +1,3 @@
-// Ports test/util/string.test.cpp.
-
 use mln_util::string::{to_hex_u64, to_string_double};
 
 // gtest: ToString.FloatingPoint

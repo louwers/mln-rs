@@ -1,9 +1,6 @@
-// Ports include/mln/style/sprite.hpp + src/mln/style/sprite.cpp.
-//
 // Cut point (added by storage, see image.rs): `mln_style::sprite`
 // re-exports it.
 
-/// `style::Sprite`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Sprite {
     pub id: String,

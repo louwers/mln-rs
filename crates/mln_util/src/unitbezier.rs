@@ -1,5 +1,3 @@
-// Ports include/mln/util/unitbezier.hpp, which comes from WebKit:
-//
 // Copyright (C) 2008 Apple Inc. All Rights Reserved.
 //
 // Redistribution and use in source and binary forms, with or without

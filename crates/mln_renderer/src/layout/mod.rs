@@ -1,5 +1,5 @@
-//! Ports `src/mln/layout` (the layouts of the renderer's layer types).
-//!
+//! The layouts of the renderer's layer types, which turn a tile's features
+//! into buckets.
 
 pub mod circle_layout;
 pub mod clip_lines;

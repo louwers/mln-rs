@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/render_tree.hpp and the RenderTreeImpl / LayerRenderItem
-// parts of src/mln/renderer/render_orchestrator.cpp.
-//
 // C++ `RenderTree` is an abstract class with one implementation
 // (`RenderTreeImpl` in render_orchestrator.cpp); the port has one struct.
 // `std::set<LayerRenderItem>` (ordered and deduplicated by `index`) is a
@@ -16,7 +13,7 @@ use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::RenderLayerPtr;
 use crate::render_pass::RenderPass; // layers: debug
 
-/// `RenderItem::DebugType` (layers: debug).
+/// The kinds of debug drawables (layers: debug).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DebugType {
     TextOutline,
@@ -24,29 +21,27 @@ pub enum DebugType {
     Border,
 }
 
-/// `RenderItem::DebugLayerGroupMap` (layers: debug).
+/// The debug layer groups, by debug type (layers: debug).
 pub type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
 
-/// `RenderItem`: the render items of sources (`sourceRenderItems`). The
-/// layer render items are the concrete `LayerRenderItem`.
+/// The render item of a source. The layer render items are the concrete
+/// `LayerRenderItem`.
 pub trait RenderItem {
     fn upload(&self, upload_pass: &dyn UploadPass);
     fn render(&self, _parameters: &mut PaintParameters<'_>) {}
     fn has_render_pass(&self, pass: RenderPass) -> bool;
     fn get_name(&self) -> &str;
-    /// `updateDebugDrawables(DebugLayerGroupMap&, PaintParameters&)`; a
-    /// no-op for the items that have none (`LayerRenderItem`, the image
-    /// source). The orchestrator gives each debug layer group its tweaker
-    /// (layers: debug).
+    /// Updates the item's debug drawables; a no-op for the items that have
+    /// none (`LayerRenderItem`, the image source). The orchestrator gives
+    /// each debug layer group its tweaker (layers: debug).
     fn update_debug_drawables(&self, _debug_layer_groups: &mut DebugLayerGroupMap, _parameters: &PaintParameters<'_>) {}
 }
 
-/// `LayerRenderItem`.
 #[derive(Clone)]
 pub struct LayerRenderItem {
     pub layer: RenderLayerPtr,
-    /// `RenderSource* source`: the id of the orchestrator's render source
-    /// (C++ points at it), `None` for layers without a source.
+    /// The id of the orchestrator's render source, `None` for layers without
+    /// a source.
     pub source: Option<String>,
     pub index: u32,
 }
@@ -62,7 +57,6 @@ impl LayerRenderItem {
     }
 }
 
-/// `RenderTreeParameters`.
 pub struct RenderTreeParameters {
     pub transform_params: TransformParameters,
     pub map_mode: MapMode,
@@ -74,7 +68,7 @@ pub struct RenderTreeParameters {
     pub sky: Option<crate::render_sky::EvaluatedSky>,
     pub has_3d: bool,
     pub opaque_pass_cut_off: u32,
-    /// C++ default-constructs `Color` (transparent black).
+    /// Transparent black unless the style has a solid background.
     pub background_color: Color,
     pub symbol_fade_change: f32,
     pub needs_repaint: bool,
@@ -107,7 +101,6 @@ impl RenderTreeParameters {
     }
 }
 
-/// `RenderTree` / `RenderTreeImpl`.
 pub struct RenderTree {
     parameters: Box<RenderTreeParameters>,
     pub(crate) layer_render_items: VecMap<u32, LayerRenderItem>,
@@ -153,9 +146,8 @@ impl RenderTree {
         self.update_symbol_opacities = update_symbol_opacities;
     }
 
-    /// `prepare()`: updates the symbol buckets of the layers that need
-    /// placement, then the positions of the layers that draw buckets other
-    /// layers place.
+    /// Updates the symbol buckets of the layers that need placement, then the
+    /// positions of the layers that draw buckets other layers place.
     pub fn prepare(&mut self) {
         let Some(placement) = &self.placement else {
             return;
@@ -177,7 +169,6 @@ impl RenderTree {
         &self.layer_render_items
     }
 
-    /// `getSourceRenderItems()`.
     #[must_use]
     pub fn get_source_render_items(&self) -> &[Box<dyn RenderItem>] {
         &self.source_render_items
@@ -188,7 +179,7 @@ impl RenderTree {
         &self.parameters
     }
 
-    /// `getElapsedTime()`, in seconds.
+    /// The time since the render tree was created, in seconds.
     #[must_use]
     pub fn get_elapsed_time(&self) -> f64 {
         self.start_time.elapsed().as_secs_f64()

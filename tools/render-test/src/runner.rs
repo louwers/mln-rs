@@ -1,6 +1,3 @@
-// Ports render-test/runner.{hpp,cpp}, and `TestContext` / `TestOperation`
-// from render-test/metadata.hpp.
-//
 // C++ `TestRunner::Impl` holds the `HeadlessFrontend`,
 // `FileSource` and `Map` of one map configuration, and the operations reach
 // them through `TestContext::getFrontend()` / `getMap()`. Here that pair is
@@ -33,11 +30,11 @@ use crate::parser::test_operation_names::{GFX_PROBE_OP, MEMORY_PROBE_OP, NETWORK
 use crate::parser::{
     TileLodMode, parse_test_operations, read_expected_image_entries, read_expected_json_entries,
     read_expected_metric_entries, read_expected_metrics, read_json, to_json_features, to_json_value,
+    unsupported_operation_entry,
 };
 use crate::test_runner_common::{deep_equal, tokenize};
 
-/// `mln::CameraOptions` (include/mln/map/camera.hpp): the fields the
-/// operations set.
+/// The camera fields the operations set.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CameraOptions {
     pub center: Option<LatLng>,
@@ -50,45 +47,42 @@ pub struct CameraOptions {
 
 /// How a `TestRunnerImpl` call can fail, standing in for the C++ return
 /// values (`nullptr` layer, `optional<Error>` conversions, failed resource
-/// requests) and for API the port does not have yet.
+/// requests) and for calls an implementation doesn't support.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MapError {
-    /// `style.getLayer(id)` returned `nullptr`.
+    /// The style has no layer with the id.
     LayerNotFound,
     /// A style conversion failed; the message is `conversion::Error::message`.
     Conversion(String),
     /// A resource request returned no data.
     LoadFailed,
-    /// TODO(port): the named C++ API is not ported yet. The test errors.
-    NotPorted(String),
+    /// The implementation doesn't support the named call. The test errors.
+    Unsupported(String),
     /// A C++ exception the runner does not catch (the C++ runner would
     /// terminate); the port errors the test with its message.
     Exception(String),
 }
 
-fn not_ported<T>(what: &str) -> Result<T, MapError> {
-    Err(MapError::NotPorted(what.to_string()))
+fn unsupported<T>(what: &str) -> Result<T, MapError> {
+    Err(MapError::Unsupported(what.to_string()))
 }
 
-/// `mln::ResourceOptions` as the runner fills it.
+/// The resource options the runner sets.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResourceOptions {
     pub cache_path: String,
 }
 
-/// `TestRunner::Impl` (frontend, file source and map for one
-/// `mapMode`/`pixelRatio`/`crossSourceCollisions` key), seen through the
-/// calls the runner and the operations make. The provided methods return
-/// `MapError::NotPorted`; implementations override what they support.
+/// A frontend, file source and map for one map mode, pixel ratio and
+/// cross-source collision setting, seen through the calls the runner and the
+/// operations make. The provided methods return `MapError::Unsupported`;
+/// implementations override what they support.
 pub trait TestRunnerImpl {
-    /// `resetContext(metadata, ctx)`: `getRenderer()->clearData()`,
-    /// `frontend.setSize(metadata.size)`, `map.setSize(metadata.size)`,
-    /// `map.setProjectionMode(ProjectionMode().withAxonometric(..)
-    /// .withXSkew(..).withYSkew(..))`, `map.setDebug(metadata.debug)`,
-    /// `map.getStyle().loadJSON(metadata.document_json)`.
+    /// Prepares the map for a test: clears the renderer's data, sets the
+    /// frontend's and the map's size, the map's projection mode (axonometric,
+    /// x and y skew) and debug options from `metadata`, and loads its style.
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError>;
 
-    /// `map.jumpTo(map.getStyle().getDefaultCamera())`.
     fn jump_to_default_camera(&mut self) -> Result<(), MapError>;
 
     /// `frontend.render(map).image`; `Err` carries the exception message.
@@ -98,68 +92,60 @@ pub trait TestRunnerImpl {
     /// timed out (watchdog.rs): which tiles never loaded or completed.
     fn dump_debug_logs(&self) {}
 
-    /// `map.jumpTo(camera)`.
     fn jump_to(&mut self, _camera: &CameraOptions) -> Result<(), MapError> {
-        not_ported("Map::jumpTo")
+        unsupported("Map::jumpTo")
     }
-    /// `map.getStyle().loadJSON(json)`.
     fn load_style_json(&mut self, _json: &str) -> Result<(), MapError> {
-        not_ported("Style::loadJSON (setStyle operation)")
+        unsupported("Style::loadJSON (setStyle operation)")
     }
-    /// `map.getStyle().loadURL(url)`.
     fn load_style_url(&mut self, _url: &str) -> Result<(), MapError> {
-        not_ported("Style::loadURL")
+        unsupported("Style::loadURL")
     }
     /// Request `"mapbox://render-tests/" + image_path` from the file source,
     /// `decodeImage` it and `style.addImage(std::make_unique<style::Image>(
     /// name, image, pixel_ratio, sdf))`. `LoadFailed` when the request
     /// returned no data.
     fn add_image(&mut self, _name: &str, _image_path: &str, _pixel_ratio: f32, _sdf: bool) -> Result<(), MapError> {
-        not_ported("Style::addImage + render-test file source")
+        unsupported("Style::addImage + render-test file source")
     }
-    /// `style.removeImage(name)`.
     fn remove_image(&mut self, _name: &str) -> Result<(), MapError> {
-        not_ported("Style::removeImage")
+        unsupported("Style::removeImage")
     }
-    /// `convert<Filter>(filter)` (`Conversion` on failure, checked first),
-    /// then `style.getLayer(layer)` (`LayerNotFound`), then `setFilter`.
+    /// Converts `filter` (`Conversion` on failure, checked first) and sets it
+    /// on `layer` (`LayerNotFound` if there is none).
     fn set_layer_filter(&mut self, _layer: &str, _filter: &serde_json::Value) -> Result<(), MapError> {
-        not_ported("Layer::setFilter")
+        unsupported("Layer::setFilter")
     }
-    /// `layer->setMinZoom(min)`, `layer->setMaxZoom(max)`.
+    /// Sets the zoom range of `layer`.
     fn set_layer_zoom_range(&mut self, _layer: &str, _min: f32, _max: f32) -> Result<(), MapError> {
-        not_ported("Layer::setMinZoom/setMaxZoom")
+        unsupported("Layer::setMinZoom/setMaxZoom")
     }
-    /// `convertJSON<std::unique_ptr<Layer>>(json)` then `style.addLayer`.
+    /// Parses a layer from `json` and adds it to the style.
     fn add_layer(&mut self, _json: &str) -> Result<(), MapError> {
-        not_ported("Style::addLayer")
+        unsupported("Style::addLayer")
     }
-    /// `bool(style.removeLayer(id))`.
     fn remove_layer(&mut self, _id: &str) -> Result<bool, MapError> {
-        not_ported("Style::removeLayer")
+        unsupported("Style::removeLayer")
     }
-    /// `convertJSON<std::unique_ptr<Source>>(json, error, id)` then
-    /// `style.addSource`.
+    /// Parses a source with id `id` from `json` and adds it to the style.
     fn add_source(&mut self, _id: &str, _json: &str) -> Result<(), MapError> {
-        not_ported("Style::addSource")
+        unsupported("Style::addSource")
     }
     /// conformance: `convert<style::Light>(json)` then `style.setLight`
     /// (a conversion error is `MapError::Conversion`).
     fn set_light(&mut self, _json: &str) -> Result<(), MapError> {
-        not_ported("Style::setLight")
+        unsupported("Style::setLight")
     }
-    /// `bool(style.removeSource(id))`.
     fn remove_source(&mut self, _id: &str) -> Result<bool, MapError> {
-        not_ported("Style::removeSource")
+        unsupported("Style::removeSource")
     }
-    /// `style.getLayer(layer)` (`LayerNotFound`), then
-    /// `layer->setProperty(name, value)` (its error is ignored by the runner).
+    /// Sets the property `name` of `layer` (`LayerNotFound` if there is
+    /// none). The runner ignores an error from setting the property.
     fn set_layer_property(&mut self, _layer: &str, _name: &str, _value: &serde_json::Value) -> Result<(), MapError> {
-        not_ported("Layer::setProperty")
+        unsupported("Layer::setProperty")
     }
-    /// `style.setGlobalStateProperty(name, value)`.
     fn set_global_state_property(&mut self, _name: &str, _value: &Value) -> Result<(), MapError> {
-        not_ported("Style::setGlobalStateProperty")
+        unsupported("Style::setGlobalStateProperty")
     }
     /// `frontend.render(map)` (an exception makes the operation return
     /// false), then `frontend.getRenderer()->setFeatureState(sourceID,
@@ -171,7 +157,7 @@ pub trait TestRunnerImpl {
         _feature_id: &str,
         _state: &feature::PropertyMap,
     ) -> Result<bool, MapError> {
-        not_ported("setFeatureState operation (Renderer feature state)")
+        unsupported("setFeatureState operation (Renderer feature state)")
     }
     /// `frontend.render(map)`, then `getRenderer()->getFeatureState(..)`.
     fn get_feature_state(
@@ -180,7 +166,7 @@ pub trait TestRunnerImpl {
         _source_layer: Option<&str>,
         _feature_id: &str,
     ) -> Result<bool, MapError> {
-        not_ported("getFeatureState operation (Renderer feature state)")
+        unsupported("getFeatureState operation (Renderer feature state)")
     }
     /// `frontend.render(map)`, then `getRenderer()->removeFeatureState(..)`.
     fn remove_feature_state(
@@ -190,54 +176,50 @@ pub trait TestRunnerImpl {
         _feature_id: Option<&str>,
         _state_key: Option<&str>,
     ) -> Result<bool, MapError> {
-        not_ported("removeFeatureState operation (Renderer feature state)")
+        unsupported("removeFeatureState operation (Renderer feature state)")
     }
     /// The `sleep` operation: run the run loop until a `util::Timer` of
     /// `duration` fires.
     fn sleep(&mut self, _duration: Duration) -> Result<(), MapError> {
-        not_ported("sleep operation (util::Timer + RunLoop::runOnce)")
+        unsupported("sleep operation (util::Timer + RunLoop::runOnce)")
     }
     fn set_tile_lod_min_radius(&mut self, _value: f64) -> Result<(), MapError> {
-        not_ported("Map::setTileLodMinRadius")
+        unsupported("Map::setTileLodMinRadius")
     }
     fn set_tile_lod_scale(&mut self, _value: f64) -> Result<(), MapError> {
-        not_ported("Map::setTileLodScale")
+        unsupported("Map::setTileLodScale")
     }
     fn set_tile_lod_pitch_threshold(&mut self, _value: f64) -> Result<(), MapError> {
-        not_ported("Map::setTileLodPitchThreshold")
+        unsupported("Map::setTileLodPitchThreshold")
     }
     fn set_tile_lod_zoom_shift(&mut self, _value: f64) -> Result<(), MapError> {
-        not_ported("Map::setTileLodZoomShift")
+        unsupported("Map::setTileLodZoomShift")
     }
     fn set_tile_lod_mode(&mut self, _mode: TileLodMode) -> Result<(), MapError> {
-        not_ported("Map::setTileLodMode")
+        unsupported("Map::setTileLodMode")
     }
-    /// `map.getStyle().getDefaultCamera()` (tile mode).
+    /// The style's default camera, for tile mode.
     fn default_camera(&mut self) -> Result<CameraOptions, MapError> {
-        not_ported("Style::getDefaultCamera")
+        unsupported("Style::getDefaultCamera")
     }
-    /// `util::tileCover(map.latLngBoundsForCamera(camera), zoom)`.
     fn tile_cover_for_camera(&mut self, _camera: &CameraOptions, _zoom: u8) -> Result<Vec<TileId>, MapError> {
-        not_ported("Map::latLngBoundsForCamera + util::tileCover")
+        unsupported("Map::latLngBoundsForCamera + util::tileCover")
     }
-    /// `frontend.getRenderer()->collectPlacedSymbolData(enable)`.
     fn collect_placed_symbol_data(&mut self, _enable: bool) {}
-    /// `frontend.getRenderer()->getPlacedSymbolsData()`.
     fn get_placed_symbols_data(&mut self) -> Vec<PlacedSymbol> {
         Vec::new()
     }
-    /// `frontend.getRenderer()->queryRenderedFeatures(geometry, options)`
-    /// for a query test's point or box.
+    /// Queries the rendered features at a query test's point or box.
     fn query_rendered_features(
         &mut self,
         _geometry: &QueryGeometry,
         _options: &RenderedQueryOptions,
     ) -> Result<Vec<Feature>, MapError> {
-        not_ported("Renderer::queryRenderedFeatures")
+        unsupported("Renderer::queryRenderedFeatures")
     }
 }
 
-/// `mln::PlacedSymbolData` (renderer.hpp), boxes as minX, minY, maxX, maxY.
+/// A placed symbol's data, boxes as minX, minY, maxX, maxY.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedSymbol {
     /// Contents of the label (UTF-16)
@@ -278,13 +260,12 @@ pub type ImplFactory =
 /// Port-only: how the runner's options that C++ does not have set up a map.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ImplOptions {
-    /// `--tileWorkerCodec=<n>`: the map's tile workers are in n worker
-    /// instances, reached through the worker codec (0: on the map's thread
-    /// pool, as in C++).
+    /// Set by `--tileWorkerCodec=<n>`: the map's tile workers are in n
+    /// worker instances, reached through the worker codec (0: on the map's
+    /// thread pool, as in C++).
     pub tile_worker_codec: usize,
 }
 
-/// `TestContext` (metadata.hpp).
 pub struct TestContext<'a> {
     metadata: &'a mut TestMetadata,
     runner_impl: Option<&'a mut dyn TestRunnerImpl>,
@@ -313,7 +294,8 @@ impl<'a> TestContext<'a> {
         self.metadata
     }
 
-    /// `getFrontend()` / `getMap()` (C++ asserts `runnerImpl`).
+    /// The map of the test. Panics if the context has none (C++ asserts
+    /// `runnerImpl`).
     pub fn get_map(&mut self) -> &mut dyn TestRunnerImpl {
         &mut **self.runner_impl.as_mut().expect("runnerImpl")
     }
@@ -327,10 +309,10 @@ impl<'a> TestContext<'a> {
         false
     }
 
-    /// For operations the port cannot execute yet: logs, records the
+    /// For operations the runner doesn't support: logs, records the
     /// message and errors the test, so it can never pass by skipping work.
-    pub fn fail_not_ported(&mut self, what: &str) -> bool {
-        let message = format!("TODO(port): {what}");
+    pub fn fail_unsupported(&mut self, what: &str) -> bool {
+        let message = format!("Unsupported: {what}");
         log::warning(Event::General, &format!("{}: {message}", self.metadata.id));
         self.metadata.error_message = message;
         self.metadata.render_errored += 1;
@@ -338,11 +320,10 @@ impl<'a> TestContext<'a> {
     }
 }
 
-/// `TestOperation`: `std::function<bool(TestContext&)>`.
+/// An operation of a test; returns `false` to stop the test.
 pub type TestOperation = Box<dyn Fn(&mut TestContext<'_>) -> bool>;
 pub type TestOperations = Vec<TestOperation>;
 
-/// `TestRunner::UpdateResults`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum UpdateResults {
     No,
@@ -352,7 +333,6 @@ pub enum UpdateResults {
     Rebaseline,
 }
 
-/// `TestRunner`.
 pub struct TestRunner {
     maps: HashMap<String, Box<dyn TestRunnerImpl>>,
     manifest: Manifest,
@@ -418,8 +398,8 @@ impl TestRunner {
         self.output_path.join(&metadata.id).join(file)
     }
 
-    /// `mln::util::write_file`, into the output directory. C++ throws on a
-    /// failed write (uncaught); the port logs it.
+    /// Writes `data` to `file` in the test's output directory. Logs a failed
+    /// write, where C++ throws an uncaught exception.
     fn write_output(&self, metadata: &TestMetadata, file: &str, data: &[u8]) {
         let path = self.test_output_path(metadata, file);
         let result = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, data));
@@ -428,7 +408,6 @@ impl TestRunner {
         }
     }
 
-    /// `checkQueryTestResults`.
     fn check_query_test_results(
         &self,
         actual_image: &PremultipliedImage,
@@ -503,7 +482,6 @@ impl TestRunner {
         }
     }
 
-    /// `checkRenderTestResults`.
     pub fn check_render_test_results(&self, actual_image: &PremultipliedImage, metadata: &mut TestMetadata) {
         let expectations = metadata.paths.expectations.clone();
 
@@ -607,7 +585,6 @@ impl TestRunner {
         }
     }
 
-    /// `checkProbingResults`.
     pub fn check_probing_results(&self, result_metadata: &mut TestMetadata) {
         fn append(metadata: &mut TestMetadata, s: &str) {
             if metadata.error_message.is_empty() {
@@ -620,11 +597,11 @@ impl TestRunner {
         if result_metadata.metrics.is_empty() {
             return;
         }
-        // TODO(port): writeMetrics (serializeMetrics) for the metrics and
-        // rebaseline update modes; the port does not write baselines.
+        // The runner doesn't write metrics: the metrics and rebaseline update
+        // modes error the test.
         let write_metrics = |metadata: &mut TestMetadata, message: &str| {
             let _ = message;
-            let msg = "TODO(port): writing metrics.json is not supported";
+            let msg = "Unsupported: writing metrics.json";
             metadata.error_message += msg;
             log::warning(Event::General, msg);
         };
@@ -907,7 +884,6 @@ impl TestRunner {
         }
     }
 
-    /// `appendLabelCutOffResults`.
     pub fn append_label_cut_off_results(
         result_metadata: &mut TestMetadata,
         cut_off_labels_report: &str,
@@ -924,10 +900,7 @@ impl TestRunner {
         }
     }
 
-    /// `TestRunner::run(metadata)`.
     pub fn run(&mut self, metadata: &mut TestMetadata) {
-        // TODO(port): AllocationIndex::setActive(false); AllocationIndex::reset();
-        // (no allocation index; its probes are TODO(port) operations).
         ProxyFileSource::set_tracking_active(false);
 
         let mut ctx = TestContext::new(metadata);
@@ -960,8 +933,7 @@ impl TestRunner {
         } else {
             if !self.maps.contains_key(&key) {
                 let Some(factory) = &self.factory else {
-                    ctx.metadata.error_message =
-                        "TODO(port): no map implementation linked into this runner".to_string();
+                    ctx.metadata.error_message = "no map implementation linked into this runner".to_string();
                     ctx.metadata.render_errored += 1;
                     return;
                 };
@@ -1005,7 +977,6 @@ impl TestRunner {
         };
 
         if !ctx.metadata.ignored_test {
-            // TODO(port): ctx.activeGfxProbe = GfxProbe(result.stats, ctx.activeGfxProbe);
             for operation in get_after_operations(&self.manifest) {
                 if !operation(&mut ctx) {
                     return;
@@ -1036,8 +1007,8 @@ impl TestRunner {
             let queried = catch_unwind(AssertUnwindSafe(|| ctx.get_map().query_rendered_features(&geometry, &options)));
             match queried {
                 Ok(Ok(result)) => features = result,
-                Ok(Err(MapError::NotPorted(what))) => {
-                    ctx.fail_not_ported(&what);
+                Ok(Err(MapError::Unsupported(what))) => {
+                    ctx.fail_unsupported(&what);
                 }
                 Ok(Err(error)) => {
                     ctx.metadata.error_message = format!("{error:?}");
@@ -1087,7 +1058,6 @@ fn render_with_map(
     run_test(ctx)
 }
 
-/// `getTileCenterCoordinates(tileId)`.
 fn get_tile_center_coordinates(tile_id: &TileId) -> LatLng {
     let scale = f64::from(1u32 << tile_id.z);
     let tile_center = Point::new(
@@ -1100,12 +1070,10 @@ fn get_tile_center_coordinates(tile_id: &TileId) -> LatLng {
         .expect("tile center")
 }
 
-/// `getTileScreenPixelSize(pixelRatio)`.
 fn get_tile_screen_pixel_size(pixel_ratio: f32) -> u32 {
     (mln_util::constants::TILE_SIZE_D * f64::from(pixel_ratio)) as u32
 }
 
-/// `getImageTileOffset(dims, dim, pixelRatio)`.
 fn get_image_tile_offset(dims: &std::collections::BTreeSet<u32>, dim: u32, pixel_ratio: f32) -> u32 {
     if let Some(index) = dims.iter().position(|&d| d == dim) {
         index as u32 * get_tile_screen_pixel_size(pixel_ratio)
@@ -1115,12 +1083,10 @@ fn get_image_tile_offset(dims: &std::collections::BTreeSet<u32>, dim: u32, pixel
     }
 }
 
-/// `util::toString(UnwrappedTileID)`.
 fn tile_id_string(tile_id: &TileId) -> String {
     format!("{}/{}/{}{}{}", tile_id.z, tile_id.x, tile_id.y, if tile_id.wrap >= 0 { "+" } else { "" }, tile_id.wrap)
 }
 
-/// `SymbolLocationAndStatus`.
 struct SymbolLocationAndStatus {
     tile_id: TileId,
     location: [f32; 4],
@@ -1273,8 +1239,8 @@ fn render_tiles(
 
 fn map_error_image(ctx: &mut TestContext<'_>, error: MapError) -> PremultipliedImage {
     match error {
-        MapError::NotPorted(what) => {
-            ctx.fail_not_ported(&what);
+        MapError::Unsupported(what) => {
+            ctx.fail_unsupported(&what);
         }
         MapError::Exception(what) => {
             ctx.fail_exception(&what);
@@ -1287,7 +1253,6 @@ fn map_error_image(ctx: &mut TestContext<'_>, error: MapError) -> PremultipliedI
     PremultipliedImage::default()
 }
 
-/// `TestRunner::runTest(metadata, ctx)`.
 fn run_test(ctx: &mut TestContext<'_>) -> PremultipliedImage {
     let mut result = PremultipliedImage::default();
     for operation in parse_test_operations(ctx.get_metadata()) {
@@ -1379,8 +1344,8 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-/// `unsupportedOperation(operation)`: C++ sets the message and stops the
-/// test without marking it errored (so it passes); kept as is.
+/// An operation that sets an "Unsupported operation" message and stops the
+/// test without marking it errored, so it passes, as in C++.
 fn unsupported_operation(operation: String) -> TestOperation {
     Box::new(move |ctx: &mut TestContext<'_>| {
         ctx.get_metadata().error_message = format!("Unsupported operation: {operation}");
@@ -1388,7 +1353,6 @@ fn unsupported_operation(operation: String) -> TestOperation {
     })
 }
 
-/// `getBeforeOperations(manifest)`.
 fn get_before_operations(manifest: &Manifest) -> TestOperations {
     let mut result: TestOperations = Vec::new();
     for probe in manifest.get_probes() {
@@ -1404,10 +1368,7 @@ fn get_before_operations(manifest: &Manifest) -> TestOperations {
             continue;
         }
         if probe == MEMORY_PROBE_OP || probe == GFX_PROBE_OP {
-            // TODO(port): the probeMemory (AllocationIndex) and probeGFX
-            // (gfx::RenderingStats) probes.
-            let what = format!("manifest probe {probe}");
-            result.push(Box::new(move |ctx: &mut TestContext<'_>| ctx.fail_not_ported(&what)));
+            result.push(unsupported_operation_entry(probe));
             continue;
         }
         result.push(unsupported_operation(probe.clone()));
@@ -1415,7 +1376,6 @@ fn get_before_operations(manifest: &Manifest) -> TestOperations {
     result
 }
 
-/// `getAfterOperations(manifest)`.
 fn get_after_operations(manifest: &Manifest) -> TestOperations {
     let mut result: TestOperations = Vec::new();
     for probe in manifest.get_probes() {
@@ -1430,9 +1390,7 @@ fn get_after_operations(manifest: &Manifest) -> TestOperations {
             continue;
         }
         if probe == MEMORY_PROBE_OP || probe == GFX_PROBE_OP {
-            // TODO(port): see get_before_operations.
-            let what = format!("manifest probe {probe}");
-            result.push(Box::new(move |ctx: &mut TestContext<'_>| ctx.fail_not_ported(&what)));
+            result.push(unsupported_operation_entry(probe));
             continue;
         }
         result.push(unsupported_operation(probe.clone()));
@@ -1440,8 +1398,7 @@ fn get_after_operations(manifest: &Manifest) -> TestOperations {
     result
 }
 
-/// `simpleDiff(result, expected)`: a line diff of the two values' JSON for
-/// the report.
+/// A line diff of the two values' JSON for the report.
 #[must_use]
 pub fn simple_diff(result: &Value, expected: &Value) -> String {
     let result_tokens = tokenize(&to_json_value(result));
@@ -1478,7 +1435,8 @@ pub fn simple_diff(result: &Value, expected: &Value) -> String {
     diff
 }
 
-/// `std::ostream << float` with the default format (`%g`, precision 6).
+/// `v` as `std::ostream << float` writes it with the default format (`%g`,
+/// precision 6).
 #[must_use]
 pub fn ostream_float(v: f64) -> String {
     if v.is_nan() {

@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/render_symbol_layer.hpp and
-// src/mln/renderer/layers/render_symbol_layer.cpp (drawable path,
-// MLN_USE_SYMBOL_INSTANCING off), plus gfx/symbol_drawable_data.hpp.
-//
 // C++ drawables share the bucket's vertex vectors and see placement's
 // changes through them (`updateModified`). Here a drawable gets copies of
 // the vectors; when placement, sorting or feature state change the bucket
@@ -85,7 +81,6 @@ const SYMBOL_SDF_SHADER_NAME: &str = "SymbolSDFShader";
 const SYMBOL_TEXT_AND_ICON_SHADER_NAME: &str = "SymbolTextAndIconShader";
 const POS_OFFSET_ATTRIB_NAME: &str = "a_pos_offset";
 
-/// `SymbolType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SymbolType {
     Text,
@@ -93,7 +88,6 @@ pub enum SymbolType {
     IconSDF,
 }
 
-/// `style::SymbolPropertyValues`.
 #[derive(Clone, Copy, Debug)]
 pub struct SymbolPropertyValues {
     pub pitch_alignment: AlignmentType,
@@ -105,7 +99,6 @@ pub struct SymbolPropertyValues {
     pub has_fill: bool,
 }
 
-/// `gfx::SymbolDrawableData`.
 #[derive(Clone, Copy, Debug)]
 pub struct SymbolDrawableData {
     pub is_halo: bool,
@@ -141,7 +134,6 @@ impl TileVersions {
     }
 }
 
-/// `iconPropertyValues(evaluated, layout)`.
 #[must_use]
 pub fn icon_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -159,7 +151,6 @@ pub fn icon_property_values(
     }
 }
 
-/// `textPropertyValues(evaluated, layout)`.
 #[must_use]
 pub fn text_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -177,7 +168,7 @@ pub fn text_property_values(
     }
 }
 
-/// `getScreenMatrix(translation)`: the tile matrix of screen-space symbols.
+/// The tile matrix of screen-space symbols.
 pub(crate) fn get_screen_matrix(translation: [f32; 2]) -> Mat4 {
     let mut m: Mat4 = [0.0; 16];
     matrix::ortho(&mut m, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
@@ -188,9 +179,8 @@ pub(crate) fn get_screen_matrix(translation: [f32; 2]) -> Mat4 {
     m
 }
 
-/// `RenderSymbolLayer::captureRenderedFeatures`: bounds each visible
-/// placed symbol by projecting its glyph and icon quads as the symbol
-/// shaders do.
+/// Bounds each visible placed symbol by projecting its glyph and icon quads
+/// as the symbol shaders do.
 ///
 /// `is_screen_space` and `is_offset` are the layer's `symbol-screen-space`
 /// and whether it sets `icon-offset`.
@@ -494,8 +484,6 @@ fn capture_rendered_features(
     }
 }
 
-/// `updateTileAttributes(buffer, isText, paintProps, evaluated, attribs,
-/// propertiesAsUniforms)`.
 #[allow(clippy::too_many_arguments)]
 fn update_tile_attributes(
     geometry: Option<&BucketGeometry>,
@@ -671,8 +659,8 @@ fn set_layout_attributes(
     }
 }
 
-/// `updateTileAttributes`: the dynamic layout vertices (placement), the
-/// layer's own when it has them.
+/// Sets the dynamic layout vertices, which placement updates: the layer's
+/// own when it has them.
 fn set_projected_pos_attribute(buffer: &Buffer, layer_id: &str, attribs: &mut VertexAttributeArray) {
     if let Some(attr) = attribs.set(ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
         attr.set_shared_raw_data(
@@ -685,7 +673,7 @@ fn set_projected_pos_attribute(buffer: &Buffer, layer_id: &str, attribs: &mut Ve
     }
 }
 
-/// `updateTileAttributes`: the opacity vertices (placement).
+/// Sets the opacity vertices, which placement updates.
 fn set_fade_opacity_attribute(buffer: &Buffer, attribs: &mut VertexAttributeArray) {
     if let Some(attr) = attribs.set(ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
         attr.set_shared_raw_data(
@@ -711,10 +699,9 @@ impl DrawableRefresh {
     const ALL: DrawableRefresh = DrawableRefresh { opacity: true, dynamic: true, sort: true, binders: true };
 }
 
-/// `updateTileDrawable(drawable, bucket, paintProps, evaluated)`: replaces
-/// the attributes (and indices) of an existing drawable that placement,
-/// sorting or feature state changed. Halo and fill drawables share their
-/// attribute array, which is refreshed once (`refreshed_attributes`).
+/// Replaces the attributes (and indices) of an existing drawable that
+/// placement, sorting or feature state changed. Halo and fill drawables share
+/// their attribute array, which is refreshed once (`refreshed_attributes`).
 fn update_tile_drawable(
     drawable: &mut dyn mln_gfx::Drawable,
     geometry: Option<&BucketGeometry>,
@@ -816,7 +803,6 @@ struct SegmentGroup {
 }
 
 impl SegmentGroup {
-    /// `operator<(RenderableSegment, RenderableSegment)`.
     fn less(lhs: &SegmentGroup, rhs: &SegmentGroup) -> bool {
         // Sort renderable segments by a sort key.
         if lhs.sort_key < rhs.sort_key {
@@ -884,8 +870,7 @@ impl RenderSymbolLayer {
         }
     }
 
-    /// `removeTile(renderPass, tileID)`: the symbol and the collision
-    /// drawables of the tile.
+    /// Removes the tile's symbol and collision drawables.
     fn remove_tile_all(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) {
         self.remove_tile(render_pass, tile_id);
         if let Some(group) = &self.collision_tile_layer_group {
@@ -896,7 +881,6 @@ impl RenderSymbolLayer {
         }
     }
 
-    /// `getCollisionTileLayerGroup()`.
     fn get_collision_tile_layer_group(
         &mut self,
         context: &dyn Context,
@@ -1015,7 +999,6 @@ impl RenderSymbolLayer {
     }
 }
 
-/// `getCollisionVertexAttributes(context, buffer)`.
 fn get_collision_vertex_attributes(
     context: &dyn Context,
     buffer: &CollisionBuffer,
@@ -1147,7 +1130,6 @@ impl RenderLayer for RenderSymbolLayer {
         self.tile_bucket_versions.clear();
     }
 
-    /// `prepare(const LayerPrepareParameters&)`.
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
         let Some(source) = params.source else {
             self.base.render_tiles = None;

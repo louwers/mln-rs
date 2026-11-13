@@ -25,8 +25,7 @@ use mln_gfx::shaders::shader_defines::{
     MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER,
 };
 
-/// `DescriptorSetType`: the descriptor sets of a pipeline layout, by set
-/// index.
+/// The descriptor sets of a pipeline layout, by set index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum DescriptorSetType {
@@ -122,7 +121,6 @@ pub const fn image_sampler_binding(index: usize) -> u32 {
 /// drawable's index into its layer's consolidated buffers (`int ubo_index`).
 pub const UBO_INDEX_PUSH_CONSTANT_SIZE: u32 = std::mem::size_of::<u32>() as u32;
 
-/// `globeClipMaskPushConstantSize`: the largest push-constant block, the
-/// globe clip mask's two matrices, which is all the guaranteed 128 bytes
-/// hold.
+/// The largest push-constant block, the globe clip mask's two matrices,
+/// which is all the guaranteed 128 bytes hold.
 pub const CLIP_MASK_PUSH_CONSTANT_SIZE: u32 = 2 * std::mem::size_of::<[f32; 16]>() as u32;

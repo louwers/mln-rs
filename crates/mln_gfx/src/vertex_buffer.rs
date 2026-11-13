@@ -1,9 +1,7 @@
-// Ports include/mln/gfx/vertex_buffer.hpp and src/mln/gfx/index_buffer.hpp
-
 use std::any::Any;
 use std::rc::Rc;
 
-/// `gfx::VertexBufferResource`: backend-specific GPU vertex buffer.
+/// A backend-specific GPU vertex buffer.
 ///
 /// Shared as `Rc` (C++ `unique_ptr` plus raw pointers in `AttributeBinding`):
 /// the binding keeps a clone and compares by pointer.
@@ -18,10 +16,9 @@ impl dyn VertexBufferResource {
 
 pub type UniqueVertexBufferResource = Rc<dyn VertexBufferResource>;
 
-/// `gfx::IndexBufferResource`: backend-specific GPU index buffer.
+/// A backend-specific GPU index buffer.
 pub trait IndexBufferResource: Any {}
 
-/// `gfx::IndexBuffer`
 pub struct IndexBuffer {
     pub elements: usize,
     resource: Box<dyn IndexBufferResource>,
@@ -33,7 +30,7 @@ impl IndexBuffer {
         IndexBuffer { elements, resource }
     }
 
-    /// `getResource<T>()`: the C++ `static_cast` becomes a checked downcast.
+    /// The backend resource, if it is a `T`. C++ casts unchecked.
     #[must_use]
     pub fn get_resource<T: 'static>(&self) -> Option<&T> {
         let resource: &dyn Any = &*self.resource;

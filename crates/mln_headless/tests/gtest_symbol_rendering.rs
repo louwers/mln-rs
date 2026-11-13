@@ -33,8 +33,8 @@ enum SymbolKind {
     TextAndIcon,
 }
 
-/// `setupCollidingSymbolsStyle`: `count` points `spacing` degrees of
-/// longitude apart from (5, 5), each with its own sort key.
+/// A style of `count` points `spacing` degrees of longitude apart from
+/// (5, 5), each with its own sort key.
 fn colliding_symbols_style(count: usize, spacing: f64, kind: SymbolKind) -> String {
     let features: Vec<String> = (0..count)
         .map(|i| {
@@ -87,8 +87,8 @@ fn lat_lng(latitude: f64, longitude: f64) -> LatLng {
     LatLng::new(latitude, longitude).expect("a coordinate")
 }
 
-/// `TimedHeadlessFrontend`: loads resources asynchronously, but renders a
-/// frame only when the test asks, at the time it chooses.
+/// A frontend that loads resources asynchronously, but renders a frame only
+/// when the test asks, at the time it chooses.
 #[derive(Clone)]
 struct TimedHeadlessFrontend {
     frontend: HeadlessFrontend,
@@ -139,7 +139,6 @@ fn stats(frontend: &HeadlessFrontend) -> RenderingStats {
     frontend.get_backend().get_context().rendering_stats().clone()
 }
 
-/// `SymbolRenderingTest`.
 struct SymbolRenderingTest<F> {
     _events: AsyncTask,
     run_loop: RunLoop,

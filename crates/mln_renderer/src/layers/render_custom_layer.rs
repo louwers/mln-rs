@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/render_custom_layer.hpp,
-// src/mln/renderer/layers/render_custom_layer.cpp and
-// src/mln/gfx/drawable_custom_layer_host_tweaker.cpp.
-//
 // Differences from C++:
 // - The host's prerender runs in a step of its own after the layer groups
 //   upload (`RenderLayer::prerender`), not in `update`, so it gets the frame's
@@ -79,7 +75,6 @@ impl Shared {
     }
 }
 
-/// `RenderCustomLayer`.
 pub struct RenderCustomLayer {
     base: RenderLayerBase,
     shared: Rc<Shared>,

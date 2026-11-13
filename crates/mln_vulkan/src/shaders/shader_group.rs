@@ -1,5 +1,3 @@
-// Ports include/mln/shaders/vulkan/shader_group.hpp
-//
 // The C++ `ShaderGroup<BuiltIn ShaderID>` template is one type here holding
 // the `BuiltIn` value.
 
@@ -32,7 +30,6 @@ impl ShaderGroup {
         ShaderGroup { data: ShaderGroupData::default(), shader_id, program_parameters }
     }
 
-    /// `ShaderGroupBase::addAdditionalDefines`
     fn add_additional_defines(
         properties_as_uniforms: &StringIDSetsPair,
         additional_defines: &mut HashMap<String, String>,

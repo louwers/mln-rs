@@ -1,8 +1,6 @@
-// Ports include/mln/shaders/background_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) BackgroundDrawableUBO` (64 bytes).
+/// The background shader's per-drawable uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct BackgroundDrawableUBO {
@@ -25,7 +23,7 @@ pub struct BackgroundPropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<BackgroundPropsUBO>() == 2 * 16);
 
-/// `struct alignas(16) BackgroundPatternDrawableUBO` (96 bytes).
+/// The background pattern shader's per-drawable uniform block (96 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct BackgroundPatternDrawableUBO {
@@ -58,10 +56,10 @@ pub struct BackgroundPatternPropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<BackgroundPatternPropsUBO>() == 4 * 16);
 
-/// `union BackgroundDrawableUnionUBO` (`MLN_UBO_CONSOLIDATION`): the size of
-/// the larger member, 96 bytes. Write either member with `from_drawable` /
-/// `from_pattern_drawable`; the rest stays zero (C++ value-initializes the
-/// vector elements).
+/// Either background per-drawable uniform block, for consolidated UBOs: a C++
+/// union, the size of the larger member, 96 bytes. Write either member with
+/// `from_drawable` / `from_pattern_drawable`; the rest stays zero (C++
+/// value-initializes the vector elements).
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct BackgroundDrawableUnionUBO {
@@ -76,7 +74,6 @@ impl Default for BackgroundDrawableUnionUBO {
 }
 
 impl BackgroundDrawableUnionUBO {
-    /// `.backgroundDrawableUBO = {...}`
     #[must_use]
     pub fn from_drawable(ubo: &BackgroundDrawableUBO) -> Self {
         let mut u = Self::zeroed();
@@ -84,7 +81,6 @@ impl BackgroundDrawableUnionUBO {
         u
     }
 
-    /// `.backgroundPatternDrawableUBO = {...}`
     #[must_use]
     pub fn from_pattern_drawable(ubo: &BackgroundPatternDrawableUBO) -> Self {
         let mut u = Self::zeroed();

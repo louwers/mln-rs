@@ -1,5 +1,3 @@
-// Ports test/style/conversion/light.test.cpp.
-
 use mln_conversion::Convertible;
 use mln_style_types::Position;
 use mln_util::Color;

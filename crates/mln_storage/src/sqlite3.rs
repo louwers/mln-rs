@@ -1,7 +1,3 @@
-// Ports platform/default/include/mln/storage/sqlite3.hpp and
-// platform/default/src/mln/storage/sqlite3.cpp (`mapbox::sqlite`) over
-// rusqlite (the same bundled SQLite engine).
-//
 // `Database` holds its connection the way C++ holds its `DatabaseImpl`
 // (`std::unique_ptr`): behind a pointer that a `Transaction` shares, so a
 // transaction keeps working when the `Database` object moves. The pointer
@@ -13,10 +9,6 @@
 // column conversions (`sqlite3_column_int64` of a text value parses it,
 // `sqlite3_column_blob` of a number formats it, ...). The offline database
 // uses rusqlite's statement cache (`prepare_cached`) directly.
-//
-// TODO(port): `setTempPath`, the debug `SQLITE_CONFIG_LOG` hook, the
-// library version check at startup, `Query::reset`/`clearBindings` after a
-// `run()`.
 
 use std::sync::Arc;
 
@@ -26,7 +18,7 @@ use rusqlite::fallible_streaming_iterator::FallibleStreamingIterator;
 use rusqlite::types::{ToSql, ValueRef};
 use rusqlite::{Connection, OpenFlags, Row, Rows};
 
-/// `mapbox::sqlite::ResultCode` values (`SQLITE_*`).
+/// SQLite result codes (`SQLITE_*`).
 pub mod result_code {
     pub const OK: i32 = 0;
     pub const ERROR: i32 = 1;
@@ -55,23 +47,21 @@ pub mod result_code {
     pub const NOT_A_DB: i32 = 26;
 }
 
-/// `mapbox::sqlite::ExtendedResultCode` values (`err >> 8`).
+/// SQLite extended result codes, without the primary code (`err >> 8`).
 pub mod extended_result_code {
     pub const UNKNOWN: i32 = 0;
     /// `SQLITE_READONLY_DBMOVED >> 8`.
     pub const READ_ONLY_DB_MOVED: i32 = 4;
 }
 
-/// `mapbox::sqlite::OpenFlag`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenFlag {
     ReadOnly = 0x0000_0001,
     ReadWriteCreate = 0x0000_0006,
 }
 
-/// `mapbox::sqlite::SqliteError`. `code` is `static_cast<ResultCode>(err)`, the
-/// low byte of the (extended) result code (`ResultCode` is a `uint8_t`
-/// enum); `extended_code` is `err >> 8`.
+/// An SQLite error. `code` is the low byte of the (extended) result code;
+/// `extended_code` is `err >> 8`.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct SqliteError {
@@ -97,33 +87,30 @@ impl From<rusqlite::Error> for SqliteError {
     }
 }
 
-/// `mapbox::sqlite::Database`.
 pub struct Database {
     connection: Arc<Mutex<Connection>>,
 }
 
 impl Database {
-    /// `Database::tryOpen(filename, flags)` (`sqlite3_open_v2(filename, flags
-    /// | SQLITE_OPEN_URI)`, extended result codes on). C++ returns a
-    /// `std::variant<Database, SqliteError>`.
+    /// Opens `filename` with `flags` and `SQLITE_OPEN_URI`, with extended
+    /// result codes on.
     pub fn try_open(filename: &str, flags: OpenFlag) -> Result<Database, SqliteError> {
         let flags = OpenFlags::from_bits_retain(flags as i32) | OpenFlags::SQLITE_OPEN_URI;
         let conn = Connection::open_with_flags(filename, flags)?;
         Ok(Database { connection: Arc::new(Mutex::new(conn)) })
     }
 
-    /// `Database::open(filename, flags)` (throws the `tryOpen` exception).
+    /// The same as `try_open`.
     pub fn open(filename: &str, flags: OpenFlag) -> Result<Database, SqliteError> {
         Self::try_open(filename, flags)
     }
 
-    /// `getFilename()`.
     #[must_use]
     pub fn get_filename(&self) -> String {
         self.conn().path().unwrap_or("").to_owned()
     }
 
-    /// `setBusyTimeout(std::chrono::milliseconds)` (clamped to `int`).
+    /// Sets the busy timeout, clamped to `0..=i32::MAX` milliseconds.
     pub fn set_busy_timeout(&self, timeout_ms: i64) -> Result<(), SqliteError> {
         let ms = timeout_ms.clamp(0, i64::from(i32::MAX)) as u64;
         self.conn().busy_timeout(std::time::Duration::from_millis(ms))?;
@@ -141,9 +128,9 @@ impl Database {
     }
 }
 
-/// `DatabaseImpl::exec` (`sqlite3_exec`): runs every statement to
-/// completion. rusqlite's `execute_batch` steps each statement only once,
-/// which leaves e.g. `PRAGMA incremental_vacuum` after freeing one page.
+/// Runs every statement of `sql` to completion, as `sqlite3_exec` does.
+/// rusqlite's `execute_batch` steps each statement only once, which leaves
+/// e.g. `PRAGMA incremental_vacuum` after freeing one page.
 fn exec(conn: &Connection, sql: &str) -> Result<(), SqliteError> {
     let mut batch = rusqlite::Batch::new(conn, sql);
     while let Some(mut stmt) = batch.next()? {
@@ -153,7 +140,6 @@ fn exec(conn: &Connection, sql: &str) -> Result<(), SqliteError> {
     Ok(())
 }
 
-/// `mapbox::sqlite::Transaction::Mode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransactionMode {
     Deferred,
@@ -161,8 +147,7 @@ pub enum TransactionMode {
     Exclusive,
 }
 
-/// `mapbox::sqlite::Transaction`: rolls back on drop unless committed or
-/// rolled back.
+/// A transaction that rolls back on drop unless committed or rolled back.
 pub struct Transaction {
     connection: Arc<Mutex<Connection>>,
     need_rollback: bool,
@@ -185,13 +170,11 @@ impl Transaction {
         exec(&self.connection.lock(), sql)
     }
 
-    /// `commit()`.
     pub fn commit(&mut self) -> Result<(), SqliteError> {
         self.need_rollback = false;
         self.exec("COMMIT TRANSACTION")
     }
 
-    /// `rollback()`.
     pub fn rollback(&mut self) -> Result<(), SqliteError> {
         self.need_rollback = false;
         self.exec("ROLLBACK TRANSACTION")
@@ -207,9 +190,8 @@ impl Drop for Transaction {
     }
 }
 
-/// `mapbox::sqlite::Statement`: a prepared statement that can be run
-/// repeatedly with a `Query`. Borrows the connection guard it was prepared
-/// on (`db.conn()`).
+/// A prepared statement that can be run repeatedly with a `Query`. Borrows
+/// the connection guard it was prepared on (`db.conn()`).
 pub struct Statement<'conn> {
     stmt: rusqlite::Statement<'conn>,
     conn: &'conn Connection,
@@ -224,7 +206,7 @@ impl<'conn> Statement<'conn> {
     }
 }
 
-/// `mapbox::sqlite::Query`: binds and runs a `Statement` one row at a time.
+/// Binds and runs a `Statement` one row at a time.
 pub struct Query<'s, 'conn> {
     stmt: Option<&'s mut rusqlite::Statement<'conn>>,
     rows: Option<Rows<'s>>,
@@ -242,12 +224,12 @@ impl<'s, 'conn> Query<'s, 'conn> {
 
     /// `bind(offset, value)` (before the first `run()`).
     pub fn bind<T: ToSql>(&mut self, offset: usize, value: T) -> Result<(), SqliteError> {
-        let stmt = self.stmt.as_mut().expect("TODO(port): Query::bind after run()");
+        let stmt = self.stmt.as_mut().expect("Query::bind after run()");
         stmt.raw_bind_parameter(offset, value)?;
         Ok(())
     }
 
-    /// `run()`: steps once; true when a row is available.
+    /// Steps once; true when a row is available.
     pub fn run(&mut self) -> Result<bool, SqliteError> {
         if self.rows.is_none() {
             let stmt = self.stmt.take().expect("statement");
@@ -263,38 +245,34 @@ impl<'s, 'conn> Query<'s, 'conn> {
         self.rows.as_ref().and_then(|rows| rows.get()).expect("Query::get without a row")
     }
 
-    /// `get<int64_t>(offset)`.
     pub fn get_i64(&self, offset: usize) -> Result<i64, SqliteError> {
         get_i64(self.row(), offset)
     }
 
-    /// `get<int>(offset)`.
     pub fn get_i32(&self, offset: usize) -> Result<i32, SqliteError> {
         get_i32(self.row(), offset)
     }
 
-    /// `get<std::string>(offset)`, as bytes.
+    /// The column at `offset` as bytes (see the free `get_bytes`).
     pub fn get_bytes(&self, offset: usize) -> Result<Vec<u8>, SqliteError> {
         get_bytes(self.row(), offset)
     }
 
-    /// `get<std::optional<std::string>>(offset)`, as bytes.
+    /// The column at `offset` as bytes; `None` for NULL.
     pub fn get_optional_bytes(&self, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
         get_optional_bytes(self.row(), offset)
     }
 
-    /// `get<std::string>(offset)` for text columns.
+    /// The column at `offset` as text, lossy for invalid UTF-8.
     pub fn get_string(&self, offset: usize) -> Result<String, SqliteError> {
         Ok(String::from_utf8_lossy(&get_bytes(self.row(), offset)?).into_owned())
     }
 
-    /// `lastInsertRowId()`.
     #[must_use]
     pub fn last_insert_row_id(&self) -> i64 {
         *self.last_insert_row_id
     }
 
-    /// `changes()`.
     #[must_use]
     pub fn changes(&self) -> u64 {
         (*self.changes).max(0) as u64
@@ -316,13 +294,11 @@ pub fn get_i32(row: &Row<'_>, offset: usize) -> Result<i32, SqliteError> {
     Ok(get_i64(row, offset)? as i32)
 }
 
-/// `Query::get<bool>` (`sqlite3_column_int(...) != 0`... C++ converts the
-/// `int` to `bool`).
+/// Whether the column's `i32` value is nonzero.
 pub fn get_bool(row: &Row<'_>, offset: usize) -> Result<bool, SqliteError> {
     Ok(get_i32(row, offset)? != 0)
 }
 
-/// `Query::get<std::optional<int64_t>>`.
 pub fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, SqliteError> {
     if matches!(row.get_ref(offset)?, ValueRef::Null) {
         return Ok(None);
@@ -330,19 +306,20 @@ pub fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, Sql
     get_i64(row, offset).map(Some)
 }
 
-/// `Query::get<std::string>` (`sqlite3_column_blob`): the bytes of a text or
-/// blob value, a number's text form.
+/// The bytes of a text or blob value, or a number's text form, as
+/// `sqlite3_column_blob` gives them; empty for NULL.
 pub fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, SqliteError> {
     Ok(match row.get_ref(offset)? {
         ValueRef::Null => Vec::new(),
         ValueRef::Integer(i) => i.to_string().into_bytes(),
-        // TODO(port): SQLite formats reals with "%!.15g".
+        // SQLite formats reals with "%!.15g"; this uses Rust's shortest
+        // round-trip formatting.
         ValueRef::Real(r) => format!("{r}").into_bytes(),
         ValueRef::Text(t) | ValueRef::Blob(t) => t.to_vec(),
     })
 }
 
-/// `Query::get<std::optional<std::string>>`, as bytes.
+/// The value as bytes (see `get_bytes`); `None` for NULL.
 pub fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
     if matches!(row.get_ref(offset)?, ValueRef::Null) {
         return Ok(None);
@@ -350,8 +327,8 @@ pub fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>
     get_bytes(row, offset).map(Some)
 }
 
-/// `Query::get<std::optional<std::string>>` for text columns (lossy for
-/// invalid UTF-8, which C++ would keep).
+/// The value as text; `None` for NULL. Lossy for invalid UTF-8, which C++
+/// would keep.
 pub fn get_optional_string(row: &Row<'_>, offset: usize) -> Result<Option<String>, SqliteError> {
     Ok(get_optional_bytes(row, offset)?.map(|bytes| match String::from_utf8(bytes) {
         Ok(s) => s,

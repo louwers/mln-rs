@@ -1,5 +1,3 @@
-// Ports src/mln/gfx/fill_large_mesh_arrays.hpp.
-//
 // The C++ keeps pointers to the current segments while it appends to their
 // vectors; the port keeps their positions.
 

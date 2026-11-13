@@ -1,5 +1,3 @@
-// Ports render-test/parser.{hpp,cpp}
-//
 // rapidjson is replaced by serde_json (with `preserve_order`, so objects
 // keep document order). Differences that matter:
 // - parse error messages are serde_json's, not
@@ -82,8 +80,8 @@ const RESULTS_HEADER_BUTTON: &str = r"
 // empty); number spelling may differ (the text is only parsed back, written
 // to actual.json and shown in the report).
 
-/// `mln::Value` as a JSON value (object members sorted by key, as C++
-/// writes them).
+/// `value` as a JSON value (object members sorted by key, as C++ writes
+/// them).
 fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Null => serde_json::Value::Null,
@@ -99,13 +97,11 @@ fn value_to_json(value: &Value) -> serde_json::Value {
     }
 }
 
-/// `toJSON(const mln::Value&, 2, false)`.
 #[must_use]
 pub fn to_json_value(value: &Value) -> String {
     serde_json::to_string_pretty(&value_to_json(value)).expect("JSON value serializes")
 }
 
-/// `toJSON(const std::vector<mln::Feature>&, 2, false)`.
 #[must_use]
 pub fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     let mut array = Vec::with_capacity(features.len());
@@ -125,14 +121,13 @@ pub fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     serde_json::to_string_pretty(&serde_json::Value::Array(array)).expect("JSON value serializes")
 }
 
-/// `readJson(path)`.
 pub fn read_json(json_path: &str) -> Result<serde_json::Value, ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
-/// `readJson(path)` keeping the text, for documents the runner hands on
-/// unchanged (style.json).
+/// Reads the JSON document at `json_path`, keeping the text, for documents
+/// the runner hands on unchanged (style.json).
 pub fn read_json_with_text(json_path: &str) -> Result<(serde_json::Value, String), ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     let value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
@@ -164,22 +159,18 @@ impl<'de> Deserialize<'de> for ObjectMembers {
     }
 }
 
-/// `readJson(path)` for a document whose top level is an object, as its
-/// members in document order.
+/// Reads the JSON document at `json_path`, whose top level is an object, as
+/// its members in document order.
 pub fn read_json_object_members(json_path: &str) -> Result<Vec<(String, serde_json::Value)>, ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     serde_json::from_slice::<ObjectMembers>(&bytes).map(|members| members.0).map_err(|e| e.to_string())
 }
 
-/// `serializeJsonValue(value)`: compact JSON (rapidjson `Writer`).
+/// `value` as compact JSON, as rapidjson's `Writer` writes it.
 #[must_use]
 pub fn serialize_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).expect("serde_json::Value serializes")
 }
-
-// TODO(port): serializeMetrics (rapidjson PrettyWriter output); only the
-// update/rebaseline modes write metrics, and the port does not write
-// baselines.
 
 fn read_expected_entries(regex: &Regex, base: &str) -> Vec<String> {
     let mut expected_entries = Vec::new();
@@ -247,7 +238,6 @@ fn array_size(v: &serde_json::Value) -> usize {
     v.as_array().map_or(0, Vec::len)
 }
 
-/// `readExpectedMetrics(path)`.
 #[must_use]
 pub fn read_expected_metrics(path: &str) -> TestMetrics {
     let mut result = TestMetrics::default();
@@ -318,7 +308,6 @@ pub fn read_expected_metrics(path: &str) -> TestMetrics {
     result
 }
 
-/// `parseTestMetadata(paths)`.
 #[must_use]
 pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     let mut metadata = TestMetadata { paths: paths.clone(), ..TestMetadata::default() };
@@ -452,7 +441,6 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         }
 
         if let Some(filter) = query_options.get("filter") {
-            // TODO(port): `convert<Filter>(filterVal, error)` (mln_style).
             metadata.query_options.filter = Some(filter.clone());
         }
     }
@@ -463,8 +451,8 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     metadata
 }
 
-/// `mln::TileLodMode` (include/mln/map/mode.hpp), parsed from the names the
-/// C++ runner gives it.
+/// The map's tile level-of-detail mode, parsed from the names the C++
+/// runner gives it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileLodMode {
     Default,
@@ -538,7 +526,6 @@ use test_operation_names::{
     SET_ZOOM_OP, SLEEP_OP, UPDATE_IMAGE_OP, WAIT_OP,
 };
 
-/// `parseGlobalStateValue(value)`.
 fn parse_global_state_value(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Null => Value::Null,
@@ -560,8 +547,8 @@ fn parse_global_state_value(value: &serde_json::Value) -> Value {
     }
 }
 
-/// `ConversionTraits<const JSValue*>::toValue`: null and false are
-/// `false`, arrays and objects have no value.
+/// The `Value` of a JSON value, as the runner's C++ conversion reads it:
+/// null and false are `false`, arrays and objects have no value.
 fn json_to_value(value: &serde_json::Value) -> Option<Value> {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(false) => Some(Value::Bool(false)),
@@ -620,23 +607,36 @@ fn parse_feature_state(state: &serde_json::Value, metadata: &mut TestMetadata) -
     p.parsed_state
 }
 
-/// An operation the port cannot execute yet: the test errors (see
-/// `TestContext::fail_not_ported`).
-fn not_ported(what: String) -> TestOperation {
-    Box::new(move |ctx: &mut TestContext<'_>| ctx.fail_not_ported(&what))
+/// Operations the runner recognises but cannot run, each with what it
+/// lacks. Each errors the test when it runs (`TestContext::fail_unsupported`),
+/// so the test can't pass by skipping it; so do the `probeMemory` and
+/// `probeGFX` manifest probes.
+const UNSUPPORTED_OPERATIONS: [(&str, &str); 5] = [
+    (MEMORY_PROBE_START_OP, "no allocation counting"),
+    (MEMORY_PROBE_OP, "no allocation counting"),
+    (MEMORY_PROBE_END_OP, "no allocation counting"),
+    (PAN_GESTURE_OP, "no flyTo animation sampled at frame times"),
+    (GFX_PROBE_OP, "no rendering stats from the frontend"),
+];
+
+/// The operation for `name` from [`UNSUPPORTED_OPERATIONS`]: it errors the
+/// test, naming what the runner lacks.
+pub(crate) fn unsupported_operation_entry(name: &str) -> TestOperation {
+    let lacks = UNSUPPORTED_OPERATIONS.iter().find(|(operation, _)| *operation == name).map_or("", |(_, lacks)| lacks);
+    let what = format!("{name} operation ({lacks})");
+    Box::new(move |ctx: &mut TestContext<'_>| ctx.fail_unsupported(&what))
 }
 
 /// Handles a `TestRunnerImpl` call made by an operation that, in C++,
 /// cannot fail (it returns `true`).
 fn infallible(ctx: &mut TestContext<'_>, result: Result<(), MapError>) -> bool {
     match result {
-        Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+        Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
         Err(MapError::Exception(what)) => ctx.fail_exception(&what),
         Ok(()) | Err(_) => true,
     }
 }
 
-/// `parseTestOperations(metadata)`.
 pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
     let mut result: TestOperations = Vec::new();
     let Some(operations) = metadata.test_value().and_then(|t| t.get("operations")).cloned() else {
@@ -690,7 +690,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 // Style::addImage.
                 match ctx.get_map().add_image(&image_name, &image_path, pixel_ratio, sdf) {
                     Ok(()) => true,
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Err(_) => {
                         let _ = write!(ctx.get_metadata().error_message, "Failed to load expected image {image_path}");
@@ -774,7 +774,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Err(MapError::LoadFailed) => false,
                 }
@@ -790,7 +790,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Ok(()) | Err(_) => true,
                 }
@@ -806,7 +806,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                     ctx.get_metadata().error_message = format!("Unable to convert light: {message}");
                     false
                 }
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Ok(()) | Err(_) => true,
             }));
@@ -818,7 +818,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                     ctx.get_metadata().error_message = format!("Unable to convert layer: {message}");
                     false
                 }
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Ok(()) | Err(_) => true,
             }));
@@ -827,7 +827,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             let layer_name = get_str(arg(1)).to_string();
             result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().remove_layer(&layer_name) {
                 Ok(removed) => removed,
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Err(_) => false,
             }));
@@ -841,7 +841,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Unable to convert source: {message}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Ok(()) | Err(_) => true,
                 }
@@ -851,7 +851,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             let source_name = get_str(arg(1)).to_string();
             result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().remove_source(&source_name) {
                 Ok(removed) => removed,
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Err(_) => false,
             }));
@@ -868,7 +868,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     // `Layer::setProperty` returns an optional<Error> the
                     // runner ignores.
@@ -915,9 +915,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 true
             }));
         } else if name == MEMORY_PROBE_START_OP || name == MEMORY_PROBE_OP || name == MEMORY_PROBE_END_OP {
-            // TODO(port): probeMemoryStart / probeMemory / probeMemoryEnd need
-            // render-test/allocation_index.cpp (a counting global allocator).
-            result.push(not_ported(format!("{name} operation (AllocationIndex)")));
+            result.push(unsupported_operation_entry(name));
         } else if name == NETWORK_PROBE_START_OP {
             // probeNetworkStart
             result.push(Box::new(|_ctx: &mut TestContext<'_>| {
@@ -952,7 +950,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             };
             let finish = |ctx: &mut TestContext<'_>, result: Result<bool, MapError>| match result {
                 Ok(ok) => ok,
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Err(_) => false,
             };
@@ -994,9 +992,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 metadata.error_message = format!("Map mode must be Continuous for {PAN_GESTURE_OP} operation");
                 return Vec::new();
             }
-            // TODO(port): flyTo animation with frame-time sampling
-            // (HeadlessFrontend::renderOnce, getFrameTime).
-            result.push(not_ported(format!("{name} operation (flyTo, renderOnce)")));
+            result.push(unsupported_operation_entry(name));
         } else if name == GFX_PROBE_START_OP {
             // probeGFXStart
             result.push(Box::new(|ctx: &mut TestContext<'_>| {
@@ -1012,9 +1008,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 true
             }));
         } else if name == GFX_PROBE_OP {
-            // TODO(port): probeGFX needs RenderResult::stats
-            // (gfx::RenderingStats) from the headless frontend.
-            result.push(not_ported(format!("{name} operation (gfx::RenderingStats)")));
+            result.push(unsupported_operation_entry(name));
         } else if name == SET_TILE_LOD_MIN_RADIUS_OP {
             // setTileLodMinRadius
             let min_radius = get_f64(arg(1));
@@ -1071,7 +1065,7 @@ fn camera_operation(camera: CameraOptions) -> TestOperation {
     })
 }
 
-/// `encodeBase64(data)`: boost's
+/// Encodes `data` in base64 as C++ does with boost's
 /// `insert_linebreaks<base64_from_binary<transform_width<const char*, 6, 8>>, 72>`,
 /// which emits the last partial sextet zero-padded and no `=` padding, with
 /// a `\n` after every 72 characters (none at the end).
@@ -1103,8 +1097,7 @@ fn to_string_u32(v: u32) -> String {
     v.to_string()
 }
 
-/// `createResultItem`: a test's entry in the report, with its images or its
-/// error message.
+/// A test's entry in the report, with its images or its error message.
 #[must_use]
 pub fn create_result_item(metadata: &TestMetadata) -> String {
     let mut html = String::new();
@@ -1170,8 +1163,8 @@ pub fn create_result_item(metadata: &TestMetadata) -> String {
     html
 }
 
-/// `createResultPage(stats, metadatas, shuffle, seed)`, with entries for the
-/// failed and errored tests only.
+/// The HTML report of a run, with entries for the failed and errored tests
+/// only.
 #[must_use]
 pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], shuffle: bool, seed: u32) -> String {
     let failed_or_errored = |metadata: &&TestMetadata| metadata.status == "failed" || metadata.status == "errored";

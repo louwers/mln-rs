@@ -1,10 +1,3 @@
-// Ports include/mln/style/sources/tile_source.hpp,
-// src/mln/style/sources/tile_source.cpp,
-// src/mln/style/sources/tile_source_impl.hpp and tile_source_impl.cpp, and
-// the source classes on top of them: include/mln/style/sources/
-// vector_source.hpp + vector_source.cpp, raster_source.hpp +
-// raster_source.cpp.
-//
 // The C++ subclasses differ in `supportsLayerType` and
 // `setTilesetOverrides`; here `TileSource` carries both as data (the
 // TileJSON response handler applies the overrides) and `VectorSource` /
@@ -27,7 +20,6 @@ use crate::layer::layer_type_info::TileKind;
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
-/// `TileSource::Impl`.
 #[derive(Clone, Debug)]
 pub struct Impl {
     base: ImplBase,
@@ -36,7 +28,6 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// `Impl(SourceType, std::string id, uint16_t tileSize)`.
     #[must_use]
     pub fn new(source_type: SourceType, id: String, tile_size: u16) -> Self {
         Impl { base: ImplBase::new(source_type, id), tileset: None, tile_size }
@@ -68,7 +59,6 @@ impl source_impl::Impl for Impl {
     }
 }
 
-/// `variant<std::string, Tileset>`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UrlOrTileset {
     Url(String),
@@ -88,7 +78,7 @@ enum Subclass {
 #[derive(Clone, Copy, Debug)]
 struct Overrides {
     subclass: Subclass,
-    /// `supportsLayerType`: the tile kind of the layers the source serves.
+    /// The tile kind of the layers the source serves.
     tile_kind: TileKind,
     /// `VectorSource`'s `maxZoom` / `minZoom`, or `RasterSource`'s `maxzoomOverride` /
     /// `minzoomOverride` (`setTilesetOverrides`).
@@ -107,7 +97,6 @@ struct Inner {
     sparse: Cell<bool>,
 }
 
-/// `TileSource`.
 #[derive(Clone)]
 pub struct TileSource {
     inner: Rc<Inner>,
@@ -123,7 +112,6 @@ impl std::fmt::Debug for TileSource {
 }
 
 impl TileSource {
-    /// `TileSource(id, urlOrTileset, tileSize, sourceType)`.
     fn new(
         id: String,
         url_or_tileset: UrlOrTileset,
@@ -143,7 +131,6 @@ impl TileSource {
         }
     }
 
-    /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
@@ -172,8 +159,8 @@ impl TileSource {
         self.inner.sparse.set(sparse);
     }
 
-    /// `setTilesetOverrides(Tileset&)`: `VectorSource`'s and `RasterSource`'s zoom
-    /// overrides; the base class has none.
+    /// Applies the source's overrides to `tileset`: a vector or raster source's
+    /// zoom range, a DEM source's raster encoding, and sparseness.
     fn set_tileset_overrides(&self, tileset: &mut Tileset) {
         let overrides = &self.inner.overrides;
         if let Some(max_zoom) = overrides.max_zoom {
@@ -266,8 +253,6 @@ impl Source for TileSource {
             return;
         }
 
-        // TODO(port): util::mapbox::canonicalizeSourceURL(tileServerOptions,
-        // rawURL).
         let url = raw_url;
 
         let weak = Rc::downgrade(&self.inner);
@@ -285,7 +270,6 @@ impl Source for TileSource {
     }
 }
 
-/// `style::VectorSource`.
 #[derive(Clone, Debug)]
 pub struct VectorSource {
     tile_source: TileSource,
@@ -293,7 +277,6 @@ pub struct VectorSource {
 }
 
 impl VectorSource {
-    /// `VectorSource(id, urlOrTileset, maxZoom, minZoom, encoding)`.
     pub fn new(
         id: impl Into<String>,
         url_or_tileset: UrlOrTileset,
@@ -373,16 +356,14 @@ impl Source for VectorSource {
     }
 }
 
-/// `style::RasterSource`.
 #[derive(Clone, Debug)]
 pub struct RasterSource {
     tile_source: TileSource,
 }
 
 impl RasterSource {
-    /// `RasterSource(id, urlOrTileset, tileSize, sourceType = Raster, minzoom, maxzoom)`.
-    /// `minzoom` / `maxzoom` are the style's inline values: they win over the TileJSON's, as in
-    /// maplibre-gl-js.
+    /// Creates a raster source. `minzoom` / `maxzoom` are the style's inline
+    /// values: they win over the TileJSON's, as in maplibre-gl-js.
     pub fn new(
         id: impl Into<String>,
         url_or_tileset: UrlOrTileset,
@@ -434,14 +415,13 @@ impl Source for RasterSource {
 
 // dem-heatmap: ports include/mln/style/sources/raster_dem_source.hpp and
 // src/mln/style/sources/raster_dem_source.cpp.
-/// `style::RasterDEMSource` (a `RasterSource` serving `TileKind::RasterDEM`).
+/// A raster source serving `TileKind::RasterDEM`.
 #[derive(Clone, Debug)]
 pub struct RasterDEMSource {
     tile_source: TileSource,
 }
 
 impl RasterDEMSource {
-    /// `RasterDEMSource(id, urlOrTileset, tileSize, options)`.
     pub fn new(
         id: impl Into<String>,
         url_or_tileset: UrlOrTileset,

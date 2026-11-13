@@ -1,5 +1,3 @@
-// Ports src/mln/text/bidi.hpp and platform/default/src/mln/text/bidi.cpp.
-//
 // The C++ runs ICU's ubidi (UBIDI_DEFAULT_LTR paragraphs, ubidi_setLine per
 // line, ubidi_writeReordered / ubidi_writeReverse with UBIDI_DO_MIRRORING |
 // UBIDI_REMOVE_BIDI_CONTROLS). The port resolves levels and visual runs
@@ -49,8 +47,8 @@ pub fn apply_arabic_shaping(input: &[u16]) -> Vec<u16> {
     output_text
 }
 
-/// `startsRightToLeft`: whether the first character in `text` with a
-/// strong direction runs right to left.
+/// Whether the first character in `text` with a strong direction runs right
+/// to left.
 #[must_use]
 pub fn starts_right_to_left(text: &[u16]) -> bool {
     // u_charDirection: U_LEFT_TO_RIGHT, U_RIGHT_TO_LEFT,
@@ -111,14 +109,13 @@ fn write_reverse_mirrored(src: &[u16], out: &mut Vec<u16>) {
     }
 }
 
-/// `BiDiRun`: a run of text in one direction, in logical order.
+/// A run of text in one direction, in logical order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BiDiRun {
     pub text: Vec<u16>,
     pub rtl: bool,
 }
 
-/// `BiDi`.
 #[derive(Default)]
 pub struct BiDi {}
 
@@ -145,7 +142,6 @@ impl BiDi {
         BiDi {}
     }
 
-    /// `mergeParagraphLineBreaks`.
     fn merge_paragraph_line_breaks(info: &BidiInfo<'_>, line_break_points: &mut VecSet<usize>) {
         for paragraph in &info.paragraphs {
             line_break_points.insert(paragraph.range.end);
@@ -191,9 +187,8 @@ impl BiDi {
         self.process_styled_text_with_blocks(input, line_break_points, &input.0, &[])
     }
 
-    /// `splitStyledText`: splits text in logical order into lines at the
-    /// line break points and at the ends of paragraphs, without reordering
-    /// it.
+    /// Splits text in logical order into lines at the line break points and
+    /// at the ends of paragraphs, without reordering it.
     pub fn split_styled_text(
         &mut self,
         input: &StyledText,
@@ -304,10 +299,9 @@ impl BiDi {
         Ok(lines)
     }
 
-    /// `visualRuns`: splits text in logical order into runs of one
-    /// direction each, and returns the runs in visual order. Each run keeps
-    /// its logical order, so a shaper such as HarfBuzz can lay it out in its
-    /// direction.
+    /// Splits text in logical order into runs of one direction each, and
+    /// returns the runs in visual order. Each run keeps its logical order, so
+    /// a shaper such as HarfBuzz can lay it out in its direction.
     pub fn visual_runs(&mut self, input: &[u16]) -> Vec<BiDiRun> {
         let mut runs = Vec::new();
         if input.is_empty() {
@@ -332,7 +326,7 @@ impl BiDi {
         runs
     }
 
-    /// `getLine`: the line in visual order, mirrored, BiDi controls
+    /// The line `start..end` in visual order, mirrored, with BiDi controls
     /// removed.
     fn get_line(info: &BidiInfo<'_>, start: usize, end: usize) -> Result<Vec<u16>, String> {
         let Some(para) = line_paragraph(info, start, end) else {
@@ -354,8 +348,7 @@ impl BiDi {
     }
 }
 
-/// Ports test/text/bidi.test.cpp. These tests mirror the unit tests in
-/// mapbox-gl-rtl-text's arabic.test.js.
+/// These tests mirror the unit tests in mapbox-gl-rtl-text's arabic.test.js.
 #[cfg(test)]
 mod bidi_test {
     use super::*;

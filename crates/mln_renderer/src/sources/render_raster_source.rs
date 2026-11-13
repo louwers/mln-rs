@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/sources/render_raster_source.hpp and
-// src/mln/renderer/sources/render_raster_source.cpp (with the
-// RenderTileSetSource half of render_tile_source.cpp).
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -23,10 +19,9 @@ use crate::tile::raster_tile::RasterTile;
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
-/// `RenderRasterSource` (a `RenderTileSetSource`).
+/// The render source of a raster source.
 pub struct RenderRasterSource {
     tile_source: RenderTileSource,
-    /// `RenderTileSetSource::cachedTileset`.
     cached_tileset: Option<Tileset>,
 }
 
@@ -41,8 +36,6 @@ impl RenderRasterSource {
         downcast_arc::<tile_source::Impl>(&self.tile_source.base.base_impl)
     }
 
-    /// `updateInternal(tileset, layers, needsRendering, needsRelayout,
-    /// parameters)`.
     fn update_internal(
         &mut self,
         tileset: &Tileset,
@@ -85,7 +78,6 @@ impl RenderSource for RenderRasterSource {
         self.tile_source.is_loaded()
     }
 
-    /// `RenderTileSetSource::update`.
     fn update(
         &mut self,
         base_impl: Arc<dyn source::Impl>,
@@ -167,7 +159,6 @@ impl RenderSource for RenderRasterSource {
         self.tile_source.dump_debug_logs();
     }
 
-    /// `RenderTileSetSource::getMaxZoom()`.
     fn get_max_zoom(&self) -> u8 {
         self.cached_tileset.as_ref().map_or(constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
     }

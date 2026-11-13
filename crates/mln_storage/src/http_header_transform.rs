@@ -10,8 +10,8 @@ use crate::resource::Kind;
 /// Header names and values, in the order they are sent.
 pub type HttpHeaders = Vec<(String, String)>;
 
-/// `(kind, url) -> headers`. It runs on the thread that starts the request,
-/// which waits for it, hence `Send + Sync`.
+/// Returns the headers for a request of `kind` to `url`. It runs on the
+/// thread that starts the request, which waits for it, hence `Send + Sync`.
 pub type HttpHeaderCallback = Arc<dyn Fn(Kind, &str) -> HttpHeaders + Send + Sync>;
 
 /// The headers to add to each HTTP request: the callback gets the resource's

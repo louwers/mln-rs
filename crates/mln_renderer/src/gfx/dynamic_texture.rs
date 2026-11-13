@@ -1,7 +1,3 @@
-// Ports include/mln/gfx/dynamic_texture.hpp, src/mln/gfx/dynamic_texture.cpp
-// and src/mln/webgpu/dynamic_texture.cpp (the WebGPU backend's deferred
-// creation and uploads).
-//
 // C++ shares a `DynamicTexture` between the worker threads (which reserve
 // bins and queue images) and the render thread (which uploads them). The
 // shelf pack and the queued images are behind a mutex here as there; the GPU
@@ -26,7 +22,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use shelf_pack::{ShelfPack, ShelfPackOptions};
 
-/// `TextureHandle`: a bin of a dynamic texture.
+/// A bin of a dynamic texture.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TextureHandle {
     id: i32,
@@ -35,7 +31,6 @@ pub struct TextureHandle {
 }
 
 impl TextureHandle {
-    /// `TextureHandle(const mapbox::Bin&)`.
     fn from_bin(bin: &shelf_pack::Bin) -> Self {
         TextureHandle {
             id: bin.id,
@@ -72,7 +67,7 @@ impl Eq for TextureHandle {}
 struct Inner {
     shelf_pack: ShelfPack,
     num_textures: i32,
-    /// `imagesToUpload` (`webgpu::DynamicTexture`), keyed by handle id.
+    /// The images queued for the next upload pass, keyed by handle id.
     images_to_upload: HashMap<i32, (RectU16, Vec<u8>)>,
 }
 
@@ -83,7 +78,8 @@ static NEXT_DYNAMIC_TEXTURE_ID: AtomicUsize = AtomicUsize::new(1);
 /// The render-thread GPU texture of a dynamic texture.
 type GpuTexture = LocalObject<RefCell<Option<Texture2DPtr>>>;
 
-/// `gfx::DynamicTexture` (with the `webgpu::DynamicTexture` overrides).
+/// A texture shelf-packed with images or glyphs. Workers reserve bins and
+/// queue images; the render thread uploads them.
 pub struct DynamicTexture {
     id: usize,
     size: Size,
@@ -106,7 +102,6 @@ fn pixel_stride(pixel_type: TexturePixelType) -> usize {
 }
 
 impl DynamicTexture {
-    /// `Context::createDynamicTexture(size, pixelType)`.
     pub fn new(size: Size, pixel_type: TexturePixelType) -> Self {
         DynamicTexture {
             id: NEXT_DYNAMIC_TEXTURE_ID.fetch_add(1, Ordering::Relaxed),
@@ -133,8 +128,8 @@ impl DynamicTexture {
         self.size
     }
 
-    /// `getTexture()`: the GPU texture, once `upload_deferred_images` created
-    /// it (render thread).
+    /// The GPU texture, once `upload_deferred_images` has created it. Render
+    /// thread only.
     pub fn get_texture(&self) -> Option<Texture2DPtr> {
         let gpu_texture = self.gpu_texture.lock();
         gpu_texture.as_ref().and_then(LocalObject::get).and_then(|t| t.borrow().clone())
@@ -148,7 +143,6 @@ impl DynamicTexture {
         self.inner.lock().num_textures == 0
     }
 
-    /// `reserveSize(size, uniqueId)`.
     pub fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
         let mut inner = self.inner.lock();
         let bin_ref = inner.shelf_pack.pack_one(unique_id, size.width as i32, size.height as i32)?;
@@ -159,7 +153,6 @@ impl DynamicTexture {
         Some(TextureHandle::from_bin(&bin))
     }
 
-    /// `addImage(pixelData, imageSize, uniqueId)`.
     pub fn add_image(&self, pixel_data: &[u8], image_size: Size, unique_id: i32) -> Option<TextureHandle> {
         let mut tex_handle = self.reserve_size(image_size, unique_id)?;
         if tex_handle.is_upload_needed() {
@@ -168,8 +161,7 @@ impl DynamicTexture {
         Some(tex_handle)
     }
 
-    /// `uploadImage(pixelData, texHandle)` (webgpu: queue the pixels of the
-    /// handle's rectangle for the next upload pass).
+    /// Queues the pixels of the handle's rectangle for the next upload pass.
     pub fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
         let mut inner = self.inner.lock();
         let rect = tex_handle.rectangle;
@@ -179,8 +171,8 @@ impl DynamicTexture {
         tex_handle.needs_upload = false;
     }
 
-    /// `uploadDeferredImages(UploadPass&)`: creates the texture on first use
-    /// and uploads the queued images (render thread).
+    /// Creates the texture on first use and uploads the queued images. Runs
+    /// on the render thread.
     pub fn upload_deferred_images(&self, context: &dyn Context) {
         let mut inner = self.inner.lock();
         let texture = if let Some(texture) = self.get_texture() {
@@ -237,7 +229,7 @@ impl DynamicTexture {
         inner.images_to_upload.insert(id, (rect, data));
     }
 
-    /// `removeTexture(texHandle)`: true when the bin's last reference went.
+    /// Releases `tex_handle`'s bin; true when that was its last reference.
     pub fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
         let mut inner = self.inner.lock();
         let Some(bin) = inner.shelf_pack.get_bin(tex_handle.id) else {

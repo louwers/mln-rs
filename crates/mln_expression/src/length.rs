@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/length.hpp and
-// src/mln/style/expression/length.cpp.
-
 use mln_conversion::Convertible;
 
 use crate::expression::{

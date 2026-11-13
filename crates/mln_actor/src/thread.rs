@@ -1,6 +1,3 @@
-// Ports include/mln/util/thread.hpp: `util::Thread<Object>` runs an actor
-// on its own thread with its own RunLoop.
-//
 // The C++ constructor forwards the object's constructor arguments to the
 // thread; here `make` is a `Send` closure that builds the object on the new
 // thread (it gets the actor's own `ActorRef`, like `O(ActorRef<O>, args...)`).
@@ -8,10 +5,6 @@
 // as in C++, not at the end of the constructor, which would deadlock when the
 // object's constructor waits for the caller (test/util/thread.test.cpp
 // InvokeBeforeChildStarts).
-//
-// TODO(port): the thread priority setters (`makeThreadPrioritySetter`,
-// platform settings) and `platform::attachThread`/`detachThread` (no-ops on
-// Linux).
 //
 // Port-only: with a cooperative scheduler installed (a host without threads,
 // see cooperative_scheduler.rs) no thread starts: the object is established
@@ -29,7 +22,6 @@ use crate::local_object::LocalObject;
 use crate::run_loop::{RunLoop, RunLoopHandle};
 use crate::scheduler;
 
-/// `util::Thread<Object>`.
 pub struct Thread<O: 'static> {
     object: AspiringActor<O>,
     backing: Backing<O>,
@@ -72,15 +64,15 @@ impl<O: 'static> Thread<O> {
         Thread { object, backing: Backing::Spawned { thread: Some(thread), running: Mutex::new(running_rx) } }
     }
 
-    /// `actor()`: a reference to the object on the thread. Messages sent
-    /// before the object exists are queued.
+    /// Returns a reference to the object on the thread. Messages sent before
+    /// the object exists are queued.
     pub fn actor(&self) -> ActorRef<O> {
         self.object.self_ref()
     }
 }
 
 impl<O: 'static> Drop for Thread<O> {
-    /// `~Thread()`: wait for the queue up to here, stop the loop and join.
+    /// Waits for the queue up to here, stops the loop and joins the thread.
     fn drop(&mut self) {
         let Backing::Spawned { thread, running } = &mut self.backing else {
             return;

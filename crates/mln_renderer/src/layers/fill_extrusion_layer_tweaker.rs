@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/fill_extrusion_layer_tweaker.hpp and
-// src/mln/renderer/layers/fill_extrusion_layer_tweaker.cpp
-// (MLN_UBO_CONSOLIDATION branches: the port's backend is WebGPU).
-
 use std::sync::Arc;
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
@@ -49,7 +45,6 @@ impl FillExtrusionLayerTweaker {
     }
 }
 
-/// `util::cast<float>(std::array<uint16_t, 4>)`.
 fn cast_tlbr(tlbr: [u16; 4]) -> [f32; 4] {
     tlbr.map(f32::from)
 }

@@ -930,7 +930,6 @@ mod android {
 
     use super::*;
 
-    /// `AHardwareBuffer_Desc`.
     #[repr(C)]
     #[derive(Default)]
     struct Desc {

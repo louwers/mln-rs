@@ -1,5 +1,3 @@
-// Ports src/mln/map/tile_projector.hpp.
-
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 
@@ -20,7 +18,6 @@ impl<'a> TileProjector<'a> {
         Self::with_data(state, tile_id, state.get_projection_data(tile_id))
     }
 
-    /// `TileProjector(const TransformState&, const UnwrappedTileID&, ProjectionData)`.
     pub fn with_data(state: &'a TransformState, tile_id: &UnwrappedTileID, data: ProjectionData) -> Self {
         TileProjector { state, tile_id: *tile_id, data }
     }

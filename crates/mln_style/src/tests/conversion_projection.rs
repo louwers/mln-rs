@@ -1,5 +1,3 @@
-// Ports test/style/conversion/projection.test.cpp.
-
 use feature::Value;
 use mln_conversion::Convertible;
 use mln_style_types::ProjectionDefinition;

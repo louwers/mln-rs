@@ -1,5 +1,3 @@
-// Ports src/mln/style/collection.hpp.
-//
 // Manages an ordered collection of elements and their `Arc<Impl>`s. The
 // latter is itself stored in an `Arc`. Using immutability at the
 // collection level allows us to short-circuit significant portions of the
@@ -8,13 +6,14 @@
 
 use std::sync::Arc;
 
-/// What C++ requires of an element type: an `Impl` type, an
-/// `Immutable<Impl> baseImpl` member and `getID()`.
+/// An element of a collection: it has an `Impl` type, a shared impl and an
+/// id.
 pub trait CollectionElement {
     type Impl: ?Sized;
     fn base_impl(&self) -> Arc<Self::Impl>;
     fn get_id(&self) -> String;
-    /// `impl->id` (used to order the impls of a persistent-order collection).
+    /// The id of an impl, which orders the impls of a persistent-order
+    /// collection.
     fn impl_id(impl_: &Self::Impl) -> &str;
 }
 
@@ -46,7 +45,6 @@ impl CollectionElement for dyn crate::source::Source {
 
 pub type ImmutableVector<I> = Arc<Vec<Arc<I>>>;
 
-/// `CollectionBase<T>`.
 pub struct CollectionBase<T: CollectionElement + ?Sized> {
     wrappers: Vec<Box<T>>,
     impls: ImmutableVector<T::Impl>,
@@ -140,7 +138,7 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
     }
 }
 
-/// `Collection<T, false>`: impls in wrapper order.
+/// A collection whose impls are in wrapper order.
 pub struct Collection<T: CollectionElement + ?Sized> {
     base: CollectionBase<T>,
 }
@@ -190,7 +188,7 @@ impl<T: CollectionElement + ?Sized> Collection<T> {
     }
 }
 
-/// `Collection<T, true>` (`CollectionWithPersistentOrder<T>`): impls sorted by id.
+/// A collection whose impls are sorted by id.
 pub struct CollectionWithPersistentOrder<T: CollectionElement + ?Sized> {
     base: CollectionBase<T>,
 }
@@ -238,7 +236,7 @@ impl<T: CollectionElement + ?Sized> CollectionWithPersistentOrder<T> {
         }
     }
 
-    /// `std::lower_bound` by `impl->id`.
+    /// The index of the first impl whose id is not less than `id`.
     fn impls_index(&self, id: &str) -> usize {
         self.base.impls.partition_point(|a| T::impl_id(a) < id)
     }

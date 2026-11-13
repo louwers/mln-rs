@@ -46,7 +46,7 @@ pub fn cpp_root() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata")
 }
 
-/// `util::read_file(path)` with `path` relative to the C++ root.
+/// Reads the file at `path`, relative to [`cpp_root`].
 pub fn read_bytes(path: &str) -> Vec<u8> {
     let full = cpp_root().join(path);
     std::fs::read(&full).unwrap_or_else(|e| panic!("{}: {e}", full.display()))
@@ -56,7 +56,6 @@ pub fn read_file(path: &str) -> String {
     String::from_utf8(read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-/// `decodeImage(util::read_file(path))`.
 pub fn decode_image(path: &str) -> PremultipliedImage {
     mln_image::decode_image(&read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
@@ -77,7 +76,6 @@ fn write_output(base: &str, name: &str, image: &PremultipliedImage) {
     }
 }
 
-/// `test::getImageDiff(base, actual, pixelThreshold)`.
 pub fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64) -> f64 {
     let expected = decode_image(&format!("{base}/expected.png"));
     let mut diff = PremultipliedImage::new(expected.size);
@@ -103,8 +101,7 @@ pub fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: 
     pixels as f64 / (f64::from(expected.size.width) * f64::from(expected.size.height))
 }
 
-/// `test::checkImages(possibleExpected, actual, imageThreshold,
-/// pixelThreshold)`: the image matches one of the bases.
+/// Asserts that `actual` matches the expected image of one of `bases`.
 #[track_caller]
 pub fn check_images(bases: &[&str], actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
     let diffs: Vec<f64> = bases.iter().map(|base| get_image_diff(base, actual, pixel_threshold)).collect();
@@ -114,8 +111,8 @@ pub fn check_images(bases: &[&str], actual: &PremultipliedImage, image_threshold
     );
 }
 
-/// `test::checkImage(base, actual, imageThreshold, pixelThreshold)`: the
-/// C++ defaults are 0 and 0.
+/// Asserts that `actual` differs from `<base>/expected.png` by at most
+/// `image_threshold`. The C++ defaults for both thresholds are 0.
 #[track_caller]
 pub fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
     let diff = get_image_diff(base, actual, pixel_threshold);
@@ -219,9 +216,8 @@ impl<A> CallbackSlot<A> {
     }
 }
 
-/// `StubMapObserver`, with callbacks for the source and sprite events too.
-// TODO(port): onRegisterShaders, onPre/PostCompileShader,
-// onShaderCompileFailed callbacks (MapObserver has none of them yet).
+/// A map observer that forwards each event to a settable callback,
+/// including the source and sprite events.
 #[derive(Default)]
 pub struct StubMapObserver {
     pub will_start_loading_map_callback: CallbackSlot<()>,
@@ -310,7 +306,7 @@ struct FakeRequestEntry {
 
 type FakeRequests = RefCell<Vec<FakeRequestEntry>>;
 
-/// `FakeFileSource::FakeFileRequest`: removes itself from the list when
+/// A request of a [`FakeFileSource`]: removes itself from the list when
 /// dropped.
 struct FakeFileRequest {
     id: u64,
@@ -327,7 +323,7 @@ impl Drop for FakeFileRequest {
     }
 }
 
-/// `FakeFileSource`: records the requests made; the test responds to them.
+/// Records the requests made; the test responds to them.
 pub struct FakeFileSource {
     requests: LocalObject<FakeRequests>,
     next_id: Mutex<u64>,
@@ -335,7 +331,7 @@ pub struct FakeFileSource {
 }
 
 impl FakeFileSource {
-    /// `FakeFileSource()`: `ResourceOptions::Default()`.
+    /// A file source with the default resource options.
     pub fn new() -> Self {
         FakeFileSource {
             requests: LocalObject::new(RefCell::new(Vec::new())),
@@ -348,7 +344,6 @@ impl FakeFileSource {
         self.requests.get().expect("FakeFileSource used from another thread")
     }
 
-    /// `requests.size()`.
     pub fn requests_len(&self) -> usize {
         self.list().borrow().len()
     }
@@ -421,8 +416,8 @@ impl mln_util::logging::Observer for Recorder {
     }
 }
 
-/// `FixtureLog`: captures the log records of the calling thread while it
-/// lives (C++ installs a process-wide observer).
+/// Captures the log records of the calling thread while it lives (C++
+/// installs a process-wide observer).
 pub struct FixtureLog {
     messages: LogRecords,
 }
@@ -434,7 +429,7 @@ impl FixtureLog {
         FixtureLog { messages }
     }
 
-    /// `count(message)`: marks the matching records checked.
+    /// Counts the matching records, and marks them checked.
     pub fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
         let mut count = 0;
         for ((s, e, c, m), checked) in self.messages.lock().iter_mut() {
@@ -446,7 +441,7 @@ impl FixtureLog {
         count
     }
 
-    /// `unchecked()`: the records nobody counted.
+    /// The records nobody counted.
     pub fn unchecked(&self) -> Vec<LogRecord> {
         self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(record, _)| record.clone()).collect()
     }
@@ -466,8 +461,8 @@ impl Drop for FixtureLog {
 
 // MARK: - RunLoop with an emergency stop
 
-/// `runLoop.run()`, stopped (and failed) after `seconds` if nothing stopped
-/// it: a hang fails the test instead of hanging the test run.
+/// Runs `run_loop`, stopping it and failing after `seconds` if nothing
+/// stopped it: a hang fails the test instead of hanging the test run.
 #[track_caller]
 pub fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
     let timed_out = Rc::new(Cell::new(false));
@@ -487,10 +482,10 @@ pub fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
 
 // MARK: - MapTest (test/map/map.test.cpp)
 
-/// `MapTest<FileSource>`. Fields drop in declaration order, which is the
-/// C++ destruction order (reverse of declaration there). The map is shared
-/// (`Rc<RefCell<..>>`) so observer callbacks can reach it through a `Weak`
-/// as C++ lambdas capture `test`.
+/// A map with its frontend, observer and file source. Fields drop in
+/// declaration order, which is the C++ destruction order (reverse of
+/// declaration there). The map is shared (`Rc<RefCell<..>>`) so observer
+/// callbacks can reach it through a `Weak` as C++ lambdas capture `test`.
 ///
 /// [`map`](Self::map) hands out the map once it has handled what its style
 /// and renderer reported, and the observer gets the map's events when the
@@ -506,12 +501,11 @@ pub struct MapTest<FS: FileSource + 'static = StubFileSource> {
 }
 
 impl MapTest<StubFileSource> {
-    /// `MapTest<>()`: pixel ratio 1, `MapMode::Static`.
+    /// A test at pixel ratio 1, in `MapMode::Static`.
     pub fn new() -> Self {
         Self::with_mode(1.0, MapMode::Static)
     }
 
-    /// `MapTest<>(pixelRatio, mode)`.
     pub fn with_mode(pixel_ratio: f32, mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
@@ -520,7 +514,6 @@ impl MapTest<StubFileSource> {
 }
 
 impl MapTest<FakeFileSource> {
-    /// `MapTest<FakeFileSource>()`.
     pub fn fake() -> Self {
         let run_loop = RunLoop::new();
         let file_source = Arc::new(FakeFileSource::new());
@@ -566,7 +559,6 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         frontend.render(&mut self.map())
     }
 
-    /// `test.map.getStyle().loadJSON(json)`.
     pub fn load_json(&self, json: &str) {
         self.map().style_mut().load_json(json);
     }

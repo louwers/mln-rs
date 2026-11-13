@@ -1,6 +1,3 @@
-// Ports src/mln/text/tagged_string.hpp and src/mln/text/tagged_string.cpp
-// (and `StyledText` from src/mln/text/bidi.hpp).
-
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
@@ -11,16 +8,13 @@ use mln_util::{Color, i18n};
 use crate::glyph::GlyphIDType;
 use crate::harfbuzz::HBShapeAdjust;
 
-/// `StyledText` (bidi.hpp): each UTF-16 code unit with the index of its
-/// section.
+/// Each UTF-16 code unit with the index of its section.
 pub type StyledText = (Vec<u16>, Vec<u8>);
 
-/// `FontStackHash`.
 pub type FontStackHash = u64;
 
 /// A key for a font stack in the glyph maps: [`std::hash`] of its font
 /// names. Every thread and worker of one build computes the same key.
-// TODO(port): belongs in mln_util::font_stack.
 #[must_use]
 pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
     let mut hasher = DefaultHasher::new();
@@ -28,7 +22,6 @@ pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
     hasher.finish()
 }
 
-/// `SectionOptions`.
 #[derive(Clone, Debug)]
 pub struct SectionOptions {
     pub scale: f64,
@@ -47,7 +40,6 @@ pub struct SectionOptions {
 }
 
 impl SectionOptions {
-    /// `SectionOptions(scale, fontStack, type, startIndex, textColor)`.
     #[must_use]
     pub fn new(
         scale: f64,
@@ -71,8 +63,8 @@ impl SectionOptions {
         }
     }
 
-    /// `SectionOptions(std::string imageID)`. (C++ leaves `fontStackHash`
-    /// and `startIndex` uninitialized here; they are 0.)
+    /// The options of an image section. The font stack hash and start index
+    /// are 0 (C++ leaves them uninitialized).
     #[must_use]
     pub fn image(image_id: String) -> Self {
         SectionOptions {
@@ -95,9 +87,9 @@ impl SectionOptions {
 const PUA_BEGIN: u16 = 0xE000;
 const PUA_END: u16 = 0xF8FF;
 
-/// `TaggedString`: the shaping-code counterpart of `Formatted`, the text
-/// at a per-character level so that character-rearranging operations (e.g.
-/// BiDi) preserve formatting.
+/// The shaping-code counterpart of `Formatted`, the text at a per-character
+/// level so that character-rearranging operations (e.g. BiDi) preserve
+/// formatting.
 #[derive(Clone, Debug, Default)]
 pub struct TaggedString {
     styled_text: StyledText,
@@ -114,14 +106,12 @@ fn is_trim_whitespace(c: u16) -> bool {
 }
 
 impl TaggedString {
-    /// `TaggedString(std::u16string text, SectionOptions options)`.
     #[must_use]
     pub fn new(text: Vec<u16>, options: SectionOptions) -> Self {
         let size = text.len();
         TaggedString { styled_text: (text, vec![0; size]), sections: vec![options], ..Default::default() }
     }
 
-    /// `TaggedString(StyledText, std::vector<SectionOptions>)`.
     #[must_use]
     pub fn from_styled_text(styled_text: StyledText, sections: Vec<SectionOptions>) -> Self {
         TaggedString { styled_text, sections, ..Default::default() }
@@ -142,7 +132,7 @@ impl TaggedString {
         self.styled_text.0.is_empty()
     }
 
-    /// `getSection(index)`: `sections.at(styledText.second.at(index))`.
+    /// The section of the code unit at `index`. Panics when out of range.
     #[must_use]
     pub fn get_section(&self, index: usize) -> &SectionOptions {
         &self.sections[self.styled_text.1[index] as usize]
@@ -163,8 +153,8 @@ impl TaggedString {
         &self.styled_text
     }
 
-    /// `addTextSection(text, scale, fontStack, type, keySection, textColor)`.
-    /// Quirk kept: `startIndex` is the length *after* appending the text.
+    /// Appends a text section. Quirk kept from C++: the section's start index
+    /// is the length *after* appending the text.
     pub fn add_text_section(
         &mut self,
         section_text: &[u16],
@@ -186,8 +176,8 @@ impl TaggedString {
         self.sections.last_mut().unwrap().key_section = key_section;
     }
 
-    /// `addTextSection(text, scale, fontStack, type, adjusts, rtl,
-    /// keySection, textColor)`: `startIndex` is the length before the text.
+    /// Appends a text section with HarfBuzz adjustments. The section's start
+    /// index is the length before the text.
     #[allow(clippy::too_many_arguments)]
     pub fn add_text_section_with_adjusts(
         &mut self,
@@ -216,7 +206,6 @@ impl TaggedString {
         section.key_section = key_section;
     }
 
-    /// `addImageSection`.
     pub fn add_image_section(&mut self, image_id: &str) {
         let Some(next) = self.get_next_image_section_char_code() else {
             Log::warning(Event::Style, "Exceeded maximum number of images in a label.");
@@ -243,7 +232,7 @@ impl TaggedString {
         self.styled_text.1[character_index]
     }
 
-    /// `getMaxScale` (`util::max` = `fmax`).
+    /// The largest section scale, compared with `fmax`.
     #[must_use]
     pub fn get_max_scale(&self) -> f64 {
         let mut max_scale = 0.0;
@@ -305,8 +294,9 @@ impl TaggedString {
         }
     }
 
-    /// `verticalizePunctuation`. Relies on verticalization changing
-    /// characters in place so that style indices don't need updating.
+    /// Replaces punctuation with its vertical forms. Relies on
+    /// verticalization changing characters in place so that style indices
+    /// don't need updating.
     pub fn verticalize_punctuation(&mut self) {
         let mut replaced = i18n::verticalize_punctuation_str(&self.styled_text.0);
         for (i, unit) in replaced.iter_mut().enumerate() {
@@ -317,7 +307,8 @@ impl TaggedString {
         self.styled_text.0 = replaced;
     }
 
-    /// `allowsVerticalWritingMode` (cached until the next addTextSection).
+    /// Whether the text allows vertical writing mode (cached until the next
+    /// section is added).
     pub fn allows_vertical_writing_mode(&mut self) -> bool {
         if self.supports_vertical_writing_mode.is_none() {
             let mut allows = false;
@@ -347,7 +338,6 @@ impl TaggedString {
         self.has_need_shape_text_val
     }
 
-    /// `getNextImageSectionCharCode`.
     fn get_next_image_section_char_code(&mut self) -> Option<u16> {
         if self.image_section_id == 0 {
             self.image_section_id = PUA_BEGIN;
@@ -361,7 +351,6 @@ impl TaggedString {
     }
 }
 
-/// Ports `test/text/tagged_string.test.cpp`.
 #[cfg(test)]
 mod tests {
     use super::*;

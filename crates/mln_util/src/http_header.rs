@@ -1,6 +1,3 @@
-// Ports src/mln/util/http_header.hpp and src/mln/util/http_header.cpp
-// (`http::CacheControl`, `http::parseRetryHeaders`).
-//
 // The boost::spirit grammar of `CacheControl::parse` is ported as a small
 // hand-written parser of the same grammar: a comma-separated list (spaces
 // skipped) of `must-revalidate`, `max-age=<unsigned long long>` or any
@@ -10,7 +7,6 @@
 
 use crate::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32};
 
-/// `http::CacheControl`
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CacheControl {
     pub max_age: Option<u64>,
@@ -36,7 +32,7 @@ impl Cursor<'_> {
         self.s.get(self.pos).copied()
     }
 
-    /// `qi::lit(s)` (pre-skipped, then matched byte by byte).
+    /// Skips whitespace, then matches `lit` byte by byte.
     fn lit(&mut self, lit: &str) -> bool {
         self.skip();
         if self.s[self.pos..].starts_with(lit.as_bytes()) {
@@ -47,7 +43,6 @@ impl Cursor<'_> {
         }
     }
 
-    /// `qi::ulong_long`
     fn ulong_long(&mut self) -> Option<u64> {
         self.skip();
         let start = self.pos;
@@ -61,7 +56,6 @@ impl Cursor<'_> {
 }
 
 impl CacheControl {
-    /// `CacheControl::parse(const std::string&)`
     #[must_use]
     pub fn parse(value: &str) -> CacheControl {
         let mut result = CacheControl::default();
@@ -120,14 +114,14 @@ impl CacheControl {
         result
     }
 
-    /// `toTimePoint()`
     #[must_use]
     pub fn to_time_point(&self) -> Option<Timestamp> {
         self.max_age.map(|max_age| Timestamp::from_secs(now().secs_since_epoch().wrapping_add(max_age as i64)))
     }
 }
 
-/// `std::stoi`: leading whitespace, sign, digits; `None` where it throws.
+/// Parses an integer as `std::stoi` does: leading whitespace, sign, digits;
+/// `None` where it throws.
 fn stoi(s: &str) -> Option<i32> {
     let t = s.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
     let (negative, digits) = match t.as_bytes().first() {
@@ -144,10 +138,9 @@ fn stoi(s: &str) -> Option<i32> {
     i32::try_from(value).ok()
 }
 
-/// `parseRetryHeaders(retryAfter, xRateLimitReset)`: when to retry a
-/// rate-limited request, from `Retry-After` (seconds or an HTTP date) or else
-/// `X-Rate-Limit-Reset` (a Unix time). `None` when the header it reads is
-/// absent or doesn't parse.
+/// When to retry a rate-limited request, from `Retry-After` (seconds or an
+/// HTTP date) or else `X-Rate-Limit-Reset` (a Unix time). `None` when the
+/// header it reads is absent or doesn't parse.
 pub fn parse_retry_headers(retry_after: &Option<String>, x_rate_limit_reset: &Option<String>) -> Option<Timestamp> {
     if let Some(retry_after) = retry_after {
         match stoi(retry_after) {
@@ -168,7 +161,6 @@ mod tests {
     // gtest: HTTPHeader.Parsing
     #[test]
     fn parsing() {
-        // Ports test/storage/headers.test.cpp `HTTPHeader.Parsing`.
         let cases: &[(&str, Option<u64>, bool)] = &[
             (r"", None, false),
             (r"max-age =34", Some(34), false),

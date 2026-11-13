@@ -1,6 +1,3 @@
-// Ports include/mln/shaders/vulkan/shader_program.hpp and
-// src/mln/shaders/vulkan/shader_program.cpp
-//
 // Differences from C++:
 // - The stages are compiled by the context (`Context::create_program`,
 //   with `shaders::compiler` in place of glslang), which hands the program
@@ -25,7 +22,6 @@ use crate::context::Context;
 use crate::pipeline::PipelineInfo;
 use crate::renderer_backend::BackendImpl;
 
-/// `vulkan::ShaderProgram`
 pub struct ShaderProgram {
     shader_program_id: SimpleIdentity,
     shader_name: String,
@@ -68,8 +64,8 @@ impl ShaderProgram {
         &self.shader_name
     }
 
-    /// `getPipeline(pipelineInfo)`: the pipeline of the program with the
-    /// state of `pipeline_info`, made when first asked for.
+    /// The pipeline of the program with the state of `pipeline_info`, made
+    /// when first asked for.
     pub fn get_pipeline(&self, pipeline_info: &PipelineInfo) -> Option<vk::Pipeline> {
         let hash = pipeline_info.hash();
         if let Some(&pipeline) = self.pipelines.borrow().get(&hash) {

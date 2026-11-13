@@ -1,6 +1,4 @@
-// Ports include/mln/style/expression/match.hpp and
-// src/mln/style/expression/match.cpp. (The module is `match_` because
-// `match` is a Rust keyword.)
+// The module is `match_` because `match` is a Rust keyword.
 
 use std::sync::Arc;
 
@@ -68,7 +66,7 @@ impl MatchLabel for i64 {
     }
 }
 
-/// `Match<T>::Branches` (C++ `std::unordered_map`; ordered here).
+/// The output of each label, sorted by label (C++ uses an unordered map).
 pub type Branches<T> = VecMap<T, Arc<dyn Expression>>;
 
 pub struct Match<T: MatchLabel> {
@@ -179,7 +177,7 @@ impl<T: MatchLabel> Expression for Match<T> {
     }
 }
 
-/// `InputType`: `variant<int64_t, std::string>`.
+/// A match label: an integer or a string.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InputType {
     Int(i64),

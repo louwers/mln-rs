@@ -1,12 +1,6 @@
-// Ports src/mln/style/layers/symbol_layer_impl.hpp +
-// src/mln/style/layers/symbol_layer_impl.cpp. `staticTypeInfo()` is generated
-// in C++ (layer.cpp.ejs); here it is in symbol_layer.rs.
-//
-// `FormatSectionOverrides` is split: the parts the style uses
-// (`hasOverrides`, `hasOverride`, `hasPaintPropertyDifference`) and
-// `updateOverrides` are here; `setOverride(s)`, which builds
-// `expression::FormatSectionOverride`s, is in mln_renderer
-// (format_section_override.rs).
+// The format section override checks and `update_overrides` are here;
+// `set_overrides`, which builds `FormatSectionOverride` expressions, is in
+// format_section_override.rs.
 
 use std::sync::OnceLock;
 
@@ -58,15 +52,14 @@ impl AsFormattedValue for PossiblyEvaluatedPropertyValue<Formatted> {
     }
 }
 
-/// `FormatSectionOverrides<SymbolPaintProperties::OverridableProperties>`
-/// (`SymbolLayerPaintPropertyOverrides`). The overridable properties are
-/// the paint properties with `IsOverridable` (`text-color`); the generic
-/// C++ fold over them is written out for that one property.
+/// The format section overrides of the symbol paint properties. The only
+/// overridable property is `text-color`, so the checks are written out for it
+/// rather than folded over a list of overridable properties.
 pub struct SymbolLayerPaintPropertyOverrides;
 
 impl SymbolLayerPaintPropertyOverrides {
-    /// `hasOverride<Property>(formatted)`, with `Property::hasOverride` for
-    /// both section types.
+    /// Whether a section of `formatted` overrides a property, as the property's
+    /// `has_override` for each section type tells.
     fn has_override(
         formatted: &dyn AsFormattedValue,
         section_has_override: fn(&FormattedSection) -> bool,
@@ -131,7 +124,7 @@ impl SymbolLayerPaintPropertyOverrides {
         }
     }
 
-    /// `hasOverrides(formatted)`: any overridable property is overridden.
+    /// Whether `formatted` overrides any overridable property.
     pub fn has_overrides(formatted: &dyn AsFormattedValue) -> bool {
         let mut result = false;
         result |= Self::has_override(
@@ -142,8 +135,8 @@ impl SymbolLayerPaintPropertyOverrides {
         result
     }
 
-    /// `updateOverrides(evaluated, updated)` (`updateOverride<TextColor>`):
-    /// carries a `FormatSectionOverride` wrapper over to `updated`.
+    /// Carries a `FormatSectionOverride` wrapper of `text-color` over from
+    /// `evaluated` to `updated`.
     // gtests-data: ported for Layer.SymbolLayerOverrides.
     pub fn update_overrides(
         evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -163,8 +156,8 @@ impl SymbolLayerPaintPropertyOverrides {
         }
     }
 
-    /// `hasPaintPropertyDifference(lhs, rhs)`: a constant overridable
-    /// property differs.
+    /// Whether a constant overridable property differs between `lhs` and
+    /// `rhs`.
     #[must_use]
     pub fn has_paint_property_difference(
         lhs: &SymbolPaintProperties::Transitionable,
@@ -177,19 +170,16 @@ impl SymbolLayerPaintPropertyOverrides {
     }
 }
 
-/// `SymbolLayer::Impl`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
     pub layout: SymbolLayoutProperties::Unevaluated,
     pub paint: SymbolPaintProperties::Transitionable,
-    /// `mutable std::optional<bool> hasFormatSectionOverrides_`.
     #[serde(skip)]
     has_format_section_overrides_: OnceLock<bool>,
 }
 
 impl Impl {
-    /// `using Layer::Impl::Impl;` (`Impl(std::string layerID, std::string sourceID)`).
     #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         Impl {
@@ -207,8 +197,7 @@ impl Impl {
     }
 }
 
-/// `SymbolLayer::Impl : public Layer::Impl`: the base members read as
-/// `impl_.id`, `impl_.visibility`, ... as in C++.
+/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
 impl std::ops::Deref for Impl {
     type Target = ImplBase;
     fn deref(&self) -> &ImplBase {

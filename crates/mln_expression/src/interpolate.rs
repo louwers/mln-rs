@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/interpolate.hpp and
-// src/mln/style/expression/interpolate.cpp.
-//
 // C++ `InterpolateImpl<T>` (a template over the output type) is the
 // `InterpolateOutput` tag here; there is one `Interpolate` struct.
 
@@ -31,7 +28,6 @@ enum InterpolateOutput {
 }
 
 impl InterpolateOutput {
-    /// `valueTypeToExpressionType<T>()`.
     fn expression_type(self) -> Type {
         match self {
             InterpolateOutput::Number => Type::Number,
@@ -56,7 +52,6 @@ impl InterpolateOutput {
     }
 }
 
-/// `Interpolator<float>::operator()(a, b, double t)`.
 fn interpolate_float(a: f32, b: f32, t: f64) -> f32 {
     (f64::from(a) * (1.0 - t) + f64::from(b) * t) as f32
 }
@@ -151,7 +146,7 @@ impl Interpolate {
                 // Interpolator<VariableAnchorOffsetCollection> only has a
                 // float overload. It throws std::runtime_error on mismatched
                 // collections, which propagates out of evaluate() in C++.
-                // TODO(port): the port reports it as an evaluation error.
+                // Here it is an evaluation error.
                 match VariableAnchorOffsetCollection::interpolate(a, b, t as f32) {
                     Ok(v) => Value::VariableAnchorOffsetCollection(v),
                     Err(e) => return Err(EvaluationError::new(e)),

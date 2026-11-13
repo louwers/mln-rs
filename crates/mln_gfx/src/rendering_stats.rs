@@ -1,15 +1,10 @@
-// Ports include/mln/gfx/rendering_stats.hpp (the counters).
-//
-// TODO(port): `RenderingStats::toString`/`toJSONString`/`eval`
-// (src/mln/gfx/rendering_stats.cpp) arrive with their first user.
-
 use std::collections::{HashMap, HashSet};
 
 use mln_tile_id::OverscaledTileID;
 
-/// `RenderingStats::NDCBound`: a bounding box in normalized device
-/// coordinates, positive up and right. The default is empty (inverted), so
-/// that [`include`](Self::include) of any bound yields that bound.
+/// A bounding box in normalized device coordinates, positive up and right. The
+/// default is empty (inverted), so that [`include`](Self::include) of any bound
+/// yields that bound.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NDCBound {
     pub min_x: f64,
@@ -34,7 +29,7 @@ impl NDCBound {
     }
 }
 
-/// `RenderingStats::FeatureInfo`: where a feature was rendered in a frame.
+/// Where a feature was rendered in a frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FeatureInfo {
     /// The bounding box for this feature.
@@ -50,7 +45,6 @@ impl FeatureInfo {
     }
 }
 
-/// `RenderingStats::SourceLayerID`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceLayerID {
     pub source_id: String,
@@ -62,8 +56,8 @@ pub type LayerFeaturesMap = HashMap<String, FeatureInfo>;
 /// Rendered features of a frame, by source and layer.
 pub type FrameRenderedFeaturesMap = HashMap<SourceLayerID, LayerFeaturesMap>;
 
-/// `RenderLayer::Stats::addRenderedFeature`: add an entry or merge with an
-/// existing one.
+/// Adds an entry for `feature_id` to `into`, or merges it into the existing
+/// one.
 pub fn add_rendered_feature(
     into: &mut LayerFeaturesMap,
     feature_id: &str,
@@ -77,7 +71,6 @@ pub fn add_rendered_feature(
     }
 }
 
-/// `RenderLayer::Stats::merge`.
 pub fn merge_layer_features(into: &mut LayerFeaturesMap, from: LayerFeaturesMap) {
     for (feature_id, info) in from {
         match into.entry(feature_id) {

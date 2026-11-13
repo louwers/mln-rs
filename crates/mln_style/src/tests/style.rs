@@ -1,5 +1,3 @@
-// Ports test/style/style.test.cpp.
-
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -27,9 +25,7 @@ use crate::sources::tile_source::{UrlOrTileset, VectorSource};
 use crate::style::{Impl, Style};
 use crate::transition_options::TransitionOptions;
 
-/// `Style::Impl style{fileSource, 1.0, threadPool}` with
-/// `auto fileSource = std::make_shared<StubFileSource>();`, as the C++ style
-/// tests construct it.
+/// A style impl over a stub file source, with pixel ratio 1.
 fn stub_style() -> Impl {
     let file_source =
         mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Asynchronous);

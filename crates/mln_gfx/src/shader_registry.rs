@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/shader_registry.hpp and src/mln/gfx/shader_registry.cpp
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 

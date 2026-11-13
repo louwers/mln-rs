@@ -1,9 +1,8 @@
-// Ports include/mln/gfx/draw_mode.hpp
-
 use crate::gfx_types::{DrawModeType, PrimitiveType};
 
-/// `gfx::DrawMode`. The C++ subclasses (`Points`, `Lines`, `LineStrip`,
-/// `Triangles`, `TriangleStrip`) are constructor functions here.
+/// A primitive type and its point size or line width. The C++ subclasses
+/// (`Points`, `Lines`, `LineStrip`, `Triangles`, `TriangleStrip`) are
+/// constructor functions here.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DrawMode {
     pub type_: DrawModeType,
@@ -44,7 +43,6 @@ impl DrawMode {
         DrawMode { type_: DrawModeType::TriangleStrip, size: 0.0 }
     }
 
-    /// `BufferGroupSizeOf<DrawMode>`
     #[must_use]
     pub fn buffer_group_size(&self) -> usize {
         match self.type_ {
@@ -54,7 +52,6 @@ impl DrawMode {
         }
     }
 
-    /// `PrimitiveTypeOf<DrawMode>`
     #[must_use]
     pub fn primitive_type(&self) -> PrimitiveType {
         match self.type_ {

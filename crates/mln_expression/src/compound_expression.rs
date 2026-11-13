@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/compound_expression.hpp and
-// src/mln/style/expression/compound_expression.cpp.
-//
 // C++ derives each signature's parameter and result types from the C++
 // types of a lambda (`Signature<R(Params...)>`). Here each definition states
 // its `type::Type`s explicitly and its `apply` function evaluates the
@@ -34,7 +31,6 @@ pub enum Params {
 
 type ApplyFn = fn(&EvaluationContext<'_>, &[Box<dyn Expression>]) -> EvaluationResult;
 
-/// `detail::SignatureBase`.
 pub struct SignatureBase {
     pub result: Type,
     pub params: Params,
@@ -84,7 +80,6 @@ fn feature_id_as_expression_value(params: &EvaluationContext<'_>) -> Value {
     identifier_to_expression_value(&id)
 }
 
-/// `toExpressionValue(mln::Value(identifier))`.
 fn identifier_to_expression_value(id: &FeatureIdentifier) -> Value {
     match id {
         FeatureIdentifier::Null => Value::Null,
@@ -568,7 +563,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
     ]
 });
 
-/// `compoundExpressionRegistry.equal_range(name)`, in definition order.
+/// The signatures registered under `name`, in definition order.
 fn definitions(name: &str) -> Vec<&'static SignatureBase> {
     REGISTRY.iter().filter(|s| s.name == name).collect()
 }

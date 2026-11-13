@@ -1,9 +1,6 @@
-// Ports util::compress and util::decompress from
-// platform/default/src/mln/util/compression.cpp.
-
 use std::io::Write;
 
-/// `util::compress(raw)`: a zlib stream (`windowBits = MAX_WBITS`) at
+/// Compresses `raw` into a zlib stream (`windowBits = MAX_WBITS`) at
 /// `Z_DEFAULT_COMPRESSION` (level 6), `memLevel` 8, `Z_DEFAULT_STRATEGY`.
 ///
 /// The stream decompresses to the same bytes as zlib's, but the compressed
@@ -15,9 +12,8 @@ pub fn compress(raw: &[u8]) -> Result<Vec<u8>, String> {
     encoder.finish().map_err(|_| "failed to deflate".to_string())
 }
 
-/// `util::is_compressed(v)`: a gzip or zlib header (with one of the four
-/// usual zlib compression levels) on more than two bytes. (Added by
-/// gtests-storage for the MBTiles and PMTiles file sources.)
+/// Whether `v` is longer than two bytes and starts with a gzip or zlib header
+/// (with one of the four usual zlib compression levels).
 #[must_use]
 pub fn is_compressed(v: &[u8]) -> bool {
     if v.len() > 2 {
@@ -39,11 +35,10 @@ pub fn is_compressed(v: &[u8]) -> bool {
     false
 }
 
-/// `util::decompress(raw, windowBits = CompressionFormat::DETECT)`: inflates a
-/// zlib or gzip stream (zlib's header auto-detection, `MAX_WBITS + 32`). Like
-/// the C++ loop, bytes after the end of the stream are ignored, and a stream
-/// that ends early is an error. C++ throws `std::runtime_error` with zlib's
-/// message; the message here is flate2's.
+/// Inflates a zlib or gzip stream (zlib's header auto-detection,
+/// `MAX_WBITS + 32`). Like the C++ loop, bytes after the end of the stream
+/// are ignored, and a stream that ends early is an error. The error message
+/// is flate2's, not zlib's.
 pub fn decompress(raw: &[u8]) -> Result<Vec<u8>, String> {
     if raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
         // gzip (rfc1952): one member; zlib checks the CRC-32 and size trailer.

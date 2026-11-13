@@ -1,9 +1,7 @@
-// Ports src/mln/renderer/property_evaluator.hpp. It lives in mln_style
-// because style/properties.hpp needs it (a cut point of the C++ include cycle).
+// Lives in mln_style because the property system needs it.
 //
-// C++ evaluators are visitors with three `operator()` overloads that
-// `PropertyValue<T>::evaluate` passes to `variant::visit`; `Evaluator<T>` is
-// that overload set.
+// An evaluator handles each case of a `PropertyValue<T>` (undefined, a
+// constant or an expression); `PropertyValue::evaluate` picks the case.
 
 use crate::expression::{EvaluationContext, ValueConverter};
 use crate::property_expression::PropertyExpression;
@@ -19,7 +17,6 @@ pub trait Evaluator<T> {
     fn expression(&self, expression: &PropertyExpression<T>) -> Self::ResultType;
 }
 
-/// `PropertyEvaluator<T>`.
 pub struct PropertyEvaluator<'a, T> {
     parameters: &'a PropertyEvaluationParameters,
     default_value: T,

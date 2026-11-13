@@ -1,6 +1,3 @@
-// Ports the render-source tests of test/style/source.test.cpp (the ones that
-// need a RenderSource; the style-side ones are in mln_style's tests).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -48,15 +45,14 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{Tileset, VectorEncoding};
 use parking_lot::Mutex;
 
-/// `SourceTest`.
 struct SourceTest {
     run_loop: RunLoop,
     transform: Transform,
     thread_pool: TaggedScheduler,
 }
 
-/// `SourceTest::tileParameters(mapMode)`, from a transform state the caller
-/// owns (the C++ fixture keeps `transformState` as a member).
+/// The tile parameters for `map_mode`, from a transform state the caller
+/// owns.
 fn tile_parameters<'a>(
     transform_state: &'a TransformState,
     thread_pool: &TaggedScheduler,
@@ -109,13 +105,12 @@ impl SourceTest {
         tile_parameters(self.transform.get_state(), &self.thread_pool, map_mode, file_source)
     }
 
-    /// `test.end()`, usable from `'static` callbacks.
+    /// Ends the test; usable from `'static` callbacks.
     fn end_handle(&self) -> impl Fn() + Clone + 'static {
         let handle = self.run_loop.handle();
         move || handle.stop()
     }
 
-    /// `test.run()`.
     fn run(&self) {
         self.run_loop.run();
     }
@@ -131,7 +126,6 @@ type OnTileChanged = Box<dyn Fn(&str, &OverscaledTileID)>;
 type OnTileError = Box<dyn Fn(&str, &OverscaledTileID, Error)>;
 type OnSourceChanged = Box<dyn Fn(&dyn Source)>;
 
-/// `StubRenderSourceObserver` (`test/src/mln/test/stub_render_source_observer.hpp`).
 #[derive(Default)]
 struct StubRenderSourceObserver {
     tile_changed: RefCell<Option<OnTileChanged>>,
@@ -152,8 +146,7 @@ impl RenderSourceObserver for StubRenderSourceObserver {
     }
 }
 
-/// `StubStyleObserver` (`test/src/mln/test/stub_style_observer.hpp`), the
-/// `SourceObserver` half.
+/// A style observer stub: the `SourceObserver` half.
 #[derive(Default)]
 struct StubStyleObserver {
     source_changed: RefCell<Option<OnSourceChanged>>,
@@ -176,8 +169,8 @@ enum Tiled {
 }
 
 impl Tiled {
-    /// `RasterLayer` / `HillshadeLayer` / `LineLayer` (source-layer "water")
-    /// "id" on "source", as layer properties.
+    /// A raster, hillshade or line (source-layer "water") layer "id" on
+    /// "source", as layer properties.
     fn layers(self) -> Vec<Arc<dyn LayerProperties>> {
         let properties: Arc<dyn LayerProperties> = match self {
             Tiled::Raster => {
@@ -197,8 +190,8 @@ impl Tiled {
         vec![properties]
     }
 
-    /// `RasterSource("source", tileset, 512)` / `RasterDEMSource(...)` /
-    /// `VectorSource("source", tileset)` with `tileset.tiles = {"tiles"}`.
+    /// The source "source" for `url_or_tileset`: raster or raster-dem with
+    /// tile size 512, or vector.
     fn source(self, url_or_tileset: UrlOrTileset) -> Box<dyn Source> {
         match self {
             Tiled::Raster => Box::new(RasterSource::new("source", url_or_tileset, 512, SourceType::Raster, None, None)),
@@ -248,7 +241,6 @@ fn run_tile_case(
     render_source.base().base_impl.type_
 }
 
-/// `Source.<Type>TileEmpty`.
 fn tile_empty(kind: Tiled) {
     let test = SourceTest::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
@@ -275,7 +267,6 @@ fn tile_empty(kind: Tiled) {
     assert!(*changed.borrow());
 }
 
-/// `Source.<Type>TileFail`.
 fn tile_fail(kind: Tiled) {
     let test = SourceTest::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
@@ -305,7 +296,6 @@ fn tile_fail(kind: Tiled) {
     assert!(*failed.borrow());
 }
 
-/// `Source.<Type>TileCorrupt`.
 fn tile_corrupt(kind: Tiled) {
     let test = SourceTest::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
@@ -338,7 +328,6 @@ fn tile_corrupt(kind: Tiled) {
     assert!(*failed.borrow());
 }
 
-/// `Source.<Type>TileCancel`.
 fn tile_cancel(kind: Tiled) {
     let test = SourceTest::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
@@ -509,7 +498,6 @@ fn vector_tile_cancel() {
     tile_cancel(Tiled::Vector);
 }
 
-/// `Source.<Type>TileAttribution`.
 fn tile_attribution(kind: Tiled, attribution: &'static str) {
     let test = SourceTest::new();
     let layers = kind.layers();
@@ -934,8 +922,7 @@ impl LogObserver for Recorder {
     }
 }
 
-/// `FixtureLog` (`test/src/mln/test/fixture_log_observer.cpp`) for this
-/// thread.
+/// Captures this thread's log records.
 struct FixtureLog {
     messages: Records,
 }
@@ -947,7 +934,6 @@ impl FixtureLog {
         FixtureLog { messages }
     }
 
-    /// `count({severity, event, -1, msg})`.
     fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
         let mut count = 0;
         for (m, checked) in self.messages.lock().iter_mut() {

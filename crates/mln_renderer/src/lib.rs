@@ -1,4 +1,5 @@
-//! Ports `src/mln/renderer` (+ `include/mln/renderer`) and `util/tile_cover`.
+//! The map renderer: sources and tiles, layouts and buckets, render layers,
+//! and the orchestrator that turns a style into each frame's render tree.
 
 pub mod algorithm;
 pub mod bucket;

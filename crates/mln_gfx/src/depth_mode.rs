@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/depth_mode.hpp
-
 use mln_util::range::Range;
 
 use crate::types::{DepthFunctionType, DepthMaskType};

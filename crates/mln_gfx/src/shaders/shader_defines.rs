@@ -1,15 +1,8 @@
-// Ports include/mln/shaders/shader_defines.hpp and the id enum of
-// include/mln/shaders/layer_ubo.hpp, for `MLN_RENDER_BACKEND_WEBGPU`
-// (`getEnumValue(packed, unpacked)` = packed).
-//
 // The values were checked against the C++ headers compiled with
 // -DMLN_RENDER_BACKEND_WEBGPU=1 (idGlobalUBOIndex = 1, idBackgroundDrawableUBO
 // = 2, idProjectionUBO = 4, idBackgroundPropsUBO = 5, layerUBOStartId = 6,
 // maxUBOCountPerShader = 7, maxTextureCountPerShader = 3,
 // maxAttributeCountPerShader = 11).
-//
-// TODO(port): the ids of the other layer types arrive with those layers
-// (circle, fill and line: layers agent, M3).
 
 // --- layer_ubo.hpp: global UBOs (WebGPU branch) ---
 pub const ID_GLOBAL_PAINT_PARAMS_UBO: usize = 0;
@@ -41,9 +34,9 @@ pub const ID_LINE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; //
 pub const ID_LINE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
 pub const LINE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
-/// `ClippingMask` UBO (`idClippingMaskUBO = idDrawableReservedVertexOnlyUBO`).
+/// The clipping mask UBO, in the drawable's reserved vertex-only slot.
 pub const ID_CLIPPING_MASK_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
-/// `idDebugUBO = getEnumValue(drawableReservedUBOCount, ...)` (layers: debug).
+/// The debug layer's UBO, the first slot after the reserved ones.
 pub const ID_DEBUG_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
 // fill/color-relief/fill-extrusion reserve one more SSBO, so the max of the

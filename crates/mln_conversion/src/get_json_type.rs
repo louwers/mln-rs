@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/get_json_type.hpp and
-// src/mln/style/conversion/get_json_type.cpp.
-
 use feature::Value;
 
 use crate::conversion::Convertible;

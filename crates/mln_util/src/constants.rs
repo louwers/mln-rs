@@ -1,12 +1,8 @@
-// Ports include/mln/util/constants.hpp + src/mln/util/constants.cpp.
-
 use std::time::Duration;
 
 use crate::unitbezier::UnitBezier;
 
-/// `tileSize_D`.
 pub const TILE_SIZE_D: f64 = 512.0;
-/// `tileSize_I`.
 pub const TILE_SIZE_I: u16 = 512;
 /// The seed's name for `tileSize_D`.
 pub const TILE_SIZE: f64 = TILE_SIZE_D;
@@ -72,7 +68,7 @@ pub const TERRAIN_RGB_MAXZOOM: u8 = 15;
 pub const LAST_RESORT_ALPHABETIC_FONT: &str = "Open Sans Regular";
 pub const LAST_RESORT_PAN_UNICODE_FONT: &str = "Arial Unicode MS Regular";
 
-/// `mln::debug` (src/mln/util/constants.cpp): on in debug builds only.
+/// Debug warning switches; the ones that are on are on in debug builds only.
 pub mod debug {
     pub const TILE_PARSE_WARNINGS: bool = false;
     pub const STYLE_PARSE_WARNINGS: bool = false;

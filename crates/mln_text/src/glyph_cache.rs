@@ -1,9 +1,6 @@
-// Ports include/mln/text/glyph_cache.hpp, src/mln/text/glyph_cache.cpp and
-// src/mln/util/weak_immutable.hpp.
-//
-// `WeakImmutable<T>` is `std::sync::Weak<T>` here, since `Immutable<T>` is
-// `Arc<T>`. C++'s `std::unordered_multimap` is a map from hash to a bucket of
-// weak references.
+// Cached glyphs are held through `std::sync::Weak`. C++'s
+// `std::unordered_multimap` is a map from hash to a bucket of weak
+// references.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -13,16 +10,16 @@ use parking_lot::Mutex;
 
 use crate::glyph::{Glyph, GlyphID};
 
-/// `GlyphCache::Range`: the glyphs parsed from one glyph range.
+/// The glyphs parsed from one glyph range.
 pub type GlyphCacheRange = BTreeMap<GlyphID, Arc<Glyph>>;
 
 /// The table sizes below which expired entries are left in place.
 const MIN_SWEEP: usize = 4096;
 
-/// `GlyphCache`: keeps one copy of equal glyphs and glyph ranges. It only
-/// holds weak references, so it never keeps a glyph alive. Renderers given
-/// the same cache share the glyphs they parse from glyph PBFs, across maps
-/// and font stacks. Thread-safe.
+/// Keeps one copy of equal glyphs and glyph ranges. It only holds weak
+/// references, so it never keeps a glyph alive. Renderers given the same
+/// cache share the glyphs they parse from glyph PBFs, across maps and font
+/// stacks. Thread-safe.
 #[derive(Default)]
 pub struct GlyphCache {
     inner: Mutex<Inner>,
@@ -126,7 +123,7 @@ impl GlyphCache {
         self.inner.lock().ranges.intern(hash, range, same_range)
     }
 
-    /// `size()`: the glyphs alive, not counting ranges. Walks the whole
+    /// The number of glyphs alive, not counting ranges. Walks the whole
     /// table.
     pub fn size(&self) -> usize {
         let inner = self.inner.lock();

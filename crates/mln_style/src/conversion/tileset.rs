@@ -1,14 +1,9 @@
-// Ports include/mln/style/conversion/tileset.hpp,
-// src/mln/style/conversion/tileset.cpp and the SourceOptions converter of
-// src/mln/style/conversion/source_options.cpp.
-
 use mln_math::clamp_f64;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
 
 use super::{Converter, Convertible, Error};
 
-/// `SourceOptions`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SourceOptions {
     pub raster_encoding: Option<RasterEncoding>,
@@ -19,7 +14,7 @@ pub struct SourceOptions {
     pub maxzoom: Option<u8>,
 }
 
-/// `zoomMember(value, name, error, invalid)`: `Err(())` is C++'s `invalid`.
+/// The zoom level member `name`, if present. `Err(())` means it is invalid.
 fn zoom_member(value: &Convertible<'_>, name: &str, error: &mut Error) -> Result<Option<u8>, ()> {
     let Some(member) = value.object_member(name) else {
         return Ok(None);
@@ -203,7 +198,7 @@ impl Converter for Tileset {
     }
 }
 
-/// `convertJSON<Tileset>(json, error)` over bytes (see
+/// Parses JSON bytes, then converts them to a tileset (see
 /// conversion/geojson.rs for the JSON syntax error message).
 pub fn convert_json_tileset(json: &[u8], error: &mut Error) -> Option<Tileset> {
     let document: serde_json::Value = match serde_json::from_slice(json) {

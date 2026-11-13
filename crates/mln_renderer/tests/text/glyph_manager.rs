@@ -1,5 +1,3 @@
-// Ports test/text/glyph_manager.test.cpp.
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -40,7 +38,6 @@ fn stub_glyph(glyph_id: GlyphID) -> Glyph {
     }
 }
 
-/// `StubLocalGlyphRasterizer`.
 struct StubLocalGlyphRasterizer;
 
 impl LocalGlyphRasterizer for StubLocalGlyphRasterizer {
@@ -53,7 +50,6 @@ impl LocalGlyphRasterizer for StubLocalGlyphRasterizer {
     }
 }
 
-/// `KatakanaOnlyLocalGlyphRasterizer`.
 struct KatakanaOnlyLocalGlyphRasterizer;
 
 impl LocalGlyphRasterizer for KatakanaOnlyLocalGlyphRasterizer {
@@ -66,7 +62,6 @@ impl LocalGlyphRasterizer for KatakanaOnlyLocalGlyphRasterizer {
     }
 }
 
-/// `LatinALocalGlyphRasterizer`.
 struct LatinALocalGlyphRasterizer;
 
 impl LocalGlyphRasterizer for LatinALocalGlyphRasterizer {
@@ -83,7 +78,6 @@ type LoadedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
 type ErrorFn = Box<dyn FnMut(&FontStack, &GlyphRange, Error)>;
 type RequestedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
 
-/// `StubGlyphManagerObserver`.
 #[derive(Default)]
 struct StubGlyphManagerObserver {
     glyphs_loaded: RefCell<Option<LoadedFn>>,
@@ -113,9 +107,9 @@ impl GlyphManagerObserver for StubGlyphManagerObserver {
 
 type OnGlyphsAvailable = Rc<dyn Fn(GlyphMap)>;
 
-/// `StubGlyphRequestor`. The callback is an `Rc<dyn Fn>` because C++'s
-/// `LocalCJKGlyphPrefersLocalRasterizationOverRange` calls `getGlyphs` from
-/// inside it, which notifies the requestor again.
+/// A glyph requestor stub. The callback is an `Rc<dyn Fn>` because
+/// `local_cjk_glyph_prefers_local_rasterization_over_range` calls
+/// `get_glyphs` from inside it, which notifies the requestor again.
 #[derive(Default)]
 struct StubGlyphRequestor {
     glyphs_available: RefCell<Option<OnGlyphsAvailable>>,
@@ -161,7 +155,6 @@ impl GlyphManagerTest {
         }
     }
 
-    /// `GlyphManagerTest(localGlyphRasterizer, glyphCache)`.
     fn with_glyph_cache(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, glyph_cache: Arc<GlyphCache>) -> Self {
         let mut test = Self::new();
         test.glyph_manager = GlyphManager::with_glyph_cache(Some(local_glyph_rasterizer), glyph_cache);
@@ -207,7 +200,6 @@ fn test_stack() -> FontStack {
     vec!["Test Stack".to_owned()]
 }
 
-/// `GlyphDependencies{.glyphs = {{{{"Test Stack"}}, {chars...}}}, .shapes = {}}`.
 fn dependencies(chars: &[char]) -> GlyphDependencies {
     let ids: GlyphIDs = chars.iter().map(|c| GlyphID::new(*c as u32)).collect();
     GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: HBShapeRequests::default() }

@@ -1,5 +1,3 @@
-// Ports src/mln/style/sky_impl.hpp + src/mln/style/sky_impl.cpp.
-//
 // `SkyProperty<T>` has the same typedefs as `PaintProperty<T>`, so the tags
 // use the `paint_property!` macro, as the light's do.
 
@@ -20,9 +18,6 @@ crate::paint_property!(pub struct SkyColor: Color = Color::new(136.0_f32 / 255.0
 crate::paint_property!(pub struct SkyHorizonBlend: f32 = 0.8_f32);
 
 crate::paint_properties!(
-    /// `using SkyProperties = Properties<SkyAtmosphereBlend, SkyFogColor,
-    /// SkyFogGroundBlend, SkyHorizonColor, SkyHorizonFogBlend, SkyColor,
-    /// SkyHorizonBlend>`.
     #[allow(non_snake_case)]
     pub mod SkyProperties {
         sky_atmosphere_blend: SkyAtmosphereBlend,
@@ -35,7 +30,6 @@ crate::paint_properties!(
     }
 );
 
-/// `Sky::Impl`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Impl {
     pub properties: SkyProperties::Transitionable,

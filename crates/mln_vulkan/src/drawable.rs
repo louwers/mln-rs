@@ -1,6 +1,3 @@
-// Ports include/mln/vulkan/drawable.hpp, src/mln/vulkan/drawable_impl.hpp
-// and src/mln/vulkan/drawable.cpp
-//
 // Differences from C++:
 // - The drawable's uniform buffer set is bound only when it has a buffer.
 //   C++ binds one for every drawable, of placeholders for most: the layer
@@ -49,14 +46,13 @@ use crate::shaders::shader_program::as_vulkan_shader;
 use crate::upload_pass::UploadPass;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
-/// `struct IndexBuffer : gfx::IndexBufferBase`: adapts `gfx::IndexBuffer`.
+/// The uploaded buffer of an index vector.
 struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
 
 impl IndexBufferBase for IndexBuffer {}
 
-/// `vulkan::Drawable::Impl`
 struct DrawableImpl {
     segments: Vec<UniqueDrawSegment>,
 
@@ -249,9 +245,8 @@ impl Drawable {
         self.base.attribute_update_time = Some(Instant::now());
     }
 
-    /// `buildVulkanInputBindings(context)`: the vertex input of the
-    /// pipelines, a binding for each way the attributes read a buffer, and
-    /// the buffers and offsets to bind at them.
+    /// Builds the vertex input of the pipelines, a binding for each way the
+    /// attributes read a buffer, and the buffers and offsets to bind at them.
     fn build_vulkan_input_bindings(&mut self, context: &Context) {
         let impl_ = &mut self.impl_;
         impl_.vulkan_vertex_buffers.clear();
@@ -342,7 +337,6 @@ impl Drawable {
         impl_.pipeline_info.update_vertex_input_hash();
     }
 
-    /// `bindAttributes(encoder)`
     fn bind_attributes(&self, context: &Context, command_buffer: vk::CommandBuffer) -> bool {
         if self.impl_.vulkan_vertex_buffers.is_empty() {
             return false;
@@ -377,7 +371,6 @@ impl Drawable {
         true
     }
 
-    /// `bindDescriptors(encoder)`
     fn bind_descriptors(&mut self, context: &Context, command_buffer: vk::CommandBuffer) -> bool {
         let Some(shader_ptr) = self.base.shader.clone() else {
             return false;
@@ -407,7 +400,6 @@ impl Drawable {
         true
     }
 
-    /// `uploadTextures(uploadPass)`
     fn upload_textures(&self) {
         for texture in self.base.textures.iter().flatten() {
             texture.borrow_mut().upload();

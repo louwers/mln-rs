@@ -1,6 +1,3 @@
-// Ports src/mln/layout/merge_lines.hpp and src/mln/layout/merge_lines.cpp
-// (`util::mergeLines`).
-//
 // C++ keys the indices on `util::hash(text, x, y)` (a `size_t`); here the
 // key is the `(text, x, y)` tuple itself, which gives the same lookups
 // except where two C++ (libstdc++ `std::hash` + `hash_combine`) hashes
@@ -15,7 +12,6 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 
 use crate::layout::symbol_feature::SymbolFeature;
 
-/// `getKey(text, coord)`.
 type Key = (Vec<u16>, i16, i16);
 
 /// Map of key -> index into features
@@ -25,8 +21,8 @@ fn get_key(text: &[u16], coord: GeometryCoordinate) -> Key {
     (text.to_vec(), coord.x, coord.y)
 }
 
-/// `mergeFromRight`: appends `features[geom].geometry[0]` (minus the shared
-/// point) to the feature `left` points at.
+/// Appends `features[geom].geometry[0]` (minus the shared point) to the
+/// feature `left` points at.
 fn merge_from_right(
     features: &mut [SymbolFeature],
     right_index: &mut Index,
@@ -45,8 +41,8 @@ fn merge_from_right(
     index
 }
 
-/// `mergeFromLeft`: prepends `features[geom].geometry[0]` (minus the shared
-/// point) to the feature `right` points at.
+/// Prepends `features[geom].geometry[0]` (minus the shared point) to the
+/// feature `right` points at.
 fn merge_from_left(
     features: &mut [SymbolFeature],
     left_index: &mut Index,
@@ -68,7 +64,6 @@ fn merge_from_left(
     index
 }
 
-/// `util::mergeLines`.
 pub fn merge_lines(features: &mut [SymbolFeature]) {
     let mut left_index = Index::new();
     let mut right_index = Index::new();
@@ -125,7 +120,6 @@ pub fn merge_lines(features: &mut [SymbolFeature]) {
 
 #[cfg(test)]
 mod tests {
-    // Ports test/util/merge_lines.test.cpp.
     use feature::Value;
     use geometry::Point;
     use mln_text::glyph::GlyphIDType;
@@ -160,7 +154,6 @@ mod tests {
         )
     }
 
-    /// `SymbolFeatureStub(id, type, geometry, properties, text, icon, index)`.
     fn symbol_feature_stub(geometry: GeometryCollection, text: &str) -> SymbolFeature {
         let mut feature = SymbolFeature::new(&StubGeometryTileFeature { geometry });
         feature.formatted_text = Some(TaggedString::new(

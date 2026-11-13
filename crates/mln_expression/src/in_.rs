@@ -1,6 +1,4 @@
-// Ports include/mln/style/expression/in.hpp and
-// src/mln/style/expression/in.cpp. (The module is `in_` because `in` is a
-// Rust keyword.)
+// The module is `in_` because `in` is a Rust keyword.
 
 use mln_conversion::Convertible;
 

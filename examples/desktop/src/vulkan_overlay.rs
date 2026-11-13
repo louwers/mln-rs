@@ -64,8 +64,8 @@ void main() {
 }
 ";
 
-/// `epaint::Vertex`: position and texture coordinates as f32 pairs, then
-/// the color as four bytes.
+/// The size of an `epaint::Vertex`: position and texture coordinates as f32
+/// pairs, then the color as four bytes.
 const VERTEX_STRIDE: u32 = 20;
 /// The descriptor sets of a pool, one for each of egui's textures.
 const POOL_SETS: u32 = 16;

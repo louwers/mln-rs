@@ -1,7 +1,3 @@
-// Ports platform/default/include/mln/gl/headless_backend.hpp and
-// platform/default/src/mln/gl/headless_backend.cpp: frames drawn into a
-// framebuffer of the library's and read back.
-
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -18,8 +14,8 @@ use crate::draw_target::{DrawTarget, TargetResource, downcast_resource};
 use crate::renderer_backend::RendererBackend;
 use crate::types::{FramebufferID, RenderbufferID};
 
-/// `gl::HeadlessRenderableResource`: a framebuffer of a color renderbuffer
-/// and a depth and stencil renderbuffer.
+/// A framebuffer of a color renderbuffer and a depth and stencil
+/// renderbuffer.
 struct OffscreenResource {
     context: Weak<Context>,
     size: Size,

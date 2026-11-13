@@ -1,5 +1,3 @@
-// Ports src/mln/util/tile_cover.hpp and src/mln/util/tile_cover.cpp.
-//
 // The C++ overloads get distinct names: `tileCover(const TileCoverParameters&,
 // ...)` is `tile_cover`, `tileCover(const LatLngBounds&, z)` is
 // `tile_cover_bounds`, `tileCover(const Geometry<double>&, z)` is
@@ -27,14 +25,14 @@ use mln_util::vectors::Vec3;
 
 use crate::util::tile_cover_impl::Impl;
 
-/// `LatLng{lat, lon}` built from the coordinates of an existing
-/// `LatLngBounds` (with the latitude clamped to ±`LATITUDE_MAX`), so the
-/// constructor's checks cannot fail.
+/// A `LatLng` built from the coordinates of an existing `LatLngBounds` (with
+/// the latitude clamped to ±`LATITUDE_MAX`), so the constructor's checks
+/// cannot fail.
 fn bounds_lat_lng(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).expect("LatLng from LatLngBounds coordinates")
 }
 
-/// `ScanLine`: `const std::function<void(int32_t x0, int32_t x1, int32_t y)>`.
+/// A callback for each span of a scan line: `(x0, x1, y)`.
 type ScanLine<'a> = dyn FnMut(i32, i32, i32) + 'a;
 
 // Taken from polymaps src/Layer.js
@@ -181,7 +179,6 @@ pub struct TileCover {
 }
 
 impl TileCover {
-    /// `TileCover(const LatLngBounds&, uint8_t z)`.
     #[must_use]
     pub fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
         let mut bounds = LatLngBounds::hull(
@@ -207,9 +204,8 @@ impl TileCover {
         }
     }
 
-    /// `TileCover(const Geometry<double>&, uint8_t z, bool project = true)`.
-    /// When project == true, projects the geometry points to tile
-    /// coordinates, and fails with
+    /// The cover of `geom` at zoom `z`. With `project`, projects the geometry
+    /// points to tile coordinates, and fails with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point that
     /// isn't a valid `LatLng`.
     pub fn new_from_geometry(geom: &Geometry<f64>, z: u8, project: bool) -> Result<TileCover, Error> {
@@ -230,8 +226,8 @@ impl Iterator for TileCover {
     }
 }
 
-/// C++ holds the transform state by reference (it must outlive the
-/// parameters); the port keeps the copy it always had.
+/// The parameters of a tile cover. They own a copy of the transform state,
+/// which C++ holds by reference.
 #[derive(Clone, Debug)]
 pub struct TileCoverParameters {
     pub transform_state: TransformState,
@@ -249,8 +245,8 @@ pub struct TileCoverParameters {
 }
 
 impl TileCoverParameters {
-    /// `TileCoverParameters{transformState}` with the default member
-    /// initializers for the other fields.
+    /// Parameters for `transform_state`, with the defaults for the other
+    /// fields.
     pub fn new(transform_state: TransformState) -> Self {
         TileCoverParameters {
             transform_state,
@@ -297,8 +293,8 @@ mod globe {
     use super::TileCoverParameters;
     use crate::util::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
-    /// `std::clamp(value, lo, hi)`: `value < lo ? lo : hi < value ? hi :
-    /// value`.
+    /// Clamps `value` between `lo` and `hi` as `std::clamp` does:
+    /// `value < lo ? lo : hi < value ? hi : value`.
     fn clamp(value: f64, lo: f64, hi: f64) -> f64 {
         if value < lo {
             lo
@@ -758,8 +754,6 @@ mod globe {
     }
 }
 
-/// `tileCover(const TileCoverParameters&, uint8_t z, Range<uint8_t>
-/// zoomRange, optional<uint8_t> overscaledZ = nullopt)`.
 pub fn tile_cover(
     state: &TileCoverParameters,
     z: u8,
@@ -960,7 +954,6 @@ fn sort_by_distance<T>(tiles: &mut [T], sqr_dist: impl Fn(&T) -> f64) {
     tiles.sort_by(|a, b| sqr_dist(a).total_cmp(&sqr_dist(b)));
 }
 
-/// `tileCover(const LatLngBounds&, uint8_t z)`.
 #[must_use]
 pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> {
     if bounds_.is_empty() || bounds_.south() > constants::LATITUDE_MAX || bounds_.north() < -constants::LATITUDE_MAX {
@@ -983,7 +976,6 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
     )
 }
 
-/// `tileCover(const Geometry<double>&, uint8_t z)`.
 pub fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
     let mut result = Vec::new();
     let mut tc = TileCover::new_from_geometry(geometry, z, true)?;
@@ -1019,7 +1011,6 @@ pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
     ((dx + 1.0) * (dy + 1.0)) as u64
 }
 
-/// `tileCount(const Geometry<double>&, uint8_t z)`.
 pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error> {
     let mut tile_count: u64 = 0;
 
@@ -1046,8 +1037,8 @@ mod tests {
         assert_eq!(expected, tiles);
     }
 
-    /// `tileCount(Geometry)` streams the same `TileCover` as
-    /// `tileCover(Geometry)` (the line of `TileCover.GeomLineZ10`).
+    /// `tile_count_geometry` streams the same cover as
+    /// `TileCover::new_from_geometry` (the line of `TileCover.GeomLineZ10`).
     #[test]
     fn tile_count_geometry_counts_the_cover() {
         let line = vec![

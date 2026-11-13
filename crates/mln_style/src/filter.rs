@@ -1,5 +1,3 @@
-// Ports include/mln/style/filter.hpp + src/mln/style/filter.cpp.
-
 use std::sync::{Arc, OnceLock};
 
 use feature::Value;
@@ -10,8 +8,6 @@ use crate::serialization::shared_expression;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Filter {
-    /// C++ `std::optional<std::shared_ptr<const expression::Expression>>`
-    /// (never an engaged null pointer).
     #[serde(with = "shared_expression::option")]
     pub expression: Option<Arc<dyn Expression>>,
     legacy_filter: Option<Value>,
@@ -26,12 +22,10 @@ impl Filter {
         Filter { expression, legacy_filter, property_keys: OnceLock::new() }
     }
 
-    /// `operator bool()`.
     pub fn is_set(&self) -> bool {
         self.expression.is_some() || self.legacy_filter.is_some()
     }
 
-    /// `operator()(const expression::EvaluationContext&)`.
     pub fn evaluate(&self, context: &EvaluationContext<'_>) -> bool {
         let Some(expression) = &self.expression else {
             return true;

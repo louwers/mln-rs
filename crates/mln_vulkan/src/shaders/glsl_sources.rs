@@ -359,7 +359,6 @@ vec2 atlas_pos(const vec2 origin, const vec2 offset) {
 
 ";
 
-/// `backgroundShaderPrelude` (background.hpp).
 pub const BACKGROUND_SHADER_PRELUDE: &str = r"
 
 #define idBackgroundDrawableUBO     idDrawableReservedVertexOnlyUBO
@@ -367,7 +366,6 @@ pub const BACKGROUND_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::Vulkan>`
 pub const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundShader",
     name: "BackgroundShader",
@@ -424,7 +422,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::Vulkan>`
 pub const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundPatternShader",
     name: "BackgroundPatternShader",
@@ -533,7 +530,6 @@ void main() {
 ",
 };
 
-/// `circleShaderPrelude` (circle.hpp).
 pub const CIRCLE_SHADER_PRELUDE: &str = r"
 
 #define idCircleDrawableUBO         idDrawableReservedVertexOnlyUBO
@@ -541,7 +537,6 @@ pub const CIRCLE_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::Vulkan>`
 pub const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CircleShader",
     name: "CircleShader",
@@ -860,7 +855,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::Vulkan>`
 pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     built_in: "ClippingMaskProgram",
     name: "ClippingMaskProgram",
@@ -911,7 +905,6 @@ pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     ",
 };
 
-/// `collisionShaderPrelude` (collision.hpp).
 pub const COLLISION_SHADER_PRELUDE: &str = r"
 
 #define idCollisionDrawableUBO      drawableUBOStartId
@@ -920,7 +913,6 @@ pub const COLLISION_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::Vulkan>`
 pub const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionBoxShader",
     name: "CollisionBoxShader",
@@ -1008,7 +1000,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::Vulkan>`
 pub const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionCircleShader",
     name: "CollisionCircleShader",
@@ -1119,7 +1110,6 @@ void main() {
 ",
 };
 
-/// `colorReliefShaderPrelude` (`color_relief.hpp`).
 pub const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
 
 #define idColorReliefDrawableUBO        idDrawableReservedVertexOnlyUBO
@@ -1128,7 +1118,6 @@ pub const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::Vulkan>`
 pub const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "ColorReliefShader",
     name: "ColorReliefShader",
@@ -1279,10 +1268,8 @@ void main() {
 ",
 };
 
-/// `debugShaderPrelude` (debug.hpp).
 pub const DEBUG_SHADER_PRELUDE: &str = r"#define idDebugUBO  drawableUBOStartId + 3";
 
-/// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::Vulkan>`
 pub const DEBUG_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "DebugShader",
     name: "DebugShader",
@@ -1343,7 +1330,6 @@ void main() {
 ",
 };
 
-/// `fillShaderPrelude` (fill.hpp).
 pub const FILL_SHADER_PRELUDE: &str = r"
 
 #define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
@@ -1352,7 +1338,6 @@ pub const FILL_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillShader",
     name: "FillShader",
@@ -1455,7 +1440,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineShader",
     name: "FillOutlineShader",
@@ -1571,7 +1555,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillPatternShader",
     name: "FillPatternShader",
@@ -1819,7 +1802,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlinePatternShader",
     name: "FillOutlinePatternShader",
@@ -2074,7 +2056,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
     name: "FillOutlineTriangulatedShader",
@@ -2186,7 +2167,6 @@ void main() {
 ",
 };
 
-/// `fillExtrusionShaderPrelude` (`fill_extrusion.hpp`).
 pub const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 #define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
@@ -2195,7 +2175,6 @@ pub const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionShader",
     name: "FillExtrusionShader",
@@ -2343,7 +2322,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionInstancedShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionInstancedShader",
     name: "FillExtrusionInstancedShader",
@@ -2513,7 +2491,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternShader",
     name: "FillExtrusionPatternShader",
@@ -2788,7 +2765,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::FillExtrusionPatternInstancedShader, gfx::Backend::Type::Vulkan>`
 pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternInstancedShader",
     name: "FillExtrusionPatternInstancedShader",
@@ -3085,7 +3061,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::Vulkan>`
 pub const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "GlobeDepthShader",
     name: "GlobeDepthShader",
@@ -3116,7 +3091,6 @@ void main() {
 ",
 };
 
-/// `heatmapShaderPrelude` (heatmap.hpp).
 pub const HEATMAP_SHADER_PRELUDE: &str = r"
 
 #define idHeatmapDrawableUBO        idDrawableReservedVertexOnlyUBO
@@ -3124,7 +3098,6 @@ pub const HEATMAP_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::Vulkan>`
 pub const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapShader",
     name: "HeatmapShader",
@@ -3267,10 +3240,8 @@ void main() {
 ",
 };
 
-/// `heatmapTextureShaderPrelude` (`heatmap_texture.hpp`).
 pub const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r"#define idHeatmapTexturePropsUBO    layerUBOStartId";
 
-/// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::Vulkan>`
 pub const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapTextureShader",
     name: "HeatmapTextureShader",
@@ -3329,7 +3300,6 @@ void main() {
 ",
 };
 
-/// `hillshadeShaderPrelude` (hillshade.hpp).
 pub const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
@@ -3338,7 +3308,6 @@ pub const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::Vulkan>`
 pub const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadeShader",
     name: "HillshadeShader",
@@ -3577,7 +3546,6 @@ void main() {
 ",
 };
 
-/// `hillshadePrepareShaderPrelude` (`hillshade_prepare.hpp`).
 pub const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadePrepareDrawableUBO       drawableUBOStartId
@@ -3585,7 +3553,6 @@ pub const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::Vulkan>`
 pub const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadePrepareShader",
     name: "HillshadePrepareShader",
@@ -3700,7 +3667,6 @@ void main() {
 ",
 };
 
-/// `lineShadePrelude` (line.hpp).
 pub const LINE_SHADE_PRELUDE: &str = r"
 
 #define idLineDrawableUBO           idDrawableReservedVertexOnlyUBO
@@ -3709,7 +3675,6 @@ pub const LINE_SHADE_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::Vulkan>`
 pub const LINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineShader",
     name: "LineShader",
@@ -3969,7 +3934,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::Vulkan>`
 pub const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientShader",
     name: "LineGradientShader",
@@ -4217,7 +4181,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::Vulkan>`
 pub const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LinePatternShader",
     name: "LinePatternShader",
@@ -4569,7 +4532,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::Vulkan>`
 pub const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineSDFShader",
     name: "LineSDFShader",
@@ -4894,7 +4856,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::Vulkan>`
 pub const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientSDFShader",
     name: "LineGradientSDFShader",
@@ -5205,7 +5166,6 @@ void main() {
 ",
 };
 
-/// `rasterShaderPrelude` (raster.hpp).
 pub const RASTER_SHADER_PRELUDE: &str = r"
 
 #define idRasterDrawableUBO         idDrawableReservedVertexOnlyUBO
@@ -5213,7 +5173,6 @@ pub const RASTER_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::Vulkan>`
 pub const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "RasterShader",
     name: "RasterShader",
@@ -5341,7 +5300,6 @@ void main() {
 ",
 };
 
-/// `skyShaderPrelude` (sky.hpp).
 pub const SKY_SHADER_PRELUDE: &str = r"
 
 #define idSkyPropsUBO layerUBOStartId
@@ -5349,7 +5307,6 @@ pub const SKY_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::Vulkan>`
 pub const SKY_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SkyShader",
     name: "SkyShader",
@@ -5395,7 +5352,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::Vulkan>`
 pub const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "AtmosphereShader",
     name: "AtmosphereShader",
@@ -5517,7 +5473,6 @@ void main() {
 ",
 };
 
-/// `symbolShaderPrelude` (symbol.hpp).
 pub const SYMBOL_SHADER_PRELUDE: &str = r"
 
 #define idSymbolDrawableUBO         idDrawableReservedVertexOnlyUBO
@@ -5526,7 +5481,6 @@ pub const SYMBOL_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::Vulkan>`
 pub const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolIconShader",
     name: "SymbolIconShader",
@@ -5769,7 +5723,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::Vulkan>`
 pub const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolSDFShader",
     name: "SymbolSDFShader",
@@ -6129,7 +6082,6 @@ void main() {
 ",
 };
 
-/// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::Vulkan>`
 pub const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolTextAndIconShader",
     name: "SymbolTextAndIconShader",

@@ -106,14 +106,14 @@ fn evaluate_static(style: &Impl, id: &str) -> BackgroundPaintProperties::Possibl
     evaluated
 }
 
-/// `Interpolator<Color>` with a double t (what the interpolate expression
-/// uses): per channel `float(a * (1.0 - t) + b * t)`.
+/// Interpolates colors with a double t, as the interpolate expression does:
+/// per channel `float(a * (1.0 - t) + b * t)`.
 fn lerp_color_f64(a: Color, b: Color, t: f64) -> Color {
     let lerp = |a: f32, b: f32| (f64::from(a) * (1.0 - t) + f64::from(b) * t) as f32;
     Color::new_unchecked(lerp(a.r, b.r), lerp(a.g, b.g), lerp(a.b, b.b), lerp(a.a, b.a))
 }
 
-/// `Interpolator<Color>` with a float t (what Transitioning uses).
+/// Interpolates colors with a float t, as transitions do.
 fn lerp_color_f32(a: Color, b: Color, t: f32) -> Color {
     let lerp = |a: f32, b: f32| a * (1.0 - t) + b * t;
     Color::new_unchecked(lerp(a.r, b.r), lerp(a.g, b.g), lerp(a.b, b.b), lerp(a.a, b.a))
@@ -150,9 +150,9 @@ fn background_color_function() {
     assert_background(&evaluated, Color::parse("blue").unwrap(), 1.0);
 }
 
-/// C++ ignores "colorSpace" in legacy functions (function.cpp interpolates
-/// with `ColorSpace::RGB`), so both colorSpace tests evaluate to the RGB
-/// midpoint at zoom 5. (render-tests/background-color/colorSpace-hcl is in
+/// The RGB midpoint at zoom 5, which both colorSpace tests evaluate to: legacy
+/// functions ignore "colorSpace" and interpolate in RGB, as in C++.
+/// (render-tests/background-color/colorSpace-hcl is in
 /// metrics/ignores/platform-all.json for that reason.)
 fn color_space_expected() -> Color {
     let lower = Color::parse("rgb(118,0,118)").unwrap();

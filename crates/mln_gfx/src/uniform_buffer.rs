@@ -1,12 +1,10 @@
-// Ports include/mln/gfx/uniform_buffer.hpp and src/mln/gfx/uniform_buffer.cpp
-
 use std::any::Any;
 use std::rc::Rc;
 
 use crate::context::Context;
 use crate::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
 
-/// `gfx::UniformBuffer`. Created only by backends
+/// A GPU uniform buffer. Created only by backends
 /// (`Context::create_uniform_buffer`). `update` takes `&self`: the buffer is
 /// shared (`UniformBufferPtr`) and GPU writes go through the queue.
 pub trait UniformBuffer: Any {
@@ -23,11 +21,11 @@ impl dyn UniformBuffer {
 
 pub type UniformBufferPtr = Rc<dyn UniformBuffer>;
 
-/// `gfx::UniformBufferArray`: a collection of uniform buffers by id.
+/// A collection of uniform buffers by id.
 ///
 /// The C++ class is abstract only for `bind(RenderPass&)` and `copy()`; the
 /// WebGPU overrides are no-ops (bind groups are built per drawable in
-/// `Drawable::draw`), so the port is a plain struct.
+/// `Drawable::draw`), so this is a plain struct.
 #[derive(Clone, Default)]
 pub struct UniformBufferArray {
     uniform_buffer_vector: [Option<UniformBufferPtr>; MAX_UBO_COUNT_PER_SHADER],
@@ -71,7 +69,7 @@ impl UniformBufferArray {
         }
     }
 
-    /// `createOrUpdate(id, const T* data, context)` for a `Pod` UBO struct.
+    /// `create_or_update` with the bytes of a `Pod` UBO struct.
     pub fn create_or_update_pod<T: bytemuck::Pod>(&mut self, id: usize, data: &T, context: &dyn Context) {
         self.create_or_update(id, bytemuck::bytes_of(data), context, false);
     }

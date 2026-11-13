@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/light.hpp +
-// src/mln/style/conversion/light.cpp.
-
 use mln_style_types::{LightAnchorType, Position};
 use mln_util::Color;
 

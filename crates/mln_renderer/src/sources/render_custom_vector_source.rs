@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/sources/render_custom_vector_source.hpp and
-// src/mln/renderer/sources/render_custom_vector_source.cpp, with ffi patch
-// 0052's FastPFOR option for MLT tiles.
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -19,21 +15,18 @@ use crate::tile::custom_tile::CustomVectorTile;
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
-/// `RenderCustomVectorSource`.
 pub struct RenderCustomVectorSource {
     tile_source: RenderTileSource,
     fast_pfor_enabled: bool,
 }
 
 impl RenderCustomVectorSource {
-    /// `RenderCustomVectorSource(Immutable<style::CustomVectorSource::Impl>, const TaggedScheduler&)`.
     #[must_use]
     pub fn new(impl_: Arc<custom_vector_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderCustomVectorSource { tile_source: RenderTileSource::new(impl_), fast_pfor_enabled: false }
     }
 
-    /// `impl()`.
     fn impl_(&self) -> Arc<custom_vector_source::Impl> {
         downcast_arc::<custom_vector_source::Impl>(&self.tile_source.base.base_impl)
     }

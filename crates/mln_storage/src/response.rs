@@ -1,10 +1,8 @@
-// Ports include/mln/storage/response.hpp and src/mln/storage/response.cpp.
-
 use std::sync::Arc;
 
 use mln_util::chrono::{Timestamp, now};
 
-/// `std::shared_ptr<const std::string>`: response bodies are bytes.
+/// A shared response body, as bytes.
 pub type Data = Arc<Vec<u8>>;
 
 /// What made a resource request fail.
@@ -78,7 +76,6 @@ impl Response {
         Self::default()
     }
 
-    /// `isFresh()`.
     #[must_use]
     pub fn is_fresh(&self) -> bool {
         match self.expires {
@@ -87,8 +84,8 @@ impl Response {
         }
     }
 
-    /// `isUsable()`: whether we are allowed to use this response according
-    /// to HTTP caching rules. It may or may not be stale.
+    /// Whether HTTP caching rules allow using this response. It may or may
+    /// not be stale.
     #[must_use]
     pub fn is_usable(&self) -> bool {
         !self.must_revalidate || self.expires.is_some_and(|expires| expires > now())

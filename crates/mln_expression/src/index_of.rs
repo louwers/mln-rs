@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/index_of.hpp and
-// src/mln/style/expression/index_of.cpp.
-
 use mln_conversion::Convertible;
 use mln_util::string::to_string_double;
 

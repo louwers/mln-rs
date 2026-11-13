@@ -1,7 +1,3 @@
-// Ports include/mln/style/sources/image_source.hpp,
-// src/mln/style/sources/image_source.cpp, image_source_impl.hpp and
-// image_source_impl.cpp (conformance).
-//
 // Like the other sources, an ImageSource is a handle to an `Rc`'d state
 // (see source.rs); the image request callback holds a `Weak` to it.
 
@@ -21,7 +17,6 @@ use crate::layer::layer_type_info::TileKind;
 use crate::source::{Source, SourceBase, downcast_arc};
 use crate::source_impl::{self, ImplBase};
 
-/// `ImageSource::Impl`.
 #[derive(Clone, Debug)]
 pub struct Impl {
     base: ImplBase,
@@ -30,19 +25,16 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// `Impl(std::string id, std::array<LatLng, 4> coords)`.
     #[must_use]
     pub fn new(id: String, coords: [LatLng; 4]) -> Self {
         Impl { base: ImplBase::new(SourceType::Image, id), coords, image: None }
     }
 
-    /// `Impl(const Impl& other, std::array<LatLng, 4> coords)`.
     #[must_use]
     pub fn with_coordinates(other: &Impl, coords: [LatLng; 4]) -> Self {
         Impl { base: other.base.clone(), coords, image: other.image.clone() }
     }
 
-    /// `Impl(const Impl& rhs, PremultipliedImage&& image)`.
     #[must_use]
     pub fn with_image(rhs: &Impl, image: PremultipliedImage) -> Self {
         Impl { base: rhs.base.clone(), coords: rhs.coords, image: Some(Arc::new(image)) }
@@ -83,7 +75,6 @@ struct Inner {
     generation: Cell<u64>,
 }
 
-/// `style::ImageSource`.
 #[derive(Clone)]
 pub struct ImageSource {
     inner: Rc<Inner>,
@@ -99,7 +90,6 @@ impl std::fmt::Debug for ImageSource {
 }
 
 impl ImageSource {
-    /// `ImageSource(std::string id, const std::array<LatLng, 4>)`.
     pub fn new(id: impl Into<String>, coords: [LatLng; 4]) -> Self {
         let impl_: Arc<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), coords));
         ImageSource {
@@ -112,13 +102,11 @@ impl ImageSource {
         }
     }
 
-    /// `impl()`.
     #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
-    /// `setCoordinates(const std::array<LatLng, 4>&)`.
     pub fn set_coordinates(&self, coords: [LatLng; 4]) {
         let new_impl: Arc<dyn source_impl::Impl> = Arc::new(Impl::with_coordinates(&self.impl_(), coords));
         self.inner.base.set_base_impl(new_impl);
@@ -130,7 +118,6 @@ impl ImageSource {
         self.impl_().get_coordinates()
     }
 
-    /// `setURL(const std::string&)`.
     pub fn set_url(&self, url: &str) {
         *self.inner.url.borrow_mut() = Some(url.to_owned());
         self.inner.generation.set(self.inner.generation.get() + 1);
@@ -142,7 +129,6 @@ impl ImageSource {
         }
     }
 
-    /// `setImage(PremultipliedImage&&)`.
     pub fn set_image(&self, image: PremultipliedImage) {
         *self.inner.url.borrow_mut() = None;
         self.inner.generation.set(self.inner.generation.get() + 1);
@@ -203,7 +189,6 @@ impl Source for ImageSource {
         &self.inner.base
     }
 
-    /// `loadDescription(FileSource&)`.
     fn load_description(&self, file_source: &dyn FileSource) {
         let url = self.inner.url.borrow().clone();
         let Some(url) = url else {

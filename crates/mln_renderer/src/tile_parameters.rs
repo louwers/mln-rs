@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/tile_parameters.hpp.
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -13,8 +11,6 @@ use crate::image_manager::ImageManager;
 use crate::text::glyph_manager::GlyphManager;
 use crate::tile::tile_worker_transport::TileWorkerTransport;
 
-/// `TileParameters`.
-// TODO(port): annotationManager.
 pub struct TileParameters<'a> {
     pub pixel_ratio: f32,
     pub debug_options: MapDebugOptions,

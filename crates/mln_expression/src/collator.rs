@@ -1,15 +1,11 @@
-// Ports include/mln/style/expression/collator.hpp and
-// src/mln/style/expression/collator.cpp. The platform collator is the
-// `locale` module's.
-
 use std::cmp::Ordering;
 use std::fmt;
 use std::sync::Arc;
 
 use crate::locale::{self, Sensitivity};
 
-/// `expression::Collator`: compares strings in a locale's order, with the
-/// sensitivity to case and diacritics the expression asks for.
+/// Compares strings in a locale's order, with the sensitivity to case and
+/// diacritics the expression asks for.
 #[derive(Clone)]
 pub struct Collator {
     collator: Arc<locale::Collator>,

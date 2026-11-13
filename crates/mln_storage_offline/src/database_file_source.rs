@@ -1,6 +1,3 @@
-// Ports the offline region half of include/mln/storage/database_file_source.hpp
-// and platform/default/src/mln/storage/database_file_source.cpp.
-//
 // `DatabaseFileSource` itself is in mln_storage, below the style parser that
 // `OfflineDownload` needs, so the region API is an extension trait here. Its
 // messages run on the database thread like the C++ ones; the downloads live
@@ -20,15 +17,13 @@ use mln_storage::offline_database::DatabaseError;
 
 use crate::offline_download::OfflineDownload;
 
-/// `DatabaseFileSourceThread::downloads`: one download per region whose
-/// observer, download state or status was asked for, until the region is
-/// deleted.
+/// One download per region whose observer, download state or status was
+/// asked for, until the region is deleted.
 #[derive(Default)]
 struct Downloads {
     downloads: RefCell<BTreeMap<i64, Rc<OfflineDownload>>>,
 }
 
-/// `DatabaseFileSourceThread::getDownload(regionID)`.
 fn get_download(thread: &DatabaseFileSourceThread, region_id: i64) -> Result<Rc<OfflineDownload>, DatabaseError> {
     let Some(online_file_source) = thread.online_file_source() else {
         return Err(DatabaseError::Runtime("Network file source unavailable.".to_owned()));
@@ -47,20 +42,19 @@ fn get_download(thread: &DatabaseFileSourceThread, region_id: i64) -> Result<Rc<
 /// The offline region API of `DatabaseFileSource`. Every callback runs on
 /// the database thread.
 pub trait DatabaseFileSourceExt {
-    /// `listOfflineRegions(callback)`: every region in the database.
+    /// Lists every region in the database.
     fn list_offline_regions(&self, callback: impl FnOnce(Result<OfflineRegions, DatabaseError>) + Send + 'static);
 
-    /// `getOfflineRegion(regionID, callback)`: the region, or `None` if the
-    /// database has none with that id.
+    /// Gets the region `region_id`, or `None` if the database has none with
+    /// that id.
     fn get_offline_region(
         &self,
         region_id: i64,
         callback: impl FnOnce(Result<Option<OfflineRegion>, DatabaseError>) + Send + 'static,
     );
 
-    /// `createOfflineRegion(definition, metadata, callback)`. The region
-    /// starts inactive; `set_offline_region_download_state` starts its
-    /// download.
+    /// Creates a region. The region starts inactive;
+    /// `set_offline_region_download_state` starts its download.
     fn create_offline_region(
         &self,
         definition: &OfflineRegionDefinition,
@@ -68,9 +62,8 @@ pub trait DatabaseFileSourceExt {
         callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
     );
 
-    /// `updateOfflineMetadata(regionID, metadata, callback)`: replaces the
-    /// region's metadata, and gives the updated region. Fails when the
-    /// database has no region `region_id`.
+    /// Replaces the region's metadata, and gives the updated region. Fails
+    /// when the database has no region `region_id`.
     fn update_offline_metadata(
         &self,
         region_id: i64,
@@ -78,10 +71,9 @@ pub trait DatabaseFileSourceExt {
         callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
     );
 
-    /// `setOfflineRegionObserver(region, observer)`: the region's only
-    /// observer, replacing the previous one; `None` removes it. Its methods
-    /// run on the database thread. Fails when the database has no region
-    /// `region_id`.
+    /// Sets the region's only observer, replacing the previous one; `None`
+    /// removes it. Its methods run on the database thread. Fails when the
+    /// database has no region `region_id`.
     fn set_offline_region_observer(
         &self,
         region_id: i64,
@@ -89,9 +81,8 @@ pub trait DatabaseFileSourceExt {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     );
 
-    /// `setOfflineRegionDownloadState(region, state)`: starts or stops the
-    /// region's download. Fails when the database has no region
-    /// `region_id`.
+    /// Starts or stops the region's download. Fails when the database has no
+    /// region `region_id`.
     fn set_offline_region_download_state(
         &self,
         region_id: i64,
@@ -99,31 +90,29 @@ pub trait DatabaseFileSourceExt {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     );
 
-    /// `getOfflineRegionStatus(region, callback)`.
     fn get_offline_region_status(
         &self,
         region_id: i64,
         callback: impl FnOnce(Result<OfflineRegionStatus, DatabaseError>) + Send + 'static,
     );
 
-    /// `mergeOfflineRegions(sideDatabasePath, callback)`: copies the regions
-    /// of another database, and the resources and tiles they use, into this
-    /// one. Identical regions become one. The side database is upgraded to
-    /// the current schema in place, so it must be writable.
+    /// Copies the regions of another database, and the resources and tiles
+    /// they use, into this one. Identical regions become one. The side
+    /// database is upgraded to the current schema in place, so it must be
+    /// writable.
     fn merge_offline_regions(
         &self,
         side_database_path: &str,
         callback: impl FnOnce(Result<OfflineRegions, DatabaseError>) + Send + 'static,
     );
 
-    /// `deleteOfflineRegion(region, callback)`: stops the region's download
-    /// and deletes the region, evicting the resources no other region uses.
-    /// Fails when the database has no region `region_id`.
+    /// Stops the region's download and deletes the region, evicting the
+    /// resources no other region uses. Fails when the database has no region
+    /// `region_id`.
     fn delete_offline_region(&self, region_id: i64, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static);
 
-    /// `invalidateOfflineRegion(region, callback)`: makes the region's
-    /// resources revalidate with their server before use, which transfers
-    /// nothing for resources that haven't changed.
+    /// Makes the region's resources revalidate with their server before use,
+    /// which transfers nothing for resources that haven't changed.
     fn invalidate_offline_region(
         &self,
         region_id: i64,

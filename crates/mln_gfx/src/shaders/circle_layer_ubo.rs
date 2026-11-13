@@ -1,8 +1,6 @@
-// Ports include/mln/shaders/circle_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) CircleDrawableUBO` (112 bytes).
+/// The circle shader's per-drawable uniform block (112 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct CircleDrawableUBO {

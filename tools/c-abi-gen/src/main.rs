@@ -192,7 +192,8 @@ fn defined_functions(src_dir: &Path, skip_dir: &Path) -> Result<BTreeMap<String,
     Ok(defined)
 }
 
-/// `crate::a::b` for `src/a/b.rs` or `src/a/b/mod.rs`, `crate` for `src/lib.rs`.
+/// The module path of `file`: `crate::a::b` for `src/a/b.rs` or
+/// `src/a/b/mod.rs`, `crate` for `src/lib.rs`.
 fn module_path(src_dir: &Path, file: &Path) -> Result<String, Box<dyn Error>> {
     let mut path = String::from("crate");
     let relative: PathBuf = file.strip_prefix(src_dir)?.with_extension("");

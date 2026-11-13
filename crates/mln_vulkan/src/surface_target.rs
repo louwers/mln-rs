@@ -1,7 +1,6 @@
-// Ports the presenting part of platform/glfw/glfw_vulkan_backend.hpp and
-// platform/glfw/glfw_vulkan_backend.cpp: frames presented to a window's
-// surface through a swapchain. The window stays with the host, which hands
-// over its handles and reports framebuffer resizes through `resize`.
+// Frames presented to a window's surface through a swapchain. The window
+// stays with the host, which hands over its handles and reports framebuffer
+// resizes through `resize`.
 //
 // Differences from C++:
 // - `USE_SHARED_VK_CONTEXT`, the example of an instance and a device that
@@ -115,11 +114,10 @@ pub struct SurfaceTarget {
 }
 
 impl SurfaceTarget {
-    /// `GLFWVulkanBackend(window, capFrameRate)`: a presenting backend on
-    /// `device` and a target that presents to `window` through a swapchain
-    /// of `framebuffer_size` physical pixels. With `cap_frame_rate` off,
-    /// frames are presented without waiting for the display where the
-    /// surface can (`present_mode`).
+    /// A presenting backend on `device` and a target that presents to `window`
+    /// through a swapchain of `framebuffer_size` physical pixels. With
+    /// `cap_frame_rate` off, frames are presented without waiting for the
+    /// display where the surface can (`present_mode`).
     ///
     /// Fails as [`RendererBackend::presenting`] and [`new`](Self::new) do.
     pub fn with_backend(
@@ -291,9 +289,9 @@ impl SurfaceTarget {
         self.size.get()
     }
 
-    /// `setFramebufferSize(Size)`: the size of the window's framebuffer, in
-    /// pixels. The next frame is drawn into a swapchain of that size, or of
-    /// the size the surface has where the window system gives it one.
+    /// Sets the size of the window's framebuffer, in pixels. The next frame is
+    /// drawn into a swapchain of that size, or of the size the surface has
+    /// where the window system gives it one.
     pub fn resize(&self, size: Size) {
         self.size.set(size);
         self.image.set_size(size);

@@ -1,9 +1,7 @@
-// Ports include/mln/gfx/fill_generator.hpp and src/mln/gfx/fill_generator.cpp
-//
 // The C++ includes renderer/buckets/{fill,line}_bucket.hpp for the vertex
 // types and layout functions, so the port lives in mln_renderer.
 //
-// TODO(port): pre-tessellated geometry (`GeometryCollection::getTriangles`,
+// Not supported: pre-tessellated geometry (`GeometryCollection::getTriangles`,
 // MLT tiles).
 
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
@@ -165,12 +163,10 @@ fn add_subdivided_polygon(
     );
 }
 
-/// `generateFillAndOutineBuffers(geometry, fillVertices, fillIndexes,
-/// fillSegments, lineVertices, lineIndexes, lineSegments, basicLineIndexes,
-/// basicLineSegments, canonical, subdivisionGranularity)`: outlines built
-/// both with triangle primitives AND with simple lines (the
-/// `MLN_TRIANGULATE_FILL_OUTLINES` variant the WebGPU fill bucket uses). C++
-/// defaults `subdivision_granularity` to 1.
+/// Generates the fill triangles and outlines of `geometry`, the outlines both
+/// as triangles and as simple lines (the `MLN_TRIANGULATE_FILL_OUTLINES`
+/// variant the WebGPU fill bucket uses). C++ defaults
+/// `subdivision_granularity` to 1.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_fill_and_outline_buffers(
     geometry: &GeometryCollection,

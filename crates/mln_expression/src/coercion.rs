@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/coercion.hpp and
-// src/mln/style/expression/coercion.cpp.
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 use mln_style_types::{
@@ -95,7 +92,7 @@ fn to_color(color_value: &Value) -> EvaluationResult {
     }
 }
 
-/// `Padding(std::span<const float>)`: CSS order, 1 to 4 values.
+/// A padding from 1 to 4 values, in CSS order.
 fn padding_from_span(values: &[f32]) -> Padding {
     match values.len() {
         1 => Padding::new(values[0], values[0], values[0], values[0]),
@@ -194,7 +191,7 @@ fn to_variable_anchor_offset(value: &Value) -> EvaluationResult {
                 };
 
                 // C++ `get<double>()` throws on a non-number offset.
-                // TODO(port): mapbox::util::bad_variant_access propagates out
+                // mapbox::util::bad_variant_access propagates out
                 // of evaluate() in C++.
                 let x = offset[0].as_number().expect("numeric offset") as f32;
                 let y = offset[1].as_number().expect("numeric offset") as f32;

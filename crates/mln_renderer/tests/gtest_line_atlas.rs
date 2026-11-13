@@ -1,5 +1,3 @@
-// Ports test/geometry/line_atlas.test.cpp.
-//
 // The C++ test draws its dash arrays from `std::mt19937`,
 // `std::uniform_int_distribution<size_t>` and
 // `std::normal_distribution<float>`. The engine is fully specified by the
@@ -8,7 +6,6 @@
 
 use mln_renderer::line_atlas::{LineAtlas, LinePatternCap};
 
-/// `std::mt19937`.
 struct Mt19937 {
     state: [u32; Self::N],
     index: usize,
@@ -21,7 +18,6 @@ impl Mt19937 {
     const UPPER_MASK: u32 = 0x8000_0000;
     const LOWER_MASK: u32 = 0x7fff_ffff;
 
-    /// `mersenne_twister_engine(result_type value)`.
     fn new(value: u32) -> Self {
         let mut state = [0u32; Self::N];
         state[0] = value;
@@ -43,7 +39,6 @@ impl Mt19937 {
         self.index = 0;
     }
 
-    /// `operator()()`.
     fn next_u32(&mut self) -> u32 {
         if self.index >= Self::N {
             self.twist();

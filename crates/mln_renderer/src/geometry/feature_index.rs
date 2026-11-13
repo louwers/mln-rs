@@ -1,6 +1,3 @@
-// Ports src/mln/geometry/feature_index.hpp and
-// src/mln/geometry/feature_index.cpp.
-//
 // `RefIndexedSubfeature` refers to the index's own copies of the source
 // layer and bucket leader names; here those are shared `Arc<str>`s interned
 // in the index, so the grid entries stay cheap to copy and the index can be
@@ -64,7 +61,6 @@ pub struct IndexedSubfeature {
 }
 
 impl IndexedSubfeature {
-    /// `IndexedSubfeature(const RefIndexedSubfeature&)`.
     #[must_use]
     pub fn from_ref(other: &RefIndexedSubfeature) -> Self {
         IndexedSubfeature {
@@ -77,20 +73,18 @@ impl IndexedSubfeature {
         }
     }
 
-    /// `IndexedSubfeature(const RefIndexedSubfeature&, bucketInstanceId, collisionGroupId)`.
     #[must_use]
     pub fn from_ref_with(other: &RefIndexedSubfeature, bucket_instance_id: u32, collision_group_id: u16) -> Self {
         IndexedSubfeature { bucket_instance_id, collision_group_id, ..IndexedSubfeature::from_ref(other) }
     }
 }
 
-/// `FeatureSortOrder`: `std::shared_ptr<const std::vector<size_t>>`.
+/// A shared order of feature indices that queries sort symbol features by.
 pub type FeatureSortOrder = Option<Arc<Vec<usize>>>;
 
 const EXPECTED_UNIQUE_LAYER_IDS: usize = 10;
 const EXPECTED_UNIQUE_LEADER_IDS: usize = 30;
 
-/// `FeatureIndex`.
 pub struct FeatureIndex {
     grid: GridIndex<RefIndexedSubfeature>,
     sort_index: usize,
@@ -109,7 +103,7 @@ impl std::fmt::Debug for FeatureIndex {
     }
 }
 
-/// `mapbox::geometry::envelope` of int16 points (`box<int16_t>`).
+/// The bounding box (min, max) of int16 points; `None` if there are none.
 fn envelope(points: impl IntoIterator<Item = GeometryCoordinate>) -> Option<(GeometryCoordinate, GeometryCoordinate)> {
     let mut iter = points.into_iter();
     let first = iter.next()?;
@@ -124,9 +118,7 @@ fn envelope(points: impl IntoIterator<Item = GeometryCoordinate>) -> Option<(Geo
 }
 
 impl FeatureIndex {
-    /// `FeatureIndex(std::unique_ptr<const GeometryTileData>)`. C++ gets a
-    /// `clone()` of the tile data, which shares the data; this shares the
-    /// `Arc`.
+    /// An empty index of `tile_data`'s features, sharing the tile data.
     #[must_use]
     pub fn new(tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>) -> Self {
         FeatureIndex {
@@ -139,7 +131,6 @@ impl FeatureIndex {
         }
     }
 
-    /// `getData()`.
     #[must_use]
     pub fn get_data(&self) -> Option<&(dyn GeometryTileData + Send + Sync)> {
         self.tile_data.as_deref()
@@ -175,7 +166,6 @@ impl FeatureIndex {
         id
     }
 
-    /// `insert(geometries, index, sourceLayerName, bucketLeaderID)`.
     pub fn insert(
         &mut self,
         geometries: &GeometryCollection,
@@ -214,9 +204,6 @@ impl FeatureIndex {
         }
     }
 
-    /// `query(result, queryGeometry, transformState, projector, tileSize,
-    /// scale, options, globalState, tileID, layers, additionalQueryPadding,
-    /// sourceFeatureState)`.
     #[allow(clippy::too_many_arguments)]
     pub fn query(
         &self,
@@ -290,8 +277,6 @@ impl FeatureIndex {
         Ok(())
     }
 
-    /// `lookupSymbolFeatures(symbolFeatures, options, globalState, layers,
-    /// tileID, featureSortOrder)`.
     pub fn lookup_symbol_features(
         &self,
         symbol_features: &[IndexedSubfeature],
@@ -353,9 +338,6 @@ impl FeatureIndex {
         Ok(result)
     }
 
-    /// `addFeature(result, indexedFeature, options, globalState, tileID,
-    /// layers, queryGeometry, transformState, pixelsToTileUnits, projector,
-    /// sourceFeatureState)`.
     #[allow(clippy::too_many_arguments)]
     fn add_feature(
         &self,
@@ -451,8 +433,6 @@ impl FeatureIndex {
         Ok(())
     }
 
-    /// `translateQueryGeometry(queryGeometry, translate, anchorType, bearing,
-    /// pixelsToTileUnits)`.
     #[must_use]
     pub fn translate_query_geometry(
         query_geometry: &GeometryCoordinates,
@@ -481,7 +461,6 @@ impl FeatureIndex {
         )
     }
 
-    /// `setBucketLayerIDs(bucketLeaderID, layerIDs)`.
     pub fn set_bucket_layer_ids(&mut self, bucket_leader_id: &str, layer_ids: &[String]) {
         let key = self.intern_leader_id(bucket_leader_id);
         self.bucket_layer_ids.insert(key, layer_ids.to_vec());

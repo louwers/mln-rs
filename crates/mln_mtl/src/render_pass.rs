@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/render_pass.hpp and src/mln/mtl/render_pass.cpp
-//
 // Differences from C++:
 // - C++ applies only the descriptor's clear color and leaves the depth and
 //   stencil attachments at Metal's default load actions; the port also
@@ -196,7 +194,6 @@ impl RenderPass {
         self.command_buffer.as_ref()
     }
 
-    /// `getMetalEncoder()`
     pub fn get_metal_encoder(&self) -> Option<MTLRenderCommandEncoderPtr> {
         self.encoder.borrow().clone()
     }

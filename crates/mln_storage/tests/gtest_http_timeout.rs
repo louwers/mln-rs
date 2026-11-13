@@ -1,14 +1,9 @@
-// Ports test/util/http_timeout.test.cpp (`http::errorRetryTimeout` and
-// `http::expirationTimeout` live in mln_storage::http_timeout because they
-// take `Response::Error::Reason`).
-
 use std::time::Duration;
 
 use mln_storage::http_timeout::{error_retry_timeout, expiration_timeout};
 use mln_storage::response::Reason;
 use mln_util::chrono::{Timestamp, now};
 
-/// `util::now() + Seconds(s)`.
 fn now_plus(s: i64) -> Timestamp {
     Timestamp::from_secs(now().secs_since_epoch() + s)
 }

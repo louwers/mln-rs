@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/constant.hpp +
-// src/mln/style/conversion/constant.cpp.
-
 use std::str::FromStr;
 
 use mln_style_types::{
@@ -47,7 +44,6 @@ impl Converter for String {
     }
 }
 
-/// `Converter<T, enable_if_t<is_enum_v<T>>>`.
 fn convert_enum<T: FromStr>(value: &Convertible<'_>, error: &mut Error) -> Option<T> {
     let Some(string) = value.to_string() else {
         error.message = "value must be a string".to_owned();
@@ -62,7 +58,6 @@ fn convert_enum<T: FromStr>(value: &Convertible<'_>, error: &mut Error) -> Optio
     result
 }
 
-/// `Converter<std::vector<T>, enable_if_t<is_enum_v<T>>>`.
 fn convert_enum_vector<T: FromStr>(value: &Convertible<'_>, error: &mut Error) -> Option<Vec<T>> {
     if !value.is_array() {
         error.message = "value must be an array".to_owned();
@@ -258,7 +253,6 @@ impl Converter for VariableAnchorOffsetCollection {
     }
 }
 
-/// `util::toString(N)` for the array messages.
 fn array_message(n: usize) -> String {
     format!("value must be an array of {n} numbers")
 }
@@ -348,8 +342,7 @@ impl Converter for Vec<String> {
     }
 }
 
-/// `Converter<expression::Formatted>` (src/mln/style/expression/formatted.cpp;
-/// `mln_expression` ports it as `formatted::convert_formatted`).
+/// Converts with `mln_expression::formatted::convert_formatted`.
 impl Converter for mln_expression::formatted::Formatted {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
         mln_expression::formatted::convert_formatted(value, error)

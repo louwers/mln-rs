@@ -1,5 +1,3 @@
-// Ports src/mln/tile/tile_cache.hpp and src/mln/tile/tile_cache.cpp.
-//
 // Deviation: C++ destroys released tiles on the thread pool
 // (`deferPendingReleases` schedules the destruction and the destructor waits
 // for it). Rust tiles live on the render thread (their state is `Rc`), so
@@ -12,25 +10,23 @@ use mln_tile_id::OverscaledTileID;
 
 use crate::tile::tile::{Tile, TileNecessity};
 
-/// `TileCache`.
 pub struct TileCache {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
-    /// `std::list<OverscaledTileID>`, oldest first.
+    /// The cached tiles' keys, oldest first.
     ordered_keys: Vec<OverscaledTileID>,
     pending_releases: Vec<Box<dyn Tile>>,
     size: usize,
 }
 
 impl TileCache {
-    /// `TileCache(const TaggedScheduler&, size_t size = 0)`, without the
-    /// thread pool: released tiles are dropped on the render thread (see the
-    /// file comment).
+    /// A cache of `size` tiles. It takes no thread pool: released tiles are
+    /// dropped on the render thread (see the file comment).
     #[must_use]
     pub fn new(size: usize) -> Self {
         TileCache { tiles: BTreeMap::new(), ordered_keys: Vec::new(), pending_releases: Vec::new(), size }
     }
 
-    /// `std::list::remove(key)`: removes every occurrence.
+    /// Removes every occurrence of `key`.
     fn remove_key(&mut self, key: &OverscaledTileID) {
         self.ordered_keys.retain(|k| k != key);
     }
@@ -167,8 +163,6 @@ impl Drop for TileCache {
     }
 }
 
-// Ports test/tile/tile_cache.test.cpp. C++ uses a renderable VectorTile
-// mock; vector tiles are not ported yet (M4), so the mock is a plain tile.
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;

@@ -1,6 +1,3 @@
-// Ports src/mln/map/vertical_perspective_projection.hpp and
-// src/mln/map/vertical_perspective_projection.cpp.
-//
 // The C++ class's static functions are associated functions here, and the
 // file-local helpers are private functions. The `vec3` overload of the
 // file-local `slerp` is `slerp_vec3`.
@@ -20,14 +17,15 @@ use mln_util::vectors::{Vec3, Vec4};
 use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
 use crate::transform_state::{NorthOrientation, TransformState};
 
-/// `LatLng{lat, lon, mode}`: C++ constructs it directly, which throws
-/// `std::domain_error` on invalid input; nothing catches it there.
+/// A `LatLng`, panicking on invalid input: C++ constructs it directly,
+/// which throws `std::domain_error` on invalid input; nothing catches it
+/// there.
 fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
     LatLng::with_mode(lat, lon, mode).unwrap_or_else(|e| panic!("{e}"))
 }
 
-/// `std::clamp(value, lo, hi)`: `value < lo ? lo : hi < value ? hi : value`
-/// (NaN passes through).
+/// Clamps `value` to `lo..=hi` as `std::clamp` does:
+/// `value < lo ? lo : hi < value ? hi : value`, so NaN passes through.
 fn clamp(value: f64, lo: f64, hi: f64) -> f64 {
     if value < lo {
         lo
@@ -96,7 +94,8 @@ fn line_of_sight_blocked(camera: &Vec3, point: &Vec3) -> bool {
     dot(&closest, &closest) < 1.0
 }
 
-/// C++ also carries `tMax`, which nothing reads.
+/// Where a ray first meets a sphere, as the distance along the ray. Only the
+/// near intersection is kept: C++ also carries `tMax`, which nothing reads.
 struct RaySphereIntersection {
     t_min: f64,
 }
@@ -175,7 +174,6 @@ fn sign(value: f64) -> i32 {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VerticalPerspectiveProjection;
 
-/// `VerticalPerspectiveProjection::CenterAndBearing`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CenterAndBearing {
     pub center: LatLng,

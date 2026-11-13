@@ -1,5 +1,3 @@
-// Ports test/storage/database_file_source.test.cpp.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;

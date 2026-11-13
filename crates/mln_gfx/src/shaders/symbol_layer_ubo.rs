@@ -1,10 +1,7 @@
-// Ports include/mln/shaders/symbol_layer_ubo.hpp and
-// include/mln/shaders/collision_layer_ubo.hpp.
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) SymbolDrawableUBO` (272 bytes; the C++ tail padding
-/// is spelled out as `pad1..3`).
+/// The symbol shader's per-drawable uniform block (272 bytes). The C++ tail
+/// padding is spelled out as `pad1..3`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct SymbolDrawableUBO {
@@ -37,7 +34,6 @@ pub struct SymbolDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<SymbolDrawableUBO>() == 18 * 16);
 
-/// `struct alignas(16) SymbolTilePropsUBO`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct SymbolTilePropsUBO {
@@ -49,8 +45,8 @@ pub struct SymbolTilePropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<SymbolTilePropsUBO>() == 16);
 
-/// `struct alignas(16) SymbolEvaluatedPropsUBO`. The colors are the
-/// premultiplied `mln::Color` as r, g, b, a floats.
+/// The symbol shader's evaluated properties uniform block. The colors are
+/// premultiplied r, g, b, a floats.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct SymbolEvaluatedPropsUBO {
@@ -70,7 +66,6 @@ pub struct SymbolEvaluatedPropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<SymbolEvaluatedPropsUBO>() == 6 * 16);
 
-/// `struct alignas(16) CollisionDrawableUBO`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct CollisionDrawableUBO {
@@ -79,7 +74,6 @@ pub struct CollisionDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<CollisionDrawableUBO>() == 4 * 16);
 
-/// `struct alignas(16) CollisionTilePropsUBO`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct CollisionTilePropsUBO {

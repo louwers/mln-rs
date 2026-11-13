@@ -1,5 +1,3 @@
-// Ports test/renderer/pattern_atlas.test.cpp.
-
 use std::path::PathBuf;
 
 use mln_image::decode_image;
@@ -13,7 +11,6 @@ fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
 }
 
-/// `util::read_file`.
 fn read_file(relative: &str) -> Vec<u8> {
     let path = cpp_path(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
@@ -44,7 +41,6 @@ fn check_image(base: &str, actual: &PremultipliedImage) {
     assert!(diff <= image_threshold, "{base}: image diff {diff} > {image_threshold}");
 }
 
-/// `makeMutable<style::Image::Impl>(id, std::move(image), pixelRatio, sdf)`.
 fn make_image(id: &str, image: PremultipliedImage, pixel_ratio: f32, sdf: bool) -> ImageImpl {
     ImageImpl::new(id.to_owned(), image, pixel_ratio, sdf, Vec::new(), Vec::new(), None, None, None).expect("image")
 }

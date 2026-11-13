@@ -1,15 +1,8 @@
-// Ports test/include/mln/test/stub_file_source.hpp and
-// test/src/mln/test/stub_file_source.cpp, the FileSource of the C++ unit
-// tests (here for the tests of every crate that needs one).
-//
 // The asynchronous mode polls the pending requests from an AsyncTask on the
 // current RunLoop, re-armed every millisecond while requests are pending
-// (C++: a 1 ms repeating `util::Timer`, a TODO(port) of the RunLoop). The
+// (C++: a 1 ms repeating `util::Timer`). The
 // stub lives on the thread that created it; requests must come from that
 // thread.
-//
-// TODO(port): the style/source/tile/glyphs/image responders beyond the
-// generic `set_response`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -26,7 +19,6 @@ use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::Response;
 
-/// `StubFileSource::ResponseType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResponseType {
     Asynchronous,
@@ -50,7 +42,6 @@ struct State {
     properties: HashMap<String, Value>,
 }
 
-/// `StubFileSource`.
 pub struct StubFileSource {
     type_: ResponseType,
     state: LocalObject<RefCell<State>>,
@@ -65,7 +56,6 @@ struct StubFileRequest {
 impl AsyncRequest for StubFileRequest {}
 
 impl Drop for StubFileRequest {
-    /// `~StubFileRequest() { fileSource.remove(this); }`
     fn drop(&mut self) {
         if let Some(state) = self.state.upgrade() {
             state.borrow_mut().pending.remove(&self.id);
@@ -134,8 +124,7 @@ impl StubFileSource {
         })
     }
 
-    /// `respondToAll()`: answers the requests pending now. Only for
-    /// `ResponseType::Manual`.
+    /// Answers the requests pending now. Only for `ResponseType::Manual`.
     pub fn respond_to_all(&self) {
         assert_eq!(self.type_, ResponseType::Manual, "this method can only be called with ResponseType::Manual");
         let state = self.state();

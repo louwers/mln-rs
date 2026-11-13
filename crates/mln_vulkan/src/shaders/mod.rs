@@ -1,4 +1,5 @@
-//! Ports include/mln/shaders/vulkan and src/mln/shaders/vulkan.
+//! The Vulkan shaders: their GLSL and its compiler, the descriptor set
+//! layout, and the shader sources, programs and groups.
 //!
 //! C++ compiles its GLSL with glslang when a shader is first used; the port
 //! compiles it with naga's GLSL front end and SPIR-V back end (`compiler`),

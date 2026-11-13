@@ -1,7 +1,3 @@
-// Ports include/mln/storage/resource_transform.hpp and
-// src/mln/storage/resource_transform.cpp, with maplibre-native-ffi's patch 0068
-// (a transform can fail a request).
-
 use std::sync::Arc;
 
 use crate::resource::Kind;

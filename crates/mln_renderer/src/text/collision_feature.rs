@@ -1,5 +1,3 @@
-// Ports src/mln/text/collision_feature.hpp and src/mln/text/collision_feature.cpp.
-//
 // The two C++ constructors are `CollisionFeature::new_text` (shaped text)
 // and `CollisionFeature::new_icon` (shaped icon). C++ copies the
 // `RefIndexedSubfeature` into an owning `IndexedSubfeature`; here both are
@@ -18,15 +16,14 @@ use serde::{Deserialize, Serialize};
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::IndexedSubfeature;
 
-/// `util::dist<float>(a, b)` on `Point<int16_t>` (util/math.hpp): a double
-/// sqrt of the `int` sum, narrowed to float.
+/// The distance from `a` to `b` as C++ computes it: an `f64` square root of
+/// the integer sum, narrowed to `f32`.
 fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
     let dx = f64::from(i32::from(b.x) - i32::from(a.x));
     let dy = f64::from(i32::from(b.y) - i32::from(a.y));
     (dx * dx + dy * dy).sqrt() as f32
 }
 
-/// `util::rotate(Point<float>, float angle)` (util/math.hpp).
 fn util_rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     let cos = angle.cos();
     let sin = angle.sin();
@@ -35,7 +32,7 @@ fn util_rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     Point::new(x, y)
 }
 
-/// `std::min({a, b, c, d})`: the first smallest by `<`.
+/// The first smallest of `values` by `<`, as `std::min` picks it.
 fn min4(values: [f32; 4]) -> f32 {
     let mut smallest = values[0];
     for value in &values[1..] {
@@ -46,7 +43,7 @@ fn min4(values: [f32; 4]) -> f32 {
     smallest
 }
 
-/// `std::max({a, b, c, d})`: the first largest by `<`.
+/// The first largest of `values` by `<`, as `std::max` picks it.
 fn max4(values: [f32; 4]) -> f32 {
     let mut largest = values[0];
     for value in &values[1..] {
@@ -57,7 +54,6 @@ fn max4(values: [f32; 4]) -> f32 {
     largest
 }
 
-/// `ProjectedCollisionBox::Type`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProjectedCollisionBoxType {
     #[default]
@@ -66,8 +62,7 @@ pub enum ProjectedCollisionBoxType {
     Circle,
 }
 
-/// `ProjectedCollisionBox`: the C++ union of a box and a circle, tagged by
-/// its `Type`.
+/// A projected collision box or circle.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectedCollisionBox {
     geometry: ProjectedCollisionBoxGeometry,
@@ -82,7 +77,6 @@ enum ProjectedCollisionBoxGeometry {
 }
 
 impl ProjectedCollisionBox {
-    /// `ProjectedCollisionBox(float x1, float y1, float x2, float y2)`.
     #[must_use]
     pub fn new_box(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         ProjectedCollisionBox {
@@ -90,13 +84,12 @@ impl ProjectedCollisionBox {
         }
     }
 
-    /// `ProjectedCollisionBox(float x, float y, float r)`.
     #[must_use]
     pub fn new_circle(x: f32, y: f32, r: f32) -> Self {
         ProjectedCollisionBox { geometry: ProjectedCollisionBoxGeometry::Circle(BCircle::new(Point::new(x, y), r)) }
     }
 
-    /// `box()`. C++ asserts `isBox()`.
+    /// The box; panics if this is a circle.
     #[must_use]
     pub fn box_(&self) -> &BBox {
         match &self.geometry {
@@ -105,7 +98,7 @@ impl ProjectedCollisionBox {
         }
     }
 
-    /// `circle()`. C++ asserts `isCircle()`.
+    /// The circle; panics if this is a box.
     #[must_use]
     pub fn circle(&self) -> &BCircle {
         match &self.geometry {
@@ -135,7 +128,6 @@ impl ProjectedCollisionBox {
     }
 }
 
-/// `CollisionBox`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CollisionBox {
     /// the box is centered around the anchor point
@@ -155,14 +147,12 @@ pub struct CollisionBox {
 }
 
 impl CollisionBox {
-    /// `CollisionBox(anchor, x1, y1, x2, y2, signedDistanceFromAnchor = 0)`.
     #[must_use]
     pub fn new(anchor: Point<f32>, x1: f32, y1: f32, x2: f32, y2: f32, signed_distance_from_anchor: f32) -> Self {
         CollisionBox { anchor, x1, y1, x2, y2, signed_distance_from_anchor }
     }
 }
 
-/// `CollisionFeature`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CollisionFeature {
     pub boxes: Vec<CollisionBox>,

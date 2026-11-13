@@ -1,7 +1,3 @@
-// Ports src/mln/style/layers/line_layer_impl.hpp +
-// src/mln/style/layers/line_layer_impl.cpp. `staticTypeInfo()` is generated
-// in C++ (layer.cpp.ejs); here it is in line_layer.rs.
-
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +5,6 @@ use crate::expression::Dependency;
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 
-/// `LineLayer::Impl`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
@@ -18,7 +13,6 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// `using Layer::Impl::Impl;` (`Impl(std::string layerID, std::string sourceID)`).
     #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         Impl {
@@ -29,8 +23,7 @@ impl Impl {
     }
 }
 
-/// `LineLayer::Impl : public Layer::Impl`: the base members read as
-/// `impl_.id`, `impl_.visibility`, ... as in C++.
+/// The base members read as `impl_.id`, `impl_.visibility`, and so on.
 impl std::ops::Deref for Impl {
     type Target = ImplBase;
     fn deref(&self) -> &ImplBase {

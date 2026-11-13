@@ -1,5 +1,5 @@
-//! Ports the high files of `src/mln/tile` (they include the renderer, so
-//! they live here; `mln_tile` holds the tile data decoding).
+//! The tiles and their workers. They use the renderer, so they live here;
+//! `mln_tile` decodes the tile data.
 
 #[allow(clippy::module_inception)]
 pub mod tile;

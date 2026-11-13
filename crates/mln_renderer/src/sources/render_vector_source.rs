@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/sources/render_vector_source.hpp,
-// src/mln/renderer/sources/render_vector_source.cpp and the
-// RenderTileSetSource half of render_tile_source.cpp.
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -21,16 +17,14 @@ use crate::tile::tile_loader::VectorTileEncoding;
 use crate::tile::vector_tile::VectorTile;
 use crate::tile_parameters::TileParameters;
 
-/// `RenderVectorSource` (a `RenderTileSetSource`).
+/// The render source of a vector source.
 pub struct RenderVectorSource {
     tile_source: RenderTileSource,
-    /// `RenderTileSetSource::cachedTileset`.
     cached_tileset: Option<Tileset>,
     fast_pfor_enabled: bool,
 }
 
 impl RenderVectorSource {
-    /// `RenderVectorSource(Immutable<style::TileSource::Impl>, const TaggedScheduler&)`.
     #[must_use]
     pub fn new(impl_: Arc<tile_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
@@ -41,13 +35,10 @@ impl RenderVectorSource {
         downcast_arc::<tile_source::Impl>(&self.tile_source.base.base_impl)
     }
 
-    /// `getTileset()`.
     fn get_tileset(&self) -> Option<Tileset> {
         self.impl_().tileset.clone()
     }
 
-    /// `updateInternal(tileset, layers, needsRendering, needsRelayout,
-    /// parameters)`.
     fn update_internal(
         &mut self,
         tileset: &Tileset,
@@ -106,7 +97,6 @@ impl RenderSource for RenderVectorSource {
         self.tile_source.is_loaded()
     }
 
-    /// `RenderTileSetSource::update`.
     fn update(
         &mut self,
         base_impl: Arc<dyn source::Impl>,
@@ -247,7 +237,6 @@ impl RenderSource for RenderVectorSource {
         self.tile_source.dump_debug_logs();
     }
 
-    /// `RenderTileSetSource::getMaxZoom()`.
     fn get_max_zoom(&self) -> u8 {
         self.cached_tileset.as_ref().map_or(constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
     }

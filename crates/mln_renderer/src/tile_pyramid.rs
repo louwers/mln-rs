@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/tile_pyramid.hpp and src/mln/renderer/tile_pyramid.cpp.
-//
 // `renderedTiles` (`std::map<UnwrappedTileID, std::reference_wrapper<Tile>>`)
 // maps to the key of the tile in `tiles`: every rendered tile is one of the
 // pyramid's tiles.
@@ -28,7 +26,6 @@ use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, tile_cover};
 
-/// `TilePyramid`.
 pub struct TilePyramid {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
     cache: TileCache,
@@ -165,8 +162,7 @@ impl Default for TilePyramid {
 }
 
 impl TilePyramid {
-    /// `TilePyramid(const TaggedScheduler&)`, without the thread pool (see
-    /// `TileCache::new`).
+    /// An empty pyramid. Takes no thread pool (see `TileCache::new`).
     #[must_use]
     pub fn new() -> Self {
         TilePyramid {
@@ -186,8 +182,6 @@ impl TilePyramid {
         self.tiles.values().all(|tile| tile.is_complete())
     }
 
-    /// `update(layers, needsRendering, needsRelayout, parameters, sourceImpl,
-    /// tileSize, zoomRange, bounds, createTile)`.
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
@@ -462,7 +456,7 @@ impl TilePyramid {
         self.cache.defer_pending_releases();
     }
 
-    /// `getRenderedTiles()`: the rendered tiles, sorted by tile id.
+    /// The rendered tiles, sorted by tile id.
     pub fn get_rendered_tiles(&self) -> impl Iterator<Item = (&UnwrappedTileID, &dyn Tile)> + '_ {
         self.rendered_tiles.iter().map(|(id, key)| (id, self.tiles[key].as_ref()))
     }
@@ -472,7 +466,7 @@ impl TilePyramid {
         self.rendered_tiles.len()
     }
 
-    /// `getTile(tileID)`: a pyramid tile or a cached one.
+    /// The tile with this id, from the pyramid or the cache.
     #[must_use]
     pub fn get_tile(&self, tile_id: &OverscaledTileID) -> Option<&dyn Tile> {
         match self.tiles.get(tile_id) {
@@ -482,8 +476,6 @@ impl TilePyramid {
     }
 
     // query
-    /// `queryRenderedFeatures(geometry, transformState, layers, options,
-    /// globalState, projMatrix, featureState)`.
     #[allow(clippy::too_many_arguments)]
     pub fn query_rendered_features(
         &self,
@@ -730,7 +722,6 @@ impl TilePyramid {
         Ok(result)
     }
 
-    /// `querySourceFeatures(options, globalState)`.
     pub fn query_source_features(
         &self,
         options: &crate::query::SourceQueryOptions,
@@ -745,7 +736,6 @@ impl TilePyramid {
         Ok(result)
     }
 
-    /// `getRenderedTile(tileID)`.
     #[must_use]
     pub fn get_rendered_tile(&self, tile_id: &UnwrappedTileID) -> Option<&dyn Tile> {
         self.rendered_tiles.get(tile_id).map(|key| self.tiles[key].as_ref())
@@ -785,7 +775,7 @@ impl TilePyramid {
         }
     }
 
-    /// `handleWrapJump(lng)`.
+    /// Reassigns the tiles' wrap values when the map pans by whole worlds.
     ///
     /// On top of the regular z/x/y values, `TileIDs` have a `wrap` value that
     /// specify which copy of the world the tile belongs to. For example, at
@@ -843,14 +833,12 @@ impl TilePyramid {
         self.cache.clear();
     }
 
-    /// `retryFailedTiles()`.
     pub fn retry_failed_tiles(&self) {
         for tile in self.tiles.values() {
             tile.retry_failed_load();
         }
     }
 
-    /// `setObserver(TileObserver*)`.
     pub fn set_observer(&mut self, observer: Rc<dyn TileObserver>) {
         self.observer = observer;
     }
@@ -861,7 +849,6 @@ impl TilePyramid {
         }
     }
 
-    /// `getTiles()`.
     #[must_use]
     pub fn get_tiles(&self) -> &BTreeMap<OverscaledTileID, Box<dyn Tile>> {
         &self.tiles

@@ -1,5 +1,3 @@
-// Ports src/mln/layout/symbol_instance.hpp and src/mln/layout/symbol_instance.cpp.
-//
 // Not ported: the MLN_SYMBOL_GUARDS memory-corruption guards (check values,
 // checkIndex, forceFail): they detect C++ memory corruption, which safe
 // Rust cannot have.
@@ -20,7 +18,7 @@ use crate::geometry::feature_index::IndexedSubfeature;
 use crate::text::collision_feature::CollisionFeature;
 use crate::text::quads::{SymbolQuads, get_glyph_quads, get_icon_quads};
 
-/// `enum class SymbolContent : uint8_t` (bit flags).
+/// Bit flags for what a symbol contains: text, an RGBA icon, an SDF icon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SymbolContent(pub u8);
 
@@ -52,8 +50,8 @@ impl std::ops::BitOrAssign for SymbolContent {
     }
 }
 
-/// `ShapedTextOrientations`. C++ `right` is a reference to `horizontal`;
-/// here `right()`/`right_mut()` return `horizontal`.
+/// A symbol's shaped text in each orientation. The right-justified shaping
+/// is the horizontal one: `right()` and `right_mut()` return `horizontal`.
 #[derive(Clone, Debug, Default)]
 pub struct ShapedTextOrientations {
     pub horizontal: Shaping,
@@ -91,7 +89,6 @@ fn get_any_shaping(shaped_text_orientations: &ShapedTextOrientations) -> &Shapin
     &shaped_text_orientations.horizontal
 }
 
-/// `SymbolInstanceSharedData`.
 #[derive(Debug, Default)]
 pub struct SymbolInstanceSharedData {
     pub line: GeometryCoordinates,
@@ -175,7 +172,6 @@ impl SymbolInstanceSharedData {
     }
 }
 
-/// `SymbolInstance`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolInstance {
     /// Port-only: not written by serde. The layout releases it before the

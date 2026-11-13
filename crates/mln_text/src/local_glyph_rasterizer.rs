@@ -1,6 +1,3 @@
-// Ports src/mln/text/local_glyph_rasterizer.hpp and
-// platform/default/src/mln/text/local_glyph_rasterizer.cpp.
-
 use mln_util::font_stack::FontStack;
 
 use crate::glyph::{Glyph, GlyphID};

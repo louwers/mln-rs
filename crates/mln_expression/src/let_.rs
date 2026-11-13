@@ -1,6 +1,4 @@
-// Ports include/mln/style/expression/let.hpp and
-// src/mln/style/expression/let.cpp. (The module is `let_` because `let` is a
-// Rust keyword.)
+// The module is `let_` because `let` is a Rust keyword.
 
 use std::sync::Arc;
 

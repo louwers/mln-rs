@@ -1,5 +1,5 @@
-//! Ports `expression-test/` of the C++ repo: runs
-//! `metrics/integration/expression-tests` with the C++ runner's rules.
+//! Runs the expression tests (`metrics/integration/expression-tests`) with
+//! the C++ runner's rules.
 
 pub mod parser;
 pub mod runner;
@@ -97,7 +97,6 @@ pub fn run(metrics: &Path, test_names: &[String], filter: Option<&str>, verbose:
     stats
 }
 
-/// `printStats` (`expression_test_logger.cpp`).
 pub fn print_stats(stats: &TestStats) {
     let count = stats.test_count();
     let pct = |n: usize| if count == 0 { 0.0 } else { 100.0 * n as f64 / count as f64 };

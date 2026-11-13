@@ -1,12 +1,7 @@
-// Ports src/mln/storage/main_resource_loader.hpp and
-// platform/default/src/mln/storage/main_resource_loader.cpp.
-//
 // The waterfall runs on the "ResourceLoaderThread" (`util::Thread`), as in
 // C++. `tasks` is keyed by a request id instead of the `AsyncRequest*` of
 // the caller's request. Callbacks of the chained requests reach the thread
 // object through a `Weak` (C++ captures `this`).
-//
-// TODO(port): `setResourceTransform`; MBGL_TIMING logs.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -37,7 +32,6 @@ struct ThreadInner {
     tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
 
-/// `MainResourceLoaderThread`.
 pub struct MainResourceLoaderThread {
     inner: Rc<ThreadInner>,
 }
@@ -77,7 +71,6 @@ impl ThreadInner {
                 {
                     database_file_source.forward(&forwarded, &response, None);
                 }
-                // TODO(port): MBGL_TIMING_FINISH for tiles.
                 callback(response);
             }),
         ))
@@ -106,7 +99,6 @@ impl MainResourceLoaderThread {
         }
     }
 
-    /// `request(AsyncRequest* req, const Resource&, const ActorRef<FileSourceRequest>&)`.
     pub fn request(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let inner = &self.inner;
         let callback = make_callback(r);
@@ -190,16 +182,15 @@ impl MainResourceLoaderThread {
         }
     }
 
-    /// `cancel(AsyncRequest* req)`.
     pub fn cancel(&self, req: u64) {
         let task = self.inner.tasks.borrow_mut().remove(&req);
         drop(task);
     }
 }
 
-/// `MainResourceLoader`: the `ResourceLoader` file source. `thread` comes
-/// first: it is dropped (joined) before the file sources, as C++ destroys
-/// members in reverse order.
+/// The `ResourceLoader` file source. `thread` comes first: it is dropped
+/// (joined) before the file sources, as C++ destroys members in reverse
+/// order.
 pub struct MainResourceLoader {
     thread: Thread<MainResourceLoaderThread>,
     asset_file_source: FileSourcePtr,
@@ -234,7 +225,6 @@ impl MainResourceLoader {
             mbtiles_file_source.clone(),
             pmtiles_file_source.clone(),
         );
-        // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_WORKER).
         let thread = Thread::new("ResourceLoaderThread", move |_| {
             let (asset, database, local, online, mbtiles, pmtiles) = sources;
             MainResourceLoaderThread::new(asset, database, local, online, mbtiles, pmtiles)

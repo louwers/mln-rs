@@ -1,6 +1,3 @@
-// Ports include/mln/vulkan/upload_pass.hpp, src/mln/vulkan/upload_pass.cpp
-// and src/mln/vulkan/vertex_attribute.cpp (`VertexAttribute::getBuffer`)
-//
 // `vulkan::VertexAttribute` adds the storage buffer an instanced attribute
 // is also read through (`getUBO`, `getBufferUsage`); here every attribute's
 // buffer is a vertex buffer, an instance attribute's too.
@@ -28,8 +25,7 @@ pub struct UploadPass {
     command_buffer: vk::CommandBuffer,
 }
 
-/// `struct VertexBuffer : gfx::VertexBufferBase`: the buffer attached to a
-/// shared vertex vector.
+/// The buffer attached to a shared vertex vector.
 struct VertexBuffer {
     resource: Rc<VertexBufferResource>,
 }
@@ -73,8 +69,7 @@ impl UploadPass {
         )
     }
 
-    /// `getBuffer(const VertexVectorBasePtr&, usage, forceUpdate)`: the
-    /// buffer of a shared vertex vector. A vector that changed gets a new
+    /// The buffer of a shared vertex vector. A vector that changed gets a new
     /// buffer: the frames in flight may still read the old one.
     #[must_use]
     pub fn get_buffer(&self, vec: Option<&VertexVectorBasePtr>) -> Option<UniqueVertexBufferResource> {
@@ -106,7 +101,6 @@ impl UploadPass {
         None
     }
 
-    /// `vulkan::VertexAttribute::getBuffer(attrib, uploadPass, usage, forceUpdate)`
     pub fn get_attribute_buffer(&self, attrib: &mut VertexAttribute) -> Option<UniqueVertexBufferResource> {
         if attrib.get_buffer().is_none() {
             if let Some(shared) = attrib.get_shared_raw_data().cloned() {
@@ -125,7 +119,6 @@ impl UploadPass {
 }
 
 impl Drop for UploadPass {
-    /// `endEncoding()`
     fn drop(&mut self) {
         self.pop_debug_group();
     }

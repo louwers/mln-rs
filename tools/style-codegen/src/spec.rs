@@ -1,7 +1,3 @@
-// Ports scripts/style-spec.mjs (the edits MapLibre Native makes to the style
-// spec reference) and the part of scripts/generate-style-code.mjs that turns
-// the spec into the per-layer property lists.
-
 use serde_json::{Map, Value, json};
 
 /// One layout, paint, light or sky property: the spec entry plus its name.
@@ -60,8 +56,9 @@ pub struct LayerSpec {
     pub paint_properties: Vec<Property>,
 }
 
-/// `modifiedReferenceSpec` (style-spec.mjs) with generate-style-code.mjs's
-/// `line-floor-width` mock property added.
+/// Parses the style spec and applies the generator's changes to it: removes
+/// or narrows the properties MapLibre Native doesn't support, and adds the
+/// internal `symbol-screen-space` and the mock `line-floor-width` properties.
 pub fn load(text: &str) -> Result<Value, String> {
     let mut spec: Value = serde_json::from_str(text).map_err(|e| format!("v8.json: {e}"))?;
 
@@ -201,7 +198,7 @@ pub fn layers(spec: &Value) -> Result<Vec<LayerSpec>, String> {
     Ok(result)
 }
 
-/// `lightProperties` of generate-style-code.mjs.
+/// The light's properties, as generate-style-code.mjs collects them.
 pub fn light_properties(spec: &Value) -> Result<Vec<Property>, String> {
     let mut result = properties_of(spec, "light", false)?;
     for p in &mut result {

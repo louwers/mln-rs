@@ -1,6 +1,3 @@
-// Ports src/mln/gl/enum.hpp and src/mln/gl/enum.cpp (`Enum<T>::to`), and the
-// component tables of src/mln/gl/value.cpp (`VertexAttribute::Set`).
-//
 // `Enum<T>::from` reads GL state back, which only the C++ tests of the state
 // values do.
 
@@ -137,9 +134,8 @@ pub fn texture_pixel(value: TexturePixelType, desktop: bool) -> u32 {
     }
 }
 
-/// `Enum<gfx::TexturePixelType>::sizedFor`: the internal format of a texture
-/// of `value` pixels with `type_` channels, on a `desktop` context or an
-/// OpenGL ES one.
+/// The internal format of a texture of `value` pixels with `type_` channels,
+/// on a `desktop` context or an OpenGL ES one.
 #[must_use]
 pub fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDataType, desktop: bool) -> u32 {
     match (type_, value) {
@@ -202,7 +198,6 @@ pub struct AttributeFormat {
     pub normalized: bool,
 }
 
-/// `components(dataType)` and `Enum<gfx::AttributeDataType>::to`.
 #[must_use]
 pub fn attribute_format(value: AttributeDataType) -> Option<AttributeFormat> {
     use AttributeDataType as A;

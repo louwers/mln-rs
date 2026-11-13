@@ -1,5 +1,3 @@
-// Ports include/mln/style/property_value.hpp.
-
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -7,8 +5,8 @@ use crate::expression::Dependency;
 use crate::property_expression::PropertyExpression;
 use crate::renderer::property_evaluator::Evaluator;
 
-/// `PropertyValue<T>`: `variant<Undefined, T, PropertyExpression<T>>`, in
-/// that order (the default is `Undefined`).
+/// A style property's value: undefined (the default), a constant or an
+/// expression.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub enum PropertyValue<T> {
     #[default]
@@ -78,7 +76,7 @@ impl<T> PropertyValue<T> {
         }
     }
 
-    /// `asConstant()`; C++ requires `isConstant()`.
+    /// The constant. Panics when the value isn't a constant.
     pub fn as_constant(&self) -> &T {
         match self {
             PropertyValue::Constant(t) => t,
@@ -86,7 +84,7 @@ impl<T> PropertyValue<T> {
         }
     }
 
-    /// `asExpression()`; C++ requires `isExpression()`.
+    /// The expression. Panics when the value isn't an expression.
     pub fn as_expression(&self) -> &PropertyExpression<T> {
         match self {
             PropertyValue::Expression(e) => e,

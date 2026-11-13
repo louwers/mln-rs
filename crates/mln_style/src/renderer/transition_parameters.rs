@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/transition_parameters.hpp (a cut point of the C++ include cycle).
-
 use std::sync::Arc;
 
 use mln_util::time::Instant;

@@ -1,7 +1,3 @@
-// Ports src/mln/layout/symbol_layout.hpp and src/mln/layout/symbol_layout.cpp
-// (the non-instanced vertex path; MLN_USE_SYMBOL_INSTANCING is off for
-// WebGPU).
-//
 // The layout keeps the tile's `SourceLayer` (shared tile data) and owned
 // `SymbolFeature`s (see symbol_feature.rs), so it can wait for glyphs and
 // images across worker messages.
@@ -64,7 +60,8 @@ use crate::text::get_anchors::{get_anchors, get_center_anchor};
 use crate::text::glyph_manager::HBShapeResults;
 use crate::text::quads::{SymbolQuad, SymbolQuads};
 
-/// `has<Property>(layout)`: a constant that is not empty, or an expression.
+/// Whether `text-field` is set: a constant that is not empty, or an
+/// expression.
 fn has_text_field(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
     layout.get::<TextField>().constant().is_none_or(|t| !t.empty())
 }
@@ -75,7 +72,6 @@ fn has_icon_image(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
     layout.get::<IconImage>().constant().is_none_or(|t| !t.empty())
 }
 
-/// `getCharGlyphIDType(ch, stack, faces, lastCharType)`.
 fn get_char_glyph_id_type(
     ch: u16,
     stack: &[String],
@@ -114,7 +110,6 @@ fn get_char_glyph_id_type(
     GlyphIDType::FontPBF
 }
 
-/// `sectionOptionsToValue(options)`.
 #[must_use]
 pub fn section_options_to_value(options: &SectionOptions) -> Value {
     let mut result = mln_expression::value::ObjectType::new();
@@ -126,7 +121,6 @@ pub fn section_options_to_value(options: &SectionOptions) -> Value {
     Value::Object(result)
 }
 
-/// `createLayout(unevaluated, zoom, globalState)`.
 fn create_layout(
     unevaluated: &SymbolLayoutProperties::Unevaluated,
     zoom: f32,
@@ -158,7 +152,6 @@ fn create_layout(
     layout
 }
 
-/// `util::dist<float>(a, b)`.
 fn dist(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
     let dx = bx - ax;
     let dy = by - ay;
@@ -172,9 +165,8 @@ fn dist(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
 // "yOffset" in shaping.js)
 const BASELINE_OFFSET: f32 = 7.0;
 
-/// `getDefaultHorizontalShaping`: we don't care which shaping we get
-/// because this is used for collision purposes and all the justifications
-/// have the same collision box.
+/// Any horizontal shaping: this is used for collision purposes, and all the
+/// justifications have the same collision box.
 fn get_default_horizontal_shaping(shaped_text_orientations: &ShapedTextOrientations) -> &Shaping {
     if shaped_text_orientations.right().is_some() {
         return shaped_text_orientations.right();
@@ -188,7 +180,6 @@ fn get_default_horizontal_shaping(shaped_text_orientations: &ShapedTextOrientati
     &shaped_text_orientations.horizontal
 }
 
-/// `shapingForTextJustifyType`.
 fn shaping_for_text_justify_type(
     shaped_text_orientations: &mut ShapedTextOrientations,
     type_: TextJustifyType,
@@ -204,7 +195,6 @@ fn shaping_for_text_justify_type(
     }
 }
 
-/// `evaluateRadialOffset(anchor, radialOffset)`.
 fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32; 2] {
     let mut result = [0.0_f32, 0.0_f32];
     let radial_offset = mln_math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
@@ -230,7 +220,6 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
     result
 }
 
-/// `SymbolLayout`.
 pub struct SymbolLayout {
     pub layer_paint_properties: VecMap<String, Arc<dyn LayerProperties>>,
     pub bucket_leader_id: String,
@@ -279,7 +268,6 @@ pub struct SymbolLayout {
 impl SymbolLayout {
     pub const INVALID_OFFSET_VALUE: f32 = f32::MAX;
 
-    /// `SymbolLayout(parameters, layers, sourceLayer, layoutParameters)`.
     pub fn new(
         parameters: &BucketParameters,
         layers: &[Arc<dyn LayerProperties>],
@@ -596,7 +584,6 @@ impl SymbolLayout {
         Ok(this)
     }
 
-    /// `evaluateVariableOffset(anchor, textOffset)`.
     #[must_use]
     pub fn evaluate_variable_offset(anchor: SymbolAnchorType, mut offset: [f32; 2]) -> [f32; 2] {
         if offset[1] == Self::INVALID_OFFSET_VALUE {
@@ -629,9 +616,9 @@ impl SymbolLayout {
         result
     }
 
-    /// `getTextVariableAnchorOffset(feature)`: helper to support both
-    /// text-variable-anchor and text-variable-anchor-offset. Offset values
-    /// converted from EMs to PXs.
+    /// The feature's variable anchors and offsets, from either
+    /// `text-variable-anchor` or `text-variable-anchor-offset`, with the
+    /// offsets converted from ems to pixels.
     fn get_text_variable_anchor_offset(&self, feature: &SymbolFeature) -> Option<VariableAnchorOffsetCollection> {
         let zoom = self.zoom;
         let canonical = &self.canonical_id;
@@ -686,9 +673,6 @@ impl SymbolLayout {
         Some(VariableAnchorOffsetCollection::new(anchor_offset_pairs))
     }
 
-    /// `addFeature(layoutFeatureIndex, feature, shapedTextOrientations,
-    /// shapedIcon, imageMap, textOffset, layoutTextSize, layoutIconSize,
-    /// iconType)`.
     #[allow(clippy::too_many_arguments)]
     fn add_feature(
         &mut self,
@@ -945,7 +929,6 @@ impl SymbolLayout {
         }
     }
 
-    /// `anchorIsTooClose(text, repeatDistance, anchor)`.
     fn anchor_is_too_close(&mut self, text: &[u16], repeat_distance: f32, anchor: &Anchor) -> bool {
         if let Some(other_anchors) = self.compare_text.get(text) {
             for other_anchor in other_anchors {
@@ -958,10 +941,8 @@ impl SymbolLayout {
         false
     }
 
-    /// `calculateTileDistances(line, anchor)`: analog of
-    /// `addToLineVertexArray` in JS. This version doesn't need to build up a
-    /// line array like the JS version does, but it uses the same logic to
-    /// calculate tile distances.
+    /// The tile distances of `line`'s vertices from `anchor`, computed as GL
+    /// JS's `addToLineVertexArray` does, without building a line array.
     #[must_use]
     pub fn calculate_tile_distances(line: &GeometryCoordinates, anchor: &Anchor) -> Vec<f32> {
         let mut tile_distances = vec![0.0_f32; line.len()];
@@ -1000,7 +981,6 @@ impl SymbolLayout {
         tile_distances
     }
 
-    /// `updatePaintPropertiesForSection(bucket, feature, sectionIndex, canonical)`.
     fn update_paint_properties_for_section(
         bucket: &SymbolBucket,
         state: &SymbolBucketState,
@@ -1025,10 +1005,8 @@ impl SymbolLayout {
         }
     }
 
-    /// `addSymbolGlyphQuads(bucket, symbolInstance, feature, writingMode,
-    /// placedIndex, glyphQuads, canonical, lastAddedSection)`: adds symbol
-    /// quads to bucket and returns formatted section index of last added
-    /// quad.
+    /// Adds symbol quads to the bucket and returns the formatted section index
+    /// of the last added quad.
     #[allow(clippy::too_many_arguments)]
     fn add_symbol_glyph_quads(
         &self,
@@ -1098,8 +1076,7 @@ impl SymbolLayout {
         (last_added_section.unwrap_or(0), placed_index)
     }
 
-    /// `addSymbol(buffer, sizeData, symbol, labelAnchor, placedSymbol,
-    /// sortKey)`: adds placed items to the buffer.
+    /// Adds a placed symbol quad to `buffer`.
     fn add_symbol(
         buffer: &mut Buffer,
         size_data: Range<f32>,
@@ -1219,7 +1196,6 @@ impl SymbolLayout {
         index as usize
     }
 
-    /// `addSymbols(buffer, sizeData, symbols, labelAnchor, placedSymbol, sortKey)`.
     fn add_symbols(
         buffer: &mut Buffer,
         size_data: Range<f32>,
@@ -1240,7 +1216,6 @@ impl SymbolLayout {
         first_index
     }
 
-    /// `addToDebugBuffers(bucket)`.
     fn add_to_debug_buffers(state: &mut SymbolBucketState) {
         if !Self::has_symbol_instances_in(state) {
             return;
@@ -1357,7 +1332,6 @@ impl Layout for SymbolLayout {
         self.need_finalize_symbols_val
     }
 
-    /// `finalizeSymbols(HBShapeResults&)`.
     fn finalize_symbols(&mut self, results: &mut HBShapeResults) {
         for feature in &mut self.features {
             if feature.geometry.is_empty() {
@@ -1435,7 +1409,6 @@ impl Layout for SymbolLayout {
         self.need_finalize_symbols_val = false;
     }
 
-    /// `prepareSymbols(glyphMap, glyphPositions, imageMap, imagePositions)`.
     // C++'s `if (ft.formattedText && ...)`: the text is borrowed where it is
     // used, as `feature` is also passed on in between.
     #[allow(clippy::unnecessary_unwrap)]
@@ -1680,8 +1653,6 @@ impl Layout for SymbolLayout {
         self.compare_text.clear();
     }
 
-    /// `createBucket(patternPositions, featureIndex, renderData, firstLoad,
-    /// showCollisionBoxes, canonical)`.
     fn create_bucket(
         &mut self,
         _pattern_positions: &ImagePositions,

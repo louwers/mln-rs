@@ -1,5 +1,3 @@
-// Ports src/mln/text/collision_index.hpp and src/mln/text/collision_index.cpp.
-//
 // The C++ `collisionGroupPredicate` (`std::optional<std::function<bool(const
 // RefIndexedSubfeature&)>>`) is an `Option<&dyn Fn(&IndexedSubfeature) ->
 // bool>`.
@@ -23,10 +21,9 @@ use crate::layout::symbol_projection::{
 };
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
 
-/// `CollisionBoundaries = std::array<float, 4>`: [x1, y1, x2, y2].
+/// A box's edges: [x1, y1, x2, y2].
 pub type CollisionBoundaries = [f32; 4];
 
-/// `IntersectStatus`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct IntersectStatus {
     pub flags: u8,
@@ -40,7 +37,6 @@ impl IntersectStatus {
     pub const VERTICAL_BORDERS: u8 = 1 << 1;
 }
 
-/// `CollisionIndex::CollisionGrid`.
 pub type CollisionGrid = GridIndex<IndexedSubfeature>;
 
 /// When a symbol crosses the edge that causes it to be included in
@@ -60,7 +56,6 @@ fn find_viewport_padding(transform_state: &TransformState, map_mode: MapMode) ->
     if transform_state.get_pitch() == 0.0 { VIEWPORT_PADDING_DEFAULT } else { VIEWPORT_PADDING_DEFAULT * 2.0 }
 }
 
-/// `IndexedSubfeature(const RefIndexedSubfeature&, bucketInstanceId, collisionGroupId)`.
 fn indexed_subfeature(
     feature: &IndexedSubfeature,
     bucket_instance_id: u32,
@@ -69,7 +64,6 @@ fn indexed_subfeature(
     IndexedSubfeature { bucket_instance_id, collision_group_id, ..feature.clone() }
 }
 
-/// `PlacedFeatureResult`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlacedFeatureResult {
     pub placed: bool,
@@ -78,7 +72,6 @@ pub struct PlacedFeatureResult {
     pub occluded: bool,
 }
 
-/// `CollisionIndex::ProjectedAnchor`.
 #[derive(Clone, Copy, Debug)]
 struct ProjectedAnchor {
     point: Point<f32>,
@@ -87,14 +80,12 @@ struct ProjectedAnchor {
     occluded: bool,
 }
 
-/// `CollisionIndex::ProjectedBox`.
 #[derive(Clone, Copy, Debug)]
 struct ProjectedBox {
     boundaries: CollisionBoundaries,
     all_points_occluded: bool,
 }
 
-/// `CollisionIndex`.
 pub struct CollisionIndex {
     transform_state: TransformState,
 
@@ -111,7 +102,6 @@ pub struct CollisionIndex {
 }
 
 impl CollisionIndex {
-    /// `CollisionIndex(const TransformState&, MapMode)`.
     pub fn new(transform_state: &TransformState, map_mode: MapMode) -> Self {
         let viewport_padding = find_viewport_padding(transform_state, map_mode);
         let size = transform_state.get_size();
@@ -184,7 +174,6 @@ impl CollisionIndex {
             && boundaries[1] < self.grid_bottom_boundary
     }
 
-    /// `projectTileBoundaries(posMatrix)`.
     pub fn project_tile_boundaries(&self, pos_matrix: &Mat4) -> CollisionBoundaries {
         let top_left = self.project_point(pos_matrix, Point::new(0.0, 0.0));
         let bottom_right = self.project_point(pos_matrix, Point::new(EXTENT as f32, EXTENT as f32));
@@ -210,7 +199,6 @@ impl CollisionIndex {
             && boundaries[3] > tile_boundaries[1]
     }
 
-    /// `intersectsTileEdges(box, shift, posMatrix, textPixelRatio, tileEdges)`.
     pub fn intersects_tile_edges(
         &self,
         box_: &CollisionBox,
@@ -257,8 +245,8 @@ impl CollisionIndex {
         result
     }
 
-    /// `placeFeature(...)`. `shift` is a variable anchor's offset, unset when
-    /// there is none.
+    /// Places a collision feature. `shift` is a variable anchor's offset,
+    /// unset when there is none.
     #[allow(clippy::too_many_arguments)]
     pub fn place_feature(
         &self,
@@ -522,8 +510,6 @@ impl CollisionIndex {
         }
     }
 
-    /// `insertFeature(feature, projectedBoxes, ignorePlacement,
-    /// bucketInstanceId, collisionGroupId)`.
     pub fn insert_feature(
         &mut self,
         feature: &CollisionFeature,
@@ -558,7 +544,6 @@ impl CollisionIndex {
         }
     }
 
-    /// `queryRenderedSymbols(queryGeometry)`.
     pub fn query_rendered_symbols(&self, query_geometry: &ScreenLineString) -> HashMap<u32, Vec<IndexedSubfeature>> {
         let mut result: HashMap<u32, Vec<IndexedSubfeature>> = HashMap::new();
         if query_geometry.is_empty() || (self.collision_grid.empty() && self.ignored_grid.empty()) {
@@ -602,7 +587,6 @@ impl CollisionIndex {
         result
     }
 
-    /// `projectAndGetPerspectiveRatio(tileProjector, point)`.
     fn project_and_get_perspective_ratio(
         &self,
         tile_projector: &TileProjector<'_>,
@@ -611,7 +595,6 @@ impl CollisionIndex {
         self.to_viewport(&tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0))
     }
 
-    /// `toViewport(projected)`.
     fn to_viewport(&self, projected: &ProjectedTilePoint) -> ProjectedAnchor {
         let size = self.transform_state.get_size();
         let viewport_padding = f64::from(self.viewport_padding);
@@ -630,7 +613,6 @@ impl CollisionIndex {
         }
     }
 
-    /// `projectPoint(tileProjector, point)`.
     fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Point<f32>) -> Point<f32> {
         let projected = tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
         let size = self.transform_state.get_size();
@@ -641,7 +623,6 @@ impl CollisionIndex {
         )
     }
 
-    /// `projectPoint(posMatrix, point)`.
     fn project_point(&self, pos_matrix: &Mat4, point: Point<f32>) -> Point<f32> {
         let p = transform(pos_matrix, point);
         let size = self.transform_state.get_size();
@@ -652,7 +633,6 @@ impl CollisionIndex {
         )
     }
 
-    /// `getProjectedCollisionBoundaries(posMatrix, shift, textPixelRatio, box)`.
     fn get_projected_collision_boundaries(
         &self,
         pos_matrix: &Mat4,
@@ -674,8 +654,6 @@ impl CollisionIndex {
         )
     }
 
-    /// `getProjectedCollisionBoundaries(projectedPoint, shift, textPixelRatio,
-    /// box)`.
     fn get_projected_collision_boundaries_for_anchor(
         projected_point: &ProjectedAnchor,
         shift: Point<f32>,
@@ -691,9 +669,9 @@ impl CollisionIndex {
         ]
     }
 
-    /// `projectCollisionBox(...)`: pitched or map-rotated boxes. The box
-    /// outline is sampled at eight points and projected, so it turns and
-    /// foreshortens the way the label does.
+    /// Projects a pitched or map-rotated box. The box outline is sampled at
+    /// eight points and projected, so it turns and foreshortens the way the
+    /// label does.
     #[allow(clippy::too_many_arguments)]
     fn project_collision_box(
         &self,
@@ -797,23 +775,19 @@ impl CollisionIndex {
     }
 }
 
-/// `Point<float> + Point<float>`.
 fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
     Point::new(a.x + b.x, a.y + b.y)
 }
 
-/// `Point<float> * float`.
 fn mul(a: Point<f32>, b: f32) -> Point<f32> {
     Point::new(a.x * b, a.y * b)
 }
 
-/// `vec4 p = {{point.x, point.y, 0, 1}}; matrix::transformMat4(p, p, posMatrix)`.
 fn transform(pos_matrix: &Mat4, point: Point<f32>) -> Vec4 {
     let a: Vec4 = [f64::from(point.x), f64::from(point.y), 0.0, 1.0];
     matrix::transform_mat4_value(&a, pos_matrix)
 }
 
-/// `polygonIntersectsBox(polygon, bbox)`.
 fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &BBox) -> bool {
     // This is just a wrapper that allows us to use the integer-based
     // util::polygonIntersectsPolygon Conversion limits our query accuracy to

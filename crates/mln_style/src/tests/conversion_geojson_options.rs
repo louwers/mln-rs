@@ -1,12 +1,9 @@
-// Ports test/style/conversion/geojson_options.test.cpp.
-
 use mln_conversion::Convertible;
 
 use super::util::parse_json;
 use crate::conversion::{Converter, Error};
 use crate::sources::geojson_source::GeoJSONOptions;
 
-/// `convertJSON<GeoJSONOptions>(json, error)`.
 fn convert_json(json: &str, error: &mut Error) -> Option<GeoJSONOptions> {
     let value = parse_json(json);
     <GeoJSONOptions as Converter>::convert(&Convertible::from(&value), error)

@@ -1,6 +1,3 @@
-// Ports src/mln/style/expression/util.hpp and
-// src/mln/style/expression/util.cpp.
-
 use mln_util::Color;
 use mln_util::string::to_string_double;
 

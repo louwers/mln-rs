@@ -1,5 +1,3 @@
-// Ports include/mln/style/expression/type.hpp.
-//
 // The module is `type_` because `type` is a Rust keyword. The C++ constants
 // (`type::Number`, ...) are the enum variants (`Type::Number`, ...).
 
@@ -7,7 +5,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// `type::Type`, same variant order as the C++ variant.
+/// The type of an expression's value, with the variants in the C++ variant's
+/// order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Type {
     Null,
@@ -27,7 +26,6 @@ pub enum Type {
     Image,
 }
 
-/// `type::Array`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Array {
     pub item_type: Type,
@@ -64,13 +62,11 @@ impl From<Array> for Type {
 }
 
 impl Type {
-    /// `type::Array(itemType)`.
     #[must_use]
     pub fn array(item_type: Type) -> Type {
         Array::new(item_type).into()
     }
 
-    /// `type::Array(itemType, N)`.
     #[must_use]
     pub fn array_n(item_type: Type, n: usize) -> Type {
         Array::with_n(item_type, Some(n)).into()
@@ -111,7 +107,6 @@ impl Type {
     }
 }
 
-/// `type::toString`.
 #[must_use]
 pub fn to_string(t: &Type) -> String {
     t.get_name()

@@ -1,5 +1,4 @@
-// Ports src/mln/renderer/property_evaluation_parameters.hpp. It lives in
-// mln_style because style/properties.hpp needs it (a cut point of the C++ include cycle).
+// Lives in mln_style because the property system needs it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,7 +39,6 @@ pub struct PropertyEvaluationParameters {
 }
 
 impl PropertyEvaluationParameters {
-    /// `explicit PropertyEvaluationParameters(float z)`.
     #[must_use]
     pub fn new(z: f32) -> Self {
         PropertyEvaluationParameters {
@@ -57,7 +55,6 @@ impl PropertyEvaluationParameters {
         }
     }
 
-    /// `PropertyEvaluationParameters(ZoomHistory, TimePoint, Duration)`.
     #[must_use]
     pub fn with_zoom_history(zoom_history: ZoomHistory, now: Option<Instant>, default_fade_duration: Duration) -> Self {
         PropertyEvaluationParameters {

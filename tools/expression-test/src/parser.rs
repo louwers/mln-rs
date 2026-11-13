@@ -1,6 +1,3 @@
-// Ports expression-test/expression_test_parser.hpp and
-// expression-test/expression_test_parser.cpp.
-//
 // The C++ runner reads the fixtures with rapidjson's full-precision parser
 // (correctly rounded, like serde_json).
 
@@ -66,11 +63,9 @@ pub type Ignores = Vec<Ignore>;
 
 fn read_json(path: &Path) -> Result<serde_json::Value, String> {
     let text = std::fs::read_to_string(path).map_err(|_| format!("Unable to open file {}", path.display()))?;
-    // TODO(port): formatJSONParseError's rapidjson message text.
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
-/// `toValue(const JSValue&)`.
 pub fn json_to_value(jsvalue: &serde_json::Value) -> Option<Value> {
     match jsvalue {
         serde_json::Value::Null => Some(Value::Null),
@@ -192,7 +187,6 @@ fn parse_property_spec(property_spec: &serde_json::Value, data: &mut TestData) {
     data.spec = Some(spec);
 }
 
-/// `mapbox::geojson::convert<mapbox::geometry::point<double>>`.
 fn convert_point(json: &serde_json::Value) -> Result<Point<f64>, String> {
     let a = json.as_array().ok_or("coordinates must be an array")?;
     if a.len() < 2 {
@@ -211,9 +205,8 @@ fn convert_polygon(json: &serde_json::Value) -> Result<Polygon<f64>, String> {
     json.as_array().ok_or("coordinates must be an array")?.iter().map(convert_points).collect()
 }
 
-/// `mapbox::geojson::convert<mapbox::geometry::geometry<double>>`.
-// TODO(port): a full port of mapbox/geojson.hpp's parser (error messages,
-// null geometries) with GeoJSON sources in M3.
+// Reads only what the tests use: no null geometries, and the error
+// messages differ from mapbox/geojson.hpp's.
 fn convert_geometry(json: &serde_json::Value) -> Result<Geometry<f64>, String> {
     let t = json.get("type").and_then(|t| t.as_str()).ok_or("Geometry must have a type property")?;
     if t == "GeometryCollection" {
@@ -250,7 +243,6 @@ fn convert_geometry(json: &serde_json::Value) -> Result<Geometry<f64>, String> {
     })
 }
 
-/// `mapbox::geojson::convert<mapbox::feature::identifier>`.
 fn convert_identifier(json: &serde_json::Value) -> Identifier {
     match json {
         serde_json::Value::Number(n) => {
@@ -352,7 +344,6 @@ pub fn collect_test_paths(root_path: &Path, test_names: &[String], filter: Optio
     test_paths
 }
 
-/// `parseExpressionIgnores`.
 #[must_use]
 pub fn parse_expression_ignores(ignores_path: &Path) -> Ignores {
     let Ok(document) = read_json(ignores_path) else {
@@ -369,7 +360,6 @@ pub fn parse_expression_ignores(ignores_path: &Path) -> Ignores {
     ignores
 }
 
-/// `parseTestData`.
 pub fn parse_test_data(path: &Path) -> Result<TestData, String> {
     let document = read_json(path).map_err(|e| format!("Cannot parse test '{}': {e}", path.display()))?;
     let mut data = TestData {
@@ -403,7 +393,7 @@ pub fn parse_test_data(path: &Path) -> Result<TestData, String> {
     Ok(data)
 }
 
-/// `toJSON(value, indent, singleLine)`, for diff output only.
+/// Pretty-printed JSON, for diff output only.
 #[must_use]
 pub fn to_json(value: &Value) -> String {
     serde_json::to_string_pretty(&mbgl_to_json_for_display(value)).unwrap_or_default()
@@ -425,7 +415,7 @@ fn mbgl_to_json_for_display(value: &Value) -> serde_json::Value {
     }
 }
 
-/// `toDocument(value)`: what the round trip re-parses. The C++ writes the
+/// The JSON document the round trip re-parses. The C++ runner writes the
 /// value with `writeJSON` (integral doubles through
 /// `Int64(static_cast<int64_t>(d))`, NaN/Inf make the JSON invalid) and
 /// parses it back with rapidjson.
@@ -473,7 +463,6 @@ pub fn to_document(value: &Value) -> serde_json::Value {
     convert(value)
 }
 
-/// `toValue(const Compiled&)`.
 #[must_use]
 pub fn compiled_to_value(compiled: &Compiled) -> Value {
     let mut compiled_object = ValueObject::new();
@@ -489,8 +478,8 @@ pub fn compiled_to_value(compiled: &Compiled) -> Value {
     Value::Object(compiled_object)
 }
 
-/// `toValue(const expression::Value&)`: serializes native expression types
-/// to JS format. Color and Formatted are exceptions.
+/// Serializes an expression value to the JS format the tests expect; colors
+/// and formatted values have their own forms.
 pub fn expression_value_to_value(expr_value: &mln_expression::Value) -> Option<Value> {
     use mln_expression::value::to_mbgl_value;
     Some(match expr_value {
@@ -509,7 +498,6 @@ pub fn expression_value_to_value(expr_value: &mln_expression::Value) -> Option<V
     })
 }
 
-/// `parseExpression(const JSValue&, spec, result)`.
 pub fn parse_expression(
     value: &serde_json::Value,
     spec: &Option<PropertySpec>,

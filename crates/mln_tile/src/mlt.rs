@@ -1,9 +1,3 @@
-// Ports the output model of the C++ MLT decoder that
-// src/mln/tile/vector_mlt_tile_data.cpp reads (vendor/maplibre-tile-spec/cpp:
-// include/mlt/{tile,layer,feature,geometry,coordinate,properties}.hpp,
-// src/mlt/{feature,properties}.cpp, the per-feature topology walk of
-// src/mlt/geometry_vector.cpp and the checks of src/mlt/decoder.cpp).
-//
 // The wire format is decoded by the `mlt-core` crate, not by a port of the
 // C++ decoder (about 70k lines), and is assumed correct. This module turns mlt-core's
 // columnar result into the C++ model, with the C++ behaviour that
@@ -67,7 +61,6 @@ impl From<mlt_core::MltError> for Error {
     }
 }
 
-/// `mlt::Coordinate`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Coordinate {
     pub x: f32,
@@ -75,16 +68,14 @@ pub struct Coordinate {
 }
 
 impl Coordinate {
-    /// `coord(std::int32_t x, std::int32_t y)`: `static_cast<float>`.
+    /// Converts an int32 vertex to `f32` coordinates.
     fn from_vertex(x: i32, y: i32) -> Self {
         Coordinate { x: x as f32, y: y as f32 }
     }
 }
 
-/// `mlt::CoordVec`.
 pub type CoordVec = Vec<Coordinate>;
 
-/// `mlt::metadata::tileset::GeometryType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GeometryType {
     Point = 0,
@@ -98,31 +89,24 @@ pub enum GeometryType {
 /// The data of the `mlt::geometry::Geometry` subclasses.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
-    /// `Point::getCoordinate()`
     Point(Coordinate),
-    /// `MultiPoint::getCoordinates()`
     MultiPoint(CoordVec),
-    /// `LineString` (a `MultiPoint` subclass): `getCoordinates()`
     LineString(CoordVec),
-    /// `Polygon::getRings()`
     Polygon(Vec<CoordVec>),
-    /// `MultiLineString::getLineStrings()`
     MultiLineString(Vec<CoordVec>),
-    /// `MultiPolygon::getPolygons()`
     MultiPolygon(Vec<Vec<CoordVec>>),
 }
 
-/// `mlt::geometry::Geometry`: its type, data and triangle span.
+/// A feature's geometry: its type, data and triangle span.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Geometry {
     pub shape: Shape,
-    /// `getTriangles()`, as a range of the layer's triangle buffer
+    /// The geometry's triangles, as a range of the layer's triangle buffer
     /// ([`Layer::triangle_buffer`]); `None` for an empty span.
     pub triangles: Option<Range<usize>>,
 }
 
 impl Geometry {
-    /// `Geometry::type`.
     #[must_use]
     pub fn type_(&self) -> GeometryType {
         match self.shape {
@@ -136,7 +120,7 @@ impl Geometry {
     }
 }
 
-/// `mlt::metadata::tileset::ScalarType` of a property column.
+/// The scalar type of a property column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScalarType {
     Boolean,
@@ -149,8 +133,8 @@ pub enum ScalarType {
     String,
 }
 
-/// `mlt::Property`: the alternatives `PresentProperties::getProperty`
-/// produces (the `std::optional<T>` and `nullptr_t` ones never are).
+/// A property value: the alternatives of C++'s `mlt::Property` that a
+/// column produces (its `std::optional<T>` and `nullptr_t` ones never are).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Property<'a> {
     Bool(bool),
@@ -228,7 +212,7 @@ impl PropertyVec {
     }
 }
 
-/// `mlt::PresentProperties`: a property column.
+/// A property column.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PresentProperties {
     type_: ScalarType,
@@ -321,14 +305,10 @@ impl PresentProperties {
         self.type_ == ScalarType::Boolean
     }
 
-    /// `getProperty(logicalIndex)`: `None` for an absent value. Past the end
-    /// of a column without a present stream the C++ throws
-    /// `std::runtime_error("Missing property value")` (after a failing
-    /// `assert` in debug builds).
-    /// Port-only: a code for each value, equal codes for equal values (equal
-    /// values may differ in code). Numbers and booleans are their bits;
-    /// strings are numbered, on the first call. `None` for a string column
-    /// with more distinct strings than about a quarter of its values.
+    /// A code for each value, equal codes for equal values (equal values may
+    /// differ in code). Numbers and booleans are their bits; strings are
+    /// numbered, on the first call. `None` for a string column with more
+    /// distinct strings than about a quarter of its values.
     pub fn codes(&self) -> Option<ValueCodes<'_>> {
         let strings = match &self.values {
             PropertyVec::Str { data, spans } => self.string_codes.get_or_init(spans, data)?,
@@ -337,6 +317,10 @@ impl PresentProperties {
         Some(ValueCodes { column: self, strings })
     }
 
+    /// The value at `logical_index`; `None` for an absent value. Past the end
+    /// of a column without a present stream fails with "Missing property
+    /// value", which C++ throws as a `std::runtime_error` (after a failing
+    /// `assert` in debug builds).
     pub fn get_property(&self, logical_index: u32) -> Result<Option<Property<'_>>, Error> {
         let i = logical_index as usize;
         if i < self.values.len() {
@@ -349,7 +333,6 @@ impl PresentProperties {
     }
 }
 
-/// `mlt::Feature`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Feature {
     id: Option<u64>,
@@ -374,7 +357,8 @@ impl Feature {
         &self.geometry
     }
 
-    /// `getProperty(key, layer)`: `None` for an unknown key or an absent value.
+    /// The value of this feature's property `key` in `layer`; `None` for an
+    /// unknown key or an absent value.
     pub fn get_property<'l>(&self, key: &str, layer: &'l Layer) -> Result<Option<Property<'l>>, Error> {
         match layer.get_property_column(key) {
             Some(column) => column.get_property(self.index),
@@ -383,13 +367,13 @@ impl Feature {
     }
 }
 
-/// `mlt::Layer`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
     name: String,
     extent: u32,
     features: Vec<Feature>,
-    /// C++ `PropertyVecMap` (an `unordered_map`); here in wire order.
+    /// The property columns, in wire order (C++ keeps them in an
+    /// `unordered_map`).
     properties: Vec<(String, PresentProperties)>,
     property_index: HashMap<String, usize>,
     /// The tile's triangle indices, per feature (see [`Geometry::triangles`]).
@@ -412,13 +396,12 @@ impl Layer {
         &self.features
     }
 
-    /// `getProperties()`: every column, in wire order (C++: hash order).
+    /// Every property column, in wire order (C++ lists them in hash order).
     #[must_use]
     pub fn get_properties(&self) -> &[(String, PresentProperties)] {
         &self.properties
     }
 
-    /// `getProperties().find(key)`.
     #[must_use]
     pub fn get_property_column(&self, key: &str) -> Option<&PresentProperties> {
         self.property_index.get(key).map(|&i| &self.properties[i].1)
@@ -430,7 +413,6 @@ impl Layer {
         self.triangles.as_ref()
     }
 
-    /// `feature.getGeometry().getTriangles()`.
     #[must_use]
     pub fn get_triangles(&self, feature: &Feature) -> &[u32] {
         match (&self.triangles, &feature.geometry.triangles) {
@@ -440,14 +422,12 @@ impl Layer {
     }
 }
 
-/// `mlt::MapLibreTile`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MapLibreTile {
     layers: Vec<Layer>,
 }
 
 impl MapLibreTile {
-    /// `mlt::Decoder(supportFastPFOR).decode(DataView)`.
     pub fn decode(data: &[u8], support_fast_pfor: bool) -> Result<MapLibreTile, Error> {
         let mut parser = mlt_core::Parser::default();
         let layers = parser.parse_layers(data)?;
@@ -479,7 +459,7 @@ impl MapLibreTile {
         &self.layers
     }
 
-    /// `getLayer(name)`: the first layer with the name.
+    /// The first layer named `name`.
     #[must_use]
     pub fn get_layer(&self, name: &str) -> Option<&Layer> {
         self.layers.iter().find(|layer| layer.name == name)
@@ -502,10 +482,9 @@ fn uses_fast_pfor(layer: &mlt_core::Layer01<'_>) -> bool {
 }
 
 impl Layer {
-    /// `Decoder::Impl::parseBasicMVTEquivalent` after the streams are
-    /// decoded: the features (`makeFeatures` on the geometry vector's
-    /// geometries) and the property columns. `optional` is the present flag
-    /// of each property column (shared dictionary children one by one).
+    /// Builds a layer from its decoded streams: a feature for each geometry,
+    /// and the property columns. `optional` is the present flag of each
+    /// property column (shared dictionary children one by one).
     fn from_parsed(parsed: &ParsedLayer01<'_>, optional: &[bool]) -> Result<Layer, Error> {
         let (geometries, triangles) = get_geometries(parsed.geometry_values())?;
 
@@ -583,7 +562,7 @@ impl Layer {
         Ok(layer)
     }
 
-    /// `PropertyVecMap::insert`: an existing name keeps its column.
+    /// Adds a property column; an existing name keeps its column.
     fn insert_column(&mut self, name: String, column: PresentProperties) {
         if !self.property_index.contains_key(&name) {
             self.property_index.insert(name.clone(), self.properties.len());
@@ -596,9 +575,9 @@ impl Layer {
 /// [`Geometry::triangles`]).
 type TriangleIndices = Arc<[u32]>;
 
-/// `GeometryVector::getGeometries`, on mlt-core's decoded topology: one
-/// geometry per feature, except multi-points without points, plus the
-/// per-feature triangle indices.
+/// The geometries of mlt-core's decoded topology: one geometry per feature,
+/// except multi-points without points, plus the per-feature triangle
+/// indices.
 fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<TriangleIndices>), Error> {
     fn require<'v>(level: Option<&'v [u32]>, what: &str) -> Result<&'v [u32], Error> {
         level.ok_or_else(|| Error::new(format!("{what} geometry without topology vector")))

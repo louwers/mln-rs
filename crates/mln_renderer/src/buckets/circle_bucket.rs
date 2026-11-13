@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/buckets/circle_bucket.hpp and circle_bucket.cpp
-//
 // The vertex/index vectors are plain `Vec`s here (the bucket is built on the
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
@@ -28,7 +26,6 @@ use crate::paint_property_binder::PaintPropertyBinder;
 use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
-    /// `CircleBinders = PaintPropertyBinders<CirclePaintProperties::DataDrivenProperties>`.
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
         circle_blur: CircleBlur => PaintPropertyBinder<f32>,
         circle_color: CircleColor => PaintPropertyBinder<Color>,
@@ -40,7 +37,6 @@ crate::paint_property_binders!(
     }
 );
 
-/// `CircleLayoutVertex = gfx::Vertex<TypeList<attributes::pos>>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct CircleLayoutVertex {
@@ -51,7 +47,6 @@ pub struct CircleLayoutVertex {
 pub struct CircleBucket {
     pub base: BucketBase,
     pub vertices: GeometryVec<CircleLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub triangles: GeometryVec<u16>,
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s: `update` (feature state) changes them while the
@@ -61,7 +56,6 @@ pub struct CircleBucket {
 }
 
 impl CircleBucket {
-    /// `CircleBucket(layerPaintProperties, mode, zoom)`.
     #[must_use]
     pub fn new(layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>, mode: MapMode, zoom: f32) -> Self {
         let mut paint_property_binders = VecMap::new();
@@ -80,8 +74,8 @@ impl CircleBucket {
         }
     }
 
-    /// `vertex(Point<int16_t> p, float ex, float ey)`: `p.x * 2` is an
-    /// `int`, plus a `float`, converted to `int16_t` (truncation).
+    /// The layout vertex for `p` with extrusion (`ex`, `ey`). As in C++,
+    /// `p.x * 2` is an integer, added to a float and truncated to `i16`.
     #[must_use]
     pub fn vertex(p: mln_tile_id::geometry_tile_data::GeometryCoordinate, ex: f32, ey: f32) -> CircleLayoutVertex {
         CircleLayoutVertex {

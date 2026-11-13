@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/scissor_rect.hpp
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ScissorRect {
     pub x: i32,

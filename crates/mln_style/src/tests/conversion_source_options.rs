@@ -1,5 +1,3 @@
-// Ports test/style/conversion/source_options.test.cpp.
-
 use mln_conversion::Convertible;
 use mln_util::tileset::{RasterEncoding, VectorEncoding};
 
@@ -9,13 +7,11 @@ use crate::conversion::tileset::SourceOptions;
 use crate::conversion::{Converter, Error};
 use crate::source::Source;
 
-/// `convertJSON<SourceOptions>(json, error)`.
 fn convert_json(json: &str, error: &mut Error) -> Option<SourceOptions> {
     let value = parse_json(json);
     <SourceOptions as Converter>::convert(&Convertible::from(&value), error)
 }
 
-/// `convertJSON<std::unique_ptr<Source>>(json, error, id)`.
 fn convert_source_json(json: &str, error: &mut Error, id: &str) -> Option<Box<dyn Source>> {
     let value = parse_json(json);
     convert_source(&Convertible::from(&value), error, id)

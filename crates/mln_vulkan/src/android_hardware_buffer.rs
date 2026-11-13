@@ -15,7 +15,6 @@ const USAGE_GPU_SAMPLED_IMAGE: u64 = 1 << 8;
 /// `AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT`.
 const USAGE_GPU_COLOR_OUTPUT: u64 = 1 << 9;
 
-/// `AHardwareBuffer_Desc`.
 #[repr(C)]
 struct Desc {
     width: u32,

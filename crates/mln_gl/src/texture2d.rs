@@ -1,5 +1,3 @@
-// Ports include/mln/gl/texture2d.hpp and src/mln/gl/texture2d.cpp
-//
 // Differences from C++:
 // - A shader's samplers read fixed texture units (`ShaderProgram`), so
 //   `bind` takes the unit alone, and nothing is unbound after a draw. An
@@ -52,13 +50,12 @@ impl Texture2D {
         }
     }
 
-    /// `getTextureID()`
     #[must_use]
     pub fn get_texture_id(&self) -> Option<TextureID> {
         self.texture
     }
 
-    /// `allocateTexture()`: a new texture object with storage for the size
+    /// Replaces the texture object with a new one with storage for the size
     /// and format, bound to texture unit 0.
     fn allocate_texture(&mut self, context: &Context) {
         self.release_texture(context);
@@ -114,7 +111,6 @@ impl Texture2D {
         }
     }
 
-    /// `updateTextureData(data)`
     fn update_texture_data(&mut self, context: &Context, data: Option<&[u8]>) {
         if data.is_some() {
             let size = self.size;
@@ -124,8 +120,7 @@ impl Texture2D {
         self.update_sampler_configuration(context, 0);
     }
 
-    /// `updateSamplerConfiguration()`, with the texture bound to
-    /// `texture_unit`.
+    /// Applies the sampler state, with the texture bound to `texture_unit`.
     fn update_sampler_configuration(&mut self, context: &Context, texture_unit: u32) {
         self.sampler_state_dirty = false;
         let gl = context.gl();
@@ -148,8 +143,7 @@ impl Texture2D {
         }
     }
 
-    /// `bind(location, textureUnit)`: binds the texture to `texture_unit`,
-    /// which the sampler reads.
+    /// Binds the texture to `texture_unit`, which the sampler reads.
     pub fn bind(&mut self, context: &Context, texture_unit: u32) {
         debug_assert!((texture_unit as i32) < texture2d::MAX_ACTIVE_TEXTURE_UNITS);
         // Update the sampler state if it was changed after resource creation

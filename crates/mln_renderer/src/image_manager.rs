@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/image_manager.hpp, src/mln/renderer/image_manager.cpp
-// and src/mln/renderer/image_manager_observer.hpp.
-//
 // The ImageManager lives on the render thread (the orchestrator owns it,
 // tiles share it as `Rc`, C++ `std::shared_ptr`), so its state is in a
 // `RefCell` instead of behind the C++ recursive mutex. Requestors (geometry
@@ -20,10 +17,8 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 
-/// `ImageRequestPair = std::pair<ImageDependencies, uint64_t>`.
 pub type ImageRequestPair = (ImageDependencies, u64);
 
-/// `ImageManagerObserver`.
 pub trait ImageManagerObserver {
     fn on_style_image_missing(&self, _id: &str, done: Box<dyn FnOnce()>) {
         done();
@@ -42,8 +37,8 @@ pub struct ImageRequestorBase {
     pending_requests: RefCell<VecSet<String>>,
 }
 
-/// `ImageRequestor`. Implementors call `ImageManager::remove_requestor_key`
-/// when they go away (the C++ destructor).
+/// Receives the images it requested from the `ImageManager`. Implementors
+/// call `ImageManager::remove_requestor_key` when they go away.
 pub trait ImageRequestor {
     fn requestor_base(&self) -> &ImageRequestorBase;
 
@@ -100,8 +95,8 @@ struct State {
 /// A notification to deliver once the state borrow is released.
 type Notification = (Weak<dyn ImageRequestor>, ImageMap, ImageMap, ImageVersionMap, u64);
 
-/// `ImageManager`: tracks requests for icon images from tile workers and
-/// sends responses when the requests are fulfilled.
+/// Tracks requests for icon images from tile workers and sends responses
+/// when the requests are fulfilled.
 pub struct ImageManager {
     self_weak: Weak<ImageManager>,
     state: RefCell<State>,
@@ -109,7 +104,6 @@ pub struct ImageManager {
 }
 
 impl ImageManager {
-    /// `ImageManager::create()`.
     #[must_use]
     pub fn create() -> Rc<ImageManager> {
         Rc::new_cyclic(|self_weak| ImageManager {
@@ -162,17 +156,14 @@ impl ImageManager {
         Log::info(Event::General, format!("ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" }));
     }
 
-    /// `getImage(id)`.
     pub fn get_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
         self.get_shared_image(id)
     }
 
-    /// `getSharedImage(id)`.
     pub fn get_shared_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
         self.state.borrow().images.get(id).cloned()
     }
 
-    /// `addImage(Immutable<style::Image::Impl>)`.
     pub fn add_image(&self, image: Arc<ImageImpl>) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
@@ -194,8 +185,7 @@ impl ImageManager {
         state.images.entry(image.id.clone()).or_insert(image);
     }
 
-    /// `updateImage(Immutable<style::Image::Impl>)`: true when tiles need a
-    /// relayout.
+    /// Replaces an image; true when tiles need a relayout.
     pub fn update_image(&self, image: Arc<ImageImpl>) -> bool {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
@@ -228,7 +218,6 @@ impl ImageManager {
         size_changed || sdf_changed
     }
 
-    /// `removeImage(id)`.
     pub fn remove_image(&self, id: &str) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
@@ -248,7 +237,6 @@ impl ImageManager {
         state.updated_image_versions.remove(id);
     }
 
-    /// `getImages(ImageRequestor&, ImageRequestPair&&)`.
     pub fn get_images(&self, requestor: &Rc<dyn ImageRequestor>, pair: ImageRequestPair) {
         // remove previous requests from this tile
         let key = requestor_key(requestor);
@@ -279,7 +267,7 @@ impl ImageManager {
         Self::deliver(notifications);
     }
 
-    /// `removeRequestor(ImageRequestor&)`, by the requestor's identity.
+    /// Removes the requestor with this identity key.
     pub fn remove_requestor_key(&self, key: RequestorKey) {
         let mut state = self.state.borrow_mut();
 
@@ -291,7 +279,6 @@ impl ImageManager {
         }
     }
 
-    /// `notifyIfMissingImageAdded()`.
     pub fn notify_if_missing_image_added(&self) {
         // Relayout once all of this update's images are added. A relayout
         // through a synchronous worker can change the set, so take the
@@ -326,7 +313,6 @@ impl ImageManager {
         Self::deliver(notifications);
     }
 
-    /// `reduceMemoryUse()`.
     pub fn reduce_memory_use(&self) {
         let unused_ids: Vec<String> = {
             let state = self.state.borrow();
@@ -344,24 +330,22 @@ impl ImageManager {
         }
     }
 
-    /// `reduceMemoryUseIfCacheSizeExceedsLimit()`.
     pub fn reduce_memory_use_if_cache_size_exceeds_limit(&self) {
         if self.state.borrow().requested_images_cache_size > DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE {
             self.reduce_memory_use();
         }
     }
 
-    /// `getAvailableImages()`.
     pub fn get_available_images(&self) -> Arc<VecSet<String>> {
         self.state.borrow().available_images.clone()
     }
 
-    /// `updatedImageVersions` (read by `GeometryTileRenderData::prepare`).
+    /// The versions of the updated images, by image id. Read by
+    /// `GeometryTileRenderData::prepare`.
     pub fn updated_image_versions(&self) -> ImageVersionMap {
         self.state.borrow().updated_image_versions.clone()
     }
 
-    /// `clear()`.
     pub fn clear(&self) {
         let mut state = self.state.borrow_mut();
 
@@ -376,7 +360,6 @@ impl ImageManager {
         state.loaded = false;
     }
 
-    /// `checkMissingAndNotify(ImageRequestor&, const ImageRequestPair&)`.
     fn check_missing_and_notify(
         &self,
         key: RequestorKey,
@@ -461,8 +444,7 @@ impl ImageManager {
         }
     }
 
-    /// `notify(ImageRequestor&, const ImageRequestPair&)`: the maps for the
-    /// requestor, delivered by `deliver`.
+    /// The maps that answer `requestor`'s `pair`, for `deliver` to send.
     fn notification(state: &State, requestor: &Weak<dyn ImageRequestor>, pair: &ImageRequestPair) -> Notification {
         let mut icon_map = ImageMap::new();
         let mut pattern_map = ImageMap::new();
@@ -494,8 +476,8 @@ impl ImageManager {
     }
 }
 
-/// `Scheduler::GetCurrent()->bindOnce(fn)`: a callable that runs `fn` on
-/// the current thread's scheduler (the render thread's run loop).
+/// Wraps `f` in a callable that runs it on the current thread's scheduler
+/// (the render thread's run loop).
 fn bind_once_local(f: impl FnOnce() + 'static) -> Box<dyn FnOnce()> {
     type Slot = RefCell<Option<Box<dyn FnOnce()>>>;
     let slot: Rc<Slot> = Rc::new(RefCell::new(Some(Box::new(f))));

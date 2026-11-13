@@ -1,5 +1,3 @@
-// Ports test/tile/tile_id.test.cpp (TEST(TileID, *)).
-
 use super::*;
 
 fn c(z: u8, x: u32, y: u32) -> CanonicalTileID {

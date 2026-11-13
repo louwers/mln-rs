@@ -1,5 +1,3 @@
-// Ports test/util/geo.test.cpp.
-//
 // C++ constructors that throw std::domain_error return `Err(message)`;
 // `LatLng(CanonicalTileID)` / `LatLng(UnwrappedTileID)` /
 // `LatLngBounds(CanonicalTileID)` are the `from_*_tile` functions (mln_util

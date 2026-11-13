@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/source.hpp and
-// src/mln/style/conversion/source.cpp.
-
 use std::sync::Arc;
 
 use geojson::GeoJSON;
@@ -13,8 +10,7 @@ use crate::source::Source;
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::tile_source::{RasterSource, UrlOrTileset, VectorSource};
 
-/// `convertURLOrTileset(value, error)`: a tile source can either specify a
-/// URL to TileJSON, or inline TileJSON.
+/// A tile source's TileJSON: either a URL to it, or inline.
 fn convert_url_or_tileset(value: &Convertible<'_>, error: &mut Error) -> Option<UrlOrTileset> {
     let Some(url_val) = value.object_member("url") else {
         let tileset = Tileset::convert(value, error)?;
@@ -29,7 +25,6 @@ fn convert_url_or_tileset(value: &Convertible<'_>, error: &mut Error) -> Option<
     Some(UrlOrTileset::Url(url))
 }
 
-/// `convertRasterSource(id, value, error)`.
 fn convert_raster_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
     let url_or_tileset = convert_url_or_tileset(value, error)?;
 
@@ -63,7 +58,6 @@ fn convert_raster_source(id: &str, value: &Convertible<'_>, error: &mut Error) -
 }
 
 // dem-heatmap
-/// `convertRasterDEMSource(id, value, error)`.
 fn convert_raster_dem_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
     let url_or_tileset = convert_url_or_tileset(value, error)?;
 
@@ -97,7 +91,6 @@ fn convert_raster_dem_source(id: &str, value: &Convertible<'_>, error: &mut Erro
     Some(Box::new(crate::sources::tile_source::RasterDEMSource::new(id, url_or_tileset, tile_size, options)))
 }
 
-/// `convertVectorSource(id, value, error)`.
 fn convert_vector_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
     let url_or_tileset = convert_url_or_tileset(value, error)?;
     let mut maxzoom = None;
@@ -137,7 +130,6 @@ fn convert_vector_source(id: &str, value: &Convertible<'_>, error: &mut Error) -
     Some(Box::new(source))
 }
 
-/// `convertGeoJSONSource(id, value, error)`.
 fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
     let Some(data_value) = value.object_member("data") else {
         error.message = "GeoJSON source must have a data value".to_owned();
@@ -154,7 +146,7 @@ fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) 
     if data_value.is_object() {
         let geojson = GeoJSON::convert(&data_value, error)?;
         if let Err(e) = result.set_geojson(&geojson) {
-            // TODO(port): C++ lets the Supercluster exception (a clustered
+            // C++ lets the Supercluster exception (a clustered
             // non-point feature) propagate out of the style parse.
             error.message = e.message;
             return None;
@@ -169,7 +161,6 @@ fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) 
     Some(Box::new(result))
 }
 
-/// `convertImageSource(id, value, error)` (conformance).
 fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
     // A source without a url starts empty, until it gets an image or a url.
     let url_string = match value.object_member("url") {
@@ -206,7 +197,6 @@ fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) ->
     Some(Box::new(result))
 }
 
-/// `convert<std::unique_ptr<Source>>(value, error, id)`.
 pub fn convert_source(value: &Convertible<'_>, error: &mut Error, id: &str) -> Option<Box<dyn Source>> {
     if !value.is_object() {
         error.message = "source must be an object".to_owned();

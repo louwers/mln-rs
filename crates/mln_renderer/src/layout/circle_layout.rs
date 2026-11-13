@@ -1,5 +1,3 @@
-// Ports src/mln/layout/circle_layout.hpp
-//
 // As in pattern_layout.rs, the layout keeps the indices (and sort keys) of
 // the features its filter accepted and gets the features again from the
 // source layer in `create_bucket`.
@@ -28,19 +26,17 @@ use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, SourceLayer};
 use crate::render_layer::LayerRenderData;
 
-/// `CircleLayout::CircleFeature` (without the feature, see above).
+/// A feature the filter accepted, by index (see the file comment).
 #[derive(Clone, Copy, Debug)]
 pub struct CircleFeature {
     pub i: usize,
     pub sort_key: f32,
 }
 
-/// `CircleLayout`.
 pub struct CircleLayout {
     pub layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
     pub bucket_leader_id: String,
 
-    /// `std::list<CircleFeature> features`.
     pub features: Vec<CircleFeature>,
 
     pub zoom: f32,
@@ -48,7 +44,7 @@ pub struct CircleLayout {
     pub source_layer_id: String,
     pub retain_features_by_id: bool,
 
-    /// `const std::unique_ptr<GeometryTileLayer> sourceLayer` (see
+    /// The source layer the layout gets its features from again (see
     /// layout.rs); `None` when built from a borrowed layer.
     pub source_layer: Option<SourceLayer>,
 }
@@ -56,7 +52,6 @@ pub struct CircleLayout {
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl CircleLayout {
-    /// `CircleLayout(parameters, group, sourceLayer)`.
     pub fn new(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
@@ -142,8 +137,8 @@ impl CircleLayout {
         })
     }
 
-    /// `CircleLayout(parameters, group, std::move(sourceLayer))` as the
-    /// factory calls it.
+    /// Creates the layout and keeps `source_layer`, as the layer factory
+    /// does.
     pub fn with_source_layer(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
@@ -155,15 +150,14 @@ impl CircleLayout {
         Ok(layout)
     }
 
-    /// `hasDependencies()`.
     #[must_use]
     pub fn has_dependencies(&self) -> bool {
         false
     }
 
-    /// `createBucket(..., featureIndex, renderData, ..., canonical)`;
-    /// `insert_feature` is `featureIndex->insert(geometries, i,
-    /// sourceLayerID, bucketLeaderID)`.
+    /// Creates the bucket from the source layer. `insert_feature(geometries,
+    /// i, source_layer_id, bucket_leader_id)` adds a feature to the feature
+    /// index.
     pub fn create_bucket_with(
         &mut self,
         source_layer: &dyn GeometryTileLayer,
@@ -209,7 +203,6 @@ impl CircleLayout {
         Ok(())
     }
 
-    /// `addCircle(bucket, feature, geometry, featureIndex, sortKey, canonical)`.
     fn add_circle(
         bucket: &mut CircleBucket,
         mode: MapMode,

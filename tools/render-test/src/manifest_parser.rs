@@ -1,5 +1,3 @@
-// Ports render-test/manifest_parser.{hpp,cpp}
-
 use std::collections::BTreeSet;
 
 use regex::Regex;
@@ -9,7 +7,7 @@ use crate::log::{self, Event};
 use crate::metadata::TestPaths;
 use crate::parser::read_json;
 
-/// `Manifest`.
+/// A parsed test manifest.
 #[derive(Clone, Debug, Default)]
 pub struct Manifest {
     manifest_path: String,
@@ -18,7 +16,7 @@ pub struct Manifest {
     cache_path: String,
     ignores: Vec<(String, String)>,
     test_paths: Vec<TestPaths>,
-    /// `std::set<std::string>`: iterated in sorted order.
+    /// Iterated in sorted order.
     probes: BTreeSet<String>,
 }
 
@@ -74,12 +72,9 @@ fn parse_ignores(ignores_paths: &[String]) -> Vec<(String, String)> {
     ignores
 }
 
-/// `getTestExpectations`.
-///
-/// `default_expectation_path`: absolute path that contains the style.json
-/// file for testing; `test_id`: test case id that used for composing
-/// expectation path; `expectated_paths`: absolute paths that contain possible
-/// expected.png/metrics.json files for result checking.
+/// The directories that may hold a test's expected.png and metrics.json:
+/// `default_expectation_path`, the absolute path of the test's style.json,
+/// then `test_id` under each of the absolute `expectated_paths`.
 fn get_test_expectations(default_expectation_path: &str, test_id: &str, expectated_paths: &[String]) -> Vec<String> {
     let mut expectations = vec![default_expectation_path.to_string()];
     for expected_path in expectated_paths {
@@ -88,11 +83,12 @@ fn get_test_expectations(default_expectation_path: &str, test_id: &str, expectat
     expectations
 }
 
-/// `getValidPath(manifestPath, path)`.
+/// `path` resolved against `manifest_path` if it is relative, in normal
+/// form; empty, with a warning, if it doesn't exist.
 ///
 /// C++ keeps the base path in a function-local `static`, so every manifest
 /// after the first one in a process resolves against the first manifest's
-/// directory. The runner parses one manifest per process; the port uses the
+/// directory. The runner parses one manifest per process; this uses the
 /// manifest it is given (unit tests parse several).
 fn get_valid_path(manifest_path: &str, path: &str) -> String {
     let mut result = path.to_string();
@@ -109,7 +105,6 @@ fn get_valid_path(manifest_path: &str, path: &str) -> String {
 pub struct ManifestParser;
 
 impl ManifestParser {
-    /// `ManifestParser::parseManifest(manifestPath, testFilter)`.
     pub fn parse_manifest(manifest_path: &str, mut test_filter: String) -> Option<Manifest> {
         let mut manifest = Manifest::default();
         let file_path = manifest_path;

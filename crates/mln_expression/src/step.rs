@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/step.hpp and
-// src/mln/style/expression/step.cpp.
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 

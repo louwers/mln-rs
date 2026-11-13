@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/buffer_resource.hpp and src/mln/webgpu/buffer_resource.cpp
-
 use std::rc::Rc;
 
 use crate::context::Context;

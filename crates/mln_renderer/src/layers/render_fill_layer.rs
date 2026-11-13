@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/render_fill_layer.hpp and
-// src/mln/renderer/layers/render_fill_layer.cpp (drawable path,
-// MLN_TRIANGULATE_FILL_OUTLINES = 1 as for WebGPU).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -60,7 +56,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillLayerImpl {
     impl_.downcast_ref::<FillLayerImpl>().expect("RenderFillLayer: not a fill layer impl")
 }
 
-/// `RenderFillLayer::FillVariant`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FillVariant {
@@ -72,8 +67,8 @@ pub enum FillVariant {
 }
 
 impl FillVariant {
-    /// `static_cast<FillVariant>(drawable.getType())`; `None` for the
-    /// values the tweaker's `default:` handles.
+    /// The fill variant of a drawable type; `None` for other types, which the
+    /// tweaker handles in its fallback arm.
     #[must_use]
     pub fn from_type(type_: usize) -> Option<FillVariant> {
         match type_ {
@@ -87,10 +82,8 @@ impl FillVariant {
     }
 }
 
-/// `vertexAttrs->readDataDrivenPaintProperties<FillColor, FillOpacity,
-/// FillOutlineColor, FillPattern>(binders, evaluated, propertiesAsUniforms,
-/// idFillColorVertexAttribute)`.
-/// `RenderFillLayer::captureRenderedFeatures`.
+/// Captures the tile's rendered features in `stats`, skipping the features
+/// that draw fully transparent.
 fn capture_rendered_features(
     stats: &mut Stats,
     bucket: &FillBucket,

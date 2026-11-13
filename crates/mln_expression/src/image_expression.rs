@@ -1,6 +1,3 @@
-// Ports include/mln/style/expression/image_expression.hpp and
-// src/mln/style/expression/image_expression.cpp.
-
 use std::cell::RefCell;
 use std::sync::Arc;
 

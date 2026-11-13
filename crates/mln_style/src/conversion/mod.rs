@@ -1,13 +1,10 @@
-//! Ports the typed converters of `mln::style::conversion`
-//! (include/mln/style/conversion/*.hpp, src/mln/style/conversion/*.cpp).
-//! `Convertible` and `Error` come from `mln_conversion`.
+//! The typed converters from a `Convertible` (from `mln_conversion`) to style
+//! types.
 //!
-//! C++ dispatches `convert<T>(value, error, args...)` to
-//! `Converter<T>::operator()`. Here `Converter` is a trait for the
-//! converters without extra arguments; the ones with extra arguments are
-//! free functions: `convert_property_value::<T>(value, error,
-//! allow_data_expressions, convert_tokens)` and
-//! `convert_source(value, error, id)`.
+//! `Converter` is a trait for the converters without extra arguments; the
+//! ones with extra arguments are free functions:
+//! `convert_property_value::<T>(value, error, allow_data_expressions,
+//! convert_tokens)` and `convert_source(value, error, id)`.
 
 pub mod color_ramp_property_value;
 pub mod constant;
@@ -32,13 +29,12 @@ pub mod transition_options;
 
 pub use mln_conversion::{Convertible, Error};
 
-/// `Converter<T>` (the specializations whose call operator takes only
-/// `(value, error)`).
+/// A conversion from a `Convertible` that takes no arguments besides the value
+/// and the error.
 pub trait Converter: Sized {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self>;
 }
 
-/// `convert<T>(value, error)`.
 pub fn convert<T: Converter>(value: &Convertible<'_>, error: &mut Error) -> Option<T> {
     T::convert(value, error)
 }

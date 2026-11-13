@@ -1,13 +1,9 @@
-// Ports src/mln/util/i18n.hpp, src/mln/util/i18n.cpp and
-// platform/default/src/mln/util/i18n.cpp (`isDigit`, `isUppercase`,
-// `isPunctuationOrSymbol` on ICU's `u_charType`).
-//
 // The C++ functions take `char16_t`: astral code points never reach them, so
 // these take `u16`. A lone surrogate code unit is Cs.
 
 use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCategory};
 
-/// `isInRange` and the `DEFINE_IS_IN_UNICODE_BLOCK` helpers.
+/// Whether `codepoint` is in `first..=last`.
 #[inline]
 fn is_in_range(codepoint: u16, first: u16, last: u16) -> bool {
     codepoint >= first && codepoint <= last
@@ -76,7 +72,7 @@ define_is_in_unicode_block! {
     is_in_halfwidth_and_fullwidth_forms, 0xFF00, 0xFFEF;
 }
 
-/// `verticalPunctuation` (a `mapbox::eternal::map`), sorted by key.
+/// The vertical form of each punctuation character, sorted by key.
 static VERTICAL_PUNCTUATION: [(u16, u16); 83] = [
     (0x0021, 0xFE15), // ! ︕
     (0x0023, 0xFF03), // # ＃
@@ -167,7 +163,6 @@ fn vertical_punctuation_get(chr: u16) -> Option<u16> {
     VERTICAL_PUNCTUATION.binary_search_by_key(&chr, |&(k, _)| k).ok().map(|i| VERTICAL_PUNCTUATION[i].1)
 }
 
-/// `verticalPunctuation.contains(chr)`.
 fn vertical_punctuation_contains(chr: u16) -> bool {
     vertical_punctuation_get(chr).is_some()
 }
@@ -197,7 +192,7 @@ pub fn allows_word_breaking_before(chr: u16) -> bool {
     chr == 0x28 /* open parenthesis */
 }
 
-/// `charAllowsLetterSpacing` (not in the header).
+/// Whether letter spacing applies to `chr` (it doesn't to Arabic).
 #[must_use]
 pub fn char_allows_letter_spacing(chr: u16) -> bool {
     !(is_in_arabic(chr)
@@ -588,7 +583,8 @@ pub fn verticalize_punctuation(chr: u16) -> u16 {
     vertical_punctuation_get(chr).unwrap_or(0)
 }
 
-/// `charInSupportedScript` (not in the header).
+/// Whether `chr` is in a supported script: not one of the common scripts
+/// that need complex shaping (Indic, Sinhala, Tibetan, Myanmar, Khmer).
 #[must_use]
 pub fn char_in_supported_script(chr: u16) -> bool {
     // This is a rough heuristic: whether we "can render" a script
@@ -607,9 +603,7 @@ pub fn char_in_supported_script(chr: u16) -> bool {
         || is_in_khmer(chr))
 }
 
-/// `isStringInSupportedScript`: the UTF-8 input is converted to UTF-16
-/// (`util::convertUTF8ToUTF16`) first. A Rust `&str` is valid UTF-8, the
-/// only input on which the C++ conversion does not throw.
+/// Whether every UTF-16 code unit of `input` is in a supported script.
 pub fn is_string_in_supported_script(input: &str) -> bool {
     input.encode_utf16().all(char_in_supported_script)
 }
@@ -633,13 +627,11 @@ fn general_category(chr: u16) -> Option<GeneralCategory> {
     char::from_u32(u32::from(chr)).map(UnicodeGeneralCategory::general_category)
 }
 
-/// `u_charType(chr) == U_DECIMAL_DIGIT_NUMBER` (platform/default).
 #[must_use]
 pub fn is_digit(chr: u16) -> bool {
     general_category(chr) == Some(GeneralCategory::DecimalNumber)
 }
 
-/// `u_charType(chr) == U_UPPERCASE_LETTER` (platform/default).
 #[must_use]
 pub fn is_uppercase(chr: u16) -> bool {
     general_category(chr) == Some(GeneralCategory::UppercaseLetter)

@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/render_fill_extrusion_layer.hpp and
-// src/mln/renderer/layers/render_fill_extrusion_layer.cpp (drawable path,
-// `MLN_USE_FILL_EXTRUSION_INSTANCING`).
-//
 // Each tile draws its roofs from the bucket's triangles and its walls as
 // instances of one static quad, an instance per bucket vertex. The WebGPU
 // and Vulkan walls also read the next vertex as attributes of their own
@@ -68,7 +64,6 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillExtrusionLayerImpl {
     impl_.downcast_ref::<FillExtrusionLayerImpl>().expect("RenderFillExtrusionLayer: not a fill-extrusion layer impl")
 }
 
-/// `RenderFillExtrusionLayer::captureRenderedFeatures`.
 fn capture_rendered_features(
     stats: &mut Stats,
     bucket: &FillExtrusionBucket,
@@ -143,9 +138,6 @@ fn capture_rendered_features(
     }
 }
 
-/// `readDataDrivenPaintProperties<FillExtrusionBase, FillExtrusionColor,
-/// FillExtrusionHeight, FillExtrusionPattern>(binders, evaluated,
-/// propertiesAsUniforms, idFillExtrusionBaseVertexAttribute)`.
 fn read_paint_properties(
     attrs: &mut VertexAttributeArray,
     binders: &FillExtrusionBinders,

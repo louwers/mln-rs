@@ -1,12 +1,7 @@
-// Ports include/mln/actor/established_actor.hpp and aspiring_actor.hpp.
-//
 // `AspiringActor<O>` is the mailbox that exists before the object (messages
 // queue in it); `EstablishedActor<O>` constructs the object on the thread
 // that will own it, opens the mailbox there, and on drop closes the mailbox
 // before the object goes away.
-//
-// TODO(port): `Actor<O>` (actor.hpp) on a thread pool scheduler: here the
-// object stays on the thread that established it (see mailbox.rs).
 
 use std::any::Any;
 use std::rc::Rc;
@@ -16,8 +11,7 @@ use crate::actor_ref::ActorRef;
 use crate::mailbox::Mailbox;
 use crate::scheduler::SchedulerPtr;
 
-/// `AspiringActor<O>`: the mailbox and the `ActorRef` handed out before the
-/// object exists.
+/// The mailbox and the `ActorRef` handed out before the object exists.
 pub(crate) struct AspiringActor<O: 'static> {
     pub(crate) mailbox: Arc<Mailbox>,
     _object: std::marker::PhantomData<fn(&O)>,
@@ -33,23 +27,21 @@ impl<O: 'static> AspiringActor<O> {
         AspiringActor { mailbox, _object: std::marker::PhantomData }
     }
 
-    /// `self()`.
     #[must_use]
     pub(crate) fn self_ref(&self) -> ActorRef<O> {
         ActorRef::new(&self.mailbox)
     }
 }
 
-/// `EstablishedActor<O>`: owns the object on its thread.
+/// Owns the object on its thread.
 pub(crate) struct EstablishedActor<O: 'static> {
     mailbox: Arc<Mailbox>,
     object: Option<Rc<O>>,
 }
 
 impl<O: 'static> EstablishedActor<O> {
-    /// `EstablishedActor(Scheduler&, AspiringActor<O>& parent, args...)`:
-    /// `make` gets the actor's own reference, as an `O(ActorRef<O>, ...)`
-    /// constructor does.
+    /// Creates the object for `parent`'s mailbox. `make` receives the
+    /// actor's own reference and builds the object.
     pub(crate) fn new(
         scheduler: &SchedulerPtr,
         parent: &AspiringActor<O>,

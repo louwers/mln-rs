@@ -1,6 +1,3 @@
-// Ports include/mln/style/conversion/sky.hpp +
-// src/mln/style/conversion/sky.cpp.
-
 use super::{Converter, Convertible, Error};
 use crate::sky::Sky;
 

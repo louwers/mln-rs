@@ -1,8 +1,3 @@
-// Ports include/mln/style/layers/custom_layer.hpp,
-// include/mln/style/layers/custom_layer_host.hpp,
-// src/mln/style/layers/custom_layer.cpp and
-// src/mln/style/layers/custom_layer_impl.hpp.
-//
 // Differences from C++:
 // - The host's callbacks get the backend's live commands as an `Any` of the
 //   backend crate's type, where C++ has a parameters subclass per backend.
@@ -94,7 +89,6 @@ pub trait CustomLayerHost: Send + Sync {
     fn context_lost(&self) {}
 }
 
-/// `CustomLayer::Impl`.
 #[derive(Clone)]
 pub struct Impl {
     pub base: ImplBase,
@@ -109,7 +103,6 @@ impl std::fmt::Debug for Impl {
 }
 
 impl Impl {
-    /// `Impl(const std::string& id, std::unique_ptr<CustomLayerHost> host)`.
     #[must_use]
     pub fn new(layer_id: String, host: &Arc<dyn CustomLayerHost>) -> Self {
         Impl { base: ImplBase::new(layer_id, String::new()), host: Arc::downgrade(host) }
@@ -128,7 +121,6 @@ impl Impl {
         std::ptr::addr_eq(self.host.as_ptr(), Arc::as_ptr(host))
     }
 
-    /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
     #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
@@ -153,7 +145,7 @@ impl layer::Impl for Impl {
     }
 }
 
-/// `CustomLayer`: a layer that the host draws.
+/// A layer that the host draws.
 pub struct CustomLayer {
     base_impl: Arc<Impl>,
     host: Arc<dyn CustomLayerHost>,
@@ -208,7 +200,6 @@ impl Layer for CustomLayer {
     }
 }
 
-/// `CustomLayerProperties`.
 #[derive(Debug)]
 pub struct CustomLayerProperties {
     pub base: LayerPropertiesBase,

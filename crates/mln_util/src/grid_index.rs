@@ -1,6 +1,3 @@
-// Ports src/mln/util/grid_index.hpp and src/mln/util/grid_index.cpp
-// (`geometry::circle<T>`, `mapbox::geometry::box<T>` and `GridIndex<T>`).
-//
 // The C++ `insert`, `hitTest` and private `query` overloads on `BBox` and
 // `BCircle` become `insert`/`insert_circle`, `hit_test`/`hit_test_circle`
 // and `query_box_fn`/`query_circle_fn`. The explicit instantiation in
@@ -12,7 +9,6 @@ use std::collections::HashSet;
 use geometry::Point;
 use mln_math::{fmax, fmin};
 
-/// `mapbox::geometry::box<T>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GeometryBox<T> {
     pub min: Point<T>,
@@ -25,7 +21,6 @@ impl<T> GeometryBox<T> {
     }
 }
 
-/// `mln::geometry::circle<T>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Circle<T> {
     pub center: Point<T>,
@@ -38,9 +33,7 @@ impl<T> Circle<T> {
     }
 }
 
-/// `GridIndex<T>::BBox`.
 pub type BBox = GeometryBox<f32>;
-/// `GridIndex<T>::BCircle`.
 pub type BCircle = Circle<f32>;
 
 /// `GridIndex` is a data structure for testing the intersection of
@@ -72,7 +65,6 @@ pub struct GridIndex<T> {
 }
 
 impl<T: Clone> GridIndex<T> {
-    /// `GridIndex(float width, float height, uint32_t cellSize)`.
     #[must_use]
     pub fn new(width: f32, height: f32, cell_size: u32) -> Self {
         // `std::ceil(width / cellSize_)`: float division (the cell size is
@@ -119,7 +111,6 @@ impl<T: Clone> GridIndex<T> {
         !self.circle_elements.is_empty()
     }
 
-    /// `insert(T&&, const BBox&)`.
     pub fn insert(&mut self, t: T, bbox: &BBox) {
         debug_assert!(self.box_elements.len() < u32::MAX as usize);
         let uid = self.box_elements.len() as u32;
@@ -142,7 +133,6 @@ impl<T: Clone> GridIndex<T> {
         self.box_elements.push((t, *bbox));
     }
 
-    /// `insert(T&&, const BCircle&)`.
     pub fn insert_circle(&mut self, t: T, bcircle: &BCircle) {
         debug_assert!(self.circle_elements.len() < u32::MAX as usize);
         let uid = self.circle_elements.len() as u32;
@@ -165,7 +155,6 @@ impl<T: Clone> GridIndex<T> {
         self.circle_elements.push((t, *bcircle));
     }
 
-    /// `query(const BBox&)`.
     #[must_use]
     pub fn query(&self, query_bbox: &BBox) -> Vec<T> {
         let mut result = Vec::new();
@@ -176,7 +165,6 @@ impl<T: Clone> GridIndex<T> {
         result
     }
 
-    /// `queryWithBoxes(const BBox&)`.
     #[must_use]
     pub fn query_with_boxes(&self, query_bbox: &BBox) -> Vec<(T, BBox)> {
         let mut result = Vec::new();
@@ -187,7 +175,6 @@ impl<T: Clone> GridIndex<T> {
         result
     }
 
-    /// `hitTest(const BBox&, std::optional<std::function<bool(const T&)>>)`.
     #[must_use]
     pub fn hit_test(&self, query_bbox: &BBox, predicate: Option<&dyn Fn(&T) -> bool>) -> bool {
         let mut hit = false;
@@ -202,7 +189,6 @@ impl<T: Clone> GridIndex<T> {
         hit
     }
 
-    /// `hitTest(const BCircle&, std::optional<std::function<bool(const T&)>>)`.
     #[must_use]
     pub fn hit_test_circle(&self, query_bcircle: &BCircle, predicate: Option<&dyn Fn(&T) -> bool>) -> bool {
         let mut hit = false;
@@ -217,7 +203,6 @@ impl<T: Clone> GridIndex<T> {
         hit
     }
 
-    /// `empty()`.
     #[must_use]
     pub fn empty(&self) -> bool {
         self.box_elements.is_empty() && self.circle_elements.is_empty()
@@ -367,13 +352,12 @@ impl<T: Clone> GridIndex<T> {
         }
     }
 
-    /// `convertToXCellCoord`: `util::max(0.0, util::min(xCellCount - 1.0,
-    /// std::floor(x * xScale)))` in double (fmax/fmin).
+    /// The cell column of `x`, clamped to the grid:
+    /// `fmax(0.0, fmin(x_cell_count - 1.0, floor(x * x_scale)))` in double.
     fn convert_to_x_cell_coord(&self, x: f32) -> usize {
         fmax(0.0, fmin(self.x_cell_count as f64 - 1.0, (f64::from(x) * self.x_scale).floor())) as usize
     }
 
-    /// `convertToYCellCoord`.
     fn convert_to_y_cell_coord(&self, y: f32) -> usize {
         fmax(0.0, fmin(self.y_cell_count as f64 - 1.0, (f64::from(y) * self.y_scale).floor())) as usize
     }
@@ -417,7 +401,6 @@ impl<T: Clone> GridIndex<T> {
 
 #[cfg(test)]
 mod tests {
-    // Ports test/util/grid_index.test.cpp.
     use super::*;
 
     fn bbox(x1: f32, y1: f32, x2: f32, y2: f32) -> BBox {

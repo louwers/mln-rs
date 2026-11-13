@@ -1,6 +1,3 @@
-// Ports include/mln/gfx/drawable.hpp, include/mln/gfx/drawable_impl.hpp and
-// src/mln/gfx/drawable.cpp
-//
 // C++ `gfx::Drawable` is an abstract class with data members. The port is a
 // trait with a `DrawableBase` struct for the data: the non-virtual accessors
 // are provided methods over `base()`, the C++ virtuals are trait methods
@@ -35,7 +32,6 @@ pub type DrawPriority = i64;
 /// Array of textures to bind
 pub type Textures = [Option<Texture2DPtr>; MAX_TEXTURE_COUNT_PER_SHADER];
 
-/// `gfx::Drawable::DrawSegment` (`drawable_impl.hpp`)
 #[derive(Debug)]
 pub struct DrawSegment {
     mode: DrawMode,
@@ -78,16 +74,15 @@ pub struct DrawableBase {
     pub line_width: i32,
     pub sub_layer_index: i32,
     pub depth_type: DepthMaskType,
-    /// `UniqueDrawableData` (layer-specific data).
+    /// Layer-specific data.
     pub drawable_data: Option<Box<dyn Any>>,
     pub vertex_attributes: Option<VertexAttributeArrayPtr>,
     pub instance_attributes: Option<VertexAttributeArrayPtr>,
     pub attribute_update_time: Option<Instant>,
     pub textures: Textures,
     pub tweakers: Vec<DrawableTweakerPtr>,
-    /// `LayerTweakerPtr`: the drawable only keeps the layer tweaker alive
-    /// (C++: "used to manage the lifetime of the tweaker"). `LayerTweaker`
-    /// lives in `mln_renderer`, so the handle is opaque here.
+    /// Keeps the layer tweaker alive; the drawable doesn't otherwise use it.
+    /// `LayerTweaker` lives in `mln_renderer`, so the handle is opaque here.
     pub layer_tweaker: Option<Rc<dyn Any>>,
     pub type_: usize,
     pub origin: Option<Point<f64>>,
@@ -96,17 +91,15 @@ pub struct DrawableBase {
     // Drawable::Impl
     pub color_mode: ColorMode,
     pub cull_face_mode: CullFaceMode,
-    /// `Impl::bucket` + `Impl::binders` (`setBinders(bucket, binders)`):
-    /// buckets and binders are renderer types, so the slot is opaque here;
+    /// The bucket and binders handle. Buckets and binders are renderer
+    /// types, so the slot is opaque here;
     /// the renderer stores its own handle and downcasts it in the tweakers.
     pub binders: Option<Rc<dyn Any>>,
-    /// `Impl::renderTiles` + `Impl::renderTile` (`setRenderTile(owner,
-    /// tile)`), opaque for the same reason.
+    /// The render tile handle, opaque for the same reason.
     pub render_tile: Option<Rc<dyn Any>>,
 }
 
 impl DrawableBase {
-    /// `Drawable(std::string name)`
     #[must_use]
     pub fn new(name: String) -> Self {
         DrawableBase {
@@ -312,19 +305,16 @@ pub trait Drawable: Any {
     fn get_layer_tweaker(&self) -> Option<&Rc<dyn Any>> {
         self.base().layer_tweaker.as_ref()
     }
-    /// `setBinders(std::shared_ptr<Bucket>, PaintPropertyBindersBase*)`.
     fn set_binders(&mut self, binders: Option<Rc<dyn Any>>) {
         self.base_mut().binders = binders;
     }
-    /// `getBinders()` (+ `getBucket()`), as the renderer stored them.
+    /// The bucket and binders handle, as the renderer stored it.
     fn get_binders(&self) -> Option<&Rc<dyn Any>> {
         self.base().binders.as_ref()
     }
-    /// `setRenderTile(Immutable<std::vector<RenderTile>>, const RenderTile*)`.
     fn set_render_tile(&mut self, render_tile: Option<Rc<dyn Any>>) {
         self.base_mut().render_tile = render_tile;
     }
-    /// `getRenderTile()`.
     fn get_render_tile(&self) -> Option<&Rc<dyn Any>> {
         self.base().render_tile.as_ref()
     }

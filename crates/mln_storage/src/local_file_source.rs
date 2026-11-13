@@ -1,12 +1,7 @@
-// Ports include/mln/storage/local_file_source.hpp and
-// platform/default/src/mln/storage/local_file_source.cpp.
-//
 // The requests run on the "LocalFileSource" thread (`util::Thread`) as in
 // C++. The resource options are kept next to the thread behind a
 // mutex (C++ keeps them in the thread object and reads them back with a
 // blocking `ask`); the values returned are the same.
-//
-// TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use mln_actor::{ActorRef, Thread};
 use mln_util::constants::FILE_PROTOCOL;
@@ -25,7 +20,7 @@ fn accepts_url(url: &str) -> bool {
     url.starts_with(FILE_PROTOCOL)
 }
 
-/// `pathFromFileURL(url)`: the percent-decoded path after `file://`.
+/// The percent-decoded path after `file://`.
 fn path_from_file_url(url: &str) -> Vec<u8> {
     #[allow(unused_mut)]
     let mut path = percent_decode(&url[FILE_PROTOCOL.len()..]);
@@ -39,11 +34,9 @@ fn path_from_file_url(url: &str) -> Vec<u8> {
     path
 }
 
-/// `LocalFileSource::Impl`.
 pub struct LocalFileSourceThread;
 
 impl LocalFileSourceThread {
-    /// `request(const Resource&, const ActorRef<FileSourceRequest>&)`.
     pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         if !accepts_url(&resource.url) {
             let mut response = Response::new();
@@ -57,7 +50,7 @@ impl LocalFileSourceThread {
     }
 }
 
-/// `LocalFileSource`: the `FileSystem` file source (`file://` URLs).
+/// The `FileSystem` file source: `file://` URLs.
 pub struct LocalFileSource {
     thread: Thread<LocalFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,

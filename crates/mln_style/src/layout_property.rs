@@ -1,14 +1,8 @@
-// Ports src/mln/style/layout_property.hpp: `LayoutProperty<T>` and
-// `DataDrivenLayoutProperty<T>`, plus the layout half of the C++
-// `Properties<Ps...>` template (properties.hpp) as the
-// [`layout_properties!`](crate::layout_properties) macro.
-//
 // Layout properties have no `Transitionable` (C++: `TransitionableType =
 // std::nullptr_t`): the unevaluated value is the `PropertyValue<T>` itself.
 // Every C++ layout property tag also has `static constexpr const char*
 // name()`; the macros give the tag an inherent `name()`.
 
-/// `LayoutProperty<T>`.
 #[macro_export]
 macro_rules! layout_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr, name = $prop_name:literal) => {
@@ -17,7 +11,6 @@ macro_rules! layout_property {
         $vis struct $name;
 
         impl $name {
-            /// `static constexpr const char *name()`.
             pub const fn name() -> &'static str {
                 $prop_name
             }
@@ -46,7 +39,6 @@ macro_rules! layout_property {
     };
 }
 
-/// `DataDrivenLayoutProperty<T>`.
 #[macro_export]
 macro_rules! data_driven_layout_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr, name = $prop_name:literal) => {
@@ -55,7 +47,6 @@ macro_rules! data_driven_layout_property {
         $vis struct $name;
 
         impl $name {
-            /// `static constexpr const char *name()`.
             pub const fn name() -> &'static str {
                 $prop_name
             }
@@ -125,7 +116,6 @@ macro_rules! layout_properties {
             $crate::__properties_field_impls!(Evaluated; $($field: $prop),+);
 
             impl Unevaluated {
-                /// `evaluate(const PropertyEvaluationParameters&)`.
                 pub fn evaluate(
                     &self,
                     parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
@@ -137,8 +127,8 @@ macro_rules! layout_properties {
                     }
                 }
 
-                /// `constantsMask()`: bit i is set when the i-th data-driven
-                /// property is a constant.
+                /// Bit i is set when the i-th data-driven property is a
+                /// constant.
                 pub fn constants_mask(&self) -> u64 {
                     let mut result = 0u64;
                     let mut _index = 0u32;
@@ -164,7 +154,6 @@ macro_rules! layout_properties {
                     })+
                 }
 
-                // TODO(port): updateGPUExpressions (gfx::GPUExpression).
             }
 
             impl PossiblyEvaluated {
@@ -181,7 +170,6 @@ macro_rules! layout_properties {
                     })+
                 }
 
-                /// `ConstantsMask<DataDrivenProperties>::getMask`.
                 pub fn constants_mask(&self) -> u64 {
                     let mut result = 0u64;
                     let mut _index = 0u32;
@@ -196,9 +184,8 @@ macro_rules! layout_properties {
 
                 $crate::__possibly_evaluated_feature_methods!();
 
-                /// `Evaluated evaluate(float z, const GeometryTileFeature&,
-                /// const CanonicalTileID&)`: every property at once (symbol
-                /// layout; added by `symbols`).
+                /// Evaluates every property at once for a feature (for symbol
+                /// layout).
                 pub fn evaluate_all(
                     &self,
                     z: f32,

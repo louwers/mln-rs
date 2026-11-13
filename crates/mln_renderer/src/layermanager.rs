@@ -1,8 +1,6 @@
-// Ports the render half of src/mln/layermanager/layer_manager.cpp and the
-// layer factories (`createBucket`, `createLayout`, `createRenderLayer`).
-// The style half (`createLayer`) is mln_style::layermanager; the dispatch
-// here is on the layer's `LayerTypeInfo`, as `LayerManager::findFactory`
-// does.
+// The render half of the layer manager: `create_render_layer`,
+// `create_bucket` and `create_layout`. The style half (`create_layer`) is
+// `mln_style::layermanager`. They dispatch on the layer's `LayerTypeInfo`.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -37,7 +35,6 @@ use crate::layout::pattern_layout::{
 };
 use crate::render_layer::RenderLayerPtr;
 
-/// `LayerManager::createRenderLayer(Immutable<style::Layer::Impl>)`.
 pub fn create_render_layer(impl_: &Arc<dyn layer::Impl>) -> Option<RenderLayerPtr> {
     let type_info = impl_.get_type_info();
     if std::ptr::eq(type_info, CustomLayerImpl::static_type_info()) {
@@ -107,13 +104,11 @@ pub fn create_render_layer(impl_: &Arc<dyn layer::Impl>) -> Option<RenderLayerPt
             Rc::new(RefCell::new(crate::layers::RenderSymbolLayer::new(downcast_arc::<SymbolLayerImpl>(impl_))));
         return Some(layer);
     }
-    // TODO(port): the other layer types (each arrives with its RenderLayer).
-    Log::error(Event::Render, format!("TODO(port): no render layer for layer type '{}'", type_info.type_));
+    Log::error(Event::Render, format!("no render layer for layer type '{}'", type_info.type_));
     None
 }
 
-/// `LayerManager::createBucket(parameters, layers)`: the layer types without
-/// a layout.
+/// Creates the bucket of a layer type that has no layout.
 pub fn create_bucket(parameters: &BucketParameters, layers: &[Arc<dyn LayerProperties>]) -> Option<Box<dyn Bucket>> {
     debug_assert!(!layers.is_empty());
     debug_assert_eq!(parameters.layer_type.layout, layer_type_info::Layout::NotRequired);
@@ -121,11 +116,10 @@ pub fn create_bucket(parameters: &BucketParameters, layers: &[Arc<dyn LayerPrope
     if std::ptr::eq(parameters.layer_type, mln_style::layers::heatmap_layer_impl::Impl::static_type_info()) {
         return Some(Box::new(crate::buckets::heatmap_bucket::HeatmapBucket::new(parameters, layers)));
     }
-    Log::error(Event::Render, format!("TODO(port): no bucket for layer type '{}'", parameters.layer_type.type_));
+    Log::error(Event::Render, format!("no bucket for layer type '{}'", parameters.layer_type.type_));
     None
 }
 
-/// `LayerManager::createLayout(parameters, tileLayer, layers)`.
 pub fn create_layout(
     parameters: &mut LayoutParameters<'_>,
     tile_layer: SourceLayer,
@@ -175,9 +169,6 @@ pub fn create_layout(
         )?)));
     }
     let _ = tile_layer;
-    Log::error(
-        Event::Render,
-        format!("TODO(port): no layout for layer type '{}'", parameters.bucket_parameters.layer_type.type_),
-    );
+    Log::error(Event::Render, format!("no layout for layer type '{}'", parameters.bucket_parameters.layer_type.type_));
     Ok(None)
 }

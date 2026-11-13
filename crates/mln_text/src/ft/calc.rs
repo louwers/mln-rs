@@ -1,5 +1,5 @@
-// Ports the FT_INT64 branch of ../maplibre-native/vendor/freetype/src/base/ftcalc.c
-// (FT_MulDiv, FT_DivFix, FT_MulFix). `FT_Long` is 64-bit on Linux x86-64.
+// FreeType's fixed-point arithmetic (ftcalc.c, the `FT_INT64` branch).
+// `FT_Long` is 64-bit on Linux x86-64, so the values are `i64`.
 
 /// `FT_MOVE_SIGN`.
 #[inline]
@@ -18,7 +18,7 @@ fn neg_long(x: i64) -> i64 {
     0u64.wrapping_sub(x as u64) as i64
 }
 
-/// `FT_MulDiv(a, b, c)`: `(a * b + c / 2) / c`, rounding the magnitude.
+/// `(a * b + c / 2) / c`, rounding the magnitude.
 #[must_use]
 pub fn mul_div(a: i64, b: i64, c: i64) -> i64 {
     let mut s = 1;
@@ -30,7 +30,7 @@ pub fn mul_div(a: i64, b: i64, c: i64) -> i64 {
     if s < 0 { neg_long(d) } else { d }
 }
 
-/// `FT_DivFix(a, b)`: `(a << 16 + b / 2) / b`.
+/// `(a << 16 + b / 2) / b`.
 #[must_use]
 pub fn div_fix(a: i64, b: i64) -> i64 {
     let mut s = 1;
@@ -41,8 +41,9 @@ pub fn div_fix(a: i64, b: i64) -> i64 {
     if s < 0 { neg_long(q) } else { q }
 }
 
-/// `FT_MulFix(a, b)` (the C version; the x86-64 inline assembly computes
-/// the same, truncated to 32 bits).
+/// `(a * b + 0x8000) >> 16`, rounding the magnitude, as FreeType's C version
+/// computes it (its x86-64 inline assembly computes the same, truncated to 32
+/// bits).
 #[must_use]
 pub fn mul_fix(a: i64, b: i64) -> i64 {
     let ab = i64::from(a as i32).wrapping_mul(i64::from(b as i32));
