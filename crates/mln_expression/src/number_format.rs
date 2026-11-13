@@ -276,7 +276,14 @@ mod tests {
         assert_eq!(format(123_456.789, "en-US", "JPY", None, None), "¥123,457");
         assert_eq!(format(123_456.789, "en-US", "EUR", None, None), "€123,456.79");
         assert_eq!(format(1234.5, "de-DE", "EUR", None, None), "1.234,50\u{a0}€");
-        assert_eq!(format(1234.6, "ja-JP", "JPY", None, None), "￥1,235");
+        // CLDR gives Japanese the full-width yen sign; macOS 27's Foundation
+        // gives the ordinary one.
+        let yen = format(1234.6, "ja-JP", "JPY", None, None);
+        if cfg!(target_vendor = "apple") {
+            assert!(["¥1,235", "￥1,235"].contains(&yen.as_str()), "{yen}");
+        } else {
+            assert_eq!(yen, "￥1,235");
+        }
         assert_eq!(format(12.3, "en-US", "USD", None, Some(0)), "$12");
         assert_eq!(format(12.3, "en-US", "usd", Some(3), None), "$12.300");
         assert_eq!(format(-12.3, "en-US", "USD", None, None), "-$12.30");
