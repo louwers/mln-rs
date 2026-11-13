@@ -1055,15 +1055,17 @@ fn host_demands_and_a_still_image_demand_never_replace_each_other() {
     demand(&session, DemandMode::WaitForUpdate, 7);
     held.answer();
     still.wait().unwrap();
-    // The image's frame showed the update that the host's demand waits for,
-    // and a static map publishes another only for its next still image, so
-    // the host's demand waits until a barrier ends it.
+    // The host's demand ends with no update, before or after the image's
+    // frame. Usually the image's frame shows the update that the demand waits
+    // for, and a static map publishes another only for its next still image,
+    // so the demand waits until a barrier ends it. But the demand may reach
+    // the session after the map published an update and before the session
+    // served the image with it: the demand then draws that update first,
+    // while the tile is still held, and ends with nothing to show.
     wait(session.barrier());
-    let results = take_results(&session, 2);
-    assert_eq!(
-        vec![(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate)],
-        tokens_and_dispositions(&results)
-    );
+    let mut results = tokens_and_dispositions(&take_results(&session, 2));
+    results.sort_by_key(|(token, _)| *token);
+    assert_eq!(vec![(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate)], results);
 }
 
 #[test]
