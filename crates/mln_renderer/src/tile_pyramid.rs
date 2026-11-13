@@ -636,7 +636,7 @@ impl TilePyramid {
         };
         let globe = transform_state.is_globe_rendering();
         let on_planet = |p: &mln_util::geo::ScreenCoordinate| {
-            mln_map_types::VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+            VerticalPerspectiveProjection::screen_coordinate_hits_globe(
                 transform_state,
                 &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
             )
