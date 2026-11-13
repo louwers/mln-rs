@@ -291,7 +291,9 @@ impl Map {
     /// The map's state after the last command that ran, without waiting for
     /// the commands still on their way. To read the state after them, send a
     /// command and read the snapshot once it completes, or use a query such
-    /// as [`camera`](Self::camera).
+    /// as [`camera`](Self::camera). Its `update_generation` counts the
+    /// renderer's updates as they are when it is read, which can be later
+    /// than the rest of the state.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) until the
     /// map is built, and after it is released.
