@@ -13,8 +13,10 @@ if [[ -e /etc/NIXOS ]]; then
     for file in flake.nix flake.lock; do
         cmp -s "$file" ".nix-shell/$file" || cp "$file" ".nix-shell/$file"
     done
+    # Absolute, since a task may call dev_shell from another directory.
+    dev_shell_flake="path:$PWD/.nix-shell"
     dev_shell() {
-        nix develop "path:$PWD/.nix-shell" --command "$@"
+        nix develop "$dev_shell_flake" --command "$@"
     }
 else
     dev_shell() {
