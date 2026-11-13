@@ -727,6 +727,46 @@ impl VerticalPerspectiveProjection {
         lat_lng(latitude, center.longitude() + (1.0 - dial) * d_lng_swing + dial * d_lng_dial, WrapMode::Unwrapped)
     }
 
+    /// The center that puts `location` under `point` (y up) with the bearing
+    /// held, where a drag can hold a location exactly. Elsewhere `None`, and
+    /// [`Self::drag_center`] makes the step:
+    ///
+    /// - `point` is off the planet, or in the band at its edge where the
+    ///   drag eases off;
+    /// - the center is where the cursor turns the dial around a pole;
+    /// - no center puts `location` there, or the one that does turns more
+    ///   than `DRAG_HOLD_MAX_GAIN` times as far as the cursor moves, as for
+    ///   a location near a pole or a quarter turn of longitude from the
+    ///   center.
+    ///
+    /// The planet keeps its size on screen as the center changes latitude
+    /// ([`Self::zoom_adjustment`]), so the center holds `location` at the
+    /// adjusted zoom. The longitude stays unwrapped around the current
+    /// center, the latitude is not yet constrained.
+    pub fn drag_center_holding(state: &TransformState, location: &LatLng, point: &ScreenCoordinate) -> Option<LatLng> {
+        let center = state.get_lat_lng(WrapMode::Unwrapped);
+        if center.latitude().abs() > LATITUDE_MAX - DIAL_RAMP_DEGREES
+            || !Self::screen_coordinate_hits_globe(state, point)
+            || pan_falloff(state, point).is_some()
+        {
+            return None;
+        }
+        let held = Self::center_for_location_at_point(state, location, point)?;
+        // A pixel of cursor travel turns the center 1 / (cos(latitude) *
+        // cos(longitude from the center)) times as far as it does for a
+        // location at the center.
+        let gain = mln_math::deg2rad(location.latitude()).cos()
+            * mln_math::deg2rad(location.longitude() - held.longitude()).cos();
+        if gain.abs() * DRAG_HOLD_MAX_GAIN < 1.0 {
+            return None;
+        }
+        Some(lat_lng(
+            held.latitude(),
+            center.longitude() + Self::difference_of_angles_degrees(center.longitude(), held.longitude()),
+            WrapMode::Unwrapped,
+        ))
+    }
+
     /// The shorter signed way around from one angle to the other, in degrees.
     #[must_use]
     pub fn difference_of_angles_degrees(from: f64, to: f64) -> f64 {
@@ -775,6 +815,10 @@ const DIAL_MIN_RADIUS_PIXELS: f64 = 20.0;
 const DIAL_RAMP_DEGREES: f64 = 12.0;
 const PAN_MAX_ANGLE: f64 = PI * 0.98;
 
+/// The most a held location may turn the center per pixel, relative to a
+/// location at the center, before the drag stops holding it exactly.
+const DRAG_HOLD_MAX_GAIN: f64 = 2.5;
+
 fn cross(a: &Vec3, b: &Vec3) -> Vec3 {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
@@ -804,29 +848,62 @@ fn orientation_to_lat_lng_bearing(q: &Quaternion) -> Orientation {
     }
 }
 
+/// A drag's ray through a point in the falloff band of
+/// [`pan_surface_vector`], or past it.
+struct PanFalloff {
+    /// The direction from the planet's center to the camera.
+    toward_camera: Vec3,
+    /// The camera's distance from the planet's center, in radii.
+    distance: f64,
+    /// The part of the ray's direction across `toward_camera`, and its
+    /// length.
+    lateral: Vec3,
+    lateral_length: f64,
+    /// The ray's angle from the line to the planet's center, and the angle
+    /// the band starts at.
+    angle: f64,
+    handover_angle: f64,
+}
+
+/// The falloff a drag towards `point` is in, if any: none while the ray is
+/// well inside the silhouette, where the drag aims at the surface point under
+/// `point`.
+fn pan_falloff(state: &TransformState, point: &ScreenCoordinate) -> Option<PanFalloff> {
+    let origin = state.get_globe_camera_position();
+    let distance = length(&origin);
+    if distance <= 1.0 {
+        return None;
+    }
+    let toward_camera = normalized(&origin);
+    let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
+    let c = -dot(&direction, &toward_camera);
+    let lateral = add(&direction, &scaled(&toward_camera, c));
+    let lateral_length = length(&lateral);
+    if lateral_length < 1e-9 {
+        return None;
+    }
+    let angle = lateral_length.atan2(c);
+    let handover_angle = (1.0 / distance).asin() * (1.0 - PAN_FALLOFF_BAND);
+    (angle >= handover_angle).then_some(PanFalloff {
+        toward_camera,
+        distance,
+        lateral,
+        lateral_length,
+        angle,
+        handover_angle,
+    })
+}
+
 /// GL JS `panSurfaceLocation`: the surface point a drag towards `point` aims
 /// at. Exact while the ray is well inside the silhouette, then eased off along
 /// a hyperbola that matches it in value and slope and saturates short of the
 /// far side, so the drag keeps going once the cursor leaves the planet.
 fn pan_surface_vector(state: &TransformState, point: &ScreenCoordinate) -> Vec3 {
-    let origin = state.get_globe_camera_position();
-    let distance = length(&origin);
-    if distance <= 1.0 {
+    let Some(PanFalloff { toward_camera: u, distance, lateral, lateral_length: s, angle, handover_angle }) =
+        pan_falloff(state, point)
+    else {
         return VerticalPerspectiveProjection::screen_coordinate_to_surface(state, point);
-    }
-    let u = normalized(&origin);
-    let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
-    let c = -dot(&direction, &u);
-    let lateral = add(&direction, &scaled(&u, c));
-    let s = length(&lateral);
-    if s < 1e-9 {
-        return VerticalPerspectiveProjection::screen_coordinate_to_surface(state, point);
-    }
-    let angle = s.atan2(c);
-    let handover_angle = (1.0 / distance).asin() * (1.0 - PAN_FALLOFF_BAND);
-    if angle < handover_angle {
-        return VerticalPerspectiveProjection::screen_coordinate_to_surface(state, point);
-    }
+    };
     let sin_handover = distance * handover_angle.sin();
     let target_at_handover = clamp(sin_handover, -1.0, 1.0).asin() - handover_angle;
     let slope_at_handover =
