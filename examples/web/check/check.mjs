@@ -6,7 +6,9 @@
 // its Web Workers (the map's or a tile worker's) or the native runner reports
 // an error, or when a view's tiles got no worker replies. The interaction
 // views drag on the map back and forth before their frame, over a slow
-// network, and also fail when the map fetches URLs again. It also makes the
+// network, and also fail when the map fetches URLs again; the zoom-out view
+// pinches out fast, and fails unless the browser aborts some of the fetches
+// of the tiles that the map passes and drops. It also makes the
 // map's wasm instance and a tile worker's panic (the page's `panic`), and
 // fails unless the page stops and shows the panic, and opens a comparison
 // with GL JS (the page's `compare`), and fails unless GL JS's map covers
@@ -82,7 +84,11 @@ const VIEWS = [
   // forth, and a pinch that pans and zooms it back and forth, as
   // mln-bench's Frame/Oscillate and Frame/OscillatePanZoom move their
   // cameras. Each starts where some tiles come into view only for moments
-  // of each swing, shorter than a tile takes to load.
+  // of each swing, shorter than a tile takes to load. Then a pinch that
+  // zooms out by 4 in half a second, past the tiles of three zoom levels,
+  // over a network slower than the pinch: the tiles it passes are still
+  // loading when the map drops them, however slowly the page draws. Where
+  // it ends the fixtures have no tiles.
   {
     id: 'real-world/chicago',
     name: 'interaction/rotate',
@@ -100,10 +106,19 @@ const VIEWS = [
     center: [-122.4591064453125, 37.77071473849609], // z15 x 5237.5, y 12666
     zoom: 15.9,
   },
+  {
+    id: 'real-world/uruguay',
+    name: 'interaction/zoom-out',
+    interaction: 'zoom-out',
+    latency: 1000,
+    width: 1024,
+    height: 768,
+  },
 ];
 
-// In the interaction views every fixture comes this late, and fresh for an
-// hour, as over a network, so the map fetches each URL once unless it drops
+// In the interaction views every fixture comes this late, unless the view
+// says otherwise, and fresh for an hour, as over a network, so the map
+// fetches each URL once unless it drops
 // what it fetched. A tile it drops while it loads is fetched again on its
 // next swing into view, which the browser answers from the first fetch,
 // so it loads then. Such a view fails when the map fetches more than
@@ -194,7 +209,7 @@ function cachedJson(url) {
  * the camera is in the style. The page can't follow other operations or
  * test options, so a view must not have them.
  */
-function view({ id, name = id, interaction, allowed = THRESHOLD, ...camera }) {
+function view({ id, name = id, interaction, latency = LATENCY_MS, allowed = THRESHOLD, ...camera }) {
   const test = JSON.parse(readFileSync(path.join(metrics, 'integration/render-tests', id, 'style.json'), 'utf8'));
   const metadata = test.metadata?.test ?? {};
   for (const key of Object.keys(metadata)) {
@@ -220,7 +235,7 @@ function view({ id, name = id, interaction, allowed = THRESHOLD, ...camera }) {
   const height = camera.height ?? metadata.height ?? 512;
   const ratio = metadata.pixelRatio ?? 1;
   style.metadata = { test: { width, height, pixelRatio: ratio, allowed } };
-  return { id, name, interaction, style, width, height, ratio, allowed };
+  return { id, name, interaction, latency, style, width, height, ratio, allowed };
 }
 
 const views = VIEWS.filter(({ id, name = id }) => new RegExp(options.filter).test(name)).map(view);
@@ -275,8 +290,11 @@ const SOURCE = 2; // Resource::Kind::Source: a TileJSON
 // this server (404, which HTTPFileSource reads as a tile the tileset doesn't
 // have, or as a Not Found error for other resources).
 let missing = [];
-// Whether the current view's fixtures come as over a network (LATENCY_MS).
-let slow = false;
+// How late the current view's fixtures come, as over a network, if they do.
+let latency = 0;
+// The fixture fetches of the current view that the browser aborted before
+// their response.
+let aborted = 0;
 
 function serveFixture(url, response) {
   const entry = cached(url);
@@ -294,9 +312,14 @@ function serveFixture(url, response) {
 const server = createServer((request, response) => {
   const url = new URL(request.url, 'http://x');
   const fixture = /^\/fixtures\/([a-z]+)\/(.*)$/.exec(request.url);
-  if (fixture && slow) {
+  if (fixture && latency > 0) {
     response.setHeader('cache-control', 'max-age=3600');
-    setTimeout(() => serveFixture(`${fixture[1]}://${fixture[2]}`, response), LATENCY_MS);
+    response.on('close', () => {
+      if (!response.writableFinished) aborted += 1;
+    });
+    setTimeout(() => {
+      if (!response.destroyed) serveFixture(`${fixture[1]}://${fixture[2]}`, response);
+    }, latency);
     return;
   }
   if (fixture) {
@@ -550,7 +573,7 @@ async function load(browser, view, count) {
           new Promise((_, reject) => setTimeout(() => reject(new Error('not idle after 60 s')), 60000)),
         ])`,
       );
-      interaction = { camera, fetches: await evaluate(browser, session, 'window.mln.fetches()') };
+      interaction = { camera, fetches: await evaluate(browser, session, 'window.mln.fetches()'), aborted };
     }
     // Let the labels fade in, then draw the frame again and read it back.
     await evaluate(browser, session, 'new Promise((resolve) => setTimeout(resolve, 1500))');
@@ -596,7 +619,9 @@ function swing(ms) {
  * - `rotate`: a right-drag from the center, which turns the map between
  *   -90° and 90° (mln_gestures' 0.5° a pixel);
  * - `pan-zoom`: a two-finger pinch that pans the map 0.65 of a tile east
- *   and west of where it started while it zooms out by 0.9 at each end.
+ *   and west of where it started while it zooms out by 0.9 at each end;
+ * - `zoom-out`: a two-finger pinch that zooms the map out by 4 in its first
+ *   half second, then holds.
  * It holds still before the release, longer than the recognizer's 40 ms,
  * so that the release starts no momentum.
  */
@@ -625,6 +650,16 @@ async function interact(browser, session, interaction) {
     await mouse('mousePressed', x);
     event = (ms) => mouse('mouseMoved', x + 180 * swing(ms));
     release = () => mouse('mouseReleased', x);
+  } else if (interaction === 'zoom-out') {
+    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    // The fingers 200 pixels apart where they start, 2^4 closer at 500 ms.
+    const fingers = (ms) => {
+      const apart = 100 * 2 ** (-4 * Math.min(ms / 500, 1));
+      return [{ x: x - apart, y, id: 0 }, { x: x + apart, y, id: 1 }];
+    };
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: fingers(0) });
+    event = (ms) => send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: fingers(ms) });
+    release = () => send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   } else {
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
     // The fingers 200 pixels apart where they start, closer by up to 2^-0.9.
@@ -819,14 +854,16 @@ async function compare() {
   const failures = [];
   for (const view of views) {
     missing = [];
-    slow = view.interaction !== undefined;
+    aborted = 0;
+    latency = view.interaction === undefined ? 0 : view.latency;
     const { stats, pixels, interaction, errors, failure } = await load(browser, view, workers);
-    slow = false;
+    latency = 0;
     const again = interaction && refetches(interaction.fetches);
     if (process.env.MLN_WEB_CHECK_LOG && again) console.error(`  fetched again: ${JSON.stringify(again.urls)}`);
     console.log(`${view.name}: ` +
       (failure ? failure : `loaded in ${Math.round(stats.loadedMs)} ms, ${stats.replies} worker replies`) +
       (again ? `, after the ${view.interaction} ${again.count} fetches again (at most ${MAX_REPEATS})` : '') +
+      (view.interaction === 'zoom-out' && interaction ? `, ${interaction.aborted} fetches aborted` : '') +
       (missing.length ? `, ${missing.length} tiles or resources not in the cache (not found)` : '') +
       (errors.length ? `, ${errors.length} errors:\n  ${errors.map(firstLines).join('\n  ')}` : ''));
     if (process.env.MLN_WEB_CHECK_LOG && missing.length) console.error(`  not in the cache: ${missing.join(', ')}`);
@@ -841,6 +878,9 @@ async function compare() {
     if (again && again.count > MAX_REPEATS) {
       const urls = again.urls.slice(0, 3).map(([url, count]) => `${url.replace(origin, '')} ${count} times`);
       failures.push(`${view.name}: ${again.count} fetches again after the ${view.interaction}, of ${urls.join(', ')}`);
+    }
+    if (view.interaction === 'zoom-out' && interaction.aborted === 0) {
+      failures.push(`${view.name}: the browser aborted none of the fetches of the tiles that the map dropped`);
     }
     // An interaction's frame is of the camera it left the map at.
     let style = view.style;
