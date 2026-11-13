@@ -1322,7 +1322,6 @@ impl Placement {
         } else {
             debug_assert!(false);
             // We skipped some setup, don't use this one or we might run into inconsistencies
-            // TODO(port): symbolInstance.forceFail() (MLN_SYMBOL_GUARDS).
             return k_unplaced;
         }
 
@@ -2002,7 +2001,6 @@ impl Placement {
 
             seen_cross_tile_ids.insert(cross_tile_id);
 
-            // TODO(port): symbolInstance.checkIndexes (MLN_SYMBOL_GUARDS).
             let count = 4;
             if symbol_instance.has_text() {
                 let mut text_opacity_vertices_size = 0usize;

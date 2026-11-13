@@ -2,7 +2,6 @@
 
 use super::*;
 
-// TODO(port): use mln_util::constants::DEFAULT_MAX_ZOOM once it exists.
 const DEFAULT_MAX_ZOOM: u8 = 22;
 
 /// gtest `EXPECT_DOUBLE_EQ`: within 4 ULPs, NaN never equal.

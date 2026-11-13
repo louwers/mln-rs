@@ -195,7 +195,7 @@ fn to_variable_anchor_offset(value: &Value) -> EvaluationResult {
                 };
 
                 // C++ `get<double>()` throws on a non-number offset.
-                // TODO(port): mapbox::util::bad_variant_access propagates out
+                // mapbox::util::bad_variant_access propagates out
                 // of evaluate() in C++.
                 let x = offset[0].as_number().expect("numeric offset") as f32;
                 let y = offset[1].as_number().expect("numeric offset") as f32;

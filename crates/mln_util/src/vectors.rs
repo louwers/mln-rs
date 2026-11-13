@@ -96,7 +96,6 @@ pub fn vec_from4<T: Copy + Default, A: AsArray<T>, B: AsArray<T>, C: AsArray<T>,
 
 // --- namespace vector ---
 
-// TODO(port): use mln_util::math::gl_fmod once util/math.hpp is ported.
 fn gl_fmod(x: f64, y: f64) -> f64 {
     x - y * (x / y).floor()
 }

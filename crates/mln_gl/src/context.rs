@@ -20,9 +20,6 @@
 // texture is a GL object of its own), fences, the legacy program path's
 // renderbuffers, draw scopes and vertex array state, and the debugging and
 // timestamp query extensions.
-//
-// TODO(port): `createDynamicTexture`, `createRenderTarget` and the render
-// jobs of the backend thread pool, as in the WebGPU backend.
 
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};

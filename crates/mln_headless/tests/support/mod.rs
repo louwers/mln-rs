@@ -219,8 +219,6 @@ impl<A> CallbackSlot<A> {
 }
 
 /// `StubMapObserver`, with callbacks for the source and sprite events too.
-// TODO(port): onRegisterShaders, onPre/PostCompileShader,
-// onShaderCompileFailed callbacks (MapObserver has none of them yet).
 #[derive(Default)]
 pub struct StubMapObserver {
     pub will_start_loading_map_callback: CallbackSlot<()>,

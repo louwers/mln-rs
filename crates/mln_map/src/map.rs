@@ -142,7 +142,6 @@ pub struct Map {
 
     debug_options: MapDebugOptions,
     rendering_stats_view: Option<RenderingStatsView>,
-    // TODO(port): annotationManager.
     /// The stats of the last frame the renderer finished.
     last_frame_stats: Option<Arc<RenderingStats>>,
     style: Style,
@@ -374,8 +373,6 @@ impl Map {
                     let camera = self.style.get_default_camera();
                     self.jump(&camera);
                 }
-                // TODO(port): if (LayerManager::annotationsEnabled)
-                // annotationManager.onStyleLoaded().
                 self.emit(MapEvent::StyleLoaded);
             }
             StyleEvent::StyleError(error) => self.emit(MapEvent::LoadingFailed(error)),
@@ -727,8 +724,6 @@ impl Map {
         self.changed();
         &mut self.style
     }
-
-    // TODO(port): setStyle(std::unique_ptr<style::Style>).
 
     // MARK: - Transitions
 
@@ -1313,8 +1308,6 @@ impl Map {
         self.camera_mutated = true;
         self.on_update();
     }
-
-    // TODO(port): annotations, rendered features.
 
     // MARK: - Debug
 

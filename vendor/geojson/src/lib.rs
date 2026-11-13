@@ -6,8 +6,6 @@
 //
 // rapidjson documents become `serde_json::Value`s, as everywhere in the port
 // (`mln_conversion::Convertible`), and stringify writes them with serde_json.
-// TODO(port): include/mapbox/geojson_value_impl.hpp (convert to/from
-// `mapbox::geojson::value`): not compiled into the core.
 
 pub mod geojson_impl;
 

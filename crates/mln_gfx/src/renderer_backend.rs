@@ -1,8 +1,4 @@
 // Ports include/mln/gfx/renderer_backend.hpp and src/mln/gfx/renderer_backend.cpp
-//
-// TODO(port): `TaggedScheduler threadPool` / `getThreadPool()` (render jobs
-// scheduled by background workers) arrives with the first user; the WebGPU
-// context calls `runRenderJobs()` in begin/endFrame, a no-op until then.
 
 use std::any::Any;
 use std::cell::OnceCell;

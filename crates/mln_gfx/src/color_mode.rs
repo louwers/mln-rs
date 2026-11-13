@@ -121,7 +121,7 @@ impl ColorMode {
     }
 
     /// `ColorMode::hash()`.
-    // TODO(port): C++ uses util::hash (boost hash_combine); the value is only
+    // C++ uses util::hash (boost hash_combine); the value is only
     // used as a pipeline cache key, so any stable combination works.
     #[must_use]
     pub fn hash(&self) -> u64 {

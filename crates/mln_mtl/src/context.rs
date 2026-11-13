@@ -14,10 +14,6 @@
 // - The globe's clip mask meshes come from the caller, which C++ makes with
 //   the renderer's `rawGlobeTileMesh` (see
 //   `gfx::Context::render_globe_tile_clipping_masks`).
-//
-// TODO(port): `createDynamicTexture`, `createRenderTarget`,
-// `createRenderbufferResource` and the render jobs of the backend thread
-// pool, as in the WebGPU backend.
 
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};

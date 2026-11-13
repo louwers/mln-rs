@@ -237,8 +237,7 @@ impl RendererBackend {
     /// `initShaders`: register one `webgpu::ShaderGroup` per built-in shader.
     ///
     /// C++ registers all 31 types; a type whose WGSL is not part of this
-    /// build is skipped (TODO(port): all sources once the
-    /// `@maplibre//:webgpu-shader-headers` filegroup feeds the extractor).
+    /// build is skipped.
     /// A duplicate registration is an error, as in C++ (which throws).
     pub fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
         for &shader_id in REGISTERED_SHADERS {

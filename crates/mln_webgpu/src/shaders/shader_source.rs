@@ -2,9 +2,6 @@
 // specialisations: the WGSL strings are the `wgsl_sources` module's, but for
 // the fill extrusions' (`fill_extrusion_wgsl`); the attribute/texture tables
 // from src/mln/shaders/webgpu/*.cpp are below.
-//
-// TODO(port): the attribute/texture tables of the other shader types
-// (fill_extrusion.cpp, symbol.cpp, raster.cpp, ...) arrive with their layers.
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::{

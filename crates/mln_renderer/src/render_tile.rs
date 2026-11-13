@@ -178,6 +178,4 @@ impl RenderTile {
         self.projection = transform.state.get_projection_data_with(&self.id, &transform.proj_matrix);
         self.matrix = self.projection.main_matrix;
     }
-
-    // TODO(port): setFeatureState (feature state, M6).
 }

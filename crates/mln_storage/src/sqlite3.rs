@@ -13,10 +13,6 @@
 // column conversions (`sqlite3_column_int64` of a text value parses it,
 // `sqlite3_column_blob` of a number formats it, ...). The offline database
 // uses rusqlite's statement cache (`prepare_cached`) directly.
-//
-// TODO(port): `setTempPath`, the debug `SQLITE_CONFIG_LOG` hook, the
-// library version check at startup, `Query::reset`/`clearBindings` after a
-// `run()`.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -242,7 +238,7 @@ impl<'s, 'conn> Query<'s, 'conn> {
 
     /// `bind(offset, value)` (before the first `run()`).
     pub fn bind<T: ToSql>(&mut self, offset: usize, value: T) -> Result<(), SqliteError> {
-        let stmt = self.stmt.as_mut().expect("TODO(port): Query::bind after run()");
+        let stmt = self.stmt.as_mut().expect("Query::bind after run()");
         stmt.raw_bind_parameter(offset, value)?;
         Ok(())
     }
@@ -336,7 +332,8 @@ pub fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, SqliteError> {
     Ok(match row.get_ref(offset)? {
         ValueRef::Null => Vec::new(),
         ValueRef::Integer(i) => i.to_string().into_bytes(),
-        // TODO(port): SQLite formats reals with "%!.15g".
+        // SQLite formats reals with "%!.15g"; this uses Rust's shortest
+        // round-trip formatting.
         ValueRef::Real(r) => format!("{r}").into_bytes(),
         ValueRef::Text(t) | ValueRef::Blob(t) => t.to_vec(),
     })

@@ -42,8 +42,6 @@ pub fn for_each_point<T>(geometry: &Geometry<T>, f: &mut impl FnMut(&Point<T>)) 
     }
 }
 
-// TODO(port): convertPoint, with its first user.
-
 #[cfg(test)]
 mod tests {
     use super::*;

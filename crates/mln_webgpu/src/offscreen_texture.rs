@@ -8,9 +8,9 @@
 // next frame's own submission ends with the copy, which C++ submits
 // separately on each read.
 //
-// TODO(port): the size-changed callback (`handleResize` / `setSizeListener`)
+// There is no size-changed callback (`handleResize` / `setSizeListener`)
 // that resizes the textures when someone calls `setSize` on the color
-// texture; nothing on the M1 path resizes them.
+// texture.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};

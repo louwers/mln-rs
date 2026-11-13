@@ -8,9 +8,7 @@
 // the renderer, so that half is `OrchestratorSourceObserver`, an `Rc` that
 // shares the orchestrator's event sink.
 //
-// Not yet ported (TODO(port) at each use): annotations, glyph eviction,
-// image-manager memory trimming, shape-annotation and feature-extension
-// queries, debug layer groups.
+// Not supported: glyph eviction and image-manager memory trimming.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -213,8 +211,6 @@ pub struct RenderOrchestrator {
     // symbols:
     cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex,
     placement_controller: crate::text::placement::PlacementController,
-    // TODO(port):
-    // layersNeedPlacement, filteredLayersForSource.
     background_layer_as_color: bool,
     placed_symbol_data_collected: bool,
     tile_cache_enabled: bool,
@@ -362,8 +358,6 @@ impl RenderOrchestrator {
             self.zoom_history.first = true;
         }
 
-        // TODO(port): annotationManager->updateData() (annotations).
-
         let zoom_changed = self
             .zoom_history
             .update(update_parameters.transform_state.get_zoom() as f32, &update_parameters.time_point);
@@ -415,7 +409,6 @@ impl RenderOrchestrator {
         evaluation_parameters.global_state_changed = global_state_changed;
         evaluation_parameters.changed_global_state_keys = changed_global_state_keys.clone();
 
-        // TODO(port): annotationManager in TileParameters.
         let mut tile_parameters = TileParameters {
             pixel_ratio: update_parameters.pixel_ratio,
             debug_options: update_parameters.debug_options,
@@ -569,8 +562,8 @@ impl RenderOrchestrator {
             self.ordered_layers.reserve(self.layer_impls.len());
             let mut layer_index: i32 = 0;
             for layer_impl in self.layer_impls.iter() {
-                // TODO(port): C++ uses renderLayers.at(id); a layer type
-                // without a render layer port is skipped.
+                // C++ uses renderLayers.at(id); a layer type without a
+                // render layer is skipped.
                 let Some(layer) = self.render_layers.get(&layer_impl.id) else {
                     continue;
                 };
@@ -583,8 +576,6 @@ impl RenderOrchestrator {
             }
         }
         debug_assert_eq!(self.ordered_layers.len(), self.render_layers.len());
-
-        // TODO(port): glyphManager->evict(fontStacks(*layerImpls)).
 
         // Update layers for class and zoom changes.
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
@@ -707,7 +698,7 @@ impl RenderOrchestrator {
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
             // C++ has a render source for every source type; the port skips
-            // the layers of a source type without one (TODO(port)).
+            // the layers of a source type without one.
             let has_render_source = source_impl
                 .as_ref()
                 .is_some_and(|source_impl| self.render_sources.contains_key(&source_impl.base().id));
@@ -796,7 +787,7 @@ impl RenderOrchestrator {
                 tile_parameters.is_update_synchronous = source_impl.is_update_synchronous();
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
                 // C++ `renderSources.at(sourceImpl->id)`; a source type
-                // without a render source port has none (TODO(port)).
+                // without a render source has none.
                 if let Some(source) = self.render_sources.get_mut(&source_impl.base().id) {
                     source.update(
                         source_impl.clone(),
@@ -951,7 +942,6 @@ impl RenderOrchestrator {
         if !render_tree_parameters.needs_repaint && render_tree_parameters.loaded {
             // Notify observer about unused images when map is fully loaded
             // and there are no ongoing transitions.
-            // TODO(port): imageManager->reduceMemoryUseIfCacheSizeExceedsLimit().
         }
 
         let mut source_render_items: Vec<Box<dyn RenderItem>> = Vec::new();
@@ -1054,7 +1044,6 @@ impl RenderOrchestrator {
         }
 
         self.image_manager.clear();
-        // TODO(port): glyphManager->evict(fontStacks(*layerImpls)).
     }
 
     /// Drops what holds the renderer's shaders: the render layers, the sky
@@ -1216,9 +1205,6 @@ impl RenderOrchestrator {
         paint_parameters: &PaintParameters<'_>,
         render_tree: &RenderTree,
     ) {
-        // TODO(port): the PropertyEvaluationParameters C++ builds here are
-        // unused by the layers' update().
-
         let items = render_tree.get_layer_render_item_map();
 
         let mut changes: UniqueChangeRequestVec = Vec::with_capacity(items.len() * 3);
@@ -1538,8 +1524,6 @@ impl RenderOrchestrator {
         self.image_manager.dump_debug_logs();
     }
 
-    // TODO(port): queryShapeAnnotations, queryFeatureExtensions, debug layer
-    // groups and the glyph/tile observer callbacks.
     // layers: feature state
     /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.
     pub fn set_feature_state(

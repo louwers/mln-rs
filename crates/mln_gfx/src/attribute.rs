@@ -1,10 +1,6 @@
 // Ports the run-time parts of src/mln/gfx/attribute.hpp used by the
 // drawable path: `AttributeDescriptor`, `AttributeBinding`,
 // `AttributeBindingArray`.
-//
-// TODO(port): the compile-time attribute type lists (`AttributeType`,
-// `Vertex<...>`, `AttributeBindings<TypeList>`, MBGL_DEFINE_ATTRIBUTE) belong
-// to the legacy program path and arrive with the first user.
 
 use std::rc::Rc;
 

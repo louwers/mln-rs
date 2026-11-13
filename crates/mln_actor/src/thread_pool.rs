@@ -1,9 +1,6 @@
 // Ports src/mln/util/thread_pool.hpp and src/mln/util/thread_pool.cpp:
 // `ThreadedSchedulerBase` / `ThreadedScheduler` with one queue per tag, and
 // `ThreadPool` (= `ParallelScheduler(3)`, 4 threads).
-//
-// TODO(port): `runOnRenderThread`/`runRenderJobs`, thread names/priorities
-// from platform settings.
 
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};

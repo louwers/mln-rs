@@ -4,9 +4,6 @@
 // queue in it); `EstablishedActor<O>` constructs the object on the thread
 // that will own it, opens the mailbox there, and on drop closes the mailbox
 // before the object goes away.
-//
-// TODO(port): `Actor<O>` (actor.hpp) on a thread pool scheduler: here the
-// object stays on the thread that established it (see mailbox.rs).
 
 use std::any::Any;
 use std::rc::Rc;

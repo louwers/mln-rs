@@ -93,7 +93,6 @@ impl HeadlessFrontend {
 
     /// `HeadlessFrontend(Size, float pixelRatio, ..., invalidateOnUpdate)`:
     /// its renderer has a glyph cache of its own.
-    // TODO(port): localFontFamily.
     pub fn with_options(size: Size, pixel_ratio: f32, invalidate_on_update: bool) -> Result<Self, Error> {
         Self::with_glyph_cache(size, pixel_ratio, invalidate_on_update, Arc::default())
     }

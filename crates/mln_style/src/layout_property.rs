@@ -164,7 +164,6 @@ macro_rules! layout_properties {
                     })+
                 }
 
-                // TODO(port): updateGPUExpressions (gfx::GPUExpression).
             }
 
             impl PossiblyEvaluated {

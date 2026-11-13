@@ -467,8 +467,8 @@ impl Impl {
 
         for layer in std::mem::take(&mut parser.layers) {
             // The parser drops duplicate layer ids, so this cannot fail for
-            // a source-less M1 style. TODO(port): C++ throws here for a layer
-            // incompatible with its source.
+            // a source-less M1 style. A layer incompatible with its source is
+            // logged and skipped (C++ throws).
             if let Err(error) = self.add_layer(layer, None) {
                 Log::error(Event::ParseStyle, error.to_string());
             }

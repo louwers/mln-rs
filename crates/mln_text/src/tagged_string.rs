@@ -20,7 +20,6 @@ pub type FontStackHash = u64;
 
 /// A key for a font stack in the glyph maps: [`std::hash`] of its font
 /// names. Every thread and worker of one build computes the same key.
-// TODO(port): belongs in mln_util::font_stack.
 #[must_use]
 pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
     let mut hasher = DefaultHasher::new();

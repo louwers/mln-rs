@@ -31,7 +31,7 @@ fn geojsonvt_tile_features(vt: &Mutex<geojson_vt::GeoJSONVT>, id: &CanonicalTile
     match vt.lock_unpoisoned().get_tile(id.z, id.x, id.y) {
         Ok(tile) => tile.features.clone(),
         Err(e) => {
-            // TODO(port): C++ lets the exception propagate.
+            // C++ lets the exception propagate; here it is logged.
             Log::error(Event::General, e);
             TileFeatures::new()
         }

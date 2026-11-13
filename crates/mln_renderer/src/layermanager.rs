@@ -109,8 +109,7 @@ pub fn create_render_layer(impl_: &Immutable<dyn layer::Impl>) -> Option<RenderL
         )));
         return Some(layer);
     }
-    // TODO(port): the other layer types (each arrives with its RenderLayer).
-    Log::error(Event::Render, format!("TODO(port): no render layer for layer type '{}'", type_info.type_));
+    Log::error(Event::Render, format!("no render layer for layer type '{}'", type_info.type_));
     None
 }
 
@@ -126,7 +125,7 @@ pub fn create_bucket(
     if std::ptr::eq(parameters.layer_type, mln_style::layers::heatmap_layer_impl::Impl::static_type_info()) {
         return Some(Box::new(crate::buckets::heatmap_bucket::HeatmapBucket::new(parameters, layers)));
     }
-    Log::error(Event::Render, format!("TODO(port): no bucket for layer type '{}'", parameters.layer_type.type_));
+    Log::error(Event::Render, format!("no bucket for layer type '{}'", parameters.layer_type.type_));
     None
 }
 
@@ -180,9 +179,6 @@ pub fn create_layout(
         )?)));
     }
     let _ = tile_layer;
-    Log::error(
-        Event::Render,
-        format!("TODO(port): no layout for layer type '{}'", parameters.bucket_parameters.layer_type.type_),
-    );
+    Log::error(Event::Render, format!("no layout for layer type '{}'", parameters.bucket_parameters.layer_type.type_));
     Ok(None)
 }

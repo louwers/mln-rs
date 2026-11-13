@@ -19,9 +19,6 @@
 // Timers (`util::Timer`, timer.rs) run first in `run_once`, as `uv_run` runs
 // due timers before the poll phase; a blocking `run()` sleeps until the next
 // timer is due. Timers do not keep `run()` alive (libuv unrefs them).
-//
-// TODO(port): fd watches (`addWatch`/`removeWatch`, only for libcurl),
-// `invokeCancellable`, `setPlatformCallback`.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;

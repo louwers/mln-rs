@@ -483,7 +483,6 @@ macro_rules! paint_properties {
                     })+
                 }
 
-                // TODO(port): updateGPUExpressions (gfx::GPUExpression).
             }
 
             impl PossiblyEvaluated {

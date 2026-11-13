@@ -1,7 +1,4 @@
 // Ports include/mln/gfx/rendering_stats.hpp (the counters).
-//
-// TODO(port): `RenderingStats::toString`/`toJSONString`/`eval`
-// (src/mln/gfx/rendering_stats.cpp) arrive with their first user.
 
 use std::collections::{HashMap, HashSet};
 

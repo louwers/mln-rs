@@ -153,7 +153,6 @@ impl RenderSourceBase {
 }
 
 /// `RenderSource`.
-// TODO(port): queryFeatureExtensions, getImageRenderData.
 pub trait RenderSource {
     fn base(&self) -> &RenderSourceBase;
     fn base_mut(&mut self) -> &mut RenderSourceBase;

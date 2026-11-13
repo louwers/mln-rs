@@ -8,8 +8,7 @@
 //
 // The `A`/`U` (attribute, uniform) template arguments of the data-driven
 // kinds are not carried: they name gfx attribute bindings, which the
-// renderer's port looks up by property (TODO(port) with the drawables of
-// those layers).
+// renderer looks up by property.
 
 /// `PaintProperty<T>`.
 #[macro_export]

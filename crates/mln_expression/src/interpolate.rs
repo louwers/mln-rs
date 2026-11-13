@@ -151,7 +151,7 @@ impl Interpolate {
                 // Interpolator<VariableAnchorOffsetCollection> only has a
                 // float overload. It throws std::runtime_error on mismatched
                 // collections, which propagates out of evaluate() in C++.
-                // TODO(port): the port reports it as an evaluation error.
+                // Here it is an evaluation error.
                 match VariableAnchorOffsetCollection::interpolate(a, b, t as f32) {
                     Ok(v) => Value::VariableAnchorOffsetCollection(v),
                     Err(e) => return Err(EvaluationError::new(e)),

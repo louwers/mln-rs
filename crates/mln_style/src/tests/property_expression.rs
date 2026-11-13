@@ -175,9 +175,6 @@ fn issue8460() {
     assert_near(600.0, fn2.evaluate_zoom_feature(19.0, &one_integer(), -1.0), 0.00);
 }
 
-// TODO(port): TEST(PropertyExpression, FormatSectionOverride) needs
-// FormatSectionOverride (renderer, M5).
-
 // gtest: PropertyExpression.ImageExpression
 #[test]
 fn image_expression() {

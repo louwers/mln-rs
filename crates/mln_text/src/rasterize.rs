@@ -11,9 +11,9 @@
 //   `ft_glyphslot_preset_bitmap` and the smooth rasterizer (`ft::grays`, a
 //   port of ftgrays.c), oversampled for glyphs flagged as overlapping.
 //
-// TODO(port): embedded bitmap glyphs (CBDT/sbix/EBDT, e.g. color emoji
-// fonts without outlines) give an empty glyph here.
-// TODO(port): FT_Load_Glyph failures leave the previous glyph in FreeType's
+// Embedded bitmap glyphs (CBDT/sbix/EBDT, e.g. color emoji fonts without
+// outlines) give an empty glyph.
+// FT_Load_Glyph failures leave the previous glyph in FreeType's
 // glyph slot, which the C++ then renders; here a glyph that cannot be loaded
 // is empty.
 
@@ -136,7 +136,6 @@ pub fn rasterize_glyph(face: &FreeTypeFace, glyph: GlyphID) -> Glyph {
     let buffer = if overflow || collector.segments.is_empty() {
         if overflow {
             // Raster_Overflow: nothing is rendered.
-            // TODO(port): check what the glyph slot holds then.
             width = 0;
             rows = 0;
         }

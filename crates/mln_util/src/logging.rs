@@ -1,7 +1,6 @@
 // Ports include/mln/util/event.hpp + src/mln/util/event.cpp,
 // include/mln/util/logging.hpp + src/mln/util/logging.cpp and
-// platform/default/src/mln/util/logging_stderr.cpp (synchronous recording only; the log thread of
-// `useLogThread` is a TODO(port)).
+// platform/default/src/mln/util/logging_stderr.cpp (synchronous recording only; no log thread).
 //
 // Rust addition: `Log::set_thread_observer` installs an observer for the
 // current thread only, taking precedence over the global one. The Rust test

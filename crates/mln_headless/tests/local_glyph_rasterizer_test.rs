@@ -73,7 +73,7 @@ struct LocalGlyphRasterizerTest {
 
 impl LocalGlyphRasterizerTest {
     /// `LocalGlyphRasterizerTest(fontFamily)`.
-    // TODO(port): the C++ passes `fontFamily` to the HeadlessFrontend's
+    // The C++ passes `fontFamily` to the HeadlessFrontend's
     // LocalGlyphRasterizer; the port's platform/default rasterizer refuses
     // every glyph (as C++'s does without a font family), so only `None` is
     // supported here.

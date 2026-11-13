@@ -4,9 +4,6 @@
 // C++ moves the `ImageSourceRenderData` into the render tree in
 // `createRenderItem` and the raster layers keep a raw pointer to it from
 // `prepare`; here it is an `Rc` both hold.
-//
-// TODO(port): queryRenderedFeatures / querySourceFeatures (both empty in
-// C++).
 
 use std::rc::Rc;
 use std::sync::Arc;

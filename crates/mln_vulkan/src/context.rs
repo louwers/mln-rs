@@ -26,10 +26,6 @@
 //   of date) are logged. A frame that acquires no image, for a swapchain or
 //   a surface that couldn't be made again, is recorded without a
 //   framebuffer for the frame target, and submitted without presenting.
-//
-// TODO(port): `createDynamicTexture`, `createRenderTarget`,
-// `createRenderbufferResource` and the render jobs of the backend thread
-// pool (`runRenderJobs` in `beginFrame`), as in the WebGPU backend.
 
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};

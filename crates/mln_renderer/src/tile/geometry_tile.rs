@@ -22,9 +22,8 @@
 // onImagesAvailable forwarded to the worker), and LayoutResult carries the
 // glyph/image atlases of the shared DynamicTextureAtlas.
 //
-// TODO(port): image patches in GeometryTileRenderData (same-size runtime
-// image updates), queries, feature state, HarfBuzz shaping of font-face
-// glyphs in onGlyphsAvailable.
+// Not supported: image patches in GeometryTileRenderData (same-size runtime
+// image updates).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -140,7 +139,6 @@ struct GeometryTileRenderData {
     atlas_textures: Option<Rc<TileAtlasTextures>>,
     layout_result: Option<Rc<LayoutResult>>,
     bucket_geometry: Rc<BucketGeometry>,
-    // TODO(port): std::vector<ImagePatch> imagePatches (sprite updates).
 }
 
 impl TileRenderData for GeometryTileRenderData {
@@ -194,15 +192,12 @@ impl TileRenderData for GeometryTileRenderData {
             image_dynamic_texture.upload_deferred_images(context);
             *atlas_textures.icon.borrow_mut() = image_dynamic_texture.get_texture();
         }
-
-        // TODO(port): imagePatches (same-size runtime image updates).
     }
 
     fn prepare(&mut self, _parameters: &SourcePrepareParameters<'_>) {
         if self.layout_result.is_none() {
             // return
         }
-        // TODO(port): populateImagePatches (sprite image updates).
     }
 }
 
@@ -324,9 +319,6 @@ impl GeometryTileInner {
             self.base.pending.set(false);
             self.base.on_tile_action(TileOperation::EndParse);
         }
-
-        // TODO(port): bucket->check (symbol guards), whose failures go to
-        // the log.
 
         *self.layout_result.borrow_mut() = Some(Rc::new(result));
         *self.bucket_geometry.borrow_mut() = Rc::default();
@@ -684,8 +676,6 @@ impl Tile for GeometryTile {
 
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         self.inner.base.set_observer(observer);
-        // TODO(port): worker.self().invoke(&GeometryTileWorker::setObserver,
-        // observer) (symbol errors reported from the worker thread).
     }
 
     // layers: feature state

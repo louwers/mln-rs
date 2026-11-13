@@ -36,7 +36,6 @@ pub struct UpdateParameters {
     /// of what it held.
     pub feature_states: Arc<crate::source_state::FeatureStatesBySource>,
 
-    // TODO(port): mapbox::base::WeakPtr<AnnotationManager> annotationManager.
     pub file_source: Option<Arc<dyn mln_storage::FileSource>>,
     pub prefetch_zoom_delta: u8,
 

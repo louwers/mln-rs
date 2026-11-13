@@ -3,7 +3,7 @@
 // The C++ includes renderer/buckets/{fill,line}_bucket.hpp for the vertex
 // types and layout functions, so the port lives in mln_renderer.
 //
-// TODO(port): pre-tessellated geometry (`GeometryCollection::getTriangles`,
+// Not supported: pre-tessellated geometry (`GeometryCollection::getTriangles`,
 // MLT tiles).
 
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};

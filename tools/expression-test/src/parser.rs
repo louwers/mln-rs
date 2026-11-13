@@ -66,7 +66,6 @@ pub type Ignores = Vec<Ignore>;
 
 fn read_json(path: &Path) -> Result<serde_json::Value, String> {
     let text = std::fs::read_to_string(path).map_err(|_| format!("Unable to open file {}", path.display()))?;
-    // TODO(port): formatJSONParseError's rapidjson message text.
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
@@ -212,8 +211,8 @@ fn convert_polygon(json: &serde_json::Value) -> Result<Polygon<f64>, String> {
 }
 
 /// `mapbox::geojson::convert<mapbox::geometry::geometry<double>>`.
-// TODO(port): a full port of mapbox/geojson.hpp's parser (error messages,
-// null geometries) with GeoJSON sources in M3.
+// Reads only what the tests use: no null geometries, and the error
+// messages differ from mapbox/geojson.hpp's.
 fn convert_geometry(json: &serde_json::Value) -> Result<Geometry<f64>, String> {
     let t = json.get("type").and_then(|t| t.as_str()).ok_or("Geometry must have a type property")?;
     if t == "GeometryCollection" {

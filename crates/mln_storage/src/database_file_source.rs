@@ -214,7 +214,6 @@ impl DatabaseFileSource {
     pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let online_file_source = file_sources.get_file_source(FileSourceType::Network, resource_options);
         let cache_path = resource_options.cache_path().to_owned();
-        // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_DATABASE).
         let thread = Thread::new("DatabaseFileSource", move |self_ref| {
             DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path)
         });

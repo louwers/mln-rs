@@ -4,8 +4,6 @@
 // The tiles are drawn (additively, kernel density) into an offscreen
 // half-float render target; a second, non-tile layer group draws that
 // texture through the color ramp onto the map.
-//
-// TODO(port): queryIntersectsFeature (queries, M6; C++ returns false).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -325,8 +323,8 @@ impl RenderLayer for RenderHeatmapLayer {
 
         {
             // `renderTarget->getTexture()->setSize(size)`.
-            // TODO(port): the WebGPU offscreen texture's resize callback
-            // (handleResize) is not ported; the texture is resized, the
+            // The WebGPU offscreen texture has no resize callback
+            // (`handleResize`): the texture is resized, the
             // renderable keeps its size.
             let texture = self.render_target.as_ref().expect("render target").borrow().get_texture();
             if texture.borrow().get_size() != size {

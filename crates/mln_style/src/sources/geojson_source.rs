@@ -319,7 +319,7 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
                 if let Some(geojson) = convert_json_geojson(&data, &mut error) {
                     match create_geojson_data(&geojson, seq_scheduler, current.get_options()) {
                         Ok(created) => geojson_data = Some(created),
-                        // TODO(port): C++ lets the Supercluster exception
+                        // C++ lets the Supercluster exception
                         // escape the background task.
                         Err(e) => Log::error(Event::ParseStyle, format!("Failed to parse GeoJSON data: {e}")),
                     }

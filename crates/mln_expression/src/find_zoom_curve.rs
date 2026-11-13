@@ -131,7 +131,7 @@ pub fn find_zoom_curve_checked(e: &dyn Expression) -> ZoomCurvePtr<'_> {
     }
     match find_zoom_curve(e).expect("zoom-dependent expression without a zoom curve") {
         ZoomCurve::Error(err) => {
-            // TODO(port): Log::Error(Event::Style, "Invalid Expression: " + err.message)
+            // C++ also logs "Invalid Expression: <message>" here.
             let _ = err;
             ZoomCurvePtr::Null
         }

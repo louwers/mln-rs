@@ -255,7 +255,7 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
     if update_results != UpdateResults::No {
         log::error(
             Event::General,
-            "TODO(port): --update is not supported: the port never writes baselines into \
+            "--update is not supported: the runner never writes baselines into \
              ../maplibre-native (add an alternate expectation by hand for a justified difference)",
         );
         return Err(1);
@@ -520,8 +520,6 @@ pub fn run_render_tests_with(arguments: &Arguments, factory: Option<ImplFactory>
     let Arguments { recycle_map, shuffle, online, seed, manifest_path, test_filter, .. } = arguments.clone();
 
     crate::file_source::ProxyFileSource::set_offline(!online);
-    // TODO(port): NetworkStatus::Set(online ? Online : Offline) (online file
-    // source).
 
     let Some(mut manifest_data) = ManifestParser::parse_manifest(&manifest_path, test_filter) else {
         return early(5);

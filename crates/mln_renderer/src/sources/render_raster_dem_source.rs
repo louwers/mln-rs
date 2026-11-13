@@ -9,8 +9,6 @@
 // does the same backfill for every renderable tile that isn't complete
 // yet. The rendered result is the same: every pair of renderable
 // neighbours is backfilled both ways before the hillshade prepare pass.
-//
-// TODO(port): queryRenderedFeatures / querySourceFeatures (C++: empty).
 
 use std::rc::Rc;
 use std::sync::Arc;

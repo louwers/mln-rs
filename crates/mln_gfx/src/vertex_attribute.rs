@@ -2,9 +2,6 @@
 //
 // The WebGPU subclasses (include/mln/webgpu/vertex_attribute.hpp) add no
 // data, so `create()`/`copy()` are not virtual here.
-//
-// TODO(port): `readDataDrivenPaintProperties` (data-driven paint property
-// binders) arrives with the first layer type that uses binders (M3).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

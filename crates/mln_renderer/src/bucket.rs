@@ -7,9 +7,6 @@
 // Bucket>`, `Bucket: Send + Sync`. The render thread only reads them, except
 // `upload` (an atomic flag, as in C++) and the geometry it moves out to draw
 // (bucket_geometry.rs).
-//
-// TODO(port): `registerAtCrossTileIndex`, `place`,
-// `updateVertices` (symbol buckets, M5), `getRenderThreadID`, `check`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};

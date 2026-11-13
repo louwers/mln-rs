@@ -13,7 +13,7 @@
 // (`GetDouble()` on a non-number coordinate, `GetArray()` on a non-array
 // line string, `GetString()` on a non-string "type"), rapidjson asserts in
 // debug builds and reads garbage in release builds; the port returns an
-// error instead (marked TODO(port) below).
+// error instead.
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geometry::{
@@ -31,7 +31,7 @@ fn error(message: &str) -> Error {
 
 /// `std::string(json.GetString())`: up to the first NUL.
 fn c_string(json: &Json) -> &str {
-    // TODO(port): rapidjson asserts on a non-string; use "".
+    // rapidjson asserts on a non-string; this reads "".
     let s = json.as_str().unwrap_or("");
     s.split('\0').next().unwrap_or("")
 }
@@ -57,7 +57,7 @@ fn validate_polygon(json: &Json) -> Result<()> {
 }
 
 fn validate_line_string(json: &Json) -> Result<()> {
-    // TODO(port): `json.GetArray()` asserts on a non-array in C++; report
+    // `json.GetArray()` asserts on a non-array in C++; this reports
     // what `convert<Cont>` would.
     let Some(points) = json.as_array() else {
         return Err(error(CONT_NOT_ARRAY));
@@ -73,7 +73,7 @@ const CONT_NOT_ARRAY: &str = "coordinates must be an array of points describing 
 
 /// `GetDouble()` of a coordinate.
 fn get_double(json: &Json) -> Result<f64> {
-    // TODO(port): rapidjson asserts on a non-number.
+    // rapidjson asserts on a non-number; this returns an error.
     json.as_f64().ok_or_else(|| error("coordinates must be numbers"))
 }
 

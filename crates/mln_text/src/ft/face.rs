@@ -12,7 +12,7 @@
 //   (`cff_get_advances`), src/sfnt/ttmtx.c (`tt_face_get_metrics`).
 //
 // Only what the C++ core reaches is ported: face index 0, unhinted advances
-// at the default variation location. See the TODO(port)s for the rest.
+// at the default variation location. Comments starting "Not supported" name the rest.
 
 use super::calc::{div_fix, mul_div};
 use super::cmap::{self, Bytes, CharMap, Encoding, LookupContext};
@@ -155,7 +155,7 @@ impl Face {
             needs_synthesized_charmap: false,
         };
         if !is_tt && face.lookup(tag(*b"CFF ")).is_none() && face.lookup(tag(*b"CFF2")).is_none() {
-            // TODO(port): Type 1 in SFNT ('typ1'), pure CFF/CID fonts.
+            // Not supported: Type 1 in SFNT ('typ1'), pure CFF/CID fonts.
             return Err(OpenError("Unknown_File_Format (no TrueType or CFF data)"));
         }
         face.load(data)?;
@@ -203,7 +203,7 @@ impl Face {
         let has_sbix = self.lookup(tag(*b"sbix")).is_some();
         let mut has_outline = has_outline_tables;
 
-        // TODO(port): Apple `bhed' bitmap-only fonts.
+        // Not supported: Apple `bhed' bitmap-only fonts.
         let head = self.lookup(tag(*b"head")).ok_or(OpenError("Table_Missing (head)"))?;
         // Ignore outlines for CBLC/CBDT fonts.
         if has_cblc || has_cbdt {
@@ -215,7 +215,7 @@ impl Face {
         }
 
         // maxp (errors ignored: numGlyphs stays 0).
-        // TODO(port): the CFF driver takes the glyph count from the CFF
+        // The CFF driver takes the glyph count from the CFF
         // CharStrings INDEX (CID fonts: max CID + 1), not from maxp; the two
         // agree in every font of //difftest/text.
         if let Some(maxp) = self.lookup(tag(*b"maxp"))
@@ -281,7 +281,7 @@ impl Face {
         self.charmaps = cmap::build_cmaps(data, self.cmap);
         let has_unicode =
             self.charmaps.iter().any(|cm| cm.encoding == Encoding::Unicode || cm.encoding == Encoding::MsSymbol);
-        // TODO(port): without a Unicode (or symbol) charmap FreeType
+        // Not supported: without a Unicode (or symbol) charmap FreeType
         // synthesizes one from the `post' glyph names here
         // (FT_CONFIG_OPTION_POSTSCRIPT_NAMES), and the CFF driver one from
         // the CFF glyph names when there is no (3,1) or (0,x) charmap.
@@ -289,11 +289,11 @@ impl Face {
             || (self.is_cff
                 && !self.charmaps.iter().any(|cm| (cm.platform_id == 3 && cm.encoding_id == 1) || cm.platform_id == 0));
 
-        // TODO(port): the CFF driver appends charmaps for the CFF font's
+        // The CFF driver appends charmaps for the CFF font's
         // Standard/Expert/Custom encodings (platform 7); force_ucs2_charmap
         // and find_unicode_charmap never select them.
 
-        // TODO(port): tt_check_single_notdef (sbit fonts whose only outline
+        // Not supported: tt_check_single_notdef (sbit fonts whose only outline
         // is .notdef lose FT_FACE_FLAG_SCALABLE).
 
         // FT_Open_Face: select Unicode charmap by default.
@@ -374,7 +374,7 @@ impl Face {
         // matching strike gives FT_DivFix(ppem << 6, upem), the value
         // FT_Request_Metrics computes below for a nominal request; for a
         // bitmap-only face both give 1.0.
-        // TODO(port): a strike whose x ppem differs from its (matching) y ppem.
+        // Not supported: a strike whose x ppem differs from its (matching) y ppem.
         if self.scalable {
             // FT_Request_Metrics, FT_SIZE_REQUEST_TYPE_NOMINAL. (tt_size_reset
             // rounds the ppem only in `hinted_metrics`; FT_Get_Advance and
@@ -401,7 +401,7 @@ impl Face {
         // tt_get_advances / cff_get_advances at the default location: the
         // `hmtx' advance.
         if self.is_cff && self.number_of_hmetrics == 0 {
-            // TODO(port): cff_get_advances' Missing_Table path loads the
+            // Not supported: cff_get_advances' Missing_Table path loads the
             // glyph for the CFF charstring width.
             return None;
         }

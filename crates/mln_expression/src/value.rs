@@ -63,7 +63,7 @@ impl Value {
 
     #[must_use]
     pub fn is_safe_integer_f64(x: f64) -> bool {
-        // TODO(port): `static_cast<uint64_t>` of |x| >= 2^64 is UB in C++;
+        // `static_cast<uint64_t>` of |x| >= 2^64 is UB in C++;
         // `as` saturates.
         ((if x > 0.0 { x } else { -x }) as u64) <= Self::max_safe_integer()
     }

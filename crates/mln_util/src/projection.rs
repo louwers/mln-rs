@@ -9,12 +9,8 @@ use crate::constants::{DEGREES_MAX, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, MIN_Z
 use crate::error::Error;
 use crate::geo::{LatLng, WrapMode};
 
-// TODO(port): use mln_util::constants::TILE_SIZE_D once it exists (constants.rs
-// currently calls tileSize_D `TILE_SIZE`).
 const TILE_SIZE_D: f64 = 512.0;
-// TODO(port): use mln_util::constants::M2PI once it exists.
 const M2PI: f64 = PI * 2.0;
-// TODO(port): use mln_util::constants::EARTH_RADIUS_M once it exists.
 const EARTH_RADIUS_M: f64 = 6_378_137.0;
 
 /// `mln::ProjectedMeters`.

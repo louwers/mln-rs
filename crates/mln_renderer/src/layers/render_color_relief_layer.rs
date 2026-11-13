@@ -8,8 +8,6 @@
 //   DEM texture per bucket id.
 // - The elevation stops texture is created anew when the ramp changes (C++
 //   re-uploads into the same texture; its size may change with the ramp).
-//
-// TODO(port): queryIntersectsFeature (C++ returns false).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

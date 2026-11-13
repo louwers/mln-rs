@@ -5,8 +5,6 @@
 // C++. The resource options are kept next to the thread behind a
 // mutex (C++ keeps them in the thread object and reads them back with a
 // blocking `ask`); the values returned are the same.
-//
-// TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::sync::Mutex;
 

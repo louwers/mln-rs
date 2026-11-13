@@ -13,7 +13,6 @@ use crate::error::Error;
 
 pub type ScreenCoordinate = Point<f64>;
 pub type ScreenLineString = Vec<Point<f64>>;
-// TODO(port): ScreenBox (mapbox::geometry::box<double>) with its first user.
 
 /// `LatLng::WrapMode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -281,8 +280,6 @@ impl LatLngBounds {
     pub fn crosses_antimeridian(&self) -> bool {
         self.sw.wrapped().longitude() > self.ne.wrapped().longitude()
     }
-
-    // TODO(port): contains(const CanonicalTileID&) (util::TileRange).
 
     #[must_use]
     pub fn contains(&self, point: &LatLng) -> bool {

@@ -174,9 +174,6 @@ impl PropertyExpressionBase {
         self.global_state_refs.as_deref()
     }
 
-    // TODO(port): getGPUExpression (gfx::GPUExpression) with the renderer's
-    // GPU-expression path.
-
     #[must_use]
     pub fn get_dependencies(&self) -> Dependency {
         self.expression.dependencies()

@@ -3,10 +3,8 @@
 // MLN_RENDER_BACKEND_WEBGPU and MLN_UBO_CONSOLIDATION branches, the backend
 // picked by the context).
 //
-// TODO(port): the GPU expressions of the Metal branch
-// (`updateGPUExpressions`, `gfx::Backend::getEnableGPUExpressionEval`), off
-// by default in C++: on Metal the expression UBO is all zeros and no
-// property is marked as evaluated on the GPU.
+// On Metal the expression UBO is all zeros and no property is marked as
+// evaluated on the GPU, as in C++ with GPU expressions off (its default).
 
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;

@@ -7,9 +7,6 @@
 // = 2, idProjectionUBO = 4, idBackgroundPropsUBO = 5, layerUBOStartId = 6,
 // maxUBOCountPerShader = 7, maxTextureCountPerShader = 3,
 // maxAttributeCountPerShader = 11).
-//
-// TODO(port): the ids of the other layer types arrive with those layers
-// (circle, fill and line: layers agent, M3).
 
 // --- layer_ubo.hpp: global UBOs (WebGPU branch) ---
 pub const ID_GLOBAL_PAINT_PARAMS_UBO: usize = 0;

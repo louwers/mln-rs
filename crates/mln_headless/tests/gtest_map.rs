@@ -2844,8 +2844,6 @@ fn continuous_map_finishes_loading_when_its_tiles_fail() {
 }
 
 // gtest: Map.ObserveTileLifecycle
-// TODO(port): the half of the gtest that checks the pre/post compile events
-// of the fill and fill-outline shaders (MapObserver has no shader callbacks).
 #[test]
 fn observe_tile_lifecycle() {
     use TileOperation::*;
@@ -3449,7 +3447,7 @@ fn globe_bounded_source_loads_finer_tiles() {
 
 // gtest: Map.LineLayerDepthDistribution
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509"]
+#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509"]
 fn line_layer_depth_distribution() {
     const LAYER_COUNT: u32 = 1 << 11;
 
@@ -3498,7 +3496,7 @@ fn line_layer_depth_distribution() {
 
 // gtest: Map.SetFrustumOffset
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2560"]
+#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2560"]
 fn set_frustum_offset() {
     let test = MapTest::new();
 

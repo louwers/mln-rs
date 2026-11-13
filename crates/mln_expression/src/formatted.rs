@@ -17,7 +17,6 @@ pub const K_FORMATTED_SECTION_TEXT_COLOR: &str = "text-color";
 
 /// `mln::FontStack` (`include/mln/util/font_stack.hpp)`: an array of font
 /// names.
-// TODO(port): move to mln_util with the rest of util/font_stack.hpp.
 pub type FontStack = Vec<String>;
 
 /// `mln::fontStackToString`.

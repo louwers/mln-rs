@@ -52,8 +52,7 @@ pub struct ScreenBox {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenderedQueryOptions {
     pub layer_ids: Option<Vec<String>>,
-    // TODO(port): `std::optional<style::Filter>`; converting it needs
-    // mln_style's filter conversion. Kept as the raw JSON until then.
+    // The raw JSON; the map converts it to a filter.
     pub filter: Option<serde_json::Value>,
 }
 
@@ -160,8 +159,8 @@ pub struct GfxProbeMemory {
     pub peak: i32,
 }
 
-/// `GfxProbe`. TODO(port): `GfxProbe(const gfx::RenderingStats&, const GfxProbe&)`
-/// needs `RenderResult::stats` from the headless frontend.
+/// Graphics resource counts. The runner never fills them, since
+/// `probeGFX` is unsupported.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GfxProbe {
     pub num_buffers: i32,

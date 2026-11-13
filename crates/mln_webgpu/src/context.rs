@@ -7,11 +7,6 @@
 // (port-only), which the backends release with `release_cached_buffers`
 // when they drop the context; otherwise the context, and with it the
 // device, would never be freed.
-//
-// TODO(port): `getOrCreateVertexBindings`, `createDynamicTexture`,
-// `createRenderTarget`, render jobs of the backend thread pool
-// (`runRenderJobs` in begin/end frame, cleanup). None is on the
-// background-layer path.
 
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
@@ -622,24 +617,19 @@ impl GfxContext for Context {
         BackendType::WebGPU
     }
 
-    fn begin_frame(&self) {
-        // TODO(port): backend.getThreadPool().runRenderJobs()
-    }
+    fn begin_frame(&self) {}
 
     fn end_frame(&self) {
         // End the frame - submit WebGPU commands
     }
 
     fn perform_cleanup(&self) {
-        // TODO(port): backend.getThreadPool().runRenderJobs()
         let mut stats = self.rendering_stats_mut();
         stats.num_draw_calls = 0;
         stats.num_frames += 1;
     }
 
-    fn reduce_memory_usage(&self) {
-        // TODO(port): backend.getThreadPool().runRenderJobs()
-    }
+    fn reduce_memory_usage(&self) {}
 
     /// `createOffscreenTexture(size, type)`: depth, no stencil.
     fn create_offscreen_texture(

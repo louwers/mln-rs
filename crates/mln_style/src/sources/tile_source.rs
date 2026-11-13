@@ -272,8 +272,6 @@ impl Source for TileSource {
             return;
         }
 
-        // TODO(port): util::mapbox::canonicalizeSourceURL(tileServerOptions,
-        // rawURL).
         let url = raw_url;
 
         let weak = Rc::downgrade(&self.inner);

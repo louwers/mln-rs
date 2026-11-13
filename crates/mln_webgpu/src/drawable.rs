@@ -2,7 +2,6 @@
 // src/mln/webgpu/drawable.cpp
 //
 // Logging: the C++ `Log::Warning`/`Log::Error` calls print to stderr here.
-// TODO(port): route them through mln::Log once a logging port exists.
 
 use std::any::Any;
 use std::cell::Cell;

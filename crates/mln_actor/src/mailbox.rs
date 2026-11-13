@@ -5,7 +5,7 @@
 // it on the scheduler's thread. Here the target lives in the registry of the
 // thread that opened the mailbox (see local_object.rs) and a message is a
 // closure over the target. So a mailbox's scheduler must run its tasks on
-// that thread (a RunLoop; actors on thread pools are a TODO(port)).
+// that thread (a RunLoop).
 //
 // Locking: C++ uses a pushing mutex, a recursive receiving mutex, a queue
 // mutex and an Idle/Processing/Abandoned state to keep `close()` from

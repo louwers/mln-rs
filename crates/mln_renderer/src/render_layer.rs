@@ -473,7 +473,6 @@ pub struct RenderLayerBase {
     pub follower_data: LayerPlacementData,
     /// The projection variant this layer's drawables are built with.
     pub projection_variant: ProjectionVariant,
-    // TODO(port): sourceForState (feature state), hasRenderFailures.
 }
 
 impl RenderLayerBase {
@@ -817,7 +816,6 @@ pub fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &mut Lay
     };
     debug_assert!(source.is_enabled());
 
-    // TODO(port): sourceForState = params.source (feature state).
     let render_tiles = source.get_render_tiles();
     let render_tiles_owner = source.get_raw_render_tiles();
     let base = layer.base_mut();

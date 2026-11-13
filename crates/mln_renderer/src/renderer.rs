@@ -54,7 +54,6 @@ pub struct Renderer {
     style_loaded: bool,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
-    // TODO(port): dynamicTextureAtlas (symbols, M5).
 }
 
 impl Renderer {
@@ -216,9 +215,6 @@ impl Renderer {
         self.orchestrator.dump_debug_logs();
     }
 
-    // TODO(port): queryPointAnnotations, queryShapeAnnotations,
-    // queryFeatureExtensions.
-
     // layers: feature state
     /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.
     pub fn set_feature_state(
@@ -293,7 +289,6 @@ impl Renderer {
     ) -> Option<Handoff> {
         let backend = self.backend.clone();
         let context = backend.get_context();
-        // TODO(port): context.setObserver(this) (shader compile callbacks).
 
         let image = target.begin_frame()?;
         context.begin_frame();
@@ -306,7 +301,6 @@ impl Renderer {
             backend.init_shaders(&static_data.shaders, &program_parameters);
 
             // Notify post-shader registration
-            // TODO(port): observer->onRegisterShaders(*staticData->shaders).
             self.static_data = Some(static_data);
         }
 
@@ -377,7 +371,6 @@ impl Renderer {
             static_data.upload(&*upload_pass);
             parameters.line_atlas.borrow_mut().upload(&*upload_pass);
             parameters.pattern_atlas.borrow_mut().upload(&*upload_pass); // conformance
-            // TODO(port): patternAtlas.upload (patterns).
         }
 
         // - LAYER GROUP UPDATE --------------------------------------------

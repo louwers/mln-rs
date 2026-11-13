@@ -15,8 +15,6 @@
 //
 // `OnlineFileRequest::actor()` (the transformed URL's way back) is a mailbox
 // on the online thread whose target finds the request by id.
-//
-// TODO(port): thread priority.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -608,7 +606,6 @@ static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 impl Impl {
     fn new(resource_options: &ResourceOptions) -> Self {
         let ro = resource_options.clone();
-        // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_NETWORK).
         let thread = Thread::new("OnlineFileSource", move |_| OnlineFileSourceThread::new(ro));
         Impl {
             cached_resource_options: Mutex::new(resource_options.clone()),

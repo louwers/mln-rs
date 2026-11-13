@@ -124,7 +124,7 @@ fn nested_scopes() {
 // on leaving the scope
 // gtest: BackendScope.ChainedScopes
 #[test]
-#[ignore = "TODO(port): BackendScope hand-over between different backends (C++ deactivates the prior scope's backend and re-activates it when the nested scope ends); crates/mln_gfx/src/backend_scope.rs tracks backend ids only, so it cannot reach the prior backend"]
+#[ignore = "not supported: BackendScope hand-over between different backends (C++ deactivates the prior scope's backend and re-activates it when the nested scope ends); crates/mln_gfx/src/backend_scope.rs tracks backend ids only, so it cannot reach the prior backend"]
 fn chained_scopes() {
     let activated_a = Rc::new(Cell::new(false));
     let activated_b = Rc::new(Cell::new(false));

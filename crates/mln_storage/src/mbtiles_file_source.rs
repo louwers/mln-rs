@@ -12,8 +12,6 @@
 // maplibre-native-ffi's patched C++. The resource options are kept
 // next to the thread behind a mutex (C++: in the thread object, read back
 // with a blocking `ask`).
-//
-// TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};

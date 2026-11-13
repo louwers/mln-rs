@@ -175,10 +175,6 @@ pub fn serialize_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).expect("serde_json::Value serializes")
 }
 
-// TODO(port): serializeMetrics (rapidjson PrettyWriter output); only the
-// update/rebaseline modes write metrics, and the port does not write
-// baselines.
-
 fn read_expected_entries(regex: &Regex, base: &str) -> Vec<String> {
     let mut expected_entries = Vec::new();
     // C++ throws from directory_iterator on an unreadable directory; callers
@@ -450,7 +446,6 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         }
 
         if let Some(filter) = query_options.get("filter") {
-            // TODO(port): `convert<Filter>(filterVal, error)` (mln_style).
             metadata.query_options.filter = Some(filter.clone());
         }
     }
@@ -617,17 +612,36 @@ fn parse_feature_state(state: &serde_json::Value, metadata: &mut TestMetadata) -
     p.parsed_state
 }
 
-/// An operation the port cannot execute yet: the test errors (see
-/// `TestContext::fail_not_ported`).
-fn not_ported(what: String) -> TestOperation {
-    Box::new(move |ctx: &mut TestContext<'_>| ctx.fail_not_ported(&what))
+/// Operations the runner recognises but cannot run, each with what it
+/// lacks. As an operation or a manifest probe, each errors the test when it
+/// runs (`TestContext::fail_unsupported`), so the test can't pass by skipping
+/// it.
+const UNSUPPORTED_OPERATIONS: [(&str, &str); 5] = [
+    (MEMORY_PROBE_START_OP, "no allocation counting"),
+    (MEMORY_PROBE_OP, "no allocation counting"),
+    (MEMORY_PROBE_END_OP, "no allocation counting"),
+    (PAN_GESTURE_OP, "no flyTo animation sampled at frame times"),
+    (GFX_PROBE_OP, "no rendering stats from the frontend"),
+];
+
+/// Whether `name` is in [`UNSUPPORTED_OPERATIONS`].
+pub(crate) fn is_unsupported_operation(name: &str) -> bool {
+    UNSUPPORTED_OPERATIONS.iter().any(|(operation, _)| *operation == name)
+}
+
+/// The operation for `name` from [`UNSUPPORTED_OPERATIONS`]: it errors the
+/// test, naming what the runner lacks.
+pub(crate) fn unsupported_operation_entry(name: &str) -> TestOperation {
+    let lacks = UNSUPPORTED_OPERATIONS.iter().find(|(operation, _)| *operation == name).map_or("", |(_, lacks)| lacks);
+    let what = format!("{name} operation ({lacks})");
+    Box::new(move |ctx: &mut TestContext<'_>| ctx.fail_unsupported(&what))
 }
 
 /// Handles a `TestRunnerImpl` call made by an operation that, in C++,
 /// cannot fail (it returns `true`).
 fn infallible(ctx: &mut TestContext<'_>, result: Result<(), MapError>) -> bool {
     match result {
-        Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+        Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
         Err(MapError::Exception(what)) => ctx.fail_exception(&what),
         Ok(()) | Err(_) => true,
     }
@@ -687,7 +701,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 // Style::addImage.
                 match ctx.get_map().add_image(&image_name, &image_path, pixel_ratio, sdf) {
                     Ok(()) => true,
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Err(_) => {
                         let _ = write!(ctx.get_metadata().error_message, "Failed to load expected image {image_path}");
@@ -771,7 +785,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Err(MapError::LoadFailed) => false,
                 }
@@ -787,7 +801,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Ok(()) | Err(_) => true,
                 }
@@ -803,7 +817,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                     ctx.get_metadata().error_message = format!("Unable to convert light: {message}");
                     false
                 }
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Ok(()) | Err(_) => true,
             }));
@@ -815,7 +829,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                     ctx.get_metadata().error_message = format!("Unable to convert layer: {message}");
                     false
                 }
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Ok(()) | Err(_) => true,
             }));
@@ -824,7 +838,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             let layer_name = get_str(arg(1)).to_string();
             result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().remove_layer(&layer_name) {
                 Ok(removed) => removed,
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Err(_) => false,
             }));
@@ -838,7 +852,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Unable to convert source: {message}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Ok(()) | Err(_) => true,
                 }
@@ -848,7 +862,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             let source_name = get_str(arg(1)).to_string();
             result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().remove_source(&source_name) {
                 Ok(removed) => removed,
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Err(_) => false,
             }));
@@ -865,7 +879,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
-                    Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                    Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     // `Layer::setProperty` returns an optional<Error> the
                     // runner ignores.
@@ -912,9 +926,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 true
             }));
         } else if name == MEMORY_PROBE_START_OP || name == MEMORY_PROBE_OP || name == MEMORY_PROBE_END_OP {
-            // TODO(port): probeMemoryStart / probeMemory / probeMemoryEnd need
-            // render-test/allocation_index.cpp (a counting global allocator).
-            result.push(not_ported(format!("{name} operation (AllocationIndex)")));
+            result.push(unsupported_operation_entry(name));
         } else if name == NETWORK_PROBE_START_OP {
             // probeNetworkStart
             result.push(Box::new(|_ctx: &mut TestContext<'_>| {
@@ -949,7 +961,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             };
             let finish = |ctx: &mut TestContext<'_>, result: Result<bool, MapError>| match result {
                 Ok(ok) => ok,
-                Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                 Err(_) => false,
             };
@@ -991,9 +1003,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 metadata.error_message = format!("Map mode must be Continuous for {PAN_GESTURE_OP} operation");
                 return Vec::new();
             }
-            // TODO(port): flyTo animation with frame-time sampling
-            // (HeadlessFrontend::renderOnce, getFrameTime).
-            result.push(not_ported(format!("{name} operation (flyTo, renderOnce)")));
+            result.push(unsupported_operation_entry(name));
         } else if name == GFX_PROBE_START_OP {
             // probeGFXStart
             result.push(Box::new(|ctx: &mut TestContext<'_>| {
@@ -1009,9 +1019,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 true
             }));
         } else if name == GFX_PROBE_OP {
-            // TODO(port): probeGFX needs RenderResult::stats
-            // (gfx::RenderingStats) from the headless frontend.
-            result.push(not_ported(format!("{name} operation (gfx::RenderingStats)")));
+            result.push(unsupported_operation_entry(name));
         } else if name == SET_TILE_LOD_MIN_RADIUS_OP {
             // setTileLodMinRadius
             let min_radius = get_f64(arg(1));

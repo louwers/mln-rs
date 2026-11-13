@@ -2,9 +2,6 @@
 // src/mln/renderer/sources/render_tile_source.cpp (RenderTileSource and
 // TileSourceRenderItem).
 //
-// TODO(port): RenderTileSetSource (vector/raster sources, M4), queries and
-// feature state.
-//
 // layers: debug: TileSourceRenderItem::updateDebugDrawables, with the tile
 // borders and the parse status and timestamp text as polylines
 // (MLN_ENABLE_POLYLINE_DRAWABLES, set for WebGPU), and

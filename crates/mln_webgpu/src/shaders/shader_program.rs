@@ -6,9 +6,6 @@
 // C++ backend gets null only on catastrophic failure and Dawn reports the
 // compile error asynchronously. On a browser's WebGPU the scope is skipped
 // (see `validated`).
-//
-// TODO(port): the `ShaderProgram(name, backend, vertexModule, fragmentModule)`
-// constructor for precompiled modules (unused on the M1 path).
 
 use std::any::Any;
 use std::borrow::Cow;

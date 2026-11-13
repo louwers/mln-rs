@@ -12,8 +12,6 @@
 //
 // The resource options are shared with the thread behind a mutex
 // (C++: in the thread object, read back with a blocking `ask`).
-//
-// TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
 use std::fmt::Write as _;

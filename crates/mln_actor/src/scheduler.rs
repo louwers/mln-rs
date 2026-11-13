@@ -9,8 +9,6 @@
 // Port-only: a host without threads installs a `CooperativeScheduler` at
 // startup (`install_cooperative`), which `GetBackground` and `GetSequenced`
 // then return (cooperative_scheduler.rs).
-//
-// TODO(port): `runOnRenderThread`/`runRenderJobs`.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, OnceLock, Weak};

@@ -9,10 +9,6 @@
 // object's constructor waits for the caller (test/util/thread.test.cpp
 // InvokeBeforeChildStarts).
 //
-// TODO(port): the thread priority setters (`makeThreadPrioritySetter`,
-// platform settings) and `platform::attachThread`/`detachThread` (no-ops on
-// Linux).
-//
 // Port-only: with a cooperative scheduler installed (a host without threads,
 // see cooperative_scheduler.rs) no thread starts: the object is established
 // on the creating thread's RunLoop, which the host drives, and its messages

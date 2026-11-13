@@ -154,7 +154,7 @@ fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) 
     if data_value.is_object() {
         let geojson = GeoJSON::convert(&data_value, error)?;
         if let Err(e) = result.set_geojson(&geojson) {
-            // TODO(port): C++ lets the Supercluster exception (a clustered
+            // C++ lets the Supercluster exception (a clustered
             // non-point feature) propagate out of the style parse.
             error.message = e.message;
             return None;

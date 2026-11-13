@@ -3,11 +3,6 @@
 // All methods take `&self`: the context is reached from everywhere
 // (`PaintParameters`, render layers, upload passes) and wgpu's API is `&self`
 // too; the backend keeps mutable state in cells.
-//
-// TODO(port): `createDynamicTexture`, `createRenderTarget` (RenderTarget is a
-// renderer type), `createRenderbuffer`, `createDrawScope`,
-// `visualizeStencilBuffer`/`visualizeDepthBuffer` (debug builds) and
-// `threadSafeAccessRenderingStats` arrive with their first user.
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};

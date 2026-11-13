@@ -8,8 +8,6 @@ use mln_util::constants;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 
 pub struct RenderStaticData {
-    // TODO(port): tileVertexBuffer / quadTriangleIndexBuffer (uploaded for
-    // stencil clipping masks), depthRenderbuffer.
     pub has_3d: bool,
     pub uploaded: std::cell::Cell<bool>,
     pub shaders: Box<ShaderRegistry>,
@@ -32,7 +30,6 @@ impl RenderStaticData {
     pub fn upload(&self, _upload_pass: &dyn mln_gfx::UploadPass) {
         if !self.uploaded.get() {
             // these are still used by stencil buffer rendering
-            // TODO(port): tileVertexBuffer / quadTriangleIndexBuffer.
             self.uploaded.set(true);
         }
     }

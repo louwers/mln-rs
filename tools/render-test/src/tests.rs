@@ -340,14 +340,36 @@ fn transition_operations_drive_the_map() {
 }
 
 #[test]
-fn unported_operations_error_the_test() {
+fn unsupported_operations_error_the_test() {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let mut map = MockMap::new(calls.clone(), [0, 0, 0, 255]);
     // addImage, addLayer, wait: addImage is not implemented by the mock.
     let (metadata, ok) = run_operations("render-tests/runtime-styling/image-add-1x-image-2x-screen", &mut map);
     assert!(!ok);
     assert_eq!(metadata.render_errored, 1);
-    assert!(metadata.error_message.starts_with("TODO(port): "), "{}", metadata.error_message);
+    assert!(metadata.error_message.starts_with("Unsupported: "), "{}", metadata.error_message);
+}
+
+#[test]
+fn known_unsupported_operations_error_the_test() {
+    for name in ["probeMemoryStart", "probeMemory", "probeMemoryEnd", "probeGFX"] {
+        let mut metadata = TestMetadata {
+            document: serde_json::json!({"metadata": {"test": {"operations": [[name]]}}}),
+            ..TestMetadata::default()
+        };
+        let operations = parse_test_operations(&mut metadata);
+        assert_eq!(operations.len(), 1, "{name}");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut map = MockMap::new(calls, [0, 0, 0, 255]);
+        let mut ctx = TestContext::with_impl(&mut metadata, &mut map);
+        assert!(!operations[0](&mut ctx), "{name}");
+        assert_eq!(metadata.render_errored, 1, "{name}");
+        assert!(
+            metadata.error_message.starts_with(&format!("Unsupported: {name} operation (")),
+            "{}",
+            metadata.error_message
+        );
+    }
 }
 
 #[test]

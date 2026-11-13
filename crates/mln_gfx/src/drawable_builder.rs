@@ -6,9 +6,6 @@
 // (including the private `Impl`), the trait has the virtuals
 // (`create_drawable`, `create_segment`, `init`) and provided methods for the
 // rest.
-//
-// TODO(port): addWideVectorPolylineLocal/Global and the wide-vector setup in
-// flush (Impl::Mode::WideVector*): no user on the WebGPU path.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -76,8 +73,6 @@ pub struct DrawableBuilderImpl {
     mode: Mode,
     pub polyline_vertices: Vec<LineLayoutVertex>,
     pub polyline_indexes: Vec<u16>,
-    // TODO(port): wideVectorVertices, wideVectorInstanceData,
-    // wideVectorIndexes.
 }
 
 impl Default for DrawableBuilderImpl {
@@ -104,7 +99,6 @@ impl DrawableBuilderImpl {
         if target != self.mode && self.vertex_count() != 0 {
             // C++ logs "DrawableBuilder mode mismatch. Target is <target>,
             // current is <mode>" and asserts.
-            // TODO(port): mln::Log once a logging port exists.
             debug_assert!(false, "DrawableBuilder mode mismatch. Target is {target:?}, current is {:?}", self.mode);
             return false;
         }
@@ -250,8 +244,6 @@ pub trait DrawableBuilder {
     /// Close the current drawable, using a new one for any further work
     fn flush(&mut self, context: &dyn Context) {
         if self.cur_vertex_count() != 0 {
-            // TODO(port): impl->setupForWideVectors for `Mode::WideVectorLocal`
-            // and `Mode::WideVectorGlobal`.
             if self.base().impl_.get_mode() == Mode::Polylines {
                 // setup for polylines
                 self.setup_for_polylines(context);

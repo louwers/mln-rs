@@ -4,12 +4,9 @@
 //
 // The asynchronous mode polls the pending requests from an AsyncTask on the
 // current RunLoop, re-armed every millisecond while requests are pending
-// (C++: a 1 ms repeating `util::Timer`, a TODO(port) of the RunLoop). The
+// (C++: a 1 ms repeating `util::Timer`). The
 // stub lives on the thread that created it; requests must come from that
 // thread.
-//
-// TODO(port): the style/source/tile/glyphs/image responders beyond the
-// generic `set_response`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

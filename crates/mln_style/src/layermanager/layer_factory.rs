@@ -11,9 +11,6 @@ pub trait LayerFactory: Send + Sync {
 
     /// Returns a new Layer instance on success call; returns `None` otherwise.
     fn create_layer(&self, id: &str, value: &Convertible<'_>) -> Option<Box<dyn Layer>>;
-
-    // TODO(port): createRenderLayer / createBucket / createLayout live with
-    // the renderer (see the module comment).
 }
 
 /// `LayerFactory::getSource` (protected helper).

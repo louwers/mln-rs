@@ -44,6 +44,3 @@ pub enum Geometry<T> {
     MultiPolygon(MultiPolygon<T>),
     GeometryCollection(GeometryCollection<T>),
 }
-
-// TODO(port): mapbox/geometry/point_arithmetic.hpp (operator+/-/*// on points)
-// with its first user (tile geometry scaling).

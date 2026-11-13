@@ -5,8 +5,6 @@
 // C++. `tasks` is keyed by a request id instead of the `AsyncRequest*` of
 // the caller's request. Callbacks of the chained requests reach the thread
 // object through a `Weak` (C++ captures `this`).
-//
-// TODO(port): `setResourceTransform`; MBGL_TIMING logs.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -77,7 +75,6 @@ impl ThreadInner {
                 {
                     database_file_source.forward(&forwarded, &response, None);
                 }
-                // TODO(port): MBGL_TIMING_FINISH for tiles.
                 callback(response);
             }),
         ))
@@ -232,7 +229,6 @@ impl Impl {
             mbtiles_file_source.clone(),
             pmtiles_file_source.clone(),
         );
-        // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_WORKER).
         let thread = Thread::new("ResourceLoaderThread", move |_| {
             let (asset, database, local, online, mbtiles, pmtiles) = sources;
             MainResourceLoaderThread::new(asset, database, local, online, mbtiles, pmtiles)

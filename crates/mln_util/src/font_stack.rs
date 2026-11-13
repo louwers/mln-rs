@@ -1,7 +1,5 @@
 // Ports include/mln/util/font_stack.hpp and src/mln/util/font_stack.cpp (the
 // parts Resource::glyphs uses).
-//
-// TODO(port): FontStackHasher, fontStacks(layers) (text, M5).
 
 /// `FontStack`: an ordered list of font names.
 pub type FontStack = Vec<String>;
