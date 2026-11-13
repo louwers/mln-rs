@@ -350,7 +350,12 @@ impl Backend {
             }
             #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Backend::Gl(backend) => {
-                let Device::Gl(device) = device;
+                // Irrefutable in a build with OpenGL alone, which has no other
+                // kind of device, and refutable in one with other backends.
+                #[allow(irrefutable_let_patterns)]
+                let Device::Gl(device) = device else {
+                    return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
+                };
                 Ok(Box::new(mln_gl::ExportedTarget::new(backend.clone(), device, ring, kind, size, producer)?))
             }
             _ => {

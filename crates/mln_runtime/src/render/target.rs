@@ -284,8 +284,13 @@ impl BorrowedRing {
     /// [`depth_stencil_formats`](Device::depth_stencil_formats).
     #[must_use]
     pub fn takes_depth_on(&self, device: &Device) -> bool {
+        // Irrefutable in a build with OpenGL alone, and refutable in one
+        // with other backends.
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-        let RingKind::Gl(_) = self.kind;
+        #[allow(irrefutable_let_patterns)]
+        if let RingKind::Gl(_) = self.kind {
+            return true;
+        }
         !self.has_depth()
             || self.depth_stencil_format().is_some_and(|format| device.depth_stencil_formats().contains(format))
     }
