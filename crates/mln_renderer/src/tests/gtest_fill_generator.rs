@@ -203,3 +203,157 @@ fn globe_subdivided_polygon_beyond_the_index_limit_keeps_its_granularity() {
     assert_eq!(expected_lines.len(), lines.len());
     assert_eq!(expected_lines, lines);
 }
+
+/// Twice the area the triangles cover, counting overlaps twice.
+fn covered_area(triangles: &[Triangle]) -> i64 {
+    triangles
+        .iter()
+        .map(|t| {
+            let [x0, y0, x1, y1, x2, y2] = t.map(i64::from);
+            ((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)).abs()
+        })
+        .sum()
+}
+
+/// The outlines and triangles a geometry draws.
+fn drawn(buffers: &Buffers) -> (Vec<Triangle>, Vec<Line>, &[LineLayoutVertex]) {
+    (
+        drawn_triangles(&buffers.fill_vertices, &buffers.fill_indexes, &buffers.fill_segments),
+        drawn_lines(&buffers.fill_vertices, &buffers.basic_line_indexes, &buffers.basic_line_segments),
+        &buffers.line_vertices,
+    )
+}
+
+/// A tile with one layer, `polygons`, of these geometries, which mlt-core
+/// stores with their triangles.
+fn tessellated_mlt(geometries: &[mlt_core::geo_types::Geometry<i32>]) -> Vec<u8> {
+    use mlt_core::encoder::{EncoderConfig, Network, Profile, Tessellation};
+
+    let mut builder = mlt_core::TileLayer::builder("polygons", EXTENT as u32).expect("layer");
+    for geometry in geometries {
+        builder.feature(geometry.clone()).finish().expect("feature");
+    }
+    let config = EncoderConfig::from_profile(Profile::Native(Network::Cellular4G))
+        .with_tessellation(Tessellation::Always)
+        .with_fastpfor(false);
+    builder.finish().encode(config).expect("encode")
+}
+
+/// The triangles of each polygon feature of `tile`'s only layer, as
+/// mlt-core reads them from the tile.
+fn carried_triangles(tile: &[u8]) -> Vec<Vec<Triangle>> {
+    let mut layers = mlt_core::Parser::default().parse_layers(tile).expect("parse");
+    let mlt_core::ParsedLayer::Tag01(layer) =
+        layers.remove(0).decode_all(&mut mlt_core::Decoder::default()).expect("decode")
+    else {
+        panic!("a version 1 layer");
+    };
+    let values = layer.geometry_values();
+    let vertices = values.vertices().expect("vertices");
+    let indices = values.index_buffer().expect("an index buffer");
+    let offsets = values.triangle_offsets().expect("triangle offsets");
+    offsets
+        .windows(2)
+        .map(|run| {
+            indices[run[0] as usize * 3..run[1] as usize * 3]
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|corners| {
+                    let mut triangle: Triangle = [0; 6];
+                    for (k, &i) in corners.iter().enumerate() {
+                        triangle[k * 2] = vertices[i as usize * 2] as i16;
+                        triangle[k * 2 + 1] = vertices[i as usize * 2 + 1] as i16;
+                    }
+                    triangle
+                })
+                .collect()
+        })
+        .collect()
+}
+
+// A polygon from an MLT tile that carries its triangles is filled with
+// them, and draws the area and outlines the earcut path draws. Rings with
+// holes and multi-polygons check that the indices skip the closing vertex
+// each decoded ring gets.
+#[test]
+fn mlt_polygons_fill_with_the_triangles_the_tile_carries() {
+    use mln_tile::VectorMLTTileData;
+    use mln_tile_id::geometry_tile_data::GeometryTileData as _;
+    use mlt_core::geo_types::{Geometry, LineString, MultiPolygon, Polygon};
+
+    let ring =
+        |coords: &[(i32, i32)]| LineString::from(coords.iter().map(|&(x, y)| (x * 20, y * 20)).collect::<Vec<_>>());
+    let square = ring(&[(0, 0), (100, 0), (100, 100), (0, 100)]);
+    let hole_a = ring(&[(10, 10), (10, 20), (20, 20), (20, 10)]);
+    let hole_b = ring(&[(30, 30), (30, 40), (40, 40), (40, 30)]);
+    let small = ring(&[(150, 150), (190, 150), (190, 190)]);
+    let geometries = [
+        Geometry::Polygon(Polygon::new(square.clone(), vec![hole_a.clone(), hole_b.clone()])),
+        Geometry::MultiPolygon(MultiPolygon(vec![
+            Polygon::new(square.clone(), vec![hole_a]),
+            Polygon::new(small.clone(), vec![]),
+            Polygon::new(small, vec![]),
+        ])),
+        Geometry::Polygon(Polygon::new(square, vec![])),
+    ];
+    let tile = tessellated_mlt(&geometries);
+    let carried = carried_triangles(&tile);
+    let data = VectorMLTTileData::new(Arc::new(tile), false);
+    let layer = data.get_layer("polygons").expect("layer").expect("the polygons layer");
+    let canonical = CanonicalTileID::new(14, 0, 0);
+    for (i, carried) in carried.iter().enumerate() {
+        let feature = layer.get_feature(i).expect("feature");
+        let geometry = feature.get_geometries();
+        assert!(!geometry.get_triangles().is_empty(), "feature {i}");
+
+        let tessellated = generate(geometry, &canonical, 1);
+        let earcut = generate(&GeometryCollection::from(geometry.to_vec()), &canonical, 1);
+        let (triangles, lines, line_vertices) = drawn(&tessellated);
+        let (earcut_triangles, earcut_lines, earcut_line_vertices) = drawn(&earcut);
+        assert_eq!(carried, &triangles, "feature {i}");
+        assert_eq!(covered_area(&earcut_triangles), covered_area(&triangles), "feature {i}");
+        assert_eq!(earcut_lines, lines, "feature {i}");
+        assert_eq!(earcut_line_vertices, line_vertices, "feature {i}");
+    }
+}
+
+// Triangles that can't be drawn are ignored, and the polygon is
+// triangulated as one without them.
+#[test]
+fn malformed_triangles_fall_back_to_earcut() {
+    let polygon = GeometryCollection::from(vec![
+        vec![p(0, 0), p(4000, 0), p(4000, 4000), p(0, 4000), p(0, 0)],
+        vec![p(1000, 1000), p(1000, 2000), p(2000, 2000), p(2000, 1000), p(1000, 1000)],
+    ]);
+    let canonical = CanonicalTileID::new(14, 0, 0);
+    let earcut = generate(&polygon, &canonical, 1);
+    let past_the_vertices: &[u32] = &[0, 1, 2, 0, 2, 10];
+    let incomplete: &[u32] = &[0, 1, 2, 0];
+    let wrapped: &[u32] = &[0, 1, u32::MAX];
+    for triangles in [past_the_vertices, incomplete, wrapped] {
+        let mut malformed = polygon.clone();
+        malformed.set_triangles(Arc::from(triangles), 0..triangles.len());
+        let buffers = generate(&malformed, &canonical, 1);
+        assert_eq!(drawn(&earcut), drawn(&buffers), "{triangles:?}");
+        assert_eq!(earcut.fill_indexes, buffers.fill_indexes, "{triangles:?}");
+    }
+}
+
+// A geometry with more vertices than a segment holds is triangulated per
+// polygon, as without triangles, rather than drawn from one segment.
+#[test]
+fn pretessellated_geometries_beyond_a_segment_fall_back_to_earcut() {
+    // Rings of 20,001 vertices on a line, which the earcut path drops for
+    // having no area.
+    let ring = |y: i16| (0..=20_000).map(|x| p(x, y)).collect::<GeometryCoordinates>();
+    let geometry = GeometryCollection::from(vec![ring(0), ring(1), ring(2), ring(3)]);
+    let mut pretessellated = geometry.clone();
+    pretessellated.set_triangles(Arc::from(&[0u32, 1, 20_001][..]), 0..3);
+    let canonical = CanonicalTileID::new(14, 0, 0);
+    let earcut = generate(&geometry, &canonical, 1);
+    let buffers = generate(&pretessellated, &canonical, 1);
+    assert_eq!(earcut.fill_vertices, buffers.fill_vertices);
+    assert_eq!(earcut.fill_indexes, buffers.fill_indexes);
+    assert_eq!(drawn(&earcut), drawn(&buffers));
+}

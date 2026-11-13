@@ -793,3 +793,35 @@ fn cpp_name(t: WireGeometryType) -> &'static str {
         WireGeometryType::MultiPolygon => "Multi-polygon",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::rebase_triangles;
+
+    fn rebase(corners: &[u32], first_vertex: u32, rings: &[(u32, u32)]) -> Option<Vec<u32>> {
+        let mut out = vec![7];
+        let ok = rebase_triangles(corners, first_vertex, rings, &mut Vec::new(), &mut out);
+        assert_eq!(out[0], 7, "kept what was there");
+        ok.then(|| out[1..].to_vec())
+    }
+
+    #[test]
+    fn rebases_corners_past_closing_vertices() {
+        // A ring of 4 stored vertices closed by decoding, an empty ring, a
+        // ring stored closed, and a ring closed by decoding.
+        let rings = [(4, 5), (0, 0), (3, 3), (3, 4)];
+        assert_eq!(rebase(&[10, 13, 14, 16, 17, 19], 10, &rings), Some(vec![0, 3, 5, 7, 8, 10]));
+        // One ring: its closing vertex moves nothing.
+        assert_eq!(rebase(&[2, 3, 5], 2, &[(4, 5)]), Some(vec![0, 1, 3]));
+    }
+
+    #[test]
+    fn rejects_corners_outside_the_feature() {
+        let rings = [(4, 5), (3, 4)];
+        // Past the feature's last vertex.
+        assert_eq!(rebase(&[0, 1, 7], 0, &rings), None);
+        // Before its first.
+        assert_eq!(rebase(&[5, 6, 4], 5, &rings), None);
+        assert_eq!(rebase(&[0, 1, 2], 0, &[]), None);
+    }
+}
