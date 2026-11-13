@@ -509,7 +509,7 @@ fn releases_the_glyphs_of_evicted_font_stacks() {
 // the requestor still gets the glyphs.
 #[test]
 fn evict_keeps_the_font_stacks_requestors_wait_for() {
-    let mut test = GlyphManagerTest::new();
+    let test = GlyphManagerTest::new();
     test.file_source.set_response(Kind::Glyphs, glyphs_response("test/fixtures/resources/glyphs.pbf"));
     test.glyph_manager.set_url("test/fixtures/resources/glyphs.pbf");
     test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
