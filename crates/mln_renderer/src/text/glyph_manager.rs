@@ -101,14 +101,6 @@ struct Entry {
 }
 
 impl Entry {
-    /// Whether a live requestor waits for one of the ranges.
-    fn is_awaited(&self) -> bool {
-        self.ranges
-            .values()
-            .flat_map(|request| request.requestors.values())
-            .any(|(requestor, _)| requestor.strong_count() > 0)
-    }
-
     fn find_glyph(&self, glyph_id: GlyphID) -> Option<Arc<Glyph>> {
         if let Some(glyph) = self.glyphs.get(&glyph_id) {
             return Some(Arc::clone(glyph));
@@ -512,16 +504,22 @@ impl GlyphManager {
     }
 
     /// Drops the glyphs and pending requests of the font stacks not in
-    /// `keep`, except those of a font stack a live requestor still waits
-    /// for: dropping its requests would leave that requestor waiting for an
-    /// answer that never comes.
+    /// `keep`, except those of the font stacks a live requestor still waits
+    /// to be answered with: it would never be answered, or be answered
+    /// without glyphs it was waiting for.
     pub(crate) fn evict(&self, keep: &VecSet<FontStack>) {
         // Dropping a request cancels it; that happens after the borrow ends.
-        let _evicted: Vec<(FontStack, Entry)> = self
-            .entries
-            .borrow_mut()
-            .extract_if(|font_stack, entry| !keep.contains(font_stack) && !entry.is_awaited())
-            .collect();
+        let _evicted: Vec<(FontStack, Entry)> = {
+            let mut entries = self.entries.borrow_mut();
+            let awaited: HashSet<FontStack> = entries
+                .values()
+                .flat_map(|entry| entry.ranges.values())
+                .flat_map(|request| request.requestors.values())
+                .filter(|(requestor, _)| requestor.strong_count() > 0)
+                .flat_map(|(_, dependencies)| dependencies.glyphs.keys().cloned())
+                .collect();
+            entries.extract_if(|font_stack, _| !keep.contains(font_stack) && !awaited.contains(font_stack)).collect()
+        };
     }
 
     pub(crate) fn get_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Arc<Glyph> {
