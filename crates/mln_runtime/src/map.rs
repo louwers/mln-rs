@@ -531,7 +531,27 @@ impl Map {
         target: RenderTarget,
         options: AttachOptions,
     ) -> Result<(RenderSession, Completion<()>), Error> {
-        crate::render::attach(self, target, options)
+        crate::render::attach(self, target, options, |session, attached| (session.clone(), attached))
+    }
+
+    /// Attaches a render session as [`attach`](Self::attach) does, and calls
+    /// `then` with it and the attach's completion before the session's
+    /// thread may deliver the attach's result. A callback that `then`
+    /// attaches with [`Completion::on_complete`] runs where the session
+    /// delivers it: on the session's thread, inside its driver call, even
+    /// when the session attaches before `then` runs. One attached after
+    /// `attach` returned would run at once on this thread instead.
+    ///
+    /// `then` keeps the session with a clone of it: the session is released
+    /// once its last handle drops. Fails as `attach` does, before `then`
+    /// runs.
+    pub fn attach_then<R>(
+        &self,
+        target: RenderTarget,
+        options: AttachOptions,
+        then: impl FnOnce(&RenderSession, Completion<()>) -> R,
+    ) -> Result<R, Error> {
+        crate::render::attach(self, target, options, then)
     }
 
     /// Renders a still image of a static or tile map, once every resource

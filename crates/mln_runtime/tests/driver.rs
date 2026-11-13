@@ -309,6 +309,30 @@ fn an_abandon_completes_pending_work_at_once() {
     wait(other.release());
 }
 
+/// A release of a session that waits for its first service abandons it at
+/// once, and completes the work on its way there, on the releasing thread,
+/// inside the release's `send_then`: a `send_then` from one of those
+/// callbacks runs at once instead of waiting for the release's.
+#[test]
+fn a_send_from_a_completion_that_a_release_settles_runs_at_once() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (session, attached) = map.attach(offscreen(), caller_options()).unwrap();
+    let (sent, received) = std::sync::mpsc::channel();
+    let inner = session.clone();
+    session
+        .send_then(RenderSession::barrier, move |result| {
+            let resent = inner.send_then(RenderSession::barrier, |_| panic!("the callback ran"));
+            sent.send((result, resent)).unwrap();
+        })
+        .unwrap();
+    session.send_then(RenderSession::release, |result| result.unwrap()).unwrap();
+    let (result, resent) = received.recv_timeout(TIMEOUT).unwrap();
+    assert_eq!(ErrorKind::TargetLost, result.unwrap_err().kind);
+    assert_eq!(ErrorKind::InvalidState, resent.unwrap_err().kind);
+    assert_eq!(ErrorKind::TargetLost, attached.wait().unwrap_err().kind);
+}
+
 #[test]
 fn a_map_release_abandons_a_released_session_that_waits_for_a_service() {
     let runtime = runtime();

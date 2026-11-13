@@ -281,8 +281,8 @@ pub(crate) struct SessionShared {
     /// the graphics work in progress.
     pub(crate) gate: Mutex<()>,
     /// Held while [`RenderSession::send_then`] sends a command and attaches
-    /// its callback, which the session's thread waits for before it
-    /// delivers results.
+    /// its callback, and while an attach hands its completion out, which the
+    /// session's thread waits for before it delivers results.
     sending: Mutex<()>,
     /// Whether the session's thread is inside a driver call: a core worker
     /// running a task and delivering what it sent the host, or a service of
@@ -439,6 +439,19 @@ impl SessionShared {
         drop(self.sending.lock_unpoisoned());
     }
 
+    /// Takes the sending lock, which the session's thread waits for before
+    /// it delivers results, unless this thread holds it already: a send
+    /// inside another, such as from a completion that a release settles at
+    /// once on this thread, is delivered after the outer one too.
+    fn hold_sending(&self) -> Option<Sending<'_>> {
+        if SENDING.with(|sending| sending.borrow().contains(&self.id)) {
+            return None;
+        }
+        let guard = self.sending.lock_unpoisoned();
+        SENDING.with(|sending| sending.borrow_mut().push(self.id));
+        Some(Sending { id: self.id, _guard: guard })
+    }
+
     /// Marks the session's thread as inside a driver call until the guard
     /// drops.
     pub(crate) fn enter_call(&self) -> InCall<'_> {
@@ -577,6 +590,20 @@ thread_local! {
     /// The driver wakes that this thread's posts asked for during a handle
     /// call, which may hold the session's locks.
     static DEFERRED_WAKES: RefCell<Option<Vec<Wake>>> = const { RefCell::new(None) };
+    /// The sessions whose sending lock this thread holds.
+    static SENDING: RefCell<Vec<SessionId>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A session's sending lock, which [`SessionShared::hold_sending`] took.
+struct Sending<'a> {
+    id: SessionId,
+    _guard: std::sync::MutexGuard<'a, ()>,
+}
+
+impl Drop for Sending<'_> {
+    fn drop(&mut self) {
+        SENDING.with(|sending| sending.borrow_mut().retain(|id| *id != self.id));
+    }
 }
 
 /// Runs `call`, which may post to a session's loop with the session's locks
@@ -672,12 +699,27 @@ impl PartialEq for RenderSession {
 
 impl Eq for RenderSession {}
 
-/// Attaches a session to `map`, as [`Map::attach`] documents.
-pub(crate) fn attach(
+/// Attaches a session to `map`, as [`Map::attach`] documents, and runs `then`
+/// with the session and the attach's completion before the session's thread
+/// may deliver that, as [`Map::attach_then`] documents.
+pub(crate) fn attach<R>(
     map: &Map,
     target: RenderTarget,
     options: AttachOptions,
-) -> Result<(RenderSession, Completion<()>), Error> {
+    then: impl FnOnce(&RenderSession, Completion<()>) -> R,
+) -> Result<R, Error> {
+    // The wakes that the attach runs, such as a caller-driven session's
+    // driver-work wake, wait for the release of the session's sending lock,
+    // so a host's wake that services the session can't wait for it.
+    with_unlocked_wakes(|| attach_unlocked(map, target, options, then))
+}
+
+fn attach_unlocked<R>(
+    map: &Map,
+    target: RenderTarget,
+    options: AttachOptions,
+    then: impl FnOnce(&RenderSession, Completion<()>) -> R,
+) -> Result<R, Error> {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let mut ring = None;
     let mut export_kind = None;
@@ -805,6 +847,10 @@ pub(crate) fn attach(
     });
     let (completion, resolver) = shared.completion();
     shared.state.lock_unpoisoned().attach = Some(resolver);
+    // Held until `then` returns: the session's thread delivers the attach's
+    // result after, inside its driver call.
+    let sending = shared.clone();
+    let _sending = sending.hold_sending();
     map.claim_session(id, Arc::downgrade(&shared))?;
     if options.driver == Driver::CoreWorker {
         match start_thread(shared.clone()) {
@@ -828,7 +874,7 @@ pub(crate) fn attach(
         // now: the host hears of it before the attach returns.
         session.shared().run_loop.invoke(|| {});
     }
-    Ok((session, completion))
+    Ok(then(&session, completion))
 }
 
 /// Starts a core worker's thread, which builds the session's renderer, then
@@ -877,7 +923,7 @@ impl RenderSession {
         // host's wake that services the session can't wait for it.
         with_unlocked_wakes(|| {
             let ready = {
-                let _sending = self.shared().sending.lock_unpoisoned();
+                let _sending = self.shared().hold_sending();
                 send(self)?.on_complete_unless_ready(callback)
             };
             // A result that came without the session's thread, such as a

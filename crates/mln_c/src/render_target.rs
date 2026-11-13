@@ -5,7 +5,8 @@ use core::ffi::c_void;
 use core::ptr::NonNull;
 
 use ::mln_runtime::{
-    BorrowedRing, DmaBufFormat, ExportKind, ExportKinds, ExportedRing, RenderTarget, Surface, SurfaceType,
+    Applied, BorrowedRing, DmaBufFormat, ExportKind, ExportKinds, ExportedRing, RenderSession, RenderTarget, Surface,
+    SurfaceType,
 };
 use mln_util::ErrorKind;
 use mln_util::size::Size;
@@ -788,20 +789,20 @@ pub unsafe extern "C" fn mln_map_attach(
             }
             Target::Unsupported(message) => return Err(unsupported(message)),
         };
-        let attached = render_session::attach(&map, target, &options);
-        // The request's references to the wakes go before the completion can
-        // run, which leaves the session's as the last ones.
-        drop(options);
-        let (handle, attached) = attached?;
-        // The completion may run before this call returns, and the caller may
-        // read the handle there.
-        *out_session = handle;
-        completion::forward(attached, Some(pending.accept()), |result| {
-            (result.map_err(Error::from), Generations::default())
-        });
-        Ok(())
+        render_session::attach(&map, target, options, |handle, attached| {
+            // The completion may run before this call returns, and the caller
+            // may read the handle there.
+            *out_session = handle;
+            completion::forward(attached, Some(pending.accept()), |result| {
+                (result.map_err(Error::from), Generations::default())
+            });
+        })
     })
 }
+
+/// Sends a session its new target, once its completion is ready for the
+/// result.
+type Replace = Box<dyn FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<Applied>, mln_util::Error>>;
 
 /// `mln_render_session_set_target()`.
 ///
@@ -833,15 +834,15 @@ pub unsafe extern "C" fn mln_render_session_set_target(
         if let Some(size) = target.size() {
             physical_size(mln_logical_extent { width: size.width, height: size.height, scale_factor })?;
         }
-        let replaced = match target {
+        let replace: Replace = match target {
             Target::Surface { size, kind, surface } => {
                 if !kind.presents_with_any() {
                     return Err(unsupported(format!("this build presents to no {kind:?} surface")));
                 }
-                object.session.set_surface(size, surface)?
+                Box::new(move |session| session.set_surface(size, surface))
             }
-            Target::HostSurface { size, surface } => object.session.set_surface(size, surface)?,
-            Target::Borrowed { size, ring } => object.session.set_ring(size, ring)?,
+            Target::HostSurface { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
+            Target::Borrowed { size, ring } => Box::new(move |session| session.set_ring(size, ring)),
             Target::Exported { .. } => {
                 return Err(unsupported("an exported ring is no replacement target: resize the session instead"));
             }
@@ -849,11 +850,10 @@ pub unsafe extern "C" fn mln_render_session_set_target(
             Target::Offscreen(_) => return Err(unsupported("an offscreen target replaces no window")),
         };
         let map = object.map.clone();
-        completion::forward(replaced, pending.map(PendingCompletion::accept), move |result| {
+        render_session::send_then(&object.session, replace, pending, move |result| {
             let generations = map::generations(&map, &result);
             (result.map(drop).map_err(Error::from), generations)
-        });
-        Ok(())
+        })
     })
 }
 

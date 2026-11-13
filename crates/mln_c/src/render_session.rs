@@ -17,7 +17,7 @@ use mln_util::size::Size;
 
 use crate::abi::{self, Fields};
 use crate::callback::Wake;
-use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
+use crate::completion::{CompletionValue, Generations, PendingCompletion};
 use crate::error::Error;
 use crate::frame_pacer::{self, Pacer, SessionPacing};
 use crate::generated::types::{
@@ -168,12 +168,17 @@ fn runtime_wake(wake: &Arc<Wake>) -> ::mln_runtime::Wake {
     Arc::new(move || wake.notify())
 }
 
-/// Attaches a session to `map` and gives it a handle.
+/// Attaches a session to `map`, gives it a handle, and calls `attached`
+/// with the handle and the attach's completion before the session's thread
+/// may deliver that, so that a callback attached there runs inside the
+/// session's driver call. The request's references to the wakes go before
+/// `attached` runs, which leaves the session's as the last ones.
 pub(crate) fn attach(
     map: &MapObject,
     target: RenderTarget,
-    request: &AttachRequest,
-) -> Result<(mln_render_session, ::mln_runtime::Completion<()>), Error> {
+    request: AttachRequest,
+    attached: impl FnOnce(mln_render_session, ::mln_runtime::Completion<()>),
+) -> Result<(), Error> {
     let pacing = (!request.has_redraw_wake).then(|| Arc::new(SessionPacing::default()));
     let options = AttachOptions {
         driver: request.driver,
@@ -188,29 +193,36 @@ pub(crate) fn attach(
     // Accepted first, so that a wake that the session runs as it starts
     // reaches the caller.
     request.wakes().iter().for_each(|wake| wake.accept());
-    let revoke = |request: &AttachRequest| request.wakes().iter().for_each(|wake| wake.revoke());
-    let (session, attached) = match map.map.attach(target, options) {
-        Ok(attached) => attached,
-        Err(error) => {
-            revoke(request);
-            return Err(error.into());
-        }
+    let revoke = |request: &Option<AttachRequest>| {
+        request.iter().flat_map(AttachRequest::wakes).for_each(Wake::revoke);
     };
-    let object = SessionObject {
-        session: session.clone(),
-        map: map.map.clone(),
-        initial_scale_factor: map.scale_factor,
-        pacing,
-        _driver_work_wake: Arc::clone(&request.driver_work_wake),
-    };
-    match SESSIONS.insert(Arc::new(object)) {
-        Ok(handle) => Ok((handle, attached)),
-        Err(error) => {
-            revoke(request);
-            let _ = session.dispose();
-            Err(error)
+    let driver_work_wake = Arc::clone(&request.driver_work_wake);
+    let mut request = Some(request);
+    let sent = map.map.attach_then(target, options, |session, completion| {
+        let object = SessionObject {
+            session: session.clone(),
+            map: map.map.clone(),
+            initial_scale_factor: map.scale_factor,
+            pacing,
+            _driver_work_wake: driver_work_wake,
+        };
+        match SESSIONS.insert(Arc::new(object)) {
+            Ok(handle) => {
+                request = None;
+                attached(handle, completion);
+                Ok(())
+            }
+            Err(error) => {
+                revoke(&request);
+                let _ = session.dispose();
+                Err(error)
+            }
         }
-    }
+    });
+    sent.unwrap_or_else(|error| {
+        revoke(&request);
+        Err(error.into())
+    })
 }
 
 // MARK: - State
@@ -551,14 +563,34 @@ pub(crate) unsafe fn operation<T: Send + 'static, V: CompletionValue>(
     // SAFETY: the caller's contract.
     let pending = unsafe { PendingCompletion::new(completion) }?;
     let map = object.map.clone();
-    // The callback runs once when the send succeeds, and is dropped unrun,
-    // with the completion unaccepted, when it fails.
-    object.session.send_then(send, move |result| {
+    send_then(&object.session, send, Some(pending), move |result| {
         let generations = map.snapshot().map_or(Generations::default(), |snapshot| Generations {
             snapshot: snapshot.generation,
             render_update: snapshot.update_generation,
         });
-        pending.accept().complete(result.map(value).map_err(Error::from), generations);
+        (result.map(value).map_err(Error::from), generations)
+    })
+}
+
+/// Sends a command to `session` with `send`, and completes `pending` with
+/// its result, which `finish` turns into the completion's result and
+/// generations. The session's driver delivers the completion inside its
+/// driver call, even when the command runs before this returns: a
+/// completion attached after the send returned would run on this thread
+/// then. A send that fails leaves `pending` unaccepted.
+pub(crate) fn send_then<T: Send + 'static, V: CompletionValue>(
+    session: &RenderSession,
+    send: impl FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<T>, mln_util::Error>,
+    pending: Option<PendingCompletion>,
+    finish: impl FnOnce(Result<T, mln_util::Error>) -> (Result<V, Error>, Generations) + Send + 'static,
+) -> Result<(), Error> {
+    // The callback runs once when the send succeeds, and is dropped unrun,
+    // with the completion unaccepted, when it fails.
+    session.send_then(send, move |result| {
+        if let Some(pending) = pending {
+            let (result, generations) = finish(result);
+            pending.accept().complete(result, generations);
+        }
     })?;
     Ok(())
 }
@@ -581,13 +613,12 @@ pub unsafe extern "C" fn mln_render_session_resize(
         // SAFETY: the caller's contract.
         let pending = unsafe { PendingCompletion::optional(completion) }?;
         let size = Size::new(extent.width, extent.height);
-        let resized = object.session.resize(LogicalExtent::new(size, extent.scale_factor))?;
         let map = object.map.clone();
-        completion::forward(resized, pending.map(PendingCompletion::accept), move |result| {
+        let resize = |session: &RenderSession| session.resize(LogicalExtent::new(size, extent.scale_factor));
+        send_then(&object.session, resize, pending, move |result| {
             let generations = map::generations(&map, &result);
             (result.map(drop).map_err(Error::from), generations)
-        });
-        Ok(())
+        })
     })
 }
 
@@ -799,11 +830,9 @@ pub unsafe extern "C" fn mln_render_session_detach(
         let object = resolve(session)?;
         // SAFETY: the caller's contract.
         let pending = unsafe { PendingCompletion::new(completion) }?;
-        let detached = object.session.detach()?;
-        completion::forward(detached, Some(pending.accept()), |result| {
+        send_then(&object.session, RenderSession::detach, Some(pending), |result| {
             (result.map_err(Error::from), Generations::default())
-        });
-        Ok(())
+        })
     })
 }
 
@@ -874,12 +903,14 @@ pub unsafe extern "C" fn mln_render_session_release(
         // A release that the session refuses, such as while the host holds
         // one of its frames, keeps the handle.
         let object = resolve(session)?;
-        let released = object.session.release()?;
-        let _ = SESSIONS.remove(session);
-        completion::forward(released, Some(pending.accept()), |result| {
+        let release = |object: &RenderSession| {
+            let released = object.release()?;
+            let _ = SESSIONS.remove(session);
+            Ok(released)
+        };
+        send_then(&object.session, release, Some(pending), |result| {
             (result.map_err(Error::from), Generations::default())
-        });
-        Ok(())
+        })
     })
 }
 
@@ -1260,7 +1291,12 @@ mod driver_tests {
         // SAFETY: local options.
         let request = unsafe { super::attach_options(&raw const options) }.unwrap();
         let target = RenderTarget::Offscreen { size: Size::new(16, 16), device: None };
-        attach(&map::resolve(map).unwrap(), target, &request).unwrap()
+        let mut attached = None;
+        attach(&map::resolve(map).unwrap(), target, request, |session, completion| {
+            attached = Some((session, completion));
+        })
+        .unwrap();
+        attached.unwrap()
     }
 
     #[test]

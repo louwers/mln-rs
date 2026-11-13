@@ -510,6 +510,66 @@ fn send_then_delivers_on_the_sessions_thread() {
     assert_eq!(ErrorKind::InvalidState, error.kind);
 }
 
+/// An attach, resize, detach or release on a core worker can finish before
+/// its call returns too, and a callback attached after it would then run on
+/// the sending thread: the callbacks of `attach_then` and `send_then` run on
+/// the session's thread every time, even when the sender is slow to attach
+/// them, as a host's thread that is preempted is.
+#[test]
+fn attach_then_and_send_then_deliver_the_lifecycle_on_the_sessions_thread() {
+    // Long enough for the session's thread to finish first.
+    const SLOW: std::time::Duration = std::time::Duration::from_millis(50);
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let sender = std::thread::current().id();
+    let (sent, received) = channel();
+    let delivered = move |name: &'static str| {
+        let sent = sent.clone();
+        move |result: Result<(), mln_runtime::Error>| sent.send((name, result, std::thread::current().id())).unwrap()
+    };
+    let check = || {
+        let (name, result, thread) = received.recv_timeout(TIMEOUT).unwrap();
+        result.unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        assert_ne!(sender, thread, "{name} ran on the sending thread");
+    };
+    // Sends with `send`, then takes a while to attach the callback.
+    let slowly = |send: fn(&RenderSession) -> Result<mln_runtime::Completion<()>, mln_runtime::Error>| {
+        move |session: &RenderSession| {
+            let completion = send(session)?;
+            std::thread::sleep(SLOW);
+            Ok(completion)
+        }
+    };
+    for round in 0..4 {
+        let session = map
+            .attach_then(offscreen(SIZE), AttachOptions::default(), |session, attached| {
+                std::thread::sleep(SLOW);
+                attached.on_complete(delivered("attach"));
+                session.clone()
+            })
+            .unwrap();
+        check();
+        for step in 1..=2 {
+            let extent = LogicalExtent::new(Size::new(SIZE.width + step, SIZE.height), 1.0);
+            let resize = move |session: &RenderSession| {
+                let resized = session.resize(extent)?;
+                std::thread::sleep(SLOW);
+                Ok(resized)
+            };
+            let resized = delivered("resize");
+            session.send_then(resize, move |result| resized(result.map(drop))).unwrap();
+            check();
+        }
+        // Detached on even rounds, and released attached on odd ones.
+        if round % 2 == 0 {
+            session.send_then(slowly(RenderSession::detach), delivered("detach")).unwrap();
+        } else {
+            session.send_then(slowly(RenderSession::release), delivered("release")).unwrap();
+        }
+        check();
+    }
+}
+
 // MARK: - Lifecycle
 
 #[test]
