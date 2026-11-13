@@ -14,12 +14,12 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::symbol_layer_properties::{
-    IconAllowOverlap, IconAnchor, IconIgnorePlacement, IconImage, IconOffset, IconPadding, IconPitchAlignment,
-    IconRotate, IconRotationAlignment, IconSize, IconTextFit, IconTextFitPadding, SymbolLayoutProperties,
-    SymbolPlacement, SymbolSortKey, SymbolSpacing, SymbolZOrder, TextAllowOverlap, TextAnchor, TextField, TextFont,
-    TextIgnorePlacement, TextJustify, TextLetterSpacing, TextLineHeight, TextMaxAngle, TextMaxWidth, TextOffset,
-    TextPadding, TextPitchAlignment, TextRadialOffset, TextRotate, TextRotationAlignment, TextSize, TextTransform,
-    TextVariableAnchor, TextVariableAnchorOffset, TextWritingMode,
+    IconAnchor, IconIgnorePlacement, IconImage, IconOffset, IconPadding, IconPitchAlignment, IconRotate,
+    IconRotationAlignment, IconSize, IconTextFit, IconTextFitPadding, SymbolLayoutProperties, SymbolPlacement,
+    SymbolSortKey, SymbolSpacing, SymbolZOrder, TextAnchor, TextField, TextFont, TextIgnorePlacement, TextJustify,
+    TextLetterSpacing, TextLineHeight, TextMaxAngle, TextMaxWidth, TextOffset, TextPadding, TextPitchAlignment,
+    TextRadialOffset, TextRotate, TextRotationAlignment, TextSize, TextTransform, TextVariableAnchor,
+    TextVariableAnchorOffset, TextWritingMode,
 };
 use mln_style::properties::Property;
 use mln_style::property_value::PropertyValue;
@@ -56,6 +56,7 @@ use crate::layout::merge_lines::merge_lines;
 use crate::layout::symbol_feature::SymbolFeature;
 use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, SymbolInstance, SymbolInstanceSharedData};
 use crate::render_layer::LayerRenderData;
+use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
 use crate::text::glyph_manager::HBShapeResults;
 use crate::text::quads::{SymbolQuad, SymbolQuads};
@@ -343,8 +344,8 @@ impl SymbolLayout {
         let z_order_by_viewport_y = symbol_z_order == SymbolZOrderType::ViewportY
             || (symbol_z_order == SymbolZOrderType::Auto && !this.sort_features_by_key);
         this.sort_features_by_y = z_order_by_viewport_y
-            && (*layout.get::<TextAllowOverlap>()
-                || *layout.get::<IconAllowOverlap>()
+            && (OverlapMode::text(&layout) != OverlapMode::Never
+                || OverlapMode::icon(&layout) != OverlapMode::Never
                 || *layout.get::<TextIgnorePlacement>()
                 || *layout.get::<IconIgnorePlacement>());
         let sort_features = this.sort_features_by_key && !layout.get::<SymbolSortKey>().is_constant();
@@ -729,6 +730,7 @@ impl SymbolLayout {
             sort_index: self.symbol_instances.len(),
             bucket_instance_id: 0,
             collision_group_id: 0,
+            overlap_mode: OverlapMode::Never,
         };
 
         let icon_text_fit = *evaluated_layout_properties.get::<IconTextFit>();

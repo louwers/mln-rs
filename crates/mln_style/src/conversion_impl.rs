@@ -147,6 +147,7 @@ enum_value_factory!(
     mln_style_types::CirclePitchScaleType,
     mln_style_types::HillshadeIlluminationAnchorType,
     mln_style_types::HillshadeMethodType,
+    mln_style_types::IconOverlapType,
     mln_style_types::IconTextFitType,
     mln_style_types::LightAnchorType,
     mln_style_types::LineCapType,

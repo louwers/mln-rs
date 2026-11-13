@@ -65,23 +65,6 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
     // https://github.com/maplibre/maplibre-native/issues/250
     remove(&mut spec, &["layout_symbol", "text-rotation-alignment", "values"], "viewport-glyph")?;
 
-    // https://github.com/maplibre/maplibre-native/issues/251
-    remove(&mut spec, &["layout_symbol"], "icon-overlap")?;
-    remove(&mut spec, &["layout_symbol"], "text-overlap")?;
-    // Quirk kept: style-spec.mjs assigns text-allow-overlap's `requires` twice,
-    // the second time from icon-allow-overlap's (filtered) list.
-    let filtered = |spec: &Value, property: &str, drop: &str| -> Result<Value, String> {
-        let requires = spec["layout_symbol"][property]["requires"]
-            .as_array()
-            .ok_or_else(|| format!("layout_symbol.{property}.requires is not an array"))?;
-        let drop: Value = serde_json::from_str(drop).expect("valid JSON");
-        Ok(Value::Array(requires.iter().filter(|v| **v != drop).cloned().collect()))
-    };
-    let text_requires = filtered(&spec, "text-allow-overlap", r#"{"!":"text-overlap"}"#)?;
-    spec["layout_symbol"]["text-allow-overlap"]["requires"] = text_requires;
-    let icon_requires = filtered(&spec, "icon-allow-overlap", r#"{"!":"icon-overlap"}"#)?;
-    spec["layout_symbol"]["text-allow-overlap"]["requires"] = icon_requires;
-
     // https://github.com/maplibre/maplibre-native/issues/1929
     remove(&mut spec, &["layout_symbol"], "symbol-height-anchor")?;
     remove(&mut spec, &["layout_symbol"], "symbol-height-offset")?;

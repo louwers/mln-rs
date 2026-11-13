@@ -181,6 +181,25 @@ pub enum IconTextFitType {
     Height,
 }
 
+/// The `icon-overlap` and `text-overlap` layout properties.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum IconOverlapType {
+    /// The property isn't set: `icon-allow-overlap` or `text-allow-overlap`
+    /// decides instead.
+    #[default]
+    Undefined,
+    /// Hidden when it collides with any symbol placed before it.
+    Never,
+    /// Shown even when it collides with symbols placed before it.
+    Always,
+    /// Hidden only when it collides with a symbol placed before it with
+    /// `Never`.
+    Cooperative,
+}
+
+pub type TextOverlapType = IconOverlapType;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TextWritingModeType {
@@ -328,6 +347,13 @@ style_spec_names!(IconTextFitType {
     Height => "height",
 });
 
+style_spec_names!(IconOverlapType {
+    Undefined => "undefined",
+    Never => "never",
+    Always => "always",
+    Cooperative => "cooperative",
+});
+
 style_spec_names!(LightAnchorType {
     Map => "map",
     Viewport => "viewport",
@@ -372,6 +398,7 @@ uninterpolated_enums!(
     SymbolAnchorType,
     TextTransformType,
     IconTextFitType,
+    IconOverlapType,
     TextWritingModeType,
     LightAnchorType,
 );

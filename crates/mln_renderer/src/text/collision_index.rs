@@ -6,6 +6,10 @@ use std::collections::{HashMap, HashSet};
 
 use geometry::Point;
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, TransformState};
+use mln_style::layers::symbol_layer_properties::{
+    IconAllowOverlap, IconOverlap, SymbolLayoutProperties, TextAllowOverlap, TextOverlap,
+};
+use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
 use mln_util::geo::ScreenLineString;
@@ -39,6 +43,41 @@ impl IntersectStatus {
 
 pub(crate) type CollisionGrid = GridIndex<IndexedSubfeature>;
 
+/// How a symbol's text or icon may overlap the symbols placed before it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum OverlapMode {
+    /// Collides with every symbol.
+    #[default]
+    Never,
+    /// Collides with no symbol.
+    Always,
+    /// Collides only with symbols placed with `Never`.
+    Cooperative,
+}
+
+impl OverlapMode {
+    /// The mode of a symbol layer's text: its `text-overlap`, or its
+    /// `text-allow-overlap` when `text-overlap` isn't set.
+    pub(crate) fn text(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Self {
+        Self::new(*layout.get::<TextOverlap>(), *layout.get::<TextAllowOverlap>())
+    }
+
+    /// The mode of a symbol layer's icon: its `icon-overlap`, or its
+    /// `icon-allow-overlap` when `icon-overlap` isn't set.
+    pub(crate) fn icon(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Self {
+        Self::new(*layout.get::<IconOverlap>(), *layout.get::<IconAllowOverlap>())
+    }
+
+    fn new(overlap: IconOverlapType, allow_overlap: bool) -> Self {
+        match overlap {
+            IconOverlapType::Always => OverlapMode::Always,
+            IconOverlapType::Cooperative => OverlapMode::Cooperative,
+            IconOverlapType::Undefined if allow_overlap => OverlapMode::Always,
+            IconOverlapType::Never | IconOverlapType::Undefined => OverlapMode::Never,
+        }
+    }
+}
+
 /// When a symbol crosses the edge that causes it to be included in
 /// collision detection, it will cause changes in the symbols around
 /// it. This constant specifies how many pixels to pad the edge of
@@ -58,10 +97,11 @@ fn find_viewport_padding(transform_state: &TransformState, map_mode: MapMode) ->
 
 fn indexed_subfeature(
     feature: &IndexedSubfeature,
+    overlap_mode: OverlapMode,
     bucket_instance_id: u32,
     collision_group_id: u16,
 ) -> IndexedSubfeature {
-    IndexedSubfeature { bucket_instance_id, collision_group_id, ..feature.clone() }
+    IndexedSubfeature { bucket_instance_id, collision_group_id, overlap_mode, ..feature.clone() }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -259,7 +299,7 @@ impl CollisionIndex {
         symbol: &PlacedSymbol,
         scale: f32,
         font_size: f32,
-        allow_overlap: bool,
+        overlap_mode: OverlapMode,
         pitch_with_map: bool,
         rotate_with_map: bool,
         collision_debug: bool,
@@ -278,7 +318,7 @@ impl CollisionIndex {
                 symbol,
                 scale,
                 font_size,
-                allow_overlap,
+                overlap_mode,
                 pitch_with_map,
                 collision_debug,
                 avoid_edges,
@@ -322,10 +362,9 @@ impl CollisionIndex {
             if occluded
                 || avoid_edges.as_ref().is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
                 || !self.is_inside_grid(&collision_boundaries)
-                || (!allow_overlap
-                    && self
-                        .collision_grid
-                        .hit_test(projected_boxes.last().expect("pushed").box_(), collision_group_predicate))
+                || self.collides(overlap_mode, collision_group_predicate, |grid, predicate| {
+                    grid.hit_test(projected_boxes.last().expect("pushed").box_(), predicate)
+                })
             {
                 return PlacedFeatureResult { placed: false, offscreen: false, occluded };
             }
@@ -345,7 +384,7 @@ impl CollisionIndex {
         symbol: &PlacedSymbol,
         scale: f32,
         font_size: f32,
-        allow_overlap: bool,
+        overlap_mode: OverlapMode,
         pitch_with_map: bool,
         collision_debug: bool,
         avoid_edges: Option<&CollisionBoundaries>,
@@ -491,8 +530,9 @@ impl CollisionIndex {
             in_grid |= self.is_inside_grid(&collision_boundaries);
 
             if avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
-                || (!allow_overlap
-                    && self.collision_grid.hit_test_circle(projected_boxes[i].circle(), collision_group_predicate))
+                || self.collides(overlap_mode, collision_group_predicate, |grid, predicate| {
+                    grid.hit_test_circle(projected_boxes[i].circle(), predicate)
+                })
             {
                 if !collision_debug {
                     return PlacedFeatureResult { placed: false, offscreen: false, occluded: false };
@@ -510,10 +550,32 @@ impl CollisionIndex {
         }
     }
 
+    /// Whether a box placed with `overlap_mode` collides with a symbol in the
+    /// grid, where `hit_test` tests the grid with a predicate.
+    fn collides(
+        &self,
+        overlap_mode: OverlapMode,
+        collision_group_predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
+        hit_test: impl FnOnce(&CollisionGrid, Option<&dyn Fn(&IndexedSubfeature) -> bool>) -> bool,
+    ) -> bool {
+        match overlap_mode {
+            OverlapMode::Never => hit_test(&self.collision_grid, collision_group_predicate),
+            OverlapMode::Always => false,
+            OverlapMode::Cooperative => hit_test(
+                &self.collision_grid,
+                Some(&|feature: &IndexedSubfeature| {
+                    feature.overlap_mode == OverlapMode::Never
+                        && collision_group_predicate.is_none_or(|predicate| predicate(feature))
+                }),
+            ),
+        }
+    }
+
     pub(crate) fn insert_feature(
         &mut self,
         feature: &CollisionFeature,
         projected_boxes: &[ProjectedCollisionBox],
+        overlap_mode: OverlapMode,
         ignore_placement: bool,
         bucket_instance_id: u32,
         collision_group_id: u16,
@@ -524,7 +586,8 @@ impl CollisionIndex {
                     continue;
                 }
 
-                let subfeature = indexed_subfeature(&feature.indexed_feature, bucket_instance_id, collision_group_id);
+                let subfeature =
+                    indexed_subfeature(&feature.indexed_feature, overlap_mode, bucket_instance_id, collision_group_id);
                 if ignore_placement {
                     self.ignored_grid.insert_circle(subfeature, circle.circle());
                 } else {
@@ -535,7 +598,8 @@ impl CollisionIndex {
             debug_assert_eq!(projected_boxes.len(), 1);
             let box_ = &projected_boxes[0];
             debug_assert!(box_.is_box());
-            let subfeature = indexed_subfeature(&feature.indexed_feature, bucket_instance_id, collision_group_id);
+            let subfeature =
+                indexed_subfeature(&feature.indexed_feature, overlap_mode, bucket_instance_id, collision_group_id);
             if ignore_placement {
                 self.ignored_grid.insert(subfeature, box_.box_());
             } else {
@@ -812,4 +876,86 @@ fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &BBox) -> bool {
     ];
 
     polygon_intersects_polygon(&integer_polygon, &bbox_points)
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::size::Size;
+
+    use super::*;
+
+    fn feature(index: usize) -> CollisionFeature {
+        CollisionFeature {
+            boxes: Vec::new(),
+            indexed_feature: IndexedSubfeature {
+                index,
+                source_layer_name: String::new(),
+                bucket_leader_id: String::new(),
+                sort_index: 0,
+                bucket_instance_id: 0,
+                collision_group_id: 0,
+                overlap_mode: OverlapMode::Never,
+            },
+            along_line: false,
+        }
+    }
+
+    fn collision_index() -> CollisionIndex {
+        let mut state = TransformState::default();
+        state.set_size(Size::new(512, 512));
+        CollisionIndex::new(&state, MapMode::Static)
+    }
+
+    fn insert(index: &mut CollisionIndex, overlap_mode: OverlapMode, collision_group_id: u16) {
+        let projected = [ProjectedCollisionBox::new_box(100.0, 100.0, 200.0, 200.0)];
+        index.insert_feature(&feature(0), &projected, overlap_mode, false, 1, collision_group_id);
+    }
+
+    fn collides(
+        index: &CollisionIndex,
+        overlap_mode: OverlapMode,
+        predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
+    ) -> bool {
+        let projected = ProjectedCollisionBox::new_box(150.0, 150.0, 250.0, 250.0);
+        index.collides(overlap_mode, predicate, |grid, predicate| grid.hit_test(projected.box_(), predicate))
+    }
+
+    #[test]
+    fn overlap_mode_falls_back_to_allow_overlap() {
+        assert_eq!(OverlapMode::new(IconOverlapType::Undefined, false), OverlapMode::Never);
+        assert_eq!(OverlapMode::new(IconOverlapType::Undefined, true), OverlapMode::Always);
+        assert_eq!(OverlapMode::new(IconOverlapType::Never, true), OverlapMode::Never);
+        assert_eq!(OverlapMode::new(IconOverlapType::Always, false), OverlapMode::Always);
+        assert_eq!(OverlapMode::new(IconOverlapType::Cooperative, false), OverlapMode::Cooperative);
+    }
+
+    #[test]
+    fn modes_collide_with_a_never_box() {
+        let mut index = collision_index();
+        insert(&mut index, OverlapMode::Never, 0);
+        assert!(collides(&index, OverlapMode::Never, None));
+        assert!(!collides(&index, OverlapMode::Always, None));
+        assert!(collides(&index, OverlapMode::Cooperative, None));
+    }
+
+    #[test]
+    fn only_never_collides_with_an_overlapping_box() {
+        for placed in [OverlapMode::Always, OverlapMode::Cooperative] {
+            let mut index = collision_index();
+            insert(&mut index, placed, 0);
+            assert!(collides(&index, OverlapMode::Never, None), "never over {placed:?}");
+            assert!(!collides(&index, OverlapMode::Always, None), "always over {placed:?}");
+            assert!(!collides(&index, OverlapMode::Cooperative, None), "cooperative over {placed:?}");
+        }
+    }
+
+    #[test]
+    fn cooperative_keeps_the_collision_group_predicate() {
+        let mut index = collision_index();
+        insert(&mut index, OverlapMode::Never, 2);
+        let same_group = |feature: &IndexedSubfeature| feature.collision_group_id == 2;
+        let other_group = |feature: &IndexedSubfeature| feature.collision_group_id == 3;
+        assert!(collides(&index, OverlapMode::Cooperative, Some(&same_group)));
+        assert!(!collides(&index, OverlapMode::Cooperative, Some(&other_group)));
+    }
 }

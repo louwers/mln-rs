@@ -1,10 +1,11 @@
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::value_to_json;
 use mln_style_types::{
-    AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
-    LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType, ResamplingType,
-    RotateAnchorType, Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
-    TextTransformType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
+    IconTextFitType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType,
+    ResamplingType, RotateAnchorType, Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
+    TextJustifyType, TextTransformType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection,
+    VisibilityType,
 };
 use mln_util::string::to_string_double;
 use mln_util::{Color, Padding};
@@ -559,6 +560,7 @@ enum_value_converter!(
     CirclePitchScaleType,
     HillshadeIlluminationAnchorType,
     HillshadeMethodType,
+    IconOverlapType,
     IconTextFitType,
     LightAnchorType,
     LineCapType,

@@ -6,8 +6,9 @@ use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase
 use crate::layers::symbol_layer_impl::Impl as SymbolLayerImpl;
 use crate::properties::OverridableSection;
 use mln_style_types::{
-    AlignmentType, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
-    TextTransformType, TextVariableAnchorType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection,
+    AlignmentType, IconOverlapType, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
+    TextJustifyType, TextOverlapType, TextTransformType, TextVariableAnchorType, TextWritingModeType,
+    TranslateAnchorType, VariableAnchorOffsetCollection,
 };
 use mln_util::{Color, Padding};
 use mln_vec_map::VecSet;
@@ -46,6 +47,11 @@ crate::data_driven_layout_property!(
 crate::layout_property!(
     /// The `icon-optional` layout property.
     pub struct IconOptional: bool = false, name = "icon-optional"
+);
+
+crate::layout_property!(
+    /// The `icon-overlap` layout property.
+    pub struct IconOverlap: IconOverlapType = IconOverlapType::Undefined, name = "icon-overlap"
 );
 
 crate::data_driven_layout_property!(
@@ -177,6 +183,11 @@ crate::data_driven_layout_property!(
 crate::layout_property!(
     /// The `text-optional` layout property.
     pub struct TextOptional: bool = false, name = "text-optional"
+);
+
+crate::layout_property!(
+    /// The `text-overlap` layout property.
+    pub struct TextOverlap: TextOverlapType = TextOverlapType::Undefined, name = "text-overlap"
 );
 
 crate::layout_property!(
@@ -330,6 +341,7 @@ crate::layout_properties!(
         icon_keep_upright: IconKeepUpright,
         icon_offset: IconOffset,
         icon_optional: IconOptional,
+        icon_overlap: IconOverlap,
         icon_padding: IconPadding,
         icon_pitch_alignment: IconPitchAlignment,
         icon_rotate: IconRotate,
@@ -356,6 +368,7 @@ crate::layout_properties!(
         text_max_width: TextMaxWidth,
         text_offset: TextOffset,
         text_optional: TextOptional,
+        text_overlap: TextOverlap,
         text_padding: TextPadding,
         text_pitch_alignment: TextPitchAlignment,
         text_radial_offset: TextRadialOffset,

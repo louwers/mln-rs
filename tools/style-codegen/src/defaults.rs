@@ -308,7 +308,6 @@ pub(crate) fn rust_value(init: &Init, t: &EvaluatedType) -> String {
         (EvaluatedType::Rotation, _) => format!("Rotation::new({})", f64_literal(as_f64(init))),
         (EvaluatedType::Enum(name), Init::Enumerator(t, v)) => {
             assert_eq!(name, t, "enumerator of another enum");
-            assert_ne!(v, "Undefined", "{name} has no Undefined enumerator");
             format!("{name}::{v}")
         }
         (EvaluatedType::Color, Init::ColorBlack) => "Color::black()".into(),

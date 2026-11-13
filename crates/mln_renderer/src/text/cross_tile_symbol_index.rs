@@ -441,6 +441,7 @@ mod tests {
     use crate::geometry::anchor::Anchor;
     use crate::geometry::feature_index::IndexedSubfeature;
     use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, SymbolInstanceSharedData};
+    use crate::text::collision_index::OverlapMode;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str) -> SymbolInstance {
         let line = GeometryCoordinates::new();
@@ -454,6 +455,7 @@ mod tests {
             sort_index: 0,
             bucket_instance_id: 0,
             collision_group_id: 0,
+            overlap_mode: OverlapMode::Never,
         };
         let anchor = Anchor::new(x, y, 0.0, Some(0));
         let text_offset = [0.0f32, 0.0];

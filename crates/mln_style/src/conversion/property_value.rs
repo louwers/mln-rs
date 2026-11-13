@@ -1,9 +1,9 @@
 use mln_expression::formatted::Formatted;
 use mln_style_types::{
-    AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
-    LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType, ResamplingType,
-    Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType,
-    TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
+    IconTextFitType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType,
+    ResamplingType, Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
+    TextTransformType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::{Color, Padding};
 
@@ -50,6 +50,7 @@ no_tokens!(
     CirclePitchScaleType,
     HillshadeIlluminationAnchorType,
     HillshadeMethodType,
+    IconOverlapType,
     IconTextFitType,
     LightAnchorType,
     LineCapType,

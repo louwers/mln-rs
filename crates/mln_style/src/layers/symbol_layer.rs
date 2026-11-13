@@ -7,13 +7,13 @@ use crate::expression::{Formatted, Image};
 use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serialize_base, serialize_property};
 use crate::layers::symbol_layer_properties::{
     IconAllowOverlap, IconAnchor, IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconIgnorePlacement, IconImage,
-    IconKeepUpright, IconOffset, IconOpacity, IconOptional, IconPadding, IconPitchAlignment, IconRotate,
+    IconKeepUpright, IconOffset, IconOpacity, IconOptional, IconOverlap, IconPadding, IconPitchAlignment, IconRotate,
     IconRotationAlignment, IconSize, IconTextFit, IconTextFitPadding, IconTranslate, IconTranslateAnchor,
     SymbolAvoidEdges, SymbolPaintProperties, SymbolPlacement, SymbolScreenSpace, SymbolSortKey, SymbolSpacing,
     SymbolZOrder, TextAllowOverlap, TextAnchor, TextColor, TextField, TextFont, TextHaloBlur, TextHaloColor,
     TextHaloWidth, TextIgnorePlacement, TextJustify, TextKeepUpright, TextLetterSpacing, TextLineHeight, TextMaxAngle,
-    TextMaxWidth, TextOffset, TextOpacity, TextOptional, TextPadding, TextPitchAlignment, TextRadialOffset, TextRotate,
-    TextRotationAlignment, TextSize, TextTransform, TextTranslate, TextTranslateAnchor, TextVariableAnchor,
+    TextMaxWidth, TextOffset, TextOpacity, TextOptional, TextOverlap, TextPadding, TextPitchAlignment, TextRadialOffset,
+    TextRotate, TextRotationAlignment, TextSize, TextTransform, TextTranslate, TextTranslateAnchor, TextVariableAnchor,
     TextVariableAnchorOffset, TextWritingMode,
 };
 use crate::property_value::PropertyValue;
@@ -22,8 +22,9 @@ use crate::transition_options::TransitionOptions;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
 use mln_style_types::{
-    AlignmentType, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
-    TextTransformType, TextVariableAnchorType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection,
+    AlignmentType, IconOverlapType, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
+    TextJustifyType, TextOverlapType, TextTransformType, TextVariableAnchorType, TextWritingModeType,
+    TranslateAnchorType, VariableAnchorOffsetCollection,
 };
 use mln_util::{Color, Padding};
 use std::sync::Arc;
@@ -177,6 +178,20 @@ impl SymbolLayer {
         }
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconOptional>() = value.clone();
+        self.set_impl(impl_);
+    }
+
+    #[must_use]
+    pub fn get_icon_overlap(&self) -> &PropertyValue<IconOverlapType> {
+        self.impl_().layout.get::<IconOverlap>()
+    }
+
+    pub fn set_icon_overlap(&mut self, value: &PropertyValue<IconOverlapType>) {
+        if *value == *self.get_icon_overlap() {
+            return;
+        }
+        let mut impl_ = self.mutable_impl();
+        *impl_.layout.get_mut::<IconOverlap>() = value.clone();
         self.set_impl(impl_);
     }
 
@@ -541,6 +556,20 @@ impl SymbolLayer {
         }
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextOptional>() = value.clone();
+        self.set_impl(impl_);
+    }
+
+    #[must_use]
+    pub fn get_text_overlap(&self) -> &PropertyValue<TextOverlapType> {
+        self.impl_().layout.get::<TextOverlap>()
+    }
+
+    pub fn set_text_overlap(&mut self, value: &PropertyValue<TextOverlapType>) {
+        if *value == *self.get_text_overlap() {
+            return;
+        }
+        let mut impl_ = self.mutable_impl();
+        *impl_.layout.get_mut::<TextOverlap>() = value.clone();
         self.set_impl(impl_);
     }
 
@@ -1077,6 +1106,7 @@ enum Property {
     IconKeepUpright,
     IconOffset,
     IconOptional,
+    IconOverlap,
     IconPadding,
     IconPitchAlignment,
     IconRotate,
@@ -1103,6 +1133,7 @@ enum Property {
     TextMaxWidth,
     TextOffset,
     TextOptional,
+    TextOverlap,
     TextPadding,
     TextPitchAlignment,
     TextRadialOffset,
@@ -1152,6 +1183,7 @@ const LAYER_PROPERTIES: &[(&str, Property)] = &[
     ("icon-keep-upright", Property::IconKeepUpright),
     ("icon-offset", Property::IconOffset),
     ("icon-optional", Property::IconOptional),
+    ("icon-overlap", Property::IconOverlap),
     ("icon-padding", Property::IconPadding),
     ("icon-pitch-alignment", Property::IconPitchAlignment),
     ("icon-rotate", Property::IconRotate),
@@ -1178,6 +1210,7 @@ const LAYER_PROPERTIES: &[(&str, Property)] = &[
     ("text-max-width", Property::TextMaxWidth),
     ("text-offset", Property::TextOffset),
     ("text-optional", Property::TextOptional),
+    ("text-overlap", Property::TextOverlap),
     ("text-padding", Property::TextPadding),
     ("text-pitch-alignment", Property::TextPitchAlignment),
     ("text-radial-offset", Property::TextRadialOffset),
@@ -1235,6 +1268,7 @@ fn get_layer_property(layer: &SymbolLayer, property: Property) -> StyleProperty 
         Property::IconKeepUpright => make_style_property(layer.get_icon_keep_upright()),
         Property::IconOffset => make_style_property(layer.get_icon_offset()),
         Property::IconOptional => make_style_property(layer.get_icon_optional()),
+        Property::IconOverlap => make_style_property(layer.get_icon_overlap()),
         Property::IconPadding => make_style_property(layer.get_icon_padding()),
         Property::IconPitchAlignment => make_style_property(layer.get_icon_pitch_alignment()),
         Property::IconRotate => make_style_property(layer.get_icon_rotate()),
@@ -1261,6 +1295,7 @@ fn get_layer_property(layer: &SymbolLayer, property: Property) -> StyleProperty 
         Property::TextMaxWidth => make_style_property(layer.get_text_max_width()),
         Property::TextOffset => make_style_property(layer.get_text_offset()),
         Property::TextOptional => make_style_property(layer.get_text_optional()),
+        Property::TextOverlap => make_style_property(layer.get_text_overlap()),
         Property::TextPadding => make_style_property(layer.get_text_padding()),
         Property::TextPitchAlignment => make_style_property(layer.get_text_pitch_alignment()),
         Property::TextRadialOffset => make_style_property(layer.get_text_radial_offset()),
@@ -1574,6 +1609,16 @@ impl Layer for SymbolLayer {
             }
         }
 
+        if property == Property::IconOverlap {
+            let mut error = Error::default();
+            let Some(typed_value) = convert_property_value::<IconOverlapType>(value, &mut error, false, false) else {
+                return Some(error);
+            };
+
+            self.set_icon_overlap(&typed_value);
+            return None;
+        }
+
         if property == Property::IconPadding {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Padding>(value, &mut error, true, false) else {
@@ -1709,6 +1754,16 @@ impl Layer for SymbolLayer {
             };
 
             self.set_text_justify(&typed_value);
+            return None;
+        }
+
+        if property == Property::TextOverlap {
+            let mut error = Error::default();
+            let Some(typed_value) = convert_property_value::<TextOverlapType>(value, &mut error, false, false) else {
+                return Some(error);
+            };
+
+            self.set_text_overlap(&typed_value);
             return None;
         }
 

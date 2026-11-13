@@ -29,9 +29,9 @@ use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, Tra
 use mln_math::{fmaxf, fminf};
 use mln_style::TransitionOptions;
 use mln_style::layers::symbol_layer_properties::{
-    IconAllowOverlap, IconIgnorePlacement, IconKeepUpright, IconOptional, IconPitchAlignment, IconRotationAlignment,
-    IconTextFit, SymbolAvoidEdges, SymbolLayoutProperties, SymbolPlacement, SymbolScreenSpace, SymbolZOrder,
-    TextAllowOverlap, TextIgnorePlacement, TextKeepUpright, TextOptional, TextPitchAlignment, TextRotationAlignment,
+    IconIgnorePlacement, IconKeepUpright, IconOptional, IconPitchAlignment, IconRotationAlignment, IconTextFit,
+    SymbolAvoidEdges, SymbolLayoutProperties, SymbolPlacement, SymbolScreenSpace, SymbolZOrder, TextIgnorePlacement,
+    TextKeepUpright, TextOptional, TextPitchAlignment, TextRotationAlignment,
 };
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
@@ -60,7 +60,9 @@ use crate::layout::symbol_projection::{
 use crate::render_layer::{BucketPlacementData, RenderLayer, RenderLayerPtr, SymbolTranslate};
 use crate::render_tile::RenderTile;
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
-use crate::text::collision_index::{CollisionBoundaries, CollisionIndex, IntersectStatus, PlacedFeatureResult};
+use crate::text::collision_index::{
+    CollisionBoundaries, CollisionIndex, IntersectStatus, OverlapMode, PlacedFeatureResult,
+};
 use crate::update_parameters::UpdateParameters;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -300,18 +302,18 @@ pub(crate) struct PlacementContext {
     pub(crate) partially_evaluated_text_size: ZoomEvaluatedSize,
     pub(crate) partially_evaluated_icon_size: ZoomEvaluatedSize,
 
-    pub(crate) text_allow_overlap: bool,
-    pub(crate) icon_allow_overlap: bool,
+    pub(crate) text_overlap_mode: OverlapMode,
+    pub(crate) icon_overlap_mode: OverlapMode,
     // This logic is similar to the "defaultOpacityState" logic below in
     // updateBucketOpacities If we know a symbol is always supposed to show,
     // force it to be marked visible even if it wasn't placed into the collision
     // index (because some or all of it was outside the range of the collision
     // grid). There is a subtle edge case here we're accepting:
-    //  Symbol A has text-allow-overlap: true, icon-allow-overlap: true,
+    //  Symbol A has text-overlap: always, icon-overlap: always,
     //  icon-optional: false A's icon is outside the grid, so doesn't get placed
     //  A's text would be inside grid, but doesn't get placed because of
-    //  icon-optional: false We still show A because of the allow-overlap
-    //  settings. Symbol B has allow-overlap: false, and gets placed where A's
+    //  icon-optional: false We still show A because of the overlap
+    //  settings. Symbol B has overlap: never, and gets placed where A's
     //  text would be On panning in, there is a short period when Symbol B and
     //  Symbol A will overlap This is the reverse of our normal policy of "fade
     //  in on pan", but should look like any other collision and hopefully not
@@ -360,14 +362,16 @@ impl PlacementContext {
         let partially_evaluated_text_size = bucket.text_size_binder.evaluate_for_zoom(placement_zoom);
         let partially_evaluated_icon_size = bucket.icon_size_binder.evaluate_for_zoom(placement_zoom);
 
-        let text_allow_overlap = *layout.get::<TextAllowOverlap>();
-        let icon_allow_overlap = *layout.get::<IconAllowOverlap>();
-        let always_show_text = text_allow_overlap
-            && (icon_allow_overlap
+        let text_overlap_mode = OverlapMode::text(layout);
+        let icon_overlap_mode = OverlapMode::icon(layout);
+        let text_always_overlap = text_overlap_mode == OverlapMode::Always;
+        let icon_always_overlap = icon_overlap_mode == OverlapMode::Always;
+        let always_show_text = text_always_overlap
+            && (icon_always_overlap
                 || !(bucket.has_icon_data() || bucket.has_sdf_icon_data())
                 || *layout.get::<IconOptional>());
         let always_show_icon =
-            icon_allow_overlap && (text_allow_overlap || !bucket.has_text_data() || *layout.get::<TextOptional>());
+            icon_always_overlap && (text_always_overlap || !bucket.has_text_data() || *layout.get::<TextOptional>());
 
         let has_icon_text_fit = *layout.get::<IconTextFit>() != IconTextFitType::None;
 
@@ -390,8 +394,8 @@ impl PlacementContext {
             collision_group,
             partially_evaluated_text_size,
             partially_evaluated_icon_size,
-            text_allow_overlap,
-            icon_allow_overlap,
+            text_overlap_mode,
+            icon_overlap_mode,
             always_show_text,
             always_show_icon,
             has_icon_text_fit,
@@ -1053,7 +1057,7 @@ impl Placement {
                             placed_symbol,
                             ctx.scale,
                             font_size,
-                            ctx.text_allow_overlap,
+                            ctx.text_overlap_mode,
                             ctx.pitch_text_with_map,
                             ctx.rotate_text_with_map,
                             this.show_collision_boxes,
@@ -1119,8 +1123,9 @@ impl Placement {
                     }
                 }
 
-                let do_variable_icon_placement =
-                    ctx.has_icon_text_fit && !ctx.icon_allow_overlap && symbol_instance.placed_icon_index.is_some();
+                let do_variable_icon_placement = ctx.has_icon_text_fit
+                    && ctx.icon_overlap_mode == OverlapMode::Never
+                    && symbol_instance.placed_icon_index.is_some();
                 let variable_text_anchors_ref = &variable_text_anchors;
                 let shift_ref = &shift;
                 let place_feature_for_variable_anchors =
@@ -1219,7 +1224,7 @@ impl Placement {
                     placed_symbol,
                     ctx.scale,
                     font_size,
-                    ctx.icon_allow_overlap,
+                    ctx.icon_overlap_mode,
                     ctx.pitch_text_with_map,
                     ctx.rotate_text_with_map,
                     this.show_collision_boxes,
@@ -1262,6 +1267,7 @@ impl Placement {
             self.collision_index.insert_feature(
                 feature,
                 &self.text_boxes,
+                ctx.text_overlap_mode,
                 *ctx.get_layout().get::<TextIgnorePlacement>(),
                 bucket.bucket_instance_id,
                 ctx.collision_group.0,
@@ -1276,6 +1282,7 @@ impl Placement {
             self.collision_index.insert_feature(
                 feature,
                 &self.icon_boxes,
+                ctx.icon_overlap_mode,
                 *ctx.get_layout().get::<IconIgnorePlacement>(),
                 bucket.bucket_instance_id,
                 ctx.collision_group.0,
@@ -1348,7 +1355,11 @@ impl Placement {
         let text_box_scale = symbol_instance.get_text_box_scale();
         let mut placed_feature = PlacedFeatureResult::default();
         let anchors_size = variable_text_anchors.len();
-        let placement_attempts = if ctx.text_allow_overlap { anchors_size * 2 } else { anchors_size };
+        // The first pass places the text where it overlaps nothing; a second
+        // pass, unless the text never overlaps, lets it overlap as its mode
+        // allows.
+        let placement_attempts =
+            if ctx.text_overlap_mode == OverlapMode::Never { anchors_size } else { anchors_size * 2 };
         for i in 0..placement_attempts {
             // when anchorsSize is 0, placementAttempts is also 0,
             // so this code would not be reached
@@ -1358,7 +1369,7 @@ impl Placement {
                 .as_ref()
                 .expect("textVariableAnchorOffset")
                 .get_offset_by_anchor(&anchor);
-            let allow_overlap = i >= anchors_size;
+            let overlap_mode = if i >= anchors_size { ctx.text_overlap_mode } else { OverlapMode::Never };
             shift.set(calculate_variable_layout_offset_unrotated(
                 anchor,
                 width,
@@ -1398,7 +1409,7 @@ impl Placement {
                 placed_symbol,
                 ctx.scale,
                 font_size,
-                allow_overlap,
+                overlap_mode,
                 ctx.pitch_text_with_map,
                 ctx.rotate_text_with_map,
                 self.show_collision_boxes,
@@ -1418,7 +1429,7 @@ impl Placement {
                     placed_symbol,
                     ctx.scale,
                     font_size,
-                    ctx.icon_allow_overlap,
+                    ctx.icon_overlap_mode,
                     ctx.pitch_text_with_map, // TODO: shall it be pitchIconWithMap?
                     ctx.rotate_text_with_map,
                     self.show_collision_boxes,
@@ -1932,25 +1943,25 @@ impl Placement {
 
         let duplicate_opacity_state = JointOpacityState::new(false, false, true);
 
-        let text_allow_overlap = *layout.get::<TextAllowOverlap>();
-        let icon_allow_overlap = *layout.get::<IconAllowOverlap>();
+        let text_always_overlap = OverlapMode::text(layout) == OverlapMode::Always;
+        let icon_always_overlap = OverlapMode::icon(layout) == OverlapMode::Always;
         let rotate_with_map = *layout.get::<TextRotationAlignment>() == AlignmentType::Map;
         let pitch_with_map = *layout.get::<TextPitchAlignment>() == AlignmentType::Map;
         let has_icon_text_fit = *layout.get::<IconTextFit>() != IconTextFitType::None;
         let screen_space = *layout.get::<SymbolScreenSpace>();
 
-        // If allow-overlap is true, we can show symbols before placement runs on them
+        // If overlap is always, we can show symbols before placement runs on them
         // But we have to wait for placement if we potentially depend on a paired icon/text
-        // with allow-overlap: false.
+        // with another overlap mode.
         // See https://github.com/mapbox/mapbox-gl-native/issues/12483
         // Prevent a flickering issue when showing a symbol allowing overlap.
         let default_opacity_state = JointOpacityState::new(
             (screen_space || bs.just_reloaded)
-                && text_allow_overlap
-                && (icon_allow_overlap || !(has_icon || has_sdf_icon) || *layout.get::<IconOptional>()),
+                && text_always_overlap
+                && (icon_always_overlap || !(has_icon || has_sdf_icon) || *layout.get::<IconOptional>()),
             (screen_space || bs.just_reloaded)
-                && icon_allow_overlap
-                && (text_allow_overlap || !has_text || *layout.get::<TextOptional>()),
+                && icon_always_overlap
+                && (text_always_overlap || !has_text || *layout.get::<TextOptional>()),
             true,
         );
 
@@ -2557,7 +2568,7 @@ impl Placement {
 
         let pitch_text_with_map = ctx.pitch_text_with_map;
         let rotate_text_with_map = ctx.rotate_text_with_map;
-        let variable_icon_placement = ctx.has_icon_text_fit && !ctx.icon_allow_overlap;
+        let variable_icon_placement = ctx.has_icon_text_fit && ctx.icon_overlap_mode == OverlapMode::Never;
         let bearing = ctx.bearing as f32;
         let symbol_intersects_tile_edges = |symbol: &SymbolInstance| -> IntersectStatus {
             let mut result = IntersectStatus::default();
