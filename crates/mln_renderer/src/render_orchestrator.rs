@@ -803,6 +803,7 @@ impl RenderOrchestrator {
             if render_source.is_enabled() {
                 render_source.prepare(&SourcePrepareParameters {
                     transform: &render_tree_parameters.transform_params,
+                    image_manager: &self.image_manager,
                     debug_options: update_parameters.debug_options,
                     source_name: name.clone(),
                 });

@@ -18,6 +18,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 
+use crate::image_manager::ImageManager;
 use crate::paint_parameters::TransformParameters;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
@@ -30,6 +31,7 @@ use crate::tile_parameters::TileParameters;
 
 pub(crate) struct SourcePrepareParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
+    pub(crate) image_manager: &'a ImageManager,
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) source_name: String,
 }

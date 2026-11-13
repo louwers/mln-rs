@@ -342,11 +342,22 @@ impl ImageManager {
         Arc::clone(&self.state.borrow().available_images)
     }
 
-    /// The versions of the updated images, by image id. Read by
-    /// `GeometryTileRenderData::prepare`.
+    /// The versions of the updated images, by image id.
     #[cfg(test)]
     pub(crate) fn updated_image_versions(&self) -> ImageVersionMap {
         self.state.borrow().updated_image_versions.clone()
+    }
+
+    /// Calls `f` with each image that replaced one of the same size, and its
+    /// version: the number of such replacements since the image was added
+    /// or last changed size.
+    pub(crate) fn for_each_updated_image(&self, mut f: impl FnMut(&Arc<ImageImpl>, u32)) {
+        let state = self.state.borrow();
+        for (id, &version) in &state.updated_image_versions {
+            if let Some(image) = state.images.get(id) {
+                f(image, version);
+            }
+        }
     }
 
     pub(crate) fn clear(&self) {

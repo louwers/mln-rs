@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use mln_style_types::image::{ImageMap, ImagePosition, Impl as ImageImpl};
+use mln_style_types::image::{ImageMap, ImagePosition, ImageType, Impl as ImageImpl};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
@@ -221,4 +221,44 @@ fn many_live_icon_revisions_get_their_own_allocations() {
         .map(|version| test.upload_icon(&make_image("marker", false), version).texture_handles[0].get_id())
         .collect();
     assert_eq!(ids.len(), REVISIONS as usize);
+}
+
+/// A 16×16 image named `id` whose pixel (x, y) is `[x, y, 0, 255]`.
+fn make_gradient_image(id: &str) -> Arc<ImageImpl> {
+    let mut image = PremultipliedImage::new(Size::new(16, 16));
+    for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
+        pixel.copy_from_slice(&[(i % 16) as u8, (i / 16) as u8, 0, 255]);
+    }
+    Arc::new(ImageImpl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None).expect("image"))
+}
+
+// Port-only: a same-size image update copies the new pixels into the bin
+// that the layout holds, with a pattern's wrapped edges.
+#[test]
+fn patched_pattern_is_queued_for_its_bin() {
+    let mut test = DynamicTextureAtlasTest::new();
+    let image_atlas = test.upload_pattern(&make_image("pattern", false));
+    let texture = image_atlas.dynamic_texture.clone().expect("dynamic texture");
+    texture.take_uploads();
+
+    assert!(!image_atlas.patch_image(&make_sized_image("pattern", false, Size::new(8, 8)), ImageType::Pattern));
+    assert!(!image_atlas.patch_image(&make_image("pattern", false), ImageType::Icon));
+    assert!(!image_atlas.patch_image(&make_image("other", false), ImageType::Pattern));
+    assert!(texture.take_uploads().is_empty());
+
+    assert!(image_atlas.patch_image(&make_gradient_image("pattern"), ImageType::Pattern));
+    let uploads = texture.take_uploads();
+    assert_eq!(uploads.len(), 1);
+    let (id, rect, data) = &uploads[0];
+    let tex_handle = image_atlas.texture_handles[0];
+    assert_eq!((*id, rect), (tex_handle.get_id(), tex_handle.get_rectangle()));
+
+    // The image starts two pixels in: one of padding, one of wrapped edge.
+    let pixel = |x: usize, y: usize| {
+        let i = (y * usize::from(rect.w) + x) * 4;
+        &data[i..i + 4]
+    };
+    assert_eq!(pixel(2 + 3, 2 + 5), [3, 5, 0, 255]);
+    assert_eq!(pixel(1, 2 + 5), [15, 5, 0, 255]);
+    assert_eq!(pixel(2 + 3, 2 + 16), [3, 0, 0, 255]);
 }

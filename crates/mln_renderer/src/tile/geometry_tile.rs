@@ -19,9 +19,6 @@
 // (getGlyphs/getImages through the managers, onGlyphsAvailable/
 // onImagesAvailable forwarded to the worker), and LayoutResult carries the
 // glyph/image atlases of the shared DynamicTextureAtlas.
-//
-// Not supported: image patches in GeometryTileRenderData (same-size runtime
-// image updates).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -38,13 +35,14 @@ use mln_style::layer;
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
-use mln_style_types::image::{ImageMap, ImagePosition};
+use mln_style_types::image::{ImageMap, ImagePosition, ImageType};
 use mln_text::BiDi;
 use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
@@ -74,6 +72,47 @@ pub(crate) struct LayoutAtlases {
     pub(crate) image_atlas: ImageAtlas,
     #[serde(skip)]
     pub(crate) dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
+    /// The image versions that `update_images` last saw, where they differ
+    /// from the layout's.
+    #[serde(skip)]
+    seen_image_versions: Mutex<SeenImageVersions>,
+}
+
+#[derive(Default)]
+struct SeenImageVersions {
+    icons: ImageVersionMap,
+    patterns: ImageVersionMap,
+}
+
+impl LayoutAtlases {
+    /// Copies the images that replaced ones of the same size into their
+    /// bins, so the layout shows them without laying out again.
+    fn update_images(&self, image_manager: &ImageManager) {
+        let image_atlas = &self.image_atlas;
+        if image_atlas.icon_positions.is_empty() && image_atlas.pattern_positions.is_empty() {
+            return;
+        }
+        let mut seen = self.seen_image_versions.lock();
+        let SeenImageVersions { icons, patterns } = &mut *seen;
+        image_manager.for_each_updated_image(|image, version| {
+            for (type_, positions, seen) in [
+                (ImageType::Icon, &image_atlas.icon_positions, &mut *icons),
+                (ImageType::Pattern, &image_atlas.pattern_positions, &mut *patterns),
+            ] {
+                let Some(position) = positions.get(&image.id) else {
+                    continue;
+                };
+                // Versions restart when an image changes size, so any
+                // difference means new pixels. An image of another size
+                // can't go in the bin, and waits for the layout that its
+                // size change started.
+                if seen.get(&image.id).copied().unwrap_or(position.version) != version {
+                    image_atlas.patch_image(image, type_);
+                    seen.insert(image.id.clone(), version);
+                }
+            }
+        });
+    }
 }
 
 impl Drop for LayoutAtlases {
@@ -104,7 +143,12 @@ impl LayoutResult {
         LayoutResult {
             layer_render_data,
             feature_index,
-            atlases: Arc::new(LayoutAtlases { glyph_atlas, image_atlas, dynamic_texture_atlas }),
+            atlases: Arc::new(LayoutAtlases {
+                glyph_atlas,
+                image_atlas,
+                dynamic_texture_atlas,
+                seen_image_versions: Mutex::default(),
+            }),
         }
     }
 
@@ -187,9 +231,9 @@ impl TileRenderData for GeometryTileRenderData {
         }
     }
 
-    fn prepare(&mut self, _parameters: &SourcePrepareParameters<'_>) {
-        if self.layout_result.is_none() {
-            // return
+    fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>) {
+        if let Some(layout_result) = &self.layout_result {
+            layout_result.atlases.update_images(parameters.image_manager);
         }
     }
 }

@@ -211,12 +211,13 @@ impl DynamicTexture {
         uploads
     }
 
-    /// Port-only: queues pixels for a bin that the texture this one mirrors
-    /// reserved (`take_uploads`). They replace whatever is still queued for
-    /// the bin or for the space it takes: the mirrored texture reserved that
-    /// space again only after freeing it, so pixels queued there before
-    /// belong to a bin that is gone, and would otherwise be uploaded over
-    /// these in whatever order the queue is drained.
+    /// Queues new pixels for a bin: a same-size image update, or a bin that
+    /// the texture this one mirrors reserved (`take_uploads`). They replace
+    /// whatever is still queued for the bin or for the space it takes: a
+    /// mirrored texture reserves a space again only after freeing it, so
+    /// pixels queued there before belong to a bin that is gone, and would
+    /// otherwise be uploaded over these in whatever order the queue is
+    /// drained.
     pub(crate) fn queue_upload(&self, id: i32, rect: RectU16, data: Vec<u8>) {
         let span = |start: u16, length: u16| u32::from(start)..u32::from(start) + u32::from(length);
         let intersect = |a: std::ops::Range<u32>, b: std::ops::Range<u32>| a.start < b.end && b.start < a.end;

@@ -59,6 +59,28 @@ fn rect_without_extra_padding(rect: RectU16) -> RectU16 {
     }
 }
 
+/// `image` placed in a bin of `bin`'s size. A pattern also gets a pixel of
+/// its opposite edge on each side, so that it tiles without seams.
+fn padded_image(image: &PremultipliedImage, bin: RectU16, type_: ImageType) -> PremultipliedImage {
+    let mut padded = PremultipliedImage::new(Size::new(u32::from(bin.w), u32::from(bin.h)));
+    padded.fill(0);
+    let x = u32::from(PADDING);
+    let y = u32::from(PADDING);
+    let _ = PremultipliedImage::copy(image, &mut padded, Point::new(0, 0), Point::new(x, y), image.size);
+
+    if type_ == ImageType::Pattern {
+        let w = image.size.width;
+        let h = image.size.height;
+        let _ =
+            PremultipliedImage::copy(image, &mut padded, Point::new(0, h - 1), Point::new(x, y - 1), Size::new(w, 1)); // T
+        let _ = PremultipliedImage::copy(image, &mut padded, Point::new(0, 0), Point::new(x, y + h), Size::new(w, 1)); // B
+        let _ =
+            PremultipliedImage::copy(image, &mut padded, Point::new(w - 1, 0), Point::new(x - 1, y), Size::new(1, h)); // L
+        let _ = PremultipliedImage::copy(image, &mut padded, Point::new(0, 0), Point::new(x + w, y), Size::new(1, h)); // R
+    }
+    padded
+}
+
 /// Where a tile's glyphs are in the dynamic texture. Serde writes the
 /// texture by key, as the worker instance's (`tile/worker_codec`).
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -80,6 +102,39 @@ pub(crate) struct ImageAtlas {
     pub(crate) texture_handles: Vec<TextureHandle>,
     #[serde(with = "fields::texture")]
     pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
+}
+
+impl ImageAtlas {
+    /// Copies `image` into the bin of the `type_` image with its id, where
+    /// the next upload pass puts it on the texture. False when this atlas
+    /// has no such image at `image`'s size.
+    pub(crate) fn patch_image(&self, image: &ImageImpl, type_: ImageType) -> bool {
+        let positions = match type_ {
+            ImageType::Icon => &self.icon_positions,
+            ImageType::Pattern => &self.pattern_positions,
+        };
+        let (Some(position), Some(texture)) = (positions.get(&image.id), &self.dynamic_texture) else {
+            return false;
+        };
+        let rect = position.padded_rect;
+        let padding = 2 * u32::from(ImagePosition::PADDING);
+        if u32::from(rect.w) != image.image.size.width + padding
+            || u32::from(rect.h) != image.image.size.height + padding
+        {
+            return false;
+        }
+        let bin = RectU16 {
+            x: rect.x - EXTRA_PADDING,
+            y: rect.y - EXTRA_PADDING,
+            w: rect.w + 2 * EXTRA_PADDING,
+            h: rect.h + 2 * EXTRA_PADDING,
+        };
+        let Some(tex_handle) = self.texture_handles.iter().find(|handle| *handle.get_rectangle() == bin) else {
+            return false;
+        };
+        texture.queue_upload(tex_handle.get_id(), bin, padded_image(&image.image, bin, type_).data);
+        true
+    }
 }
 
 /// Identifies an image's allocation: (dynamic texture, image revision,
@@ -340,16 +395,7 @@ impl DynamicTextureAtlas {
             let rect = *tex_handle.get_rectangle();
 
             if tex_handle.is_upload_needed() {
-                let mut padded_image = PremultipliedImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
-                padded_image.fill(0);
-                let _ = PremultipliedImage::copy(
-                    &icon.image,
-                    &mut padded_image,
-                    Point::new(0, 0),
-                    Point::new(u32::from(PADDING), u32::from(PADDING)),
-                    icon.image.size,
-                );
-                texture.upload_image(&padded_image.data, &mut tex_handle);
+                texture.upload_image(&padded_image(&icon.image, rect, ImageType::Icon).data, &mut tex_handle);
             }
             image_atlas.texture_handles.push(tex_handle);
             let version = version_map.get(&icon.id).copied().unwrap_or(0);
@@ -364,53 +410,7 @@ impl DynamicTextureAtlas {
             let rect = *tex_handle.get_rectangle();
 
             if tex_handle.is_upload_needed() {
-                let mut padded_image = PremultipliedImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
-                padded_image.fill(0);
-                let src = &pattern.image;
-                let _ = PremultipliedImage::copy(
-                    src,
-                    &mut padded_image,
-                    Point::new(0, 0),
-                    Point::new(u32::from(PADDING), u32::from(PADDING)),
-                    src.size,
-                );
-
-                let x = u32::from(PADDING);
-                let y = u32::from(PADDING);
-                let w = src.size.width;
-                let h = src.size.height;
-
-                // Add 1 pixel wrapped padding on each side of the image.
-                let _ = PremultipliedImage::copy(
-                    src,
-                    &mut padded_image,
-                    Point::new(0, h - 1),
-                    Point::new(x, y - 1),
-                    Size::new(w, 1),
-                ); // T
-                let _ = PremultipliedImage::copy(
-                    src,
-                    &mut padded_image,
-                    Point::new(0, 0),
-                    Point::new(x, y + h),
-                    Size::new(w, 1),
-                ); // B
-                let _ = PremultipliedImage::copy(
-                    src,
-                    &mut padded_image,
-                    Point::new(w - 1, 0),
-                    Point::new(x - 1, y),
-                    Size::new(1, h),
-                ); // L
-                let _ = PremultipliedImage::copy(
-                    src,
-                    &mut padded_image,
-                    Point::new(0, 0),
-                    Point::new(x + w, y),
-                    Size::new(1, h),
-                ); // R
-
-                texture.upload_image(&padded_image.data, &mut tex_handle);
+                texture.upload_image(&padded_image(&pattern.image, rect, ImageType::Pattern).data, &mut tex_handle);
             }
             image_atlas.texture_handles.push(tex_handle);
             let version = version_map.get(&pattern.id).copied().unwrap_or(0);
