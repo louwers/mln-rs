@@ -4,8 +4,6 @@
 // between the projection's far depth and 1. A backend that this build or
 // machine lacks skips its cases.
 
-#![expect(unsafe_code, reason = "the tests read back the frames' depth through each backend's API")]
-
 mod support;
 
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
@@ -182,6 +180,7 @@ fn device_of(backend: mln_runtime::BackendType) -> Option<Device> {
 }
 
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+#[expect(unsafe_code, reason = "the tests make the host's images and read back their depth through ash")]
 mod vulkan {
     use mln_runtime::{BackendType, BorrowedRing, ExportKind, ExportKinds, ExportedImage, ExportedRing, NativeTexture};
     use mln_vulkan::ash::vk::Handle as _;
@@ -583,6 +582,7 @@ fn a_webgpu_rings_depth_textures_hold_the_frames_depth() {
 }
 
 #[cfg(all(feature = "gl", target_os = "linux"))]
+#[expect(unsafe_code, reason = "the tests make the host's context and read back its depth through EGL and OpenGL")]
 mod gl {
     use std::ptr::NonNull;
 

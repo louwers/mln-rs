@@ -170,10 +170,6 @@ impl FrameTexture {
 }
 
 /// `texture`, which `device` drew into, with the device.
-#[cfg_attr(
-    target_family = "wasm",
-    expect(unused_variables, reason = "the browser build has no native textures to describe")
-)]
 fn native_kind(texture: NativeTexture, device: &Device) -> Option<FrameTextureKind> {
     match (texture, device) {
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]

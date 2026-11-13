@@ -2,8 +2,6 @@
 // commands, in the map's render pass, at its place among the map's layers: over
 // a red background and under a half-transparent blue one, or over both.
 
-#![expect(unsafe_code, reason = "the hosts draw through each backend's own API")]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -195,6 +193,7 @@ mod webgpu {
 }
 
 #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+#[expect(unsafe_code, reason = "the host draws through ash")]
 mod vulkan {
     use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_vulkan::ash::{self, vk};
@@ -348,6 +347,7 @@ mod vulkan {
 }
 
 #[cfg(all(unix, not(target_vendor = "apple")))]
+#[expect(unsafe_code, reason = "the host draws through glow")]
 mod gl {
     use glow::HasContext as _;
     use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};

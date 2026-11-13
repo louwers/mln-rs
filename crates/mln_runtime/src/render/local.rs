@@ -16,7 +16,6 @@
     target_family = "wasm",
     expect(
         unused_macros,
-        unused_variables,
         unused_imports,
         reason = "the browser build has only canvases' backends, and none of the targets that the others make"
     )
@@ -292,8 +291,8 @@ impl Backend {
     /// A backend on `device`, for offscreen targets and the surfaces that
     /// the device's backend makes on it.
     #[cfg_attr(
-        target_family = "wasm",
-        expect(clippy::unnecessary_wraps, reason = "the browser's backends can't fail to start")
+        not(any(feature = "gl", all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))),
+        expect(clippy::unnecessary_wraps, reason = "only Vulkan and OpenGL backends can fail to start")
     )]
     fn new(device: &Device) -> Result<Backend, Error> {
         match *device {

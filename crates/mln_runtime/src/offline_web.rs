@@ -23,7 +23,6 @@ fn no_database<T>(runtime: &Runtime) -> Result<T, Error> {
     Err(Error::unsupported("the browser build has no cache database, so no offline regions"))
 }
 
-#[expect(clippy::needless_pass_by_value, reason = "the signatures of offline.rs")]
 impl<'a> Offline<'a> {
     pub(crate) fn new(runtime: &'a Runtime) -> Self {
         Offline { runtime }
