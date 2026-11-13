@@ -10,13 +10,16 @@ use core::ffi::c_void;
 use std::sync::Arc;
 
 use mln_util::ErrorKind;
+use mln_util::logging::{Event, Log};
 
 use crate::abi;
 use crate::buffer::{LentText, Strided};
 use crate::callback::{self, UserData};
 use crate::delivery::{Call, Hold, Queue};
 use crate::error::Error;
-use crate::generated::types::{MLN_STATUS_OK, mln_buffer_view, mln_completion, mln_completion_result};
+use crate::generated::types::{
+    MLN_STATUS_CANCELLED, MLN_STATUS_OK, mln_buffer_view, mln_completion, mln_completion_result,
+};
 
 /// The generations that a map command's completion reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -203,17 +206,32 @@ impl Completion {
 
 /// Delivers the result of a runtime command to `sink` once it arrives:
 /// `finish` turns it into the completion's result and generations, on the
-/// thread that resolves it. Without a sink the result goes nowhere.
+/// thread that resolves it. Without a sink, a failure that isn't a
+/// cancellation is logged as one warning, so it isn't lost.
 pub(crate) fn forward<T: Send + 'static, V: CompletionValue>(
     completion: mln_runtime::Completion<T>,
     sink: Option<Completion>,
     finish: impl FnOnce(Result<T, mln_util::Error>) -> (Result<V, Error>, Generations) + Send + 'static,
 ) {
-    let Some(sink) = sink else { return };
     completion.on_complete(move |result| {
         let (result, generations) = finish(result);
-        sink.complete(result, generations);
+        match sink {
+            Some(sink) => sink.complete(result, generations),
+            None => {
+                if let Err(error) = result {
+                    log_discarded(&error);
+                }
+            }
+        }
     });
+}
+
+/// Logs the failure of a command whose caller passed no completion.
+fn log_discarded(error: &Error) {
+    let status = error.status();
+    if status != MLN_STATUS_CANCELLED {
+        Log::warning(Event::General, format!("discarded command failed (status {status}): {}", error.message()));
+    }
 }
 
 impl Drop for Completion {
@@ -232,7 +250,7 @@ mod tests {
     use super::*;
     use crate::delivery::tests::{Log, queue, queue_with_abandon};
     use crate::delivery::{mln_delivery_queue_dispatch, mln_delivery_queue_release};
-    use crate::generated::types::{MLN_STATUS_CANCELLED, MLN_STATUS_NOT_FOUND, mln_status};
+    use crate::generated::types::{MLN_STATUS_INVALID_STATE, MLN_STATUS_NOT_FOUND, mln_status};
     use crate::lock;
 
     /// What a completion callback saw.
@@ -347,6 +365,35 @@ mod tests {
         drop(pending(&descriptor(user_data, 0)).accept());
         assert_eq!(log.take(), "1c1r");
         assert_eq!(seen(user_data)[0].status, MLN_STATUS_CANCELLED);
+    }
+
+    /// Collects the warnings logged on this thread.
+    struct Warnings(Arc<Mutex<Vec<String>>>);
+
+    impl mln_util::logging::Observer for Warnings {
+        fn on_record(&self, severity: mln_util::logging::EventSeverity, event: Event, _: i64, msg: &str) -> bool {
+            if severity == mln_util::logging::EventSeverity::Warning && event == Event::General {
+                lock(&self.0).push(msg.to_owned());
+            }
+            true
+        }
+    }
+
+    #[test]
+    fn a_command_without_a_completion_logs_its_failure_as_a_warning() {
+        let warnings = Arc::new(Mutex::new(Vec::new()));
+        let previous = mln_util::logging::Log::set_thread_observer(Some(Box::new(Warnings(warnings.clone()))));
+        let finish = |result: Result<(), mln_util::Error>| (result.map_err(Error::from), Generations::default());
+        forward(mln_runtime::Completion::ready(Ok(())), None, finish);
+        let failed = mln_util::Error::new(ErrorKind::InvalidState, "map has no open command group");
+        forward(mln_runtime::Completion::ready(Err(failed)), None, finish);
+        let cancelled = mln_util::Error::new(ErrorKind::Cancelled, "the map was released");
+        forward(mln_runtime::Completion::ready(Err(cancelled)), None, finish);
+        drop(mln_util::logging::Log::set_thread_observer(previous));
+        assert_eq!(
+            [format!("discarded command failed (status {MLN_STATUS_INVALID_STATE}): map has no open command group")],
+            lock(&warnings).as_slice()
+        );
     }
 
     #[test]
