@@ -26,12 +26,11 @@
 //! module, and nothing waits.
 
 #![expect(unsafe_code, reason = "every export takes raw pointers from C callers")]
-#![cfg_attr(
-    not(target_family = "wasm"),
-    expect(
-        trivial_numeric_casts,
-        reason = "a cast between C's types can be to the same type on one platform only: `c_char` is signed on some and unsigned on others, `c_ulong` 32 or 64 bits"
-    )
+// Whether a cast between C's types is trivial depends on the target, so
+// no `expect` holds on every one.
+#![allow(
+    trivial_numeric_casts,
+    reason = "a cast between C's types can be to the same type on one platform only: `c_char` is signed on some and unsigned on others, `c_ulong` 32 or 64 bits"
 )]
 
 #[macro_use]
