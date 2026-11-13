@@ -10,7 +10,7 @@ use mln_expression::expression::{evaluate_feature_with_canonical, evaluate_featu
 use crate::parser::{
     TestData, TestResult, compiled_to_value, expression_value_to_value, parse_expression, to_document, to_json,
 };
-use crate::test_runner_common::{deep_equal_opt, tokenize};
+use crate::test_runner_common::{color_output_equal, deep_equal, deep_equal_opt, tokenize};
 
 #[derive(Clone, Debug, Default)]
 pub struct TestRunOutput {
@@ -19,6 +19,9 @@ pub struct TestRunOutput {
     pub text: String,
     pub expression: String,
     pub serialized: String,
+    /// When the test fails only because some inputs evaluate differently,
+    /// their indices in the fixture's `inputs`; empty otherwise.
+    pub failed_inputs: Vec<usize>,
 }
 
 #[derive(Default)]
@@ -69,6 +72,19 @@ fn simple_diff(result: &Value, expected: &Value) -> String {
         }
     }
     diff
+}
+
+/// The indices of the inputs whose outputs differ from the expected ones, or
+/// `None` when the outputs don't line up with them.
+fn differing_inputs(outputs: Option<&Value>, expected: Option<&Value>, is_color: bool) -> Option<Vec<usize>> {
+    let equal = if is_color { color_output_equal } else { deep_equal };
+    match (outputs, expected) {
+        (None, None) => Some(Vec::new()),
+        (Some(Value::Array(outputs)), Some(Value::Array(expected))) if outputs.len() == expected.len() => {
+            Some((0..outputs.len()).filter(|&i| !equal(&outputs[i], &expected[i])).collect())
+        }
+        _ => None,
+    }
 }
 
 fn rewrite_roundtripped_type(expected: &str, actual: &mut String) {
@@ -139,20 +155,37 @@ pub fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
         }
     }
 
+    // GL JS compares every number to 6 significant figures; colors here also
+    // absorb this port's f32 rounding (`color_output_equal`).
+    let is_color = data.expected.compiled.serialized_type == "color";
     let compile_ok = data.result.compiled == data.expected.compiled;
-    let eval_ok = compile_ok && deep_equal_opt(&data.result.outputs, &data.expected.outputs);
+    let eval_diff = differing_inputs(data.result.outputs.as_ref(), data.expected.outputs.as_ref(), is_color);
+    let eval_ok = compile_ok && eval_diff.as_ref().is_some_and(Vec::is_empty);
 
     let mut recompile_ok = true;
     let mut round_trip_ok = true;
     let mut serialization_ok = true;
+    let mut round_trip_diff = Some(Vec::new());
 
     if data.expected.compiled.success {
         serialization_ok = compile_ok && deep_equal_opt(&data.result.serialized, &data.expected.serialized);
         recompile_ok = compile_ok && data.recompiled.compiled == data.expected.compiled;
-        round_trip_ok = recompile_ok && deep_equal_opt(&data.recompiled.outputs, &data.expected.outputs);
+        round_trip_diff = differing_inputs(data.recompiled.outputs.as_ref(), data.expected.outputs.as_ref(), is_color);
+        round_trip_ok = recompile_ok && round_trip_diff.as_ref().is_some_and(Vec::is_empty);
     }
 
     output.passed = compile_ok && eval_ok && recompile_ok && round_trip_ok && serialization_ok;
+    if !output.passed
+        && compile_ok
+        && recompile_ok
+        && serialization_ok
+        && let (Some(eval_diff), Some(round_trip_diff)) = (eval_diff, round_trip_diff)
+    {
+        output.failed_inputs = eval_diff;
+        output.failed_inputs.extend(round_trip_diff);
+        output.failed_inputs.sort_unstable();
+        output.failed_inputs.dedup();
+    }
 
     let null = Value::Null;
     if !compile_ok {

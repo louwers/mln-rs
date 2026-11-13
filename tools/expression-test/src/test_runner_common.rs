@@ -123,6 +123,29 @@ pub fn deep_equal(a: &Value, b: &Value) -> bool {
     false
 }
 
+/// How far a color channel in [0, 1] may be from the fixture's. The fixtures
+/// hold GL JS's f64 results truncated to 6 significant figures; this port
+/// converts Lab and Oklab colors in f32, so a channel can land a couple of
+/// 1e-6 away and truncate to a different 6th digit. A difference of one 8-bit
+/// step, 1/255, is far outside the tolerance.
+pub const COLOR_CHANNEL_TOLERANCE: f64 = 1e-5;
+
+/// `deep_equal` for an output of a color expression, an `[r, g, b, a]` array
+/// or an error, except that channels within `COLOR_CHANNEL_TOLERANCE` of each
+/// other are equal.
+#[must_use]
+pub fn color_output_equal(a: &Value, b: &Value) -> bool {
+    let close = |x: &Value, y: &Value| {
+        numeric_value(x).zip(numeric_value(y)).is_some_and(|(x, y)| (x - y).abs() <= COLOR_CHANNEL_TOLERANCE)
+    };
+    match (a, b) {
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| deep_equal(x, y) || close(x, y))
+        }
+        _ => deep_equal(a, b),
+    }
+}
+
 /// `deepEqual(const std::optional<Value>&, const std::optional<Value>&)`.
 #[must_use]
 pub fn deep_equal_opt(a: &Option<Value>, b: &Option<Value>) -> bool {
@@ -130,5 +153,25 @@ pub fn deep_equal_opt(a: &Option<Value>, b: &Option<Value>) -> bool {
         (Some(a), Some(b)) => deep_equal(a, b),
         (None, None) => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn color(channels: [f64; 4]) -> Value {
+        Value::Array(channels.into_iter().map(Value::Double).collect())
+    }
+
+    #[test]
+    fn color_output_equal_absorbs_f32_rounding_only() {
+        let expected = color([0.509_169, 0.0, 0.552_985, 0.6]);
+        // f32 results that truncate to a different 6th significant digit.
+        assert!(!deep_equal(&color([0.509_168_9, 0.0, 0.552_984_9, 0.600_000_02]), &expected));
+        assert!(color_output_equal(&color([0.509_168_9, 0.0, 0.552_984_9, 0.600_000_02]), &expected));
+        // One 8-bit step off in a single channel.
+        assert!(!color_output_equal(&color([0.509_169 + 1.0 / 255.0, 0.0, 0.552_985, 0.6]), &expected));
+        assert!(!color_output_equal(&color([0.509_169, 0.0, 0.552_985, 0.6 - 1.0 / 255.0]), &expected));
     }
 }
