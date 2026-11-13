@@ -4,9 +4,9 @@ The benchmarks of mln-rs, and a comparison of two commits that says which
 changes are real.
 
 ```sh
-just bench                      # every case, once
-just bench --filter Frame       # the cases whose name contains "Frame"
-just bench-compare main         # this checkout, uncommitted changes included, against a Git ref
+mise run bench                      # every case, once
+mise run bench --filter Frame       # the cases whose name contains "Frame"
+mise run bench-compare main         # this checkout, uncommitted changes included, against a Git ref
 ```
 
 ## Data
@@ -18,7 +18,7 @@ just bench-compare main         # this checkout, uncommitted changes included, a
   San Francisco (a 5 x 5 block at zoom 14) with Noto Sans glyphs and a
   generated sprite, 1024 x 768. `fixtures.json` and `style.json` are
   maplibre-native-ffi's, and the cases below that share its names use its
-  cameras, so their numbers compare with the C++ core's. `just
+  cameras, so their numbers compare with the C++ core's. `mise run
   bench-fixtures` (`fixtures.py`) downloads the pinned files into
   `target/bench-fixtures` once; nothing else uses the network.
 - The basemap's tiles as MLT, every polygon with the triangles mlt-core
@@ -93,7 +93,7 @@ metrics only; `--verbose` also shows the others.
 
 ## Comparing
 
-`just bench-compare <ref>` checks the ref out in a worktree under
+`mise run bench-compare <ref>` checks the ref out in a worktree under
 `target/bench-compare`, which the next comparison reuses, lays this
 checkout's `tools/bench` over it so both sides run the same cases, and
 builds it there. Then it runs one `mln-bench run` process per side per
@@ -129,7 +129,7 @@ Every night, CI's `bench-nightly` workflow compares main with main as it was a d
 
 ## On an Android device
 
-`just bench-android <ndk>` (`android.py`) compares the WebGPU and Vulkan
+`mise run bench-android <ndk>` (`android.py`) compares the WebGPU and Vulkan
 backends on the device adb reaches. It builds `mln-bench` for
 `aarch64-linux-android` with the NDK's clang (`rustup target add
 aarch64-linux-android` first), pushes it with the basemap fixture and the

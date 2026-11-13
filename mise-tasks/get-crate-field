@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Print a field of a package's Cargo metadata"
+#USAGE arg "<field>" help="The field, such as `rust_version`"
+#USAGE arg "[package]" default="mln-rs" help="The package"
+set -euo pipefail
+cargo metadata --no-deps --format-version 1 |
+    jq -e -r --arg package "$usage_package" --arg field "$usage_field" \
+        '.packages | map(select(.name == $package)) | first | .[$field] // error("Field \"\($field)\" is missing in Cargo.toml for package \($package)")'

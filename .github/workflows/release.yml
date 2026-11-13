@@ -47,7 +47,7 @@ jobs:
 
       # Builds each package from its packaged sources. Packages resolve each
       # other locally, so this works before any of them is on crates.io. The
-      # desktop app is never released (justfile, `package`).
+      # desktop app is never released (the `package` task).
       - name: Package
         run: cargo package --workspace --locked --exclude mln-rs-desktop
 

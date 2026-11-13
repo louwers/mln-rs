@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#MISE description="Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) and its page into examples/web/dist"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile: `--profile release` for the page to ship, the dev profile to debug with the names kept"
+# The tools are mise.toml's; wasm-bindgen-cli must be the version in
+# Cargo.lock. The release build also gets the release profile's fat LTO and one
+# codegen unit, opt-level "s", and binaryen's wasm-opt shrinks it with -Oz and
+# strips its names and other custom sections. It inlines a function with one
+# caller only when that function is small: binaryen's default inlines them at
+# any size, which made the module bigger after brotli and slower to start. Two
+# modules, from one cargo run: the map and its tile workers (examples/web,
+# mln_web), and the font-face shaper (crates/mln_web_shaper) that the map's Web
+# Worker loads the first time a style declares font faces. A second cargo run
+# builds the map's module again with its `webgl` feature, for browsers without
+# WebGPU: it draws with WebGL2, and only those browsers download it.
+# wasm-bindgen writes the modules into examples/web/web/pkg (the WebGL2 one
+# into pkg/webgl), and Vite builds the page around them into examples/web/dist,
+# every asset's name hashed by its content; serve that over HTTP, or run `mise
+# run web-dev`.
+set -euo pipefail
+profile="$usage_profile"
+if [[ "$profile" == release ]]; then
+    # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
+    export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+fi
+target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/$([[ "$profile" == dev ]] && echo debug || echo "$profile")"
+pkg=examples/web/web/pkg
+if [[ "$profile" != dev ]]; then
+    command -v wasm-opt > /dev/null ||
+        { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (examples/web/README.md)" >&2; exit 1; }
+fi
+# wasm-bindgen's output for a module cargo built, into a directory.
+bind() {
+    wasm-bindgen --target web --out-dir "$2" "$target/$1.wasm"
+    if [[ "$profile" != dev ]]; then
+        wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
+            --strip-debug --strip-producers --strip-target-features "$2/$1_bg.wasm" -o "$2/$1_bg.wasm"
+    fi
+}
+cargo build --profile "$profile" --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+bind mln_web "$pkg"
+bind mln_web_shaper "$pkg"
+# The same file again, with the feature.
+cargo build --profile "$profile" --target wasm32-unknown-unknown -p mln-rs-web --features webgl
+bind mln_web "$pkg/webgl"
+pnpm -C examples/web install --frozen-lockfile
+pnpm -C examples/web build

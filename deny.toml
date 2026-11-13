@@ -1,4 +1,4 @@
-# cargo-deny's license check (`just licenses`, in CI's lint job): every
+# cargo-deny's license check (`mise run licenses`, in CI's lint job): every
 # package in the dependency graph, ours included, must be under the licenses
 # allowed here. Allowing another one means that every app that ships mln-rs
 # takes on its terms.

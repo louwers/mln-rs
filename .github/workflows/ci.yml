@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  # Every test (`just ci-coverage`): the libraries' tests and the shared
+  # Every test (`mise run ci-coverage`): the libraries' tests and the shared
   # render, query and expression suites (the render and query suites twice:
   # also with the tile workers behind the worker codec), with their line
   # coverage uploaded to Codecov (codecov.yml). The headless renders go
@@ -73,7 +73,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test
-        run: just ci-coverage
+        run: mise run ci-coverage
 
       # The render suite's reports and actual/diff images, from the run with
       # the tile workers in process and the one through the worker codec
@@ -94,11 +94,11 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
 
-  # maplibre-native-ffi's C ABI suite against crates/mln_c (`just c-abi-test`,
-  # tools/c-abi-test), under its Vulkan preset on lavapipe and its OpenGL one on
-  # llvmpipe: each fails when any case fails. Also that crates/mln_c's generated
-  # declarations are what its headers generate (`just generate-c-abi`, which
-  # needs libclang).
+  # maplibre-native-ffi's C ABI suite against crates/mln_c (`mise run
+  # c-abi-test`, tools/c-abi-test), under its Vulkan preset on lavapipe and its
+  # OpenGL one on llvmpipe: each fails when any case fails. Also that
+  # crates/mln_c's generated declarations are what its headers generate (`mise
+  # run generate-c-abi`, which needs libclang).
   c-abi:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -123,15 +123,15 @@ jobs:
 
       - name: Check the generated declarations
         run: |
-          just generate-c-abi
-          just assert-git-is-clean
+          mise run generate-c-abi
+          mise run assert-git-is-clean
 
       - name: Test
-        run: just c-abi-test
+        run: mise run c-abi-test
 
       - name: Test the OpenGL preset
         if: ${{ !cancelled() }}
-        run: MLN_C_TEST_BACKEND=opengl just c-abi-test
+        run: MLN_C_TEST_BACKEND=opengl mise run c-abi-test
 
   # The Cargo manifests: build each crates.io package from its packaged
   # sources, as the release does (RELEASING.md), and every test target, so a
@@ -150,23 +150,24 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Package
-        run: just ci-package
+        run: mise run ci-package
 
-  # Formatting (`just fmt`, every Rust file, with the nightly rustfmt the
-  # justfile pins), the panic and RefCell-borrow ratchet (`just ratchet`,
+  # Formatting (`mise run fmt`, every Rust file, with the nightly rustfmt
+  # mise.toml pins), the panic and RefCell-borrow ratchet (`mise run ratchet`,
   # tools/ratchet), clippy with the workspace's lints (Cargo.toml), the API
   # docs as docs.rs builds them, and clippy on the libraries and examples/web
-  # for wasm32-unknown-unknown (`just check-wasm`, the browser build) and on
-  # the C library for 32-bit x86 Linux (`just check-32bit`), all with
-  # warnings as errors (the justfile denies them in CI), and the packages'
-  # licenses against deny.toml (`just licenses`).
+  # for wasm32-unknown-unknown (`mise run check-wasm`, the browser build) and on
+  # the C library for 32-bit x86 Linux (`mise run check-32bit`), all with
+  # warnings as errors (mise.toml denies them in CI), and the packages'
+  # licenses against deny.toml (`mise run licenses`).
   lint:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
-      # The C compiler and libc headers for `just check-32bit`'s C dependencies.
+      # The C compiler and libc headers for `mise run check-32bit`'s C
+      # dependencies.
       - name: Install system packages
         run: |
           sudo apt-get update
@@ -179,7 +180,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lint
-        run: just ci-lint
+        run: mise run ci-lint
 
   # The oldest Rust the packages declare (`rust-version` in Cargo.toml) still
   # builds them and their tests.
@@ -196,10 +197,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check
-        run: just ci-test-msrv
+        run: mise run ci-test-msrv
 
-  # The browser build in headless Chromium (`just profile=release web-check`,
-  # examples/web/README.md): views of the render suite, served offline from
+  # The browser build in headless Chromium (`mise run web-check --profile
+  # release`, examples/web/README.md): views of the render suite, served offline from
   # its cache database to the page with its tile workers in Web Workers, each
   # frame compared with the native runner's render of the same view
   # (lavapipe). Twice: the module that draws with WebGPU, and the one that
@@ -233,7 +234,7 @@ jobs:
         run: npx -y playwright@1.61.1 install chromium
 
       - name: Check
-        run: just profile=release web-check --out "$RUNNER_TEMP/web-check"
+        run: mise run web-check --profile release --out "$RUNNER_TEMP/web-check"
 
       # The build and the native runner are the ones the step above made.
       - name: Check the WebGL2 module
@@ -243,7 +244,7 @@ jobs:
       # raw C ABI from a Web Worker (crates/mln_c/web-check). The dev profile:
       # the check needs no release build, and two more would outlast the job.
       - name: Check the C library's packages
-        run: just c-web-check webgpu && just c-web-check gl
+        run: mise run c-web-check webgpu && mise run c-web-check gl
 
       # The page's TypeScript, against the modules' wasm-bindgen typings that
       # the check's build wrote.

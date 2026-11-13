@@ -171,21 +171,21 @@ in a storage worker loaded only when a page asks for them.
 mise.toml pins the tools: wasm-bindgen-cli at the version in Cargo.lock,
 binaryen's `wasm-opt`, which shrinks a release build's code with `-Oz` and
 strips the names and the other custom sections, and Node and pnpm for the
-page. `just web` builds the modules into web/pkg, then Vite builds the page
+page. `mise run web` builds the modules into web/pkg, then Vite builds the page
 (web/, TypeScript) around them into dist/, every asset's name hashed by its
 content so that a browser never mixes two builds' files:
 
 ```sh
 mise install
-just profile=release web  # into examples/web/dist, as Pages deploys it
-just web-dev              # or Vite's dev server, from the sources
+mise run web --profile release  # into examples/web/dist, as Pages deploys it
+mise run web-dev                # or Vite's dev server, from the sources
 ```
 
-`just web` (the dev profile) skips wasm-opt and keeps the names, for
+`mise run web` (the dev profile) skips wasm-opt and keeps the names, for
 debugging and profiling. `pnpm -C examples/web typecheck` checks the page's
 TypeScript, as CI does.
 
-Serve dist/ over HTTP, or run `just web-dev`, and open the page. URL
+Serve dist/ over HTTP, or run `mise run web-dev`, and open the page. URL
 parameters (web/main.ts):
 
 - `style=<key|url>`: a style of web/styles.ts by its key, or any style's
@@ -218,7 +218,7 @@ page shows the panic's message (`window.mln.fatal` in web/main.ts).
 
 ## Check
 
-`just profile=release web-check` (check/check.mjs, Node 24 with no
+`mise run web-check --profile release` (check/check.mjs, Node 24 with no
 packages) loads views of the render suite in headless Chromium, offline
 (Chromium resolves no host but the local server's), and compares each
 with the native render-test runner's render of the same view. CI runs it

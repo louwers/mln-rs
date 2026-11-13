@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV to target/llvm-cov/lcov.info for CI to upload to codecov.io"
+set -euo pipefail
+mise run env-info
+rm -rf target/llvm-cov
+mkdir -p target/llvm-cov
+mise run coverage --lcov --output-path target/llvm-cov/lcov.info

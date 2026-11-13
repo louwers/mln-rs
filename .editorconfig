@@ -1,4 +1,4 @@
-# https://editorconfig.org. rustfmt formats the Rust code (`just fmt`).
+# https://editorconfig.org. rustfmt formats the Rust code (`mise run fmt`).
 root = true
 
 [*]

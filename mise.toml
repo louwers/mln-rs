@@ -1,5 +1,7 @@
-# https://mise.jdx.dev: the tools that build, run and check mln-rs. `mise
-# install` installs them; the justfile's recipes run with them on the PATH.
+# https://mise.jdx.dev: the tools that build, run and check mln-rs, and the
+# tasks that run them. `mise install` installs the tools, `mise tasks` lists
+# the tasks and `mise run <task>` runs one. The tasks of more than a few lines
+# are scripts in mise-tasks/.
 
 min_version = "2026.10.0"
 
@@ -13,7 +15,6 @@ lockfile_mode = "merge"
 idiomatic_version_file_enable_tools = ["rust"]
 
 [tools]
-"aqua:casey/just" = "1.59.0"
 # The test runner, which ends a test that hangs (.config/nextest.toml).
 "github:nextest-rs/nextest" = { version = "0.9.151", version_prefix = "cargo-nextest-" }
 # Cargo subcommands: the tests' coverage, the packages' licenses
@@ -28,7 +29,7 @@ idiomatic_version_file_enable_tools = ["rust"]
 # The browser build's page (examples/web) and its check.
 "core:node" = "24.22.2"
 "aqua:pnpm/pnpm" = "12.18.0"
-# The justfile's scripts that generate tables and fixtures, and the jq that
+# The tasks' scripts that generate tables and fixtures, and the jq that
 # reads Cargo's JSON output.
 "core:python" = "3.15.2"
 "aqua:jqlang/jq" = "1.8.2"
@@ -36,3 +37,120 @@ idiomatic_version_file_enable_tools = ["rust"]
 [deps.pnpm]
 auto = true
 dir = "examples/web"
+
+[env]
+# In CI (CI set), warnings are errors and a panic prints its backtrace, unless
+# the environment sets them. `CI=true mise run ci-lint` runs the lint job's
+# checks as CI does.
+CARGO_BUILD_WARNINGS = "{% if get_env(name='CARGO_BUILD_WARNINGS', default='') != '' %}{{ get_env(name='CARGO_BUILD_WARNINGS') }}{% elif get_env(name='CI', default='') != '' %}deny{% else %}warn{% endif %}"
+RUST_BACKTRACE = "{% if get_env(name='RUST_BACKTRACE', default='') != '' %}{{ get_env(name='RUST_BACKTRACE') }}{% elif get_env(name='CI', default='') != '' %}1{% else %}0{% endif %}"
+# The nightly whose rustfmt `mise run fmt` runs (its import options,
+# imports_granularity and group_imports, are unstable) and that builds the
+# sanitizer tests. Pinned so every machine formats alike: bump it on purpose,
+# then run `mise run fmt`.
+MLN_NIGHTLY = "nightly-2026-11-04"
+
+[tasks.bench-fixtures]
+description = "Download the benchmarks' basemap fixture into target/bench-fixtures, once (tools/bench/fixtures.py)"
+run = "python3 -I tools/bench/fixtures.py target/bench-fixtures"
+
+[tasks.check]
+description = "Quick compile of the Cargo workspace without building a binary"
+run = "cargo check --workspace --all-targets"
+
+# The C library as maplibre-native-ffi's 32-bit presets build it (Android's
+# armeabi-v7a and x86), checked on 32-bit x86 Linux: a type whose size a
+# dependency asserts, or a cast that assumes a 64-bit usize, fails here. Needs
+# a C compiler for the target, for SQLite: i686-linux-gnu-gcc, or the one
+# CC_i686_unknown_linux_gnu names.
+[tasks.check-32bit]
+description = "Check that the C library builds for a 32-bit target (i686-unknown-linux-gnu), as CI does"
+run = [
+  "rustup target add i686-unknown-linux-gnu",
+  "cargo clippy --target i686-unknown-linux-gnu -p mln-rs-c",
+]
+
+[tasks.ci-lint]
+description = "Run the checks of CI's lint job: formatting, the panic and RefCell-borrow ratchet, clippy, the API docs, the wasm32-unknown-unknown and 32-bit builds and the licenses, warnings as errors"
+run = [
+  "mise run env-info",
+  "mise run test-fmt",
+  "mise run ratchet",
+  "mise run clippy",
+  "mise run test-doc",
+  "mise run check-wasm",
+  "mise run check-32bit",
+  "mise run licenses",
+  "mise run assert-git-is-clean",
+]
+
+[tasks.ci-package]
+description = "Package every crate and compile every Cargo test target, as CI's release-crate job does"
+run = ["mise run env-info", "mise run package", "mise run assert-git-is-clean"]
+
+[tasks.ci-test-msrv]
+description = "Check the Cargo workspace with the oldest Rust it declares, as CI's msrv job does"
+run = ["mise run env-info", "mise run test-msrv", "mise run assert-git-is-clean"]
+
+[tasks.clean]
+description = "Clean the Cargo build"
+run = "cargo clean"
+
+[tasks.env-info]
+description = "Print environment info"
+run = [
+  "echo \"Running in {% if get_env(name='CI', default='') != '' %}CI{% else %}dev{% endif %} mode on {{ os() }} / {{ arch() }} in $PWD\"",
+  "mise --version",
+  "rustc --version",
+  "cargo --version",
+  "rustup --version",
+  "echo \"CARGO_BUILD_WARNINGS='$CARGO_BUILD_WARNINGS'\"",
+  "echo \"RUST_BACKTRACE='$RUST_BACKTRACE'\"",
+]
+
+# Needs libclang, which bindgen loads at run time (LIBCLANG_PATH names its
+# directory if it isn't found).
+[tasks.generate-c-abi]
+description = "Regenerate crates/mln_c's declarations (src/generated) from its C headers, with tools/c-abi-gen"
+run = "cargo run -q -p mln-rs-c-abi-gen"
+
+# The spec is tools/style-codegen/v8.json, a copy of the MapLibre style spec's
+# (`mise run update-style-spec` refreshes it).
+[tasks.generate-style-code]
+description = "Regenerate crates/mln_style's generated style code from the style spec (checked by style-codegen's generated_code_test)"
+run = "cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates/mln_style/src"
+
+[tasks.get-msrv]
+description = "Print the minimum supported Rust version (MSRV) of a package (mln-rs by default)"
+usage = 'arg "[package]" default="mln-rs"'
+run = "mise run get-crate-field rust_version {{ usage.package }}"
+
+[tasks.licenses]
+description = "Check that every package in the dependency graph is under a license deny.toml allows"
+run = "cargo deny --locked check licenses"
+
+[tasks.ratchet]
+description = "Fail when a file has more library panic sites or RefCell borrows than tools/ratchet/baseline.toml; `--update` lowers it"
+usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet/ratchet.py, such as `--update`"'
+run = "python3 -I tools/ratchet/ratchet.py {{ usage.args | default(value=[]) | join(sep=' ') }}"
+
+[tasks.release]
+description = "Run the release workflow on main: publish the crates at the version in Cargo.toml (RELEASING.md)"
+run = "gh workflow run release.yml --repo louwers/mln-rs --ref main"
+
+[tasks.test-doc]
+description = "Test documentation generation"
+env = { DOCS_RS = "1" }
+run = "cargo doc --no-deps --workspace"
+
+[tasks.test-fmt]
+description = "Test code formatting"
+run = "mise run fmt --check"
+
+[tasks.udeps]
+description = "Find unused dependencies"
+run = "cargo +nightly udeps --workspace --all-targets"
+
+[tasks.update]
+description = "Update the dependencies within their Cargo.toml requirements"
+run = "cargo update"

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Load render-suite views in headless Chromium and compare the frames with native renders (examples/web/README.md)"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web`"
+#USAGE arg "[args]..." var=#true help="Arguments to examples/web/check/check.mjs, such as `--filter real-world`"
+# Builds the page (`web`), then checks it offline, from the render suite's
+# cache database. Needs Node 24, Playwright's Chromium (`npx playwright@1.61.1
+# install chromium`) and lavapipe (VK_DRIVER_FILES); builds the native
+# render-test runner. CI's web job runs `mise run web-check --profile release`.
+set -euo pipefail
+eval "set -- ${usage_args:-}"
+mise run web --profile "$usage_profile"
+cargo build -p mln-rs-render-test --bin render-test
+node examples/web/check/check.mjs "$@"

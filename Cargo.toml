@@ -453,7 +453,7 @@ workspace = true
 fsst-rs = { path = "patches/fsst-rs" }
 
 # Fat LTO with one codegen unit: smaller release binaries, for a longer
-# build. The browser build adds opt-level "s" (`just web`).
+# build. The browser build adds opt-level "s" (`mise run web`).
 [profile.release]
 lto = "fat"
 codegen-units = 1

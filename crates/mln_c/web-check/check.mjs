@@ -1,4 +1,4 @@
-// Loads crates/mln_c's browser package (`just c-web <backend>`) in headless
+// Loads crates/mln_c's browser package (`mise run c-web <backend>`) in headless
 // Chromium and drives its raw C ABI from a module Web Worker (worker.js), as
 // a JavaScript host does: a runtime, a map whose GeoJSON layer the tile
 // workers lay out, and sessions one after another, each on a new

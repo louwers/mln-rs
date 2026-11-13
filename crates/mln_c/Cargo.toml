@@ -21,7 +21,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 doctest = false
 
 # The runtime's backends (crates/mln_runtime/Cargo.toml). A browser build
-# turns on one of `webgpu` and `gl` (`just c-web`).
+# turns on one of `webgpu` and `gl` (`mise run c-web`).
 [features]
 default = ["webgpu", "metal", "vulkan", "gl"]
 webgpu = ["mln_runtime/webgpu"]

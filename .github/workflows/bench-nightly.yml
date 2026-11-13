@@ -18,7 +18,7 @@ permissions:
   issues: write
 
 jobs:
-  # Main against main a day earlier, every case (`just bench-compare`,
+  # Main against main a day earlier, every case (`mise run bench-compare`,
   # tools/bench/README.md), on lavapipe. A worse verdict opens the
   # "Nightly benchmarks: main got worse" issue with the report, or comments
   # on it when it's open already, and a night without one closes it
@@ -72,7 +72,7 @@ jobs:
         if: steps.base.outputs.changed == 'true'
         env:
           BASE: ${{ steps.base.outputs.sha }}
-        run: just bench-compare "$BASE" | tee report.md
+        run: mise run bench-compare "$BASE" | tee report.md
 
       - name: File or update the issue
         if: steps.base.outputs.changed == 'true'

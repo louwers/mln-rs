@@ -1,5 +1,5 @@
 // The script of the library's tile worker Web Workers in the browser package
-// (`just c-web`): wasm-bindgen copies it to snippets/<crate>/js/, three
+// (`mise run c-web`): wasm-bindgen copies it to snippets/<crate>/js/, three
 // directories below the package's root, beside the module's bindings. Each
 // message is {module, port} from a map's instance: the first instantiates
 // the module, and each port gets tile workers of its own.

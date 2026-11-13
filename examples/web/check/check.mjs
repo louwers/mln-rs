@@ -230,7 +230,7 @@ if (views.length === 0) throw new Error(`no view matches ${options.filter}`);
 
 // The page as Vite builds it, as it deploys.
 const root = path.join(here, '../dist');
-if (!existsSync(path.join(root, 'index.html'))) throw new Error('no dist: run `just web` first');
+if (!existsSync(path.join(root, 'index.html'))) throw new Error('no dist: run `mise run web` first');
 const types = {
   '.html': 'text/html',
   '.js': 'text/javascript',

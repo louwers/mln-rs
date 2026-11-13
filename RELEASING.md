@@ -27,7 +27,7 @@ released.
    one fails every cargo command. Run `cargo check` to update `Cargo.lock`
    and merge that change to main. crates.io never replaces a published
    version.
-2. Run the **release** workflow on main: `just release`, or Actions →
+2. Run the **release** workflow on main: `mise run release`, or Actions →
    release → Run workflow.
 
 If the workflow fails part way, run it again on the same commit: packages
@@ -56,13 +56,13 @@ first.
 4. Creates the tag `v<version>` on the workflow's commit and a GitHub release
    with the `.crate` files.
 
-CI (`release-crate` in `ci.yml`, `just ci-package`) runs step 2 on every
+CI (`release-crate` in `ci.yml`, `mise run ci-package`) runs step 2 on every
 push and PR. It catches a manifest crates.io would reject.
 
 ## Locally
 
 ```sh
-just package
+mise run package
 ```
 
 On NixOS, run it inside `nix develop` if a build script cannot find a C

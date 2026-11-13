@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Serve the browser build's page from its sources (examples/web/web) at http://localhost:5173/"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web`"
+# Builds the modules (`web`), then runs Vite's dev server, which reloads the
+# page's scripts as they change; `mise run web` again rebuilds the modules.
+set -euo pipefail
+mise run web --profile "$usage_profile"
+pnpm -C examples/web dev

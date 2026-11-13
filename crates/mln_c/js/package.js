@@ -1,4 +1,4 @@
-// The defaults of the browser package (`just c-web`) for what the library
+// The defaults of the browser package (`mise run c-web`) for what the library
 // loads beside its module. wasm-bindgen copies this file to
 // snippets/<crate>/js/, three directories below the package's root.
 

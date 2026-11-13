@@ -13,7 +13,7 @@ include.workspace = true
 publish = false
 autotests = false
 
-# The app: a map in a window. `just desktop`.
+# The app: a map in a window. `mise run desktop`.
 [[bin]]
 name = "mln-desktop"
 path = "src/main.rs"
