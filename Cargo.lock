@@ -2147,6 +2147,7 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-mtl",
+ "mln-rs-renderer",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
