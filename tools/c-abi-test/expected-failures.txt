@@ -11,9 +11,6 @@
 abi/backend/opengl_validation.c:only_the_builds_providers_wrap  # the Vulkan preset expects no OpenGL provider, and mln-rs builds EGL beside Vulkan
 abi/base/logging.c:a_failed_discarded_command_logs_one_warning  # a failed command without a completion is dropped instead of logged as a warning
 abi/base/logging.c:a_log_callback_cannot_call_back_into_the_c_api  # no discarded-failure warning is logged, so the callback never tries the C API
-abi/map/still_image.c:a_barrier_ends_a_still_image_demand_until_the_next  # a still image is one attempt per update, not a demand that waits, parks and ends
-abi/map/still_image.c:a_still_image_waits_for_the_next_session  # a still image is one attempt per update, not a demand that waits, parks and ends
-abi/map/still_image.c:host_demands_and_a_still_image_demand_never_replace_each_other  # a still image is one attempt per update, not a demand that waits, parks and ends
 abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default  # likely: a still map loads the tiles that come back into view again
 abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them  # likely: a still map loads the tiles that come back into view again
 abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api  # plugins are stubs: mln_plugin_get_register_function_v1 returns NULL

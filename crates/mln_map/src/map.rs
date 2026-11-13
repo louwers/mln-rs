@@ -617,6 +617,14 @@ impl Map {
         self.on_update();
     }
 
+    /// The still image request that waits for a frame, as the
+    /// `still_image_request_id` of the updates that ask for it, or `None`
+    /// once it completed or failed.
+    #[must_use]
+    pub fn pending_still_image(&self) -> Option<u64> {
+        self.still_image_request.as_ref().map(|_| self.still_image_request_id)
+    }
+
     /// Triggers a repaint.
     pub fn trigger_repaint(&mut self) {
         self.process_events();

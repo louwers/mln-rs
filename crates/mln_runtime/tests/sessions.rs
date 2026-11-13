@@ -6,16 +6,18 @@
 
 mod support;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
     LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
-    RenderedQueryOptions, Runtime, SourceQueryOptions,
+    RenderedQueryOptions, ResourceRequest, Runtime, SourceQueryOptions,
 };
+use mln_storage::response::Reason;
+use mln_storage::{ResourceError, Response};
 use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
 use support::{TIMEOUT, eventually, runtime, wait, wait_err};
@@ -930,6 +932,139 @@ fn map_release_cancels_the_pending_still_image() {
     assert_eq!(ErrorKind::InvalidState, wait_err(map.request_still_image()).kind);
     wait(map.release());
     assert_eq!(ErrorKind::Cancelled, pending.wait().unwrap_err().kind);
+}
+
+/// One vector source with one tile at zoom 0, which a still image of a
+/// 64 by 64 map needs.
+const TILED_STYLE: &str = r##"{"version":8,"sources":{"tiles":{"type":"vector","tiles":["custom://tiles/{z}/{x}/{y}.pbf"],"minzoom":0,"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}},{"id":"fill","type":"fill","source":"tiles","source-layer":"any"}]}"##;
+
+/// A tile without content, which loads as an empty tile.
+fn empty_tile() -> Response {
+    Response { no_content: true, ..Response::default() }
+}
+
+/// A static map of `TILED_STYLE` whose provider holds the first tile
+/// request, so that a still image waits for the test to answer it, and
+/// answers every later one with an empty tile.
+struct HeldTile {
+    map: Map,
+    held: Arc<Mutex<Option<ResourceRequest>>>,
+    requests: Arc<AtomicUsize>,
+}
+
+impl HeldTile {
+    fn new(runtime: &Runtime) -> HeldTile {
+        let held = Arc::new(Mutex::new(None));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let (holder, counter) = (held.clone(), requests.clone());
+        wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                *holder.lock().unwrap() = Some(request);
+            } else {
+                // A request that the renderer cancelled meanwhile takes no
+                // answer.
+                let _ = request.respond(empty_tile());
+            }
+        }));
+        let map = map_in_mode(runtime, MapMode::Static);
+        wait(map.set_style_json(TILED_STYLE));
+        HeldTile { map, held, requests }
+    }
+
+    /// Waits until the renderer has asked for the tile `count` times.
+    fn wait_for_requests(&self, count: usize) {
+        assert!(eventually(|| self.requests.load(Ordering::SeqCst) >= count), "the tile was never requested");
+    }
+
+    /// Answers the held request with an empty tile, unless the renderer
+    /// cancelled it.
+    fn answer(&self) {
+        if let Some(request) = self.held.lock().unwrap().take() {
+            let _ = request.respond(empty_tile());
+        }
+    }
+}
+
+fn tokens_and_dispositions(results: &[FrameResult]) -> Vec<(Option<u64>, FrameDisposition)> {
+    results.iter().map(|result| (result.token, result.disposition)).collect()
+}
+
+#[test]
+fn a_still_image_waits_for_the_next_session() {
+    let runtime = runtime();
+    let held = HeldTile::new(&runtime);
+    let still = held.map.request_still_image().unwrap();
+    let first = attach(&held.map);
+    held.wait_for_requests(1);
+    wait(first.detach());
+    let ended = first.drain_frame_results().unwrap();
+    assert_eq!(vec![(None, FrameDisposition::TargetNotReady)], tokens_and_dispositions(&ended));
+    assert!(!still.is_complete());
+
+    // The detach cancelled the held request, so the next session's renderer
+    // asks for the tile again, and gets an empty one.
+    let second = attach(&held.map);
+    still.wait().unwrap();
+    let rendered = second.drain_frame_results().unwrap();
+    assert_eq!(vec![(None, FrameDisposition::Rendered)], tokens_and_dispositions(&rendered));
+    assert_eq!([255, 0, 0, 255], center_pixel(&second, SIZE));
+    held.answer();
+}
+
+#[test]
+fn a_barrier_ends_a_still_image_demand_until_the_next() {
+    let runtime = runtime();
+    let held = HeldTile::new(&runtime);
+    let session = attach(&held.map);
+    let still = held.map.request_still_image().unwrap();
+    held.wait_for_requests(1);
+    wait(session.barrier());
+    let ended = take_one(&session);
+    assert_eq!((None, FrameDisposition::NoUpdate), (ended.token, ended.disposition));
+    assert!(!still.is_complete());
+
+    // The demand that the barrier made again renders the image once the
+    // tile loads.
+    held.answer();
+    still.wait().unwrap();
+    let rendered = session.drain_frame_results().unwrap();
+    assert_eq!(vec![(None, FrameDisposition::Rendered)], tokens_and_dispositions(&rendered));
+}
+
+#[test]
+fn host_demands_and_a_still_image_demand_never_replace_each_other() {
+    let runtime = runtime();
+    let held = HeldTile::new(&runtime);
+    let session = attach(&held.map);
+    let still = held.map.request_still_image().unwrap();
+    held.wait_for_requests(1);
+    demand(&session, DemandMode::WaitForUpdate, 7);
+    held.answer();
+    still.wait().unwrap();
+    // The image's frame showed the update that the host's demand waits for,
+    // and a static map publishes another only for its next still image, so
+    // the host's demand waits until a barrier ends it.
+    wait(session.barrier());
+    let results = take_results(&session, 2);
+    assert_eq!(
+        vec![(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate)],
+        tokens_and_dispositions(&results)
+    );
+}
+
+#[test]
+fn a_still_image_that_fails_ends_its_demand() {
+    let runtime = runtime();
+    wait(runtime.set_resource_provider(|request: ResourceRequest| {
+        let error = ResourceError::new(Reason::Other, "no tile here");
+        let _ = request.respond(Response { error: Some(Box::new(error)), ..Response::default() });
+    }));
+    let map = map_in_mode(&runtime, MapMode::Static);
+    wait(map.set_style_json(TILED_STYLE));
+    let session = attach(&map);
+    assert_eq!(ErrorKind::Native, wait_err(map.request_still_image()).kind);
+    let ended = take_one(&session);
+    assert_eq!((None, FrameDisposition::NoUpdate), (ended.token, ended.disposition));
 }
 
 // MARK: - Queries

@@ -109,6 +109,9 @@ pub(crate) struct Published {
     /// The sequence number of the last command that ran.
     applied: AtomicU64,
     event_mask: AtomicU64,
+    /// The still image that waits for a frame, as the
+    /// `still_image_request_id` of the updates that ask for it, or 0.
+    still_image: AtomicU64,
 }
 
 impl Published {
@@ -117,11 +120,19 @@ impl Published {
         self.applied.load(Ordering::SeqCst)
     }
 
+    /// The still image that waits for a frame, as the
+    /// `still_image_request_id` of the updates that ask for it, or 0 when
+    /// none waits.
+    pub(crate) fn pending_still_image(&self) -> u64 {
+        self.still_image.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn new(event_mask: EventMask) -> Self {
         Published {
             snapshot: Mutex::new(None),
             applied: AtomicU64::new(0),
             event_mask: AtomicU64::new(event_mask.bits()),
+            still_image: AtomicU64::new(0),
         }
     }
 }
@@ -557,7 +568,18 @@ impl Map {
     /// Renders a still image of a static or tile map, once every resource
     /// that it needs has loaded. The map's render session draws it, and
     /// [`RenderSession::read_texture`] reads its pixels once the completion
-    /// reports success. Without a session, the image waits for the next one.
+    /// reports success.
+    ///
+    /// While the image waits, the session has a demand of its own for it,
+    /// whose [`FrameResult`](crate::FrameResult) has no token. The demand
+    /// waits for the map to load what the image needs, and parks while a
+    /// borrowed ring has no texture to render into. It finishes with the
+    /// image's frame, which completes the image once its result is queued:
+    /// a frame of the host's demands completes none. The host's demands
+    /// neither replace it nor are replaced by it. When the session ends its
+    /// demands, by a barrier, a target's release or a detach, the demand
+    /// ends too, and the image waits for the next one: once the barrier ran,
+    /// the target came back, or the next session attached.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
     /// continuous map. Completes with
@@ -1494,6 +1516,14 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     let style_outcome = style_outcome.map(|outcome| (outcome, entry.pending_style.take(), entry.applied()));
     let still_outcome = entry.pending_still.as_ref().and_then(|pending| pending.outcome.borrow_mut().take());
     let still = still_outcome.and_then(|outcome| Some((outcome, entry.pending_still.take()?.resolver)));
+    // The session demands a frame for the image while it waits, and lets
+    // the demand go once it doesn't.
+    let still_image = entry.pending_still.as_ref().and(entry.core.pending_still_image()).unwrap_or(0);
+    if entry.published.still_image.swap(still_image, Ordering::SeqCst) != still_image
+        && let Some(link) = &entry.session
+    {
+        worker_post(&link.run_loop, Worker::still_image_changed);
+    }
 
     let mask = entry.mask;
     let events: Vec<RuntimeEvent> = events
