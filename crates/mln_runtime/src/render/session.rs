@@ -691,11 +691,12 @@ pub(crate) fn physical_size(size: Size, pixel_ratio: f32) -> Size {
 /// takes it fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind), or
 /// with the failure of a session that failed.
 ///
-/// The last drop of the session's handles, [`AcquiredFrame`]s and
-/// [`FrameView`]s waits for a core worker's thread to end, once the session
-/// has let go of its graphics objects and its map. A drop on a thread of the
-/// library, such as in a callback or a wake that the library runs, doesn't
-/// wait: that thread waits for the session's at its own end.
+/// Unless the session was released or disposed, the last drop of its
+/// handles, [`AcquiredFrame`]s and [`FrameView`]s waits for a core worker's
+/// thread to end, once the session has let go of its graphics objects and
+/// its map. A drop on a thread of the library, such as in a callback or a
+/// wake that the library runs, doesn't wait: that thread waits for the
+/// session's at its own end.
 #[derive(Clone)]
 pub struct RenderSession {
     handle: Arc<SessionHandle>,
@@ -1614,7 +1615,8 @@ impl RenderSession {
 
     /// Releases the session, detaching it first when it is attached. The
     /// completion reports when the session has let go of its map and its
-    /// graphics objects. Every call on the session fails with
+    /// graphics objects, and nothing waits for its thread to end after
+    /// that. Every call on the session fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
     ///
     /// A caller-driven session detaches at the host's next service, so keep
@@ -1631,21 +1633,36 @@ impl RenderSession {
         }
         let (completion, resolver) = self.shared().completion();
         self.shared().dispose(Some(resolver))?;
+        self.detach_thread();
         Ok(completion)
     }
 
-    /// Releases the session in any state, without waiting. Dropping the last
-    /// handle does the same.
+    /// Releases the session in any state, without waiting, and nothing waits
+    /// for its thread to end. Dropping the last handle does the same, then
+    /// waits for the thread.
     pub fn dispose(&self) -> Result<(), Error> {
-        self.shared().dispose(None)
+        self.shared().dispose(None)?;
+        self.detach_thread();
+        Ok(())
     }
 
     /// Releases the session in any state, without waiting and without a
     /// graphics call past the one in progress. A session that hasn't ended
     /// is abandoned, keeping its graphics objects until the process exits,
     /// as [`abandon_keeping_graphics`](Self::abandon_keeping_graphics) does.
+    /// Nothing waits for its thread to end.
     pub fn dispose_keeping_graphics(&self) -> Result<(), Error> {
-        self.shared().dispose_keeping_graphics()
+        self.shared().dispose_keeping_graphics()?;
+        self.detach_thread();
+        Ok(())
+    }
+
+    /// Leaves a core worker's thread to end alone, for a release or
+    /// disposal, which don't wait for it.
+    fn detach_thread(&self) {
+        if let Some(thread) = &self.handle.thread_end {
+            thread.detach();
+        }
     }
 }
 

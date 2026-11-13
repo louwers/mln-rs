@@ -98,21 +98,27 @@ pub fn join<T>(thread: JoinHandle<T>) -> Option<std::thread::Result<T>> {
 }
 
 /// A library thread that ends by itself once its owner lets go of it, which
-/// this waits for with [`join`] when it drops, as the module describes.
+/// this waits for with [`join`] when it drops, as the module describes,
+/// unless it was [`detach`](Self::detach)ed.
 #[derive(Debug)]
-pub struct Joined(Option<JoinHandle<()>>);
+pub struct Joined(Mutex<Option<JoinHandle<()>>>);
 
 impl Joined {
     /// Waits for `thread` when this drops.
     #[must_use]
     pub fn new(thread: JoinHandle<()>) -> Joined {
-        Joined(Some(thread))
+        Joined(Mutex::new(Some(thread)))
+    }
+
+    /// Leaves the thread to end alone: the drop no longer waits for it.
+    pub fn detach(&self) {
+        self.0.lock().take();
     }
 }
 
 impl Drop for Joined {
     fn drop(&mut self) {
-        let Some(thread) = self.0.take() else { return };
+        let Some(thread) = self.0.get_mut().take() else { return };
         // A thread whose locals are gone is past its work: it waits at once.
         if LIBRARY.try_with(Cell::get).unwrap_or(false) {
             let mut thread = Some(thread);
@@ -257,5 +263,14 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "the threads wait for each other");
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn a_detached_thread_is_left_to_end_alone() {
+        let (joined, open, ended) = gated();
+        joined.detach();
+        drop(joined);
+        assert!(!ended.load(Ordering::SeqCst));
+        drop(open);
     }
 }

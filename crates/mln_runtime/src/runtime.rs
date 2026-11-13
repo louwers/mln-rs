@@ -54,14 +54,15 @@ pub struct RuntimeOptions {
 /// are dropped. A handler or provider that holds a handle keeps it alive
 /// until then.
 ///
-/// The drop of the last of the runtime's handles and maps returns once the
-/// runtime's threads have ended: its own and its file sources'. A worker
-/// that loads over HTTP and is stuck in a name lookup or a TCP connect is
-/// waited for up to a second, then left to end alone. A drop on a thread of
-/// the library, such as in a handler or callback that the library runs,
-/// doesn't wait: that thread waits for the runtime's at its own end. The
-/// host's handlers, providers and transforms that the runtime holds are
-/// dropped on the runtime's thread before its end.
+/// Unless the runtime was released or disposed, the drop of the last of its
+/// handles and maps returns once the runtime's threads have ended: its own
+/// and its file sources'. A worker that loads over HTTP and is stuck in a
+/// name lookup or a TCP connect is waited for up to a second, then left to
+/// end alone. The host's handlers, providers and transforms that the runtime
+/// holds are dropped on its thread meanwhile, so they mustn't wait for the
+/// thread that drops it. A drop on a thread of the library, such as in a
+/// handler or callback that the library runs, doesn't wait: that thread
+/// waits for the runtime's at its own end.
 #[derive(Clone)]
 pub struct Runtime {
     pub(crate) shared: Arc<RuntimeShared>,
@@ -89,9 +90,10 @@ pub(crate) struct RuntimeShared {
     /// The glyphs that the renderers of the runtime's maps parse, which they
     /// share.
     pub(crate) glyph_cache: Arc<GlyphCache>,
-    /// The runtime's thread, which the drop waits for after the shutdown,
-    /// except in the browser, where the thread is the host's.
-    _thread_end: Option<Joined>,
+    /// The runtime's thread, which the drop waits for after the shutdown
+    /// unless a release or disposal detached it, except in the browser,
+    /// where the thread is the host's.
+    thread_end: Option<Joined>,
 }
 
 impl RuntimeShared {
@@ -131,6 +133,14 @@ impl RuntimeShared {
         Completion::new(Some(self.thread))
     }
 
+    /// Leaves the runtime's thread to end alone, for a release or disposal,
+    /// which don't wait for it.
+    fn detach_thread(&self) {
+        if let Some(thread) = &self.thread_end {
+            thread.detach();
+        }
+    }
+
     fn check_live(&self) -> Result<(), Error> {
         if self.lifecycle.lock().released { Err(released()) } else { Ok(()) }
     }
@@ -168,7 +178,7 @@ impl RuntimeShared {
 
 impl Drop for RuntimeShared {
     /// Shuts the runtime down unless it has, then waits for its thread as
-    /// `_thread_end` drops.
+    /// `thread_end` drops.
     fn drop(&mut self) {
         if !self.lifecycle.get_mut().shut_down {
             self.shut_down(None);
@@ -426,7 +436,7 @@ impl Runtime {
                 lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
                 next_map_id: AtomicU64::new(1),
                 glyph_cache: Arc::default(),
-                _thread_end: thread_end,
+                thread_end,
             }),
         })
     }
@@ -693,7 +703,8 @@ impl Runtime {
     }
 
     /// Shuts the runtime down. The completion reports when its thread has
-    /// let go of its maps' resources and its file sources.
+    /// let go of its maps' resources and its file sources, and nothing waits
+    /// for the thread to end after that.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
     /// runtime has maps that aren't released, or when the runtime was
@@ -710,14 +721,16 @@ impl Runtime {
             lifecycle.released = true;
             lifecycle.shut_down = true;
         }
+        self.shared.detach_thread();
         let (completion, resolver) = self.shared.completion();
         self.shared.shut_down(Some(resolver));
         Ok(completion)
     }
 
     /// Releases the runtime whatever its state, without waiting: it shuts
-    /// down once its last map is released. Every call on the runtime fails
-    /// with [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
+    /// down once its last map is released, and nothing waits for its thread
+    /// to end. Every call on the runtime fails with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
     pub fn dispose(&self) -> Result<(), Error> {
         let shut_down = {
             let mut lifecycle = self.shared.lifecycle.lock();
@@ -729,6 +742,7 @@ impl Runtime {
             lifecycle.shut_down |= shut_down;
             shut_down
         };
+        self.shared.detach_thread();
         if shut_down {
             self.shared.shut_down(None);
         }

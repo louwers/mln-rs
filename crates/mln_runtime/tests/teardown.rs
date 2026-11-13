@@ -6,7 +6,7 @@ mod support;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{Sender, channel};
 
 use httpmock::MockServer;
 use mln_runtime::{AttachOptions, Map, RenderSession, RenderTarget, Runtime, RuntimeOptions};
@@ -149,4 +149,28 @@ fn a_session_dropped_in_its_own_callback_ends() {
     drop(session);
     open.send(()).unwrap();
     assert!(eventually(|| ended.has()), "the session's thread runs");
+}
+
+#[test]
+fn dropping_a_released_runtime_doesnt_wait_for_its_thread() {
+    /// Waits as it drops, on the runtime's thread, for this thread to go on
+    /// past the drop of the runtime.
+    struct WaitsForHost(Mutex<std::sync::mpsc::Receiver<()>>, Sender<bool>);
+    impl Drop for WaitsForHost {
+        fn drop(&mut self) {
+            let _ = self.1.send(self.0.get_mut().recv_timeout(TIMEOUT).is_ok());
+        }
+    }
+    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let (go_on, gone_on) = channel();
+    let (saw, saw_host) = channel();
+    let blocker = WaitsForHost(Mutex::new(gone_on), saw);
+    wait(runtime.set_event_handler(move |_| {
+        let _ = &blocker;
+    }));
+    let released = runtime.release().unwrap();
+    drop(runtime);
+    go_on.send(()).unwrap();
+    assert!(saw_host.recv_timeout(TIMEOUT).unwrap(), "the drop waited for the runtime's thread");
+    released.wait().unwrap();
 }

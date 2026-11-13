@@ -1562,9 +1562,7 @@ MLN_API mln_status mln_map_request_still_image(
 /**
  * Releases the map.
  *
- * Detach the map's render session first. The call that lets go of the map's
- * runtime last waits for the runtime's threads, as mln_runtime_dispose()
- * describes.
+ * Detach the map's render session first.
  */
 MLN_BINDING("execution=lifecycle")
 MLN_API mln_status mln_map_release(
@@ -1574,9 +1572,7 @@ MLN_API mln_status mln_map_release(
 /**
  * Releases the map in any state, and finishes in the background.
  *
- * Use it from destructors and finalizers. Otherwise, use mln_map_release(). The
- * call that lets go of the map's runtime last waits for the runtime's threads,
- * as mln_runtime_dispose() describes.
+ * Use it from destructors and finalizers. Otherwise, use mln_map_release().
  */
 MLN_API mln_status
 mln_map_dispose(mln_map map, mln_diagnostic* out_diagnostic) MLN_NOEXCEPT;
