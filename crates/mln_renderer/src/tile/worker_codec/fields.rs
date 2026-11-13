@@ -133,8 +133,7 @@ macro_rules! bucket_types {
         #[derive(Serialize)]
         enum BucketRef<'a> { $($tag(&'a $bucket),)+ }
 
-        // Read, then moved into an `Arc` at once.
-        #[allow(clippy::large_enum_variant)]
+        #[expect(clippy::large_enum_variant, reason = "the value is read, then moved into an `Arc` at once")]
         #[derive(Deserialize)]
         enum BucketOwned { $($tag($bucket),)+ }
 

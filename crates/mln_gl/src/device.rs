@@ -28,8 +28,7 @@
 //
 // On Windows, the library's group is WGL's (wgl.rs), and EGL's only a host's.
 
-// Windows makes no library device on EGL.
-#![cfg_attr(windows, allow(dead_code))]
+#![cfg_attr(windows, expect(dead_code, reason = "Windows makes no library device on EGL"))]
 
 use std::cell::Cell;
 use std::ffi::c_void;

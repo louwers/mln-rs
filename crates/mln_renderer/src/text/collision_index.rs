@@ -191,14 +191,6 @@ impl CollisionIndex {
             && boundaries[3] < tile_boundaries[3]
     }
 
-    #[allow(dead_code)]
-    fn overlaps_tile(boundaries: &CollisionBoundaries, tile_boundaries: &CollisionBoundaries) -> bool {
-        boundaries[0] < tile_boundaries[2]
-            && boundaries[2] > tile_boundaries[0]
-            && boundaries[1] < tile_boundaries[3]
-            && boundaries[3] > tile_boundaries[1]
-    }
-
     pub(crate) fn intersects_tile_edges(
         &self,
         box_: &CollisionBox,
@@ -247,7 +239,10 @@ impl CollisionIndex {
 
     /// Places a collision feature. `shift` is a variable anchor's offset,
     /// unset when there is none.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the feature, its shift and translation, the projectors, the symbol's size and alignment, the collision options and the boxes it writes"
+    )]
     pub(crate) fn place_feature(
         &self,
         feature: &CollisionFeature,
@@ -334,7 +329,10 @@ impl CollisionIndex {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the feature and its translation, the projectors, the symbol's size and alignment, the collision options and the boxes it writes"
+    )]
     fn place_line_feature(
         &self,
         feature: &CollisionFeature,
@@ -675,7 +673,10 @@ impl CollisionIndex {
     /// Projects a pitched or map-rotated box. The box outline is sampled at
     /// eight points and projected, so it turns and foreshortens the way the
     /// label does.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the box, its scales, the projector and alignment flags, and the anchor, shift and translation that place it"
+    )]
     fn project_collision_box(
         &self,
         box_: &CollisionBox,

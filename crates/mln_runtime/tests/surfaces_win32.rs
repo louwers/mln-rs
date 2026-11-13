@@ -4,7 +4,7 @@
 // device that presents to Win32 windows is skipped.
 
 #![cfg(windows)]
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "the tests make Win32 windows to present to")]
 
 mod support;
 

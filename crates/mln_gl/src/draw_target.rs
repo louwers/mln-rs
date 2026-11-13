@@ -28,7 +28,6 @@ impl DrawTarget {
         &*self.resource
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_size(&self, size: Size) {
         self.size.set(size);
     }

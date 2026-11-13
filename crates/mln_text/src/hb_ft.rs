@@ -52,9 +52,11 @@ impl<'a> HbFtFont<'a> {
 }
 
 impl FontFuncs for HbFtFont<'_> {
-    /// `hb_ft_get_nominal_glyph`.
-    // The `match` is HarfBuzz's `switch` over the font page.
-    #[allow(clippy::single_match, clippy::collapsible_match)]
+    #[expect(
+        clippy::single_match,
+        clippy::collapsible_match,
+        reason = "the `match` is HarfBuzz's `switch` over the font page"
+    )]
     fn nominal_glyph(&self, _font: &ShaperFont, unicode: u32) -> Option<GlyphId> {
         let mut g = self.face.get_char_index(unicode);
         if g == 0 {

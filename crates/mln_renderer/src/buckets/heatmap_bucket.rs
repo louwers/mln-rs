@@ -34,6 +34,8 @@ crate::paint_property_binders!(
         heatmap_radius: HeatmapRadius => PaintPropertyBinder<f32>,
         heatmap_weight: HeatmapWeight => PaintPropertyBinder<f32>,
     }
+    #[expect(dead_code, reason = "the heatmap bucket doesn't rewrite its vertices on a feature state change")]
+    fn update_vertex_vectors;
 );
 
 /// A heatmap layout vertex, also used for the heatmap texture's quad.

@@ -612,7 +612,10 @@ impl BorrowedTarget {
                 .position(|old| old.image == image.image)
                 .and_then(|index| previous.get_mut(index))
                 .and_then(|slot| slot.consumer_wait.take());
-            #[cfg_attr(not(unix), allow(clippy::needless_update))]
+            #[cfg_attr(
+                not(unix),
+                expect(clippy::needless_update, reason = "only Unix's slots have fields besides the consumer's wait")
+            )]
             slots.push(Slot { consumer_wait: carried, ..Slot::default() });
         }
         let waits = previous.iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
@@ -683,7 +686,7 @@ impl BorrowedTarget {
     }
 
     /// The sync the host waits for, once the frame was submitted.
-    #[cfg_attr(not(unix), allow(unused_variables))]
+    #[cfg_attr(not(unix), expect(unused_variables, reason = "sync files are Unix's"))]
     fn producer_sync(&self, context: &Context, slot: usize) -> Option<GpuSync> {
         use ash::vk::Handle as _;
         match self.producer {
@@ -850,7 +853,7 @@ impl Drop for PendingReads {
 
 /// Lets go of `wait`, destroying a semaphore of the target's that no frame
 /// waits on.
-#[cfg_attr(not(unix), allow(unused_variables))]
+#[cfg_attr(not(unix), expect(unused_variables, reason = "sync files are Unix's"))]
 fn drop_wait(backend: &BackendImpl, wait: ConsumerWait) {
     match wait {
         ConsumerWait::Timeline(..) => {}

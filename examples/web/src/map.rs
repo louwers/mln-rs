@@ -126,7 +126,10 @@ impl WebMap {
     /// downloading them, as GL JS's `localIdeographFontFamily`.
     /// (`map_webgl.rs` has the `webgl` build's.)
     #[cfg(not(feature = "webgl"))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "JavaScript passes the canvas, its size and ratio, the worker ports and the host's callbacks and font family positionally"
+    )]
     pub async fn create(
         canvas: web_sys::OffscreenCanvas,
         width: u32,
@@ -376,7 +379,7 @@ impl WebMap {
     /// "pen"), `button` the DOM `button` (0 primary, 1 middle, 2 secondary)
     /// and `modifiers` the bits of [`modifiers`]. `time` is in milliseconds
     /// on the clock `frame` gets. Returns whether the map used it.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "JavaScript passes the DOM pointer event's fields positionally")]
     pub fn pointer_down(
         &mut self,
         id: u32,
@@ -494,7 +497,10 @@ fn modifiers_from_bits(bits: u32) -> Modifiers {
 impl WebMap {
     /// The map on `backend`, drawing into `target`: what both builds'
     /// `create` share (see there).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the backend, target, size and ratio and the worker ports and callbacks that both builds' `create` pass on"
+    )]
     fn build(
         backend: Rc<dyn RendererBackend>,
         target: Target,

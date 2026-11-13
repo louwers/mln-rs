@@ -24,12 +24,9 @@ use crate::generated::types::{MLN_STATUS_OK, mln_diagnostic, mln_status};
 /// the status.
 macro_rules! export {
     ($diagnostic:ident, $(non_null($($pointer:ident),+ $(,)?),)? $body:block) => {{
-        // The closure gives the body a scope for `?` and `return`, which a
-        // body without them doesn't need.
-        #[allow(clippy::redundant_closure_call)]
-        let result: ::core::result::Result<(), $crate::error::Error> = match $crate::export::refusal() {
-            ::core::option::Option::Some(error) => ::core::result::Result::Err(error),
-            ::core::option::Option::None => (|| -> ::core::result::Result<(), $crate::error::Error> {
+        // The closure gives the body a scope for `?` and `return`.
+        let result = $crate::export::refusal().map_or_else(
+            || -> ::core::result::Result<(), $crate::error::Error> {
                 $($(
                     if $pointer.is_null() {
                         return ::core::result::Result::Err($crate::error::Error::invalid_argument(
@@ -38,8 +35,9 @@ macro_rules! export {
                     }
                 )+)?
                 $body
-            })(),
-        };
+            },
+            ::core::result::Result::Err,
+        );
         // SAFETY: every entry point's contract: `out_diagnostic` is null, or
         // points to an `mln_diagnostic` whose `size` is initialized and
         // declares bytes the caller can write.

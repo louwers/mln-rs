@@ -178,7 +178,7 @@ impl TaggedString {
 
     /// Appends a text section with HarfBuzz adjustments. The section's start
     /// index is the length before the text.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a property of the section")]
     pub fn add_text_section_with_adjusts(
         &mut self,
         section_text: &[u16],

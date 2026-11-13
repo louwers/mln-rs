@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Fail when a file has more panic sites or TODO(port) comments than recorded.
+"""Fail when a file has more library panic sites or `RefCell` borrows than recorded.
 
-Two counts per Rust file:
+Two counts per Rust file, in the libraries' non-test code (`src/`,
+`crates/*/src`, `vendor/*/src`, minus `#[cfg(test)]` items and the files of
+`#[cfg(test)] mod name;` modules):
 
 - `panic`: `.unwrap()`, `.expect(`, `panic!`, `unreachable!`, `todo!` and
-  `unimplemented!` in the libraries' non-test code (`src/`, `crates/*/src`,
-  `vendor/*/src`, minus `#[cfg(test)]` items and the files of
-  `#[cfg(test)] mod name;` modules). A C++
-  exception or invariant ported as a panic takes down the embedding app:
-  where C++ throws, return the error.
-- `todo-port`: `TODO(port)` comments anywhere, each a C++ path the port skips.
+  `unimplemented!`. A C++ exception or invariant ported as a panic takes down
+  the embedding app: where C++ throws, return the error.
+- `borrow`: `.borrow()` and `.borrow_mut()`, each a `RefCell` borrow that
+  panics when it overlaps a conflicting one. The scan can't see types, so a
+  file that names the `Borrow` or `BorrowMut` trait and never `RefCell` counts
+  none: its calls are the trait's.
 
 `tools/ratchet/baseline.toml` records the counts. A file absent from it allows
 none, and a count above its baseline fails. A count below its baseline also
@@ -29,13 +31,15 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = ROOT / "tools" / "ratchet" / "baseline.toml"
-RULES = ("panic", "todo-port")
+RULES = ("panic", "borrow")
 
 LIBRARY_SOURCE = re.compile(r"^(?:src/|(?:crates|vendor)/[^/]+/src/)")
 PANIC = re.compile(
     r"\.unwrap\(\)|\.expect\(|\b(?:panic|unreachable|todo|unimplemented)!\s*[(\[{]"
 )
-TODO_PORT = re.compile(r"TODO\(port\)")
+BORROW = re.compile(r"\.borrow(?:_mut)?\(\)")
+BORROW_TRAIT = re.compile(r"\bBorrow(?:Mut)?\b")
+REF_CELL = re.compile(r"\bRefCell\b")
 RUST_TEST_ATTRIBUTE = re.compile(r"#\[cfg\((?:all\()?test\b[^\]]*\]\s*")
 PATH_ATTRIBUTE = re.compile(r'^#\[path\s*=\s*"([^"]+)"\]')
 MOD_DECLARATION = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;")
@@ -120,14 +124,16 @@ def test_modules(path: str, lines: list[str]) -> list[str]:
 
 def counts(path: str, lines: list[str], test_prefixes: list[str]) -> dict[str, int]:
     result = dict.fromkeys(RULES, 0)
-    result["todo-port"] = sum(len(TODO_PORT.findall(line)) for line in lines)
-    if LIBRARY_SOURCE.match(path) and not any(path.startswith(prefix) for prefix in test_prefixes):
-        tests = test_lines(lines)
-        result["panic"] = sum(
-            len(PANIC.findall(code_part(line)))
-            for index, line in enumerate(lines)
-            if index not in tests
-        )
+    if not LIBRARY_SOURCE.match(path) or any(path.startswith(prefix) for prefix in test_prefixes):
+        return result
+    tests = test_lines(lines)
+    code = [code_part(line) for index, line in enumerate(lines) if index not in tests]
+    result["panic"] = sum(len(PANIC.findall(line)) for line in code)
+    trait_only = any(BORROW_TRAIT.search(line) for line in code) and not any(
+        REF_CELL.search(line) for line in code
+    )
+    if not trait_only:
+        result["borrow"] = sum(len(BORROW.findall(line)) for line in code)
     return result
 
 
@@ -158,7 +164,7 @@ def scan() -> dict[str, dict[str, int]]:
 
 def write_baseline(baseline: dict[str, dict[str, int]]) -> None:
     lines = [
-        "# Panic sites and TODO(port) comments per file (tools/ratchet/ratchet.py).",
+        "# Library panic sites and RefCell borrows per file (tools/ratchet/ratchet.py).",
         "# Counts only fall: `just ratchet --update` lowers them. Raise one by hand",
         "# in the change that needs it.",
     ]
@@ -197,12 +203,12 @@ def main() -> int:
         print(f"error: {error}", file=sys.stderr)
     if errors:
         print(
-            "Return errors instead of panicking in library code, and port the C++ "
-            "paths a TODO(port) skips (tools/ratchet/ratchet.py).",
+            "Return errors instead of panicking in library code, and give state one "
+            "owner instead of borrowing it from a RefCell (tools/ratchet/ratchet.py).",
             file=sys.stderr,
         )
     total = {rule: sum(current[rule].values()) for rule in RULES}
-    print(f"panic: {total['panic']}, todo-port: {total['todo-port']}")
+    print(", ".join(f"{rule}: {total[rule]}" for rule in RULES))
     return 1 if errors else 0
 
 

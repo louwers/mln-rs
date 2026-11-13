@@ -89,10 +89,8 @@ macro_rules! layout_properties {
     ($(#[$meta:meta])* $vis:vis mod $module:ident { $($field:ident: $prop:ty),+ $(,)? }) => {
         $(#[$meta])*
         $vis mod $module {
-            #[allow(unused_imports)]
             use super::*;
-            #[allow(unused_imports)]
-            use $crate::properties::{Field, Property, PropertyValueLike};
+            use $crate::properties::Property;
 
             #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Unevaluated {

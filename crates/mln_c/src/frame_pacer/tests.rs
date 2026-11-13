@@ -531,7 +531,7 @@ fn end(runtime: mln_runtime, map: mln_map, session: mln_render_session) {
 /// demands. Each platform's tests run it with a pacer of their own.
 #[cfg_attr(
     not(any(target_os = "macos", target_os = "ios", target_os = "tvos", target_os = "android", target_env = "ohos")),
-    allow(dead_code)
+    expect(dead_code, reason = "only the platforms with a pacer of their own run it")
 )]
 pub(crate) fn expect_paced_frames(pacer: mln_frame_pacer, release: bool) {
     let (runtime, map, session) = settled_session();

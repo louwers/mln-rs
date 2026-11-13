@@ -19,7 +19,10 @@ use serde_json::Value as JSValue;
 
 /// Extracts an individual image from a spritesheet at the given location.
 /// Logs and returns `None` for invalid metrics or metadata.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the sprite sheet, the image's rectangle, and the metadata of one sprite entry"
+)]
 #[must_use]
 pub(crate) fn create_style_image(
     id: &str,

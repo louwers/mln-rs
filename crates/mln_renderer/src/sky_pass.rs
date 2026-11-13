@@ -103,7 +103,10 @@ pub(crate) struct SkyPass {
 }
 
 impl SkyPass {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the shaders, context and camera, the viewport, and the evaluated sky and light that the pass draws"
+    )]
     pub(crate) fn update(
         &mut self,
         shaders: &ShaderRegistry,

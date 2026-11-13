@@ -249,7 +249,6 @@ pub(crate) struct RenderLineLayer {
     line_sdf_shader_group: Option<ShaderGroupPtr>,
     line_gradient_sdf_shader_group: Option<ShaderGroupPtr>,
     // Used by the line-pattern branch.
-    #[allow(dead_code)]
     line_pattern_shader_group: Option<ShaderGroupPtr>,
 }
 

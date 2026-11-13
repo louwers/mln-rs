@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![expect(dead_code, reason = "each test binary uses some of the shared helpers")]
 
 use std::path::PathBuf;
 use std::sync::Arc;

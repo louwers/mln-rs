@@ -8,8 +8,7 @@
 //! build with the vertex layouts their tables describe, in both projection
 //! variants.
 
-// Metal through objc2 is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -94,7 +93,8 @@ fn compile(
     let options = MTLCompileOptions::new();
     // SAFETY: the macros map NSString names to NSString values.
     unsafe { options.setPreprocessorMacros(Some(&macros)) };
-    #[allow(deprecated)] // C++ sets fastMathEnabled, which mathMode replaces on macOS 15.
+    #[expect(deprecated, reason = "C++ sets `fastMathEnabled`, which `mathMode` replaces on macOS 15")]
+    // C++ sets fastMathEnabled, which mathMode replaces on macOS 15.
     options.setFastMathEnabled(true);
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
     options.setPreserveInvariance(true);

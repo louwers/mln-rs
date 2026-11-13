@@ -1066,7 +1066,6 @@ fn custom_vector<'a>(style: &'a Style, id: &str) -> Result<&'a CustomVectorSourc
 /// synchronous tiling on, and returns its resolver for the command to
 /// resolve once it ran; otherwise starts building it, or leaves it waiting
 /// behind the data being built. An error returns the resolver with it.
-#[allow(clippy::too_many_arguments)]
 fn queue_geojson(
     entry: &mut MapEntry,
     map_id: MapId,

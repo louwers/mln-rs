@@ -121,7 +121,7 @@ ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lco
     rm -rf {{quote(parent_directory(coverage_lcov))}}
     mkdir -p {{quote(parent_directory(coverage_lcov))}}
 
-# Run the checks of CI's lint job: formatting, the panic and TODO(port) ratchet, clippy, the API docs, the wasm32-unknown-unknown and 32-bit builds and the licenses, warnings as errors
+# Run the checks of CI's lint job: formatting, the panic and RefCell-borrow ratchet, clippy, the API docs, the wasm32-unknown-unknown and 32-bit builds and the licenses, warnings as errors
 ci-lint:  env-info test-fmt ratchet clippy test-doc check-wasm check-32bit licenses && assert-git-is-clean
 
 # Package every crate and compile every Cargo test target, as CI's release-crate job does
@@ -313,7 +313,7 @@ package:
     cargo package --workspace --locked --exclude mln-rs-desktop
     cargo test --workspace --locked --no-run
 
-# Fail when a file has more library panic sites or TODO(port) comments than tools/ratchet/baseline.toml; `--update` lowers it
+# Fail when a file has more library panic sites or RefCell borrows than tools/ratchet/baseline.toml; `--update` lowers it
 ratchet *args:
     python3 -I tools/ratchet/ratchet.py {{args}}
 

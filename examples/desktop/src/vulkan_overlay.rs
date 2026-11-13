@@ -9,8 +9,7 @@
 // queue for the same reason, and so does a freed texture's descriptor set
 // on its way to the next texture.
 
-// Vulkan through ash is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "Vulkan through ash is the FFI here")]
 
 use std::cell::RefCell;
 use std::collections::HashMap;

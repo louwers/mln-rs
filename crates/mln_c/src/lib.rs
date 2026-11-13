@@ -25,11 +25,11 @@
 //! tools/c-abi-gen generates. Everything runs on the thread that loaded the
 //! module, and nothing waits.
 
-// Every export takes raw pointers from C callers.
-#![allow(unsafe_code)]
-// A cast between C's types can be to the same type on one platform only:
-// `c_char` is signed on some and unsigned on others, `c_ulong` 32 or 64 bits.
-#![allow(trivial_numeric_casts)]
+#![expect(unsafe_code, reason = "every export takes raw pointers from C callers")]
+#![expect(
+    trivial_numeric_casts,
+    reason = "a cast between C's types can be to the same type on one platform only: `c_char` is signed on some and unsigned on others, `c_ulong` 32 or 64 bits"
+)]
 
 #[macro_use]
 mod export;
@@ -73,8 +73,20 @@ mod web;
 mod wgl_tests;
 
 #[rustfmt::skip]
-#[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unreachable_pub, unused_variables, clippy::all, clippy::pedantic)]
 mod generated {
+    // An allow, not an expect: which lints the generated code trips changes
+    // with the headers and the build's target.
+    #![allow(
+        dead_code,
+        non_camel_case_types,
+        non_snake_case,
+        non_upper_case_globals,
+        unreachable_pub,
+        unused_variables,
+        clippy::all,
+        clippy::pedantic,
+        reason = "tools/c-abi-gen declares every item of the C headers, with C's names"
+    )]
     pub(crate) mod types;
     mod stubs;
     mod signatures;

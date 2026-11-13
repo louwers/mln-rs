@@ -226,7 +226,7 @@ impl Subdivider {
         ring
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the ring, the edge's two endpoints and the cell's column range")]
     fn generate_intra_edge_vertices(
         &mut self,
         ring: &mut Vec<u32>,
@@ -261,7 +261,10 @@ impl Subdivider {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the ring, the three points of two edges and the cell row's column and range"
+    )]
     fn generate_inter_edge_vertices(
         &mut self,
         ring: &mut Vec<u32>,

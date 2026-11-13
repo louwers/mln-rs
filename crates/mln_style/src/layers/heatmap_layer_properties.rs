@@ -34,7 +34,7 @@ crate::data_driven_paint_property!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `HeatmapPaintProperties` type list")]
     pub mod HeatmapPaintProperties {
         heatmap_color: HeatmapColor,
         heatmap_intensity: HeatmapIntensity,

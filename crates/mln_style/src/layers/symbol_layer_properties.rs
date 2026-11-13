@@ -321,7 +321,7 @@ crate::paint_property!(
 
 crate::layout_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `SymbolLayoutProperties` type list")]
     pub mod SymbolLayoutProperties {
         icon_allow_overlap: IconAllowOverlap,
         icon_anchor: IconAnchor,
@@ -371,7 +371,7 @@ crate::layout_properties!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `SymbolPaintProperties` type list")]
     pub mod SymbolPaintProperties {
         icon_color: IconColor,
         icon_halo_blur: IconHaloBlur,

@@ -26,7 +26,7 @@ fn path_from_file_url(url: &str) -> Vec<u8> {
     let url = &url[FILE_PROTOCOL.len()..];
     #[cfg(target_os = "android")]
     let url = crate::android::url_path(url);
-    #[allow(unused_mut)]
+    #[cfg_attr(not(windows), expect(unused_mut, reason = "only Windows edits the path"))]
     let mut path = percent_decode(url);
     #[cfg(windows)]
     {

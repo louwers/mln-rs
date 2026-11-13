@@ -87,7 +87,10 @@ pub(crate) fn layer_tweaker_slot(tweaker: &LayerTweakerPtr) -> Option<Rc<dyn Any
     Some(Rc::new(Rc::clone(tweaker)))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the tile, the paint parameters and the translation, clipping and alignment options of its matrix"
+)]
 pub(crate) fn get_tile_matrix(
     tile_id: &UnwrappedTileID,
     parameters: &PaintParameters<'_>,
@@ -113,7 +116,10 @@ pub(crate) fn get_tile_matrix(
 
 /// The projection data for this tile: the tile matrix plus the per-tile
 /// projection fields.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the tile, the paint parameters and the translation, clipping and alignment options of its projection"
+)]
 pub(crate) fn get_projection_data(
     tile_id: &UnwrappedTileID,
     parameters: &PaintParameters<'_>,
@@ -171,7 +177,10 @@ pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude
 
 /// The static `getTileMatrix(tileID, transformState, transformParams, ...)`
 /// overload.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the tile, the transform and the translation, origin, clipping and alignment options of its matrix"
+)]
 pub(crate) fn get_tile_matrix_for(
     tile_id: &UnwrappedTileID,
     transform_state: &TransformState,

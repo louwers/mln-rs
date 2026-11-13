@@ -71,7 +71,7 @@ crate::paint_property!(
 
 crate::layout_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `CircleLayoutProperties` type list")]
     pub mod CircleLayoutProperties {
         circle_sort_key: CircleSortKey,
     }
@@ -79,7 +79,7 @@ crate::layout_properties!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `CirclePaintProperties` type list")]
     pub mod CirclePaintProperties {
         circle_blur: CircleBlur,
         circle_color: CircleColor,

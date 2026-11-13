@@ -278,7 +278,7 @@ pub(crate) struct PlacedSymbol {
 }
 
 impl PlacedSymbol {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the placed symbol")]
     #[must_use]
     pub(crate) fn new(
         anchor_point: Point<f32>,
@@ -503,7 +503,10 @@ impl std::fmt::Debug for SymbolBucket {
 }
 
 impl SymbolBucket {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the evaluated layout and sizes, the laid-out symbols and the placement flags that the bucket keeps"
+    )]
     #[must_use]
     pub(crate) fn new(
         layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
@@ -712,7 +715,7 @@ impl SymbolBucket {
 
     /// The layout vertex of a quad corner, with the quad's atlas origin
     /// (`tex_origin`, see [`SymbolLayoutVertex::a4`]).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a component of the packed vertex")]
     #[must_use]
     pub(crate) fn layout_attributes(
         label_anchor: Point<f32>,

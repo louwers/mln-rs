@@ -13,7 +13,7 @@ crate::paint_property!(pub struct LightColor: Color = Color::white());
 crate::paint_property!(pub struct LightIntensity: f32 = 0.5_f32);
 
 crate::paint_properties!(
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `LightProperties` type list")]
     pub mod LightProperties {
         light_anchor: LightAnchor,
         light_position: LightPosition,

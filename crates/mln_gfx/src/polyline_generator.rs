@@ -727,7 +727,10 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
         segment.index_length += triangle_store.len() * 3;
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a join's vertex: its position, normal and end extrusions, plus the line's running distance and triangle state"
+    )]
     fn add_current_vertex(
         &mut self,
         current_coordinate: GeometryCoordinate,
@@ -803,7 +806,10 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a round join's vertex: its position, extrusion and turn, plus the line's running distance and triangle state"
+    )]
     fn add_pie_slice_vertex(
         &mut self,
         current_vertex: GeometryCoordinate,

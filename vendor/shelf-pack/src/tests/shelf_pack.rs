@@ -2,7 +2,11 @@
 // by test (same names, same assertions). `Bin*` is `Option<BinRef>`;
 // `ptr->field` reads `sprite.bin(ptr)`.
 
-#![allow(unused_mut, unused_variables, unused_assignments)]
+#![expect(
+    unused_mut,
+    unused_assignments,
+    reason = "the tests keep the C++ tests' statements, including bindings they never change and assignments they never read"
+)]
 
 use crate::{Bin, BinRef, PackOptions, SHELF_PACK_VERSION, ShelfPack, ShelfPackOptions};
 

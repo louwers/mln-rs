@@ -14,8 +14,7 @@
 //! Metal exists on Apple platforms only; elsewhere this crate is empty.
 
 #![cfg(target_vendor = "apple")]
-// Metal through objc2 is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
 pub mod borrowed_target;
 pub mod buffer_resource;

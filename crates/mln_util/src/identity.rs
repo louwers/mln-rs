@@ -19,7 +19,10 @@ impl SimpleIdentity {
     pub const EMPTY: SimpleIdentity = SimpleIdentity { unique_id: Self::EMPTY_ID };
 
     /// Returns a new unique identity.
-    #[allow(clippy::new_without_default)]
+    #[expect(
+        clippy::new_without_default,
+        reason = "each `new` is a fresh identity, which `Default` would make implicit"
+    )]
     pub fn new() -> Self {
         SimpleIdentity { unique_id: NEXT_ID.fetch_add(1, Ordering::Relaxed) }
     }

@@ -617,7 +617,10 @@ fn calculate_variable_layout_offset_unrotated(
 
 /// The variable anchor's shift as a screen-space offset, for the boxes that
 /// are not projected.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the anchor, the box's size, offset and scale, and the alignment and bearing that turn it to screen space"
+)]
 fn calculate_variable_layout_offset(
     anchor: SymbolAnchorType,
     width: f32,
@@ -1325,7 +1328,10 @@ impl Placement {
     }
 
     /// The `placeFeatureForVariableAnchors` lambda of `placeSymbol`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the text and icon features, the symbol and the placement context, projectors and anchors that place them"
+    )]
     fn place_feature_for_variable_anchors(
         &mut self,
         text_collision_feature: &CollisionFeature,

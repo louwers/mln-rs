@@ -197,7 +197,6 @@ fn color_range(base_mip_level: u32, level_count: u32) -> vk::ImageSubresourceRan
 }
 
 /// Records a layout transition of `image`'s color `range`.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn transition_image(
     device: &ash::Device,
     command_buffer: vk::CommandBuffer,

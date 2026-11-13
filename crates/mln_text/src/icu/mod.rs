@@ -15,7 +15,7 @@ mod ubidi_props_data;
 pub(crate) mod ushape;
 
 /// ICU's `UErrorCode`, limited to the values this module produces.
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types, reason = "ICU's names for its error codes")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum UErrorCode {
     U_STRING_NOT_TERMINATED_WARNING,

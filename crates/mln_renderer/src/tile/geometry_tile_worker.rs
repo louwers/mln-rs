@@ -206,7 +206,7 @@ pub(crate) struct GeometryTileWorker {
 }
 
 impl GeometryTileWorker {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the worker's tile, parent, render mode and atlases, which it keeps")]
     pub(crate) fn new(
         self_ref: SelfRef,
         parent: Box<dyn TileEndpoint>,

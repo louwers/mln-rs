@@ -23,7 +23,7 @@
 // Elsewhere no platform creates pacers, and only the tests' fake ones exist.
 #![cfg_attr(
     not(any(target_os = "macos", target_os = "ios", target_os = "tvos", target_os = "android", target_env = "ohos")),
-    allow(dead_code)
+    expect(dead_code, reason = "elsewhere no platform creates pacers, and only the tests' fake ones exist")
 )]
 
 pub(crate) mod android;
@@ -220,7 +220,10 @@ impl Limit {
     }
 
     /// The most frames per second.
-    #[cfg_attr(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "ios", target_os = "tvos")),
+        expect(dead_code, reason = "only the Apple platforms' pacer asks for the rate")
+    )]
     pub(crate) fn frames_per_second(self) -> u32 {
         self.frames_per_second
     }

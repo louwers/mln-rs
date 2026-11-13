@@ -364,6 +364,11 @@ unimplemented = "warn"
 # `Arc::clone(&x)` and `Rc::clone(&x)` for a new reference to the same value,
 # so that `x.clone()` is a copy of a value.
 clone_on_ref_ptr = "warn"
+# `#[expect(lint, reason = "…")]` instead of `#[allow(lint)]`: the reason
+# says why the code needs it, and the attribute fails once the lint stops
+# firing.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
 # Their fixes would change what the code does: numeric conversions that
 # truncate, wrap or saturate on purpose, where `try_from` would fail
 # instead, and exact float comparisons, which an epsilon would loosen.

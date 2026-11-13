@@ -26,7 +26,7 @@ fn calculations() {
 
     expect_array_ne(position.get_cartesian(), spherical);
     expect_array_eq(position.get_spherical(), spherical);
-    #[allow(clippy::excessive_precision)]
+    #[expect(clippy::excessive_precision, reason = "the C++ test's expected values, digit for digit")]
     expect_array_eq(
         position.get_cartesian(),
         [0.347_296_386_957_168_58, -1.969_615_459_442_138_7, 2.384_976_127_700_611e-08],
@@ -44,12 +44,12 @@ fn calculations() {
     let new_spherical = [1.0, 80.0, 270.0];
     position.set(new_spherical);
     expect_array_ne(position.get_spherical(), spherical);
-    #[allow(clippy::excessive_precision)]
+    #[expect(clippy::excessive_precision, reason = "the C++ test's expected values, digit for digit")]
     expect_array_ne(
         position.get_cartesian(),
         [0.347_296_386_957_168_58, -1.969_615_459_442_138_7, 2.384_976_127_700_611e-08],
     );
-    #[allow(clippy::excessive_precision)]
+    #[expect(clippy::excessive_precision, reason = "the C++ test's expected values, digit for digit")]
     expect_array_eq(
         position.get_cartesian(),
         [0.984_807_729_721_069_34, -0.173_648_297_786_712_65, 1.192_488_063_850_305_5e-08],

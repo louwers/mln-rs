@@ -4,7 +4,7 @@
 // between the projection's far depth and 1. A backend that this build or
 // machine lacks skips its cases.
 
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "the tests read back the frames' depth through each backend's API")]
 
 mod support;
 

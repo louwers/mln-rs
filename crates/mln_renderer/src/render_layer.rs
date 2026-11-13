@@ -209,7 +209,10 @@ impl<'a> CaptureView<'a> {
 /// feature whose vertices those are, drawn through `view`: the tile matrix
 /// of `tile_id` translated by `translation`, or on the globe the tile's
 /// projection.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the bucket, tile and camera, the layer's translation, and the callbacks that pick and bound each feature"
+)]
 pub(crate) fn capture_retained_features<'a>(
     stats: &mut Stats,
     bucket: &dyn crate::bucket::Bucket,
@@ -533,7 +536,10 @@ pub trait RenderLayer {
     }
 
     /// Update a layer with its render data (drawables).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the shaders, context, camera, update and paint parameters, render tree and change list that a layer's drawables depend on"
+    )]
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
@@ -734,7 +740,10 @@ pub trait RenderLayer {
     // transformState, pixelsToTileUnits, projector, featureState)`, with the
     // tile's projector in place of its matrix; C++ returns false unless a
     // layer type overrides it.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the query geometry, the feature and its state, and the zoom, camera and projector that test them"
+    )]
     fn query_intersects_feature(
         &self,
         _query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,

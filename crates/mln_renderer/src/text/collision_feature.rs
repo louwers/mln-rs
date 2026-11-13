@@ -169,7 +169,10 @@ pub(crate) struct CollisionFeature {
 
 impl CollisionFeature {
     /// The constructor for text.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the line, anchor and shaped text, and the box scale, padding, placement, feature, overscaling and rotation of its boxes"
+    )]
     #[must_use]
     pub(crate) fn new_text(
         line: &GeometryCoordinates,
@@ -249,7 +252,10 @@ impl CollisionFeature {
         feature
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the line, anchor and box edges, and the paddings, scales and rotation of the boxes"
+    )]
     fn initialize(
         &mut self,
         line: &GeometryCoordinates,

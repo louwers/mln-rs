@@ -115,7 +115,7 @@ impl<'a> PaintParameters<'a> {
     pub(crate) const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
     pub(crate) const MAX_STENCIL_VALUE: i32 = 255;
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the paint parameters")]
     pub(crate) fn new(
         context: &'a dyn Context,
         pixel_ratio: f32,

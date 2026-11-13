@@ -33,7 +33,10 @@ pub(crate) fn get_line_length(line: &GeometryCoordinates) -> f32 {
     line_length
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the line and the spacing, angle window and label length that pick the anchors"
+)]
 fn resample(
     line: &GeometryCoordinates,
     offset: f32,
@@ -105,7 +108,10 @@ fn resample(
     anchors
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the line, the spacing and angle limit, and the text and icon extents and scales that size the labels"
+)]
 #[must_use]
 pub(crate) fn get_anchors(
     line: &GeometryCoordinates,
@@ -159,7 +165,10 @@ pub(crate) fn get_anchors(
     resample(line, offset, spacing, angle_window_size, max_angle, label_length, continued_line, false)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the line, the angle limit, and the text and icon extents and scales that size the label"
+)]
 #[must_use]
 pub(crate) fn get_center_anchor(
     line: &GeometryCoordinates,

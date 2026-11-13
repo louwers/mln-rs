@@ -263,7 +263,7 @@ pub(crate) struct RuntimeCore {
     /// The runtime's file sources, held for its life so that each map, and
     /// each transform, finds the same ones.
     _loader: Option<Arc<dyn FileSource>>,
-    #[cfg_attr(target_family = "wasm", allow(dead_code))]
+    #[cfg_attr(target_family = "wasm", expect(dead_code, reason = "the browser build has no database"))]
     database: Option<Arc<dyn FileSource>>,
     network: Option<Arc<dyn FileSource>>,
     pub(crate) run_loop: RunLoopHandle,

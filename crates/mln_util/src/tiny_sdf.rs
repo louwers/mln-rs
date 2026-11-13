@@ -41,7 +41,6 @@ fn edt1d(f: &[f64], d: &mut [f64], v: &mut [i16], z: &mut [f64], n: u32) {
 }
 
 /// 2D Euclidean distance transform.
-#[allow(clippy::too_many_arguments)]
 fn edt(data: &mut [f64], width: u32, height: u32, f: &mut [f64], d: &mut [f64], v: &mut [i16], z: &mut [f64]) {
     for x in 0..width {
         for y in 0..height {

@@ -455,7 +455,10 @@ impl State {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the request, tile and directory location of one step of the directory walk, and its callback"
+    )]
     fn get_tile_address(
         self: &Rc<Self>,
         url: &str,

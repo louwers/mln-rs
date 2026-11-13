@@ -18,7 +18,7 @@ crate::paint_property!(pub struct SkyColor: Color = Color::new(136.0_f32 / 255.0
 crate::paint_property!(pub struct SkyHorizonBlend: f32 = 0.8_f32);
 
 crate::paint_properties!(
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `SkyProperties` type list")]
     pub mod SkyProperties {
         sky_atmosphere_blend: SkyAtmosphereBlend,
         sky_fog_color: SkyFogColor,

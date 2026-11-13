@@ -2,7 +2,7 @@
 // own targets: rings of its textures, whose frames go back to it, and its
 // surfaces. A backend that this build or machine lacks skips its cases.
 
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "the tests make and wrap the host's devices and targets through each backend's API")]
 
 mod support;
 

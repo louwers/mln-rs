@@ -64,13 +64,19 @@ enum Target {
     },
     /// The host's surface, which only a device of the host's instance or
     /// share group presents to. Apple builds have neither kind.
-    #[cfg_attr(not(backend_vulkan), allow(dead_code))]
+    #[cfg_attr(
+        not(any(backend_vulkan, backend_gl)),
+        expect(dead_code, reason = "builds without Vulkan or EGL present to no host surface")
+    )]
     HostSurface {
         size: Size,
         surface: Surface,
     },
     /// A ring of the host's textures. The browser build takes none.
-    #[cfg_attr(target_family = "wasm", allow(dead_code))]
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(dead_code, reason = "the browser build takes no ring of the host's textures")
+    )]
     Borrowed {
         size: Size,
         ring: PendingRing,
@@ -116,7 +122,7 @@ impl WindowSurface {
     ///
     /// An Android or `OpenHarmony` window or a Metal layer is the host's live
     /// object, which the header's contract keeps alive through the call.
-    #[cfg_attr(not(target_env = "ohos"), allow(clippy::unnecessary_wraps, reason = "OpenHarmony's checks the window"))]
+    #[cfg_attr(not(target_env = "ohos"), expect(clippy::unnecessary_wraps, reason = "OpenHarmony's checks the window"))]
     unsafe fn into_surface(self) -> Result<Surface, Error> {
         match self {
             WindowSurface::Ready(surface) => Ok(surface),
@@ -138,11 +144,20 @@ impl WindowSurface {
 /// A borrowed ring, which the call takes once the handles it names check
 /// out: until then, textures that a stale handle's call would never use may
 /// be no textures at all.
-#[cfg_attr(target_family = "wasm", allow(dead_code))]
+#[cfg_attr(
+    target_family = "wasm",
+    expect(dead_code, reason = "the browser build takes no ring of the host's textures")
+)]
 enum PendingRing {
     /// A ring of Vulkan images or OpenGL textures, which are handles rather
     /// than objects.
-    #[cfg_attr(target_vendor = "apple", allow(dead_code))]
+    #[cfg_attr(
+        target_vendor = "apple",
+        expect(
+            dead_code,
+            reason = "Apple builds take only Metal textures, which the ring retains once the call's handles check out"
+        )
+    )]
     Ready(BorrowedRing),
     /// Metal textures, which the ring retains.
     #[cfg(target_vendor = "apple")]
@@ -1393,7 +1408,10 @@ mod tests {
         };
         let display = display.display.map_or(core::ptr::null_mut(), NonNull::as_ptr);
         let logical_size = mln_logical_size { width, height };
-        #[allow(clippy::useless_conversion, reason = "`c_ulong` is narrower on 32-bit targets")]
+        #[cfg_attr(
+            target_pointer_width = "64",
+            expect(clippy::useless_conversion, reason = "`c_ulong` is narrower on 32-bit targets")
+        )]
         let window = u64::from(handle.window);
         let data = mln_xlib_window_target { logical_size, display, window };
         target(MLN_RENDER_TARGET_KIND_XLIB_WINDOW, mln_render_target_data { xlib_window: data })

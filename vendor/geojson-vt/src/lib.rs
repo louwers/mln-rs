@@ -240,7 +240,7 @@ impl GeoJSONVT {
         None
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the features, the tile to split and the target tile")]
     fn split_tile(&mut self, features: &VtFeatures, z: u8, x: u32, y: u32, cz: u8, cx: u32, cy: u32) {
         let options = self.options;
         let z2 = f64::from(1u32.wrapping_shl(u32::from(z)));

@@ -16,7 +16,7 @@
 // testdata/; paths are written as in C++, relative to the maplibre-native
 // root ("test/fixtures/api/empty.json").
 
-#![allow(dead_code)]
+#![expect(dead_code, reason = "each test binary uses some of the shared helpers")]
 
 use std::cell::{Cell, RefCell, RefMut};
 use std::ops::{Deref, DerefMut};

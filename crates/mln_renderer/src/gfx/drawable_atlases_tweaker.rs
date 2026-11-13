@@ -26,7 +26,7 @@ pub(crate) struct DrawableAtlasesTweaker {
 }
 
 impl DrawableAtlasesTweaker {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the tweaker")]
     #[must_use]
     pub(crate) fn new(
         atlases: Option<Rc<TileAtlasTextures>>,

@@ -240,7 +240,7 @@ mod tests {
 
     /// The log state is the process's, so its tests take turns, and each
     /// restores the defaults when it ends.
-    struct LogState(#[allow(dead_code, reason = "held for its lifetime")] MutexGuard<'static, ()>);
+    struct LogState(#[expect(dead_code, reason = "held for its lifetime")] MutexGuard<'static, ()>);
 
     impl LogState {
         fn take() -> Self {

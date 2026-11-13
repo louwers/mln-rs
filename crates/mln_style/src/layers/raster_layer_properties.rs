@@ -55,7 +55,7 @@ crate::paint_property!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `RasterPaintProperties` type list")]
     pub mod RasterPaintProperties {
         raster_brightness_max: RasterBrightnessMax,
         raster_brightness_min: RasterBrightnessMin,

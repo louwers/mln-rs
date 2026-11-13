@@ -311,7 +311,10 @@ impl ShaderProgram {
     /// The pipeline for the vertex layouts and modes, reused from earlier
     /// calls with the same `reuse_hash`. C++ also takes a renderable, which
     /// it doesn't use.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the vertex layouts and the color, depth, stencil, draw and cull state that key a pipeline"
+    )]
     pub(crate) fn get_render_pipeline(
         &self,
         vertex_layouts: &[VertexLayout],

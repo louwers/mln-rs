@@ -213,7 +213,6 @@ pub(crate) trait RenderSource {
     // query
     /// Queries the rendered features in `geometry`; sources without features
     /// return nothing. `Err` if the query fails (a malformed tile).
-    #[allow(clippy::too_many_arguments)]
     fn query_rendered_features(
         &self,
         _geometry: &[mln_util::geo::ScreenCoordinate],

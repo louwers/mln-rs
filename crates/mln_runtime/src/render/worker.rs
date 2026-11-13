@@ -1,8 +1,10 @@
 //! A render session's thread: its renderer, its frame demands, and the work
 //! that the handle sends it.
 
-// The browser build renders into no borrowed ring.
-#![cfg_attr(target_family = "wasm", allow(unreachable_code, unused_variables))]
+#![cfg_attr(
+    target_family = "wasm",
+    expect(unreachable_code, unused_variables, reason = "the browser build renders into no borrowed ring")
+)]
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};

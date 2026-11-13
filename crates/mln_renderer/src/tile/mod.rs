@@ -1,7 +1,10 @@
 //! The tiles and their workers. They use the renderer, so they live here;
 //! `mln_tile` decodes the tile data.
 
-#[allow(clippy::module_inception)]
+#[expect(
+    clippy::module_inception,
+    reason = "`tile::tile` holds the `Tile` trait that the other modules' tiles implement"
+)]
 pub(crate) mod tile;
 
 pub(crate) mod custom_tile;

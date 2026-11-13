@@ -61,16 +61,13 @@ macro_rules! layer_types {
         #[derive(Serialize)]
         enum ImplRef<'a> { $($tag(&'a $impl_),)+ }
 
-        // Read, then moved into an `Arc` at once.
-        #[allow(clippy::large_enum_variant)]
+        #[expect(clippy::large_enum_variant, reason = "the value is read, then moved into an `Arc` at once")]
         #[derive(Deserialize)]
         enum ImplOwned { $($tag($impl_),)+ }
 
         #[derive(Serialize)]
         enum PropertiesRef<'a> { $($tag(&'a $properties),)+ }
 
-        // Read, then moved into an `Arc` at once.
-        #[allow(clippy::large_enum_variant)]
         #[derive(Deserialize)]
         enum PropertiesOwned { $($tag($properties),)+ }
 

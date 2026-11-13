@@ -27,7 +27,7 @@ fn number_to_string() {
     assert_eq!("-1.123456789", to_string_double(-1.123_456_789));
     assert_eq!("32768.123456789", to_string_double(32_768.123_456_789));
     assert_eq!("-32768.123456789", to_string_double(-32_768.123_456_789));
-    #[allow(clippy::approx_constant, clippy::excessive_precision)]
+    #[expect(clippy::approx_constant, clippy::excessive_precision, reason = "the C++ test's literal, digit for digit")]
     let pi = 3.141_592_653_589_793_238_512_808_959_406_186_204_432_742_670_178_4;
     assert_eq!("3.141592653589793", to_string_double(pi));
     assert_eq!("-3.141592653589793", to_string_double(-pi));

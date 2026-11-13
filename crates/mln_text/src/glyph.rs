@@ -16,7 +16,7 @@ use crate::tagged_string::FontStackHash;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct GlyphIDType(pub u16);
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals, reason = "the glyph ID types keep the C++ enumerator names")]
 impl GlyphIDType {
     pub const FontPBF: GlyphIDType = GlyphIDType(0x00);
 }
@@ -162,7 +162,7 @@ pub struct PositionedGlyph {
 }
 
 impl PositionedGlyph {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the positioned glyph")]
     #[must_use]
     pub fn new(
         glyph: GlyphID,
@@ -184,7 +184,7 @@ impl PositionedGlyph {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct WritingModeType(pub u8);
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
 impl WritingModeType {
     pub const None: WritingModeType = WritingModeType(0);
     pub const Horizontal: WritingModeType = WritingModeType(1 << 0);

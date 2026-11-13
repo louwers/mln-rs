@@ -26,7 +26,10 @@ impl WebMap {
     /// Creates a WebGL2 context on `canvas` and the map, as the build
     /// without the `webgl` feature creates a WebGPU device (map.rs, which
     /// describes the arguments).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "JavaScript passes the canvas, its size and ratio, the worker ports and the host's callbacks and font family positionally"
+    )]
     #[expect(
         clippy::unused_async,
         clippy::unused_async_trait_impl,

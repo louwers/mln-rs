@@ -19,8 +19,7 @@
 //! The crate is empty on Apple platforms and in the browser build.
 
 #![cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-// Vulkan through ash is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "Vulkan through ash is the FFI here")]
 
 #[cfg(target_os = "android")]
 mod android_hardware_buffer;

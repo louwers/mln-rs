@@ -10,14 +10,14 @@ pub struct DrawMode {
 }
 
 impl DrawMode {
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "`DrawMode::Lines(width)` reads as the draw mode's variant")]
     #[must_use]
     pub fn Lines(line_width: f32) -> DrawMode {
         debug_assert!(line_width > 0.0);
         DrawMode { type_: DrawModeType::Lines, size: line_width }
     }
 
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "`DrawMode::Triangles()` reads as the draw mode's variant")]
     #[must_use]
     pub fn Triangles() -> DrawMode {
         DrawMode { type_: DrawModeType::Triangles, size: 0.0 }

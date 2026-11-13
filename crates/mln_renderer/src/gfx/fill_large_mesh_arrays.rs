@@ -88,7 +88,10 @@ pub(crate) struct MeshLines<'a> {
 /// as many segments as it needs. Unlike GL JS, no segment is started without
 /// indices to draw. `max_vertices` is the 16-bit index space
 /// (`MAX_SEGMENT_VERTICES`, the C++ default) unless a test asks for less.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the output vertices, indexes and segments, and the triangulated mesh and outlines they're built from"
+)]
 pub(crate) fn fill_large_mesh_arrays<V>(
     vertices: &mut Vec<V>,
     layout_vertex: impl Fn(i16, i16) -> V,

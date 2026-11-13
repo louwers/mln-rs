@@ -26,7 +26,7 @@ crate::cross_faded_paint_property!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `BackgroundPaintProperties` type list")]
     pub mod BackgroundPaintProperties {
         background_color: BackgroundColor,
         background_opacity: BackgroundOpacity,

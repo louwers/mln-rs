@@ -2,8 +2,7 @@
 // in its command buffer, as egui-wgpu draws them on WebGPU (overlay.rs): in
 // gamma space, premultiplied, with egui-wgpu's blending, but no dithering.
 
-// Metal through objc2 is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
 use std::cell::RefCell;
 use std::collections::HashMap;

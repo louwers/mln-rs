@@ -311,7 +311,10 @@ pub(crate) trait Tile: Any {
 
     // query: the feature queries (tile.cpp: no-ops for tiles without
     // features).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the results, query geometry, camera, layers, options, global and feature state and projection of a feature query"
+    )]
     fn query_rendered_features(
         &self,
         _result: &mut crate::geometry::feature_index::QueryResults,

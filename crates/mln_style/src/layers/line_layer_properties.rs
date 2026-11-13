@@ -97,7 +97,7 @@ crate::data_driven_paint_property!(
 
 crate::layout_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `LineLayoutProperties` type list")]
     pub mod LineLayoutProperties {
         line_cap: LineCap,
         line_join: LineJoin,
@@ -109,7 +109,7 @@ crate::layout_properties!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `LinePaintProperties` type list")]
     pub mod LinePaintProperties {
         line_blur: LineBlur,
         line_color: LineColor,

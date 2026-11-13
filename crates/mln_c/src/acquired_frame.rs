@@ -400,7 +400,6 @@ pub(crate) unsafe extern "C" fn mln_acquired_frame_get_vulkan_texture(
             }
             _ => (0, 0, 0, 0),
         };
-        #[allow(unreachable_patterns)]
         let record = match texture.native_kind() {
             Some(&FrameTextureKind::Vulkan { image, view, device, format, layout }) => mln_vulkan_texture_frame {
                 size: size_of::<mln_vulkan_texture_frame>() as u32,
@@ -455,7 +454,6 @@ pub(crate) unsafe extern "C" fn mln_acquired_frame_get_metal_texture(
             }
             _ => (core::ptr::null_mut(), 0),
         };
-        #[allow(unreachable_patterns)]
         let record = match texture.native_kind() {
             Some(&FrameTextureKind::Metal { texture: object, device, pixel_format }) => mln_metal_texture_frame {
                 size: size_of::<mln_metal_texture_frame>() as u32,
@@ -497,7 +495,6 @@ pub(crate) unsafe extern "C" fn mln_acquired_frame_get_open_gl_texture(
             }
             _ => (0, 0),
         };
-        #[allow(unreachable_patterns)]
         let record = match texture.native_kind() {
             Some(&FrameTextureKind::OpenGl { texture: name, target }) => mln_open_gl_texture_frame {
                 size: size_of::<mln_open_gl_texture_frame>() as u32,

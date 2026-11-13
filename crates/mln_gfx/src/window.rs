@@ -26,7 +26,7 @@ pub fn has_area(window: &dyn Window) -> bool {
 
 // FFI to user32's queries of a window.
 #[cfg(windows)]
-#[allow(unsafe_code)]
+#[expect(unsafe_code, reason = "user32's window queries are FFI")]
 mod win32 {
     /// `RECT`.
     #[repr(C)]

@@ -7,8 +7,7 @@
 //! effect, and its resolved locale leaves them out. Its case- and
 //! diacritic-insensitive options select the strength.
 
-// Foundation through objc2 is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "Foundation through objc2 is the FFI here")]
 
 use std::cmp::Ordering;
 use std::collections::HashSet;

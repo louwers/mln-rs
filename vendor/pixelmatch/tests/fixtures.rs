@@ -13,7 +13,7 @@ fn read_image(name: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "a case's images, size, options and expected mismatch")]
 fn diff_test(
     img_path1: &str,
     img_path2: &str,

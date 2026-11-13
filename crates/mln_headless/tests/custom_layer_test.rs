@@ -2,8 +2,7 @@
 // commands, in the map's render pass, at its place among the map's layers: over
 // a red background and under a half-transparent blue one, or over both.
 
-// The hosts draw through each backend's own API.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "the hosts draw through each backend's own API")]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

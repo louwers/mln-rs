@@ -85,7 +85,7 @@ fn emit_tag(w: &mut Writer, property: &Property, layout: bool) {
 fn emit_set(w: &mut Writer, macro_name: &str, class: &str, properties: &[Property]) {
     w.line(&format!("crate::{macro_name}!("));
     w.line("    /// The properties, in field order.");
-    w.line("    #[allow(non_snake_case)]");
+    w.line(&format!("    #[expect(non_snake_case, reason = \"named for the C++ `{class}` type list\")]"));
     w.line(&format!("    pub mod {class} {{"));
     for p in properties {
         w.line(&format!("        {}: {},", snake(&p.name), camelize(&p.name)));

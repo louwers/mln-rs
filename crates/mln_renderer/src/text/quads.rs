@@ -26,7 +26,7 @@ pub(crate) struct SymbolQuad {
 }
 
 impl SymbolQuad {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the quad")]
     #[must_use]
     pub(crate) fn new(
         tl: Point<f32>,

@@ -226,7 +226,7 @@ impl<N: Number, I: Index> KDBush<N, I> {
         I::from_usize(usize::from(self.node_size))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the query box, the visitor and the recursion's node range and axis")]
     fn range_impl(
         &self,
         min_x: N,
@@ -273,7 +273,10 @@ impl<N: Number, I: Index> KDBush<N, I> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the query circle, the visitor and the recursion's node range and axis"
+    )]
     fn within_impl(&self, qx: N, qy: N, r: N, visitor: &mut impl FnMut(I), left: I, right: I, axis: u8) {
         if self.points.is_empty() {
             return;

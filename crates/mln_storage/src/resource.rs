@@ -81,7 +81,7 @@ pub struct TileData {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LoadingMethod(pub u8);
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
 impl LoadingMethod {
     #[cfg(test)]
     pub(crate) const None: LoadingMethod = LoadingMethod(0b00);

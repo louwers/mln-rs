@@ -185,7 +185,10 @@ impl FeatureIndex {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the query geometry, camera, tile and options that select and filter the tile's features"
+    )]
     pub(crate) fn query(
         &self,
         result: &mut QueryResults,
@@ -319,7 +322,10 @@ impl FeatureIndex {
         Ok(result)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one candidate feature and the query's geometry, camera, layers and feature state that test it"
+    )]
     fn add_feature(
         &self,
         result: &mut QueryResults,

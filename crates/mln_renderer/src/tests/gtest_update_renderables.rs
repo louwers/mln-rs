@@ -27,7 +27,7 @@ struct TileRef {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names, reason = "the actions keep the names of the C++ test's log entries")]
 enum ActionLogEntry {
     GetTileDataAction(OverscaledTileID, LookupResult),
     CreateTileDataAction(OverscaledTileID),

@@ -16,7 +16,10 @@ pub trait UploadPass: DebugGroupTarget + Any {
     /// Build the vertex bindings for a drawable: one binding per shader
     /// attribute index, from `overrides` (the drawable's attributes) or a
     /// dummy buffer for missing ones.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the vertex data, its layout and the attribute defaults and overrides that the bindings combine"
+    )]
     fn build_attribute_bindings(
         &self,
         vertex_count: usize,

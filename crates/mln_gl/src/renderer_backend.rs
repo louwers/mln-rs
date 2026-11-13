@@ -108,7 +108,6 @@ impl RendererBackend {
     /// A backend on the functions of `platform`'s context.
     #[cfg(not(target_family = "wasm"))]
     pub(crate) fn from_parts(gl: Gl, platform: Box<dyn PlatformContext>) -> Self {
-        #[allow(clippy::arc_with_non_send_sync)]
         let gl = Arc::new(gl);
         RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(BackendImpl { gl, platform }) }
     }
@@ -116,7 +115,10 @@ impl RendererBackend {
     /// A backend on a canvas's WebGL2 context.
     #[cfg(target_family = "wasm")]
     pub(crate) fn from_parts(webgl2: web_sys::WebGl2RenderingContext, platform: Box<dyn PlatformContext>) -> Self {
-        #[allow(clippy::arc_with_non_send_sync)]
+        #[expect(
+            clippy::arc_with_non_send_sync,
+            reason = "the backend lives on the browser's one thread, and the `Arc` only shares the WebGL2 context among its objects"
+        )]
         let gl = Arc::new(glow::Context::from_webgl2_context(webgl2.clone()));
         RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(BackendImpl { gl, webgl2, platform }) }
     }

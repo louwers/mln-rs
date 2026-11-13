@@ -283,7 +283,6 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         matches!(self.kind, PaintPropertyBinderKind::CompositeFunction { .. })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn populate_vertex_vector(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
@@ -604,7 +603,10 @@ impl CrossFadedPaintPropertyBinder<Image> {
 /// `readDataDrivenPaintProperty` use it.
 pub(crate) trait PaintPropertyBinderBase {
     fn set_interleaved(&mut self, buffer: &mut InterleavedVertexBuffer);
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the vertex buffer, the feature and its index range, its patterns, the tile and the formatted section that evaluate a property"
+    )]
     fn populate(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
@@ -720,7 +722,10 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
 
 /// Adds the attributes `attribute_names` of one property to `attrs`, or
 /// records them as uniforms if the property is constant.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the binder and its buffers, the attribute names, and the attributes, uniform set and counter it fills"
+)]
 pub(crate) fn read_data_driven_paint_property(
     attrs: &mut VertexAttributeArray,
     binder: &dyn PaintPropertyBinderBase,
@@ -749,13 +754,15 @@ pub(crate) fn read_data_driven_paint_property(
 /// Declares the binders of one layer type's data-driven paint properties: a
 /// struct with one binder per property (fields in the C++ type-list order,
 /// which is also the interleaved vertex order) and the shared
-/// `InterleavedVertexBuffer`.
+/// `InterleavedVertexBuffer`. Attributes before a trailing
+/// `fn update_vertex_vectors;` go on that method.
 macro_rules! paint_property_binders {
     (
         $(#[$meta:meta])*
         pub struct $name:ident for $props:path {
             $($field:ident: $prop:ty => $binder:ty),+ $(,)?
         }
+        $($(#[$update_meta:meta])+ fn update_vertex_vectors;)?
     ) => {
         $(#[$meta])*
         #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
@@ -779,7 +786,7 @@ macro_rules! paint_property_binders {
                 result
             }
 
-            #[allow(clippy::too_many_arguments)]
+            #[expect(clippy::too_many_arguments, reason = "the feature and its index range, its patterns, the tile and the formatted section that evaluate every property")]
             pub(crate) fn populate_vertex_vectors(
                 &mut self,
                 feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
@@ -813,7 +820,7 @@ macro_rules! paint_property_binders {
                 // copies the vector when it builds drawables.
             }
 
-            #[allow(dead_code, reason = "the heatmap bucket doesn't rewrite its vertices on a feature state change")]
+            $($(#[$update_meta])+)?
             pub(crate) fn update_vertex_vectors(
                 &mut self,
                 states: &$crate::bucket::FeatureStates,

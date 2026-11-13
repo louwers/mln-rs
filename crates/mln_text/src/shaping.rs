@@ -227,7 +227,10 @@ impl PositionedIcon {
 }
 
 /// `align`.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shaping and the justification, alignment and line metrics that move its glyphs"
+)]
 fn align(
     shaping: &mut Shaping,
     justify: f32,
@@ -563,7 +566,10 @@ fn determine_line_verticals(line: &TaggedString) -> Vec<bool> {
     verticals
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shaping and its lines, the text layout options, and the glyphs and images it places"
+)]
 fn shape_lines(
     shaping: &mut Shaping,
     lines: &mut [TaggedString],
@@ -856,7 +862,10 @@ fn reorder_shaped_lines(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the text, the text layout options, the bidi state, and the glyphs and images it shapes with"
+)]
 pub fn get_shaping(
     formatted_string: &TaggedString,
     max_width: f32,

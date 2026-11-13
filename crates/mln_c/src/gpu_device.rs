@@ -84,10 +84,15 @@ const QUEUE_LOCK_REENTRY: &str = "the C API cannot be called from a queue lock c
 /// A host's `mln_queue_lock`, which a Vulkan device holds around its queue
 /// calls. Once accepted, it releases its user data when the device goes.
 pub(crate) struct HostQueueLock {
-    // Only a Vulkan device calls them; other builds still check the lock.
-    #[cfg_attr(not(backend_vulkan), allow(dead_code))]
+    #[cfg_attr(
+        not(backend_vulkan),
+        expect(dead_code, reason = "only a Vulkan device calls the host's queue lock; other builds still check it")
+    )]
     lock: unsafe extern "C" fn(*mut c_void),
-    #[cfg_attr(not(backend_vulkan), allow(dead_code))]
+    #[cfg_attr(
+        not(backend_vulkan),
+        expect(dead_code, reason = "only a Vulkan device calls the host's queue lock; other builds still check it")
+    )]
     unlock: unsafe extern "C" fn(*mut c_void),
     user_data: UserData,
     release: mln_user_data_release,

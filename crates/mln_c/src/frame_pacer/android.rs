@@ -92,7 +92,13 @@ pub(crate) mod choreographer {
 
     /// Arms `timer_fd` to expire once after `delay`, or disarms it for a zero
     /// `delay`.
-    #[allow(clippy::cast_lossless, reason = "`c_long` takes the nanoseconds without loss only where it has 64 bits")]
+    #[cfg_attr(
+        target_pointer_width = "64",
+        expect(
+            clippy::cast_lossless,
+            reason = "`c_long` takes the nanoseconds without loss only where it has 64 bits"
+        )
+    )]
     fn arm_timer(timer_fd: c_int, delay: Duration) {
         let spec = libc::itimerspec {
             it_interval: libc::timespec { tv_sec: 0, tv_nsec: 0 },
@@ -274,8 +280,10 @@ pub(crate) mod choreographer {
     /// high bits come from `CLOCK_MONOTONIC`, the frame time's clock, as the
     /// NDK recommends.
     unsafe extern "C" fn on_frame(frame_time_nanos: c_long, data: *mut c_void) {
-        // A `long` is an `i64` in a 64-bit process.
-        #[allow(clippy::useless_conversion)]
+        #[cfg_attr(
+            target_pointer_width = "64",
+            expect(clippy::useless_conversion, reason = "a `long` is an `i64` in a 64-bit process")
+        )]
         let mut time = i64::from(frame_time_nanos);
         if size_of::<c_long>() < size_of::<i64>() {
             const LOW_BITS: i64 = 0xffff_ffff;

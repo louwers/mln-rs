@@ -34,8 +34,7 @@
 //! `ExportedTarget` renders into dmabufs, or on Android into hardware
 //! buffers, that it allocates.
 
-// OpenGL through glow is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "OpenGL through glow is the FFI here")]
 
 mod command_encoder;
 mod context;

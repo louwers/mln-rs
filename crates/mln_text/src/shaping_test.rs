@@ -748,7 +748,7 @@ fn setup_shaped_text(shaped_text: &mut Shaping, text_size: f32) {
     shaped_text.positioned_lines.last_mut().unwrap().positioned_glyphs.push(glyph);
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "a case's image, text fit, shaping and scale, and the expected edges")]
 fn test_apply_text_fit(
     rectangle: RectU16,
     content: ImageContent,

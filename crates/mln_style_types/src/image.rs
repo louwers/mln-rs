@@ -107,7 +107,7 @@ impl Impl {
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty image,
     /// a pixel ratio that isn't positive, or stretches or a content area
     /// outside the image.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the image")]
     pub fn new(
         id: String,
         image: PremultipliedImage,
@@ -151,7 +151,7 @@ pub struct Image {
 }
 
 impl Image {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the image")]
     pub fn new(
         id: String,
         image: PremultipliedImage,

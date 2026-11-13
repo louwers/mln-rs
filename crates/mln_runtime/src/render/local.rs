@@ -4,9 +4,23 @@
 //!
 //! [`RenderTarget`]: super::RenderTarget
 
-// The browser build has only canvases' backends, and none of the targets
-// that the others make.
-#![cfg_attr(target_family = "wasm", allow(unused_macros, unused_variables, unused_imports))]
+// The matches over the backends' enums list a variant per backend that the
+// build's features and target have, so whether their `_` arm is unreachable,
+// and whether a `let` of one variant is irrefutable, depends on the build.
+#![allow(
+    unreachable_patterns,
+    irrefutable_let_patterns,
+    reason = "the backends' variants depend on the build's features and target"
+)]
+#![cfg_attr(
+    target_family = "wasm",
+    expect(
+        unused_macros,
+        unused_variables,
+        unused_imports,
+        reason = "the browser build has only canvases' backends, and none of the targets that the others make"
+    )
+)]
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -41,7 +55,6 @@ impl Borrowed for mln_mtl::BorrowedTarget {
         mln_mtl::BorrowedTarget::discard(self, slot);
     }
     fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        #[allow(irrefutable_let_patterns)]
         let RingKind::Metal(textures) = ring.kind else {
             return Err(Error::unsupported("a ring of Metal textures takes Metal textures only"));
         };
@@ -107,7 +120,6 @@ impl Borrowed for mln_vulkan::BorrowedTarget {
         mln_vulkan::BorrowedTarget::discard(self, slot);
     }
     fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        #[allow(irrefutable_let_patterns)]
         let RingKind::Vulkan(images) = ring.kind else {
             return Err(Error::unsupported("a ring of Vulkan images takes Vulkan images only"));
         };
@@ -224,7 +236,6 @@ impl Borrowed for mln_webgpu::BorrowedTarget {
         mln_webgpu::BorrowedTarget::discard(self, slot);
     }
     fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        #[allow(irrefutable_let_patterns)]
         let RingKind::WebGpu(textures) = ring.kind else {
             return Err(Error::unsupported("a ring of WebGPU textures takes WebGPU textures only"));
         };
@@ -244,7 +255,6 @@ impl Borrowed for mln_gl::BorrowedTarget {
         mln_gl::BorrowedTarget::discard(self, slot);
     }
     fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        #[allow(irrefutable_let_patterns)]
         let RingKind::Gl(textures) = ring.kind else {
             return Err(Error::unsupported("a ring of OpenGL textures takes OpenGL textures only"));
         };
@@ -281,7 +291,10 @@ impl Backend {
 
     /// A backend on `device`, for offscreen targets and the surfaces that
     /// the device's backend makes on it.
-    #[cfg_attr(target_family = "wasm", allow(clippy::unnecessary_wraps))]
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(clippy::unnecessary_wraps, reason = "the browser's backends can't fail to start")
+    )]
     fn new(device: &Device) -> Result<Backend, Error> {
         match *device {
             #[cfg(feature = "webgpu")]
@@ -302,7 +315,6 @@ impl Backend {
     /// A target on the backend that renders into `ring`, handing frames over
     /// with sync of the kind `producer`.
     fn borrowed(&self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed>, Error> {
-        #[allow(unreachable_patterns)]
         match (self, ring.kind) {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Backend::Vulkan(backend), RingKind::Vulkan(images)) => {
@@ -338,7 +350,6 @@ impl Backend {
         size: Size,
         producer: SyncKind,
     ) -> Result<Box<dyn Exported>, Error> {
-        #[allow(unreachable_patterns)]
         match self {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Backend::Vulkan(backend) => {
@@ -352,7 +363,6 @@ impl Backend {
             Backend::Gl(backend) => {
                 // Irrefutable in a build with OpenGL alone, which has no other
                 // kind of device, and refutable in one with other backends.
-                #[allow(irrefutable_let_patterns)]
                 let Device::Gl(device) = device else {
                     return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
                 };
@@ -393,7 +403,6 @@ impl Backend {
     /// pixels. Fails with `Unsupported` when only a backend of the target's
     /// own can present to it: see [`surface_backend`].
     fn surface(&self, surface: Surface, size: Size) -> Result<Box<dyn Presenting>, Error> {
-        #[allow(unreachable_patterns)]
         match (self, surface.kind) {
             #[cfg(feature = "webgpu")]
             (Backend::WebGpu(backend), kind) => {
@@ -471,7 +480,6 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
 /// window: Vulkan's, whose instance and device take the window's surface
 /// extensions, and OpenGL ES's, whose context is of the window's display.
 fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Backend, Box<dyn Presenting>), Error> {
-    #[allow(unreachable_patterns)]
     match (device, &surface.kind) {
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
         (Device::Vulkan(device), SurfaceKind::Window(window)) => {

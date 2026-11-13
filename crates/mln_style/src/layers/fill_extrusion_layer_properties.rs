@@ -57,7 +57,7 @@ crate::paint_property!(
 
 crate::layout_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `FillExtrusionLayoutProperties` type list")]
     pub mod FillExtrusionLayoutProperties {
         fill_extrusion_rounded_corner_distance: FillExtrusionRoundedCornerDistance,
     }
@@ -65,7 +65,7 @@ crate::layout_properties!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `FillExtrusionPaintProperties` type list")]
     pub mod FillExtrusionPaintProperties {
         fill_extrusion_base: FillExtrusionBase,
         fill_extrusion_color: FillExtrusionColor,

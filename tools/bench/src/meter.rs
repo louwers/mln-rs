@@ -8,8 +8,7 @@
 //! A `Meter` times the timed part of each iteration of a case and leaves
 //! its setup out.
 
-// The allocator, the process CPU clock and its counters are the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "the allocator, the process CPU clock and its counters are the FFI here")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};

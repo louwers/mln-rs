@@ -390,7 +390,10 @@ fn project_truncated_line_segment(
     add(previous_projected_point, mul(projected_unit_segment, minimum_length / mag_f32(projected_unit_segment)))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the glyph's offsets, the anchor in both spaces, the line and its distances, and the projection and its cache"
+)]
 fn place_glyph_along_line(
     offset_x: f32,
     line_offset_x: f32,
@@ -497,7 +500,10 @@ fn place_glyph_along_line(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the label's offsets, the anchor in both spaces, the symbol, and the projection and its cache"
+)]
 pub(crate) fn place_first_and_last_glyph(
     font_scale: f32,
     line_offset_x: f32,
@@ -584,7 +590,10 @@ fn requires_orientation_change(
     None
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the symbol, its size and orientation flags, the projection and its cache, and the vertices it writes"
+)]
 fn place_glyphs_along_line(
     symbol: &PlacedSymbol,
     font_size: f32,
@@ -716,7 +725,10 @@ fn place_glyphs_along_line(
     PlacementResult::Ok
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the tile's symbols, projector and size binder, the alignment flags and the vertices it writes"
+)]
 pub(crate) fn reproject_line_labels(
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
     placed_symbols: &[PlacedSymbol],

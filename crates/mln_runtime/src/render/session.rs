@@ -1766,7 +1766,10 @@ impl AcquiredFrame {
     /// back the frame and `consumer`, for a kind that the session's
     /// [`consumer_sync_kinds`](RenderSessionCapabilities::consumer_sync_kinds)
     /// lacks.
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the error hands back the frame and the consumer's sync, so that the caller can release it another way"
+    )]
     pub fn release(mut self, consumer: ConsumerSync) -> Result<(), (AcquiredFrame, ConsumerSync, Error)> {
         if !self.shared.capabilities.consumer_sync_kinds.contains(consumer.sync.kind) {
             return Err((self, consumer, Error::unsupported("render backend does not support this gpu sync kind")));

@@ -15,9 +15,10 @@ fn check_number(n: f64) -> Value {
     if n > f64::MAX { Value::Number(f64::INFINITY) } else { Value::Number(n) }
 }
 
-/// Parses the JSON value of a literal.
-// C++'s signature: `ctx` is only passed on to the recursive calls.
-#[allow(clippy::only_used_in_recursion)]
+#[expect(
+    clippy::only_used_in_recursion,
+    reason = "`ctx` is only passed on to the recursive calls, as the parsers of other expressions take it"
+)]
 pub(crate) fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<Value> {
     if value.is_undefined() {
         return Some(Value::Null);

@@ -216,7 +216,10 @@ fn add_tessellated_polygon(
 ///
 /// Without subdivision, a geometry that carries triangles is filled with
 /// them, and triangulated only when they can't be drawn.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the fill, outline and basic-outline buffers that one pass over the geometry fills, each with its indexes and segments"
+)]
 pub(crate) fn generate_fill_and_outline_buffers(
     geometry: &GeometryCollection,
     fill_vertices: &mut Vec<FillLayoutVertex>,

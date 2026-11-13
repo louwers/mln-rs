@@ -114,7 +114,14 @@ mod native {
 
     use super::{Any, mln_custom_layer_encoder_data, mln_custom_layer_pass_data, mln_render_backend};
 
-    #[allow(unused_variables, unused_mut, clippy::needless_pass_by_ref_mut)]
+    #[cfg_attr(
+        not(any(backend_vulkan, target_vendor = "apple", backend_gl, all(target_family = "wasm", feature = "gl"))),
+        expect(unused_variables, reason = "the build has no backend with commands for the host")
+    )]
+    #[cfg_attr(
+        not(any(backend_vulkan, target_vendor = "apple")),
+        expect(unused_mut, reason = "only Vulkan and Metal fill in the data")
+    )]
     pub(super) fn encoder(encoder: &mut dyn Any) -> Option<(mln_render_backend, mln_custom_layer_encoder_data)> {
         // SAFETY: zeros are a valid union of pointers and integers.
         let mut data: mln_custom_layer_encoder_data = unsafe { core::mem::zeroed() };
@@ -141,7 +148,10 @@ mod native {
         None
     }
 
-    #[allow(unused_variables, unused_mut, clippy::needless_pass_by_ref_mut)]
+    #[cfg_attr(
+        not(any(backend_vulkan, target_vendor = "apple", backend_gl, all(target_family = "wasm", feature = "gl"))),
+        expect(unused_variables, unused_mut, reason = "the build has no backend with commands for the host")
+    )]
     pub(super) fn pass(pass: &mut dyn Any) -> Option<(mln_render_backend, mln_custom_layer_pass_data)> {
         // SAFETY: zeros are a valid union of pointers and integers.
         let mut data: mln_custom_layer_pass_data = unsafe { core::mem::zeroed() };

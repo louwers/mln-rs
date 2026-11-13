@@ -2,8 +2,7 @@
 //! through `HttpURLConnection` in the app's Java VM, and `asset://` URLs load
 //! the app's assets, from its `AssetManager`.
 
-// JNI and the NDK's asset manager are the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "JNI and the NDK's asset manager are the FFI here")]
 
 use std::ffi::{CString, c_int, c_void};
 use std::io::{Read, Seek, SeekFrom};

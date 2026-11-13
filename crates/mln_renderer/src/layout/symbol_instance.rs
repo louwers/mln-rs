@@ -22,7 +22,7 @@ use crate::text::quads::{SymbolQuads, get_glyph_quads, get_icon_quads};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct SymbolContent(pub(crate) u8);
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
 impl SymbolContent {
     pub(crate) const None: SymbolContent = SymbolContent(0);
     pub(crate) const Text: SymbolContent = SymbolContent(1 << 0);
@@ -102,7 +102,10 @@ pub(crate) struct SymbolInstanceSharedData {
 }
 
 impl SymbolInstanceSharedData {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the shaped text and icons and the evaluated layout that the shared quads are built from"
+    )]
     #[must_use]
     pub(crate) fn new(
         line: GeometryCoordinates,
@@ -212,7 +215,10 @@ pub(crate) struct SymbolInstance {
 impl SymbolInstance {
     pub(crate) const INVALID_CROSS_TILE_ID: u32 = u32::MAX;
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the anchor, shapings, boxes, offsets, rotations and feature indexes that make up a symbol instance"
+    )]
     #[must_use]
     pub(crate) fn new(
         anchor: Anchor,

@@ -1,7 +1,6 @@
 // Ported gtests (test/storage/*.test.cpp) and test helpers.
 
-// Most helpers serve the SQLite tests.
-#![cfg_attr(not(feature = "sqlite"), allow(dead_code))]
+#![cfg_attr(not(feature = "sqlite"), expect(dead_code, reason = "most helpers serve the SQLite tests"))]
 
 mod asset_file_source;
 #[cfg(feature = "sqlite")]

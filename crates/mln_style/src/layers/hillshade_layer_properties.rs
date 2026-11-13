@@ -56,7 +56,7 @@ crate::paint_property!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `HillshadePaintProperties` type list")]
     pub mod HillshadePaintProperties {
         hillshade_accent_color: HillshadeAccentColor,
         hillshade_exaggeration: HillshadeExaggeration,

@@ -41,7 +41,7 @@ pub(crate) unsafe fn write(diagnostic: *mut mln_diagnostic, message: &str) {
 /// # Safety
 ///
 /// As for [`write`].
-#[allow(
+#[expect(
     dead_code,
     reason = "the generated stub of a function that reports a diagnostic calls it, and no such function is a stub today"
 )]

@@ -52,7 +52,7 @@ crate::paint_property!(
 
 crate::layout_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `FillLayoutProperties` type list")]
     pub mod FillLayoutProperties {
         fill_sort_key: FillSortKey,
     }
@@ -60,7 +60,7 @@ crate::layout_properties!(
 
 crate::paint_properties!(
     /// The properties, in field order.
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "named for the C++ `FillPaintProperties` type list")]
     pub mod FillPaintProperties {
         fill_antialias: FillAntialias,
         fill_color: FillColor,

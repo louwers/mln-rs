@@ -417,15 +417,15 @@ pub(crate) struct Shared {
     swapchain: Option<ash::khr::swapchain::Device>,
     #[cfg_attr(not(unix), expect(dead_code, reason = "sync files are Unix's"))]
     semaphore_fd: Option<ash::khr::external_semaphore_fd::Device>,
-    #[cfg_attr(not(unix), allow(dead_code))]
+    #[cfg_attr(not(unix), expect(dead_code, reason = "dmabufs are Unix's"))]
     memory_fd: Option<ash::khr::external_memory_fd::Device>,
     drm_format_modifier: Option<ash::ext::image_drm_format_modifier::Device>,
     /// Only Android has hardware buffers.
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    #[cfg_attr(not(target_os = "android"), expect(dead_code, reason = "only Android has hardware buffers"))]
     android_hardware_buffer: Option<ash::android::external_memory_android_hardware_buffer::Device>,
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(windows), expect(dead_code, reason = "Win32 handles are Windows'"))]
     memory_win32: Option<ash::khr::external_memory_win32::Device>,
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(windows), expect(dead_code, reason = "Win32 handles are Windows'"))]
     semaphore_win32: Option<ash::khr::external_semaphore_win32::Device>,
     /// The D3D11 device on the GPU's adapter that makes the textures of
     /// exported rings, made once, when first asked.
@@ -642,7 +642,7 @@ impl Device {
 
     /// The library's `VkDevice` on the GPU `selector` names, with the
     /// extensions and features renderers use where the GPU has them.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity, reason = "the parts of the new device that the constructor stores, each once")]
     fn create_device(
         instance: &ash::Instance,
         selector: Selector,
@@ -1230,7 +1230,7 @@ impl Shared {
         self.swapchain.as_ref()
     }
 
-    #[cfg_attr(not(unix), allow(dead_code))]
+    #[cfg_attr(not(unix), expect(dead_code, reason = "dmabufs are Unix's"))]
     pub(crate) fn memory_fd(&self) -> Option<&ash::khr::external_memory_fd::Device> {
         self.memory_fd.as_ref()
     }
@@ -1251,12 +1251,12 @@ impl Shared {
         self.semaphore_fd.as_ref()
     }
 
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(windows), expect(dead_code, reason = "Win32 handles are Windows'"))]
     pub(crate) fn memory_win32(&self) -> Option<&ash::khr::external_memory_win32::Device> {
         self.memory_win32.as_ref()
     }
 
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(windows), expect(dead_code, reason = "Win32 handles are Windows'"))]
     pub(crate) fn semaphore_win32(&self) -> Option<&ash::khr::external_semaphore_win32::Device> {
         self.semaphore_win32.as_ref()
     }

@@ -3,9 +3,7 @@
 // to the render thread for each backend it makes. A layer per backend would
 // leave the last one's frame in the view under the next.
 
-// The layer comes from raw-window-metal as a pointer; taking it is the FFI
-// here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "the layer comes from raw-window-metal as a pointer; taking it is the FFI here")]
 
 use objc2::rc::Retained;
 use objc2_quartz_core::CAMetalLayer;

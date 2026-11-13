@@ -252,12 +252,7 @@ fn multiple_sequenced_schedulers() {
     let mut schedulers: Vec<SchedulerPtr> = Vec::new();
     let same = |a: &SchedulerPtr, b: &SchedulerPtr| Arc::as_ptr(a).cast::<()>() == Arc::as_ptr(b).cast::<()>();
 
-    // Regression check, the scheduler assignment was previously sensitive to the state of the weak references.
-    // If expired weak references followed a still-valid one, both after the last-used index, the index would
-    // be incremented multiple times.
-    // (Rust also evaluates the right side first and drops the old value on
-    // assignment.)
-    #[allow(unused_assignments)]
+    #[expect(unused_assignments, reason = "the test drops the first scheduler by assigning over it")]
     let mut temp = scheduler::get_sequenced();
     temp = scheduler::get_sequenced();
     let _temp = temp;

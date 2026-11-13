@@ -1,6 +1,5 @@
 #![cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-// Creating the headless surface through ash is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "creating the headless surface through ash is the FFI here")]
 
 // The window target (`SurfaceTarget`) without a window: on a surface of
 // VK_EXT_headless_surface, whose swapchain takes and gives images like a

@@ -16,8 +16,7 @@
 //! The session's delegate drops them from a redirect that leaves the origin,
 //! as maplibre-native-ffi's `http_file_source.mm` does.
 
-// Foundation through objc2 is the FFI here.
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "Foundation through objc2 is the FFI here")]
 
 use std::sync::Arc;
 

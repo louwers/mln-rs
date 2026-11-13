@@ -173,7 +173,10 @@ pub(crate) fn get_screen_matrix(translation: [f32; 2]) -> Mat4 {
 ///
 /// `is_screen_space` and `is_offset` are the layer's `symbol-screen-space`
 /// and whether it sets `icon-offset`.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the tile, its bucket, the layer's paint and the camera that place its symbols' captured features"
+)]
 fn capture_rendered_features(
     stats: &mut Stats,
     layer_id: &str,
@@ -473,7 +476,10 @@ fn capture_rendered_features(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the bucket's buffers and the layer's paint properties, and the attributes and uniforms they fill"
+)]
 fn update_tile_attributes(
     geometry: Option<&BucketGeometry>,
     bucket: &SymbolBucket,
@@ -899,7 +905,10 @@ impl RenderSymbolLayer {
 
     /// The `addCollisionDrawables(isText, hasCollisionBox,
     /// hasCollisionCircle)` lambda of `update`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the tile's bucket and paint, and the context, passes and change list that the drawables go to"
+    )]
     fn add_collision_drawables(
         &mut self,
         context: &dyn Context,

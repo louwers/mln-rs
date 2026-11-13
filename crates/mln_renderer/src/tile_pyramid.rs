@@ -281,7 +281,10 @@ impl TilePyramid {
         self.tiles.values().all(|tile| tile.is_complete())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the layers, the update flags, the source and its tile range, and the callback that makes a tile"
+    )]
     pub(crate) fn update(
         &mut self,
         layers: &[Arc<dyn LayerProperties>],
@@ -606,7 +609,10 @@ impl TilePyramid {
     }
 
     // query
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the query geometry, camera, layers, options, global and feature state and projection that select the features"
+    )]
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],

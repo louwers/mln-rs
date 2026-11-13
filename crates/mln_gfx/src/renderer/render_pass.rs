@@ -6,7 +6,7 @@ use std::ops::{BitAnd, BitOr, BitOrAssign};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RenderPass(pub u8);
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
 impl RenderPass {
     pub const None: RenderPass = RenderPass(0);
     pub const Opaque: RenderPass = RenderPass(1 << 0);

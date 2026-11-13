@@ -4,7 +4,7 @@
 // cases: Mesa's software drivers export dmabufs only through the kernel's
 // udmabuf module.
 
-#![allow(unsafe_code)]
+#![expect(unsafe_code, reason = "the tests import the exported images through each backend's API")]
 
 mod support;
 

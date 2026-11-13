@@ -4,7 +4,10 @@
 pub(crate) mod circle_layout;
 pub(crate) mod clip_lines;
 pub(crate) mod filter_groups;
-#[allow(clippy::module_inception)]
+#[expect(
+    clippy::module_inception,
+    reason = "`layout::layout` holds the `Layout` trait that the other modules' layouts implement"
+)]
 pub(crate) mod layout;
 pub(crate) mod merge_lines;
 pub(crate) mod pattern_layout;
