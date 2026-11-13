@@ -31,6 +31,7 @@ font-face-shaper = []
 bytemuck.workspace = true
 earcut.workspace = true
 feature.workspace = true
+geo.workspace = true
 geometry.workspace = true
 mln_actor.workspace = true
 mln_expression.workspace = true

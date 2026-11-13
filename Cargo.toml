@@ -77,7 +77,6 @@ mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = 
 mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.11" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.11" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
-polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.11" }
 render_test = { package = "mln-rs-render-test", path = "tools/render-test", version = "=0.0.11" }
 shelf_pack = { package = "mln-rs-shelf-pack", path = "vendor/shelf-pack", version = "=0.0.11" }
 style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.11" }
@@ -138,6 +137,14 @@ mlt-core = { version = "0.22.1" }
 # The even-odd union that repairs the polygons of version 1 vector tiles,
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
+# The pole of inaccessibility that a polygon's point-placed symbol is
+# anchored at (mln_renderer's symbol layout), instead of a port of
+# mapbox/polylabel.hpp. It depends on geo with geo's default features, so it
+# also builds spade and turns on i_overlay's rayon multithreading.
+polylabel = { version = "3.3.1" }
+# polylabel's polygon type, and the area and bounds of the polygons it would
+# put at (0, 0). mlt-core already depends on it.
+geo = { version = "0.33.1", default-features = false }
 # MVT decoding, instead of porting the C++ reader (vendor/vector-tile).
 fast-mvt = { version = "0.7.3", default-features = false, features = ["reader"] }
 # Glyph PBFs: fast-mvt's protobuf runtime, whose wire format functions read
@@ -409,7 +416,6 @@ mln_vec_map.workspace = true
 mln_vulkan.workspace = true
 mln_web_host.workspace = true
 mln_webgpu.workspace = true
-polylabel.workspace = true
 shelf_pack.workspace = true
 supercluster.workspace = true
 

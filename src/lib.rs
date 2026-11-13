@@ -47,6 +47,5 @@ pub use mln_vulkan;
 /// Empty except in the browser build.
 pub use mln_web_host;
 pub use mln_webgpu;
-pub use polylabel;
 pub use shelf_pack;
 pub use supercluster;

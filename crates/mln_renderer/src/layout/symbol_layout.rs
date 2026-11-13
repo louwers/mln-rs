@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use geometry::{LinearRing, Point, Polygon};
+use geo::{Area, BoundingRect};
+use geometry::Point;
 use mln_expression::Value;
 use mln_expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_map_types::MapMode;
@@ -150,6 +151,29 @@ fn create_layout(
     }
 
     layout
+}
+
+/// A point within `precision` of the pole of inaccessibility of the polygon
+/// with outer ring `rings[0]` and holes `rings[1..]`, its symbol's anchor.
+/// `None` without an outer ring, where the C++ core's `mapbox::polylabel`
+/// throws.
+fn pole_of_inaccessibility(rings: &[GeometryCoordinates], precision: f64) -> Option<geo::Point<f64>> {
+    let mut rings = rings.iter().map(|ring| {
+        ring.iter().map(|p| geo::Coord { x: f64::from(p.x), y: f64::from(p.y) }).collect::<geo::LineString>()
+    });
+    let outer = rings.next()?;
+    let first = *outer.0.first()?;
+    let polygon = geo::Polygon::new(outer, rings.collect());
+    // polylabel puts a polygon without area at (0, 0). mapbox::polylabel puts
+    // one whose outer ring has a flat bounding box at the box's minimum corner.
+    // Otherwise no point beats its first guess, the outer ring's first point,
+    // unless the ring crosses itself or its holes add up to its area.
+    if polygon.signed_area() == 0.0 {
+        let bounds = polygon.exterior().bounding_rect()?;
+        let flat = bounds.width() == 0.0 || bounds.height() == 0.0;
+        return Some(if flat { bounds.min() } else { first }.into());
+    }
+    polylabel::polylabel(&polygon, &precision).ok()
 }
 
 fn dist(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
@@ -896,17 +920,11 @@ impl SymbolLayout {
             }
         } else if feature_type == FeatureType::Polygon {
             for polygon in mln_tile::geometry_tile_data::classify_rings(&feature.geometry) {
-                let mut poly: Polygon<f64> = Polygon::new();
-                for ring in polygon.iter() {
-                    let r: LinearRing<f64> = ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect();
-                    poly.push(r);
-                }
-
                 // 1 pixel worth of precision, in tile coordinates
-                let Ok(poi) = polylabel::polylabel(&poly, f64::from(EXTENT) / TILE_SIZE_D) else {
+                let Some(poi) = pole_of_inaccessibility(&polygon, f64::from(EXTENT) / TILE_SIZE_D) else {
                     continue;
                 };
-                let anchor = Anchor::new(poi.x as f32, poi.y as f32, 0.0, Some(min_scale as usize));
+                let anchor = Anchor::new(poi.x() as f32, poi.y() as f32, 0.0, Some(min_scale as usize));
                 add_symbol_instance(self, anchor, create_symbol_instance_shared_data(polygon[0].clone()));
             }
         } else if feature_type == FeatureType::LineString {
