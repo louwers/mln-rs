@@ -888,8 +888,12 @@ fn no_double_dispatch() {
 
     let req = req();
     let response_count = Rc::new(Cell::new(0u32));
+    // A second dispatch would answer within moments of the first, so the
+    // check waits that long after the first answer, however long it took.
+    let timer = Rc::new(Timer::new());
     let dbfs = database_file_source(&file_sources);
     let (r, fs2, resource2, count) = (req.clone(), fs.clone(), resource.clone(), response_count.clone());
+    let (stop, check) = (run_loop.clone(), timer.clone());
     dbfs.forward(
         &resource,
         &response,
@@ -904,20 +908,21 @@ fn no_double_dispatch() {
                     if !res.not_modified {
                         assert_eq!(b"data", data(&res));
                         count.set(count.get() + 1);
+                        if count.get() == 1 {
+                            let (stop, count) = (stop.clone(), count.clone());
+                            check.start(Duration::from_millis(100), Duration::zero(), move || {
+                                assert_eq!(1, count.get());
+                                stop.stop();
+                            });
+                        }
                     }
                 }),
             ));
         })),
     );
 
-    let timer = Timer::new();
-    let (stop, count) = (run_loop.clone(), response_count.clone());
-    timer.start(Duration::from_millis(100), Duration::zero(), move || {
-        assert_eq!(1, count.get());
-        stop.stop();
-    });
-
     run_loop.run();
+    assert_eq!(1, response_count.get());
 }
 
 // gtest: MainResourceLoader.ResourceOptions
