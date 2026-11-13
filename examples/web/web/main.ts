@@ -163,7 +163,24 @@ const tileWorkers = Array.from({ length: count }, () =>
 const map = backend === 'webgl2'
   ? new Worker(new URL('./map-worker.ts', import.meta.url), { type: 'module', name: 'webgl2' })
   : new Worker(new URL('./map-worker.ts', import.meta.url), { type: 'module' });
-const toMap = (message: ToMap, transfer: Transferable[] = []) => map.postMessage(message, transfer);
+// The map's Web Worker may draw between any two of its messages. A touch's
+// fingers move with an event each: sent one by one, a pinch would draw with
+// one finger moved and not yet the other, zoomed far in or out for a frame,
+// and the map would load that zoom's tiles. So the page's inputs (`send`)
+// go together at the end of the task they came in, and before any other
+// message, which keeps their order.
+let inputs: Input[] = [];
+function sendInputs() {
+  if (inputs.length === 0) return;
+  map.postMessage({ type: 'input', inputs } satisfies ToMap);
+  inputs = [];
+}
+const endOfTask = new MessageChannel();
+endOfTask.port1.onmessage = sendInputs;
+const toMap = (message: ToMap, transfer: Transferable[] = []) => {
+  sendInputs();
+  map.postMessage(message, transfer);
+};
 const camera: Camera = cameraFromHash(location.hash) ??
   [number('lat', 52.37), number('lon', 4.89), number('zoom', 13), number('bearing', 0), number('pitch', 0)];
 let current = styleFor(params.get('style'));
@@ -327,7 +344,9 @@ function stop(message: string) {
   }
 }
 
-const send = (input: Input) => toMap({ type: 'input', input });
+const send = (input: Input) => {
+  if (inputs.push(input) === 1) endOfTask.port2.postMessage(null);
+};
 // Each event's time, as performance.timeOrigin + timeStamp: the map's Web
 // Worker turns it into its own performance.now(), the clock its frames run on.
 const time = (e: Event) => performance.timeOrigin + e.timeStamp;
@@ -360,10 +379,19 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 // In a worker, the map draws as soon as a move arrives: pointerrawupdate
 // comes when the browser has the move, pointermove only with the page's
-// next frame.
-const moveEvent = 'onpointerrawupdate' in HTMLElement.prototype ? 'pointerrawupdate' : 'pointermove';
-canvas.addEventListener(moveEvent, (e) => {
-  if (e instanceof PointerEvent) send({ kind: 'pointer_move', id: e.pointerId, ...at(e), time: time(e) });
+// next frame. A touch moves with pointermove, which comes for all its
+// fingers in one task, as one input message (`send`): Chromium dispatches
+// each finger's pointerrawupdate in a task of its own, and the map would
+// draw a pinch with one finger moved and not the other.
+const raw = 'onpointerrawupdate' in HTMLElement.prototype;
+const move = (e: PointerEvent) => send({ kind: 'pointer_move', id: e.pointerId, ...at(e), time: time(e) });
+if (raw) {
+  canvas.addEventListener('pointerrawupdate', (e) => {
+    if (e instanceof PointerEvent && e.pointerType !== 'touch') move(e);
+  });
+}
+canvas.addEventListener('pointermove', (e) => {
+  if (!raw || e.pointerType === 'touch') move(e);
 });
 canvas.addEventListener('pointerup', (e) => send({ kind: 'pointer_up', id: e.pointerId, ...at(e), time: time(e) }));
 canvas.addEventListener('pointercancel', (e) => send({ kind: 'pointer_cancel', id: e.pointerId, time: time(e) }));

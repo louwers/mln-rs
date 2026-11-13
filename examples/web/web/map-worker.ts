@@ -393,7 +393,7 @@ async function run(
         break;
       }
       case 'input': {
-        applyInput(map, data.input);
+        for (const input of data.inputs) applyInput(map, input);
         const [x0, y0, x1, y1] = map.box_zoom() ?? [];
         const next: Box | null = x0 === undefined || y0 === undefined || x1 === undefined || y1 === undefined
           ? null

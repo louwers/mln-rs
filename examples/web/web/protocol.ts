@@ -74,7 +74,9 @@ export type ToMap =
   | { type: 'follow'; camera: Camera }
   // Stop the camera's own motion: an ease, momentum, a wheel's eased zoom.
   | { type: 'stop' }
-  | { type: 'input'; input: Input }
+  // The page's inputs of one task, such as the moves of a touch's fingers,
+  // which the map applies before it draws again.
+  | { type: 'input'; inputs: Input[] }
   // Whether the page shows its debug overlay (debug.ts): while it does, the
   // map's Web Worker reports each frame that draws.
   | { type: 'debug'; on: boolean };
