@@ -697,15 +697,7 @@ impl VerticalPerspectiveProjection {
             &pan_surface_vector(state, point),
         ));
 
-        // A swing over a pole turns the bearing around; with the bearing held,
-        // the center stops on that pole.
-        let latitude = if Self::difference_of_angles_degrees(bearing, swung.bearing).abs() <= 90.0 {
-            swung.latitude
-        } else if swung.latitude > 0.0 {
-            90.0
-        } else {
-            -90.0
-        };
+        let latitude = swung.latitude_holding(bearing).unwrap_or_else(|pole| pole);
 
         // The swing's longitude is ill-conditioned near the pole, so within
         // the last 12 degrees before the pole's edge the cursor turns a dial
@@ -725,6 +717,59 @@ impl VerticalPerspectiveProjection {
             d_lng_dial = (if pole_latitude > 0.0 { 1.0 } else { -1.0 }) * mln_math::rad2deg(d_theta);
         }
         lat_lng(latitude, center.longitude() + (1.0 - dial) * d_lng_swing + dial * d_lng_dial, WrapMode::Unwrapped)
+    }
+
+    /// The differential of a drag: the unit axis, fixed in the planet, that
+    /// a drag at `point` towards `direction` (both y up) turns the planet
+    /// about, and the radians it turns per pixel dragged. `None` for a
+    /// direction without length, or where a drag doesn't turn the planet.
+    /// Near and past the planet's edge the angle per pixel is the drag's
+    /// there, which its falloff bounds.
+    pub fn drag_rotation(
+        state: &TransformState,
+        point: &ScreenCoordinate,
+        direction: &ScreenCoordinate,
+    ) -> Option<(Vec3, f64)> {
+        let pixels = direction.x.hypot(direction.y);
+        if pixels.is_nan() || pixels <= 0.0 || pixels.is_infinite() {
+            return None;
+        }
+        // Half a pixel to either side of the point.
+        let half = Point::new(direction.x / pixels / 2.0, direction.y / pixels / 2.0);
+        let from = pan_surface_vector(state, &Point::new(point.x - half.x, point.y - half.y));
+        let to = pan_surface_vector(state, &Point::new(point.x + half.x, point.y + half.y));
+        let axis = cross(&from, &to);
+        let sine = length(&axis);
+        let radians = sine.atan2(dot(&from, &to));
+        (sine > 0.0 && radians.is_finite()).then(|| (scaled(&axis, 1.0 / sine), radians))
+    }
+
+    /// The camera after the planet turns by `radians` about `axis`, as
+    /// [`drag_rotation`](Self::drag_rotation) gives it, the bearing turning
+    /// with the planet. The longitude stays unwrapped around the current
+    /// center, the latitude is not yet constrained.
+    pub fn turn_camera(state: &TransformState, axis: &Vec3, radians: f64) -> CenterAndBearing {
+        center_and_bearing(
+            &camera_orientation(state).multiply(&rotation(axis, radians)),
+            &state.get_lat_lng(WrapMode::Unwrapped),
+        )
+    }
+
+    /// [`turn_camera`](Self::turn_camera) with the bearing held: the center
+    /// after the turn, and whether the turn swung over a pole, where the
+    /// center stops on the pole, on the meridian it came along, as a drag's
+    /// does.
+    pub fn turn_center(state: &TransformState, axis: &Vec3, radians: f64) -> (LatLng, bool) {
+        let center = state.get_lat_lng(WrapMode::Unwrapped);
+        let swung = orientation_to_lat_lng_bearing(&camera_orientation(state).multiply(&rotation(axis, radians)));
+        match swung.latitude_holding(-mln_math::rad2deg(state.get_bearing())) {
+            Ok(latitude) => {
+                let longitude =
+                    center.longitude() + Self::difference_of_angles_degrees(center.longitude(), swung.longitude);
+                (lat_lng(latitude, longitude, WrapMode::Unwrapped), false)
+            }
+            Err(pole) => (lat_lng(pole, center.longitude(), WrapMode::Unwrapped), true),
+        }
     }
 
     /// The shorter signed way around from one angle to the other, in degrees.
@@ -793,6 +838,19 @@ struct Orientation {
     latitude: f64,
     longitude: f64,
     bearing: f64,
+}
+
+impl Orientation {
+    /// The latitude with the bearing held at `bearing`. A swing over a pole
+    /// turns the bearing around; with the bearing held, the center stops on
+    /// that pole, whose latitude is the error.
+    fn latitude_holding(&self, bearing: f64) -> Result<f64, f64> {
+        if VerticalPerspectiveProjection::difference_of_angles_degrees(bearing, self.bearing).abs() <= 90.0 {
+            Ok(self.latitude)
+        } else {
+            Err(if self.latitude > 0.0 { 90.0 } else { -90.0 })
+        }
+    }
 }
 
 /// GL JS `lngLatBearingFromOrientation`.

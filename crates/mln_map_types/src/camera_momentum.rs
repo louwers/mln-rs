@@ -140,7 +140,10 @@ impl Default for MomentumSnap {
 /// every frame relative to the camera as it stands, so other commands can
 /// change the fields that the momentum leaves alone. A command that sets a
 /// field stops the parts that move it. On a tilted map, pan moves the map's
-/// content the same distance on screen in every direction.
+/// content the same distance on screen in every direction. On the globe, pan
+/// turns the planet about one axis, the one a drag at the pan's anchor along
+/// its velocity turns it about, at that drag's angular speed: the pan's
+/// speeds and distances are pixels at the anchor at release.
 ///
 /// [`Default`] gives each part maplibre-native-ffi's C API default decay
 /// ([`MomentumDecay::PAN`], [`ZOOM`](MomentumDecay::ZOOM),
@@ -157,6 +160,12 @@ pub struct CameraMomentum {
     /// second.
     pub pan_velocity: Option<ScreenCoordinate>,
     pub pan_decay: MomentumDecay,
+    /// The screen point the pan was holding at release, such as the last
+    /// pointer position; without one, the view's center. On the globe the
+    /// planet turns on as a drag at this point was turning it. A flat map
+    /// glides the same wherever it was held. maplibre-native-ffi's C API has
+    /// no such field, so its callers get the view's center.
+    pub pan_anchor: Option<ScreenCoordinate>,
 
     /// Zoom levels per second.
     pub zoom_velocity: Option<f64>,
@@ -185,6 +194,7 @@ impl Default for CameraMomentum {
         CameraMomentum {
             pan_velocity: None,
             pan_decay: MomentumDecay::PAN,
+            pan_anchor: None,
             zoom_velocity: None,
             zoom_decay: MomentumDecay::ZOOM,
             zoom_anchor: None,
