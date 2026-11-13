@@ -6,15 +6,21 @@
 //! connection until the OS gives up (75 s on macOS). curl races them (Happy
 //! Eyeballs), so the agent's TCP step does too: see `HappyEyeballsConnector`.
 //!
+//! A request for a byte range asks for the identity encoding, since a range
+//! of a compressed body isn't a range of the resource. On Android, plain
+//! HTTP follows the app's network security configuration.
+//!
 //! TLS checks certificates against the system's trust store (rustls with
 //! rustls-platform-verifier; `SChannel` through native-tls on Windows), as curl
-//! does with the system's CA bundle. On Android without the app's Java VM,
-//! that is the store's certificate files. A proxy comes from the environment
+//! does with the system's CA bundle. On Android without the app's Java VM or
+//! the verifier's Android component, that is the store's certificate files.
+//! A proxy comes from the environment
 //! (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, ...), as for curl.
 //!
 //! ureq follows redirects with every header it was given, so a request with
 //! the host's headers follows them here instead, and drops those headers
-//! once a redirect leaves their origin.
+//! once a redirect leaves their origin. On Android every request does, so
+//! that each URL's plain HTTP is checked.
 
 use std::net::SocketAddr;
 #[cfg(any(target_os = "android", test))]
@@ -238,7 +244,8 @@ fn root_certs() -> RootCerts {
 }
 
 /// Android's verifier once [`android::init`](crate::android::init) gave it
-/// the app's Java VM, which it panics without. Otherwise the certificates of
+/// the app's Java VM, which it panics without, and found its component in
+/// the app. Otherwise the certificates of
 /// Android's store, from its files: Conscrypt's, which Android 14 and later
 /// update, else the system image's. Those leave out the ones a user
 /// installed.
@@ -297,10 +304,17 @@ impl Client {
         let mut url = resource.url.clone();
         let mut headers = headers;
         let mut redirects = 0;
+        // Android's network security configuration applies to each URL of a
+        // redirect chain, so there every redirect is followed here.
+        let follows_redirects = !headers.is_empty() || cfg!(target_os = "android");
         loop {
-            let mut http_response = self.call(resource, &url, headers)?;
+            #[cfg(target_os = "android")]
+            if let Some(refusal) = cleartext_refusal(&url, crate::android::cleartext_permitted) {
+                return Err(Box::new(refusal));
+            }
+            let mut http_response = self.call(resource, &url, headers, follows_redirects)?;
             let status = http_response.status().as_u16();
-            if !headers.is_empty()
+            if follows_redirects
                 && matches!(status, 301 | 302 | 303 | 307 | 308)
                 && let Some(next) = http_response
                     .headers()
@@ -334,16 +348,18 @@ impl Client {
     }
 
     /// One GET of `url` for `resource`, with the host's `headers`. ureq
-    /// follows the redirects of a request without them.
+    /// follows its redirects unless `transfer` `follows_redirects` itself.
     fn call(
         &self,
         resource: &Resource,
         url: &str,
         headers: &[(String, String)],
+        follows_redirects: bool,
     ) -> Result<ureq::http::Response<ureq::Body>, Box<ResourceError>> {
         let mut request = self.agent.get(url);
         if let Some(range) = range_header(resource) {
-            request = request.header("Range", range);
+            // A range of a compressed body isn't a range of the resource.
+            request = request.header("Range", range).header("Accept-Encoding", "identity");
         }
 
         // If there's already a response, set the correct etags/modified headers to
@@ -358,12 +374,28 @@ impl Client {
         for (name, value) in headers {
             request = request.header(name.as_str(), value.as_str());
         }
-        if headers.is_empty() {
-            request.call().map_err(|e| Box::new(error(&e)))
-        } else {
+        if follows_redirects {
             request.config().max_redirects(0).build().call().map_err(|e| Box::new(error(&e)))
+        } else {
+            request.call().map_err(|e| Box::new(error(&e)))
         }
     }
+}
+
+/// The error of a plain HTTP request to `url` that `permitted` refuses for
+/// its host, as Android's own HTTP clients word it, or `None` when the
+/// request may go ahead.
+#[cfg(any(target_os = "android", test))]
+fn cleartext_refusal(url: &str, permitted: impl FnOnce(&str) -> bool) -> Option<ResourceError> {
+    let uri = url.parse::<ureq::http::Uri>().ok()?;
+    if !uri.scheme_str().is_some_and(|scheme| scheme.eq_ignore_ascii_case("http")) {
+        return None;
+    }
+    let host = uri.host()?;
+    let host = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')).unwrap_or(host);
+    // A refusal is the app's policy, which no retry changes.
+    (!permitted(host))
+        .then(|| ResourceError::new(Reason::Other, format!("Cleartext HTTP traffic to {host} not permitted")))
 }
 
 /// The URL a redirect from `current` to `location` goes to: `location`
@@ -540,6 +572,62 @@ mod tests {
         // The families alternate: the IPv4 address goes second, after
         // HAPPY_EYEBALLS_DELAY.
         assert_eq!([dropped[0], server], attempts.lock()[..2]);
+    }
+
+    /// Answers one request on a loopback port with 200 and returns the
+    /// port and the request's head.
+    fn serve_one() -> (SocketAddr, std::thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.ends_with(b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0, "the request ended early");
+                request.extend_from_slice(&buffer[..read]);
+            }
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").unwrap();
+            String::from_utf8(request).unwrap().to_ascii_lowercase()
+        });
+        (addr, server)
+    }
+
+    #[test]
+    fn a_range_asks_for_the_identity_encoding() {
+        let (addr, server) = serve_one();
+        let mut resource = Resource::source(&format!("http://{addr}/archive.pmtiles"));
+        resource.data_range = Some((0, 126));
+        Client::new().transfer(&resource, &[]).unwrap();
+        let request = server.join().unwrap();
+        assert!(request.contains("\r\nrange: bytes=0-126\r\n"), "{request}");
+        assert!(request.contains("\r\naccept-encoding: identity\r\n"), "{request}");
+        assert_eq!(request.matches("accept-encoding").count(), 1, "{request}");
+
+        // A whole resource may come compressed.
+        let (addr, server) = serve_one();
+        Client::new().transfer(&Resource::style(&format!("http://{addr}/style.json")), &[]).unwrap();
+        let request = server.join().unwrap();
+        assert!(request.contains("\r\naccept-encoding: gzip\r\n"), "{request}");
+    }
+
+    #[test]
+    fn plain_http_to_a_refused_host_fails_with_the_host() {
+        let refuse = |expected: &'static str| {
+            move |host: &str| {
+                assert_eq!(host, expected);
+                false
+            }
+        };
+        let refusal = cleartext_refusal("http://localhost:8080/style.json", refuse("localhost")).unwrap();
+        assert_eq!(refusal.reason, Reason::Other);
+        assert_eq!(refusal.message, "Cleartext HTTP traffic to localhost not permitted");
+        assert!(cleartext_refusal("HTTP://Tiles.Example/a", refuse("Tiles.Example")).is_some());
+        assert!(cleartext_refusal("http://[::1]:80/a", refuse("::1")).is_some());
+        assert!(cleartext_refusal("http://localhost/a", |_| true).is_none());
+        let unasked = |_: &str| -> bool { panic!("HTTPS has no cleartext policy") };
+        assert!(cleartext_refusal("https://localhost/a", unasked).is_none());
     }
 
     #[test]

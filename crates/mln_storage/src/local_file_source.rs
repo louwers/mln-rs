@@ -20,10 +20,14 @@ fn accepts_url(url: &str) -> bool {
     url.starts_with(FILE_PROTOCOL)
 }
 
-/// The percent-decoded path after `file://`.
+/// The percent-decoded path after `file://`. On Android, a query or fragment
+/// ends it.
 fn path_from_file_url(url: &str) -> Vec<u8> {
+    let url = &url[FILE_PROTOCOL.len()..];
+    #[cfg(target_os = "android")]
+    let url = crate::android::url_path(url);
     #[allow(unused_mut)]
-    let mut path = percent_decode(&url[FILE_PROTOCOL.len()..]);
+    let mut path = percent_decode(url);
     #[cfg(windows)]
     {
         // file:///C:/path minus the scheme is /C:/path, which Windows rejects.
@@ -46,11 +50,17 @@ impl LocalFileSourceThread {
         }
 
         let path = path_from_file_url(&resource.url);
+        #[cfg(target_os = "android")]
+        if let Some(name) = crate::android::app_asset_name(&path) {
+            crate::android::request_asset(name, req, resource.data_range);
+            return;
+        }
         request_local_file(&path, req, resource.data_range);
     }
 }
 
-/// The `FileSystem` file source: `file://` URLs.
+/// The `FileSystem` file source: `file://` URLs. On Android, the files under
+/// `mln_storage::android::APP_ASSETS` are the app's assets.
 pub struct LocalFileSource {
     thread: Thread<LocalFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
