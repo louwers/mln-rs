@@ -430,8 +430,7 @@ impl FrameTarget for HostSurfaceTarget {
         if self.image.borrow().is_none() {
             return Handoff::Dropped;
         }
-        self.swap.swap();
-        Handoff::Presented
+        if self.swap.swap() { Handoff::Presented } else { Handoff::Dropped }
     }
 }
 

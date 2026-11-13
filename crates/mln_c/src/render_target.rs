@@ -98,22 +98,33 @@ enum WindowSurface {
     /// An Android window, which the surface takes its own reference to.
     #[cfg(target_os = "android")]
     Android(NonNull<c_void>),
+    /// An OpenHarmony window, which the surface takes its own reference to.
+    #[cfg(target_env = "ohos")]
+    Ohos(NonNull<c_void>),
 }
 
 impl WindowSurface {
     /// The surface.
     ///
+    /// Fails with an invalid argument for a pointer that `OpenHarmony` finds
+    /// is no `OHNativeWindow`.
+    ///
     /// # Safety
     ///
-    /// An Android window is the host's live window, which the header's
-    /// contract keeps alive through the call.
-    unsafe fn into_surface(self) -> Surface {
+    /// An Android or `OpenHarmony` window is the host's live window, which the
+    /// header's contract keeps alive through the call.
+    #[cfg_attr(not(target_env = "ohos"), allow(clippy::unnecessary_wraps, reason = "OpenHarmony's checks the window"))]
+    unsafe fn into_surface(self) -> Result<Surface, Error> {
         match self {
-            WindowSurface::Ready(surface) => surface,
+            WindowSurface::Ready(surface) => Ok(surface),
             #[cfg(target_os = "android")]
             // SAFETY: the caller's contract; the surface keeps its own
             // reference from here on.
-            WindowSurface::Android(window) => Surface::window(unsafe { crate::android::Window::acquire(window) }),
+            WindowSurface::Android(window) => Ok(Surface::window(unsafe { crate::android::Window::acquire(window) })),
+            #[cfg(target_env = "ohos")]
+            // SAFETY: the caller's contract; the surface keeps its own
+            // reference from here on.
+            WindowSurface::Ohos(window) => unsafe { OhosWindow::reference(window) }.map(Surface::window),
         }
     }
 }
@@ -386,6 +397,26 @@ impl HasDisplayHandle for OhosWindow {
 }
 
 #[cfg(target_env = "ohos")]
+impl OhosWindow {
+    /// Takes a reference to the host's window.
+    ///
+    /// Fails with an invalid argument for a pointer that OpenHarmony finds
+    /// is no `OHNativeWindow`.
+    ///
+    /// # Safety
+    ///
+    /// `window` is the host's live window.
+    unsafe fn reference(window: NonNull<c_void>) -> Result<OhosWindow, Error> {
+        // SAFETY: the host's window, which OpenHarmony checks is a native
+        // object.
+        if unsafe { OH_NativeWindow_NativeObjectReference(window.as_ptr()) } != 0 {
+            return Err(Error::invalid_argument("mln_ohos_window_target.window is no OHNativeWindow"));
+        }
+        Ok(OhosWindow(window))
+    }
+}
+
+#[cfg(target_env = "ohos")]
 impl Drop for OhosWindow {
     fn drop(&mut self) {
         // SAFETY: the reference that `ohos_window` took.
@@ -393,25 +424,17 @@ impl Drop for OhosWindow {
     }
 }
 
-/// An OpenHarmony window's target, which takes its own reference to the
-/// window, as the header says.
-///
-/// Fails with an invalid argument for a pointer that is no `OHNativeWindow`.
+/// An OpenHarmony window's target. The surface takes its own reference to
+/// the window, as the header says, once the call's handles check out.
 #[cfg(target_env = "ohos")]
-fn ohos_window(size: Size, window: NonNull<c_void>) -> Result<Target, Error> {
-    // SAFETY: the host's window, which OpenHarmony checks is a native object.
-    if unsafe { OH_NativeWindow_NativeObjectReference(window.as_ptr()) } != 0 {
-        return Err(Error::invalid_argument("mln_ohos_window_target.window is no OHNativeWindow"));
-    }
-    let window = OhosWindow(window);
-    Ok(Target::Surface { size, kind: SurfaceType::OhosNdk, surface: WindowSurface::Ready(Surface::window(window)) })
+fn ohos_window(size: Size, window: NonNull<c_void>) -> Target {
+    Target::Surface { size, kind: SurfaceType::OhosNdk, surface: WindowSurface::Ohos(window) }
 }
 
 #[cfg(not(target_env = "ohos"))]
-#[allow(clippy::unnecessary_wraps, reason = "OpenHarmony's checks the window")]
-fn ohos_window(size: Size, window: NonNull<c_void>) -> Result<Target, Error> {
+fn ohos_window(size: Size, window: NonNull<c_void>) -> Target {
     let _ = (size, window);
-    Ok(Target::Unsupported("this platform has no OpenHarmony windows"))
+    Target::Unsupported("this platform has no OpenHarmony windows")
 }
 
 /// Checks a caller's target, whose size `scale_factor` scales, and makes the
@@ -535,7 +558,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 }
             }
             MLN_RENDER_TARGET_KIND_OHOS_WINDOW => {
-                ohos_window(size, required(target.data.ohos_window.window, &field("window"))?)?
+                ohos_window(size, required(target.data.ohos_window.window, &field("window"))?)
             }
             MLN_RENDER_TARGET_KIND_WEB_CANVAS => web_canvas(size, &target.data.web_canvas, name)?,
             MLN_RENDER_TARGET_KIND_VULKAN_SURFACE => {
@@ -824,7 +847,7 @@ pub(crate) unsafe extern "C" fn mln_map_attach(
                     options.require_core_worker("a window session renders on a core worker")?;
                 }
                 // SAFETY: the caller's contract.
-                let surface = unsafe { surface.into_surface() };
+                let surface = unsafe { surface.into_surface() }?;
                 RenderTarget::Surface { size, surface, device }
             }
             Target::HostSurface { size, surface } => {
@@ -905,7 +928,7 @@ pub(crate) unsafe extern "C" fn mln_render_session_set_target(
                     return Err(unsupported(format!("this build presents to no {kind:?} surface")));
                 }
                 // SAFETY: the caller's contract.
-                let surface = unsafe { surface.into_surface() };
+                let surface = unsafe { surface.into_surface() }?;
                 Box::new(move |session| session.set_surface(size, surface))
             }
             Target::HostSurface { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
@@ -1195,11 +1218,6 @@ mod tests {
             newest.expect("a frame")
         }
 
-        // Memory that is no native object, which the target turns down.
-        let mut not_a_window = [0u64; 8];
-        let not_a_window = not_a_window.as_mut_ptr().cast::<c_void>();
-        assert_eq!(read(&ohos(8, 8, not_a_window), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
-
         let runtime = create();
         let map = create_map(runtime, &options(1.0));
         let styled = Waiter::new();
@@ -1207,6 +1225,24 @@ mod tests {
         // SAFETY: local arguments.
         unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, core::ptr::null_mut()) };
         assert_eq!(styled.status(), MLN_STATUS_OK);
+
+        // Memory that is no native object, which an attach turns down.
+        let mut not_a_window = [0u64; 8];
+        let not_a_window = not_a_window.as_mut_ptr().cast::<c_void>();
+        let (mut session, attached) = (0, Waiter::new());
+        // SAFETY: local arguments.
+        let status = unsafe {
+            mln_map_attach(
+                map,
+                &ohos(8, 8, not_a_window),
+                0,
+                &attach_options(),
+                &mut session,
+                &attached.descriptor,
+                core::ptr::null_mut(),
+            )
+        };
+        assert_eq!((status, session), (MLN_STATUS_INVALID_ARGUMENT, 0));
 
         let mut presented = 0;
         for (index, (backend, value, _)) in gpu_device::BACKENDS.iter().enumerate() {

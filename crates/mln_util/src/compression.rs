@@ -97,7 +97,7 @@ mod tests {
         assert!(compressed.len() < raw.len());
         assert_eq!(decompress(&compressed).unwrap(), raw);
         assert!(decompress(&compressed[..compressed.len() / 2]).is_err());
-        let mut trailing = compressed.clone();
+        let mut trailing = compressed;
         trailing.extend_from_slice(b"garbage");
         assert_eq!(decompress(&trailing).unwrap(), raw);
         assert!(decompress(&[]).is_err());

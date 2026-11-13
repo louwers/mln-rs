@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 
 [lib]
@@ -38,7 +40,7 @@ supercluster.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-mln_storage = { workspace = true, features = ["test-support"] }
+mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_tile = { package = "mln-rs-tile", path = "../mln_tile" }
 postcard.workspace = true
 

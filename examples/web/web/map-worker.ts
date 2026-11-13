@@ -23,16 +23,43 @@
 // can't start the map, the worker says `unsupported` rather than `fatal`.
 
 import type { WebMap } from './pkg/mln_web.js';
-import type { Bindings, Box, Camera, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
+import type { Bindings, Box, Camera, DebugFeature, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
 
-// Every URL this worker fetched, and how many times: the map's fetches look
-// the global `fetch` up at each call, and so do the preloads below.
+// Every URL this worker fetched, and how many times, and how many fetches
+// are still transferring: the map's fetches look the global `fetch` up at
+// each call, and so do the preloads below. A fetch is pending until it fails
+// or its body is read (mln_storage reads each with `arrayBuffer()`); a
+// preload, which the map may never claim, until a copy of its body is
+// (`settle`).
 const fetches = new Map<string, number>();
+let requests = 0;
+let pending = 0;
+const settle = new WeakMap<Response, () => void>();
 const globalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = input instanceof Request ? input.url : String(input);
   fetches.set(url, (fetches.get(url) ?? 0) + 1);
-  return globalFetch(input, init);
+  requests++;
+  pending++;
+  let settled = false;
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    pending--;
+  };
+  return globalFetch(input, init).then((response) => {
+    if (response.type === 'opaqueredirect') {
+      done(); // mln_storage reads no body from it
+      return response;
+    }
+    const read = response.arrayBuffer.bind(response);
+    response.arrayBuffer = () => read().finally(done);
+    settle.set(response, done);
+    return response;
+  }, (error: unknown) => {
+    done();
+    throw error;
+  });
 };
 
 const webgl2 = self.name === 'webgl2';
@@ -47,6 +74,11 @@ type Handle = (message: ToMap) => void;
 
 // Frames without a camera change after which the map has stopped moving.
 const IDLE_FRAMES = 10;
+// How far from the pointer, in CSS pixels, the debug overlay looks for
+// features, and how often it looks again while the map redraws under a
+// still pointer.
+const HOVER_RADIUS = 3;
+const HOVER_REQUERY_MS = 200;
 
 let start: Promise<Handle | undefined> | null = null;
 const early: ToMap[] = []; // messages before the map exists
@@ -111,6 +143,7 @@ function preload(url: unknown): Promise<Response> | undefined {
   const response = fetch(url);
   // Unclaimed, a failure is quiet; claimed, the map fetches again.
   response.catch(() => {});
+  response.then((r) => r.clone().arrayBuffer().finally(() => settle.get(r)?.())).catch(() => {});
   const expiry = setTimeout(() => preloads.delete(url), 60_000);
   preloads.set(url, { response, expiry });
   return response;
@@ -195,7 +228,7 @@ async function run(
   { module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily, panic }: Start,
 ): Promise<Handle> {
   const { default: init, WebMap, set_preloads, panic_for_check, mlnWebStopPump } = await bindings;
-  await init({ module_or_path: module });
+  const exports = await init({ module_or_path: module }) as { memory?: WebAssembly.Memory };
   stopPump = mlnWebStopPump;
   set_preloads(takePreload);
 
@@ -238,6 +271,14 @@ async function run(
   let reported = 0;
   let attribution = '';
   let styleName = '';
+  // The debug overlay: whether the page shows it, and the pointer it asks
+  // about, which `hoverMoved` marks as not yet queried and `hoverStale` as
+  // queried before the map last drew.
+  let debug = false;
+  let hover: [number, number] | null = null;
+  let hoverMoved = false;
+  let hoverStale = false;
+  let hoverQueried = 0;
   const report = (force: boolean) => {
     const now = performance.now();
     if (!force && now - reported < 250) return;
@@ -258,14 +299,44 @@ async function run(
       styleName = name;
       post({ type: 'styleName', name });
     }
+    if (debug) {
+      const [drawCalls = 0, textures = 0, buffers = 0] = map.render_stats();
+      post({
+        type: 'stats',
+        stats: {
+          drawCalls,
+          memory: exports.memory?.buffer.byteLength ?? 0,
+          gpuMemory: textures + buffers,
+          pending,
+          requests,
+          loadedMs: loaded?.loadedMs ?? null,
+        },
+      });
+    }
   };
-  function frame() {
-    guard(drawFrame);
+  let lastFrame: number | null = null;
+  function frame(time: number) {
+    const interval = lastFrame === null ? 0 : time - lastFrame;
+    lastFrame = time;
+    guard(() => drawFrame(interval));
     if (!stopped) requestAnimationFrame(frame);
   }
   let shownCamera = '';
-  function drawFrame() {
-    map.frame(8, performance.now());
+  function drawFrame(interval: number) {
+    const drew = map.frame(8, performance.now());
+    if (debug) {
+      post({ type: 'frame', sample: { interval, phases: Array.from(map.frame_timings()) } });
+      const now = performance.now();
+      hoverStale ||= drew;
+      if (hover && (hoverMoved || (hoverStale && now - hoverQueried >= HOVER_REQUERY_MS))) {
+        hoverMoved = false;
+        hoverStale = false;
+        hoverQueried = now;
+        const features = JSON.parse(map.query_features(hover[0], hover[1], HOVER_RADIUS)) as DebugFeature[];
+        const [lat, lon] = map.lat_lng_at(hover[0], hover[1]) ?? [];
+        post({ type: 'features', at: lat === undefined || lon === undefined ? null : [lat, lon], features });
+      }
+    }
     const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();
     const next = [lat, lon, zoom, bearing, pitch].join();
     const camera: Camera = [lat, lon, zoom, bearing, pitch];
@@ -352,6 +423,14 @@ async function run(
         }
         break;
       }
+      case 'debug':
+        debug = data.on;
+        report(true);
+        break;
+      case 'hover':
+        hover = data.point;
+        hoverMoved = hover !== null;
+        break;
       case 'preload':
       case 'start':
       case 'fetches':

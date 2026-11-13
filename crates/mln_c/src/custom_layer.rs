@@ -134,7 +134,7 @@ mod native {
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_METAL, data));
         }
-        #[cfg(any(all(unix, not(target_vendor = "apple")), all(target_family = "wasm", feature = "gl")))]
+        #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")), target_family = "wasm")))]
         if encoder.is::<mln_gl::CustomLayerEncoder>() {
             return Some((crate::generated::types::MLN_RENDER_BACKEND_OPEN_GL, data));
         }
@@ -174,7 +174,7 @@ mod native {
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_METAL, data));
         }
-        #[cfg(any(all(unix, not(target_vendor = "apple")), all(target_family = "wasm", feature = "gl")))]
+        #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")), target_family = "wasm")))]
         if let Some(pass) = pass.downcast_ref::<mln_gl::CustomLayerPass>() {
             data.open_gl = crate::generated::types::mln_open_gl_custom_layer_pass {
                 // A browser session draws into its canvas: the default

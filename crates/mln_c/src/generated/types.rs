@@ -3351,7 +3351,8 @@ pub struct mln_gpu_device_options {
  no Vulkan driver, and in a browser the build's one backend: WebGPU or
  OpenGL (WebGL2).*/
     pub backend: mln_render_backend,
-    /// The GPU to use, as an index into the backend's list of GPUs.
+    /** The GPU to use, as an index into the backend's list of GPUs. OpenGL's
+ list holds one GPU: the one that its display renders on.*/
     pub adapter_index: u32,
     /** The 16-byte UUID of the GPU to use: Vulkan's
  `VkPhysicalDeviceIDProperties.deviceUUID`, or OpenGL's

@@ -32,7 +32,7 @@ fn get_download(thread: &DatabaseFileSourceThread, region_id: i64) -> Result<Rc<
     if let Some(download) = downloads.downloads.borrow().get(&region_id) {
         return Ok(Rc::clone(download));
     }
-    let definition = require_region(thread, region_id)?.definition.clone();
+    let definition = require_region(thread, region_id)?.definition;
     let download = Rc::new(OfflineDownload::new(
         region_id,
         definition,

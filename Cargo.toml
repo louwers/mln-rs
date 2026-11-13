@@ -34,6 +34,9 @@ repository = "https://github.com/louwers/mln-rs"
 # it, which `cargo package` archives as a file. The ports of other projects
 # also ship their own license files.
 include = ["/src", "/tests", "/LICENSE*"]
+# The libraries' keywords and categories on crates.io. mln-rs has its own.
+keywords = ["maplibre", "map"]
+categories = ["graphics", "science::geo"]
 
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
@@ -347,6 +350,11 @@ unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+# The manifests: package metadata, feature names and dependency declarations.
+# A workspace this size can't avoid two versions of a crate among its
+# dependencies' dependencies.
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
 # Development macros that shouldn't be merged: `dbg!` prints to stderr, and
 # `todo!` and `unimplemented!` panic.
 dbg_macro = "warn"

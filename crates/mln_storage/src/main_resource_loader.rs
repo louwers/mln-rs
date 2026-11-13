@@ -154,7 +154,7 @@ impl MainResourceLoaderThread {
                             // Copy response fields for cache control request
                             res.prior_modified = response.modified;
                             res.prior_expires = response.expires;
-                            res.prior_etag = response.etag.clone();
+                            res.prior_etag = response.etag;
                         }
 
                         let parent = this.tasks.borrow_mut().remove(&req);

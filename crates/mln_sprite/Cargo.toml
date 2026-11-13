@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 
 [lib]
@@ -24,7 +26,7 @@ mln_vec_map.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-mln_storage = { workspace = true, features = ["test-support"] }
+mln_storage = { workspace = true, features = ["stub-file-source"] }
 parking_lot.workspace = true
 
 [lints]

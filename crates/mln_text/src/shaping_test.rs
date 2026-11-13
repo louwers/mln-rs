@@ -207,7 +207,7 @@ fn zwsp() {
 
     // 5 'new' lines.
     {
-        let string = TaggedString::new(u("\u{200b}\u{200b}\u{200b}\u{200b}\u{200b}"), section_options.clone());
+        let string = TaggedString::new(u("\u{200b}\u{200b}\u{200b}\u{200b}\u{200b}"), section_options);
         let shaping = test_get_shaping(&string, 1);
         assert_eq!(shaping.positioned_lines.len(), 5);
         assert_eq!(shaping.top, -60.0);

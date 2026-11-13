@@ -74,7 +74,12 @@ export type ToMap =
   | { type: 'follow'; camera: Camera }
   // Stop the camera's own motion: an ease, momentum, a wheel's eased zoom.
   | { type: 'stop' }
-  | { type: 'input'; input: Input };
+  | { type: 'input'; input: Input }
+  // Whether the page shows its debug overlay (debug.ts): while it does, the
+  // map's Web Worker reports each frame and the features under `hover`.
+  | { type: 'debug'; on: boolean }
+  // The pointer over the canvas, in CSS pixels, or null once it left.
+  | { type: 'hover'; point: [number, number] | null };
 
 export interface Loaded {
   loadedMs: number;
@@ -91,6 +96,47 @@ export interface Pixels {
 /** A Shift-drag's box, [x0, y0, x1, y1] in CSS pixels. */
 export type Box = [number, number, number, number];
 
+/** One animation frame of the map's Web Worker, for the debug overlay. */
+export interface FrameSample {
+  /** Milliseconds since the frame before it. */
+  interval: number;
+  /** Milliseconds of each phase, in PHASES's order (WebMap::frame_timings). */
+  phases: number[];
+}
+
+/** The phases of FrameSample's `phases`, in order. */
+export const PHASES = ['update', 'render', 'tasks', 'between'] as const;
+
+/** What the debug overlay shows of the map beside its frames. */
+export interface DebugStats {
+  /** Draw calls of the last frame drawn. */
+  drawCalls: number;
+  /** Bytes of the map's wasm instance's memory. */
+  memory: number;
+  /** Bytes of the live textures and buffers on the GPU. */
+  gpuMemory: number;
+  /** Requests the map's Web Worker is waiting on, and all it has made. */
+  pending: number;
+  requests: number;
+  /** Milliseconds the current style took to load fully, once it has. */
+  loadedMs: number | null;
+}
+
+/**
+ * A feature under the pointer (WebMap::query_features). `type` is its
+ * style layer's, and `geometry` its geometry's GeoJSON type.
+ */
+export interface DebugFeature {
+  layer: string;
+  type: string | null;
+  source: string;
+  sourceLayer: string;
+  id: string | number | null;
+  geometry: string;
+  properties: Record<string, unknown>;
+  state: Record<string, unknown>;
+}
+
 /** From the map's Web Worker to the page. */
 export type FromMap =
   | { type: 'status'; text: string }
@@ -105,6 +151,11 @@ export type FromMap =
   | { type: 'camera'; camera: Camera }
   | { type: 'attribution'; attribution: string[] }
   | { type: 'styleName'; name: string }
+  // While the page shows its debug overlay.
+  | { type: 'frame'; sample: FrameSample }
+  | { type: 'stats'; stats: DebugStats }
+  // `at` is the pointer's [lat, lon], or null past the globe's edge.
+  | { type: 'features'; at: [number, number] | null; features: DebugFeature[] }
   // The map stopped: a panic, or it failed to start.
   | { type: 'fatal'; message: string }
   // The map didn't start: the browser's API couldn't draw it.

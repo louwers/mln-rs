@@ -1286,7 +1286,7 @@ fn rendered_queries_select_by_geometry_and_layer() {
     let everything =
         RenderedQueryGeometry::Box { min: ScreenCoordinate::new(0.0, 0.0), max: ScreenCoordinate::new(64.0, 64.0) };
     let circles = RenderedQueryOptions::new(Some(vec!["circles".into()]), None);
-    assert_eq!(2, names(wait(session.query_rendered_features(everything.clone(), circles))).len());
+    assert_eq!(2, names(wait(session.query_rendered_features(everything, circles))).len());
     let line =
         RenderedQueryGeometry::LineString(vec![ScreenCoordinate::new(10.0, 32.0), ScreenCoordinate::new(26.0, 32.0)]);
     assert_eq!(1, wait(session.query_rendered_features(line, RenderedQueryOptions::default())).len());

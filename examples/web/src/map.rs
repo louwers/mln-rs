@@ -16,10 +16,12 @@ use mln_map::{
     UpdateReader,
 };
 use mln_renderer::Renderer;
+use mln_renderer::query::RenderedQueryOptions;
 use mln_renderer::text::font_face_engine;
 use mln_util::LatLng;
-use mln_util::geo::ScreenCoordinate;
+use mln_util::geo::{ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
+use mln_util::time::Instant;
 use mln_web_host::shaper::{self, ShaperModuleEngine};
 use mln_web_host::{install_cooperative_scheduler, pump, tile_workers};
 use wasm_bindgen::prelude::*;
@@ -95,7 +97,14 @@ pub struct WebMap {
     received: Rc<Cell<u32>>,
     /// The page's pointer, wheel and key input, turned into camera moves.
     gestures: GestureRecognizer,
+    /// Milliseconds the `RunLoop` ran between frames since the last frame.
+    between_frames_ms: Rc<Cell<f64>>,
+    /// What the last frame spent on each of its phases (`frame_timings`).
+    phases: [f64; PHASES],
 }
+
+/// How many phases `WebMap::frame_timings` reports.
+const PHASES: usize = 4;
 
 #[wasm_bindgen]
 impl WebMap {
@@ -302,15 +311,79 @@ impl WebMap {
     /// cooperative scheduler's tasks (sprites, glyphs, raster tiles) for up
     /// to `budget_ms` and delivers their results. Returns whether it drew.
     pub fn frame(&mut self, budget_ms: f64, now: f64) -> bool {
+        let between = self.between_frames_ms.replace(0.0);
+        let start = Instant::now();
         // The map samples its animations at this frame's time.
-        self.map.set_frame_time(Some(mln_util::time::Instant::now()));
+        self.map.set_frame_time(Some(start));
         self.gestures.frame(&mut self.map, now);
         self.run_loop.run_once();
         self.handle_map_events();
+        let updated = Instant::now();
         let drew = self.frontend.render();
+        let rendered = Instant::now();
         self.run_tasks(budget_ms);
         self.handle_map_events();
+        let ran = Instant::now();
+        let ms = |from: Instant, to: Instant| to.duration_since(from).as_secs_f64() * 1000.0;
+        self.phases = [ms(start, updated), ms(updated, rendered), ms(rendered, ran), between];
         drew
+    }
+
+    /// The milliseconds the last `frame` spent on each of its phases, in
+    /// order: stepping the gestures and running the `RunLoop`, drawing,
+    /// running the cooperative scheduler's tasks, and the `RunLoop` runs
+    /// between the frame before it and this one.
+    pub fn frame_timings(&self) -> Vec<f64> {
+        self.phases.to_vec()
+    }
+
+    /// The graphics context's counters: the draw calls of the last frame it
+    /// drew, and the bytes of its live textures and of its live buffers.
+    pub fn render_stats(&self) -> Vec<f64> {
+        let backend = &*self.frontend.backend;
+        let _scope = BackendScope::new(backend, ScopeType::Implicit);
+        let stats = backend.get_context().rendering_stats();
+        vec![f64::from(stats.num_draw_calls), f64::from(stats.mem_textures), f64::from(stats.mem_buffers)]
+    }
+
+    /// Where (`x`, `y`) CSS pixels on the canvas are, as `[latitude,
+    /// longitude]`, or undefined where the map isn't (past the globe's edge).
+    pub fn lat_lng_at(&self, x: f64, y: f64) -> Option<Vec<f64>> {
+        let at = self.map.lat_lng_for_pixel(&ScreenCoordinate::new(x, y), WrapMode::Wrapped).ok()?;
+        Some(vec![at.latitude(), at.longitude()])
+    }
+
+    /// The features drawn within `radius` CSS pixels of (`x`, `y`), topmost
+    /// first, as a JSON array: each an object with its style `layer`, the
+    /// layer's `type`, its `source`, `sourceLayer`, `id` (or null),
+    /// `geometry` type, `properties` and feature `state`. One that several
+    /// layers draw is there once per layer.
+    pub fn query_features(&self, x: f64, y: f64, radius: f64) -> Result<String, JsValue> {
+        let min = ScreenCoordinate::new(x - radius, y - radius);
+        let max = ScreenCoordinate::new(x + radius, y + radius);
+        let features = self
+            .frontend
+            .renderer
+            .query_rendered_features_in_box(&min, &max, &RenderedQueryOptions::default())
+            .map_err(js_error)?;
+        let style = self.map.style();
+        let features = features
+            .iter()
+            .map(|feature| {
+                let layer_type = style.get_layer(&feature.layer).map(|layer| layer.get_type_info().type_);
+                serde_json::json!({
+                    "layer": feature.layer,
+                    "type": layer_type,
+                    "source": feature.source,
+                    "sourceLayer": feature.source_layer,
+                    "id": identifier_json(&feature.id),
+                    "geometry": geometry_type(&feature.geometry),
+                    "properties": object_json(&feature.properties),
+                    "state": object_json(&feature.state),
+                })
+            })
+            .collect();
+        Ok(serde_json::Value::Array(features).to_string())
     }
 
     /// A pointer went down on the canvas, at `x`, `y` CSS pixels from its
@@ -423,6 +496,51 @@ impl WebMap {
     }
 }
 
+/// A feature's geometry type, as GeoJSON names it.
+fn geometry_type(geometry: &geometry::Geometry<f64>) -> &'static str {
+    use geometry::Geometry;
+    match geometry {
+        Geometry::Empty => "Empty",
+        Geometry::Point(_) => "Point",
+        Geometry::MultiPoint(_) => "MultiPoint",
+        Geometry::LineString(_) => "LineString",
+        Geometry::MultiLineString(_) => "MultiLineString",
+        Geometry::Polygon(_) => "Polygon",
+        Geometry::MultiPolygon(_) => "MultiPolygon",
+        Geometry::GeometryCollection(_) => "GeometryCollection",
+    }
+}
+
+fn identifier_json(id: &feature::Identifier) -> serde_json::Value {
+    use feature::Identifier;
+    match id {
+        Identifier::Null => serde_json::Value::Null,
+        Identifier::Uint(n) => (*n).into(),
+        Identifier::Int(n) => (*n).into(),
+        Identifier::Double(n) => (*n).into(),
+        Identifier::String(s) => s.as_str().into(),
+    }
+}
+
+fn object_json(object: &feature::PropertyMap) -> serde_json::Value {
+    object.iter().map(|(key, value)| (key.clone(), value_json(value))).collect::<serde_json::Map<_, _>>().into()
+}
+
+fn value_json(value: &feature::Value) -> serde_json::Value {
+    use feature::Value;
+    match value {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => (*b).into(),
+        Value::Uint(n) => (*n).into(),
+        Value::Int(n) => (*n).into(),
+        // Null for a NaN or an infinity, which JSON has no number for.
+        Value::Double(n) => (*n).into(),
+        Value::String(s) => s.as_str().into(),
+        Value::Array(values) => values.iter().map(value_json).collect(),
+        Value::Object(object) => object_json(object),
+    }
+}
+
 /// `WebMap::wheel`'s `kind`, as web/protocol.ts's `WHEEL_PIXELS` and
 /// `WHEEL_NOTCHES` send it.
 const WHEEL_PIXELS: u32 = 0;
@@ -454,10 +572,14 @@ impl WebMap {
         let run_loop = RunLoop::get();
         run_loop.set_waker(Some(pump::waker()));
         scheduler.set_waker(Some(pump::waker()));
+        let between_frames_ms = Rc::new(Cell::new(0.0));
         let between_frames = {
             let run_loop = run_loop.clone();
+            let spent = Rc::clone(&between_frames_ms);
             pump::add(move || {
+                let start = Instant::now();
                 run_loop.run_once();
+                spent.set(spent.get() + start.elapsed().as_secs_f64() * 1000.0);
                 true
             })
         };
@@ -488,6 +610,8 @@ impl WebMap {
             pixel_ratio,
             received,
             gestures: GestureRecognizer::default(),
+            between_frames_ms,
+            phases: [0.0; PHASES],
         })
     }
 

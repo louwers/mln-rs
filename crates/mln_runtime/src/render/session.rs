@@ -750,6 +750,7 @@ fn attach_unlocked<R>(
                 return Err(Error::invalid_argument("a surface that the host made needs the host's device"));
             }
             surface.check_area()?;
+            surface.check_pixel_format(device.as_ref())?;
             (size, TargetInit::Surface { surface, device })
         }
         RenderTarget::Borrowed { size, ring: borrowed, device } => {

@@ -33,6 +33,8 @@
 //                          turn the bearing with the planet, and a drag
 //                          carries on over a pole (default: off, north
 //                          stays up)
+//   debug                  the debug overlay (debug.ts), which D also
+//                          toggles
 //   panic=<map|tile>       the map's instance or the first tile worker's
 //                          panics once it starts, for check/check.mjs
 //   backend=<webgpu|webgl2>
@@ -66,6 +68,7 @@
 import wasmUrl from './pkg/mln_web_bg.wasm?url';
 import webglWasmUrl from './pkg/webgl/mln_web_bg.wasm?url';
 import type { Comparison } from './compare.ts';
+import { createDebugOverlay } from './debug.ts';
 import {
   type Backend,
   type Box,
@@ -107,6 +110,8 @@ const status = element('status', HTMLElement);
 const banner = element('error', HTMLElement);
 const mapBox = element('map-box', HTMLElement);
 const canvas = element('map', HTMLCanvasElement);
+// The debug overlay (debug.ts), wired up at the end.
+const debug = createDebugOverlay(document.body);
 
 if (params.has('width') && params.has('height')) {
   mapBox.style.width = `${number('width', 0)}px`;
@@ -299,6 +304,15 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
       styleName = data.name;
       showStyle();
       break;
+    case 'frame':
+      debug.frame(data.sample);
+      break;
+    case 'stats':
+      debug.stats(data.stats);
+      break;
+    case 'features':
+      if (hovering) debug.features(data.at, data.features);
+      break;
   }
 };
 
@@ -412,6 +426,7 @@ new ResizeObserver(() => {
   size = next;
   fitCanvas();
   toMap({ type: 'resize', width: size[0], height: size[1] });
+  showDebugPage();
 }).observe(mapBox);
 
 // A window that moves to a display of another density draws at its pixel
@@ -422,6 +437,7 @@ if (!params.has('ratio')) {
       ratio = window.devicePixelRatio || 1;
       fitCanvas();
       toMap({ type: 'pixelRatio', ratio });
+      showDebugPage();
       watchRatio(ratio);
     }, { once: true });
   };
@@ -456,6 +472,7 @@ function showCamera(next: Camera) {
   latestCamera = next;
   const [, , , bearing, pitch] = next;
   needle.style.transform = `rotateX(${pitch}deg) rotateZ(${-bearing}deg)`;
+  debug.camera(next);
   comparison?.cameraChanged(next);
   hashTimer ??= setTimeout(() => {
     hashTimer = null;
@@ -623,3 +640,60 @@ function setFreeBearing(on: boolean) {
 }
 freeBearingToggle.addEventListener('change', () => setFreeBearing(freeBearingToggle.checked));
 if (params.has('freeBearing')) setFreeBearing(true);
+
+// The debug overlay (debug.ts), off as the page starts unless `?debug`. While
+// it shows, the pointer over the canvas goes to the map's Web Worker, at most
+// once a frame, which answers with the features under it.
+const debugToggle = element('debug-toggle', HTMLInputElement);
+function showDebugPage() {
+  debug.page({
+    backend: backend === 'webgl2' ? 'WebGL2' : 'WebGPU',
+    width: devicePixels(size[0]),
+    height: devicePixels(size[1]),
+    ratio,
+  });
+}
+function setDebug(on: boolean) {
+  debugToggle.checked = on;
+  setParam('debug', on ? '' : null);
+  debug.show(on);
+  toMap({ type: 'debug', on });
+  if (on) {
+    showDebugPage();
+    debug.camera(latestCamera);
+  } else {
+    hover(null);
+  }
+}
+let hovering = false;
+let hoverPoint: [number, number] | null = null;
+let hoverQueued = false;
+function hover(point: [number, number] | null) {
+  hovering = point !== null;
+  hoverPoint = point;
+  if (point === null) {
+    debug.hideFeatures();
+    toMap({ type: 'hover', point: null });
+    return;
+  }
+  if (hoverQueued) return;
+  hoverQueued = true;
+  requestAnimationFrame(() => {
+    hoverQueued = false;
+    if (hoverPoint) toMap({ type: 'hover', point: hoverPoint });
+  });
+}
+canvas.addEventListener('pointermove', (e) => {
+  if (debug.shown && e.pointerType !== 'touch') hover([at(e).x, at(e).y]);
+});
+canvas.addEventListener('pointerleave', () => {
+  if (hovering) hover(null);
+});
+debugToggle.addEventListener('change', () => setDebug(debugToggle.checked));
+// D, unless a modifier makes it another shortcut or a field takes the text.
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'd' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')) return;
+  setDebug(!debug.shown);
+});
+if (params.has('debug')) setDebug(true);

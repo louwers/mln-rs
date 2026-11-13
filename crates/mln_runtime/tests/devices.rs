@@ -8,8 +8,9 @@ mod support;
 
 use mln_map::MapMode;
 use mln_runtime::{
-    AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
-    FrameDisposition, GlApi, GpuSync, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind, SyncKinds,
+    Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions, ErrorKind,
+    FrameDemand, FrameDisposition, GlApi, GpuSync, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,
+    SyncKinds,
 };
 use mln_util::size::Size;
 use support::{eventually, runtime, wait};
@@ -120,6 +121,18 @@ fn sessions_of_two_maps_share_each_kind_of_open_gl_device() {
             sessions_of_two_maps_share(device, &format!("{options:?}"));
         }
     }
+}
+
+/// OpenGL lists one GPU, the one its display renders on, so an OpenGL
+/// device takes the first index and no other.
+#[test]
+fn an_open_gl_device_names_its_one_gpu_by_index() {
+    let first = DeviceOptions { adapter: Some(Adapter::Index(0)), ..DeviceOptions::default() };
+    let Some(device) = device_with(BackendType::OpenGL, first) else { return };
+    sessions_of_two_maps_share(device, "the first OpenGL GPU");
+    let second = DeviceOptions { adapter: Some(Adapter::Index(1)), ..DeviceOptions::default() };
+    let error = Device::with_backend(BackendType::OpenGL, second).unwrap_err();
+    assert_eq!(ErrorKind::NotFound, error.kind);
 }
 
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]

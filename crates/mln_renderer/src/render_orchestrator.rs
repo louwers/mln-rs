@@ -370,8 +370,7 @@ impl RenderOrchestrator {
         // change leaves it nothing to transition from.
         let added_layer_transition_parameters =
             TransitionParameters::new(update_parameters.time_point, transition_options);
-        let transition_parameters =
-            TransitionParameters { global_state_change, ..added_layer_transition_parameters.clone() };
+        let transition_parameters = TransitionParameters { global_state_change, ..added_layer_transition_parameters };
 
         // Transitions the values that read a changed global-state key, where
         // nothing else changed.

@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # Generates crates/mln_style's style code; published for the difftests
 # (louwers/mln-rs-difftests).

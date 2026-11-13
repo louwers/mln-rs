@@ -215,7 +215,7 @@ fn id() {
     assert!(!filter_id(r#"[">", "$id", "1"]"#, &[], id1.clone()));
     assert!(!filter_id(r#"["<", "$id", "1"]"#, &[], id1.clone()));
     assert!(!filter_id(r#"[">=", "$id", "1"]"#, &[], id1.clone()));
-    assert!(!filter_id(r#"["<=", "$id", "1"]"#, &[], id1.clone()));
+    assert!(!filter_id(r#"["<=", "$id", "1"]"#, &[], id1));
 
     let id2 = Identifier::String("1".into());
     assert!(!filter_id(r#"["<", "$id", "0"]"#, &[], id2.clone()));

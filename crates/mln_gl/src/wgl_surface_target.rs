@@ -34,18 +34,25 @@ struct WglWindow {
     _window: Arc<dyn Window>,
 }
 
+/// The Win32 window of `window`.
+fn hwnd(window: &dyn Window) -> Result<HWND, Error> {
+    let handle =
+        window.window_handle().map_err(|e| Error::invalid_argument(format!("The window has no handle: {e}")))?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err(Error::invalid_argument("The window is no Win32 window."));
+    };
+    Ok(handle.hwnd.get() as HWND)
+}
+
+fn other_pixel_format() -> Error {
+    Error::invalid_argument("the window has a pixel format of its own, which Windows doesn't let change")
+}
+
 impl WglWindow {
     fn new(window: Arc<dyn Window>) -> Result<WglWindow, Error> {
-        let handle =
-            window.window_handle().map_err(|e| Error::invalid_argument(format!("The window has no handle: {e}")))?;
-        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-            return Err(Error::invalid_argument("The window is no Win32 window."));
-        };
-        let hwnd = handle.hwnd.get() as HWND;
+        let hwnd = hwnd(&*window)?;
         // SAFETY: the window is the live one of `window`.
-        let dc = unsafe { wgl::WindowDc::new(hwnd, 0) }.map_err(Error::native)?.ok_or_else(|| {
-            Error::invalid_argument("the window has a pixel format of its own, which Windows doesn't let change")
-        })?;
+        let dc = unsafe { wgl::WindowDc::new(hwnd, 0) }.map_err(Error::native)?.ok_or_else(other_pixel_format)?;
         let context = wgl::create_context(dc.dc(), std::ptr::null_mut()).map_err(Error::unsupported)?;
         Ok(WglWindow { window: hwnd, dc, context, _window: window })
     }
@@ -106,6 +113,24 @@ pub struct SurfaceTarget {
 }
 
 impl SurfaceTarget {
+    /// Checks, on any thread and without a context, that
+    /// [`with_backend`](Self::with_backend) can give `window` the library's
+    /// pixel format: that it has none yet, or that one. Sets none.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// window that isn't a Win32 window or that has a pixel format of its
+    /// own, and with [`ErrorKind::Native`](mln_util::ErrorKind) when the
+    /// query fails.
+    pub fn check_window(window: &dyn Window) -> Result<(), Error> {
+        let hwnd = hwnd(window)?;
+        // SAFETY: the window that `window` names, which the caller keeps open.
+        if unsafe { wgl::takes_library_pixel_format(hwnd) }.map_err(Error::native)? {
+            Ok(())
+        } else {
+            Err(other_pixel_format())
+        }
+    }
+
     /// A backend on a context of `window`, a Win32 window, and a target that
     /// presents frames of `framebuffer_size` pixels to it, which it keeps.
     /// It gives the window the library's pixel format. With

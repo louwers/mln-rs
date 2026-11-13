@@ -666,7 +666,7 @@ impl Device {
                 ]
             }
             Selector::Index(None) => {
-                let mut ranked = gpus.clone();
+                let mut ranked = gpus;
                 // SAFETY: plain queries of the GPUs.
                 ranked.sort_by_key(|&gpu| match unsafe { instance.get_physical_device_properties(gpu) }.device_type {
                     vk::PhysicalDeviceType::DISCRETE_GPU => 0,

@@ -4995,7 +4995,7 @@ fn a_command_that_keeps_some_fields_completes_or_is_cancelled() {
     let start = start_clock(&mut transform);
     transform.ease_to(
         &CameraOptions { zoom: Some(10.0), bearing: Some(90.0), ..Default::default() },
-        &AnimationOptions { duration: Some(Duration::from_secs(1)), ..both.clone() },
+        &AnimationOptions { duration: Some(Duration::from_secs(1)), ..both },
     );
     transform.jump_to(&CameraOptions { zoom: Some(6.0), ..Default::default() });
     assert_eq!(outcome(&ended), None);

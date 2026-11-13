@@ -517,8 +517,9 @@ impl Map {
     /// map already has a session or was released, or a window is minimized
     /// or has no client area, and with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
-    /// target, or a [`Surface::wgpu`](crate::Surface::wgpu) without the
-    /// host's device. The completion fails as
+    /// target, a [`Surface::wgpu`](crate::Surface::wgpu) without the
+    /// host's device, or a Win32 window with a pixel format of its own that
+    /// OpenGL would present to. The completion fails as
     /// [`Device::new`](crate::Device::new) does when the
     /// session has to create its device and can't, with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the window or

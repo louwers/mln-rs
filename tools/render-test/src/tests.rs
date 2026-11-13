@@ -150,7 +150,7 @@ fn shuffle_order_depends_only_on_the_seed() {
     assert_eq!(order, shuffled(1));
     assert_ne!(order, original);
     assert_ne!(order, shuffled(2));
-    let (mut sorted, mut original_sorted) = (order.clone(), original);
+    let (mut sorted, mut original_sorted) = (order, original);
     sorted.sort_unstable();
     original_sorted.sort_unstable();
     assert_eq!(sorted, original_sorted);

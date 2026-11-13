@@ -323,7 +323,7 @@ fn load_from_cache(state_rc: &Rc<RefCell<State>>) {
                 state.resource.prior_modified = res.modified;
                 state.resource.prior_expires = res.expires;
                 state.resource.prior_etag = res.etag.clone();
-                state.resource.prior_data = res.data.clone();
+                state.resource.prior_data = res.data;
             } else {
                 loaded_data(&state_rc, &res, LoadingMethod::CacheOnly);
             }

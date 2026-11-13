@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
@@ -57,7 +59,7 @@ geojson = { package = "mln-rs-geojson", path = "../../vendor/geojson" }
 mln_conversion = { package = "mln-rs-conversion", path = "../mln_conversion" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
 mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
-mln_storage = { workspace = true, features = ["test-support"] }
+mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 mlt-core.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }

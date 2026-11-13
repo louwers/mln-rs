@@ -704,19 +704,24 @@ pub(crate) enum SurfaceSwap {
 }
 
 impl SurfaceSwap {
-    pub(crate) fn swap(&self) {
+    /// Presents the frame, and returns whether the surface took it.
+    pub(crate) fn swap(&self) -> bool {
         match self {
-            SurfaceSwap::Egl { egl, display, surface } => {
-                if let Err(e) = egl.swap_buffers(*display, *surface) {
+            SurfaceSwap::Egl { egl, display, surface } => match egl.swap_buffers(*display, *surface) {
+                Ok(()) => true,
+                Err(e) => {
                     Log::error(Event::GraphicsBackend, format!("eglSwapBuffers() failed: {e}"));
+                    false
                 }
-            }
+            },
             #[cfg(windows)]
-            SurfaceSwap::Wgl(dc) => {
-                if let Err(e) = crate::wgl::swap_buffers(*dc) {
+            SurfaceSwap::Wgl(dc) => match crate::wgl::swap_buffers(*dc) {
+                Ok(()) => true,
+                Err(e) => {
                     Log::error(Event::GraphicsBackend, e);
+                    false
                 }
-            }
+            },
         }
     }
 }

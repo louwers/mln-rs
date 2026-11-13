@@ -260,9 +260,7 @@ impl<T: Clone> GridIndex<T> {
                 let cell_index = self.x_cell_count * y + x;
                 // Look up other boxes
                 for &uid in &self.box_cells[cell_index] {
-                    if !seen_boxes.contains(&uid) {
-                        seen_boxes.insert(uid);
-
+                    if seen_boxes.insert(uid) {
                         let pair = &self.box_elements[uid as usize];
                         let bbox = &pair.1;
                         if Self::boxes_collide(query_bbox, bbox) && result_fn(&pair.0, bbox) {
@@ -273,9 +271,7 @@ impl<T: Clone> GridIndex<T> {
 
                 // Look up circles
                 for &uid in &self.circle_cells[cell_index] {
-                    if !seen_circles.contains(&uid) {
-                        seen_circles.insert(uid);
-
+                    if seen_circles.insert(uid) {
                         let pair = &self.circle_elements[uid as usize];
                         let bcircle = &pair.1;
                         if Self::circle_and_box_collide(bcircle, query_bbox)
@@ -323,9 +319,7 @@ impl<T: Clone> GridIndex<T> {
                 let cell_index = self.x_cell_count * y + x;
                 // Look up boxes
                 for &uid in &self.box_cells[cell_index] {
-                    if !seen_boxes.contains(&uid) {
-                        seen_boxes.insert(uid);
-
+                    if seen_boxes.insert(uid) {
                         let pair = &self.box_elements[uid as usize];
                         let bbox = &pair.1;
                         if Self::circle_and_box_collide(query_bcircle, bbox) && result_fn(&pair.0, bbox) {
@@ -336,9 +330,7 @@ impl<T: Clone> GridIndex<T> {
 
                 // Look up other circles
                 for &uid in &self.circle_cells[cell_index] {
-                    if !seen_circles.contains(&uid) {
-                        seen_circles.insert(uid);
-
+                    if seen_circles.insert(uid) {
                         let pair = &self.circle_elements[uid as usize];
                         let bcircle = &pair.1;
                         if Self::circles_collide(query_bcircle, bcircle)

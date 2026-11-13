@@ -124,7 +124,7 @@ fn synchronous_update() {
     tile_parameters.is_update_synchronous = true;
     let tile = GeoJSONTile::new(OverscaledTileID::from_zxy(0, 0, 0), "source".to_owned(), &tile_parameters, data, None);
     let layers = vec![circle_layer_properties()];
-    tile.set_layers(&layers, tile_parameters.global_state.clone());
+    tile.set_layers(&layers, tile_parameters.global_state);
     assert!(tile.is_complete());
     assert!(tile.is_renderable());
 }
@@ -187,7 +187,7 @@ fn issue_9927() {
 
     let layer_properties = circle_layer_properties();
     let layers = vec![Arc::clone(&layer_properties)];
-    tile.set_layers(&layers, tile_parameters.global_state.clone());
+    tile.set_layers(&layers, tile_parameters.global_state);
 
     while !tile.is_complete() {
         test.run_loop.run_once();
@@ -244,7 +244,7 @@ fn synchronous_update_with_the_serializing_transport() {
         None,
     );
     let layer_properties = evaluated_circle_layer_properties();
-    tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state.clone());
+    tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state);
     assert!(tile.is_complete());
     assert!(tile.is_renderable());
     assert!(tile.layer_properties_updated(&layer_properties));
