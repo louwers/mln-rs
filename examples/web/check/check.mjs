@@ -33,20 +33,20 @@
 // lavapipe). Headless Chromium composites WebGPU canvases as white, so the
 // page reads its frame back itself. Its WebGL2 runs on SwiftShader too.
 
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
-import { crc32, deflateSync, inflateSync } from 'node:zlib';
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { homedir, tmpdir } from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+import { crc32, deflateSync, inflateSync } from "node:zlib";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, '../../..');
-const metrics = path.join(repo, 'tools/render-test/testdata/metrics');
+const repo = path.resolve(here, "../../..");
+const metrics = path.join(repo, "tools/render-test/testdata/metrics");
 
 // The render suite's tests the page loads, with their fixtures from the
 // suite's cache database: the real-world styles (vector tiles with fills,
@@ -63,38 +63,41 @@ const metrics = path.join(repo, 'tools/render-test/testdata/metrics');
 // labels changes 0.1% to 2% of the pixels.
 const THRESHOLD = 0.001;
 const VIEWS = [
-  { id: 'real-world/nepal' },
-  { id: 'real-world/norway' },
-  { id: 'real-world/uruguay' },
-  { id: 'real-world/chicago' },
-  { id: 'real-world/sanfrancisco' },
-  { id: 'raster-rotation/45' },
-  { id: 'raster-masking/overlapping-vector' },
-  { id: 'hillshade-accent-color/default' },
+  { id: "real-world/nepal" },
+  { id: "real-world/norway" },
+  { id: "real-world/uruguay" },
+  { id: "real-world/chicago" },
+  { id: "real-world/sanfrancisco" },
+  { id: "raster-rotation/45" },
+  { id: "raster-masking/overlapping-vector" },
+  { id: "hillshade-accent-color/default" },
   // SwiftShader and lavapipe antialias the edges of the z1 coastlines
   // differently: 0.5% of the pixels.
-  { id: 'combinations/color-relief--hillshade--vector-fill--color-relief--hillshade', allowed: 0.01 },
-  { id: 'text-font/devanagari' },
-  { id: 'text-font/khmer' },
-  { id: 'text-font/font-faces-bidi' },
-  { id: 'is-supported-script/font-faces-layout' },
+  {
+    id: "combinations/color-relief--hillshade--vector-fill--color-relief--hillshade",
+    allowed: 0.01,
+  },
+  { id: "text-font/devanagari" },
+  { id: "text-font/khmer" },
+  { id: "text-font/font-faces-bidi" },
+  { id: "is-supported-script/font-faces-layout" },
   // Interactions (interact()): a right-drag that turns the map back and
   // forth, and a pinch that pans and zooms it back and forth, as
   // mln-bench's Frame/Oscillate and Frame/OscillatePanZoom move their
   // cameras. Each starts where some tiles come into view only for moments
   // of each swing, shorter than a tile takes to load.
   {
-    id: 'real-world/chicago',
-    name: 'interaction/rotate',
-    interaction: 'rotate',
+    id: "real-world/chicago",
+    name: "interaction/rotate",
+    interaction: "rotate",
     width: 1024,
     height: 768,
     center: [-87.704736328125, 41.86203372809279], // z13 x 2100.23, y 3045.23
   },
   {
-    id: 'real-world/sanfrancisco',
-    name: 'interaction/pan-zoom',
-    interaction: 'pan-zoom',
+    id: "real-world/sanfrancisco",
+    name: "interaction/pan-zoom",
+    interaction: "pan-zoom",
     width: 1024,
     height: 768,
     center: [-122.4591064453125, 37.77071473849609], // z15 x 5237.5, y 12666
@@ -112,42 +115,53 @@ const LATENCY_MS = 100;
 const MAX_REPEATS = 1;
 
 // Playwright 1.61.1's Chromium (Chrome for Testing 149), as CI installs it.
-const CHROMIUM_BUILD = 'chromium-1228';
+const CHROMIUM_BUILD = "chromium-1228";
 
 const { values: options } = parseArgs({
   options: {
-    filter: { type: 'string', default: '' },
-    workers: { type: 'string', default: '2' },
-    out: { type: 'string' },
-    'render-test': { type: 'string' },
-    codec: { type: 'string' },
-    backend: { type: 'string', default: 'webgpu' },
+    filter: { type: "string", default: "" },
+    workers: { type: "string", default: "2" },
+    out: { type: "string" },
+    "render-test": { type: "string" },
+    codec: { type: "string" },
+    backend: { type: "string", default: "webgpu" },
     chromium: {
-      type: 'string',
+      type: "string",
       default: path.join(
-        process.env.PLAYWRIGHT_BROWSERS_PATH ?? path.join(homedir(), '.cache/ms-playwright'),
+        process.env.PLAYWRIGHT_BROWSERS_PATH ??
+          path.join(homedir(), ".cache/ms-playwright"),
         CHROMIUM_BUILD,
-        'chrome-linux64/chrome',
+        "chrome-linux64/chrome",
       ),
     },
   },
 });
 const workers = Number(options.workers);
-if (!['webgpu', 'webgl2'].includes(options.backend)) throw new Error(`--backend is webgpu or webgl2, not ${options.backend}`);
-const icd = process.env.VK_DRIVER_FILES ?? '/usr/share/vulkan/icd.d/lvp_icd.x86_64.json';
+if (!["webgpu", "webgl2"].includes(options.backend))
+  throw new Error(`--backend is webgpu or webgl2, not ${options.backend}`);
+const icd =
+  process.env.VK_DRIVER_FILES ?? "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json";
 if (!existsSync(options.chromium)) {
-  throw new Error(`no Chromium at ${options.chromium}: run \`npx playwright@1.61.1 install chromium\` or pass --chromium`);
+  throw new Error(
+    `no Chromium at ${options.chromium}: run \`npx playwright@1.61.1 install chromium\` or pass --chromium`,
+  );
 }
 
 // MARK: - The fixtures: the render suite's cache database
 
-const database = new DatabaseSync(path.join(metrics, 'cache-style.db'), { readOnly: true });
-const resourceQuery = database.prepare('SELECT kind, data, compressed FROM resources WHERE url = ?');
-const tileQuery = database.prepare('SELECT data, compressed FROM tiles WHERE id = ?');
+const database = new DatabaseSync(path.join(metrics, "cache-style.db"), {
+  readOnly: true,
+});
+const resourceQuery = database.prepare(
+  "SELECT kind, data, compressed FROM resources WHERE url = ?",
+);
+const tileQuery = database.prepare(
+  "SELECT data, compressed FROM tiles WHERE id = ?",
+);
 
 /** The cache's URL for a URL of the fixtures, as the runner's file source maps it (tools/render-test/src/file_source.rs). */
 function cacheUrl(url) {
-  for (const prefix of ['local://', 'http://localhost:2900/']) {
+  for (const prefix of ["local://", "http://localhost:2900/"]) {
     if (url.startsWith(prefix)) return `http://${url.slice(prefix.length)}`;
   }
   return url;
@@ -156,14 +170,21 @@ function cacheUrl(url) {
 // The cache keys tiles by their URL template and coordinates; the page
 // requests them by URL.
 const tiles = new Map();
-for (const { id, url_template: template, pixel_ratio: ratio, z, x, y } of database
-  .prepare('SELECT id, url_template, pixel_ratio, z, x, y FROM tiles')
+for (const {
+  id,
+  url_template: template,
+  pixel_ratio: ratio,
+  z,
+  x,
+  y,
+} of database
+  .prepare("SELECT id, url_template, pixel_ratio, z, x, y FROM tiles")
   .all()) {
   const url = template
-    .replaceAll('{z}', z)
-    .replaceAll('{x}', x)
-    .replaceAll('{y}', y)
-    .replaceAll('{ratio}', ratio > 1 ? `@${ratio}x` : '');
+    .replaceAll("{z}", z)
+    .replaceAll("{x}", x)
+    .replaceAll("{y}", y)
+    .replaceAll("{ratio}", ratio > 1 ? `@${ratio}x` : "");
   tiles.set(url, id);
 }
 
@@ -177,14 +198,14 @@ function cached(url) {
   const resource = resourceQuery.get(key);
   if (resource) return { kind: resource.kind, data: unpack(resource) };
   const tile = tiles.has(key) ? tileQuery.get(tiles.get(key)) : undefined;
-  return tile ? { kind: 'tile', data: unpack(tile) } : undefined;
+  return tile ? { kind: "tile", data: unpack(tile) } : undefined;
 }
 
 /** A cached JSON document, such as a style. */
 function cachedJson(url) {
   const entry = cached(url);
   if (!entry) throw new Error(`${url} is not in the cache`);
-  return JSON.parse(entry.data.toString('utf8'));
+  return JSON.parse(entry.data.toString("utf8"));
 }
 
 // MARK: - Views
@@ -195,19 +216,36 @@ function cachedJson(url) {
  * test options, so a view must not have them.
  */
 function view({ id, name = id, interaction, allowed = THRESHOLD, ...camera }) {
-  const test = JSON.parse(readFileSync(path.join(metrics, 'integration/render-tests', id, 'style.json'), 'utf8'));
+  const test = JSON.parse(
+    readFileSync(
+      path.join(metrics, "integration/render-tests", id, "style.json"),
+      "utf8",
+    ),
+  );
   const metadata = test.metadata?.test ?? {};
   for (const key of Object.keys(metadata)) {
-    if (!['width', 'height', 'pixelRatio', 'operations', 'allowed', 'description'].includes(key)) {
+    if (
+      ![
+        "width",
+        "height",
+        "pixelRatio",
+        "operations",
+        "allowed",
+        "description",
+      ].includes(key)
+    ) {
       throw new Error(`${id}: the page can't follow the test's "${key}"`);
     }
   }
   let style = test;
   for (const [operation, ...args] of metadata.operations ?? []) {
-    if (operation === 'setStyle') style = cachedJson(args[0]);
-    else if (operation === 'setZoom') style.zoom = args[0];
-    else if (operation === 'setCenter') style.center = args[0];
-    else if (operation !== 'wait') throw new Error(`${id}: the page can't follow the operation ${operation}`);
+    if (operation === "setStyle") style = cachedJson(args[0]);
+    else if (operation === "setZoom") style.zoom = args[0];
+    else if (operation === "setCenter") style.center = args[0];
+    else if (operation !== "wait")
+      throw new Error(
+        `${id}: the page can't follow the operation ${operation}`,
+      );
   }
   style = structuredClone(style);
   if (camera.center) style.center = camera.center;
@@ -223,21 +261,24 @@ function view({ id, name = id, interaction, allowed = THRESHOLD, ...camera }) {
   return { id, name, interaction, style, width, height, ratio, allowed };
 }
 
-const views = VIEWS.filter(({ id, name = id }) => new RegExp(options.filter).test(name)).map(view);
+const views = VIEWS.filter(({ id, name = id }) =>
+  new RegExp(options.filter).test(name),
+).map(view);
 if (views.length === 0) throw new Error(`no view matches ${options.filter}`);
 
 // MARK: - The page, served from web/, and the fixtures
 
 // The page as Vite builds it, as it deploys.
-const root = path.join(here, '../dist');
-if (!existsSync(path.join(root, 'index.html'))) throw new Error('no dist: run `mise run web:build` first');
+const root = path.join(here, "../dist");
+if (!existsSync(path.join(root, "index.html")))
+  throw new Error("no dist: run `mise run web:build` first");
 const types = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.css': 'text/css',
-  '.wasm': 'application/wasm',
-  '.json': 'application/json',
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".css": "text/css",
+  ".wasm": "application/wasm",
+  ".json": "application/json",
 };
 
 // Every URL the page loads is on this server: `/fixtures/<scheme>/<rest>`
@@ -253,18 +294,24 @@ function served(json) {
   const copy = structuredClone(json);
   if (Array.isArray(copy.tiles)) copy.tiles = copy.tiles.map(fixtureUrl);
   for (const source of Object.values(copy.sources ?? {})) {
-    if (typeof source.url === 'string') source.url = fixtureUrl(source.url);
+    if (typeof source.url === "string") source.url = fixtureUrl(source.url);
     if (Array.isArray(source.urls)) source.urls = source.urls.map(fixtureUrl);
-    if (Array.isArray(source.tiles)) source.tiles = source.tiles.map(fixtureUrl);
-    if (typeof source.data === 'string') source.data = fixtureUrl(source.data);
+    if (Array.isArray(source.tiles))
+      source.tiles = source.tiles.map(fixtureUrl);
+    if (typeof source.data === "string") source.data = fixtureUrl(source.data);
   }
-  if (typeof copy.sprite === 'string') copy.sprite = fixtureUrl(copy.sprite);
-  if (Array.isArray(copy.sprite)) copy.sprite = copy.sprite.map((sprite) => ({ ...sprite, url: fixtureUrl(sprite.url) }));
-  if (typeof copy.glyphs === 'string') copy.glyphs = fixtureUrl(copy.glyphs);
-  for (const [name, faces] of Object.entries(copy['font-faces'] ?? {})) {
-    copy['font-faces'][name] = typeof faces === 'string'
-      ? fixtureUrl(faces)
-      : faces.map((face) => ({ ...face, url: fixtureUrl(face.url) }));
+  if (typeof copy.sprite === "string") copy.sprite = fixtureUrl(copy.sprite);
+  if (Array.isArray(copy.sprite))
+    copy.sprite = copy.sprite.map((sprite) => ({
+      ...sprite,
+      url: fixtureUrl(sprite.url),
+    }));
+  if (typeof copy.glyphs === "string") copy.glyphs = fixtureUrl(copy.glyphs);
+  for (const [name, faces] of Object.entries(copy["font-faces"] ?? {})) {
+    copy["font-faces"][name] =
+      typeof faces === "string"
+        ? fixtureUrl(faces)
+        : faces.map((face) => ({ ...face, url: fixtureUrl(face.url) }));
   }
   return copy;
 }
@@ -284,19 +331,26 @@ function serveFixture(url, response) {
     missing.push(url);
     response.writeHead(404).end();
   } else if (entry.kind === SOURCE) {
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify(served(JSON.parse(entry.data.toString('utf8')))));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify(served(JSON.parse(entry.data.toString("utf8")))),
+    );
   } else {
-    response.writeHead(200, { 'content-type': 'application/octet-stream' }).end(entry.data);
+    response
+      .writeHead(200, { "content-type": "application/octet-stream" })
+      .end(entry.data);
   }
 }
 
 const server = createServer((request, response) => {
-  const url = new URL(request.url, 'http://x');
+  const url = new URL(request.url, "http://x");
   const fixture = /^\/fixtures\/([a-z]+)\/(.*)$/.exec(request.url);
   if (fixture && slow) {
-    response.setHeader('cache-control', 'max-age=3600');
-    setTimeout(() => serveFixture(`${fixture[1]}://${fixture[2]}`, response), LATENCY_MS);
+    response.setHeader("cache-control", "max-age=3600");
+    setTimeout(
+      () => serveFixture(`${fixture[1]}://${fixture[2]}`, response),
+      LATENCY_MS,
+    );
     return;
   }
   if (fixture) {
@@ -305,24 +359,31 @@ const server = createServer((request, response) => {
   }
   const style = /^\/style\/(\d+)$/.exec(url.pathname);
   if (style) {
-    response.writeHead(200, { 'content-type': 'application/json' });
+    response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(served(views[Number(style[1])].style)));
     return;
   }
-  if (url.pathname === '/blank') {
-    response.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html>');
+  if (url.pathname === "/blank") {
+    response
+      .writeHead(200, { "content-type": "text/html" })
+      .end("<!doctype html>");
     return;
   }
-  const file = path.join(root, path.normalize(decodeURIComponent(url.pathname)));
-  const target = file.endsWith(path.sep) ? path.join(file, 'index.html') : file;
+  const file = path.join(
+    root,
+    path.normalize(decodeURIComponent(url.pathname)),
+  );
+  const target = file.endsWith(path.sep) ? path.join(file, "index.html") : file;
   if (!target.startsWith(root) || !existsSync(target)) {
     response.writeHead(404).end();
     return;
   }
-  response.writeHead(200, { 'content-type': types[path.extname(target)] ?? 'application/octet-stream' });
+  response.writeHead(200, {
+    "content-type": types[path.extname(target)] ?? "application/octet-stream",
+  });
   response.end(readFileSync(target));
 });
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 origin = `http://127.0.0.1:${server.address().port}`;
 
 const pageUrl = (view, count) => {
@@ -339,7 +400,7 @@ const pageUrl = (view, count) => {
     workers: String(count),
     backend: options.backend,
     // The native runner downloads every glyph, as GL JS's render tests do.
-    localIdeographFontFamily: 'false',
+    localIdeographFontFamily: "false",
   });
   return `${origin}/index.html?${params}`;
 };
@@ -347,45 +408,47 @@ const pageUrl = (view, count) => {
 // MARK: - Chromium over the DevTools protocol
 
 async function launch() {
-  const profile = await mkdtemp(path.join(tmpdir(), 'mln-web-check-profile-'));
+  const profile = await mkdtemp(path.join(tmpdir(), "mln-web-check-profile-"));
   const env = { ...process.env };
   delete env.VK_DRIVER_FILES; // the native runner's driver
   const child = spawn(
     options.chromium,
     [
-      '--headless=new',
-      '--no-sandbox',
-      '--no-first-run',
-      '--password-store=basic',
-      '--use-mock-keychain',
-      '--disable-dev-shm-usage',
-      '--enable-unsafe-webgpu',
+      "--headless=new",
+      "--no-sandbox",
+      "--no-first-run",
+      "--password-store=basic",
+      "--use-mock-keychain",
+      "--disable-dev-shm-usage",
+      "--enable-unsafe-webgpu",
       // SwiftShader, which Chromium bundles, for WebGPU and for compositing
       // through Vulkan: with headless Chromium's default GL compositing, the
       // copy of the frame that the page reads back is never mapped.
-      '--enable-features=Vulkan',
-      '--use-angle=vulkan',
-      '--use-vulkan=swiftshader',
-      '--use-webgpu-adapter=swiftshader',
+      "--enable-features=Vulkan",
+      "--use-angle=vulkan",
+      "--use-vulkan=swiftshader",
+      "--use-webgpu-adapter=swiftshader",
       // Offline: a request that escapes the local server (a URL that
       // served() doesn't rewrite) fails to resolve, an error in the page
       // or a worker, rather than reaching the network.
-      '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1',
-      '--remote-debugging-port=0',
+      "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+      "--remote-debugging-port=0",
       `--user-data-dir=${profile}`,
-      'about:blank',
+      "about:blank",
     ],
-    { stdio: ['ignore', 'ignore', 'pipe'], env },
+    { stdio: ["ignore", "ignore", "pipe"], env },
   );
-  const exited = new Promise((resolve) => child.on('exit', resolve));
-  let log = '';
+  const exited = new Promise((resolve) => child.on("exit", resolve));
+  let log = "";
   const url = await new Promise((resolve, reject) => {
-    child.stderr.on('data', (chunk) => {
+    child.stderr.on("data", (chunk) => {
       log += chunk;
       const match = /DevTools listening on (ws:\/\/\S+)/.exec(log);
       if (match) resolve(match[1]);
     });
-    exited.then((code) => reject(new Error(`chromium exited with ${code}\n${log}`)));
+    exited.then((code) =>
+      reject(new Error(`chromium exited with ${code}\n${log}`)),
+    );
   });
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
@@ -403,7 +466,10 @@ async function launch() {
     }
     const entry = pending.get(message.id);
     pending.delete(message.id);
-    if (message.error) entry.reject(new Error(`${entry.method}: ${JSON.stringify(message.error)}`));
+    if (message.error)
+      entry.reject(
+        new Error(`${entry.method}: ${JSON.stringify(message.error)}`),
+      );
     else entry.resolve(message.result);
   };
   const send = (method, params = {}, sessionId = undefined) =>
@@ -424,7 +490,8 @@ async function launch() {
   };
 }
 
-const text = (args) => args.map((arg) => arg.value ?? arg.description).join(' ');
+const text = (args) =>
+  args.map((arg) => arg.value ?? arg.description).join(" ");
 
 /**
  * Opens `url` in a new tab; returns the session, with the errors that its
@@ -432,8 +499,13 @@ const text = (args) => args.map((arg) => arg.value ?? arg.description).join(' ')
  * resolves at the first of them.
  */
 async function open(browser, url) {
-  const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await browser.send('Target.attachToTarget', { targetId, flatten: true });
+  const { targetId } = await browser.send("Target.createTarget", {
+    url: "about:blank",
+  });
+  const { sessionId } = await browser.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
   const errors = [];
   let fail;
   const failed = new Promise((resolve) => {
@@ -443,44 +515,60 @@ async function open(browser, url) {
     errors.push(error);
     fail();
   };
-  const sessions = new Map([[sessionId, 'page']]);
+  const sessions = new Map([[sessionId, "page"]]);
   const listener = (message) => {
     // The Web Workers: each starts paused until its console is attached.
-    if (message.method === 'Target.attachedToTarget' && sessions.has(message.sessionId)) {
+    if (
+      message.method === "Target.attachedToTarget" &&
+      sessions.has(message.sessionId)
+    ) {
       const worker = message.params.sessionId;
       sessions.set(worker, `worker ${sessions.size}`);
       browser
-        .send('Runtime.enable', {}, worker)
-        .then(() => browser.send('Runtime.runIfWaitingForDebugger', {}, worker))
+        .send("Runtime.enable", {}, worker)
+        .then(() => browser.send("Runtime.runIfWaitingForDebugger", {}, worker))
         .catch((error) => report(`attaching to a worker: ${error.message}`));
       return;
     }
     const where = sessions.get(message.sessionId);
     if (where === undefined) return;
-    if (process.env.MLN_WEB_CHECK_LOG && message.method === 'Runtime.consoleAPICalled') {
+    if (
+      process.env.MLN_WEB_CHECK_LOG &&
+      message.method === "Runtime.consoleAPICalled"
+    ) {
       console.error(`[${where}] ${text(message.params.args)}`);
     }
-    if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
+    if (
+      message.method === "Runtime.consoleAPICalled" &&
+      message.params.type === "error"
+    ) {
       report(`${where}: ${text(message.params.args)}`);
-    } else if (message.method === 'Runtime.exceptionThrown') {
+    } else if (message.method === "Runtime.exceptionThrown") {
       const details = message.params.exceptionDetails;
       report(`${where}: ${details.exception?.description ?? details.text}`);
     }
   };
   browser.listeners.add(listener);
-  await browser.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
-  await browser.send('Runtime.enable', {}, sessionId);
-  await browser.send('Page.enable', {}, sessionId);
+  await browser.send(
+    "Target.setAutoAttach",
+    { autoAttach: true, waitForDebuggerOnStart: true, flatten: true },
+    sessionId,
+  );
+  await browser.send("Runtime.enable", {}, sessionId);
+  await browser.send("Page.enable", {}, sessionId);
   const loaded = new Promise((resolve) => {
     const onLoad = (message) => {
-      if (message.sessionId === sessionId && message.method === 'Page.loadEventFired') {
+      if (
+        message.sessionId === sessionId &&
+        message.method === "Page.loadEventFired"
+      ) {
         browser.listeners.delete(onLoad);
         resolve();
       }
     };
     browser.listeners.add(onLoad);
   });
-  await browser.send('Page.navigate', { url }, sessionId);
+  await browser.send("Page.navigate", { url }, sessionId);
   await loaded;
   return {
     targetId,
@@ -488,7 +576,7 @@ async function open(browser, url) {
     errors,
     failed,
     async close() {
-      await browser.send('Target.closeTarget', { targetId });
+      await browser.send("Target.closeTarget", { targetId });
       browser.listeners.delete(listener);
     },
   };
@@ -496,12 +584,15 @@ async function open(browser, url) {
 
 async function evaluate(browser, session, expression) {
   const result = await browser.send(
-    'Runtime.evaluate',
+    "Runtime.evaluate",
     { expression, awaitPromise: true, returnByValue: true },
     session.sessionId,
   );
   if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
+    throw new Error(
+      result.exceptionDetails.exception?.description ??
+        result.exceptionDetails.text,
+    );
   }
   return result.result.value;
 }
@@ -516,7 +607,7 @@ async function load(browser, view, count) {
   const session = await open(browser, pageUrl(view, count));
   const failed = session.failed.then(async () => {
     await new Promise((resolve) => setTimeout(resolve, 500)); // the errors that follow
-    throw new Error('the page or a worker reported an error');
+    throw new Error("the page or a worker reported an error");
   });
   const run = async () => {
     const stats = await evaluate(
@@ -537,8 +628,9 @@ async function load(browser, view, count) {
         ]);
       })()`,
     );
-    const backend = await evaluate(browser, session, 'window.mln.backend');
-    if (backend !== options.backend) throw new Error(`the page drew with ${backend}, not ${options.backend}`);
+    const backend = await evaluate(browser, session, "window.mln.backend");
+    if (backend !== options.backend)
+      throw new Error(`the page drew with ${backend}, not ${options.backend}`);
     let interaction;
     if (view.interaction) {
       await interact(browser, session, view.interaction);
@@ -550,10 +642,17 @@ async function load(browser, view, count) {
           new Promise((_, reject) => setTimeout(() => reject(new Error('not idle after 60 s')), 60000)),
         ])`,
       );
-      interaction = { camera, fetches: await evaluate(browser, session, 'window.mln.fetches()') };
+      interaction = {
+        camera,
+        fetches: await evaluate(browser, session, "window.mln.fetches()"),
+      };
     }
     // Let the labels fade in, then draw the frame again and read it back.
-    await evaluate(browser, session, 'new Promise((resolve) => setTimeout(resolve, 1500))');
+    await evaluate(
+      browser,
+      session,
+      "new Promise((resolve) => setTimeout(resolve, 1500))",
+    );
     const pixels = await evaluate(
       browser,
       session,
@@ -571,7 +670,7 @@ async function load(browser, view, count) {
   try {
     return { ...(await Promise.race([run(), failed])), errors: session.errors };
   } catch (error) {
-    return { failure: error.message.split('\n')[0], errors: session.errors };
+    return { failure: error.message.split("\n")[0], errors: session.errors };
   } finally {
     await session.close();
   }
@@ -609,24 +708,28 @@ async function interact(browser, session, interaction) {
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     })()`,
   );
-  const send = (method, params) => browser.send(method, params, session.sessionId);
+  const send = (method, params) =>
+    browser.send(method, params, session.sessionId);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let event, release;
-  if (interaction === 'rotate') {
+  if (interaction === "rotate") {
     const mouse = (type, at) =>
-      send('Input.dispatchMouseEvent', {
+      send("Input.dispatchMouseEvent", {
         type,
         x: at,
         y,
-        button: 'right',
-        buttons: type === 'mouseReleased' ? 0 : 2,
-        clickCount: type === 'mouseMoved' ? 0 : 1,
+        button: "right",
+        buttons: type === "mouseReleased" ? 0 : 2,
+        clickCount: type === "mouseMoved" ? 0 : 1,
       });
-    await mouse('mousePressed', x);
-    event = (ms) => mouse('mouseMoved', x + 180 * swing(ms));
-    release = () => mouse('mouseReleased', x);
+    await mouse("mousePressed", x);
+    event = (ms) => mouse("mouseMoved", x + 180 * swing(ms));
+    release = () => mouse("mouseReleased", x);
   } else {
-    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    await send("Emulation.setTouchEmulationEnabled", {
+      enabled: true,
+      maxTouchPoints: 2,
+    });
     // The fingers 200 pixels apart where they start, closer by up to 2^-0.9.
     // The map's center follows the fingers' midpoint, at the zoom's scale:
     // 0.65 of a tile a swing, 333 pixels at the zoom of its ends.
@@ -634,17 +737,30 @@ async function interact(browser, session, interaction) {
       const out = Math.abs(swing(ms));
       const at = x + 333 * swing(ms) * 2 ** (0.9 * (1 - out));
       const apart = 100 * 2 ** (-0.9 * out);
-      return [{ x: at - apart, y, id: 0 }, { x: at + apart, y, id: 1 }];
+      return [
+        { x: at - apart, y, id: 0 },
+        { x: at + apart, y, id: 1 },
+      ];
     };
-    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: fingers(0) });
-    event = (ms) => send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: fingers(ms) });
-    release = () => send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: fingers(0),
+    });
+    event = (ms) =>
+      send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: fingers(ms),
+      });
+    release = () =>
+      send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   }
   // A move a frame, at 60 Hz deadlines.
   const start = performance.now();
   for (let frame = 0; frame * FRAME_MS < INTERACTION_MS; frame++) {
     await event(performance.now() - start);
-    await sleep(Math.max(0, start + (frame + 1) * FRAME_MS - performance.now()));
+    await sleep(
+      Math.max(0, start + (frame + 1) * FRAME_MS - performance.now()),
+    );
   }
   await event(INTERACTION_MS);
   await sleep(200);
@@ -653,8 +769,13 @@ async function interact(browser, session, interaction) {
 
 /** The fetches beyond the first of each URL, the URLs fetched most first. */
 function refetches(fetches) {
-  const again = Object.entries(fetches).filter(([, count]) => count > 1).sort(([, a], [, b]) => b - a);
-  return { count: again.reduce((sum, [, count]) => sum + count - 1, 0), urls: again };
+  const again = Object.entries(fetches)
+    .filter(([, count]) => count > 1)
+    .sort(([, a], [, b]) => b - a);
+  return {
+    count: again.reduce((sum, [, count]) => sum + count - 1, 0),
+    urls: again,
+  };
 }
 
 // MARK: - PNG
@@ -674,13 +795,18 @@ function png(width, height, rgba) {
   header.set([8, 6, 0, 0, 0], 8); // 8-bit RGBA
   const rows = Buffer.alloc((width * 4 + 1) * height);
   for (let y = 0; y < height; y++) {
-    rgba.copy(rows, y * (width * 4 + 1) + 1, y * width * 4, (y + 1) * width * 4);
+    rgba.copy(
+      rows,
+      y * (width * 4 + 1) + 1,
+      y * width * 4,
+      (y + 1) * width * 4,
+    );
   }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(rows)),
-    chunk('IEND', Buffer.alloc(0)),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(rows)),
+    chunk("IEND", Buffer.alloc(0)),
   ]);
 }
 
@@ -702,16 +828,24 @@ try {
     }
   })();
   console.log(`WebGPU adapter: ${gpu}`);
-  if (!/swiftshader/.test(gpu ?? '')) throw new Error(`the page's WebGPU adapter is ${gpu}, not SwiftShader`);
+  if (!/swiftshader/.test(gpu ?? ""))
+    throw new Error(`the page's WebGPU adapter is ${gpu}, not SwiftShader`);
 
   failures = await compare();
-  for (const [where, instance] of [['map', "the map's instance"], ['tile', "a tile worker's instance"]]) {
+  for (const [where, instance] of [
+    ["map", "the map's instance"],
+    ["tile", "a tile worker's instance"],
+  ]) {
     const failure = await checkPanic(browser, views[0], where);
-    console.log(`a panic in ${instance}: ${failure ?? 'the page stopped and showed it'}`);
+    console.log(
+      `a panic in ${instance}: ${failure ?? "the page stopped and showed it"}`,
+    );
     if (failure) failures.push(`a panic in ${instance}: ${failure}`);
   }
   const comparing = await checkCompare(browser, views[0]);
-  console.log(`a comparison with GL JS: ${comparing ?? "GL JS's map covers the page's, right of the divider"}`);
+  console.log(
+    `a comparison with GL JS: ${comparing ?? "GL JS's map covers the page's, right of the divider"}`,
+  );
   if (comparing) failures.push(`a comparison with GL JS: ${comparing}`);
 } finally {
   await browser.close();
@@ -719,7 +853,7 @@ try {
   database.close();
 }
 if (failures.length > 0) {
-  console.log(`\nfailed:\n  ${failures.join('\n  ')}`);
+  console.log(`\nfailed:\n  ${failures.join("\n  ")}`);
   process.exitCode = 1;
 }
 
@@ -730,8 +864,9 @@ if (failures.length > 0) {
  */
 async function checkCompare(browser, view) {
   const url = new URL(pageUrl(view, workers));
-  for (const name of ['width', 'height', 'ratio']) url.searchParams.delete(name);
-  url.searchParams.set('compare', '');
+  for (const name of ["width", "height", "ratio"])
+    url.searchParams.delete(name);
+  url.searchParams.set("compare", "");
   const session = await open(browser, url.href);
   try {
     return await evaluate(
@@ -770,7 +905,10 @@ async function checkCompare(browser, view) {
  * and show the panic, if it did.
  */
 async function checkPanic(browser, view, where) {
-  const session = await open(browser, `${pageUrl(view, workers)}&panic=${where}`);
+  const session = await open(
+    browser,
+    `${pageUrl(view, workers)}&panic=${where}`,
+  );
   try {
     const page = await evaluate(
       browser,
@@ -795,13 +933,18 @@ async function checkPanic(browser, view, where) {
         };
       })()`,
     );
-    const expected = `${where === 'map' ? 'map' : 'tile worker 0'}: panicked at `;
-    if (!page.fatal.startsWith(expected) || !page.fatal.includes('panic=<map|tile> asked for this panic')) {
+    const expected = `${where === "map" ? "map" : "tile worker 0"}: panicked at `;
+    if (
+      !page.fatal.startsWith(expected) ||
+      !page.fatal.includes("panic=<map|tile> asked for this panic")
+    ) {
       return `the page's fatal error is ${JSON.stringify(page.fatal)}`;
     }
     if (page.loaded !== page.fatal) return `\`loaded\` is ${page.loaded}`;
-    if (page.readPixels !== page.fatal) return `\`readPixels()\` is ${page.readPixels}`;
-    if (!page.banner.includes(page.fatal)) return `the page shows ${JSON.stringify(page.banner)}`;
+    if (page.readPixels !== page.fatal)
+      return `\`readPixels()\` is ${page.readPixels}`;
+    if (!page.banner.includes(page.fatal))
+      return `the page shows ${JSON.stringify(page.banner)}`;
     return null;
   } catch (error) {
     return firstLines(error.message);
@@ -812,35 +955,61 @@ async function checkPanic(browser, view, where) {
 
 /** Loads and compares every view; returns what failed. */
 async function compare() {
-  const out = path.resolve(options.out ?? (await mkdtemp(path.join(tmpdir(), 'mln-web-check-'))));
+  const out = path.resolve(
+    options.out ?? (await mkdtemp(path.join(tmpdir(), "mln-web-check-"))),
+  );
   // A kept --out holds an earlier run's views and results; without this a
   // runner that writes no results would leave the old ones to be read.
-  for (const dir of ['tests', 'results']) await rm(path.join(out, dir), { recursive: true, force: true });
+  for (const dir of ["tests", "results"])
+    await rm(path.join(out, dir), { recursive: true, force: true });
   const failures = [];
   for (const view of views) {
     missing = [];
     slow = view.interaction !== undefined;
-    const { stats, pixels, interaction, errors, failure } = await load(browser, view, workers);
+    const { stats, pixels, interaction, errors, failure } = await load(
+      browser,
+      view,
+      workers,
+    );
     slow = false;
     const again = interaction && refetches(interaction.fetches);
-    if (process.env.MLN_WEB_CHECK_LOG && again) console.error(`  fetched again: ${JSON.stringify(again.urls)}`);
-    console.log(`${view.name}: ` +
-      (failure ? failure : `loaded in ${Math.round(stats.loadedMs)} ms, ${stats.replies} worker replies`) +
-      (again ? `, after the ${view.interaction} ${again.count} fetches again (at most ${MAX_REPEATS})` : '') +
-      (missing.length ? `, ${missing.length} tiles or resources not in the cache (not found)` : '') +
-      (errors.length ? `, ${errors.length} errors:\n  ${errors.map(firstLines).join('\n  ')}` : ''));
-    if (process.env.MLN_WEB_CHECK_LOG && missing.length) console.error(`  not in the cache: ${missing.join(', ')}`);
+    if (process.env.MLN_WEB_CHECK_LOG && again)
+      console.error(`  fetched again: ${JSON.stringify(again.urls)}`);
+    console.log(
+      `${view.name}: ` +
+        (failure
+          ? failure
+          : `loaded in ${Math.round(stats.loadedMs)} ms, ${stats.replies} worker replies`) +
+        (again
+          ? `, after the ${view.interaction} ${again.count} fetches again (at most ${MAX_REPEATS})`
+          : "") +
+        (missing.length
+          ? `, ${missing.length} tiles or resources not in the cache (not found)`
+          : "") +
+        (errors.length
+          ? `, ${errors.length} errors:\n  ${errors.map(firstLines).join("\n  ")}`
+          : ""),
+    );
+    if (process.env.MLN_WEB_CHECK_LOG && missing.length)
+      console.error(`  not in the cache: ${missing.join(", ")}`);
     if (failure) {
       failures.push(`${view.name}: ${failure}`);
       continue;
     }
-    if (errors.length) failures.push(`${view.name}: ${errors.length} errors in the page or its workers`);
+    if (errors.length)
+      failures.push(
+        `${view.name}: ${errors.length} errors in the page or its workers`,
+      );
     // Every view has tiles, and only their workers reply: the raster and
     // raster-dem tiles' too, in the views that have nothing else.
     if (stats.replies === 0) failures.push(`${view.name}: no worker replies`);
     if (again && again.count > MAX_REPEATS) {
-      const urls = again.urls.slice(0, 3).map(([url, count]) => `${url.replace(origin, '')} ${count} times`);
-      failures.push(`${view.name}: ${again.count} fetches again after the ${view.interaction}, of ${urls.join(', ')}`);
+      const urls = again.urls
+        .slice(0, 3)
+        .map(([url, count]) => `${url.replace(origin, "")} ${count} times`);
+      failures.push(
+        `${view.name}: ${again.count} fetches again after the ${view.interaction}, of ${urls.join(", ")}`,
+      );
     }
     // An interaction's frame is of the camera it left the map at.
     let style = view.style;
@@ -848,51 +1017,75 @@ async function compare() {
       const [lat, lon, zoom, bearing, pitch] = interaction.camera;
       style = { ...style, center: [lon, lat], zoom, bearing, pitch };
     }
-    const dir = path.join(out, 'tests/render-tests', view.name);
+    const dir = path.join(out, "tests/render-tests", view.name);
     await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, 'style.json'), JSON.stringify(style, null, 1));
-    await writeFile(path.join(dir, 'expected.png'), png(pixels.width, pixels.height, Buffer.from(pixels.base64, 'base64')));
+    await writeFile(
+      path.join(dir, "style.json"),
+      JSON.stringify(style, null, 1),
+    );
+    await writeFile(
+      path.join(dir, "expected.png"),
+      png(pixels.width, pixels.height, Buffer.from(pixels.base64, "base64")),
+    );
   }
-  if (!existsSync(path.join(out, 'tests'))) return failures;
+  if (!existsSync(path.join(out, "tests"))) return failures;
 
   // The native renders, compared with the page's frames as references.
-  const manifest = path.join(out, 'manifest.json');
-  await writeFile(manifest, JSON.stringify({
-    base_test_path: path.join(out, 'tests'),
-    cache_path: path.join(metrics, 'cache-style.db'),
-    expectation_paths: [],
-    ignore_paths: [],
-  }));
-  const targetDir = process.env.CARGO_TARGET_DIR ?? path.join(repo, 'target');
-  const runner = options['render-test'] ?? path.join(targetDir, 'debug/render-test');
-  const args = ['-p', manifest, '--output', path.join(out, 'results')];
+  const manifest = path.join(out, "manifest.json");
+  await writeFile(
+    manifest,
+    JSON.stringify({
+      base_test_path: path.join(out, "tests"),
+      cache_path: path.join(metrics, "cache-style.db"),
+      expectation_paths: [],
+      ignore_paths: [],
+    }),
+  );
+  const targetDir = process.env.CARGO_TARGET_DIR ?? path.join(repo, "target");
+  const runner =
+    options["render-test"] ?? path.join(targetDir, "debug/render-test");
+  const args = ["-p", manifest, "--output", path.join(out, "results")];
   if (options.codec) args.push(`--tileWorkerCodec=${options.codec}`);
-  const native = spawnSync(runner, args, { env: { ...process.env, VK_DRIVER_FILES: icd }, encoding: 'utf8' });
+  const native = spawnSync(runner, args, {
+    env: { ...process.env, VK_DRIVER_FILES: icd },
+    encoding: "utf8",
+  });
   if (native.error) throw native.error;
-  if (!existsSync(path.join(out, 'results/manifest.html'))) {
+  if (!existsSync(path.join(out, "results/manifest.html"))) {
     console.log(native.stdout, native.stderr);
-    return [...failures, `the native runner exited with ${native.status} and no results`];
+    return [
+      ...failures,
+      `the native runner exited with ${native.status} and no results`,
+    ];
   }
-  const page = await readFile(path.join(out, 'results/manifest.html'), 'utf8');
-  console.log(`\nnative render (${runner}${options.codec ? `, codec with ${options.codec} instances` : ''}) ` +
-    `against the page's frame, ${workers} tile workers:`);
+  const page = await readFile(path.join(out, "results/manifest.html"), "utf8");
+  console.log(
+    `\nnative render (${runner}${options.codec ? `, codec with ${options.codec} instances` : ""}) ` +
+      `against the page's frame, ${workers} tile workers:`,
+  );
   const results = new Map();
   for (const item of page.split('<div class="test ').slice(1)) {
     const id = /<\/span> render-tests\/([^<]+)<\/h2>/.exec(item)?.[1];
     const status = /^(\w+)/.exec(item)?.[1];
-    const diff = Number(/<strong>Diff:<\/strong> ([0-9.e-]+)/.exec(item)?.[1] ?? 0);
+    const diff = Number(
+      /<strong>Diff:<\/strong> ([0-9.e-]+)/.exec(item)?.[1] ?? 0,
+    );
     const error = /<strong>Error:<\/strong> ([^<]*)/.exec(item)?.[1];
     results.set(id, { status, diff, error });
   }
   // The report has an entry only for a failed or errored test. Every other
   // test in its sequence passed, under its view's threshold.
-  const sequence = /<strong>Test sequence:<\/strong>([^<]*)<\/p>/.exec(page)?.[1].trim().split(/\s+/) ?? [];
+  const sequence =
+    /<strong>Test sequence:<\/strong>([^<]*)<\/p>/
+      .exec(page)?.[1]
+      .trim()
+      .split(/\s+/) ?? [];
   for (const id of sequence) {
-    const name = id.replace(/^render-tests\//, '');
-    if (!results.has(name)) results.set(name, { status: 'passed' });
+    const name = id.replace(/^render-tests\//, "");
+    if (!results.has(name)) results.set(name, { status: "passed" });
   }
   for (const view of views) {
-    if (!existsSync(path.join(out, 'tests/render-tests', view.name))) continue;
+    if (!existsSync(path.join(out, "tests/render-tests", view.name))) continue;
     const result = results.get(view.name);
     if (!result) {
       console.log(`  ${view.name}: not rendered`);
@@ -901,12 +1094,18 @@ async function compare() {
       console.log(`  ${view.name}: error: ${result.error}`);
       failures.push(`${view.name}: the native runner: ${result.error}`);
     } else if (result.diff === undefined) {
-      console.log(`  ${view.name}: passed (at most ${(view.allowed * 100).toFixed(1)}% of the pixels differ)`);
+      console.log(
+        `  ${view.name}: passed (at most ${(view.allowed * 100).toFixed(1)}% of the pixels differ)`,
+      );
     } else {
-      console.log(`  ${view.name}: ${(result.diff * 100).toFixed(3)}% of the pixels differ ` +
-        `(at most ${(view.allowed * 100).toFixed(1)}%)`);
-      if (result.status !== 'passed' || result.diff > view.allowed) {
-        failures.push(`${view.name}: ${(result.diff * 100).toFixed(3)}% of the pixels differ (${result.status})`);
+      console.log(
+        `  ${view.name}: ${(result.diff * 100).toFixed(3)}% of the pixels differ ` +
+          `(at most ${(view.allowed * 100).toFixed(1)}%)`,
+      );
+      if (result.status !== "passed" || result.diff > view.allowed) {
+        failures.push(
+          `${view.name}: ${(result.diff * 100).toFixed(3)}% of the pixels differ (${result.status})`,
+        );
       }
     }
   }
@@ -916,5 +1115,5 @@ async function compare() {
 
 /** An error's message, without the rest of its stack. */
 function firstLines(error) {
-  return error.split('\n').slice(0, 2).join(' ');
+  return error.split("\n").slice(0, 2).join(" ");
 }

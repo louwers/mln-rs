@@ -5,7 +5,9 @@
 /** Loads the font-face shaper module that the package ships, initialized. */
 export function shaperLoader() {
   return async () => {
-    const shaper = await import(new URL('../../../mln_web_shaper.js', import.meta.url).href);
+    const shaper = await import(
+      new URL("../../../mln_web_shaper.js", import.meta.url).href
+    );
     await shaper.default();
     return shaper;
   };

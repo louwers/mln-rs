@@ -18,7 +18,9 @@ path = "src/main.rs"
 [dependencies]
 # Loads libclang at run time, so building the workspace needs no libclang;
 # running the generator does.
-bindgen = { version = "0.73.2", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.73.2", default-features = false, features = [
+  "runtime",
+] }
 prettyplease = "0.2.37"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"

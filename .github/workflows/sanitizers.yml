@@ -7,12 +7,12 @@ name: sanitizers
 
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       minutes:
         description: How long to keep starting rounds of the tests, in minutes
-        default: '20'
+        default: "20"
 
 permissions:
   contents: read

@@ -7,15 +7,15 @@
 resolver = "3"
 # The packages with `publish = false` are test helpers or unused by mln-rs.
 members = [
-    "crates/*",
-    "examples/*",
-    "tools/bench",
-    "tools/c-abi-gen",
-    "tools/expression-test",
-    "tools/render-test",
-    "tools/style-codegen",
-    "tools/test-server",
-    "vendor/*",
+  "crates/*",
+  "examples/*",
+  "tools/bench",
+  "tools/c-abi-gen",
+  "tools/expression-test",
+  "tools/render-test",
+  "tools/style-codegen",
+  "tools/test-server",
+  "vendor/*",
 ]
 # Patched copies of crates.io packages ([patch.crates-io] below), not ours.
 exclude = ["patches/*"]
@@ -100,10 +100,15 @@ bytes = { version = "1.10.1" }
 csscolorparser = { version = "0.9.1" }
 # zlib-rs backend: pure Rust, so neither native nor wasm32 builds need a C
 # compiler or a system zlib.
-flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] }
+flate2 = { version = "1.1.11", default-features = false, features = [
+  "zlib-rs",
+] }
 # examples/desktop: finds the system fonts it gives the map as fallback font
 # faces, and reads their names and coverage through short-lived maps.
-fontdb = { version = "0.24.0", default-features = false, features = ["fs", "memmap"] }
+fontdb = { version = "0.24.0", default-features = false, features = [
+  "fs",
+  "memmap",
+] }
 # crates/mln_gl: OpenGL ES 3.0 and WebGL2 through one set of bindings.
 glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }
@@ -122,12 +127,12 @@ libc = { version = "0.2.191" }
 # tools/bench's GetProcessTimes, and crates/mln_gl's WGL contexts, their pixel
 # formats and the hidden windows they are current on.
 windows-sys = { version = "0.61.2", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_Graphics_OpenGL",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Threading",
-    "Win32_UI_WindowsAndMessaging",
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_OpenGL",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 # crates/mln_gl's window backend: loads libwayland-egl at run time.
 libloading = { version = "0.8.9" }
@@ -143,7 +148,9 @@ mlt-core = { version = "0.22.1" }
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
 # MVT decoding, instead of porting the C++ reader (vendor/vector-tile).
-fast-mvt = { version = "0.7.3", default-features = false, features = ["reader"] }
+fast-mvt = { version = "0.7.3", default-features = false, features = [
+  "reader",
+] }
 # Glyph PBFs: fast-mvt's protobuf runtime, whose wire format functions read
 # them instead of a port of protozero.
 buffa = { version = "0.9.2", default-features = false }
@@ -180,7 +187,10 @@ rusqlite = "0.41.1"
 # style parser and the order of expression errors rely on.
 # float_roundtrip: correctly rounded float parsing (the default parser can be
 # off by an ULP).
-serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
+serde_json = { version = "1.0.154", features = [
+  "float_roundtrip",
+  "preserve_order",
+] }
 skrifa = { version = "0.49.0" }
 # tools/render-test's --shuffle order for a --seed. tempfile already builds it.
 fastrand = { version = "2.5.0" }
@@ -193,7 +203,9 @@ thiserror = "2.0.21"
 unicode-bidi = { version = "0.3.18" }
 # General_Category (mln_text's script runs, mln_util's i18n), in the Unicode
 # version of harfrust's own tables.
-unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
+unicode-properties = { version = "0.1.5", default-features = false, features = [
+  "general-category",
+] }
 # The locale-sensitive expressions (collator, resolved-locale, number-format)
 # on platforms without their own locale services (mln_expression's locale):
 # ICU4X, with the CLDR data it compiles in. icu_experimental has CLDR's
@@ -225,61 +237,64 @@ jni = { version = "0.22.4", default-features = false }
 block2 = { version = "0.6.2" }
 objc2 = { version = "0.6.5" }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
-    "std",
-    "block2",
-    "NSData",
-    "NSDate",
-    "NSError",
-    "NSObjCRuntime",
-    "NSOperation",
-    "NSString",
-    "NSURL",
-    "NSURLCache",
-    "NSURLError",
-    "NSURLRequest",
-    "NSURLResponse",
-    "NSURLSession",
+  "std",
+  "block2",
+  "NSData",
+  "NSDate",
+  "NSError",
+  "NSObjCRuntime",
+  "NSOperation",
+  "NSString",
+  "NSURL",
+  "NSURLCache",
+  "NSURLError",
+  "NSURLRequest",
+  "NSURLResponse",
+  "NSURLSession",
 ] }
 # Apple platforms: the Metal backend (crates/mln_mtl) and its CAMetalLayer.
 objc2-metal = { version = "0.3.2", default-features = false, features = [
-    "std",
-    "MTLAllocation",
-    "MTLArgument",
-    "MTLBlitCommandEncoder",
-    "MTLBuffer",
-    "MTLCommandBuffer",
-    "MTLCommandEncoder",
-    "MTLCommandQueue",
-    "MTLDepthStencil",
-    "MTLDevice",
-    "MTLDrawable",
-    "MTLEvent",
-    "MTLLibrary",
-    "MTLPixelFormat",
-    "MTLRenderCommandEncoder",
-    "MTLRenderPass",
-    "MTLRenderPipeline",
-    "MTLResource",
-    "MTLSampler",
-    "MTLTexture",
-    "MTLTypes",
-    "MTLVertexDescriptor",
+  "std",
+  "MTLAllocation",
+  "MTLArgument",
+  "MTLBlitCommandEncoder",
+  "MTLBuffer",
+  "MTLCommandBuffer",
+  "MTLCommandEncoder",
+  "MTLCommandQueue",
+  "MTLDepthStencil",
+  "MTLDevice",
+  "MTLDrawable",
+  "MTLEvent",
+  "MTLLibrary",
+  "MTLPixelFormat",
+  "MTLRenderCommandEncoder",
+  "MTLRenderPass",
+  "MTLRenderPipeline",
+  "MTLResource",
+  "MTLSampler",
+  "MTLTexture",
+  "MTLTypes",
+  "MTLVertexDescriptor",
 ] }
-objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "CFCGTypes",
+] }
 # Apple platforms: the IOSurfaces of the Metal backend's exported rings.
 objc2-io-surface = { version = "0.3.2", default-features = false, features = [
-    "std",
-    "bitflags",
-    "objc2-core-foundation",
-    "IOSurfaceRef",
-    "IOSurfaceTypes",
+  "std",
+  "bitflags",
+  "objc2-core-foundation",
+  "IOSurfaceRef",
+  "IOSurfaceTypes",
 ] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
-    "std",
-    "objc2-core-foundation",
-    "objc2-metal",
-    "CALayer",
-    "CAMetalLayer",
+  "std",
+  "objc2-core-foundation",
+  "objc2-metal",
+  "CALayer",
+  "CAMetalLayer",
 ] }
 # examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
@@ -287,8 +302,19 @@ js-sys = { version = "0.3.107" }
 wasm-bindgen = { version = "=0.2.130" }
 wasm-bindgen-futures = { version = "0.4.80" }
 web-sys = { version = "0.3.107", features = [
-    "Blob", "Headers", "ImageBitmap", "ImageData", "OffscreenCanvas", "OffscreenCanvasRenderingContext2d", "Request",
-    "RequestInit", "RequestRedirect", "Response", "ResponseType", "TextMetrics", "console",
+  "Blob",
+  "Headers",
+  "ImageBitmap",
+  "ImageData",
+  "OffscreenCanvas",
+  "OffscreenCanvasRenderingContext2d",
+  "Request",
+  "RequestInit",
+  "RequestRedirect",
+  "Response",
+  "ResponseType",
+  "TextMetrics",
+  "console",
 ] }
 # std::time's clocks, which panic on wasm32-unknown-unknown (mln_util::time):
 # performance.now() and Date.now() there, std::time everywhere else.
@@ -298,7 +324,15 @@ web-time = { version = "1.1.0" }
 # and DX12 natively (wgpu builds each only where it runs), and on
 # wasm32-unknown-unknown the browser's WebGPU (examples/web). Not its
 # default GLES backend, which nothing selects.
-wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "webgpu"] }
+wgpu = { version = "30.0.1", default-features = false, features = [
+  "std",
+  "parking_lot",
+  "wgsl",
+  "dx12",
+  "metal",
+  "vulkan",
+  "webgpu",
+] }
 # The Vulkan backend (crates/mln_vulkan), where the C++ one uses vulkan-hpp,
 # VulkanMemoryAllocator and glslang: the bindings and the allocator that
 # wgpu's own Vulkan backend uses, and naga's GLSL front end and SPIR-V back
@@ -308,31 +342,48 @@ ash = { version = "0.38.0" }
 # The Vulkan backend on Windows: its D3D12 fences, and the D3D11 textures of
 # its exported rings on the DXGI adapter of the Vulkan GPU, at wgpu's version.
 windows = { version = "0.62.2", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Direct3D",
-    "Win32_Graphics_Direct3D11",
-    "Win32_Graphics_Dxgi",
-    "Win32_Graphics_Dxgi_Common",
-    "Win32_Security",
-    "Win32_System_LibraryLoader",
+  "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Security",
+  "Win32_System_LibraryLoader",
 ] }
-gpu-allocator = { version = "0.28.0", default-features = false, features = ["std", "vulkan"] }
+gpu-allocator = { version = "0.28.0", default-features = false, features = [
+  "std",
+  "vulkan",
+] }
 naga = { version = "30.0.1", features = ["glsl-in", "spv-out", "wgsl-in"] }
 # examples/desktop: the CAMetalLayer of the window's view on macOS.
 raw-window-metal = { version = "1.1.0" }
 # examples/desktop's window and input. On Linux it loads the X11 and Wayland
 # libraries at run time (`wayland-dlopen`, x11-dl), so builds need no system
 # development packages.
-winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
+winit = { version = "0.30.13", default-features = false, features = [
+  "rwh_06",
+  "x11",
+  "wayland",
+  "wayland-dlopen",
+  "wayland-csd-adwaita",
+] }
 # examples/desktop's controls over the map: egui, drawn with the map's wgpu
 # device or in its OpenGL ES context, its input from winit. `links` opens the
 # attribution's links.
-egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
+egui = { version = "0.37.0", default-features = false, features = [
+  "default_fonts",
+] }
 egui-wgpu = { version = "0.37.0", default-features = false }
 egui_glow = { version = "0.37.0", default-features = false }
 # The backends' SVG logos in examples/desktop's controls.
-egui_extras = { version = "0.37.0", default-features = false, features = ["svg"] }
-egui-winit = { version = "0.37.0", default-features = false, features = ["links", "wayland", "x11"] }
+egui_extras = { version = "0.37.0", default-features = false, features = [
+  "svg",
+] }
+egui-winit = { version = "0.37.0", default-features = false, features = [
+  "links",
+  "wayland",
+  "x11",
+] }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default and
 # pedantic sets, with warnings denied in CI (the `lint` job). The pedantic

@@ -28,12 +28,17 @@
   color-scheme: dark;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   height: 100%;
   overflow: hidden;
   background: var(--page);
-  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font:
+    13px/1.4 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
   color: var(--ink);
 }
 
@@ -211,7 +216,9 @@ button {
   border-radius: 8px;
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.22), 0 0 0 1px var(--line);
+  box-shadow:
+    0 6px 24px rgb(0 0 0 / 0.22),
+    0 0 0 1px var(--line);
   max-height: calc(100vh - 80px);
   overflow: auto;
 }
@@ -268,8 +275,14 @@ button {
   font-size: 12px;
 }
 
-code, kbd {
-  font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+code,
+kbd {
+  font:
+    12px ui-monospace,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 kbd {
@@ -345,7 +358,9 @@ a {
   border-radius: 50%;
   background: var(--ink);
   color: var(--surface);
-  font: italic 600 12px/18px Georgia, serif;
+  font:
+    italic 600 12px/18px Georgia,
+    serif;
   cursor: pointer;
 }
 
@@ -494,9 +509,16 @@ a {
   border-radius: 8px;
   background: rgb(14 18 24 / 0.8);
   backdrop-filter: blur(10px) saturate(1.2);
-  box-shadow: 0 4px 18px rgb(0 0 0 / 0.3), inset 0 0 0 1px var(--debug-line);
+  box-shadow:
+    0 4px 18px rgb(0 0 0 / 0.3),
+    inset 0 0 0 1px var(--debug-line);
   color: var(--debug-ink);
-  font: 11px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font:
+    11px/1.45 ui-monospace,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace;
   font-variant-numeric: tabular-nums;
   color-scheme: dark;
 }

@@ -12,51 +12,51 @@ export interface Style {
 }
 
 const LIBERTY: Style = {
-  key: 'liberty',
-  name: 'Liberty',
-  provider: 'OpenFreeMap',
-  url: 'https://tiles.openfreemap.org/styles/liberty',
+  key: "liberty",
+  name: "Liberty",
+  provider: "OpenFreeMap",
+  url: "https://tiles.openfreemap.org/styles/liberty",
 };
 
 export const STYLES: Style[] = [
   LIBERTY,
   {
-    key: 'bright',
-    name: 'Bright',
-    provider: 'OpenFreeMap',
-    url: 'https://tiles.openfreemap.org/styles/bright',
+    key: "bright",
+    name: "Bright",
+    provider: "OpenFreeMap",
+    url: "https://tiles.openfreemap.org/styles/bright",
   },
   {
-    key: 'positron',
-    name: 'Positron',
-    provider: 'OpenFreeMap',
-    url: 'https://tiles.openfreemap.org/styles/positron',
+    key: "positron",
+    name: "Positron",
+    provider: "OpenFreeMap",
+    url: "https://tiles.openfreemap.org/styles/positron",
   },
   {
-    key: 'dark',
-    name: 'Dark Matter',
-    provider: 'OpenFreeMap',
-    url: 'https://tiles.openfreemap.org/styles/dark',
+    key: "dark",
+    name: "Dark Matter",
+    provider: "OpenFreeMap",
+    url: "https://tiles.openfreemap.org/styles/dark",
     dark: true,
   },
   {
-    key: 'fiord',
-    name: 'Fiord',
-    provider: 'OpenFreeMap',
-    url: 'https://tiles.openfreemap.org/styles/fiord',
+    key: "fiord",
+    name: "Fiord",
+    provider: "OpenFreeMap",
+    url: "https://tiles.openfreemap.org/styles/fiord",
     dark: true,
   },
   {
-    key: 'colorful',
-    name: 'Colorful',
-    provider: 'VersaTiles',
-    url: 'https://tiles.versatiles.org/assets/styles/colorful/style.json',
+    key: "colorful",
+    name: "Colorful",
+    provider: "VersaTiles",
+    url: "https://tiles.versatiles.org/assets/styles/colorful/style.json",
   },
   {
-    key: 'satellite',
-    name: 'Satellite',
-    provider: 'VersaTiles',
-    url: 'https://tiles.versatiles.org/assets/styles/satellite/style.json',
+    key: "satellite",
+    name: "Satellite",
+    provider: "VersaTiles",
+    url: "https://tiles.versatiles.org/assets/styles/satellite/style.json",
     dark: true,
   },
 ];
@@ -65,8 +65,10 @@ export const STYLES: Style[] = [
 // page names by the style's own name once it loads.
 export function styleFor(param: string | null): Style {
   if (param === null) return LIBERTY;
-  const known = STYLES.find((style) => style.key === param || style.url === param);
+  const known = STYLES.find(
+    (style) => style.key === param || style.url === param,
+  );
   if (known) return known;
   const url = new URL(param, location.href);
-  return { key: null, name: 'Custom style', provider: url.host, url: url.href };
+  return { key: null, name: "Custom style", provider: url.host, url: url.href };
 }

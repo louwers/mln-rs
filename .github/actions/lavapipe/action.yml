@@ -1,21 +1,21 @@
 name: Mesa's software rasterizers
 description: >-
   Installs Mesa's Vulkan drivers and a Vulkan loader that is safe to use from
-  several threads, and points the loader at lavapipe, the software
-  rasterizer the GPU tests on Linux run on. With
-  `validation-layer`, also Vulkan's validation layer, and with `egl`, Mesa's
-  EGL, for OpenGL ES on llvmpipe.
+  several threads, and points the loader at lavapipe, the software rasterizer
+  the GPU tests on Linux run on. With `validation-layer`, also Vulkan's
+  validation layer, and with `egl`, Mesa's EGL, for OpenGL ES on llvmpipe.
 
 inputs:
   validation-layer:
-    description: Also install the Khronos validation layer (VK_LAYER_KHRONOS_validation).
-    default: 'false'
+    description:
+      Also install the Khronos validation layer (VK_LAYER_KHRONOS_validation).
+    default: "false"
   egl:
     description: >-
       Also install Mesa's EGL (packages-egl.sha256), which the runner image
       lacks, and have Mesa render with llvmpipe: for the tests of the OpenGL
       backend.
-    default: 'false'
+    default: "false"
 
 # The packages are the Ubuntu ones that packages.sha256 pins, with
 # `validation-layer` the one that validation-layer.sha256 pins and with `egl`

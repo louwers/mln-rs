@@ -7,7 +7,7 @@
 // A panic aborts the instance, and nothing may call into it after that: the
 // Web Worker sends {fatal: message} over each port instead.
 
-import init, { mlnWebServeTileWorker } from '../../../maplibre_native_c.js';
+import init, { mlnWebServeTileWorker } from "../../../maplibre_native_c.js";
 
 const ports = [];
 let ready = null;
@@ -16,11 +16,12 @@ let dead = false;
 function fatal(error) {
   if (dead) return;
   dead = true;
-  for (const port of ports) port.postMessage({ fatal: self.mlnPanic ?? String(error) });
+  for (const port of ports)
+    port.postMessage({ fatal: self.mlnPanic ?? String(error) });
 }
 
-addEventListener('error', (event) => fatal(event.error ?? event.message));
-addEventListener('unhandledrejection', (event) => fatal(event.reason));
+addEventListener("error", (event) => fatal(event.error ?? event.message));
+addEventListener("unhandledrejection", (event) => fatal(event.reason));
 
 onmessage = ({ data }) => {
   ports.push(data.port);

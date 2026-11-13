@@ -29,7 +29,7 @@ jobs:
       # Both sides build with these, so they still compare like with like,
       # in less time than the release profile's fat LTO.
       CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
     steps:
       # The base is checked out in a worktree, so the history comes too.
       - uses: actions/checkout@v7
@@ -61,9 +61,10 @@ jobs:
         env:
           BASE: ${{ inputs.base }}
         run: >-
-          mise run bench:compare "$BASE"
-          --filter Load/Jump --filter Frame/Throughput --filter Frame/Idle --filter Frame/Oscillate
-          --filter Load/Style/basemap --fail-on allocs --fail-on peak_heap_mib | tee report.md
+          mise run bench:compare "$BASE" --filter Load/Jump --filter
+          Frame/Throughput --filter Frame/Idle --filter Frame/Oscillate --filter
+          Load/Style/basemap --fail-on allocs --fail-on peak_heap_mib | tee
+          report.md
 
       - name: Report
         if: always()

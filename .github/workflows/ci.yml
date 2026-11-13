@@ -238,7 +238,9 @@ jobs:
 
       # The build and the native runner are the ones the step above made.
       - name: Check the WebGL2 module
-        run: node examples/web/check/check.mjs --backend webgl2 --out "$RUNNER_TEMP/web-check-webgl2"
+        run:
+          node examples/web/check/check.mjs --backend webgl2 --out
+          "$RUNNER_TEMP/web-check-webgl2"
 
       # The C library's browser package, one per backend, driven through its
       # raw C ABI from a Web Worker (crates/mln_c/web-check). The dev profile:
@@ -277,5 +279,7 @@ jobs:
         run: echo "$NEEDS"
 
       - name: Fail if a job failed or was cancelled
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        if:
+          contains(needs.*.result, 'failure') || contains(needs.*.result,
+          'cancelled')
         run: exit 1
