@@ -1,6 +1,8 @@
 // Ports include/mln/style/conversion/constant.hpp +
 // src/mln/style/conversion/constant.cpp.
 
+use std::str::FromStr;
+
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
     IconTextFitType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition, RasterResamplingType,
@@ -8,7 +10,6 @@ use mln_style_types::{
     TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
     projection_type_from_name,
 };
-use mln_util::enum_::Enum;
 use mln_util::{Color, Padding};
 
 use super::{Converter, Convertible, Error, convert};
@@ -47,23 +48,22 @@ impl Converter for String {
 }
 
 /// `Converter<T, enable_if_t<is_enum_v<T>>>`.
-fn convert_enum<T: Enum>(value: &Convertible<'_>, error: &mut Error) -> Option<T> {
+fn convert_enum<T: FromStr>(value: &Convertible<'_>, error: &mut Error) -> Option<T> {
     let Some(string) = value.to_string() else {
         error.message = "value must be a string".to_owned();
         return None;
     };
 
-    let result = T::to_enum(&string);
+    let result = string.parse().ok();
     if result.is_none() {
         error.message = "value must be a valid enumeration value".to_owned();
-        return None;
     }
 
     result
 }
 
 /// `Converter<std::vector<T>, enable_if_t<is_enum_v<T>>>`.
-fn convert_enum_vector<T: Enum>(value: &Convertible<'_>, error: &mut Error) -> Option<Vec<T>> {
+fn convert_enum_vector<T: FromStr>(value: &Convertible<'_>, error: &mut Error) -> Option<Vec<T>> {
     if !value.is_array() {
         error.message = "value must be an array".to_owned();
         return None;

@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::time::Duration;
 
 use httpmock::{HttpMockRequest, HttpMockResponse, MockServer};
-use mln_util::chrono::{now, parse_timestamp_i32, parse_timestamp_str, rfc1123};
+use mln_util::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32, rfc1123};
 
 /// `httplib::Response` as the routes fill it: `status == -1` until a route
 /// sets one.
@@ -217,12 +217,12 @@ impl HttpServer {
             when.method("GET").path("/clockskew");
             then.respond_with(move |req| {
                 let mut res = Reply::new();
-                let date_str = if expired_once.swap(false, Ordering::SeqCst) {
-                    "jan 1 10:00:00 2010 utc"
+                let date = if expired_once.swap(false, Ordering::SeqCst) {
+                    "Fri, 01 Jan 2010 10:00:00 GMT"
                 } else {
-                    "jan 1 10:01:00 2010 utc"
+                    "Fri, 01 Jan 2010 10:01:00 GMT"
                 };
-                res.set_header("Expires", rfc1123(parse_timestamp_str(date_str)));
+                res.set_header("Expires", date);
                 res.status = 200;
                 res.set_content("Response");
                 res.finish(req)
@@ -233,10 +233,11 @@ impl HttpServer {
             when.method("GET").path("/revalidate-modified");
             then.respond_with(|req| {
                 let mut res = Reply::new();
-                let jan1 = parse_timestamp_str("jan 1 2015 utc");
+                // 2015-01-01 00:00:00 UTC.
+                let jan1 = Timestamp::from_secs(1_420_070_400);
 
                 if let Some(modified_since) = header(req, "if-modified-since")
-                    && parse_timestamp_str(&modified_since) >= jan1
+                    && parse_http_date(&modified_since).is_some_and(|modified_since| modified_since >= jan1)
                 {
                     res.set_header("Cache-Control", "max-age=1, must-revalidate");
                     res.status = 304;

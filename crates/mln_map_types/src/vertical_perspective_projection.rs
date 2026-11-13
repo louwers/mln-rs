@@ -10,7 +10,6 @@ use std::f64::consts::PI;
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, LATITUDE_MAX};
-use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::mat4::{Mat4, matrix};
@@ -18,9 +17,7 @@ use mln_util::projection::Projection;
 use mln_util::quaternion::Quaternion;
 use mln_util::vectors::{Vec3, Vec4};
 
-use crate::projection_base::{
-    ProjectedTilePoint, ProjectionBase, ProjectionData, mercator_tile_coords, mercator_tile_matrix,
-};
+use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
 use crate::transform_state::{NorthOrientation, TransformState};
 
 /// `LatLng{lat, lon, mode}`: C++ constructs it directly, which throws
@@ -948,21 +945,9 @@ fn zoom_turning_the_planet(
     state.set_bearing(-mln_math::deg2rad(camera.bearing));
 }
 
-impl ProjectionBase for VerticalPerspectiveProjection {
-    fn project(&self, lat_lng: &LatLng, scale: f64) -> Point<f64> {
-        Projection::project(lat_lng, scale)
-    }
-
-    fn unproject(&self, point: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, Error> {
-        Projection::unproject(point, scale, wrap_mode)
-    }
-
-    fn tile_matrix(&self, matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64) {
-        mercator_tile_matrix(matrix, tile_id, scale);
-    }
-
-    fn get_projection_data(
-        &self,
+impl VerticalPerspectiveProjection {
+    /// [`Projection::get_projection_data`](crate::Projection::get_projection_data) on the globe.
+    pub(crate) fn projection_data(
         state: &TransformState,
         tile_id: &UnwrappedTileID,
         mercator_matrix: &Mat4,
@@ -978,8 +963,8 @@ impl ProjectionBase for VerticalPerspectiveProjection {
         }
     }
 
-    fn project_tile_point(
-        &self,
+    /// [`Projection::project_tile_point`](crate::Projection::project_tile_point) on the globe.
+    pub(crate) fn project_tile_point(
         data: &ProjectionData,
         tile_id: &UnwrappedTileID,
         point: &Point<f64>,
@@ -1004,14 +989,14 @@ impl ProjectionBase for VerticalPerspectiveProjection {
         }
     }
 
-    fn drawn_tile_point(
-        &self,
+    /// [`Projection::drawn_tile_point`](crate::Projection::drawn_tile_point) on the globe.
+    pub(crate) fn drawn_tile_point(
         data: &ProjectionData,
         tile_id: &UnwrappedTileID,
         point: &Point<f64>,
         elevation: f64,
     ) -> ProjectedTilePoint {
-        let globe = self.project_tile_point(data, tile_id, point, elevation);
+        let globe = Self::project_tile_point(data, tile_id, point, elevation);
         let t = data.projection_transition;
         if t > 0.999 {
             return globe;
@@ -1041,7 +1026,8 @@ impl ProjectionBase for VerticalPerspectiveProjection {
         }
     }
 
-    fn circle_radius_correction(&self, state: &TransformState) -> f64 {
+    /// [`Projection::circle_radius_correction`](crate::Projection::circle_radius_correction) on the globe.
+    pub(crate) fn circle_radius_correction(state: &TransformState) -> f64 {
         interpolate(
             &1.0,
             &Self::planet_scale(state.get_lat_lng(WrapMode::Unwrapped).latitude()),
@@ -1049,7 +1035,8 @@ impl ProjectionBase for VerticalPerspectiveProjection {
         )
     }
 
-    fn pixel_scale(&self, state: &TransformState) -> f64 {
+    /// [`Projection::pixel_scale`](crate::Projection::pixel_scale) on the globe.
+    pub(crate) fn pixel_scale(state: &TransformState) -> f64 {
         interpolate(
             &1.0,
             &(1.0 / Self::planet_scale(state.get_lat_lng(WrapMode::Unwrapped).latitude())),
@@ -1057,8 +1044,8 @@ impl ProjectionBase for VerticalPerspectiveProjection {
         )
     }
 
-    fn pitched_text_correction(
-        &self,
+    /// [`Projection::pitched_text_correction`](crate::Projection::pitched_text_correction) on the globe.
+    pub(crate) fn pitched_text_correction(
         state: &TransformState,
         tile_anchor: &Point<f64>,
         tile_id: &UnwrappedTileID,

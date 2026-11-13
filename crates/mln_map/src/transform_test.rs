@@ -1,6 +1,5 @@
-// Ports test/map/transform.test.cpp (TEST(Transform, *), TEST(Camera, *), the
-// projection seam's TEST(MercatorProjection, *) and TEST(TransformState, *),
-// and the globe's TEST(VerticalPerspectiveProjection, *),
+// Ports test/map/transform.test.cpp (TEST(Transform, *), TEST(Camera, *),
+// TEST(TransformState, *), and the globe's TEST(VerticalPerspectiveProjection, *),
 // TEST(GlobeTransform, *) and TEST(TileProjector, *)).
 //
 // The C++ AnimationOptions callbacks capture the Transform by reference and
@@ -19,9 +18,8 @@
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
-use mln_map_types::projection_base::ProjectionBase;
 use mln_map_types::util_camera::Camera as UtilCamera;
-use mln_map_types::{MercatorProjection, TileProjector, TransitionEndFn};
+use mln_map_types::{TileProjector, TransitionEndFn};
 use mln_math::deg2rad;
 use mln_style_types::ProjectionType;
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
@@ -1709,29 +1707,6 @@ fn reference_tile_matrix(scale: f64, tile_id: &UnwrappedTileID) -> Mat4 {
     let a = m;
     matrix::scale(&mut m, &a, s / f64::from(EXTENT), s / f64::from(EXTENT), 1.0);
     m
-}
-
-// gtest: MercatorProjection.MatchesStaticProjection
-#[test]
-fn matches_static_projection() {
-    let projection = MercatorProjection;
-    for zoom in [0.0, 1.0, 3.5, 7.25, 12.0, 18.0] {
-        let scale = 2.0f64.powf(zoom);
-        for lat in [-85.0, -45.0, 0.0, 30.0, 80.0] {
-            for lon in [-180.0, -90.0, 0.0, 45.0, 179.0] {
-                let lat_lng = ll(lat, lon);
-                let expected = Projection::project(&lat_lng, scale);
-                let actual = projection.project(&lat_lng, scale);
-                assert_eq!(expected.x, actual.x);
-                assert_eq!(expected.y, actual.y);
-
-                let unprojected = projection.unproject(&actual, scale, WrapMode::Wrapped).unwrap();
-                let expected_unprojected = Projection::unproject(&expected, scale, WrapMode::Wrapped).unwrap();
-                assert_eq!(expected_unprojected.latitude(), unprojected.latitude());
-                assert_eq!(expected_unprojected.longitude(), unprojected.longitude());
-            }
-        }
-    }
 }
 
 // gtest: TransformState.ProjectionDataMatchesTileMatrix

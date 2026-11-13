@@ -10,8 +10,10 @@
 
 use std::cell::RefCell;
 use std::fmt::Write as _;
+use std::str::FromStr;
 use std::sync::RwLock;
 
+use crate::ParseEnumError;
 use crate::sync::RwLockExt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -45,39 +47,85 @@ pub enum Event {
     Timing,
 }
 
-// src/mln/util/event.cpp
-crate::define_enum!(
-    EventSeverity,
-    [
-        (EventSeverity::Debug, "DEBUG"),
-        (EventSeverity::Info, "INFO"),
-        (EventSeverity::Warning, "WARNING"),
-        (EventSeverity::Error, "ERROR"),
-    ]
-);
+impl EventSeverity {
+    /// The name log lines print.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EventSeverity::Debug => "DEBUG",
+            EventSeverity::Info => "INFO",
+            EventSeverity::Warning => "WARNING",
+            EventSeverity::Error => "ERROR",
+        }
+    }
+}
 
-crate::define_enum!(
-    Event,
-    [
-        (Event::General, "General"),
-        (Event::Setup, "Setup"),
-        (Event::Shader, "Shader"),
-        (Event::ParseStyle, "ParseStyle"),
-        (Event::ParseTile, "ParseTile"),
-        (Event::Render, "Render"),
-        (Event::Style, "Style"),
-        (Event::Database, "Database"),
-        (Event::HttpRequest, "HttpRequest"),
-        (Event::Sprite, "Sprite"),
-        (Event::Image, "Image"),
-        (Event::GraphicsBackend, "GraphicsBackend"),
-        (Event::JNI, "JNI"),
-        (Event::Android, "Android"),
-        (Event::Crash, "Crash"),
-        (Event::Glyph, "Glyph"),
-        (Event::Timing, "Timing"),
-    ]
-);
+impl FromStr for EventSeverity {
+    type Err = ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "DEBUG" => Ok(EventSeverity::Debug),
+            "INFO" => Ok(EventSeverity::Info),
+            "WARNING" => Ok(EventSeverity::Warning),
+            "ERROR" => Ok(EventSeverity::Error),
+            _ => Err(ParseEnumError),
+        }
+    }
+}
+
+impl Event {
+    /// The name log lines print.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Event::General => "General",
+            Event::Setup => "Setup",
+            Event::Shader => "Shader",
+            Event::ParseStyle => "ParseStyle",
+            Event::ParseTile => "ParseTile",
+            Event::Render => "Render",
+            Event::Style => "Style",
+            Event::Database => "Database",
+            Event::HttpRequest => "HttpRequest",
+            Event::Sprite => "Sprite",
+            Event::Image => "Image",
+            Event::GraphicsBackend => "GraphicsBackend",
+            Event::JNI => "JNI",
+            Event::Android => "Android",
+            Event::Crash => "Crash",
+            Event::Glyph => "Glyph",
+            Event::Timing => "Timing",
+        }
+    }
+}
+
+impl FromStr for Event {
+    type Err = ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "General" => Ok(Event::General),
+            "Setup" => Ok(Event::Setup),
+            "Shader" => Ok(Event::Shader),
+            "ParseStyle" => Ok(Event::ParseStyle),
+            "ParseTile" => Ok(Event::ParseTile),
+            "Render" => Ok(Event::Render),
+            "Style" => Ok(Event::Style),
+            "Database" => Ok(Event::Database),
+            "HttpRequest" => Ok(Event::HttpRequest),
+            "Sprite" => Ok(Event::Sprite),
+            "Image" => Ok(Event::Image),
+            "GraphicsBackend" => Ok(Event::GraphicsBackend),
+            "JNI" => Ok(Event::JNI),
+            "Android" => Ok(Event::Android),
+            "Crash" => Ok(Event::Crash),
+            "Glyph" => Ok(Event::Glyph),
+            "Timing" => Ok(Event::Timing),
+            _ => Err(ParseEnumError),
+        }
+    }
+}
 
 /// `Log::Observer`.
 pub trait Observer: Send + Sync {
@@ -130,7 +178,6 @@ impl Log {
     /// (`disabledEventPermutations = {{Debug, Shader}}`; Debug is disabled in
     /// release builds).
     pub fn record(severity: EventSeverity, event: Event, code: i64, msg: &str) {
-        use crate::enum_::Enum;
         if !cfg!(debug_assertions) && severity == EventSeverity::Debug {
             return;
         }
@@ -159,7 +206,7 @@ impl Log {
         log_stream.push_str(std::thread::current().name().unwrap_or(""));
         log_stream.push('}');
         log_stream.push('[');
-        log_stream.push_str(event.to_string());
+        log_stream.push_str(event.as_str());
         log_stream.push(']');
         if code >= 0 {
             let _ = write!(log_stream, "({code})");
@@ -173,7 +220,6 @@ impl Log {
 
     /// `platform/default/src/mln/util/logging_stderr.cpp`.
     fn platform_record(severity: EventSeverity, msg: &str) {
-        use crate::enum_::Enum;
-        eprintln!("[{}] {}", severity.to_string(), msg);
+        eprintln!("[{}] {}", severity.as_str(), msg);
     }
 }

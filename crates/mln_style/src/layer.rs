@@ -19,7 +19,6 @@ use std::sync::Arc;
 use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
-use mln_util::enum_::Enum;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
@@ -253,7 +252,7 @@ fn evaluate_visibility_expression(expression: &dyn Expression, global_state: &Gl
     let result = expression.evaluate(&EvaluationContext::default().with_global_state(Some(global_state)));
     if let Ok(result) = result
         && let Some(string) = from_expression_value::<String>(&result)
-        && let Some(visibility) = VisibilityType::to_enum(&string)
+        && let Ok(visibility) = string.parse::<VisibilityType>()
     {
         return visibility;
     }

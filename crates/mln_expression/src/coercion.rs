@@ -7,7 +7,6 @@ use mln_style_types::{
     AnchorOffsetPair, ProjectionDefinition, SymbolAnchorType, VariableAnchorOffsetCollection, projection_type_from_name,
 };
 use mln_util::Padding;
-use mln_util::enum_::Enum;
 
 use crate::expression::{
     Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, children_equal,
@@ -186,7 +185,7 @@ fn to_variable_anchor_offset(value: &Value) -> EvaluationResult {
                     )));
                 }
 
-                let Some(anchor) = SymbolAnchorType::to_enum(anchor_type_string) else {
+                let Ok(anchor) = anchor_type_string.parse::<SymbolAnchorType>() else {
                     return Err(EvaluationError::new(format!(
                         "Invalid variableAnchorOffsetCollection value {}: unknown anchor type '{}'",
                         components_value(),

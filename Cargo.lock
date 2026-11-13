@@ -3009,6 +3009,7 @@ dependencies = [
  "bytemuck",
  "csscolorparser",
  "flate2",
+ "httpdate",
  "js-sys",
  "mln-rs-conversion",
  "mln-rs-expression",

@@ -9,7 +9,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::symbol_layer_ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use mln_gfx::{Drawable, LayerGroupBase, UniformBufferPtr};
-use mln_map_types::{MercatorProjection, ProjectionBase, ProjectionData};
+use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_properties::{
     IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOpacity, IconTranslate, IconTranslateAnchor,
@@ -167,7 +167,7 @@ impl LayerTweaker for SymbolLayerTweaker {
             let anchor =
                 if is_text { *evaluated.get::<TextTranslateAnchor>() } else { *evaluated.get::<IconTranslateAnchor>() };
             let mut projection: ProjectionData = if is_screen_space {
-                MercatorProjection.get_projection_data(state, &tile_id, &get_screen_matrix(*translate))
+                Projection::Mercator.get_projection_data(state, &tile_id, &get_screen_matrix(*translate))
             } else {
                 const NEAR_CLIPPED: bool = false;
                 const IN_VIEWPORT_PIXEL_UNITS: bool = false;

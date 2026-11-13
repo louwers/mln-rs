@@ -94,3 +94,9 @@ mod tests {
         assert_eq!(error.to_string(), "Style is not done loading.");
     }
 }
+
+/// What parsing an enum from its name fails with: the string names none of
+/// the enum's values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("unknown enumeration value")]
+pub struct ParseEnumError;

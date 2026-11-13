@@ -17,7 +17,7 @@
 // headers from the `HttpHeaderTransform`, which a redirect to another origin
 // drops, as maplibre-native-ffi's HTTP file sources do. Response headers are
 // read in order with curl's header callback rules (case-insensitive names;
-// `Last-Modified`/`Expires` through vendor parsedate, `Cache-Control`,
+// `Last-Modified`/`Expires` as HTTP dates, `Cache-Control`,
 // `ETag`, `Retry-After`, `X-Rate-Limit-Reset`). Status codes map to the same
 // Response fields and errors.
 //
@@ -27,9 +27,9 @@
 //
 // Differences (ureq): ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
-// ureq's text instead of curl's `curl_easy_strerror: errorbuffer`; dates use
-// the vendored parsedate instead of libcurl's `curl_getdate` (they differ
-// only after 2037).
+// ureq's text instead of curl's `curl_easy_strerror: errorbuffer`; dates are
+// read in the three formats of RFC 9110 only, where libcurl's `curl_getdate`
+// also takes other zones and free-form dates.
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
-use mln_util::chrono::{Timestamp, parse_timestamp_str};
+use mln_util::chrono::parse_http_date;
 use mln_util::http_header::{CacheControl, parse_retry_headers};
 use mln_util::sync::MutexExt;
 
@@ -117,11 +117,6 @@ impl Cancellation {
 /// `headerMatches(header, buffer, length)`: ASCII-case-insensitive prefix.
 fn header_value<'a>(name: &str, header: &str, line: &'a str) -> Option<&'a str> {
     (name.eq_ignore_ascii_case(header)).then_some(line)
-}
-
-/// `curl_getdate` (vendor parsedate, -1 when unparsable).
-fn getdate(value: &str) -> Timestamp {
-    parse_timestamp_str(value)
 }
 
 /// What a transport hands back: the status code, the response headers in
@@ -247,7 +242,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
         if let Some(value) = header_value(name, "last-modified", value) {
             // Always overwrite the modification date; We might already have
             // a value here from the Date header, but this one is more accurate.
-            response.modified = Some(getdate(value));
+            response.modified = parse_http_date(value);
         } else if let Some(value) = header_value(name, "etag", value) {
             response.etag = Some(value.to_owned());
         } else if let Some(value) = header_value(name, "cache-control", value) {
@@ -255,7 +250,8 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
             response.expires = cc.to_time_point();
             response.must_revalidate = cc.must_revalidate;
         } else if let Some(value) = header_value(name, "expires", value) {
-            response.expires = Some(getdate(value));
+            // An invalid date, such as "0", means already expired (RFC 9111 §5.3).
+            response.expires = Some(parse_http_date(value).unwrap_or_default());
         } else if let Some(value) = header_value(name, "retry-after", value) {
             retry_after = Some(value.to_owned());
         } else if let Some(value) = header_value(name, "x-rate-limit-reset", value) {

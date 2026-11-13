@@ -4,7 +4,6 @@
 
 use feature::Value;
 use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
-use mln_util::enum_::Enum;
 use mln_util::{Color, Padding};
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
@@ -144,7 +143,7 @@ macro_rules! enum_value_factory {
     ($($t:ty),* $(,)?) => {
         $(impl ValueFactory for $t {
             fn make_value(&self) -> Value {
-                Value::String(Enum::to_string(*self).to_owned())
+                Value::String(self.as_str().to_owned())
             }
         })*
     };
