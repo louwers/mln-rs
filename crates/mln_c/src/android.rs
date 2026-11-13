@@ -142,11 +142,11 @@ mod tests {
         MLN_RENDER_BACKEND_OPEN_GL, MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_RESULT_RENDERED,
         MLN_RENDER_RESULT_TARGET_NOT_READY, MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION,
         MLN_RENDER_SESSION_CAPABILITY_PRESENTATION, MLN_RENDER_TARGET_KIND_ANDROID_WINDOW,
-        MLN_RENDER_TARGET_KIND_EXPORTED_RING, MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, MLN_STATUS_OK,
-        MLN_STATUS_UNSUPPORTED, mln_android_hardware_buffer_frame, mln_android_window_target, mln_dma_buf_frame,
-        mln_exported_ring_target, mln_gpu_device, mln_gpu_device_capabilities, mln_gpu_device_options, mln_gpu_sync,
-        mln_logical_size, mln_map, mln_render_session, mln_render_session_capabilities, mln_render_target,
-        mln_render_target_data,
+        MLN_RENDER_TARGET_KIND_EXPORTED_RING, MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, MLN_STATUS_INVALID_STATE,
+        MLN_STATUS_OK, MLN_STATUS_UNSUPPORTED, mln_android_hardware_buffer_frame, mln_android_window_target,
+        mln_dma_buf_frame, mln_exported_ring_target, mln_gpu_device, mln_gpu_device_capabilities,
+        mln_gpu_device_options, mln_gpu_sync, mln_logical_size, mln_map, mln_render_session,
+        mln_render_session_capabilities, mln_render_target, mln_render_target_data,
     };
     use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_get_capabilities, mln_gpu_device_release};
     use crate::map::mln_map_set_style_json;
@@ -387,6 +387,31 @@ mod tests {
         for device in devices {
             mln_gpu_device_release(device);
         }
+        release_map(map);
+        release(runtime);
+    }
+
+    // A window target that replaces a released session's fails on the
+    // session, without using the window, which a call that fails needn't
+    // name.
+    #[test]
+    fn a_released_sessions_set_target_leaves_the_window_alone() {
+        let runtime = create();
+        let map = red_map(runtime);
+        let reader = Reader::new(64, 48);
+        let session = attach(map, &window_target(reader.window(), 64, 48), 0, 0);
+        release_session(session);
+        let not_a_window = core::ptr::NonNull::<c_void>::dangling().as_ptr();
+        // SAFETY: local arguments; the window is never read.
+        let status = unsafe {
+            mln_render_session_set_target(
+                session,
+                &window_target(not_a_window, 64, 48),
+                core::ptr::null(),
+                NO_DIAGNOSTIC,
+            )
+        };
+        assert_eq!(status, MLN_STATUS_INVALID_STATE);
         release_map(map);
         release(runtime);
     }

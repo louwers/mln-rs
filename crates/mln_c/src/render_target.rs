@@ -60,7 +60,7 @@ enum Target {
     Surface {
         size: Size,
         kind: SurfaceType,
-        surface: Surface,
+        surface: WindowSurface,
     },
     /// The host's surface, which only a device of the host's instance or
     /// share group presents to. Apple builds have neither kind.
@@ -88,6 +88,34 @@ enum Target {
     },
     /// A target that this library doesn't render to.
     Unsupported(&'static str),
+}
+
+/// A window or layer target's surface, which the call makes once the handles
+/// it names check out: until then, a window that a stale handle's call would
+/// never use may be no window at all.
+enum WindowSurface {
+    Ready(Surface),
+    /// An Android window, which the surface takes its own reference to.
+    #[cfg(target_os = "android")]
+    Android(NonNull<c_void>),
+}
+
+impl WindowSurface {
+    /// The surface.
+    ///
+    /// # Safety
+    ///
+    /// An Android window is the host's live window, which the header's
+    /// contract keeps alive through the call.
+    unsafe fn into_surface(self) -> Surface {
+        match self {
+            WindowSurface::Ready(surface) => surface,
+            #[cfg(target_os = "android")]
+            // SAFETY: the caller's contract; the surface keeps its own
+            // reference from here on.
+            WindowSurface::Android(window) => Surface::window(unsafe { crate::android::Window::acquire(window) }),
+        }
+    }
 }
 
 impl Target {
@@ -317,7 +345,7 @@ fn win32_window(size: Size, window: NonNull<c_void>) -> Target {
         window: RawWindowHandle::Win32(handle),
         display: RawDisplayHandle::Windows(raw_window_handle::WindowsDisplayHandle::new()),
     };
-    Target::Surface { size, kind: SurfaceType::Win32, surface: Surface::window(window) }
+    Target::Surface { size, kind: SurfaceType::Win32, surface: WindowSurface::Ready(Surface::window(window)) }
 }
 
 /// An OpenHarmony window that the session holds a reference to, which it
@@ -376,7 +404,7 @@ fn ohos_window(size: Size, window: NonNull<c_void>) -> Result<Target, Error> {
         return Err(Error::invalid_argument("mln_ohos_window_target.window is no OHNativeWindow"));
     }
     let window = OhosWindow(window);
-    Ok(Target::Surface { size, kind: SurfaceType::OhosNdk, surface: Surface::window(window) })
+    Ok(Target::Surface { size, kind: SurfaceType::OhosNdk, surface: WindowSurface::Ready(Surface::window(window)) })
 }
 
 #[cfg(not(target_env = "ohos"))]
@@ -474,7 +502,11 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     )),
                     display: RawDisplayHandle::Xlib(raw_window_handle::XlibDisplayHandle::new(Some(display), 0)),
                 };
-                Target::Surface { size, kind: SurfaceType::Xlib, surface: Surface::window(window) }
+                Target::Surface {
+                    size,
+                    kind: SurfaceType::Xlib,
+                    surface: WindowSurface::Ready(Surface::window(window)),
+                }
             }
             MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE => {
                 let wayland = target.data.wayland_surface;
@@ -484,17 +516,17 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     window: RawWindowHandle::Wayland(raw_window_handle::WaylandWindowHandle::new(surface)),
                     display: RawDisplayHandle::Wayland(raw_window_handle::WaylandDisplayHandle::new(display)),
                 };
-                Target::Surface { size, kind: SurfaceType::Wayland, surface: Surface::window(window) }
+                Target::Surface {
+                    size,
+                    kind: SurfaceType::Wayland,
+                    surface: WindowSurface::Ready(Surface::window(window)),
+                }
             }
             MLN_RENDER_TARGET_KIND_ANDROID_WINDOW => {
                 let window = required(target.data.android_window.window, &field("window"))?;
                 #[cfg(target_os = "android")]
                 {
-                    // SAFETY: the host's window, which the header's contract
-                    // keeps alive through the call; the session keeps its own
-                    // reference from here on.
-                    let window = crate::android::Window::acquire(window);
-                    Target::Surface { size, kind: SurfaceType::AndroidNdk, surface: Surface::window(window) }
+                    Target::Surface { size, kind: SurfaceType::AndroidNdk, surface: WindowSurface::Android(window) }
                 }
                 #[cfg(not(target_os = "android"))]
                 {
@@ -727,9 +759,11 @@ fn metal_layer(size: Size, layer: NonNull<c_void>) -> Target {
     {
         // SAFETY: the host's layer, which the header's contract keeps alive.
         match unsafe { mln_mtl::Layer::from_raw(layer.as_ptr()) } {
-            Some(layer) => {
-                Target::Surface { size, kind: SurfaceType::MetalLayer, surface: Surface::metal_layer(layer) }
-            }
+            Some(layer) => Target::Surface {
+                size,
+                kind: SurfaceType::MetalLayer,
+                surface: WindowSurface::Ready(Surface::metal_layer(layer)),
+            },
             None => Target::Unsupported("a null layer"),
         }
     }
@@ -789,6 +823,8 @@ pub unsafe extern "C" fn mln_map_attach(
                 if kind != SurfaceType::MetalLayer {
                     options.require_core_worker("a window session renders on a core worker")?;
                 }
+                // SAFETY: the caller's contract.
+                let surface = unsafe { surface.into_surface() };
                 RenderTarget::Surface { size, surface, device }
             }
             Target::HostSurface { size, surface } => {
@@ -868,6 +904,8 @@ pub unsafe extern "C" fn mln_render_session_set_target(
                 if !kind.presents_with_any() {
                     return Err(unsupported(format!("this build presents to no {kind:?} surface")));
                 }
+                // SAFETY: the caller's contract.
+                let surface = unsafe { surface.into_surface() };
                 Box::new(move |session| session.set_surface(size, surface))
             }
             Target::HostSurface { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
