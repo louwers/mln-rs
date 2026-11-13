@@ -13,6 +13,7 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_style::layers::{CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -69,18 +70,26 @@ impl Calls {
 }
 
 /// Renders the style with `host`'s layer below the layer named `before`, or
-/// above every layer, on `backend`, and drops the renderer.
-fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> PremultipliedImage {
+/// above every layer, on `backend`, and drops the renderer. `None` where the
+/// machine has no device of `backend`, such as no EGL.
+fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> Option<PremultipliedImage> {
     let _run_loop = RunLoop::new();
     let size = Size::new(SIDE, SIDE);
-    let device = Device::with_backend(backend, DeviceOptions::default()).expect("a device");
+    let device = match Device::with_backend(backend, DeviceOptions::default()) {
+        Ok(device) => device,
+        Err(error) if error.kind == ErrorKind::Unsupported => {
+            eprintln!("skipped: no {backend:?} device: {error}");
+            return None;
+        }
+        Err(error) => panic!("a {backend:?} device: {error}"),
+    };
     let mut frontend = HeadlessFrontend::with_device(device, size, 1.0, true, Arc::default()).expect("a frontend");
     let mut map =
         Map::new(MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(1.0)).unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(STYLE);
     map.style_mut().add_custom_layer("quad", host, before).expect("the custom layer");
-    frontend.render(&mut map).expect("a frame").image
+    Some(frontend.render(&mut map).expect("a frame").image)
 }
 
 fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
@@ -97,7 +106,7 @@ fn assert_near(actual: [u8; 4], expected: [u8; 4], what: &str) {
 /// pixels, the callbacks, and that the renderer deinitialized the host.
 fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn CustomLayerHost>, Arc<Calls>)) {
     let (below, calls) = host();
-    let image = render(backend, below, Some("blue"));
+    let Some(image) = render(backend, below, Some("blue")) else { return };
     assert_near(pixel(&image, SIDE / 2, SIDE / 2), [0, 128, 128, 255], "the quad under the blue layer");
     assert_near(pixel(&image, 2, 2), [128, 0, 128, 255], "the map around the quad");
     assert_eq!(calls.prerenders.load(Ordering::Relaxed), 1);
@@ -108,7 +117,7 @@ fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn CustomLayerHost>, Arc
     assert!(far_depth > 0.0 && far_depth < 1.0 && layer_depth > far_depth && layer_depth <= 1.0);
 
     let (above, _) = host();
-    let image = render(backend, above, None);
+    let image = render(backend, above, None).expect("a device, as for the first frame");
     assert_near(pixel(&image, SIDE / 2, SIDE / 2), [0, 255, 0, 255], "the quad over every layer");
     assert_near(pixel(&image, 2, 2), [128, 0, 128, 255], "the map around the quad");
 }
