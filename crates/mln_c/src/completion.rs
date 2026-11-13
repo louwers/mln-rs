@@ -245,13 +245,12 @@ impl Drop for Completion {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     use super::*;
     use crate::delivery::tests::{Log, queue, queue_with_abandon};
     use crate::delivery::{mln_delivery_queue_dispatch, mln_delivery_queue_release};
     use crate::generated::types::{MLN_STATUS_INVALID_STATE, MLN_STATUS_NOT_FOUND, mln_status};
-    use crate::lock;
 
     /// What a completion callback saw.
     #[derive(Debug, PartialEq)]
@@ -288,12 +287,12 @@ mod tests {
             value_size: result.value_size,
             generations: Generations { snapshot: result.generation, render_update: result.render_update_generation },
         };
-        lock(&SEEN).push((user_data as usize, seen));
+        SEEN.lock().push((user_data as usize, seen));
         Log::record(UserData::new(user_data), 'c');
     }
 
     fn seen(user_data: *mut c_void) -> Vec<Seen> {
-        let mut all = lock(&SEEN);
+        let mut all = SEEN.lock();
         let (mine, others) = core::mem::take(&mut *all).into_iter().partition(|(key, _)| *key == user_data as usize);
         *all = others;
         mine.into_iter().map(|(_, seen)| seen).collect::<Vec<_>>()
@@ -373,7 +372,7 @@ mod tests {
     impl mln_util::logging::Observer for Warnings {
         fn on_record(&self, severity: mln_util::logging::EventSeverity, event: Event, _: i64, msg: &str) -> bool {
             if severity == mln_util::logging::EventSeverity::Warning && event == Event::General {
-                lock(&self.0).push(msg.to_owned());
+                self.0.lock().push(msg.to_owned());
             }
             true
         }
@@ -392,7 +391,7 @@ mod tests {
         drop(mln_util::logging::Log::set_thread_observer(previous));
         assert_eq!(
             [format!("discarded command failed (status {MLN_STATUS_INVALID_STATE}): map has no open command group")],
-            lock(&warnings).as_slice()
+            warnings.lock().as_slice()
         );
     }
 

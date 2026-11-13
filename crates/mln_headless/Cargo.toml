@@ -110,6 +110,7 @@ mln_style_types.workspace = true
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
 mln_tile_id.workspace = true
+parking_lot.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
 # The custom layer test's hosts, which draw with each backend's own API.

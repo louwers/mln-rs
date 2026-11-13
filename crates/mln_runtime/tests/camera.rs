@@ -5,7 +5,7 @@
 
 mod support;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use mln_map::{
@@ -16,6 +16,7 @@ use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
+use parking_lot::Mutex;
 use support::{map, runtime, wait, wait_err};
 
 /// An animation whose ends `ends` records.
@@ -23,7 +24,7 @@ fn recorded(ends: &Arc<Mutex<Vec<TransitionEnd>>>, duration: Duration) -> Animat
     let ends = ends.clone();
     AnimationOptions {
         duration: Some(duration),
-        transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| ends.lock().unwrap().push(*end))),
+        transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| ends.lock().push(*end))),
         ..AnimationOptions::default()
     }
 }
@@ -44,18 +45,18 @@ fn an_end_reports_the_snapshot_that_shows_it_before_its_completion() {
     let ends = Arc::new(Mutex::new(Vec::new()));
 
     let jumped = wait(map.update_camera(zoom_to(3.0, recorded(&ends, Duration::ZERO))));
-    let end = ends.lock().unwrap().pop().unwrap();
+    let end = ends.lock().pop().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Completed, jumped.generation));
     assert_eq!(jumped.generation, map.snapshot().unwrap().generation);
 
     drop(map.update_camera(zoom_to(9.0, recorded(&ends, Duration::from_secs(60)))).unwrap());
     let cancelled = wait(map.cancel_camera_transitions());
-    let end = ends.lock().unwrap().pop().unwrap();
+    let end = ends.lock().pop().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Cancelled, cancelled.generation));
 
     drop(map.update_camera(zoom_to(9.0, recorded(&ends, Duration::from_secs(60)))).unwrap());
     wait(map.release());
-    let end = ends.lock().unwrap().pop().unwrap();
+    let end = ends.lock().pop().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Closed, 0));
     wait(runtime.release());
 }
@@ -86,7 +87,7 @@ fn a_fit_moves_the_camera_where_the_query_fits() {
     let error = wait_err(map.fit_camera(area.clone(), refused));
     assert_eq!(error.kind, ErrorKind::InvalidArgument);
     assert!(error.message.contains("padding"), "{}", error.message);
-    assert_eq!(ends.lock().unwrap()[0].outcome, TransitionOutcome::Cancelled);
+    assert_eq!(ends.lock()[0].outcome, TransitionOutcome::Cancelled);
     assert_eq!(wait(map.camera()).camera, moved);
 
     assert_eq!(ErrorKind::InvalidArgument, wait_err(map.camera_for(CameraFitArea::Coordinates(Vec::new()), fit)).kind);

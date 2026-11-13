@@ -10,12 +10,13 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 
 use mln_actor::actor::Actor;
 use mln_actor::scheduler::{self, SchedulerPtr, TaggedScheduler};
 use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
 use mln_util::identity::SimpleIdentity;
+use parking_lot::Mutex;
 
 use crate::{Failures, wait};
 
@@ -219,21 +220,21 @@ fn sequenced_scheduler() {
     let first = move || {
         f.expect(0 == c.load(Ordering::SeqCst), "0 == count");
         let id = std::thread::current().id();
-        *b.lock().unwrap() = Some(id);
+        *b.lock() = Some(id);
         f.expect(caller_id != id, "caller_id != bg_id");
         c.fetch_add(1, Ordering::SeqCst);
     };
     let (f, b, c) = (failures.clone(), bg_id.clone(), count.clone());
     let second = move || {
         f.expect(1 == c.load(Ordering::SeqCst), "1 == count");
-        f.expect(*b.lock().unwrap() == Some(std::thread::current().id()), "bg_id == this thread");
+        f.expect(*b.lock() == Some(std::thread::current().id()), "bg_id == this thread");
         c.fetch_add(1, Ordering::SeqCst);
     };
     let (f, b, c) = (failures.clone(), bg_id.clone(), count.clone());
     let handle = run_loop.handle();
     let third = move || {
         f.expect(2 == c.load(Ordering::SeqCst), "2 == count");
-        f.expect(*b.lock().unwrap() == Some(std::thread::current().id()), "bg_id == this thread");
+        f.expect(*b.lock() == Some(std::thread::current().id()), "bg_id == this thread");
         handle.stop();
     };
 

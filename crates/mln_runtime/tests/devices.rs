@@ -193,20 +193,20 @@ mod vulkan {
     /// A host's lock on a queue that it shares with sessions.
     #[derive(Default)]
     struct HostQueueLock {
-        locked: std::sync::Mutex<bool>,
-        unlocked: std::sync::Condvar,
+        locked: parking_lot::Mutex<bool>,
+        unlocked: parking_lot::Condvar,
     }
 
     impl mln_vulkan::QueueLock for HostQueueLock {
         fn lock(&self) {
-            let mut locked = self.locked.lock().unwrap();
+            let mut locked = self.locked.lock();
             while *locked {
-                locked = self.unlocked.wait(locked).unwrap();
+                self.unlocked.wait(&mut locked);
             }
             *locked = true;
         }
         fn unlock(&self) {
-            *self.locked.lock().unwrap() = false;
+            *self.locked.lock() = false;
             self.unlocked.notify_one();
         }
     }
@@ -955,9 +955,9 @@ fn no_frame_is_acquired_while_a_release_of_the_ring_is_on_its_way() {
     // The frame wake runs on the session's thread: blocking it holds the
     // release back.
     let (block, blocked) = mpsc::channel::<mpsc::Receiver<()>>();
-    let blocked = std::sync::Mutex::new(blocked);
+    let blocked = parking_lot::Mutex::new(blocked);
     let frame_wake: mln_runtime::Wake = Arc::new(move || {
-        if let Ok(unblock) = blocked.lock().unwrap().try_recv() {
+        if let Ok(unblock) = blocked.lock().try_recv() {
             let _ = unblock.recv();
         }
     });

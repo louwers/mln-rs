@@ -8,10 +8,10 @@
 // the library loads on a Windows without them.
 
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use mln_util::error::Error;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, LUID};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL};
 use windows::Win32::Graphics::Direct3D11::{
@@ -215,7 +215,7 @@ impl TextureDevice {
             let done = D3D11_QUERY_DESC { Query: D3D11_QUERY_EVENT, MiscFlags: 0 };
             self.device.CreateQuery(&done, Some(&mut query)).map_err(native("D3D11 can't make a query"))?;
             let query = query.ok_or_else(|| Error::native("D3D11 made no query"))?;
-            let context = self.context.lock_unpoisoned();
+            let context = self.context.lock();
             context.End(&query);
             context.Flush();
             let mut finished = BOOL(0);

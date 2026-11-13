@@ -4,8 +4,8 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_storage::file_source::Callback;
@@ -14,7 +14,7 @@ use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
 use mln_storage::{AsyncRequest, FileSource, OnlineFileSource, Resource, ResourceError, ResourceOptions, Response};
 use mln_util::error::Error;
-use mln_util::sync::{MutexExt, RwLockExt};
+use parking_lot::{Mutex, RwLock};
 
 /// Serves a runtime's network requests in place of the library.
 ///
@@ -79,7 +79,7 @@ impl ResourceHooks {
         &self,
         provider: Option<Box<dyn ResourceProvider>>,
     ) -> Option<Box<dyn ResourceProvider>> {
-        std::mem::replace(&mut *self.provider.write_unpoisoned(), provider)
+        std::mem::replace(&mut *self.provider.write(), provider)
     }
 
     pub(crate) fn set_transform_set(&self, set: bool) {
@@ -222,7 +222,7 @@ impl Drop for ImmediateRequest {
 
 impl FileSource for ProviderFileSource {
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let hooked = self.hooks.provider.read_unpoisoned();
+        let hooked = self.hooks.provider.read();
         let provider = match Self::route(resource, hooked.as_deref()) {
             Route::Provider(provider) => provider,
             Route::Native { declined } => {
@@ -254,7 +254,7 @@ impl FileSource for ProviderFileSource {
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
-        let hooked = self.hooks.provider.read_unpoisoned();
+        let hooked = self.hooks.provider.read();
         matches!(Self::route(resource, hooked.as_deref()), Route::Provider(..)) || self.online.can_request(resource)
     }
 
@@ -347,7 +347,7 @@ impl AsyncRequest for ProviderRequest {}
 impl Drop for ProviderRequest {
     fn drop(&mut self) {
         let on_cancel = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             state.cancelled = true;
             if state.answered { None } else { state.on_cancel.take() }
         };
@@ -379,7 +379,7 @@ impl ResourceRequest {
     /// Whether the library no longer needs the request.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.shared.as_ref().is_none_or(|shared| shared.state.lock_unpoisoned().cancelled)
+        self.shared.as_ref().is_none_or(|shared| shared.state.lock().cancelled)
     }
 
     /// Calls `on_cancel`, on the requesting thread, if the library cancels
@@ -392,7 +392,7 @@ impl ResourceRequest {
         let Some(shared) = &self.shared else {
             return Err(Error::invalid_state("the request was answered"));
         };
-        let mut state = shared.state.lock_unpoisoned();
+        let mut state = shared.state.lock();
         if state.cancelled {
             return Err(Error::cancelled("the library cancelled the request"));
         }
@@ -423,7 +423,7 @@ impl ResourceRequest {
             return Err(Error::invalid_state("the request was answered"));
         };
         let on_cancel = {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             if state.cancelled {
                 return Err(Error::invalid_state("the library cancelled the request"));
             }

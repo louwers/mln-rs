@@ -2227,6 +2227,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
  "scopeguard",
+ "serde",
 ]
 
 [[package]]
@@ -2335,6 +2336,7 @@ name = "mln-rs-actor"
 version = "0.0.11"
 dependencies = [
  "mln-rs-util",
+ "parking_lot",
 ]
 
 [[package]]
@@ -2394,6 +2396,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "parking_lot",
  "raw-window-handle",
  "serde_json",
  "thiserror 2.0.21",
@@ -2462,6 +2465,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "parking_lot",
  "raw-window-metal",
  "serde_json",
  "skrifa 0.49.0",
@@ -2560,6 +2564,7 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-style-types",
  "mln-rs-util",
+ "parking_lot",
 ]
 
 [[package]]
@@ -2589,6 +2594,7 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "parking_lot",
  "raw-window-handle",
  "wasm-bindgen",
  "web-sys",
@@ -2622,6 +2628,7 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "naga",
+ "parking_lot",
  "serde_json",
  "wgpu",
 ]
@@ -2661,6 +2668,7 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "parking_lot",
 ]
 
 [[package]]
@@ -2732,6 +2740,7 @@ dependencies = [
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-util",
+ "parking_lot",
  "postcard",
  "regex",
  "serde",
@@ -2770,6 +2779,7 @@ dependencies = [
  "mln-rs-vec-map",
  "mln-rs-webgpu",
  "mlt-core",
+ "parking_lot",
  "postcard",
  "proptest",
  "serde",
@@ -2806,6 +2816,7 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
+ "parking_lot",
  "pollster",
  "serde_json",
  "wasm-bindgen",
@@ -2831,6 +2842,7 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "parking_lot",
  "serde_json",
 ]
 
@@ -2853,6 +2865,7 @@ dependencies = [
  "mln-rs-vec-map",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+ "parking_lot",
  "pmtiles",
  "rusqlite",
  "rustls",
@@ -2883,6 +2896,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "parking_lot",
  "tempfile",
 ]
 
@@ -2909,6 +2923,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "parking_lot",
  "postcard",
  "serde",
  "serde_json",
@@ -2965,6 +2980,7 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "parking_lot",
  "serde",
  "skrifa 0.49.0",
  "thiserror 2.0.21",
@@ -2987,6 +3003,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mlt-core",
+ "parking_lot",
  "proptest",
  "thiserror 2.0.21",
 ]
@@ -3019,6 +3036,7 @@ dependencies = [
  "mln-rs-style",
  "mln-rs-style-types",
  "mln-rs-tile-id",
+ "parking_lot",
  "postcard",
  "serde",
  "serde_json",
@@ -3046,6 +3064,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",
+ "parking_lot",
  "windows",
 ]
 
@@ -3065,6 +3084,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-web-host",
  "mln-rs-webgpu",
+ "parking_lot",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -3080,6 +3100,7 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-text",
  "mln-rs-util",
+ "parking_lot",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -3105,6 +3126,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "parking_lot",
  "pollster",
  "wgpu",
 ]

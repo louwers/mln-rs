@@ -2,13 +2,13 @@
 // src/mln/text/glyph.cpp.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_style_types::image::RectU16;
 use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::image::AlphaImage;
-use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::tagged_string::FontStackHash;
@@ -437,7 +437,7 @@ pub fn gen_new_glyph_id_type(url: &str, font_stack: &FontStack, pairs: &[(u32, u
     }
     let family = font_stack_to_string(font_stack);
 
-    let mut state = GLYPH_TYPES.lock_unpoisoned();
+    let mut state = GLYPH_TYPES.lock();
     let state = &mut *state;
     let entry = state
         .types

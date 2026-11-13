@@ -12,14 +12,14 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use mln_actor::TaggedScheduler;
 use mln_renderer::tile::worker_codec::{Encoded, TileWorkerHost};
 use mln_util::identity::SimpleIdentity;
 use mln_util::serialization::payload::Payload;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 
 use crate::pump;
@@ -55,7 +55,7 @@ pub fn serve(port: &web_sys::MessagePort) {
     // A raster tile's reply comes once the browser decoded its image,
     // outside a slice.
     let host = TileWorkerHost::new(workers, move |reply| {
-        sink.lock_unpoisoned().push(reply);
+        sink.lock().push(reply);
         pump::wake();
     });
     let connection = Rc::new_cyclic(|weak: &std::rc::Weak<Connection>| {
@@ -86,7 +86,7 @@ pub fn serve(port: &web_sys::MessagePort) {
 impl Connection {
     /// Sends the replies since the last batch, their payloads transferred.
     fn send_replies(&self) {
-        let replies = std::mem::take(&mut *self.replies.lock_unpoisoned());
+        let replies = std::mem::take(&mut *self.replies.lock());
         if replies.is_empty() {
             return;
         }

@@ -8,12 +8,10 @@
 //
 // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
-use std::sync::Mutex;
-
 use mln_actor::{ActorRef, Thread};
 use mln_util::constants::FILE_PROTOCOL;
-use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
+use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
@@ -89,10 +87,10 @@ impl FileSource for LocalFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock().clone()
     }
 }

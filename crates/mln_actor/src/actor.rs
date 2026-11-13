@@ -22,11 +22,11 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak, mpsc};
+use std::sync::{Arc, Weak, mpsc};
 use std::thread::ThreadId;
 
 use mln_util::identity::SimpleIdentity;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::scheduler::{SchedulerPtr, TaggedScheduler, WeakScheduler};
 
@@ -60,7 +60,7 @@ impl<O: Send + 'static> PoolMailbox<O> {
             return;
         }
         let was_empty = {
-            let mut queue = self.queue.lock_unpoisoned();
+            let mut queue = self.queue.lock();
             if queue.closed {
                 return;
             }
@@ -75,13 +75,13 @@ impl<O: Send + 'static> PoolMailbox<O> {
 
     /// `receive()`: runs the first message, and schedules the next one.
     fn receive(&self) {
-        let mut object = self.object.lock_unpoisoned();
+        let mut object = self.object.lock();
         let Some(target) = object.as_mut() else {
             return; // closed
         };
 
         let (message, was_empty) = {
-            let mut queue = self.queue.lock_unpoisoned();
+            let mut queue = self.queue.lock();
             if queue.closed {
                 return;
             }
@@ -91,12 +91,12 @@ impl<O: Send + 'static> PoolMailbox<O> {
             (message, queue.messages.is_empty())
         };
 
-        *self.receiving_thread.lock_unpoisoned() = Some(std::thread::current().id());
+        *self.receiving_thread.lock() = Some(std::thread::current().id());
         message(target);
-        *self.receiving_thread.lock_unpoisoned() = None;
+        *self.receiving_thread.lock() = None;
         // gtests-core: the message closed the mailbox (its actor was dropped
         // from inside it): drop the object now, outside the lock.
-        if self.queue.lock_unpoisoned().closed {
+        if self.queue.lock().closed {
             let closed_object = object.take();
             drop(object);
             drop(closed_object);
@@ -136,16 +136,16 @@ impl<O: Send + 'static> PoolMailbox<O> {
     /// afterwards. Returns the object.
     fn close(&self) -> Option<O> {
         self.abandon();
-        if *self.receiving_thread.lock_unpoisoned() == Some(std::thread::current().id()) {
+        if *self.receiving_thread.lock() == Some(std::thread::current().id()) {
             // gtests-core: inside one of our own messages; `receive()` drops
             // the object when it returns.
-            let mut queue = self.queue.lock_unpoisoned();
+            let mut queue = self.queue.lock();
             queue.closed = true;
             queue.messages.clear();
             return None;
         }
-        let mut object = self.object.lock_unpoisoned();
-        let mut queue = self.queue.lock_unpoisoned();
+        let mut object = self.object.lock();
+        let mut queue = self.queue.lock();
         queue.closed = true;
         queue.messages.clear();
         drop(queue);
@@ -216,9 +216,9 @@ impl<O: Send + 'static> Actor<O> {
             weak_self: weak_self.clone(),
         });
         let object = make(PoolActorRef { mailbox: Arc::downgrade(&mailbox) });
-        *mailbox.object.lock_unpoisoned() = Some(object);
+        *mailbox.object.lock() = Some(object);
         // Messages sent from `make` were queued before the object existed.
-        let pending = !mailbox.queue.lock_unpoisoned().messages.is_empty();
+        let pending = !mailbox.queue.lock().messages.is_empty();
         if pending {
             mailbox.schedule_to_receive();
         }

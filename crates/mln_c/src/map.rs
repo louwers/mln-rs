@@ -23,7 +23,7 @@ use crate::generated::types::{
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::runtime::{self, MapHandles};
-use crate::{abi, buffer, geo, lock, parse_thread, projection};
+use crate::{abi, buffer, geo, parse_thread, projection};
 
 abi::versioned!(mln_map_options, mln_map_snapshot, mln_feature_state_selector);
 
@@ -196,7 +196,7 @@ pub unsafe extern "C" fn mln_runtime_create_map(
         let (handle, created) = {
             // The runtime's events find the map's handle once this lock goes,
             // including the events of its creation.
-            let mut handles = lock(&runtime.maps);
+            let mut handles = runtime.maps.lock();
             let (map, created) = runtime.runtime.create_map(options)?;
             let id = map.id();
             let handle = MAPS.insert(Arc::new(MapObject { map, handles: Arc::clone(&runtime.maps), scale_factor }))?;
@@ -233,7 +233,7 @@ fn retire(
     let id = object.map.id();
     let handles = Arc::clone(&object.handles);
     released.on_complete(move |result| {
-        lock(&handles).remove(&id);
+        handles.lock().remove(&id);
         if let Some(completion) = completion {
             completion.complete(result.map_err(Error::from), Generations::default());
         }

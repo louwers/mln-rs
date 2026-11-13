@@ -2,7 +2,7 @@
 // backend is the WebGPU one here) and test/renderer/fill_bucket.test.cpp.
 
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
@@ -45,6 +45,7 @@ use mln_util::size::Size;
 use mln_vec_map::VecMap;
 use mln_webgpu::upload_pass::UploadPass as WebGpuUploadPass;
 use mln_webgpu::{Device, OffscreenTarget};
+use parking_lot::Mutex;
 
 /// `StubGeometryTileFeature(id, type, geometry, properties)`.
 struct StubGeometryTileFeature {
@@ -273,7 +274,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert!(Rc::ptr_eq(&buffer, &reused));
 
         // Data-driven paint values are freed too when nothing can rewrite them.
-        let binders = bucket.paint_property_binders.get("fill").unwrap().read().unwrap();
+        let binders = bucket.paint_property_binders.get("fill").unwrap().read();
         assert!(!binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(Some(&geometry), &bucket, buffer, false);
@@ -295,7 +296,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
     with_webgpu_upload_pass(|upload_pass| {
         bucket.upload(upload_pass);
         let geometry = BucketGeometry::default();
-        let binders = bucket.paint_property_binders.get("fill").unwrap().read().unwrap();
+        let binders = bucket.paint_property_binders.get("fill").unwrap().read();
         assert!(binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(Some(&geometry), &bucket, buffer, binders.depends_on_feature_state());
@@ -638,7 +639,7 @@ struct Recorder(Records);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push((severity, event, code, msg.to_owned()));
+        self.0.lock().push((severity, event, code, msg.to_owned()));
         true
     }
 }
@@ -653,10 +654,10 @@ impl FixtureLog {
         FixtureLog(records)
     }
     fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
-        self.0.lock().unwrap().iter().filter(|m| m.0 == severity && m.1 == event && m.2 == -1 && m.3 == msg).count()
+        self.0.lock().iter().filter(|m| m.0 == severity && m.1 == event && m.2 == -1 && m.3 == msg).count()
     }
     fn is_empty(&self) -> bool {
-        self.0.lock().unwrap().is_empty()
+        self.0.lock().is_empty()
     }
 }
 

@@ -40,6 +40,7 @@ mln_style_types.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true
+parking_lot.workspace = true
 serde_json.workspace = true
 skrifa.workspace = true
 wgpu.workspace = true

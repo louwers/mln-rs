@@ -5,10 +5,10 @@
 //! create the same file source at once, the first one registered wins and
 //! the other is dropped.
 
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
-use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
+use parking_lot::Mutex;
 
 use crate::asset_file_source::AssetFileSource;
 #[cfg(feature = "sqlite")]
@@ -128,7 +128,7 @@ impl FileSourceManager {
         };
 
         let factory = {
-            let mut registry = self.registry.lock_unpoisoned();
+            let mut registry = self.registry.lock();
             registry.file_sources.retain(|info| info.file_source.strong_count() > 0);
             if let Some(file_source) = find(&registry) {
                 return Some(file_source);
@@ -139,7 +139,7 @@ impl FileSourceManager {
         let file_source = factory(self, options);
 
         let existing = {
-            let mut registry = self.registry.lock_unpoisoned();
+            let mut registry = self.registry.lock();
             let existing = find(&registry);
             if existing.is_none() {
                 registry.file_sources.push(FileSourceInfo {
@@ -158,12 +158,12 @@ impl FileSourceManager {
     /// Sets the factory of a file source type, replacing any earlier one.
     /// File sources the earlier factory made stay shared until released.
     pub fn register_file_source_factory(&self, type_: FileSourceType, factory: FileSourceFactory) {
-        self.registry.lock_unpoisoned().factories.insert(type_, factory);
+        self.registry.lock().factories.insert(type_, factory);
     }
 
     /// Removes the factory of a file source type and returns it.
     #[must_use]
     pub fn unregister_file_source_factory(&self, type_: FileSourceType) -> Option<FileSourceFactory> {
-        self.registry.lock_unpoisoned().factories.remove(&type_)
+        self.registry.lock().factories.remove(&type_)
     }
 }

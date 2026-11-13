@@ -3,10 +3,11 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ::mln_runtime::{CacheDatabaseOperation, MapId, Runtime, RuntimeEvent, RuntimeOptions};
 use mln_storage::network_status::{NetworkStatus, Status};
+use parking_lot::Mutex;
 
 use crate::callback::Registration;
 use crate::completion::{self, Generations, PendingCompletion};
@@ -19,7 +20,7 @@ use crate::generated::types::{
     mln_runtime_event_handler, mln_runtime_options, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
-use crate::{abi, buffer, lock};
+use crate::{abi, buffer};
 
 abi::versioned!(mln_runtime_options, mln_runtime_event_handler);
 
@@ -177,7 +178,7 @@ pub unsafe extern "C" fn mln_runtime_set_event_handler(
         registration.accept();
         let command = object.runtime.set_event_handler(move |events: &[RuntimeEvent]| {
             let batch = {
-                let maps = lock(&maps);
+                let maps = maps.lock();
                 EventBatch::new(events, runtime, |id| maps.get(&id).copied().unwrap_or(handles::NULL))
             };
             delivery.deliver(move |user_data| {

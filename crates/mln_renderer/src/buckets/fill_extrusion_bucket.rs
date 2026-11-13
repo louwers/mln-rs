@@ -7,8 +7,8 @@
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -34,9 +34,9 @@ use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::mat3::{Mat3, matrix as mat3};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::sync::RwLockExt;
 use mln_util::vectors::Vec3f;
 use mln_vec_map::VecMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -325,7 +325,7 @@ impl Bucket for FillExtrusionBucket {
 
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -367,7 +367,7 @@ impl Bucket for FillExtrusionBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
+            binders.write().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

@@ -3,7 +3,7 @@
 //! ([`GestureCamera`]).
 
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use mln_map::{
@@ -12,7 +12,7 @@ use mln_map::{
 };
 use mln_util::UnitBezier;
 use mln_util::geo::ScreenCoordinate;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::camera::GestureCamera;
 use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
@@ -606,7 +606,7 @@ impl GestureRecognizer {
             return;
         }
         self.begun = true;
-        *self.cancelled_glide.lock_unpoisoned() = None;
+        *self.cancelled_glide.lock() = None;
         let phase = if self.options.interrupt_animations {
             GesturePhase::Begin
         } else {
@@ -614,7 +614,7 @@ impl GestureRecognizer {
             GesturePhase::Update
         };
         camera.apply_camera_delta(&CameraDelta { phase, ..CameraDelta::default() });
-        self.caught_glide = self.cancelled_glide.lock_unpoisoned().take().filter(|_| self.options.carry_caught_glide);
+        self.caught_glide = self.cancelled_glide.lock().take().filter(|_| self.options.carry_caught_glide);
     }
 
     /// One step of the gesture, at once.
@@ -634,7 +634,7 @@ impl GestureRecognizer {
             transition_id: Some(self.options.transition_id),
             transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {
                 if end.outcome == TransitionOutcome::Cancelled {
-                    *cancelled_glide.lock_unpoisoned() = Some(end.velocity);
+                    *cancelled_glide.lock() = Some(end.velocity);
                 }
             })),
             ..AnimationOptions::default()

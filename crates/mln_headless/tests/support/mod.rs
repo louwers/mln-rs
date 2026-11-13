@@ -22,7 +22,7 @@ use std::cell::{Cell, RefCell, RefMut};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use mln_actor::{AsyncTask, LocalObject, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
@@ -37,6 +37,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
+use parking_lot::Mutex;
 
 // MARK: - Fixtures
 
@@ -380,7 +381,7 @@ impl Default for FakeFileSource {
 impl FileSource for FakeFileSource {
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let id = {
-            let mut next = self.next_id.lock().unwrap();
+            let mut next = self.next_id.lock();
             *next += 1;
             *next
         };
@@ -398,11 +399,11 @@ impl FileSource for FakeFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock().clone()
     }
 }
 
@@ -415,7 +416,7 @@ struct Recorder(LogRecords);
 
 impl mln_util::logging::Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push(((severity, event, code, msg.to_owned()), false));
+        self.0.lock().push(((severity, event, code, msg.to_owned()), false));
         true
     }
 }
@@ -436,7 +437,7 @@ impl FixtureLog {
     /// `count(message)`: marks the matching records checked.
     pub fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
         let mut count = 0;
-        for ((s, e, c, m), checked) in self.messages.lock().unwrap().iter_mut() {
+        for ((s, e, c, m), checked) in self.messages.lock().iter_mut() {
             if *s == severity && *e == event && *c == code && m == msg {
                 *checked = true;
                 count += 1;
@@ -447,7 +448,7 @@ impl FixtureLog {
 
     /// `unchecked()`: the records nobody counted.
     pub fn unchecked(&self) -> Vec<LogRecord> {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).map(|(record, _)| record.clone()).collect()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(record, _)| record.clone()).collect()
     }
 }
 

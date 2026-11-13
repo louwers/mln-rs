@@ -21,6 +21,7 @@ glow.workspace = true
 mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
+parking_lot.workspace = true
 
 # The headless backend's context: EGL, whose library is loaded at run time.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

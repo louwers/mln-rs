@@ -10,12 +10,12 @@
 //! publishes waits, and the latest of it shows when the outermost group ends.
 //! A hold, which the map's owner sets apart from the groups, does the same.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::update_parameters::UpdateParameters;
 
@@ -53,7 +53,7 @@ impl Shared {
 
     /// Runs the wakers, with nothing locked.
     fn wake(&self) {
-        let wakers: Vec<Waker> = self.wakers.lock_unpoisoned().iter().map(|(_, waker)| waker.clone()).collect();
+        let wakers: Vec<Waker> = self.wakers.lock().iter().map(|(_, waker)| waker.clone()).collect();
         for waker in wakers {
             waker();
         }
@@ -90,7 +90,7 @@ impl UpdateSlot {
     /// is open, the update that shows when the last of them ends.
     pub fn publish(&self, parameters: Arc<UpdateParameters>) {
         {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             if state.group_depth > 0 || state.hold {
                 state.held = Some(parameters);
                 return;
@@ -108,7 +108,7 @@ impl UpdateSlot {
     /// Counts the updates that readers could see.
     #[must_use]
     pub fn generation(&self) -> u64 {
-        self.shared.state.lock_unpoisoned().generation
+        self.shared.state.lock().generation
     }
 
     /// The generation of the update that shows what was published last:
@@ -116,13 +116,13 @@ impl UpdateSlot {
     /// end shows.
     #[must_use]
     pub fn pending_generation(&self) -> u64 {
-        let state = self.shared.state.lock_unpoisoned();
+        let state = self.shared.state.lock();
         state.generation + u64::from(state.held.is_some())
     }
 
     /// Opens a command group. Groups nest.
     pub fn begin_group(&self) {
-        self.shared.state.lock_unpoisoned().group_depth += 1;
+        self.shared.state.lock().group_depth += 1;
     }
 
     /// Closes the innermost command group. When it was the outermost, the
@@ -131,7 +131,7 @@ impl UpdateSlot {
     /// open.
     pub fn end_group(&self) -> Result<(), Error> {
         let shown = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             if state.group_depth == 0 {
                 return Err(Error::invalid_state("the map has no open command group"));
             }
@@ -158,14 +158,14 @@ impl UpdateSlot {
     /// [`release`](Self::release). It doesn't nest, and it doesn't count
     /// as a group.
     pub fn hold(&self) {
-        self.shared.state.lock_unpoisoned().hold = true;
+        self.shared.state.lock().hold = true;
     }
 
     /// Ends the hold: the latest update published during it shows, unless
     /// a group still holds it.
     pub fn release(&self) {
         let shown = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             state.hold = false;
             Self::show_held(&mut state)
         };
@@ -177,14 +177,14 @@ impl UpdateSlot {
     /// How many command groups are open.
     #[must_use]
     pub fn group_depth(&self) -> u32 {
-        self.shared.state.lock_unpoisoned().group_depth
+        self.shared.state.lock().group_depth
     }
 }
 
 impl Drop for UpdateSlot {
     fn drop(&mut self) {
         {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             state.closed = true;
             state.latest = None;
             state.held = None;
@@ -217,7 +217,7 @@ impl UpdateReader {
     /// The latest update, if the map published one and is still there.
     #[must_use]
     pub fn latest(&self) -> Option<Update> {
-        let state = self.shared.state.lock_unpoisoned();
+        let state = self.shared.state.lock();
         let parameters = state.latest.clone()?;
         Some(Update { generation: state.generation, parameters })
     }
@@ -225,20 +225,20 @@ impl UpdateReader {
     /// The generation of the latest update, or 0 before the first.
     #[must_use]
     pub fn generation(&self) -> u64 {
-        self.shared.state.lock_unpoisoned().generation
+        self.shared.state.lock().generation
     }
 
     /// Whether the map that published to the slot is gone.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.shared.state.lock_unpoisoned().closed
+        self.shared.state.lock().closed
     }
 
     /// Sets the waker that runs when an update shows or the slot closes,
     /// until the reader drops. It runs on the map's thread, with the slot
     /// unlocked, and schedules the reader's work rather than drawing there.
     pub fn set_waker(&self, waker: Option<Waker>) {
-        let mut wakers = self.shared.wakers.lock_unpoisoned();
+        let mut wakers = self.shared.wakers.lock();
         wakers.retain(|(id, _)| *id != self.id);
         if let Some(waker) = waker {
             wakers.push((self.id, waker));

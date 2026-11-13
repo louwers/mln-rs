@@ -18,7 +18,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr};
@@ -285,7 +284,7 @@ impl CircleLayout {
 
         let length = bucket.vertices.len();
         for binders in bucket.paint_property_binders.values_mut() {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 feature_index,

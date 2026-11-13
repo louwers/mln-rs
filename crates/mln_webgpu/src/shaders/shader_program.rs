@@ -76,19 +76,17 @@ fn validated<T>(device: &wgpu::Device, create: impl FnOnce() -> T) -> Result<T, 
 /// doesn't parse goes as WGSL, for wgpu to report its error.
 #[cfg(not(target_family = "wasm"))]
 fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
-    use std::sync::Mutex;
-
-    use mln_util::sync::MutexExt;
+    use parking_lot::Mutex;
 
     static PARSED: Mutex<Option<HashMap<String, wgpu::naga::Module>>> = Mutex::new(None);
-    let cached = PARSED.lock_unpoisoned().get_or_insert_default().get(source).cloned();
+    let cached = PARSED.lock().get_or_insert_default().get(source).cloned();
     let module = if let Some(module) = cached {
         module
     } else {
         let Ok(module) = wgpu::naga::front::wgsl::parse_str(source) else {
             return wgpu::ShaderSource::Wgsl(Cow::Borrowed(source));
         };
-        PARSED.lock_unpoisoned().get_or_insert_default().insert(source.to_owned(), module.clone());
+        PARSED.lock().get_or_insert_default().insert(source.to_owned(), module.clone());
         module
     };
     wgpu::ShaderSource::Naga(Cow::Owned(module))

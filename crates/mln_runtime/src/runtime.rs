@@ -4,10 +4,10 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 #[cfg(not(target_family = "wasm"))]
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use mln_actor::{RunLoop, RunLoopHandle};
@@ -19,7 +19,7 @@ use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventHandler, RuntimeEvent};
@@ -100,7 +100,7 @@ impl RuntimeShared {
         instead: impl FnOnce(V),
     ) {
         // Posting with the lock held orders the task before a shutdown.
-        let lifecycle = self.lifecycle.lock_unpoisoned();
+        let lifecycle = self.lifecycle.lock();
         if lifecycle.shut_down {
             drop(lifecycle);
             instead(value);
@@ -119,14 +119,14 @@ impl RuntimeShared {
     }
 
     fn check_live(&self) -> Result<(), Error> {
-        if self.lifecycle.lock_unpoisoned().released { Err(released()) } else { Ok(()) }
+        if self.lifecycle.lock().released { Err(released()) } else { Ok(()) }
     }
 
     /// A map of the runtime was released or dropped. A disposed runtime shuts
     /// down with its last map.
     pub(crate) fn map_released(&self) {
         let shut_down = {
-            let mut lifecycle = self.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.lifecycle.lock();
             lifecycle.live_maps -= 1;
             let shut_down = lifecycle.released && lifecycle.live_maps == 0 && !lifecycle.shut_down;
             lifecycle.shut_down |= shut_down;
@@ -155,7 +155,7 @@ impl RuntimeShared {
 
 impl Drop for RuntimeShared {
     fn drop(&mut self) {
-        if !self.lifecycle.get_mut_unpoisoned().shut_down {
+        if !self.lifecycle.get_mut().shut_down {
             self.shut_down(None);
         }
     }
@@ -502,7 +502,7 @@ impl Runtime {
             return Err(Error::invalid_argument("the map's pixel ratio must be finite and positive"));
         }
         {
-            let mut lifecycle = self.shared.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.shared.lifecycle.lock();
             if lifecycle.released {
                 return Err(released());
             }
@@ -680,7 +680,7 @@ impl Runtime {
     /// released already. Every call on the runtime fails the same way after.
     pub fn release(&self) -> Result<Completion<()>, Error> {
         {
-            let mut lifecycle = self.shared.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.shared.lifecycle.lock();
             if lifecycle.released {
                 return Err(released());
             }
@@ -700,7 +700,7 @@ impl Runtime {
     /// with [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
     pub fn dispose(&self) -> Result<(), Error> {
         let shut_down = {
-            let mut lifecycle = self.shared.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.shared.lifecycle.lock();
             if lifecycle.released {
                 return Err(released());
             }

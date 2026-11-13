@@ -23,6 +23,7 @@ flate2.workspace = true
 geometry.workspace = true
 httpdate.workspace = true
 mln_math.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 unicode-properties.workspace = true

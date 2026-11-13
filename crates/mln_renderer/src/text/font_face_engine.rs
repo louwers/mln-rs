@@ -9,11 +9,11 @@
 // a second wasm module the first time a style declares font faces
 // (crates/mln_web_shaper).
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_text::HBShapeAdjust;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 /// A font file loaded for shaping: what `HBShaper` does for `GlyphManager`.
 pub trait FontFaceShaper {
@@ -47,12 +47,12 @@ static ENGINE: Mutex<Option<Arc<dyn FontFaceEngine>>> = Mutex::new(None);
 /// none): for a host that loads the shaper itself, such as the browser
 /// build.
 pub fn set_font_face_engine(engine: Arc<dyn FontFaceEngine>) {
-    *ENGINE.lock_unpoisoned() = Some(engine);
+    *ENGINE.lock() = Some(engine);
 }
 
 /// The engine `set_font_face_engine` set, else the default.
 pub fn font_face_engine() -> Arc<dyn FontFaceEngine> {
-    if let Some(engine) = ENGINE.lock_unpoisoned().clone() {
+    if let Some(engine) = ENGINE.lock().clone() {
         return engine;
     }
     default_engine()

@@ -4,12 +4,13 @@
 
 mod support;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use httpmock::MockServer;
 use mln_map::MapEvent;
 use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
+use parking_lot::Mutex;
 use support::{EMPTY_STYLE, EventLog, map, map_options, runtime, wait, wait_err};
 
 fn is_map_event(event: &RuntimeEvent, event_type: EventType) -> bool {
@@ -23,16 +24,16 @@ fn a_command_sends_its_events_before_it_completes() {
     let order = Arc::new(Mutex::new(Vec::new()));
     let events = order.clone();
     wait(runtime.set_event_handler(move |batch| {
-        events.lock().unwrap().extend(batch.iter().map(|event| format!("{:?}", event.kind.event_type())));
+        events.lock().extend(batch.iter().map(|event| format!("{:?}", event.kind.event_type())));
     }));
     let done = order.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     map.set_style_json(EMPTY_STYLE).unwrap().on_complete(move |result| {
-        done.lock().unwrap().push("completed".to_owned());
+        done.lock().push("completed".to_owned());
         tx.send(result).unwrap();
     });
     rx.recv_timeout(support::TIMEOUT).unwrap().unwrap();
-    let order = order.lock().unwrap();
+    let order = order.lock();
     let position = |name: &str| order.iter().position(|entry| entry == name);
     assert!(position("MapLoadingStarted") < position("MapStyleLoaded"), "{order:?}");
     assert!(position("MapStyleLoaded") < position("completed"), "{order:?}");
@@ -48,7 +49,7 @@ fn an_event_comes_after_a_snapshot_that_includes_it() {
         let snapshot = inner.snapshot().unwrap();
         for event in batch {
             if let EventSource::Map { generation, .. } = event.source {
-                record.lock().unwrap().push((generation, snapshot.generation));
+                record.lock().push((generation, snapshot.generation));
             }
         }
     }));
@@ -57,7 +58,7 @@ fn an_event_comes_after_a_snapshot_that_includes_it() {
         camera: mln_map::CameraOptions { zoom: Some(2.0), ..Default::default() },
         ..mln_map::CameraUpdate::default()
     }));
-    let checked = checked.lock().unwrap();
+    let checked = checked.lock();
     assert!(!checked.is_empty());
     assert!(checked.iter().all(|(event, snapshot)| event <= snapshot), "{checked:?}");
     assert!(checked.windows(2).all(|pair| pair[0].0 <= pair[1].0), "{checked:?}");

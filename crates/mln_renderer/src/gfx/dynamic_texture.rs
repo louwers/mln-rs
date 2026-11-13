@@ -13,8 +13,8 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_actor::LocalObject;
 use mln_gfx::Context;
@@ -22,7 +22,7 @@ use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
 use mln_util::size::Size;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use shelf_pack::{ShelfPack, ShelfPackOptions};
 
@@ -136,7 +136,7 @@ impl DynamicTexture {
     /// `getTexture()`: the GPU texture, once `upload_deferred_images` created
     /// it (render thread).
     pub fn get_texture(&self) -> Option<Texture2DPtr> {
-        let gpu_texture = self.gpu_texture.lock_unpoisoned();
+        let gpu_texture = self.gpu_texture.lock();
         gpu_texture.as_ref().and_then(LocalObject::get).and_then(|t| t.borrow().clone())
     }
 
@@ -145,12 +145,12 @@ impl DynamicTexture {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.lock_unpoisoned().num_textures == 0
+        self.inner.lock().num_textures == 0
     }
 
     /// `reserveSize(size, uniqueId)`.
     pub fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
-        let mut inner = self.inner.lock_unpoisoned();
+        let mut inner = self.inner.lock();
         let bin_ref = inner.shelf_pack.pack_one(unique_id, size.width as i32, size.height as i32)?;
         let bin = *inner.shelf_pack.bin(bin_ref);
         if bin.refcount() == 1 {
@@ -171,7 +171,7 @@ impl DynamicTexture {
     /// `uploadImage(pixelData, texHandle)` (webgpu: queue the pixels of the
     /// handle's rectangle for the next upload pass).
     pub fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
-        let mut inner = self.inner.lock_unpoisoned();
+        let mut inner = self.inner.lock();
         let rect = tex_handle.rectangle;
         let byte_size = rect.w as usize * rect.h as usize * pixel_stride(self.pixel_format);
         let image_data = pixel_data[..byte_size].to_vec();
@@ -182,7 +182,7 @@ impl DynamicTexture {
     /// `uploadDeferredImages(UploadPass&)`: creates the texture on first use
     /// and uploads the queued images (render thread).
     pub fn upload_deferred_images(&self, context: &dyn Context) {
-        let mut inner = self.inner.lock_unpoisoned();
+        let mut inner = self.inner.lock();
         let texture = if let Some(texture) = self.get_texture() {
             texture
         } else {
@@ -199,7 +199,7 @@ impl DynamicTexture {
                 });
                 t.create();
             }
-            *self.gpu_texture.lock_unpoisoned() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
+            *self.gpu_texture.lock() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
             texture
         };
         let mut t = texture.borrow_mut();
@@ -213,7 +213,7 @@ impl DynamicTexture {
     /// in handle order, for a mirror of this texture in another wasm
     /// instance (`tile/worker_codec`), which uploads them instead.
     pub fn take_uploads(&self) -> Vec<(i32, RectU16, Vec<u8>)> {
-        let mut inner = self.inner.lock_unpoisoned();
+        let mut inner = self.inner.lock();
         let mut uploads: Vec<_> = inner.images_to_upload.drain().map(|(id, (rect, data))| (id, rect, data)).collect();
         uploads.sort_by_key(|(id, _, _)| *id);
         uploads
@@ -232,14 +232,14 @@ impl DynamicTexture {
             intersect(span(other.x, other.w), span(rect.x, rect.w))
                 && intersect(span(other.y, other.h), span(rect.y, rect.h))
         };
-        let mut inner = self.inner.lock_unpoisoned();
+        let mut inner = self.inner.lock();
         inner.images_to_upload.retain(|_, (queued, _)| !overlaps(queued));
         inner.images_to_upload.insert(id, (rect, data));
     }
 
     /// `removeTexture(texHandle)`: true when the bin's last reference went.
     pub fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
-        let mut inner = self.inner.lock_unpoisoned();
+        let mut inner = self.inner.lock();
         let Some(bin) = inner.shelf_pack.get_bin(tex_handle.id) else {
             return false;
         };
@@ -255,7 +255,7 @@ impl DynamicTexture {
     /// Drops the render-thread GPU texture (render thread; a no-op
     /// elsewhere).
     pub(crate) fn release_gpu_texture(&self) {
-        let gpu_texture = self.gpu_texture.lock_unpoisoned().take();
+        let gpu_texture = self.gpu_texture.lock().take();
         if let Some(gpu_texture) = gpu_texture
             && let Some(cell) = gpu_texture.get()
         {

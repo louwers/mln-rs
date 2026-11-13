@@ -4,8 +4,8 @@
 // As in custom_geometry_tile.rs, the loader is an actor on the test's run
 // loop, which the test reaches through messages.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
@@ -21,6 +21,7 @@ use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVecto
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
+use parking_lot::Mutex;
 
 use super::RasterTileTest;
 
@@ -45,7 +46,7 @@ fn counter() -> (Arc<AtomicUsize>, TileFunction) {
 fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     let ids = Arc::new(Mutex::new(Vec::new()));
     let recorded = ids.clone();
-    (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().unwrap().push(*id)))
+    (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 
 fn tile(test: &RasterTileTest, id: OverscaledTileID, loader: PoolActorRef<CustomVectorTileLoader>) -> CustomVectorTile {
@@ -167,7 +168,7 @@ fn invalidate_region() {
         })
         .collect();
     test.run_loop.wait_for_empty();
-    assert_eq!(fetched.lock().unwrap().len(), tile_ids.len());
+    assert_eq!(fetched.lock().len(), tile_ids.len());
 
     // Cached data would otherwise answer the refetch.
     for tile in &tiles {
@@ -175,7 +176,7 @@ fn invalidate_region() {
         loader.self_ref().invoke(move |loader| loader.set_tile_data(&id, (None, TileDataFormat::Mvt)));
     }
     test.run_loop.wait_for_empty();
-    fetched.lock().unwrap().clear();
+    fetched.lock().clear();
 
     // Northeast of the origin, so it intersects the root tile, 1/1/0, and 2/2/1.
     let bounds = LatLngBounds::hull(LatLng::new(10.0, 10.0).unwrap(), LatLng::new(20.0, 20.0).unwrap());
@@ -189,8 +190,8 @@ fn invalidate_region() {
     test.run_loop.wait_for_empty();
     let intersecting =
         vec![CanonicalTileID::new(0, 0, 0), CanonicalTileID::new(1, 1, 0), CanonicalTileID::new(2, 2, 1)];
-    let mut cancelled = cancelled.lock().unwrap().clone();
-    let mut fetched = fetched.lock().unwrap().clone();
+    let mut cancelled = cancelled.lock().clone();
+    let mut fetched = fetched.lock().clone();
     cancelled.sort();
     fetched.sort();
     assert_eq!(cancelled, intersecting);

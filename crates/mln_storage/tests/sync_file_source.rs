@@ -4,7 +4,7 @@
 // depend on mln_storage.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
@@ -12,6 +12,7 @@ use mln_map::{Map, MapOptions};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{AsyncRequest, Callback, FileSource, Resource, ResourceOptions, Response};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 fn read_file(relative: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
@@ -32,14 +33,14 @@ struct SyncFileSource {
 
 impl SyncFileSource {
     fn add(&self, key: &str, data: Vec<u8>) {
-        self.assets.lock().unwrap().entry(key.to_owned()).or_insert(Arc::new(data));
+        self.assets.lock().entry(key.to_owned()).or_insert(Arc::new(data));
     }
 }
 
 impl FileSource for SyncFileSource {
     fn request(&self, resource: &Resource, mut callback: Callback) -> Box<dyn AsyncRequest> {
         let mut response = Response::new();
-        let data = self.assets.lock().unwrap().get(&resource.url).cloned();
+        let data = self.assets.lock().get(&resource.url).cloned();
         match data {
             None => {
                 response.error =

@@ -41,6 +41,7 @@ mln_text.workspace = true
 mln_util.workspace = true
 mln_web_host.workspace = true
 mln_webgpu.workspace = true
+parking_lot.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true

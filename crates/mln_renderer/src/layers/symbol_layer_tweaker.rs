@@ -21,7 +21,6 @@ use mln_style::layers::symbol_layer_properties::{
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::sync::RwLockExt;
 
 use super::render_symbol_layer::{SymbolDrawableData, SymbolType, get_screen_matrix};
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
@@ -162,7 +161,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                 debug_assert!(false);
                 return;
             };
-            let paint_properties = paint_properties.read_unpoisoned();
+            let paint_properties = paint_properties.read();
 
             let translate = if is_text { evaluated.get::<TextTranslate>() } else { evaluated.get::<IconTranslate>() };
             let anchor =

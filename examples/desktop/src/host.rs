@@ -21,12 +21,13 @@
 // window's.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
 use mln_actor::RunLoopHandle;
 use mln_gestures::{Button, Input, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use mln_util::geo::ScreenCoordinate;
+use parking_lot::{Mutex, MutexGuard};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
@@ -102,7 +103,7 @@ pub(crate) struct Inbox {
 
 impl Inbox {
     fn messages(&self) -> MutexGuard<'_, Vec<Message>> {
-        self.messages.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.messages.lock()
     }
 
     pub(crate) fn send(&self, message: Message) {

@@ -19,11 +19,10 @@
 // Foundation through objc2 is the FFI here.
 #![allow(unsafe_code)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use block2::{DynBlock, RcBlock};
 use mln_util::chrono::rfc1123;
-use mln_util::sync::MutexExt;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AnyThread, define_class, msg_send};
@@ -35,6 +34,7 @@ use objc2_foundation::{
     NSURLSession, NSURLSessionConfiguration, NSURLSessionDataTask, NSURLSessionDelegate, NSURLSessionTask,
     NSURLSessionTaskDelegate,
 };
+use parking_lot::Mutex;
 
 use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
 use crate::response::{Reason, ResourceError};
@@ -165,7 +165,7 @@ impl HttpTransport for NSURLSessionTransport {
             request.set_cancel_handler({
                 let slot = slot.clone();
                 move || {
-                    let mut slot = slot.lock_unpoisoned();
+                    let mut slot = slot.lock();
                     slot.cancelled = true;
                     if let Some(task) = slot.task.take() {
                         task.cancel();
@@ -177,7 +177,7 @@ impl HttpTransport for NSURLSessionTransport {
             let pending = Mutex::new(Some(request));
             let completion =
                 RcBlock::new(move |data: *mut NSData, response: *mut NSURLResponse, error: *mut NSError| {
-                    let Some(request) = pending.lock_unpoisoned().take() else {
+                    let Some(request) = pending.lock().take() else {
                         return;
                     };
                     // SAFETY: NSURLSession passes each object, or nil, valid
@@ -191,7 +191,7 @@ impl HttpTransport for NSURLSessionTransport {
             // delegate queue: it holds a `Mutex` of a `TransferRequest`.
             let task = unsafe { self.session.dataTaskWithRequest_completionHandler(&url_request, &completion) };
             {
-                let mut slot = slot.lock_unpoisoned();
+                let mut slot = slot.lock();
                 if slot.cancelled {
                     // Calls the completion block with NSURLErrorCancelled.
                     task.cancel();

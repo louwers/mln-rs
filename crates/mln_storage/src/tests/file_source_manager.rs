@@ -105,17 +105,17 @@ fn failing_transform(message: &'static str) -> ResourceTransform {
 fn loader_error(manager: &FileSourceManager) -> String {
     let run_loop = RunLoop::new();
     let loader = manager.get_file_source(FileSourceType::ResourceLoader, &ResourceOptions::default()).unwrap();
-    let message = Arc::new(std::sync::Mutex::new(String::new()));
+    let message = Arc::new(parking_lot::Mutex::new(String::new()));
     let (out, stop) = (message.clone(), run_loop.clone());
     let _req = loader.request(
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(move |res: Response| {
-            *out.lock().unwrap() = res.error.expect("error").message;
+            *out.lock() = res.error.expect("error").message;
             stop.stop();
         }),
     );
     run_loop.run();
-    message.lock().unwrap().clone()
+    message.lock().clone()
 }
 
 #[test]

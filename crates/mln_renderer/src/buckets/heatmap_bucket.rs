@@ -4,8 +4,8 @@
 // bucket is built on the worker thread and shared with `Arc`); the render
 // layer copies them into the shared gfx vectors its drawables reference.
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
 
 use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -20,8 +20,8 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -176,7 +176,7 @@ impl Bucket for HeatmapBucket {
 
         let length = self.vertices.len();
         for binders in self.paint_property_binders.values_mut() {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 feature_index,

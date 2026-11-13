@@ -6,9 +6,9 @@
 
 mod support;
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
 
 use mln_map::{CameraOptions, CameraUpdate, MapEvent, MapMode, TileOperation};
 use mln_runtime::{
@@ -22,6 +22,7 @@ use mln_storage::{ResourceError, Response};
 use mln_util::chrono::Timestamp;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 use support::{EventLog, TIMEOUT, eventually, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
@@ -973,7 +974,7 @@ impl HeldTile {
         let (holder, counter) = (held.clone(), requests.clone());
         wait(runtime.set_resource_provider(move |request: ResourceRequest| {
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                *holder.lock().unwrap() = Some(request);
+                *holder.lock() = Some(request);
             } else {
                 // A request that the renderer cancelled meanwhile takes no
                 // answer.
@@ -993,7 +994,7 @@ impl HeldTile {
     /// Answers the held request with an empty tile, unless the renderer
     /// cancelled it.
     fn answer(&self) {
-        if let Some(request) = self.held.lock().unwrap().take() {
+        if let Some(request) = self.held.lock().take() {
             let _ = request.respond(empty_tile());
         }
     }
@@ -1108,7 +1109,7 @@ impl TileServer {
         let revalidation = request.resource().prior_expires.is_some();
         if request.resource().kind == Kind::Tile && !revalidation {
             self.loads.fetch_add(1, Ordering::SeqCst);
-            if let Some(held) = self.held.lock().unwrap().as_mut() {
+            if let Some(held) = self.held.lock().as_mut() {
                 return held.push(request);
             }
         }
@@ -1116,11 +1117,11 @@ impl TileServer {
     }
 
     fn hold(&self) {
-        *self.held.lock().unwrap() = Some(Vec::new());
+        *self.held.lock() = Some(Vec::new());
     }
 
     fn release(&self) {
-        for request in self.held.lock().unwrap().take().unwrap_or_default() {
+        for request in self.held.lock().take().unwrap_or_default() {
             TileServer::answer(request, false);
         }
     }

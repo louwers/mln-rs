@@ -2,8 +2,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mln_actor::{RunLoop, Timer};
@@ -27,6 +27,7 @@ use mln_util::i18n;
 use mln_util::image::AlphaImage;
 use mln_util::size::Size;
 use mln_vec_map::{VecMap, VecSet};
+use parking_lot::Mutex;
 
 use super::glyph_manager_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
@@ -805,7 +806,7 @@ struct DeferredEngine {
 
 impl DeferredEngine {
     fn report(&self, result: &Result<(), String>) {
-        let ready = std::mem::take(&mut *self.ready.lock().unwrap());
+        let ready = std::mem::take(&mut *self.ready.lock());
         for ready in ready {
             ready(result.clone());
         }
@@ -815,7 +816,7 @@ impl DeferredEngine {
 impl FontFaceEngine for DeferredEngine {
     fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
         self.prepares.fetch_add(1, Ordering::SeqCst);
-        self.ready.lock().unwrap().push(ready);
+        self.ready.lock().push(ready);
     }
 
     fn load(&self, _type: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {

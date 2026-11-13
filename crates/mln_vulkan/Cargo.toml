@@ -24,6 +24,7 @@ mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 naga.workspace = true
+parking_lot.workspace = true
 
 # The NT handles of D3D12 fences, and the D3D11 textures of exported rings.
 [target.'cfg(windows)'.dependencies]

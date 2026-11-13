@@ -10,12 +10,12 @@
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Thread};
-use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
+use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType};
@@ -305,7 +305,7 @@ impl FileSource for MainResourceLoader {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        let mut resource_options = self.resource_options.lock_unpoisoned();
+        let mut resource_options = self.resource_options.lock();
         *resource_options = options.clone();
         for fs in self.in_member_order().into_iter().flatten() {
             fs.set_resource_options(options.clone());
@@ -313,6 +313,6 @@ impl FileSource for MainResourceLoader {
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock().clone()
     }
 }

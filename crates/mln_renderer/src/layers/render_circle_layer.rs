@@ -25,7 +25,6 @@ use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::sync::RwLockExt;
 use mln_util::vectors::{Vec2, Vec3, vec2_gl_fmod};
 
 use super::circle_layer_tweaker::CircleLayerTweaker;
@@ -595,7 +594,7 @@ impl RenderLayer for RenderCircleLayer {
             let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let binders_guard = binders_lock.read_unpoisoned();
+            let binders_guard = binders_lock.read();
             let paint_property_binders = &*binders_guard;
             let geometry = tile.get_bucket_geometry();
             let paint = || {

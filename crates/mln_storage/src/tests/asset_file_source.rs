@@ -4,10 +4,11 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_actor::{RunLoop, Thread};
+use parking_lot::Mutex;
 
 use super::{cpp_path, req};
 use crate::asset_file_source::AssetFileSource;
@@ -65,7 +66,7 @@ impl WorkerChain {
             Box::new(move |res: Response| {
                 // EXPECT_*: record, keep going.
                 if res.error.is_some() || res.data.as_deref().map(Vec::as_slice) != Some(b"content is here\n") {
-                    this.failures.lock().unwrap().push(format!("{res:?}"));
+                    this.failures.lock().push(format!("{res:?}"));
                 }
 
                 let remaining = this.num_requests.get() - 1;
@@ -144,7 +145,7 @@ fn load() {
 
     run_loop.run();
     drop(threads);
-    assert!(failures.lock().unwrap().is_empty(), "{:?}", failures.lock().unwrap().first());
+    assert!(failures.lock().is_empty(), "{:?}", failures.lock().first());
 }
 
 // gtest: AssetFileSource.AcceptsURL

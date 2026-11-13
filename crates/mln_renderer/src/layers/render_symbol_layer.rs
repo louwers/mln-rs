@@ -50,7 +50,6 @@ use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::sync::RwLockExt;
 use mln_util::vectors::{Vec2, Vec3, Vec4, vec2_max_scalar};
 
 use super::collision_layer_tweaker::{CollisionDrawableData, CollisionLayerTweaker};
@@ -237,7 +236,7 @@ fn capture_rendered_features(
     let Some(bucket_paint_properties) = bucket.paint_properties.get(layer_id) else {
         return;
     };
-    let bucket_paint_properties = bucket_paint_properties.read_unpoisoned();
+    let bucket_paint_properties = bucket_paint_properties.read();
     let icon_binders = &bucket_paint_properties.icon_binders;
     let text_binders = &bucket_paint_properties.text_binders;
 
@@ -778,7 +777,7 @@ fn update_tile_drawable(
             if refresh.binders
                 && let Some(paint_props) = bucket.paint_properties.get(layer_id)
             {
-                let paint_props = paint_props.read_unpoisoned();
+                let paint_props = paint_props.read();
                 let mut properties_as_uniforms = StringIDSetsPair::default();
                 set_binder_attributes(
                     geometry,
@@ -1561,7 +1560,7 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(bucket_paint_properties) = bucket.paint_properties.get(self.get_id()) else {
                 continue;
             };
-            let bucket_paint_properties = bucket_paint_properties.read_unpoisoned();
+            let bucket_paint_properties = bucket_paint_properties.read();
 
             let bucket_layout = &*bucket.layout;
             let values = if is_text {

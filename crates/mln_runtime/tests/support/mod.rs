@@ -1,12 +1,13 @@
 #![allow(dead_code)]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use mln_runtime::{Completion, Error, Map, MapOptions, Runtime, RuntimeEvent, RuntimeOptions};
 use mln_util::size::Size;
+use parking_lot::{Condvar, Mutex};
 
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -105,19 +106,19 @@ impl EventLog {
 
     pub fn push(&self, events: &[RuntimeEvent]) {
         let (events_so_far, changed) = &*self.shared;
-        events_so_far.lock().unwrap().extend_from_slice(events);
+        events_so_far.lock().extend_from_slice(events);
         changed.notify_all();
     }
 
     pub fn events(&self) -> Vec<RuntimeEvent> {
-        self.shared.0.lock().unwrap().clone()
+        self.shared.0.lock().clone()
     }
 
     /// Waits until the events hold an event that `wanted` accepts.
     pub fn wait_for(&self, mut wanted: impl FnMut(&RuntimeEvent) -> bool) -> Option<RuntimeEvent> {
         let (events, changed) = &*self.shared;
         let deadline = Instant::now() + TIMEOUT;
-        let mut events = events.lock().unwrap();
+        let mut events = events.lock();
         loop {
             if let Some(event) = events.iter().find(|event| wanted(event)) {
                 return Some(event.clone());
@@ -126,7 +127,7 @@ impl EventLog {
             if now >= deadline {
                 return None;
             }
-            events = changed.wait_timeout(events, deadline - now).unwrap().0;
+            changed.wait_for(&mut events, deadline - now);
         }
     }
 }

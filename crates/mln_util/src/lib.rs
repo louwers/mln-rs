@@ -44,7 +44,6 @@ pub mod quaternion;
 pub mod serialization;
 pub mod size;
 pub mod subdivision_granularity;
-pub mod sync;
 pub mod thread;
 pub mod tileset;
 pub mod time;

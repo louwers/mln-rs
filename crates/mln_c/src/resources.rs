@@ -34,14 +34,14 @@ use crate::generated::types::{
 };
 use crate::handles::{HandleKind, HandleTable};
 use crate::url_rules::{self, Routes, abi_kind};
-use crate::{abi, lock, runtime};
+use crate::{abi, runtime};
 
 abi::versioned!(mln_resource_provider, mln_resource_request_cancel_handler);
 
 /// A request that the host holds a handle to, until it answers or releases
 /// it.
 struct RequestObject {
-    request: std::sync::Mutex<Option<ResourceRequest>>,
+    request: parking_lot::Mutex<Option<ResourceRequest>>,
     /// Whether the request took a cancel callback, which it takes once.
     cancel_registered: AtomicBool,
 }
@@ -51,7 +51,7 @@ static REQUESTS: HandleTable<RequestObject> = HandleTable::new(HandleKind::Resou
 /// Ends `handle`, which fails its request if no answer came first.
 pub(crate) fn release(handle: mln_resource_request) -> Result<(), Error> {
     let object = REQUESTS.remove(handle)?;
-    let request = lock(&object.request).take();
+    let request = object.request.lock().take();
     drop(request);
     Ok(())
 }
@@ -187,7 +187,7 @@ impl ResourceProvider for HostProvider {
     fn request(&self, request: ResourceRequest) {
         let info = RequestInfo::new(request.resource());
         let object = Arc::new(RequestObject {
-            request: std::sync::Mutex::new(Some(request)),
+            request: parking_lot::Mutex::new(Some(request)),
             cancel_registered: AtomicBool::new(false),
         });
         // A full table drops the request, which fails it.
@@ -389,7 +389,7 @@ fn answer(
     answer: impl FnOnce(ResourceRequest) -> Result<(), mln_util::Error>,
 ) -> Result<(), Error> {
     let object = REQUESTS.remove(handle)?;
-    let request = lock(&object.request).take();
+    let request = object.request.lock().take();
     let request = request.ok_or_else(|| Error::invalid_state("the resource request was answered"))?;
     answer(request).map_err(Error::from)
 }
@@ -446,7 +446,7 @@ pub unsafe extern "C" fn mln_resource_request_is_cancelled(
 ) -> mln_status {
     export!(out_diagnostic, non_null(out_cancelled), {
         let object = REQUESTS.get(handle)?;
-        let cancelled = lock(&object.request).as_ref().is_none_or(ResourceRequest::is_cancelled);
+        let cancelled = object.request.lock().as_ref().is_none_or(ResourceRequest::is_cancelled);
         // SAFETY: non-null, and the caller's contract.
         unsafe { out_cancelled.write(cancelled) };
         Ok(())
@@ -496,7 +496,7 @@ pub unsafe extern "C" fn mln_resource_request_set_cancel_callback(
             // returns, or in the queue's dispatch after it.
             drop(cancel);
         };
-        let registered = match lock(&object.request).as_ref() {
+        let registered = match object.request.lock().as_ref() {
             Some(request) => request.on_cancel(on_cancel),
             None => Err(mln_util::Error::invalid_state("the resource request was answered")),
         };

@@ -7,9 +7,10 @@
 
 use core::cell::Cell;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Mutex, Once, RwLock, mpsc};
+use std::sync::{Once, mpsc};
 
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
+use parking_lot::{Mutex, RwLock};
 
 use crate::abi::{self, Fields};
 use crate::buffer::LentText;
@@ -21,7 +22,6 @@ use crate::generated::types::{
     MLN_LOG_SEVERITY_WARNING, mln_buffer_view, mln_diagnostic, mln_log_event, mln_log_handler, mln_log_severity,
     mln_log_severity_flags, mln_status,
 };
-use crate::lock;
 
 abi::versioned!(mln_log_handler);
 
@@ -76,7 +76,7 @@ fn flag(severity: mln_log_severity) -> mln_log_severity_flags {
 
 /// Sends `record` to the host's handler, if there is one.
 fn deliver(record: &Record) {
-    let handler = HANDLER.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let handler = HANDLER.read();
     let Some(handler) = &*handler else { return };
     let callback = handler.callback;
     let _forbid = ForbidReentry::enter(REENTRY);
@@ -102,7 +102,7 @@ fn deliver_later(record: Record) -> Result<(), Record> {
     if cfg!(target_family = "wasm") {
         return Err(record);
     }
-    let mut thread = lock(&LOG_THREAD);
+    let mut thread = LOG_THREAD.lock();
     if thread.is_none() {
         let (sender, receiver) = mpsc::channel::<Record>();
         let started = mln_util::thread::builder("mln-log")
@@ -128,7 +128,7 @@ impl Observer for Forwarder {
             return false;
         }
         let platform = {
-            let handler = HANDLER.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let handler = HANDLER.read();
             match &*handler {
                 Some(handler) => handler.platform_severities & flag(severity) != 0,
                 None => return false,
@@ -151,8 +151,7 @@ impl Observer for Forwarder {
 /// Replaces the handler, and releases the one it replaces as a log callback's
 /// release runs: unable to call the library.
 fn replace(handler: Option<Handler>) {
-    let previous =
-        core::mem::replace(&mut *HANDLER.write().unwrap_or_else(std::sync::PoisonError::into_inner), handler);
+    let previous = core::mem::replace(&mut *HANDLER.write(), handler);
     let _forbid = ForbidReentry::enter(REENTRY);
     drop(previous);
 }
@@ -219,9 +218,11 @@ pub unsafe extern "C" fn mln_log_set_async_severity_mask(
 #[cfg(test)]
 mod tests {
     use core::ffi::c_void;
-    use std::sync::{Arc, MutexGuard};
+    use std::sync::Arc;
     use std::thread::ThreadId;
     use std::time::{Duration, Instant};
+
+    use parking_lot::MutexGuard;
 
     use super::*;
     use crate::delivery::tests::queue;
@@ -242,7 +243,7 @@ mod tests {
     impl LogState {
         fn take() -> Self {
             static TURN: Mutex<()> = Mutex::new(());
-            Self(lock(&TURN))
+            Self(TURN.lock())
         }
     }
 
@@ -282,7 +283,7 @@ mod tests {
         }
 
         fn records(&self) -> Vec<Seen> {
-            lock(&self.records).clone()
+            self.records.lock().clone()
         }
 
         fn wait_for(&self, count: usize) -> Vec<Seen> {
@@ -318,10 +319,10 @@ mod tests {
             return;
         }
         if probe.call_back {
-            *lock(&probe.reentry) = Some(Probe::clear_from_callback());
+            *probe.reentry.lock() = Some(Probe::clear_from_callback());
         }
         let thread = std::thread::current().id();
-        lock(&probe.records).push(Seen { severity, event, code, message, thread });
+        probe.records.lock().push(Seen { severity, event, code, message, thread });
     }
 
     unsafe extern "C" fn release(user_data: *mut c_void) {
@@ -329,7 +330,7 @@ mod tests {
         let probe = unsafe { &*user_data.cast::<Probe>() };
         probe.releases.fetch_add(1, Ordering::SeqCst);
         if probe.call_back {
-            *lock(&probe.reentry) = Some(Probe::clear_from_callback());
+            *probe.reentry.lock() = Some(Probe::clear_from_callback());
         }
     }
 
@@ -444,7 +445,7 @@ mod tests {
         let probe = Probe::new("reentry", true);
         assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
         Log::warning(Event::General, "reentry");
-        let (status, text) = lock(&probe.reentry).take().unwrap();
+        let (status, text) = probe.reentry.lock().take().unwrap();
         assert_eq!(status, MLN_STATUS_INVALID_STATE);
         assert!(text.contains("log callback"), "{text}");
         // The callback's call changed nothing.
@@ -453,7 +454,7 @@ mod tests {
 
         assert_eq!(clear(), MLN_STATUS_OK);
         assert_eq!(probe.releases.load(Ordering::SeqCst), 1);
-        assert_eq!(lock(&probe.reentry).take().map(|(status, _)| status), Some(MLN_STATUS_INVALID_STATE));
+        assert_eq!(probe.reentry.lock().take().map(|(status, _)| status), Some(MLN_STATUS_INVALID_STATE));
     }
 
     #[test]
@@ -488,7 +489,7 @@ mod tests {
         assert_eq!(unsafe { mln_delivery_queue_dispatch(queue, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
         assert_eq!(probe.records().len(), 1);
         // From the queue's dispatch, the callback may call the library.
-        assert_eq!(lock(&probe.reentry).take().map(|(status, _)| status), Some(MLN_STATUS_OK));
+        assert_eq!(probe.reentry.lock().take().map(|(status, _)| status), Some(MLN_STATUS_OK));
         mln_delivery_queue_release(queue);
     }
 

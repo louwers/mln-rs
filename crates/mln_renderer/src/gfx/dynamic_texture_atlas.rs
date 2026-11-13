@@ -8,7 +8,7 @@
 // dynamic_texture.rs).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::types::TexturePixelType;
@@ -17,7 +17,7 @@ use mln_text::glyph::{Glyph, GlyphMap, GlyphPosition, GlyphPositions};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::serialization::sorted;
 use mln_util::size::Size;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
@@ -147,7 +147,7 @@ impl Drop for DynamicTextureAtlas {
     /// Frees the GPU textures with the atlas (render thread): textures still
     /// referenced elsewhere must not keep the map's device alive.
     fn drop(&mut self) {
-        let state = self.state.get_mut_unpoisoned();
+        let state = self.state.get_mut();
         for texture in state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()) {
             texture.release_gpu_texture();
         }
@@ -166,7 +166,7 @@ impl DynamicTextureAtlas {
 
     /// `uploadGlyphs(const GlyphMap&)`.
     pub fn upload_glyphs(&self, glyphs: &GlyphMap) -> GlyphAtlas {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         let mut glyph_atlas = GlyphAtlas::default();
         if glyphs.is_empty() {
@@ -268,7 +268,7 @@ impl DynamicTextureAtlas {
         patterns: &ImageMap,
         version_map: &ImageVersionMap,
     ) -> ImageAtlas {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         let mut image_atlas = ImageAtlas::default();
         if icons.is_empty() && patterns.is_empty() {
@@ -512,7 +512,7 @@ impl DynamicTextureAtlas {
             return;
         };
 
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         for tex_handle in texture_handles {
             Self::release_texture(&mut state, dynamic_texture, tex_handle);
@@ -523,13 +523,13 @@ impl DynamicTextureAtlas {
     /// the map side's mirror of a tile worker's atlas in another wasm
     /// instance (`tile/worker_codec`).
     pub fn textures(&self) -> Vec<DynamicTexturePtr> {
-        let state = self.state.lock_unpoisoned();
+        let state = self.state.lock();
         state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()).cloned().collect()
     }
 
     /// `removeUnusedDynamicTextures()` (render thread).
     pub fn remove_unused_dynamic_textures(&self) {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         // release textures not referenced elsewhere (by an atlas still alive
         // on a worker thread), so the last reference is always dropped on

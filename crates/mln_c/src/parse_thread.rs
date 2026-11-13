@@ -8,12 +8,12 @@
 //! the caller's thread, its only one.
 
 #[cfg(not(target_family = "wasm"))]
-use std::sync::{Mutex, mpsc};
+use std::sync::mpsc;
+
+use parking_lot::Mutex;
 
 use crate::error::Error;
 #[cfg(not(target_family = "wasm"))]
-use crate::lock;
-
 #[cfg(not(target_family = "wasm"))]
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -23,7 +23,7 @@ static JOBS: Mutex<Option<mpsc::Sender<Job>>> = Mutex::new(None);
 
 #[cfg(not(target_family = "wasm"))]
 fn jobs() -> Result<mpsc::Sender<Job>, Error> {
-    let mut jobs = lock(&JOBS);
+    let mut jobs = JOBS.lock();
     if let Some(jobs) = &*jobs {
         return Ok(jobs.clone());
     }

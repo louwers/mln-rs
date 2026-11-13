@@ -4,8 +4,8 @@
 mod momentum;
 
 use core::ffi::c_void;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ::mln_map::{
@@ -19,6 +19,7 @@ use mln_util::constants::{MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D, TILE_SIZE_I};
 use mln_util::geo::{EdgeInsets, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::for_each_point;
 use mln_util::projection::Projection;
+use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
 use crate::callback::Registration;
@@ -55,7 +56,7 @@ use crate::generated::types::{
     mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point, mln_status,
 };
 use crate::map::{command, query};
-use crate::{buffer, geo, handles, lock};
+use crate::{buffer, geo, handles};
 
 abi::versioned!(
     mln_bound_options,
@@ -231,7 +232,7 @@ impl EndHandler {
 
     fn set_accepted(&self, accepted: bool) {
         self.accepted.store(accepted, Ordering::Release);
-        if let Some(registration) = &*lock(&self.registration) {
+        if let Some(registration) = &*self.registration.lock() {
             if accepted {
                 registration.accept();
             } else {
@@ -241,7 +242,7 @@ impl EndHandler {
     }
 
     fn end(&self, end: &TransitionEnd) {
-        let Some(registration) = lock(&self.registration).take() else { return };
+        let Some(registration) = self.registration.lock().take() else { return };
         let callback = self.callback;
         let end = from_transition_end(end);
         // SAFETY: the host's end callback with its user data, and an end that

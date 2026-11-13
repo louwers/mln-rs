@@ -5,8 +5,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use feature::Value;
@@ -14,6 +14,7 @@ use mln_actor::{RunLoop, Timer};
 use mln_test_server::{HttpServer, closed_port_url};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::time::Instant;
+use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
@@ -824,7 +825,7 @@ fn a_header_transform_runs_for_every_attempt() {
     let urls = Arc::new(Mutex::new(Vec::new()));
     let seen = urls.clone();
     fs.set_http_header_transform(HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {
-        seen.lock().unwrap().push((kind, url.to_owned()));
+        seen.lock().push((kind, url.to_owned()));
         vec![("X-Test-Token".to_owned(), "secret-token".to_owned())]
     }))));
 
@@ -843,5 +844,5 @@ fn a_header_transform_runs_for_every_attempt() {
     );
 
     run_loop.run();
-    assert_eq!(vec![(Kind::Source, target.clone()), (Kind::Source, target)], *urls.lock().unwrap());
+    assert_eq!(vec![(Kind::Source, target.clone()), (Kind::Source, target)], *urls.lock());
 }

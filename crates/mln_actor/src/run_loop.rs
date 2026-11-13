@@ -26,10 +26,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 
-use mln_util::sync::{CondvarExt, MutexExt};
+use parking_lot::{Condvar, Mutex};
 
 use crate::scheduler::{self, Scheduler};
 use crate::timer::TimerHandle;
@@ -69,7 +69,7 @@ impl Core {
     }
 
     fn push(&self, task: Task) {
-        self.queue.lock_unpoisoned().push_back(task);
+        self.queue.lock().push_back(task);
         // wake()
         self.queue_pending.store(true, Ordering::SeqCst);
         self.wake();
@@ -78,40 +78,40 @@ impl Core {
     /// Wakes a blocking `run()` (what `uv_async_send` does for libuv).
     pub(crate) fn wake(&self) {
         {
-            let mut signalled = self.signal.lock_unpoisoned();
+            let mut signalled = self.signal.lock();
             *signalled = true;
             self.condvar.notify_all();
         }
-        let waker = self.waker.lock_unpoisoned().clone();
+        let waker = self.waker.lock().clone();
         if let Some(waker) = waker {
             waker();
         }
     }
 
     fn wait(&self) {
-        let mut signalled = self.signal.lock_unpoisoned();
+        let mut signalled = self.signal.lock();
         while !*signalled {
-            signalled = self.condvar.wait_unpoisoned(signalled);
+            self.condvar.wait(&mut signalled);
         }
         *signalled = false;
     }
 
     /// `wait`, but returns at `deadline` at the latest.
     fn wait_until(&self, deadline: mln_util::time::Instant) {
-        let mut signalled = self.signal.lock_unpoisoned();
+        let mut signalled = self.signal.lock();
         while !*signalled {
             let now = mln_util::time::Instant::now();
             if now >= deadline {
                 return;
             }
-            signalled = self.condvar.wait_timeout_unpoisoned(signalled, deadline - now).0;
+            self.condvar.wait_for(&mut signalled, deadline - now);
         }
         *signalled = false;
     }
 
     fn process(&self) {
         loop {
-            let Some(task) = self.queue.lock_unpoisoned().pop_front() else {
+            let Some(task) = self.queue.lock().pop_front() else {
                 break;
             };
             task();
@@ -119,7 +119,7 @@ impl Core {
     }
 
     fn remaining(&self) -> usize {
-        self.queue.lock_unpoisoned().len()
+        self.queue.lock().len()
     }
 }
 
@@ -267,7 +267,7 @@ impl RunLoop {
     /// the loop with `run_once` on its own thread knows to run it. Timers
     /// don't wake: such a host runs the loop at least once a frame.
     pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
-        *self.inner.core.waker.lock_unpoisoned() = waker;
+        *self.inner.core.waker.lock() = waker;
     }
 
     /// Whether a [`stop`](Self::stop) task ran, for a host that drives the
@@ -413,7 +413,7 @@ impl RunLoopHandle {
 
     /// [`RunLoop::set_waker`] from any thread.
     pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
-        *self.core.waker.lock_unpoisoned() = waker;
+        *self.core.waker.lock() = waker;
     }
 
     /// `RunLoop::invoke` from any thread.

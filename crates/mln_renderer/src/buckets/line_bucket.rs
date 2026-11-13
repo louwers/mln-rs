@@ -1,7 +1,7 @@
 // Ports src/mln/renderer/buckets/line_bucket.hpp and line_bucket.cpp
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -25,8 +25,8 @@ use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -289,7 +289,7 @@ impl Bucket for LineBucket {
 
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -317,17 +317,17 @@ impl Bucket for LineBucket {
         let offset = get_or_max(
             evaluated.get::<LineOffset>().constant(),
             LineOffset::default_value(),
-            binders.and_then(|b| b.read_unpoisoned().line_offset.statistics.max()),
+            binders.and_then(|b| b.read().line_offset.statistics.max()),
         );
         let mut line_width = get_or_max(
             evaluated.get::<LineWidth>().constant(),
             LineWidth::default_value(),
-            binders.and_then(|b| b.read_unpoisoned().line_width.statistics.max()),
+            binders.and_then(|b| b.read().line_width.statistics.max()),
         );
         let gap_width = get_or_max(
             evaluated.get::<LineGapWidth>().constant(),
             LineGapWidth::default_value(),
-            binders.and_then(|b| b.read_unpoisoned().line_gap_width.statistics.max()),
+            binders.and_then(|b| b.read().line_gap_width.statistics.max()),
         );
         if gap_width != 0.0 {
             line_width = gap_width + 2.0 * line_width;
@@ -344,7 +344,7 @@ impl Bucket for LineBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
+            binders.write().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

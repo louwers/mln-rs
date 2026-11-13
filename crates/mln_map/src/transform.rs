@@ -15,7 +15,7 @@
 use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use geometry::Point;
@@ -34,8 +34,8 @@ use mln_util::interpolate::interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
-use mln_util::sync::MutexExt;
 use mln_util::time::Instant;
+use parking_lot::Mutex;
 
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -2446,7 +2446,7 @@ fn joint_end(animation: &AnimationOptions, count: u32) -> AnimationOptions {
     // The remaining commands and the outcome so far.
     let state = Mutex::new((count, TransitionOutcome::Completed));
     let joint = move |end: &TransitionEnd| {
-        let mut state = state.lock_unpoisoned();
+        let mut state = state.lock();
         let (remaining, outcome) = *state;
         let worst = match (outcome, end.outcome) {
             (TransitionOutcome::Cancelled, _) | (_, TransitionOutcome::Cancelled) => TransitionOutcome::Cancelled,

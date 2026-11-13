@@ -11,9 +11,9 @@
 // returning, every reply goes out as soon as it's sent, as in C++.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::tile::tile_worker_transport::TileEndpoint;
 
@@ -55,7 +55,7 @@ impl<M> OrderedReplies<M> {
 
     /// The slot of the next reply.
     pub fn slot(&self) -> ReplySlot<M> {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
         let number = state.first + state.slots.len() as u64;
         state.slots.push_back(Slot::Waiting);
         ReplySlot { state: Arc::downgrade(&self.state), number, filled: false }
@@ -73,7 +73,7 @@ impl<M> ReplySlot<M> {
         let Some(state) = self.state.upgrade() else {
             return;
         };
-        let mut state = state.lock_unpoisoned();
+        let mut state = state.lock();
         let index = (self.number - state.first) as usize;
         state.slots[index] = slot;
         while !matches!(state.slots.front(), None | Some(Slot::Waiting)) {
@@ -101,7 +101,7 @@ mod tests {
 
     impl TileEndpoint<u32> for Recorder {
         fn send(&self, message: u32) {
-            self.0.lock_unpoisoned().push(message);
+            self.0.lock().push(message);
         }
     }
 
@@ -110,17 +110,17 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let replies = OrderedReplies::new(Box::new(Recorder(sent.clone())));
         replies.slot().send(1);
-        assert_eq!(*sent.lock_unpoisoned(), [1]);
+        assert_eq!(*sent.lock(), [1]);
 
         let (a, b, c, d) = (replies.slot(), replies.slot(), replies.slot(), replies.slot());
         c.send(4);
         b.send(3);
-        assert_eq!(*sent.lock_unpoisoned(), [1]);
+        assert_eq!(*sent.lock(), [1]);
         a.send(2);
-        assert_eq!(*sent.lock_unpoisoned(), [1, 2, 3, 4]);
+        assert_eq!(*sent.lock(), [1, 2, 3, 4]);
         drop(d);
         replies.slot().send(5);
-        assert_eq!(*sent.lock_unpoisoned(), [1, 2, 3, 4, 5]);
+        assert_eq!(*sent.lock(), [1, 2, 3, 4, 5]);
     }
 
     #[test]
@@ -130,6 +130,6 @@ mod tests {
         let slot = replies.slot();
         drop(replies);
         slot.send(1);
-        assert!(sent.lock_unpoisoned().is_empty());
+        assert!(sent.lock().is_empty());
     }
 }

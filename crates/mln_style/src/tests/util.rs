@@ -1,9 +1,10 @@
 //! Test helpers: the C++ `FixtureLog` (per thread, see `mln_util::logging`)
 //! and `convertJSON`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
+use parking_lot::Mutex;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogMessage {
@@ -17,7 +18,7 @@ struct Recorder(Arc<Mutex<Vec<(LogMessage, bool)>>>);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push((LogMessage { severity, event, code, msg: msg.to_owned() }, false));
+        self.0.lock().push((LogMessage { severity, event, code, msg: msg.to_owned() }, false));
         true
     }
 }
@@ -37,7 +38,7 @@ impl FixtureLog {
     /// `count(message)`: the number of matching messages, which are then
     /// checked (C++ ignores the code when it is -1 in the pattern).
     pub fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
-        let mut messages = self.messages.lock().unwrap();
+        let mut messages = self.messages.lock();
         let mut count = 0;
         for (m, checked) in messages.iter_mut() {
             if m.severity == severity && m.event == event && m.msg == msg {
@@ -50,16 +51,16 @@ impl FixtureLog {
 
     /// `unchecked()`: the messages no `count` call has matched.
     pub fn unchecked(&self) -> Vec<LogMessage> {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
     }
 
     /// `empty()`.
     pub fn is_empty(&self) -> bool {
-        self.messages.lock().unwrap().is_empty()
+        self.messages.lock().is_empty()
     }
 
     pub fn messages(&self) -> Vec<LogMessage> {
-        self.messages.lock().unwrap().iter().map(|(m, _)| m.clone()).collect()
+        self.messages.lock().iter().map(|(m, _)| m.clone()).collect()
     }
 }
 

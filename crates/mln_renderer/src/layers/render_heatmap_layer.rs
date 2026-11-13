@@ -39,7 +39,6 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::sync::RwLockExt;
 
 use super::heatmap_layer_tweaker::HeatmapLayerTweaker;
 use super::heatmap_texture_layer_tweaker::HeatmapTextureLayerTweaker;
@@ -393,7 +392,7 @@ impl RenderLayer for RenderHeatmapLayer {
             let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let binders_guard = binders_lock.read_unpoisoned();
+            let binders_guard = binders_lock.read();
             let paint_property_binders = &*binders_guard;
             let geometry = tile.get_bucket_geometry();
 

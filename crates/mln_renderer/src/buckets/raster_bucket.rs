@@ -10,8 +10,8 @@
 // render-thread objects (`Rc`), so the render layer keeps them per bucket
 // id instead (see render_raster_layer.rs).
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -19,8 +19,8 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
-use mln_util::sync::MutexExt;
 use mln_util::time::Instant;
+use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -108,7 +108,7 @@ impl RasterBucket {
 
     /// The masked geometry (C++ reads the members directly).
     pub fn geometry(&self) -> MutexGuard<'_, RasterBucketGeometry> {
-        self.geometry.lock_unpoisoned()
+        self.geometry.lock()
     }
 
     /// `clear()`.

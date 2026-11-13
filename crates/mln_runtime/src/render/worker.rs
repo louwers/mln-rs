@@ -24,7 +24,6 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_util::sync::MutexExt;
 use mln_util::time::Instant;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
@@ -76,8 +75,8 @@ fn run(task: impl FnOnce(&mut Worker, &mut Outbox)) {
     let _call = shared.enter_call();
     let mut outbox = Outbox::default();
     if let Some(worker) = slot.borrow_mut().as_mut() {
-        let _gate = shared.gate.lock_unpoisoned();
-        if !worker.torn_down && shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned {
+        let _gate = shared.gate.lock();
+        if !worker.torn_down && shared.state.lock().lifecycle == RenderSessionState::Abandoned {
             worker.tear_down(&mut outbox);
         }
         task(worker, &mut outbox);
@@ -156,7 +155,7 @@ impl TargetInit {
 pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl std::future::Future<Output = ()> + 'static {
     let needs_device = shared
         .state
-        .lock_unpoisoned()
+        .lock()
         .init
         .as_ref()
         .and_then(|init| init.downcast_ref::<Init>())
@@ -170,7 +169,7 @@ pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl std::future::Future<O
         let made = mln_webgpu::Device::request().await.map(Device::WebGpu);
         #[cfg(not(feature = "webgpu"))]
         let made: Result<Device, Error> = Err(Error::unsupported("this build has no WebGPU"));
-        let mut state = shared.state.lock_unpoisoned();
+        let mut state = shared.state.lock();
         if let Some(init) = state.init.as_mut().and_then(|init| init.downcast_mut::<Init>()) {
             match made {
                 #[cfg(feature = "webgpu")]
@@ -194,12 +193,12 @@ pub(crate) enum TargetInit {
 /// Builds the session's renderer into `slot`, on the thread that runs the
 /// session's work, before any other work.
 pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
-    let Some(Ok(init)) = shared.state.lock_unpoisoned().init.take().map(<Box<dyn Any + Send>>::downcast::<Init>) else {
+    let Some(Ok(init)) = shared.state.lock().init.take().map(<Box<dyn Any + Send>>::downcast::<Init>) else {
         return;
     };
     let _call = shared.enter_call();
     let mut outbox = Outbox::default();
-    let gate = shared.gate.lock_unpoisoned();
+    let gate = shared.gate.lock();
     let worker = Worker::new(shared.clone(), *init, &mut outbox);
     *slot.borrow_mut() = Some(worker);
     drop(gate);
@@ -480,7 +479,7 @@ impl Worker {
             });
         })));
         // A session that a detach or abandon reached first needs no renderer.
-        let attaching = shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Attaching;
+        let attaching = shared.state.lock().lifecycle == RenderSessionState::Attaching;
         let scale_factor = init.scale_factor;
         let ring = match &init.target {
             TargetInit::Borrowed { ring, .. } => Some(ring.clone()),
@@ -490,7 +489,7 @@ impl Worker {
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
-                let mut state = shared.state.lock_unpoisoned();
+                let mut state = shared.state.lock();
                 state.graphics_objects = Gfx::OBJECTS - 1;
                 state.abandon_keeps_graphics = gfx.target.device().abandon_keeps_graphics();
                 drop(state);
@@ -498,7 +497,7 @@ impl Worker {
             }
             Some(Err(error)) => {
                 let attach = {
-                    let mut state = shared.state.lock_unpoisoned();
+                    let mut state = shared.state.lock();
                     if state.lifecycle == RenderSessionState::Attaching {
                         state.lifecycle = RenderSessionState::Failed;
                     }
@@ -583,7 +582,7 @@ impl Worker {
         self.reader = Some(reader);
         self.map_events = Some(events);
         let attach = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             if state.lifecycle == RenderSessionState::Attaching {
                 state.lifecycle = RenderSessionState::Attached;
             }
@@ -605,7 +604,7 @@ impl Worker {
     /// The map couldn't bind the session.
     pub(crate) fn bind_failed(&mut self, error: Error, outbox: &mut Outbox) {
         let attach = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             if state.lifecycle == RenderSessionState::Attaching {
                 state.lifecycle = RenderSessionState::Failed;
                 state.failure = Some(error.clone());
@@ -732,7 +731,7 @@ impl Worker {
     /// Whether a ring replacement is on its way, which gives the demands
     /// that wait a new target: they render to it once it lands.
     fn retargeting(&self) -> bool {
-        self.shared.state.lock_unpoisoned().pending_retargets != 0
+        self.shared.state.lock().pending_retargets != 0
     }
 
     /// Runs the demands whose map commands ran and the work that waits
@@ -803,7 +802,7 @@ impl Worker {
         let latest = self.latest();
         let latest_generation = latest.as_ref().map_or(0, |update| update.generation);
         if self.gfx.is_none() {
-            let failed = self.shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Failed;
+            let failed = self.shared.state.lock().lifecycle == RenderSessionState::Failed;
             let disposition = if failed { FrameDisposition::Failed } else { FrameDisposition::TargetNotReady };
             self.publish(&FrameResult::unrendered(token, disposition, latest_generation), outbox);
             return None;
@@ -920,14 +919,14 @@ impl Worker {
         if self.torn_down || self.reader.is_none() || self.gfx.is_none() {
             return false;
         }
-        let state = self.shared.state.lock_unpoisoned();
+        let state = self.shared.state.lock();
         state.lifecycle == RenderSessionState::Attached
             && state.has_target
             && (state.ring.is_empty() || !state.ring.iter().all(|slot| slot.quarantined))
     }
 
     fn generation(&self) -> u64 {
-        self.shared.state.lock_unpoisoned().generation
+        self.shared.state.lock().generation
     }
 
     /// Renders `update` for the demand `token`, or for the still image's
@@ -960,7 +959,7 @@ impl Worker {
             gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames))
         };
         {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
         }
         let mut events = self.renderer_events.take();
@@ -995,7 +994,7 @@ impl Worker {
                 // The session takes the frame's generation in
                 // `publish_frame`.
                 let (generation, frame_generation) = {
-                    let state = self.shared.state.lock_unpoisoned();
+                    let state = self.shared.state.lock();
                     (state.generation, state.frame_generation + 1)
                 };
                 FrameResult {
@@ -1051,7 +1050,7 @@ impl Worker {
     /// drained and, in a ring, its slot acquired.
     fn publish_frame(&self, slot: Option<(usize, Option<Published>)>, result: &FrameResult, outbox: &mut Outbox) {
         let wake = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             if let Some((slot, published)) = slot
                 && let Some(entry) = state.ring.get_mut(slot)
             {
@@ -1100,7 +1099,7 @@ impl Worker {
     /// it as rendering: one that holds no frame, or else the one with the
     /// oldest frame that the host didn't acquire.
     fn pick_slot(&self) -> RingPick {
-        let mut state = self.shared.state.lock_unpoisoned();
+        let mut state = self.shared.state.lock();
         if state.ring.is_empty() {
             return RingPick::None;
         }
@@ -1130,7 +1129,7 @@ impl Worker {
     /// Ends a frame rendered into the ring's `slot`, which then holds
     /// `published` for the host to acquire.
     fn end_slot(&self, slot: usize, published: Option<Published>) {
-        let mut state = self.shared.state.lock_unpoisoned();
+        let mut state = self.shared.state.lock();
         if let Some(entry) = state.ring.get_mut(slot) {
             entry.rendering = false;
             entry.frame = published;
@@ -1147,7 +1146,7 @@ impl Worker {
         let kind = consumer.sync.kind;
         let released = match self.gfx.as_ref() {
             Some(gfx) if gfx.target.ring_released() => {
-                let mut state = self.shared.state.lock_unpoisoned();
+                let mut state = self.shared.state.lock();
                 if let Some(entry) = state.ring.get_mut(slot) {
                     entry.acquired = false;
                     entry.quarantined |= kind != SyncKind::CpuComplete;
@@ -1162,7 +1161,7 @@ impl Worker {
             None => Err(Error::target_lost("the render session lost its renderer")),
         };
         let failure = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             if let Some(entry) = state.ring.get_mut(slot) {
                 entry.acquired = false;
                 entry.quarantined |= released.is_err() && kind != SyncKind::CpuComplete && !entry.retired;
@@ -1226,7 +1225,7 @@ impl Worker {
         let pending = replaced?;
         let old = self.ring.replace(ring.clone());
         {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             // The host's GPU may still read a texture it gave up, wherever it
             // is in the new ring.
             let quarantined: Vec<bool> = (0..state.ring.len())
@@ -1272,7 +1271,7 @@ impl Worker {
 
     /// The target's size in logical pixels.
     pub(crate) fn size(&self) -> Size {
-        self.shared.state.lock_unpoisoned().size
+        self.shared.state.lock().size
     }
 
     pub(crate) fn renderer(&mut self) -> Result<&mut Renderer, Error> {
@@ -1295,7 +1294,7 @@ impl Worker {
                 // in the same step as the snapshot, so that none is acquired
                 // with an image that the resize lets go of.
                 let held: Vec<usize> = {
-                    let mut state = self.shared.state.lock_unpoisoned();
+                    let mut state = self.shared.state.lock();
                     for slot in state.ring.iter_mut().filter(|slot| !slot.acquired) {
                         slot.frame = None;
                     }
@@ -1310,7 +1309,7 @@ impl Worker {
                     // slot that the host gave up is free, and one it holds
                     // has its old image retired.
                     Ok(true) => {
-                        let mut state = self.shared.state.lock_unpoisoned();
+                        let mut state = self.shared.state.lock();
                         for slot in &mut state.ring {
                             if slot.acquired {
                                 slot.retired = true;
@@ -1338,7 +1337,7 @@ impl Worker {
     /// way, and lets go of its renderer and target.
     fn fail(&mut self, error: Error, outbox: &mut Outbox) {
         let failed = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             let attached = self.gfx.is_some() && state.lifecycle == RenderSessionState::Attached;
             if attached {
                 state.lifecycle = RenderSessionState::Failed;
@@ -1367,7 +1366,7 @@ impl Worker {
     /// `has_target` says so.
     fn target_changed(&mut self, size: Size, has_target: Option<bool>) {
         self.has_frame = false;
-        let mut state = self.shared.state.lock_unpoisoned();
+        let mut state = self.shared.state.lock();
         state.size = size;
         state.scale_factor = self.scale_factor;
         state.generation += 1;
@@ -1391,7 +1390,7 @@ impl Worker {
         self.has_frame = false;
         self.ring = None;
         {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             state.has_target = false;
             for slot in &mut state.ring {
                 slot.frame = None;
@@ -1589,7 +1588,7 @@ impl Worker {
         self.map_events = None;
         self.sources = None;
         self.has_frame = false;
-        let attach = self.shared.state.lock_unpoisoned().attach.take();
+        let attach = self.shared.state.lock().attach.take();
         if let Some(attach) = attach {
             outbox.resolve(attach, Err(Error::target_lost("the render session ended before it attached")));
         }
@@ -1602,7 +1601,7 @@ impl Worker {
     fn drop_gfx(&mut self) {
         let Some(mut gfx) = self.gfx.take() else { return };
         let (keep, viewed, abandoned) = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             state.graphics_objects = 0;
             let viewed = state.views != 0 && !state.keep_graphics;
             state.viewed_teardown |= viewed;
@@ -1650,7 +1649,7 @@ impl Worker {
     /// another.
     pub(crate) fn detach(&mut self, outbox: &mut Outbox) {
         self.tear_down(outbox);
-        let map = self.shared.state.lock_unpoisoned().map.clone();
+        let map = self.shared.state.lock().map.clone();
         if let Some(map) = map {
             map.unbind_session(self.shared.id);
         }
@@ -1661,7 +1660,7 @@ impl Worker {
     /// of the map, and stops the session's thread.
     pub(crate) fn finish(&mut self, outbox: &mut Outbox) {
         let (waiters, map) = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             if state.lifecycle == RenderSessionState::Detaching {
                 state.lifecycle = RenderSessionState::Detached;
             }

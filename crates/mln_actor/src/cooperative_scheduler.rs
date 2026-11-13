@@ -16,12 +16,12 @@
 // doesn't install one.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_util::identity::SimpleIdentity;
-use mln_util::sync::MutexExt;
 use mln_util::time::Instant;
+use parking_lot::Mutex;
 
 use crate::scheduler::{Scheduler, Task};
 
@@ -54,7 +54,7 @@ impl CooperativeScheduler {
     /// while none were waiting, so that the host knows to run them (as
     /// `RunLoop::set_waker`).
     pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
-        *self.waker.lock_unpoisoned() = waker;
+        *self.waker.lock() = waker;
     }
 
     /// Whether tasks are waiting.
@@ -71,8 +71,8 @@ impl CooperativeScheduler {
             // 1. Gather buckets for us to visit this iteration (dropping
             // the empty ones: a later task of the tag starts a new queue).
             let pending: Vec<Arc<Mutex<VecDeque<Task>>>> = {
-                let mut queues = self.queues.lock_unpoisoned();
-                queues.retain(|_, queue| !queue.lock_unpoisoned().is_empty());
+                let mut queues = self.queues.lock();
+                queues.retain(|_, queue| !queue.lock().is_empty());
                 queues.values().cloned().collect()
             };
             if pending.is_empty() {
@@ -81,7 +81,7 @@ impl CooperativeScheduler {
 
             // 2. Visit a task from each
             for queue in pending {
-                let Some(task) = queue.lock_unpoisoned().pop_front() else {
+                let Some(task) = queue.lock().pop_front() else {
                     continue;
                 };
                 self.run(task);
@@ -105,10 +105,10 @@ impl Scheduler for CooperativeScheduler {
     }
 
     fn schedule_tagged(&self, tag: SimpleIdentity, task: Task) {
-        let queue = self.queues.lock_unpoisoned().entry(tag).or_default().clone();
-        queue.lock_unpoisoned().push_back(task);
+        let queue = self.queues.lock().entry(tag).or_default().clone();
+        queue.lock().push_back(task);
         if self.task_count.fetch_add(1, Ordering::SeqCst) == 0 {
-            let waker = self.waker.lock_unpoisoned().clone();
+            let waker = self.waker.lock().clone();
             if let Some(waker) = waker {
                 waker();
             }
@@ -124,18 +124,18 @@ impl Scheduler for CooperativeScheduler {
     /// can't wait for itself (a `ThreadedScheduler` asserts there instead).
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
         let tag_to_find = if tag.is_empty() { self.unique_id } else { tag };
-        let Some(queue) = self.queues.lock_unpoisoned().get(&tag_to_find).cloned() else {
+        let Some(queue) = self.queues.lock().get(&tag_to_find).cloned() else {
             return;
         };
         loop {
-            let Some(task) = queue.lock_unpoisoned().pop_front() else {
+            let Some(task) = queue.lock().pop_front() else {
                 break;
             };
             self.run(task);
         }
 
         // After waiting for the queue to empty, go ahead and erase it from the map.
-        let mut queues = self.queues.lock_unpoisoned();
+        let mut queues = self.queues.lock();
         if queues.get(&tag_to_find).is_some_and(|q| Arc::ptr_eq(q, &queue)) {
             queues.remove(&tag_to_find);
         }
@@ -153,7 +153,7 @@ mod tests {
             tag,
             Box::new(move || {
                 assert_eq!(std::thread::current().id(), main);
-                order.lock().unwrap().push(value);
+                order.lock().push(value);
             }),
         );
     }
@@ -166,16 +166,16 @@ mod tests {
         for (tag, value) in [(a, 1), (a, 2), (b, 3)] {
             push(&scheduler, tag, &order, value);
         }
-        assert!(order.lock().unwrap().is_empty());
+        assert!(order.lock().is_empty());
         assert!(scheduler.has_tasks());
 
         // A past deadline stops after the first task.
         assert!(scheduler.run_until(Some(Instant::now())));
-        assert_eq!(order.lock().unwrap().len(), 1);
+        assert_eq!(order.lock().len(), 1);
 
         assert!(!scheduler.run_until(None));
         assert!(!scheduler.has_tasks());
-        let order = order.lock().unwrap().clone();
+        let order = order.lock().clone();
         // Each tag's tasks in order.
         let position = |value| order.iter().position(|&v| v == value).unwrap();
         assert!(position(1) < position(2));
@@ -191,7 +191,7 @@ mod tests {
             push(&scheduler, tag, &order, value);
         }
         scheduler.run_until(None);
-        let order = order.lock().unwrap().clone();
+        let order = order.lock().clone();
         // b's task runs in the first round, before a's last two.
         assert!(order.iter().position(|&v| v == 4).unwrap() < 2);
     }
@@ -222,18 +222,18 @@ mod tests {
             push(&scheduler, tag, &order, value);
         }
         scheduler.wait_for_empty_tagged(a);
-        assert_eq!(*order.lock().unwrap(), vec![1, 3]);
+        assert_eq!(*order.lock(), vec![1, 3]);
         assert!(scheduler.has_tasks());
         scheduler.wait_for_empty_tagged(b);
-        assert_eq!(*order.lock().unwrap(), vec![1, 3, 2]);
+        assert_eq!(*order.lock(), vec![1, 3, 2]);
         assert!(!scheduler.has_tasks());
 
         // The untagged queue.
         push(&scheduler, SimpleIdentity::new(), &order, 4);
         let untagged = order.clone();
-        scheduler.schedule(Box::new(move || untagged.lock().unwrap().push(5)));
+        scheduler.schedule(Box::new(move || untagged.lock().push(5)));
         scheduler.wait_for_empty();
-        assert_eq!(*order.lock().unwrap(), vec![1, 3, 2, 5]);
+        assert_eq!(*order.lock(), vec![1, 3, 2, 5]);
         assert!(scheduler.has_tasks());
     }
 
@@ -246,13 +246,13 @@ mod tests {
         scheduler.schedule_tagged(
             tag,
             Box::new(move || {
-                o.lock().unwrap().push(1);
+                o.lock().push(1);
                 inner.wait_for_empty_tagged(tag);
-                o.lock().unwrap().push(3);
+                o.lock().push(3);
             }),
         );
         push(&scheduler, tag, &order, 2);
         assert!(!scheduler.run_until(None));
-        assert_eq!(*order.lock().unwrap(), vec![1, 2, 3]);
+        assert_eq!(*order.lock(), vec![1, 2, 3]);
     }
 }

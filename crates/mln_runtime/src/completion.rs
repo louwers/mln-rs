@@ -2,12 +2,12 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll, Waker};
 use std::thread::ThreadId;
 
 use mln_util::error::Error;
-use mln_util::sync::{CondvarExt, MutexExt};
+use parking_lot::{Condvar, Mutex};
 
 type Callback<T> = Box<dyn FnOnce(Result<T, Error>) + Send>;
 
@@ -92,7 +92,7 @@ impl<T: Send + 'static> Completion<T> {
     /// Whether the result has arrived.
     #[must_use]
     pub fn is_complete(&self) -> bool {
-        !matches!(*self.shared.state.lock_unpoisoned(), State::Pending { .. })
+        !matches!(*self.shared.state.lock(), State::Pending { .. })
     }
 
     /// Blocks until the result arrives, and returns it.
@@ -108,7 +108,7 @@ impl<T: Send + 'static> Completion<T> {
     /// browser, whose instance has one thread: await the completion there,
     /// or pass it a callback.
     pub fn wait(self) -> Result<T, Error> {
-        let mut state = self.shared.state.lock_unpoisoned();
+        let mut state = self.shared.state.lock();
         loop {
             match std::mem::replace(&mut *state, State::Taken) {
                 State::Ready(result) => return result,
@@ -121,7 +121,7 @@ impl<T: Send + 'static> Completion<T> {
                             "a completion can't be waited for on the thread that resolves it",
                         ));
                     }
-                    state = self.shared.ready.wait_unpoisoned(state);
+                    self.shared.ready.wait(&mut state);
                 }
                 State::Taken => return Err(Error::invalid_state("the completion's result was already taken")),
             }
@@ -143,7 +143,7 @@ impl<T: Send + 'static> Completion<T> {
         self,
         callback: F,
     ) -> Option<(F, Result<T, Error>)> {
-        let mut state = self.shared.state.lock_unpoisoned();
+        let mut state = self.shared.state.lock();
         match std::mem::replace(&mut *state, State::Taken) {
             State::Ready(result) => Some((callback, result)),
             State::Pending { waker, .. } => {
@@ -159,7 +159,7 @@ impl<T> Future for Completion<T> {
     type Output = Result<T, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut state = self.shared.state.lock_unpoisoned();
+        let mut state = self.shared.state.lock();
         match std::mem::replace(&mut *state, State::Taken) {
             State::Ready(result) => Poll::Ready(result),
             State::Pending { callback, .. } => {
@@ -173,7 +173,7 @@ impl<T> Future for Completion<T> {
 
 impl<T> std::fmt::Debug for Completion<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let complete = !matches!(*self.shared.state.lock_unpoisoned(), State::Pending { .. });
+        let complete = !matches!(*self.shared.state.lock(), State::Pending { .. });
         f.debug_struct("Completion").field("complete", &complete).finish()
     }
 }
@@ -189,7 +189,7 @@ impl<T> Resolver<T> {
 
     fn deliver(shared: &Shared<T>, result: Result<T, Error>) {
         let (callback, waker) = {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             match std::mem::replace(&mut *state, State::Taken) {
                 State::Pending { callback: Some(callback), .. } => (Some((callback, result)), None),
                 State::Pending { waker, callback: None } => {

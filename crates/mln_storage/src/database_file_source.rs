@@ -12,15 +12,15 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{ActorRef, Thread, Timer, scheduler};
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType, READ_ONLY_MODE_KEY};
@@ -316,10 +316,10 @@ impl FileSource for DatabaseFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock().clone()
     }
 }

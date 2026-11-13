@@ -1,7 +1,7 @@
 // Ports test/util/thread.test.cpp.
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::thread::ThreadId;
 use std::time::Duration;
 
@@ -9,6 +9,7 @@ use mln_actor::actor::Actor;
 use mln_actor::scheduler::{self, SchedulerPtr, TaggedScheduler, Task};
 use mln_actor::{ActorRef, RunLoop, Thread, Timer};
 use mln_util::identity::SimpleIdentity;
+use parking_lot::Mutex;
 
 use crate::{Failures, get, wait};
 
@@ -335,7 +336,7 @@ fn delete_before_child_starts() {
     let start = Mutex::new(Some(start));
     control.actor().invoke(move |o: &TestWorker| {
         o.send_delayed(move || {
-            if let Some(start) = start.lock().unwrap().take() {
+            if let Some(start) = start.lock().take() {
                 start.send(()).unwrap();
             }
         });

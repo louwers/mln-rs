@@ -3,8 +3,8 @@
 // outlines are generated both as triangulated lines and as line primitives).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
 
 use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -22,8 +22,8 @@ use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -151,7 +151,7 @@ impl FillBucket {
     ) {
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -239,7 +239,7 @@ impl Bucket for FillBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
+            binders.write().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

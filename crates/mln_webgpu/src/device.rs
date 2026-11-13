@@ -13,13 +13,10 @@
 // object) while another thread destroys an instance, which renderers on many
 // threads did whenever one of them finished.
 
-#[cfg(not(target_family = "wasm"))]
-use std::sync::Mutex;
-
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 #[cfg(not(target_family = "wasm"))]
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 /// A WebGPU device that renderers on any thread share: the library's, or the
 /// host's. Clones share it.
@@ -50,7 +47,7 @@ fn instance_backends() -> wgpu::Backends {
 #[cfg(not(target_family = "wasm"))]
 fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
     static INSTANCES: Mutex<Vec<(wgpu::Backends, wgpu::Instance)>> = Mutex::new(Vec::new());
-    let mut instances = INSTANCES.lock_unpoisoned();
+    let mut instances = INSTANCES.lock();
     if let Some((_, instance)) = instances.iter().find(|(made_for, _)| *made_for == backends) {
         return instance.clone();
     }

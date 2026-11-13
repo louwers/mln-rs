@@ -18,10 +18,10 @@
 // on the creating thread's RunLoop, which the host drives, and its messages
 // run there.
 
-use std::sync::{Mutex, mpsc};
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::actor_ref::ActorRef;
 use crate::established_actor::{AspiringActor, EstablishedActor};
@@ -87,7 +87,7 @@ impl<O: 'static> Drop for Thread<O> {
         };
         let (stoppable_tx, stoppable_rx) = mpsc::channel::<()>();
         // `running.wait()`.
-        let run_loop = running.lock_unpoisoned().recv().expect("thread failed to start");
+        let run_loop = running.lock().recv().expect("thread failed to start");
         run_loop.invoke(move || {
             let _ = stoppable_tx.send(());
         });

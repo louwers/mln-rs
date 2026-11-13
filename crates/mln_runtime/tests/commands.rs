@@ -5,13 +5,14 @@
 
 mod support;
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
 
 use mln_map::{CameraOptions, CameraUpdate};
 use mln_runtime::{ErrorKind, LogicalExtent, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 use support::{EMPTY_STYLE, TIMEOUT, TempDir, eventually, map, map_options, runtime, wait, wait_err};
 
 /// `width` by `height` logical pixels at a scale factor of 1.
@@ -35,10 +36,10 @@ fn commands_run_in_the_order_each_thread_sent_them() {
             std::thread::spawn(move || {
                 for i in 0..50 {
                     let ran = ran.clone();
-                    drop(map.with_core(move |_| ran.lock().unwrap().push((thread, i))).unwrap());
+                    drop(map.with_core(move |_| ran.lock().push((thread, i))).unwrap());
                     let applied = applied.clone();
                     map.request_repaint().unwrap().on_complete(move |result| {
-                        applied.lock().unwrap().push((thread, result.unwrap().sequence));
+                        applied.lock().push((thread, result.unwrap().sequence));
                     });
                 }
             })
@@ -50,10 +51,10 @@ fn commands_run_in_the_order_each_thread_sent_them() {
     open.send(()).unwrap();
     wait(map.request_repaint());
 
-    let applied = applied.lock().unwrap();
+    let applied = applied.lock();
     assert_eq!(200, applied.len());
     assert!(applied.windows(2).all(|pair| pair[0].1 < pair[1].1), "{applied:?}");
-    let ran = ran.lock().unwrap();
+    let ran = ran.lock();
     assert_eq!(200, ran.len());
     for thread in 0..4 {
         let order: Vec<_> = ran.iter().filter(|(t, _)| *t == thread).map(|(_, i)| *i).collect();
@@ -71,7 +72,7 @@ fn completions_arrive_in_send_order_across_maps_and_the_runtime() {
         let order = order.clone();
         move |ok: bool| {
             assert!(ok);
-            order.lock().unwrap().push(name);
+            order.lock().push(name);
         }
     };
     let (repainted, cleared) = (record("first"), record("runtime"));
@@ -81,7 +82,7 @@ fn completions_arrive_in_send_order_across_maps_and_the_runtime() {
     second.resize(extent(100, 100)).unwrap().on_complete(move |result| resized(result.is_ok()));
     first.resize(extent(100, 100)).unwrap().on_complete(move |result| resized_again(result.is_ok()));
     wait(runtime.clear_resource_transform());
-    assert_eq!(["first", "runtime", "second", "first again"], order.lock().unwrap().as_slice());
+    assert_eq!(["first", "runtime", "second", "first again"], order.lock().as_slice());
 }
 
 #[test]

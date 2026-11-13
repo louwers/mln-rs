@@ -11,10 +11,10 @@
 use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::str::FromStr;
-use std::sync::RwLock;
+
+use parking_lot::RwLock;
 
 use crate::ParseEnumError;
-use crate::sync::RwLockExt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -144,11 +144,11 @@ pub struct Log;
 
 impl Log {
     pub fn set_observer(observer: Box<dyn Observer>) {
-        *OBSERVER.write_unpoisoned() = Some(observer);
+        *OBSERVER.write() = Some(observer);
     }
 
     pub fn remove_observer() -> Option<Box<dyn Observer>> {
-        OBSERVER.write_unpoisoned().take()
+        OBSERVER.write().take()
     }
 
     /// Rust addition (see the file comment): an observer for the calling
@@ -191,7 +191,7 @@ impl Log {
                 .with(|o| o.borrow().as_ref().map(|observer| observer.on_record(severity, event, code, msg)));
             let handled = match handled {
                 Some(handled) => handled,
-                None => match &*OBSERVER.read_unpoisoned() {
+                None => match &*OBSERVER.read() {
                     Some(observer) => observer.on_record(severity, event, code, msg),
                     None => false,
                 },

@@ -1,8 +1,8 @@
 // The worker codec on a real tile: a worker behind the codec gives the same
 // layout as one the tile reaches directly, and it crosses without loss.
 
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -18,6 +18,7 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
+use parking_lot::Mutex;
 
 use super::envelope::{self, Request};
 use super::fields;
@@ -38,13 +39,13 @@ struct Replies(Arc<Mutex<Vec<TileMessage>>>);
 
 impl TileEndpoint for Replies {
     fn send(&self, message: TileMessage) {
-        self.0.lock().unwrap().push(message);
+        self.0.lock().push(message);
     }
 }
 
 impl Replies {
     fn take(&self) -> Vec<TileMessage> {
-        std::mem::take(&mut *self.0.lock().unwrap())
+        std::mem::take(&mut *self.0.lock())
     }
 }
 
@@ -444,7 +445,7 @@ fn pattern_layouts_cross() {
         .bucket
         .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
         .unwrap();
-    let binders = extrusion.paint_property_binders["extrusion-pattern"].read().unwrap();
+    let binders = extrusion.paint_property_binders["extrusion-pattern"].read();
     assert!(matches!(
         binders.fill_extrusion_pattern.kind,
         crate::paint_property_binder::CrossFadedPaintPropertyBinderKind::Composite { .. }

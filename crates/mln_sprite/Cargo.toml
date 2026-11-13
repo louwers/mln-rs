@@ -23,5 +23,8 @@ mln_util.workspace = true
 mln_vec_map.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+parking_lot.workspace = true
+
 [lints]
 workspace = true

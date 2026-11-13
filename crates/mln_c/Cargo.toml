@@ -44,6 +44,7 @@ mln_text.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
+parking_lot.workspace = true
 # The windows that window targets name, as the runtime takes them.
 raw-window-handle.workspace = true
 serde_json.workspace = true

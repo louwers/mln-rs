@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use geojson::GeoJSON;
@@ -46,6 +46,7 @@ use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{Tileset, VectorEncoding};
+use parking_lot::Mutex;
 
 /// `SourceTest`.
 struct SourceTest {
@@ -377,7 +378,7 @@ impl AsyncRequest for PendingTileRequest {}
 
 impl Drop for PendingTileRequest {
     fn drop(&mut self) {
-        self.cancelled.lock().unwrap().push(self.tile);
+        self.cancelled.lock().push(self.tile);
     }
 }
 
@@ -385,7 +386,7 @@ impl FileSource for PendingTileSource {
     fn request(&self, resource: &Resource, _callback: Callback) -> Box<dyn AsyncRequest> {
         let data = resource.tile_data.as_ref().expect("only tiles are requested");
         let tile = (data.z, data.x, data.y);
-        self.requested.lock().unwrap().push(tile);
+        self.requested.lock().push(tile);
         Box::new(PendingTileRequest { tile, cancelled: self.cancelled.clone() })
     }
 
@@ -425,7 +426,7 @@ fn tile_out_of_view_keeps_loading() {
         });
         let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs.clone()));
         render_source.update(source.base_impl(), &layers, true, needs_relayout, &parameters);
-        requested.lock().unwrap().clone()
+        requested.lock().clone()
     };
 
     let unturned = turn(&mut test, 0.0, true);
@@ -433,7 +434,7 @@ fn tile_out_of_view_keeps_loading() {
     assert!(turned.len() > unturned.len(), "turning shows other tiles");
     let back = turn(&mut test, 0.0, false);
     assert_eq!(turned, back, "no tile is requested again");
-    assert!(cancelled.lock().unwrap().is_empty(), "no request is cancelled");
+    assert!(cancelled.lock().is_empty(), "no request is cancelled");
 }
 
 // gtest: Source.RasterTileEmpty
@@ -868,7 +869,7 @@ struct HeldScheduler {
 
 impl scheduler::Scheduler for HeldScheduler {
     fn schedule(&self, task: scheduler::Task) {
-        self.tasks.lock().unwrap().push(task);
+        self.tasks.lock().push(task);
     }
 
     fn wait_for_empty(&self) {}
@@ -901,13 +902,13 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     };
 
     update(&mut render_source);
-    assert!(!slicer.tasks.lock().unwrap().is_empty());
+    assert!(!slicer.tasks.lock().is_empty());
     assert!(!render_source.is_loaded());
 
     // The queued slices run in the background while the source turns
     // synchronous and recreates its tiles, which slice the same index inline.
     source.set_override_synchronous_update(true);
-    let tasks = std::mem::take(&mut *slicer.tasks.lock().unwrap());
+    let tasks = std::mem::take(&mut *slicer.tasks.lock());
     let background = std::thread::spawn(move || {
         for task in tasks {
             task();
@@ -928,7 +929,7 @@ struct Recorder(Records);
 
 impl LogObserver for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push(((severity, event, msg.to_owned()), false));
+        self.0.lock().push(((severity, event, msg.to_owned()), false));
         true
     }
 }
@@ -949,7 +950,7 @@ impl FixtureLog {
     /// `count({severity, event, -1, msg})`.
     fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
         let mut count = 0;
-        for (m, checked) in self.messages.lock().unwrap().iter_mut() {
+        for (m, checked) in self.messages.lock().iter_mut() {
             if m.0 == severity && m.1 == event && m.2 == msg {
                 *checked = true;
                 count += 1;
@@ -959,7 +960,7 @@ impl FixtureLog {
     }
 
     fn unchecked_count(&self) -> usize {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).count()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).count()
     }
 }
 

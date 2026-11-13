@@ -20,7 +20,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard};
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
@@ -28,7 +27,7 @@ use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;
 use mln_util::serialization::payload::{Payload, pod};
-use mln_util::sync::MutexExt;
+use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::bucket::Bucket;
@@ -70,19 +69,19 @@ impl<T> GeometryVec<T> {
     {
         debug_assert!(!self.is_moved(), "geometry modified after it moved to the render thread");
         #[cfg(target_family = "wasm")]
-        if let Some(bytes) = self.host.get_mut().unwrap_or_else(|e| e.into_inner()).take() {
-            *self.v.get_mut().unwrap_or_else(|e| e.into_inner()) = bytes.to_pod_vec();
+        if let Some(bytes) = self.host.get_mut().take() {
+            *self.v.get_mut() = bytes.to_pod_vec();
         }
-        self.v.get_mut().unwrap_or_else(|e| e.into_inner())
+        self.v.get_mut()
     }
 
     /// The element count, which stays when the data is moved out.
     pub fn len(&self) -> usize {
         #[cfg(target_family = "wasm")]
-        if let Some(bytes) = &*self.host.lock_unpoisoned() {
+        if let Some(bytes) = &*self.host.lock() {
             return bytes.len() / size_of::<T>() + self.moved.load(Ordering::Relaxed);
         }
-        self.v.lock_unpoisoned().len() + self.moved.load(Ordering::Relaxed)
+        self.v.lock().len() + self.moved.load(Ordering::Relaxed)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -100,10 +99,10 @@ impl<T> GeometryVec<T> {
         T: bytemuck::Pod,
     {
         #[cfg(target_family = "wasm")]
-        if let Some(bytes) = self.host.lock_unpoisoned().take() {
-            *self.v.lock_unpoisoned() = bytes.to_pod_vec();
+        if let Some(bytes) = self.host.lock().take() {
+            *self.v.lock() = bytes.to_pod_vec();
         }
-        self.v.lock_unpoisoned()
+        self.v.lock()
     }
 }
 
@@ -122,7 +121,7 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
     /// The data, moved out if it is still in the JS array it arrived in.
     #[cfg(target_family = "wasm")]
     fn take_host(&self) -> Option<HostBytes> {
-        let bytes = self.host.lock_unpoisoned().take()?;
+        let bytes = self.host.lock().take()?;
         self.moved.fetch_add(bytes.len() / size_of::<T>(), Ordering::Relaxed);
         Some(bytes)
     }
@@ -151,9 +150,9 @@ impl GeometryVec<u16> {
 impl<T: Clone> Clone for GeometryVec<T> {
     fn clone(&self) -> Self {
         GeometryVec {
-            v: Mutex::new(self.v.lock_unpoisoned().clone()),
+            v: Mutex::new(self.v.lock().clone()),
             #[cfg(target_family = "wasm")]
-            host: Mutex::new(self.host.lock_unpoisoned().clone()),
+            host: Mutex::new(self.host.lock().clone()),
             moved: AtomicUsize::new(self.moved.load(Ordering::Relaxed)),
         }
     }
@@ -168,9 +167,9 @@ impl<T: bytemuck::Pod + PartialEq> PartialEq for GeometryVec<T> {
 impl<T: std::fmt::Debug> std::fmt::Debug for GeometryVec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut f = f.debug_struct("GeometryVec");
-        f.field("v", &*self.v.lock_unpoisoned());
+        f.field("v", &*self.v.lock());
         #[cfg(target_family = "wasm")]
-        f.field("host", &*self.host.lock_unpoisoned());
+        f.field("host", &*self.host.lock());
         f.field("moved", &self.moved.load(Ordering::Relaxed)).finish()
     }
 }
@@ -198,7 +197,7 @@ impl<'de, T: bytemuck::Pod> Deserialize<'de> for GeometryVec<T> {
             #[cfg(target_family = "wasm")]
             Payload::Host(bytes) => {
                 let vec = GeometryVec::default();
-                *vec.host.lock_unpoisoned() = Some(bytes);
+                *vec.host.lock() = Some(bytes);
                 vec
             }
         })

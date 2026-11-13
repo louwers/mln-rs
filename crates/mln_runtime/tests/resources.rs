@@ -26,16 +26,16 @@ fn style_response() -> Response {
 #[test]
 fn a_provider_serves_a_scheme_the_library_cant_load() {
     let runtime = runtime();
-    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let record = seen.clone();
     wait(runtime.set_resource_provider(move |request: ResourceRequest| {
-        record.lock().unwrap().push((request.resource().kind, request.resource().url.clone()));
+        record.lock().push((request.resource().kind, request.resource().url.clone()));
         assert!(!request.is_cancelled());
         request.respond(style_response()).unwrap();
     }));
     let map = map(&runtime);
     wait(map.set_style_url("custom://styles/empty"));
-    assert_eq!(vec![(Kind::Style, "custom://styles/empty".to_owned())], *seen.lock().unwrap());
+    assert_eq!(vec![(Kind::Style, "custom://styles/empty".to_owned())], *seen.lock());
     assert_eq!(EMPTY_STYLE, wait(map.loaded_style_json()));
 }
 

@@ -11,7 +11,7 @@
 pub(super) mod display_link {
     use core::ffi::{c_int, c_void};
     use std::collections::VecDeque;
-    use std::sync::{Mutex, mpsc};
+    use std::sync::mpsc;
     use std::thread::{self, ThreadId};
     use std::time::Duration;
 
@@ -23,10 +23,10 @@ pub(super) mod display_link {
     };
     use objc2_foundation::{NSDefaultRunLoopMode, NSRunLoop};
     use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CAFrameRateRangeDefault};
+    use parking_lot::Mutex;
 
     use crate::error::Error;
     use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
-    use crate::lock;
 
     // A vsync that waits behind other work delays the frames it demands.
     const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
@@ -68,7 +68,7 @@ pub(super) mod display_link {
     impl LinkThread {
         /// The thread, which starts on first use.
         fn get() -> Result<&'static Self, Error> {
-            let mut started = lock(&THREAD);
+            let mut started = THREAD.lock();
             if let Some(thread) = *started {
                 return Ok(thread);
             }
@@ -90,7 +90,7 @@ pub(super) mod display_link {
 
         /// Runs `task` on the thread, after the tasks sent before it.
         fn send(&self, task: impl FnOnce() + Send + 'static) {
-            lock(&TASKS).push_back(Box::new(task));
+            TASKS.lock().push_back(Box::new(task));
             self.source.0.signal();
             self.run_loop.0.wake_up();
         }
@@ -150,7 +150,7 @@ pub(super) mod display_link {
     /// The source's callback, on the link thread: runs the tasks that wait.
     unsafe extern "C-unwind" fn perform(_info: *mut c_void) {
         loop {
-            let Some(task) = lock(&TASKS).pop_front() else {
+            let Some(task) = TASKS.lock().pop_front() else {
                 return;
             };
             // A panic stays on this side of the run loop.

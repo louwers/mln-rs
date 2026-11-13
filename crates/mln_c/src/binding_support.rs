@@ -205,7 +205,7 @@ pub unsafe extern "C" fn mln_binding_dart_wake_create(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     use super::*;
     use crate::diagnostic::tests::{diagnostic, message};
@@ -225,7 +225,7 @@ mod tests {
         let message = unsafe { &*message };
         // SAFETY: an integer message's value is its `as_int64`.
         let value = unsafe { message.value.as_int64 };
-        crate::lock(&POSTED).push((port, message.kind, value));
+        POSTED.lock().push((port, message.kind, value));
         false
     }
 
@@ -248,7 +248,7 @@ mod tests {
             wake.callback.unwrap()(wake.user_data);
             wake.release_user_data.unwrap()(wake.user_data);
         }
-        let posted: Vec<_> = crate::lock(&POSTED).iter().copied().filter(|(port, ..)| *port == 41).collect();
+        let posted: Vec<_> = POSTED.lock().iter().copied().filter(|(port, ..)| *port == 41).collect();
         assert_eq!(posted, [(41, DART_INT64, 0), (41, DART_INT64, 1)]);
     }
 

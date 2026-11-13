@@ -34,13 +34,13 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_util::chrono::parse_http_date;
 use mln_util::http_header::{CacheControl, parse_retry_headers};
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
@@ -88,7 +88,7 @@ struct Cancellation {
 impl Cancellation {
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
-        let handler = self.handler.lock_unpoisoned().take();
+        let handler = self.handler.lock().take();
         if let Some(handler) = handler {
             handler();
         }
@@ -99,10 +99,10 @@ impl Cancellation {
     }
 
     fn set_handler(&self, handler: Box<dyn FnOnce() + Send>) {
-        *self.handler.lock_unpoisoned() = Some(handler);
+        *self.handler.lock() = Some(handler);
         // `cancel` may have run before the handler was there.
         if self.is_cancelled() {
-            let handler = self.handler.lock_unpoisoned().take();
+            let handler = self.handler.lock().take();
             if let Some(handler) = handler {
                 handler();
             }
@@ -110,7 +110,7 @@ impl Cancellation {
     }
 
     fn clear_handler(&self) {
-        drop(self.handler.lock_unpoisoned().take());
+        drop(self.handler.lock().take());
     }
 }
 
@@ -196,12 +196,12 @@ static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
 /// the default (`NSURLSession` on Apple platforms, fetch on wasm, ureq
 /// elsewhere): for a host with its own HTTP stack.
 pub fn set_transport(transport: Arc<dyn HttpTransport>) {
-    *TRANSPORT.lock_unpoisoned() = Some(transport);
+    *TRANSPORT.lock() = Some(transport);
 }
 
 /// The transport `set_transport` set, else the default.
 fn current_transport() -> Arc<dyn HttpTransport> {
-    if let Some(transport) = TRANSPORT.lock_unpoisoned().clone() {
+    if let Some(transport) = TRANSPORT.lock().clone() {
         return transport;
     }
     default_transport()
@@ -360,7 +360,7 @@ impl HTTPFileSource {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         let cancellation = Arc::new(Cancellation::default());
-        let header_transform = self.header_transform.lock_unpoisoned().clone();
+        let header_transform = self.header_transform.lock().clone();
         let headers = header_transform.headers(resource.kind, &resource.url);
         self.transport.start(TransferRequest {
             resource: resource.clone(),
@@ -382,14 +382,14 @@ impl FileSource for HTTPFileSource {
     }
 
     fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        *self.header_transform.lock_unpoisoned() = transform;
+        *self.header_transform.lock() = transform;
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock().clone()
     }
 }

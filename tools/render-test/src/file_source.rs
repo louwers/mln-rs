@@ -3,8 +3,8 @@
 // `TestRunner::registerProxyFileSource` (render-test/runner.cpp).
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use feature::Value;
@@ -14,6 +14,7 @@ use mln_storage::{
     ResourceOptions, Response,
 };
 use mln_util::logging::{Event, Log};
+use parking_lot::Mutex;
 
 static REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
 static TRANSFERRED_SIZE: AtomicUsize = AtomicUsize::new(0);
@@ -29,13 +30,13 @@ static NEXT_REQUEST: AtomicU64 = AtomicU64::new(0);
 /// Adds a request for `url` to `PENDING` and returns its number.
 pub(crate) fn track(url: &str) -> u64 {
     let number = NEXT_REQUEST.fetch_add(1, Ordering::SeqCst);
-    PENDING.lock().unwrap().insert(number, (url.to_string(), Instant::now()));
+    PENDING.lock().insert(number, (url.to_string(), Instant::now()));
     number
 }
 
 /// Removes request `number` from `PENDING`, if it is there.
 pub(crate) fn answered(number: u64) {
-    PENDING.lock().unwrap().remove(&number);
+    PENDING.lock().remove(&number);
 }
 
 /// A request passed on, which leaves `PENDING` when it is cancelled.
@@ -107,7 +108,7 @@ impl ProxyFileSource {
     /// cancelled, oldest first, with how long ago each was made.
     pub fn pending_requests() -> Vec<(String, Duration)> {
         let now = Instant::now();
-        PENDING.lock().unwrap().values().map(|(url, since)| (url.clone(), now - *since)).collect()
+        PENDING.lock().values().map(|(url, since)| (url.clone(), now - *since)).collect()
     }
 }
 
@@ -182,11 +183,11 @@ impl FileSource for ProxyFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock().clone()
     }
 }
 

@@ -1,7 +1,7 @@
 //! `projection.h`: conversions between coordinates, screen points and
 //! projected meters, for one view of a map or for none.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_map::MapProjection;
 use mln_map_types::{Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode};
@@ -9,6 +9,7 @@ use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::{NorthOrientation, WrapMode};
 use mln_util::projection::{ProjectedMeters, Projection};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 use crate::error::Error;
 use crate::generated::types::{
@@ -21,7 +22,7 @@ use crate::generated::types::{
     mln_projection_mode, mln_screen_point, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
-use crate::{abi, camera, geo, lock};
+use crate::{abi, camera, geo};
 
 abi::versioned!(mln_map_projection_camera_result, mln_map_view);
 
@@ -31,7 +32,7 @@ static PROJECTIONS: HandleTable<Mutex<MapProjection>> = HandleTable::new(HandleK
 /// Runs `call` on the live projection that `projection` names.
 fn with_projection<R>(projection: mln_map_projection, call: impl FnOnce(&mut MapProjection) -> R) -> Result<R, Error> {
     let projection = PROJECTIONS.get(projection)?;
-    let mut projection = lock(&projection);
+    let mut projection = projection.lock();
     Ok(call(&mut projection))
 }
 

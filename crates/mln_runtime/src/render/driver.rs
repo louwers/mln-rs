@@ -6,7 +6,6 @@ use std::sync::atomic::Ordering;
 
 use mln_actor::RunLoop;
 use mln_util::error::Error;
-use mln_util::sync::MutexExt;
 
 use super::session::{Abandoner, RenderSessionState, SessionShared};
 use super::worker::{self, Slot, Worker};
@@ -68,7 +67,7 @@ impl DriverWork {
         if self.servicing.replace(true) {
             return Err(Error::busy("the render session's driver work is running on this thread"));
         }
-        let abandoned = self.shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned;
+        let abandoned = self.shared.state.lock().lifecycle == RenderSessionState::Abandoned;
         let armed = &self.shared.driver_armed;
         armed.store(true, Ordering::SeqCst);
         {
@@ -105,7 +104,7 @@ impl DriverWork {
     fn end(&self) {
         self.finished.set(true);
         let mut outbox = Outbox::default();
-        let gate = self.shared.gate.lock_unpoisoned();
+        let gate = self.shared.gate.lock();
         let worker = self.slot.borrow_mut().take();
         if let Some(worker) = worker {
             worker.close(&mut outbox);

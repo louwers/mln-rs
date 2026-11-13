@@ -21,8 +21,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use feature::Value;
@@ -32,8 +32,8 @@ use mln_util::constants::{
     ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
 };
 use mln_util::logging::{Event, Log};
-use mln_util::sync::MutexExt;
 use mln_vec_map::{VecMap, VecSet};
+use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
@@ -658,7 +658,7 @@ impl FileSource for OnlineFileSource {
                 self.thread
                     .actor()
                     .invoke(move |t: &OnlineFileSourceThread| t.set_maximum_concurrent_requests(maximum));
-                *self.cached_maximum_concurrent_requests.lock_unpoisoned() = maximum;
+                *self.cached_maximum_concurrent_requests.lock() = maximum;
             } else {
                 Log::error(Event::General, "Invalid max-concurrent-requests property value type.");
             }
@@ -675,7 +675,7 @@ impl FileSource for OnlineFileSource {
 
     fn get_property(&self, key: &str) -> Value {
         if key == MAX_CONCURRENT_REQUESTS_KEY {
-            Value::Uint(u64::from(*self.cached_maximum_concurrent_requests.lock_unpoisoned()))
+            Value::Uint(u64::from(*self.cached_maximum_concurrent_requests.lock()))
         } else {
             Log::error(Event::General, format!("Resource provider does not support property {key}"));
             Value::Null
@@ -693,10 +693,10 @@ impl FileSource for OnlineFileSource {
     fn set_resource_options(&self, options: ResourceOptions) {
         let o = options.clone();
         self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_options(o));
-        *self.cached_resource_options.lock_unpoisoned() = options;
+        *self.cached_resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.cached_resource_options.lock_unpoisoned().clone()
+        self.cached_resource_options.lock().clone()
     }
 }

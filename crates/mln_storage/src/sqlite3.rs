@@ -18,9 +18,9 @@
 // library version check at startup, `Query::reset`/`clearBindings` after a
 // `run()`.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 
-use mln_util::sync::MutexExt;
+use parking_lot::{Mutex, MutexGuard};
 use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::fallible_streaming_iterator::FallibleStreamingIterator;
 use rusqlite::types::{ToSql, ValueRef};
@@ -137,7 +137,7 @@ impl Database {
 
     /// The connection.
     pub fn conn(&self) -> MutexGuard<'_, Connection> {
-        self.connection.lock_unpoisoned()
+        self.connection.lock()
     }
 }
 
@@ -182,7 +182,7 @@ impl Transaction {
     }
 
     fn exec(&self, sql: &str) -> Result<(), SqliteError> {
-        exec(&self.connection.lock_unpoisoned(), sql)
+        exec(&self.connection.lock(), sql)
     }
 
     /// `commit()`.

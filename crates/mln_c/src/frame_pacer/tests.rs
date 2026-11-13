@@ -3,8 +3,9 @@
 //! of its own source.
 
 use core::ffi::c_void;
-use std::sync::{Condvar, Mutex};
 use std::time::Instant;
+
+use parking_lot::{Condvar, Mutex};
 
 use super::*;
 use crate::generated::types::{
@@ -154,18 +155,18 @@ struct FakeSource(Arc<FakeDisplay>);
 
 impl VsyncSource for FakeSource {
     fn schedule(&self) {
-        *lock(&self.0.scheduled) += 1;
+        *self.0.scheduled.lock() += 1;
         self.0.changed.notify_all();
     }
 
     fn set_limit(&self, limit: Option<Limit>) {
-        lock(&self.0.limits).push(limit);
+        self.0.limits.lock().push(limit);
     }
 }
 
 impl Drop for FakeSource {
     fn drop(&mut self) {
-        *lock(&self.0.dropped) = true;
+        *self.0.dropped.lock() = true;
     }
 }
 
@@ -174,7 +175,7 @@ impl FakeDisplay {
     /// whether it did.
     fn refresh(&self, time: Duration) -> bool {
         {
-            let mut scheduled = lock(&self.scheduled);
+            let mut scheduled = self.scheduled.lock();
             if *scheduled == 0 {
                 return false;
             }
@@ -193,15 +194,15 @@ impl FakeDisplay {
     /// Waits until the pacer schedules a refresh.
     fn wait_until_scheduled(&self) {
         let deadline = Instant::now() + TIMEOUT;
-        let mut scheduled = lock(&self.scheduled);
+        let mut scheduled = self.scheduled.lock();
         while *scheduled == 0 {
             let left = deadline.checked_duration_since(Instant::now()).expect("the pacer scheduled a refresh");
-            scheduled = self.changed.wait_timeout(scheduled, left).unwrap().0;
+            self.changed.wait_for(&mut scheduled, left);
         }
     }
 
     fn scheduled(&self) -> u32 {
-        *lock(&self.scheduled)
+        *self.scheduled.lock()
     }
 
     /// Sends each refresh that the pacer schedules, as a display does, until
@@ -250,24 +251,24 @@ fn set_options(pacer: mln_frame_pacer, options: *const mln_frame_pacer_options) 
 }
 
 fn limit_of(pacer: mln_frame_pacer) -> Option<Limit> {
-    lock(&resolve(pacer).unwrap().state).throttle.limit
+    resolve(pacer).unwrap().state.lock().throttle.limit
 }
 
 #[test]
 fn options_check_their_fields_and_limit() {
     let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
     let (pacer, _) = create_fake(&raw const limited).unwrap();
-    assert_eq!(resolve(pacer).unwrap().state.lock().unwrap().throttle.limit, Limit::new(30));
+    assert_eq!(resolve(pacer).unwrap().state.lock().throttle.limit, Limit::new(30));
     mln_frame_pacer_release(pacer);
     // A limit that its field doesn't set is no limit.
     let (pacer, _) = create_fake(&pacer_options(0, 0)).unwrap();
-    assert_eq!(resolve(pacer).unwrap().state.lock().unwrap().throttle.limit, None);
+    assert_eq!(resolve(pacer).unwrap().state.lock().throttle.limit, None);
     mln_frame_pacer_release(pacer);
 
     // The removal of a limit is the default.
     let (pacer, display) = create_fake(&pacer_options(MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND, 0)).unwrap();
     assert_eq!(limit_of(pacer), None);
-    assert!(lock(&display.limits).is_empty());
+    assert!(display.limits.lock().is_empty());
     mln_frame_pacer_release(pacer);
 
     let zero = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 0);
@@ -303,7 +304,7 @@ fn set_options_changes_only_what_it_sets() {
     assert_eq!(set_options(pacer, &raw const unlimited), MLN_STATUS_OK);
     assert_eq!(limit_of(pacer), None);
     // The source hears each change, in order.
-    assert_eq!(*lock(&display.limits), [Limit::new(30), None]);
+    assert_eq!(*display.limits.lock(), [Limit::new(30), None]);
     mln_frame_pacer_release(pacer);
 }
 
@@ -323,7 +324,7 @@ fn set_options_checks_its_pacer_and_options_and_keeps_the_limit_it_refuses() {
     assert_eq!(set_options(pacer, &raw const small), MLN_STATUS_INVALID_ARGUMENT);
     assert_eq!(set_options(pacer, core::ptr::null()), MLN_STATUS_INVALID_ARGUMENT);
     assert_eq!(limit_of(pacer), Limit::new(30));
-    assert!(lock(&display.limits).is_empty());
+    assert!(display.limits.lock().is_empty());
 
     let unlimited = pacer_options(MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND, 0);
     assert_eq!(set_options(handles::NULL, &raw const unlimited), MLN_STATUS_INVALID_ARGUMENT);
@@ -357,9 +358,9 @@ fn requests_share_one_refresh_until_it_comes() {
     pacer.request(2);
     pacer.request(1);
     assert_eq!(display.scheduled(), 1);
-    assert_eq!(lock(&pacer.state).waiting, [1, 2]);
+    assert_eq!(pacer.state.lock().waiting, [1, 2]);
     assert!(display.refresh(now()));
-    assert_eq!(lock(&pacer.state).waiting, [] as [u64; 0]);
+    assert_eq!(pacer.state.lock().waiting, [] as [u64; 0]);
     assert_eq!(display.scheduled(), 0);
 
     pacer.request(3);
@@ -377,9 +378,9 @@ fn a_refresh_that_the_limit_skips_schedules_the_next() {
     assert!(display.refresh(at(1000)));
     pacer.request(1);
     assert!(display.refresh(at(1016)));
-    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (1, 1));
     assert!(display.refresh(at(1033)));
-    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (0, 0));
     mln_frame_pacer_release(handle);
 }
 
@@ -393,23 +394,23 @@ fn a_new_limit_applies_to_the_refresh_on_its_way() {
     assert!(display.refresh(at(1000)));
     pacer.request(1);
     assert!(display.refresh(at(1016)));
-    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (1, 1));
 
     // The higher limit takes the refresh that the old one would skip.
     let faster = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
     assert_eq!(set_options(handle, &raw const faster), MLN_STATUS_OK);
     assert_eq!(display.scheduled(), 1, "the refresh on its way serves the new limit");
     assert!(display.refresh(at(1033)));
-    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (0, 0));
 
     // The lower limit skips the refresh that the old one would take.
     pacer.request(1);
     let slower = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 5);
     assert_eq!(set_options(handle, &raw const slower), MLN_STATUS_OK);
     assert!(display.refresh(at(1066)));
-    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (1, 1));
     assert!(display.refresh(at(1233)));
-    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (0, 0));
     mln_frame_pacer_release(handle);
 }
 
@@ -417,7 +418,7 @@ fn a_new_limit_applies_to_the_refresh_on_its_way() {
 fn a_released_pacer_stops_once_no_session_holds_it() {
     let (pacer, display) = fake_pacer();
     mln_frame_pacer_release(pacer);
-    assert!(*lock(&display.dropped));
+    assert!(*display.dropped.lock());
     assert_eq!(resolve(pacer).err().unwrap().status(), MLN_STATUS_INVALID_STATE);
     // Releases of the null handle and of stale handles do nothing.
     mln_frame_pacer_release(pacer);
@@ -588,13 +589,13 @@ fn a_released_pacer_keeps_pacing_its_sessions_until_they_end() {
     let (runtime, map, session) = settled_session();
     assert_eq!(set_pacer(session, pacer), MLN_STATUS_OK);
     mln_frame_pacer_release(pacer);
-    assert!(!*lock(&display.dropped));
+    assert!(!*display.dropped.lock());
 
     let generation = paint(map, "red");
     display.refresh_when_scheduled();
     wait_for_paced_frame(session, generation);
     end(runtime, map, session);
-    assert!(*lock(&display.dropped));
+    assert!(*display.dropped.lock());
 }
 
 #[test]
@@ -635,7 +636,7 @@ fn a_demand_answers_what_the_session_had_to_draw() {
     wake();
     assert_eq!(display.scheduled(), 0);
     pacing.set(77, Some(Arc::clone(&pacer)));
-    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.clone()), (1, vec![77]));
+    assert_eq!((display.scheduled(), pacer.state.lock().waiting.clone()), (1, vec![77]));
     // A host's demand answers it, so the refresh demands nothing.
     pacing.demanded();
     assert!(!pacing.take_redraw(&pacer));

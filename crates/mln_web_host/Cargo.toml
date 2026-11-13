@@ -20,6 +20,7 @@ mln_actor.workspace = true
 mln_renderer.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true
+parking_lot.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["MessageChannel", "MessageEvent", "MessagePort", "Worker", "WorkerOptions", "WorkerType"] }

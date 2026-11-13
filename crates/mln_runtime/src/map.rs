@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
 use mln_actor::RunLoopHandle;
 use mln_map::{
@@ -15,7 +15,7 @@ use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLngBounds;
 use mln_util::size::Size;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use crate::completion::{Completion, Resolver};
@@ -155,7 +155,7 @@ impl MapShared {
         &self,
         command: impl FnOnce(&mut RuntimeCore, &mut Outbox, MapId, u64, Resolver<R>) + Send + 'static,
     ) -> Result<Completion<R>, Error> {
-        let mut sent = self.sent.lock_unpoisoned();
+        let mut sent = self.sent.lock();
         if self.released.load(Ordering::SeqCst) {
             return Err(released());
         }
@@ -178,7 +178,7 @@ impl MapShared {
     /// Refuses the commands sent from now on. Fails when the map was
     /// released already.
     fn close(&self) -> Result<(), Error> {
-        let _sent = self.sent.lock_unpoisoned();
+        let _sent = self.sent.lock();
         if self.released.swap(true, Ordering::SeqCst) {
             return Err(released());
         }
@@ -200,7 +200,7 @@ impl MapShared {
 impl Drop for MapShared {
     fn drop(&mut self) {
         let _ = self.close();
-        let deferred = self.session.get_mut_unpoisoned().take().and_then(|claim| claim.removal);
+        let deferred = self.session.get_mut().take().and_then(|claim| claim.removal);
         self.remove(deferred);
     }
 }
@@ -275,7 +275,7 @@ impl Map {
     /// The sequence number of the last command sent to the map.
     #[must_use]
     pub fn sent_sequence(&self) -> u64 {
-        *self.shared.sent.lock_unpoisoned()
+        *self.shared.sent.lock()
     }
 
     /// The sequence number of the last command that ran.
@@ -295,7 +295,7 @@ impl Map {
         if self.shared.released.load(Ordering::SeqCst) {
             return Err(released());
         }
-        self.shared.published.snapshot.lock_unpoisoned().ok_or_else(|| Error::invalid_state("the map isn't built"))
+        self.shared.published.snapshot.lock().ok_or_else(|| Error::invalid_state("the map isn't built"))
     }
 
     /// The events that the map reports, as of the last command that ran.
@@ -375,7 +375,7 @@ impl Map {
     fn release_with(&self, in_any_state: bool) -> Result<Completion<()>, Error> {
         let (completion, resolver) = self.shared.runtime.completion();
         let claimed = {
-            let mut claim = self.shared.session.lock_unpoisoned();
+            let mut claim = self.shared.session.lock();
             match claim.as_mut() {
                 None => None,
                 Some(held) => match held.session.upgrade() {
@@ -415,7 +415,7 @@ impl Map {
     /// or a scale factor that isn't finite and positive.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
         let LogicalExtent { size, scale_factor } = extent;
-        if self.shared.session.lock_unpoisoned().is_some() {
+        if self.shared.session.lock().is_some() {
             return Err(Error::invalid_state("the map has a render session: resize the session instead"));
         }
         if size.is_empty() {
@@ -627,7 +627,7 @@ impl Map {
 
     /// Reserves the map for the session `id`.
     pub(crate) fn claim_session(&self, id: SessionId, session: Weak<SessionShared>) -> Result<(), Error> {
-        let mut claim = self.shared.session.lock_unpoisoned();
+        let mut claim = self.shared.session.lock();
         if self.shared.released.load(Ordering::SeqCst) {
             return Err(released());
         }
@@ -642,7 +642,7 @@ impl Map {
     /// removes the map when a dispose waited for the session.
     pub(crate) fn release_session_claim(&self, id: SessionId) {
         let claim = {
-            let mut session = self.shared.session.lock_unpoisoned();
+            let mut session = self.shared.session.lock();
             if session.as_ref().is_some_and(|claim| claim.id == id) { session.take() } else { None }
         };
         if let Some(removal) = claim.and_then(|claim| claim.removal) {
@@ -1320,7 +1320,7 @@ impl Ends {
         if let Some(end_fn) = animation.transition_end_fn.take() {
             let ended = self.0.clone();
             animation.transition_end_fn = Some(Arc::new(move |end: &TransitionEnd| {
-                ended.lock_unpoisoned().push((end_fn.clone(), *end));
+                ended.lock().push((end_fn.clone(), *end));
             }));
         }
     }
@@ -1328,7 +1328,7 @@ impl Ends {
     /// Reports the changes that ended to their commands, after what `outbox`
     /// holds, with the generation of the snapshot that shows them.
     fn deliver(&self, generation: u64, outbox: &mut Outbox) {
-        for (end_fn, end) in std::mem::take(&mut *self.0.lock_unpoisoned()) {
+        for (end_fn, end) in std::mem::take(&mut *self.0.lock()) {
             outbox.push(move || end_fn(&TransitionEnd { generation, ..end }));
         }
     }
@@ -1476,7 +1476,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     // of what they held before anything reports the change.
     crate::style::reconcile(entry, outbox);
     let generation = entry.core.generation();
-    *entry.published.snapshot.lock_unpoisoned() = Some(entry.core.snapshot());
+    *entry.published.snapshot.lock() = Some(entry.core.snapshot());
 
     let mut style_outcome = None;
     let from_json = entry.pending_style.as_ref().is_some_and(|pending| pending.from_json);

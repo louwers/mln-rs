@@ -30,7 +30,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_actor::{AsyncTask, AsyncTaskSender};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
@@ -46,9 +46,9 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::logging::{Event, Log};
-use mln_util::sync::MutexExt;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};
@@ -137,11 +137,11 @@ struct EngineReadiness {
 
 impl EngineReadiness {
     fn is_reported(&self) -> bool {
-        self.result.lock_unpoisoned().is_some()
+        self.result.lock().is_some()
     }
 
     fn is_ready(&self) -> bool {
-        matches!(*self.result.lock_unpoisoned(), Some(Ok(())))
+        matches!(*self.result.lock(), Some(Ok(())))
     }
 }
 
@@ -570,8 +570,8 @@ impl GlyphManager {
             if let Err(error) = &result {
                 Log::error(Event::Glyph, format!("font faces can't be loaded: {error}"));
             }
-            *readiness.result.lock_unpoisoned() = Some(result);
-            let waker = readiness.waker.lock_unpoisoned().take();
+            *readiness.result.lock() = Some(result);
+            let waker = readiness.waker.lock().take();
             if let Some(waker) = waker {
                 waker.send();
             }
@@ -596,7 +596,7 @@ impl GlyphManager {
                 }
             })
         });
-        *self.engine_readiness.waker.lock_unpoisoned() = Some(task.sender());
+        *self.engine_readiness.waker.lock() = Some(task.sender());
         // The engine may have reported back from another thread before the
         // waker was set.
         if self.engine_readiness.is_reported() {

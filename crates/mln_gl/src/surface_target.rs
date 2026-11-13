@@ -12,7 +12,7 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_ulong, c_void};
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use khronos_egl as egl;
 use mln_gfx::command_encoder::CommandEncoder;
@@ -24,6 +24,7 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 use crate::context::Context;
 use crate::draw_target::{DrawTarget, TargetResource};
@@ -157,7 +158,7 @@ impl DisplayUse {
         platform: Option<egl::Enum>,
         native_display: *mut c_void,
     ) -> Result<DisplayUse, String> {
-        let mut shared = SHARED_DISPLAYS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut shared = SHARED_DISPLAYS.lock();
         let native = native_display as usize;
         if let Some(entry) = shared.iter_mut().find(|entry| entry.native == native) {
             entry.users += 1;
@@ -190,7 +191,7 @@ impl DisplayUse {
 impl Drop for DisplayUse {
     fn drop(&mut self) {
         let Some(native) = self.native else { return };
-        let mut shared = SHARED_DISPLAYS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut shared = SHARED_DISPLAYS.lock();
         let Some(index) = shared.iter().position(|entry| entry.native == native) else { return };
         shared[index].users -= 1;
         if shared[index].users == 0 {

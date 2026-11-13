@@ -4,7 +4,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use feature::Value;
 use mln_actor::{AsyncTask, LocalObject, RunLoop};
@@ -24,6 +24,7 @@ use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::Scheme;
+use parking_lot::Mutex;
 
 use super::cpp_path;
 use crate::offline_download::{OfflineDownload, WeakOfflineDownload};
@@ -470,11 +471,11 @@ impl FileSource for FakeOnlineFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock().clone()
     }
 }
 

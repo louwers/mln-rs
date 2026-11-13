@@ -201,9 +201,8 @@ fn an_update_reaches_a_reader_on_another_thread() {
     let mut map = map();
     let reader = map.update_reader();
     let (sender, receiver) = std::sync::mpsc::channel();
-    let waker_sender = std::sync::Mutex::new(sender);
     reader.set_waker(Some(Arc::new(move || {
-        let _ = waker_sender.lock().map(|sender| sender.send(()));
+        let _ = sender.send(());
     })));
     let thread = std::thread::spawn(move || {
         receiver.recv().expect("a wake");

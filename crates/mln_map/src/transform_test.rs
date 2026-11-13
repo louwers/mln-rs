@@ -17,7 +17,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mln_map_types::util_camera::Camera as UtilCamera;
@@ -31,6 +31,7 @@ use mln_util::mat4::{Mat4, matrix};
 use mln_util::quaternion::Quaternion;
 use mln_util::time::Instant;
 use mln_util::vectors::{Vec3, Vec4};
+use parking_lot::Mutex;
 
 use super::*;
 
@@ -4260,7 +4261,7 @@ struct EventObserver {
 
 impl TransformObserver for EventObserver {
     fn on_camera_did_change(&self, _change: CameraChange) {
-        self.events.lock().unwrap().push(0);
+        self.events.lock().push(0);
         self.changes.set(self.changes.get() + 1);
     }
 }
@@ -4273,30 +4274,30 @@ fn partial_camera_commands_finish_together_for_still_image() {
     transform.resize(Size::new(512, 512)).unwrap();
     let push = |event: i32| {
         let events = observer.events.clone();
-        Some(Arc::new(move |_: &TransitionEnd| events.lock().unwrap().push(event)) as TransitionEndFn)
+        Some(Arc::new(move |_: &TransitionEnd| events.lock().push(event)) as TransitionEndFn)
     };
     let position = AnimationOptions { transition_end_fn: push(1), ..AnimationOptions::new(Duration::from_secs(5)) };
     let bearing = AnimationOptions { transition_end_fn: push(2), ..AnimationOptions::new(Duration::from_secs(10)) };
     transform
         .ease_to(&CameraOptions { center: Some(ll(20.0, 30.0)), zoom: Some(12.0), ..Default::default() }, &position);
     transform.ease_to(&CameraOptions { bearing: Some(60.0), ..Default::default() }, &bearing);
-    observer.events.lock().unwrap().clear();
+    observer.events.lock().clear();
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
-    assert_eq!(*observer.events.lock().unwrap(), [0]);
+    assert_eq!(*observer.events.lock(), [0]);
 
     // Static maps advance to the maximum time point for a still image. Each
     // command finishes before its own did-change notification, even when
     // another command has replaced one of its properties.
-    observer.events.lock().unwrap().clear();
+    observer.events.lock().clear();
     transform.update_transitions(None);
-    assert_eq!(*observer.events.lock().unwrap(), [1, 0, 2, 0]);
+    assert_eq!(*observer.events.lock(), [1, 0, 2, 0]);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 20.0, 1e-5);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 30.0, 1e-5);
     assert_near(transform.get_zoom(), 10.0, 1e-5);
     assert_near(bearing_degrees(&transform), 60.0, 1e-5);
     assert!(!transform.in_transition());
     transform.cancel_transitions();
-    assert_eq!(*observer.events.lock().unwrap(), [1, 0, 2, 0]);
+    assert_eq!(*observer.events.lock(), [1, 0, 2, 0]);
 }
 
 // gtest: Transform.CancelTransitionsByIdLeavesOthersRunning

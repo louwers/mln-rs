@@ -5,12 +5,11 @@
 // `Send + Sync` senders, keyed by an id the subscriber keeps for
 // `unsubscribe`.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use mln_actor::AsyncTaskSender;
-use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
+use parking_lot::Mutex;
 
 /// `NetworkStatus::Status`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,13 +45,13 @@ impl NetworkStatus {
     /// `Subscribe(util::AsyncTask*)`: returns the id for `unsubscribe`.
     pub fn subscribe(sender: AsyncTaskSender) -> u64 {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        OBSERVERS.lock_unpoisoned().insert(id, sender);
+        OBSERVERS.lock().insert(id, sender);
         id
     }
 
     /// `Unsubscribe(util::AsyncTask*)`
     pub fn unsubscribe(id: u64) {
-        OBSERVERS.lock_unpoisoned().remove(&id);
+        OBSERVERS.lock().remove(&id);
     }
 
     /// `Reachable()`
@@ -60,7 +59,7 @@ impl NetworkStatus {
         if !ONLINE.load(Ordering::SeqCst) {
             return;
         }
-        for sender in OBSERVERS.lock_unpoisoned().values() {
+        for sender in OBSERVERS.lock().values() {
             sender.send();
         }
     }

@@ -5,8 +5,8 @@
 // The hosts draw through each backend's own API.
 #![allow(unsafe_code)]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
@@ -16,6 +16,7 @@ use mln_style::layers::{CustomLayerHost, CustomLayerPrerenderParameters, CustomL
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 const SIDE: u32 = 64;
 
@@ -63,8 +64,7 @@ impl Calls {
         // Every prerender of a frame comes before its renders.
         assert_eq!(self.prerenders.load(Ordering::Relaxed), self.renders.load(Ordering::Relaxed) + 1);
         let frame = parameters.frame;
-        *self.frame.lock().unwrap() =
-            Some((frame.width, frame.height, frame.projection.far_depth, parameters.layer_depth));
+        *self.frame.lock() = Some((frame.width, frame.height, frame.projection.far_depth, parameters.layer_depth));
         self.renders.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -112,7 +112,7 @@ fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn CustomLayerHost>, Arc
     assert_eq!(calls.prerenders.load(Ordering::Relaxed), 1);
     assert_eq!(calls.renders.load(Ordering::Relaxed), 1);
     assert_eq!(calls.deinitializations.load(Ordering::Relaxed), 1, "the renderer that drew the layer went");
-    let (width, height, far_depth, layer_depth) = calls.frame.lock().unwrap().expect("a render");
+    let (width, height, far_depth, layer_depth) = calls.frame.lock().expect("a render");
     assert_eq!((width, height), (SIDE, SIDE));
     assert!(far_depth > 0.0 && far_depth < 1.0 && layer_depth > far_depth && layer_depth <= 1.0);
 
@@ -142,7 +142,7 @@ mod webgpu {
         fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
             self.calls.render(parameters);
             let pass = parameters.pass.downcast_mut::<mln_webgpu::CustomLayerPass>().expect("a WebGPU pass");
-            let mut pipeline = self.pipeline.lock().unwrap();
+            let mut pipeline = self.pipeline.lock();
             let pipeline = pipeline.get_or_insert_with(|| {
                 let module = pass.device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some("quad"),
@@ -181,7 +181,7 @@ mod webgpu {
         }
 
         fn deinitialize(&self) {
-            self.pipeline.lock().unwrap().take();
+            self.pipeline.lock().take();
             self.calls.deinitializations.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -295,7 +295,7 @@ mod vulkan {
         fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
             self.calls.render(parameters);
             let pass = parameters.pass.downcast_ref::<mln_vulkan::CustomLayerPass>().expect("a Vulkan pass");
-            let mut objects = self.objects.lock().unwrap();
+            let mut objects = self.objects.lock();
             let objects = objects.get_or_insert_with(|| make(pass));
             assert_eq!(objects.render_pass, pass.render_pass);
             let extent = pass.extent;
@@ -326,7 +326,7 @@ mod vulkan {
         }
 
         fn deinitialize(&self) {
-            if let Some(objects) = self.objects.lock().unwrap().take() {
+            if let Some(objects) = self.objects.lock().take() {
                 // SAFETY: the GPU no longer uses them, as `deinitialize`
                 // promises.
                 unsafe {
@@ -383,7 +383,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
             self.calls.render(parameters);
             let pass = parameters.pass.downcast_ref::<mln_gl::CustomLayerPass>().expect("an OpenGL pass");
             let gl = pass.gl();
-            let mut objects = self.objects.lock().unwrap();
+            let mut objects = self.objects.lock();
             // SAFETY: the session's context is current, and the objects are
             // made on it.
             unsafe {
@@ -415,7 +415,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 
         fn deinitialize(&self) {
             // The program and vertex array go with the session's context.
-            self.objects.lock().unwrap().take();
+            self.objects.lock().take();
             self.calls.deinitializations.fetch_add(1, Ordering::Relaxed);
         }
     }

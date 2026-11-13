@@ -77,11 +77,3 @@ mod generated {
     #[cfg(target_family = "wasm")]
     pub mod trampolines;
 }
-
-use std::sync::{Mutex, MutexGuard, PoisonError};
-
-/// Locks `mutex`, poisoned or not: no code that holds one of this crate's
-/// locks leaves the data half-changed if it panics.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}

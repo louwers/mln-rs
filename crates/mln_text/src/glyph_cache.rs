@@ -7,9 +7,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::glyph::{Glyph, GlyphID};
 
@@ -110,7 +110,7 @@ impl GlyphCache {
     /// cached.
     pub fn intern_glyph(&self, glyph: Glyph) -> Arc<Glyph> {
         let hash = hash_glyph(&glyph);
-        self.inner.lock_unpoisoned().glyphs.intern(hash, glyph, |a, b| a == b)
+        self.inner.lock().glyphs.intern(hash, glyph, |a, b| a == b)
     }
 
     /// `intern(Range&&)`: the cached range that points to the same glyphs as
@@ -123,13 +123,13 @@ impl GlyphCache {
             Arc::as_ptr(glyph).hash(&mut hasher);
         }
         let hash = hasher.finish();
-        self.inner.lock_unpoisoned().ranges.intern(hash, range, same_range)
+        self.inner.lock().ranges.intern(hash, range, same_range)
     }
 
     /// `size()`: the glyphs alive, not counting ranges. Walks the whole
     /// table.
     pub fn size(&self) -> usize {
-        let inner = self.inner.lock_unpoisoned();
+        let inner = self.inner.lock();
         inner.glyphs.buckets.values().flatten().filter(|weak| weak.strong_count() > 0).count()
     }
 }

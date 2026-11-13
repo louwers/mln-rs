@@ -41,7 +41,6 @@ use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
 use mln_util::identity::SimpleIdentity;
-use mln_util::sync::RwLockExt;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
 use super::{
@@ -484,7 +483,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
                 continue;
             };
-            let binders_guard = binders_lock.read_unpoisoned();
+            let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
             let geometry = tile.get_bucket_geometry();
 

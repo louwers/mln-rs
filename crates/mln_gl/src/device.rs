@@ -35,12 +35,13 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use khronos_egl as egl;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
+use parking_lot::{Condvar, Mutex};
 
 use crate::borrowed_target::SurfaceHandle;
 use crate::egl::{Egl, library};
@@ -334,9 +335,9 @@ impl SingleContext {
     /// turn, rather than waiting for itself.
     fn take(&self, user: u64) -> bool {
         let thread = std::thread::current().id();
-        let mut turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut turn = self.turn.lock();
         while turn.holder.is_some_and(|holder| holder != thread) {
-            turn = self.free.wait(turn).unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.free.wait(&mut turn);
         }
         let lost = turn.last_user != user;
         turn.last_user = user;
@@ -367,7 +368,7 @@ impl SingleContext {
     /// so every renderer's next turn finds its state lost. The outer stretch
     /// goes on with the state that the nested one left.
     fn give(&self, user: u64) {
-        let mut turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut turn = self.turn.lock();
         if turn.depth == 0 {
             return;
         }

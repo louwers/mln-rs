@@ -45,7 +45,6 @@ use mln_util::feature::feature_id_to_string;
 use mln_util::geometry::FeatureType;
 use mln_util::i18n;
 use mln_util::range::Range;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr, get_retain_feature_id};
@@ -1013,7 +1012,7 @@ impl SymbolLayout {
             section_options_to_value(feature.formatted_text.as_ref().expect("text").section_at(section_index));
         let length = state.text.attribute_data.len();
         for binders in bucket.paint_properties.values() {
-            let mut binders = binders.write_unpoisoned();
+            let mut binders = binders.write();
             binders.text_binders.populate_vertex_vectors(
                 feature,
                 length,
@@ -1784,7 +1783,7 @@ impl Layout for SymbolLayout {
                     let length =
                         if sdf { state.sdf_icon.attribute_data.len() } else { state.icon.attribute_data.len() };
                     for binders in bucket_ref.paint_properties.values() {
-                        let mut binders = binders.write_unpoisoned();
+                        let mut binders = binders.write();
                         binders.icon_binders.populate_vertex_vectors(
                             feature,
                             length,

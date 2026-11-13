@@ -7,8 +7,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use feature::Feature;
 use geometry::{Geometry, Point};
@@ -26,6 +26,7 @@ use mln_style::layers::{CircleLayer, CircleLayerProperties};
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
+use parking_lot::Mutex;
 
 use super::RasterTileTest;
 
@@ -50,7 +51,7 @@ fn counter() -> (Arc<AtomicUsize>, TileFunction) {
 fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     let ids = Arc::new(Mutex::new(Vec::new()));
     let recorded = ids.clone();
-    (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().unwrap().push(*id)))
+    (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 
 fn tile(
@@ -106,7 +107,7 @@ fn invoke_fetch_tile() {
     tile.set_necessity(TileNecessity::Required);
     test.run_loop.wait_for_empty();
 
-    assert_eq!(*fetched.lock().unwrap(), vec![CanonicalTileID::new(0, 0, 0)]);
+    assert_eq!(*fetched.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
 }
 
 // gtest: CustomGeometryTile.InvokeCancelTile
@@ -121,7 +122,7 @@ fn invoke_cancel_tile() {
     tile.set_necessity(TileNecessity::Optional);
     test.run_loop.wait_for_empty();
 
-    assert_eq!(*cancelled.lock().unwrap(), vec![CanonicalTileID::new(0, 0, 0)]);
+    assert_eq!(*cancelled.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
 }
 
 // gtest: CustomGeometryTile.FetchCancelledTileAgain
