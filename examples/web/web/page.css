@@ -594,6 +594,14 @@ a {
 
 .debug-legend-note {
   margin-top: 2px;
+  overflow: hidden;
+  color: var(--debug-muted);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+/* Nothing drew in the last second: the frame rate is the last one's. */
+.debug-idle .debug-fps {
   color: var(--debug-muted);
 }
 

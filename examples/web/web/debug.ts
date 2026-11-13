@@ -5,9 +5,11 @@
 // Web Worker reports frames and numbers only while it shows.
 //
 // Frames that draw nothing add nothing to the graph, so it pauses while the
-// map is still; a marker shows where it resumed. Hovering a bar shows that
-// frame's phases in the legend, which otherwise shows their average over the
-// last frames.
+// map is still; a marker shows where it resumed. The frame rate is that of
+// the frames that drew one after another in the last second; with none, it
+// keeps its last value, dimmed, as idle. Hovering a bar shows that frame's
+// phases in the legend, which otherwise shows their average over the last
+// frames.
 
 import { type Camera, type DebugStats, type FrameSample, PHASES } from './protocol.ts';
 
@@ -29,9 +31,12 @@ const HISTORY = 120;
 /** The graph's width per frame and its height, in CSS pixels. */
 const BAR = 2;
 const GRAPH_HEIGHT = 72;
-/** The milliseconds the graph's height spans; taller frames are clipped. */
-const GRAPH_MS = 40;
-/** The frame rates the graph marks. */
+/**
+ * The milliseconds the graph's height can span: the least that fits every
+ * frame it shows; taller frames are clipped.
+ */
+const SCALES = [5, 10, 20, 40, 80, 160, 320];
+/** The frame rates the graph marks, where they fit its scale. */
 const RATES = [120, 60, 30];
 /** A frame this long after the one before resumes the graph after a pause. */
 const PAUSE_MS = 250;
@@ -133,17 +138,19 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
     if (row && row.textContent !== text) row.textContent = text;
   };
 
-  // The frame rate counts the frames that drew in the last second, so it
-  // falls to 0 while the map is still.
   function showRate() {
     const now = performance.now();
     while (lastSecond.length > 0 && now - (lastSecond[0]?.arrived ?? now) > 1000) lastSecond.shift();
-    fps.textContent = `${lastSecond.length} fps`;
     const intervals = lastSecond.filter((bar) => !bar.resumed).map((bar) => bar.sample.interval);
-    frameMs.textContent = intervals.length === 0
-      ? 'still'
-      : `${(intervals.reduce((sum, ms) => sum + ms, 0) / intervals.length).toFixed(1)} ms · ` +
-        `max ${Math.max(...intervals).toFixed(1)}`;
+    headline.classList.toggle('debug-idle', intervals.length === 0);
+    if (intervals.length === 0) {
+      if (fps.textContent === '') fps.textContent = '– fps';
+      frameMs.textContent = 'idle';
+    } else {
+      const average = intervals.reduce((sum, ms) => sum + ms, 0) / intervals.length;
+      fps.textContent = `${Math.round(1000 / average)} fps`;
+      frameMs.textContent = `${average.toFixed(1)} ms · max ${Math.max(...intervals).toFixed(1)}`;
+    }
     showLegend();
   }
 
@@ -154,16 +161,21 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
       const value = legendValues.get(phase);
       if (value) value.textContent = (values[i] ?? 0).toFixed(1);
     });
-    const total = values.reduce((sum, v) => sum + v, 0);
+    // The frame's work and its time since the frame before, or their
+    // averages, in columns that keep their width.
+    const work = values.reduce((sum, v) => sum + v, 0);
+    let frame: number | null;
     if (hoveredBar) {
-      const age = bars.length - 1 - (hovered ?? 0);
-      legendNote.textContent = `frame −${age}: ${total.toFixed(1)} ms work` +
-        (hoveredBar.resumed ? ', after a pause' : `, ${hoveredBar.sample.interval.toFixed(1)} ms after the last`);
+      frame = hoveredBar.resumed ? null : hoveredBar.sample.interval;
     } else {
-      legendNote.textContent = bars.length === 0
-        ? 'no frames drawn yet'
-        : `last ${Math.min(AVERAGE, bars.length)} frames: ${total.toFixed(1)} ms avg work`;
+      const intervals = bars.slice(-AVERAGE).filter((bar) => !bar.resumed).map((bar) => bar.sample.interval);
+      frame = intervals.length === 0 ? null : intervals.reduce((sum, ms) => sum + ms, 0) / intervals.length;
     }
+    const label = hoveredBar ? `−${bars.length - 1 - (hovered ?? 0)}` : 'avg';
+    const ms = (value: number) => value.toFixed(1).padStart(5);
+    legendNote.textContent = bars.length === 0
+      ? 'no frames drawn yet'
+      : `${label.padEnd(5)} work ${ms(work)} · frame ${frame === null ? 'pause' : `${ms(frame)} ms`}`;
   }
 
   function draw() {
@@ -179,7 +191,10 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
     if (!context) return;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, HISTORY * BAR, GRAPH_HEIGHT);
-    const y = (ms: number) => GRAPH_HEIGHT - Math.min(ms, GRAPH_MS) / GRAPH_MS * GRAPH_HEIGHT;
+    const peak = Math.max(0, ...bars.map((bar) =>
+      Math.max(bar.sample.phases.reduce((sum, ms) => sum + ms, 0), bar.resumed ? 0 : bar.sample.interval)));
+    const scale = SCALES.find((ms) => ms >= peak) ?? SCALES[SCALES.length - 1] ?? peak;
+    const y = (ms: number) => GRAPH_HEIGHT - Math.min(ms, scale) / scale * GRAPH_HEIGHT;
     const offset = HISTORY - bars.length;
     bars.forEach((bar, i) => {
       const x = (offset + i) * BAR;
@@ -201,11 +216,16 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
         top += ms;
       });
     });
-    // The frame rates, labelled at the right, where the newest frames are.
+    // The scale at the top left, and the frame rates that fit it, labelled
+    // at the right, where the newest frames are.
     context.font = '9px ui-monospace, monospace';
+    context.textAlign = 'left';
+    context.textBaseline = 'top';
+    context.fillStyle = 'rgb(255 255 255 / 0.5)';
+    context.fillText(`${scale} ms`, 2, 1);
     context.textAlign = 'right';
     context.textBaseline = 'middle';
-    for (const rate of RATES) {
+    for (const rate of RATES.filter((rate) => 1000 / rate < scale)) {
       const line = Math.round(y(1000 / rate));
       const label = `${rate}`;
       context.fillStyle = 'rgb(255 255 255 / 0.3)';
