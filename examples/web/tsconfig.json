@@ -15,5 +15,5 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["web/main.ts", "web/compare.ts", "web/styles.ts", "web/protocol.ts", "vite.config.ts"]
+  "include": ["web/main.ts", "web/compare.ts", "web/debug.ts", "web/styles.ts", "web/protocol.ts", "vite.config.ts"]
 }

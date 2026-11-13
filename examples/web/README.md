@@ -109,6 +109,14 @@ same style over the canvas, clipped to the right of a divider you can drag
 comparison first opens. Each side takes its own input: the map that last took input leads,
 and the other jumps to its camera.
 
+`?debug`, F3, or the switch in the panel shows a debug overlay
+(web/debug.ts): the frame rate, the camera and the map's numbers, a graph
+of the last two seconds of frames with each frame's work stacked by phase
+(`WebMap::frame_timings`) in front of its whole interval, and the features
+within a few pixels of the pointer (`WebMap::query_features`), each with its
+layer, source and properties. The map's Web Worker reports frames and
+features only while the overlay shows.
+
 `?freeBearing`, or the other switch in the panel, gives the globe free bearing (`Map::set_globe_free_bearing`): drags and zooms on it turn the bearing with the planet, and a drag carries on over a pole. Off, as the page starts, north stays up and a drag stops at the pole.
 
 ## Images decode in the browser
@@ -186,6 +194,7 @@ parameters (web/main.ts):
   (`[{"url": "...", "unicode-range": ["U+1000-109F"]}]`);
 - `compare`: MapLibre GL JS's map beside this one (see above);
 - `freeBearing`: free bearing on the globe (see above);
+- `debug`: the debug overlay (see above);
 - `workers=<n>`: Web Workers for the tiles (default: up to 4);
 - `width`, `height`, `ratio`: a fixed map size in CSS pixels and pixel
   ratio;

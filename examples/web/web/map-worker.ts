@@ -23,7 +23,7 @@
 // can't start the map, the worker says `unsupported` rather than `fatal`.
 
 import type { WebMap } from './pkg/mln_web.js';
-import type { Bindings, Box, Camera, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
+import type { Bindings, Box, Camera, DebugFeature, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
 
 // Every URL this worker fetched, and how many times: the map's fetches look
 // the global `fetch` up at each call, and so do the preloads below.
@@ -47,6 +47,11 @@ type Handle = (message: ToMap) => void;
 
 // Frames without a camera change after which the map has stopped moving.
 const IDLE_FRAMES = 10;
+// How far from the pointer, in CSS pixels, the debug overlay looks for
+// features, and how often it looks again while the map redraws under a
+// still pointer.
+const HOVER_RADIUS = 3;
+const HOVER_REQUERY_MS = 200;
 
 let start: Promise<Handle | undefined> | null = null;
 const early: ToMap[] = []; // messages before the map exists
@@ -195,7 +200,7 @@ async function run(
   { module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily, panic }: Start,
 ): Promise<Handle> {
   const { default: init, WebMap, set_preloads, panic_for_check, mlnWebStopPump } = await bindings;
-  await init({ module_or_path: module });
+  const exports = await init({ module_or_path: module }) as { memory?: WebAssembly.Memory };
   stopPump = mlnWebStopPump;
   set_preloads(takePreload);
 
@@ -238,6 +243,12 @@ async function run(
   let reported = 0;
   let attribution = '';
   let styleName = '';
+  // The debug overlay: whether the page shows it, and the pointer it asks
+  // about, which `hoverMoved` marks as not yet queried.
+  let debug = false;
+  let hover: [number, number] | null = null;
+  let hoverMoved = false;
+  let hoverQueried = 0;
   const report = (force: boolean) => {
     const now = performance.now();
     if (!force && now - reported < 250) return;
@@ -258,14 +269,38 @@ async function run(
       styleName = name;
       post({ type: 'styleName', name });
     }
+    if (debug) {
+      post({
+        type: 'stats',
+        stats: {
+          tileWorkers: ports.length,
+          replies: map.received(),
+          memory: exports.memory?.buffer.byteLength ?? 0,
+          loadedMs: loaded?.loadedMs ?? null,
+        },
+      });
+    }
   };
-  function frame() {
-    guard(drawFrame);
+  let lastFrame: number | null = null;
+  function frame(time: number) {
+    const interval = lastFrame === null ? 0 : time - lastFrame;
+    lastFrame = time;
+    guard(() => drawFrame(interval));
     if (!stopped) requestAnimationFrame(frame);
   }
   let shownCamera = '';
-  function drawFrame() {
-    map.frame(8, performance.now());
+  function drawFrame(interval: number) {
+    const drew = map.frame(8, performance.now());
+    if (debug) {
+      post({ type: 'frame', sample: { interval, phases: Array.from(map.frame_timings()) } });
+      const now = performance.now();
+      if (hover && (hoverMoved || (drew && now - hoverQueried >= HOVER_REQUERY_MS))) {
+        hoverMoved = false;
+        hoverQueried = now;
+        const features = JSON.parse(map.query_features(hover[0], hover[1], HOVER_RADIUS)) as DebugFeature[];
+        post({ type: 'features', point: hover, features });
+      }
+    }
     const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();
     const next = [lat, lon, zoom, bearing, pitch].join();
     const camera: Camera = [lat, lon, zoom, bearing, pitch];
@@ -352,6 +387,14 @@ async function run(
         }
         break;
       }
+      case 'debug':
+        debug = data.on;
+        report(true);
+        break;
+      case 'hover':
+        hover = data.point;
+        hoverMoved = hover !== null;
+        break;
       case 'preload':
       case 'start':
       case 'fetches':

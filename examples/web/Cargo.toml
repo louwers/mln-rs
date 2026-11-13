@@ -29,6 +29,8 @@ webgl = ["dep:mln_gl"]
 
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+feature.workspace = true
+geometry.workspace = true
 js-sys.workspace = true
 mln_actor.workspace = true
 mln_gestures.workspace = true
@@ -42,6 +44,7 @@ mln_util.workspace = true
 mln_web_host.workspace = true
 mln_webgpu.workspace = true
 parking_lot.workspace = true
+serde_json.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true
