@@ -287,8 +287,21 @@ impl TransformState {
             * (self.roll.cos().abs() + self.roll.sin().abs() * width / height);
         let tan_multiple = mln_math::clamp_f64(tan_fov_above_center * limited_pitch.tan(), 0.0, 0.99);
         debug_assert!(tan_multiple < 1.0);
+
+        // The map ends at the horizon, where the sky starts, as in GL JS's
+        // `_calculateNearFarZ`: at high pitch it is below the top of the view.
+        let horizon = self.get_mercator_horizon();
+        let horizon_angle = (horizon / camera_to_center_distance).atan();
+        let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
+        let fov_center_to_horizon = if horizon_angle > min_horizon_angle {
+            2.0 * horizon_angle * (0.5 + offset.y / (horizon * 2.0))
+        } else {
+            min_horizon_angle
+        };
+        let horizon_multiple = mln_math::clamp_f64(fov_center_to_horizon.tan() * limited_pitch.tan(), 0.0, 0.99);
+
         // Calculate z distance of the farthest fragment that should be rendered.
-        let furthest_distance = camera_to_sea_level_distance / (1.0 - tan_multiple);
+        let furthest_distance = camera_to_sea_level_distance / (1.0 - tan_multiple.min(horizon_multiple));
         // Add a bit extra to avoid precision problems when a fragment's
         // distance is exactly `furthestDistance`
         furthest_distance * 1.01
@@ -985,6 +998,15 @@ impl TransformState {
         (0.5 * f64::from(self.size.height) / (self.fov / 2.0).tan()) as f32
     }
 
+    /// GL JS's `getMercatorHorizon`: how far above the center of the view,
+    /// in pixels, the map ends and the sky starts. It is 0.85 of the way to
+    /// the flat map's geometric horizon, and never past 89.25 degrees from
+    /// straight down; at a pitch past that it is negative.
+    pub fn get_mercator_horizon(&self) -> f64 {
+        f64::from(self.get_camera_to_center_distance())
+            * f64::min((PI / 2.0 - self.pitch).tan() * 0.85, (max_mercator_horizon_angle() - self.pitch).tan())
+    }
+
     pub fn get_pitch(&self) -> f64 {
         self.pitch
     }
@@ -1563,7 +1585,77 @@ impl TransformState {
 
 #[cfg(test)]
 mod tests {
-    use mln_util::constants::LATITUDE_MAX;
+    use mln_style_types::ProjectionDefinition;
+    use mln_util::constants::{DEFAULT_FOV, LATITUDE_MAX};
+    use mln_util::geo::LatLng;
+    use mln_util::mat4::matrix;
+    use mln_util::projection::Projection;
+    use mln_util::size::Size;
+
+    use super::TransformState;
+    use crate::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
+
+    /// A 512 by 512 view at `pitch` degrees, looking north.
+    fn pitched(pitch: f64) -> TransformState {
+        MapView {
+            camera: Camera {
+                center: LatLng::new(0.0, -60.0).unwrap(),
+                zoom: 5.0,
+                pitch,
+                fov: mln_math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap()
+    }
+
+    /// The ground north of the center through `state`'s projection matrix,
+    /// every hundredth of a degree up to 85 degrees north: each point's row
+    /// from the top of the view, and its clip z over w.
+    fn meridian(state: &TransformState) -> Vec<(f64, f64)> {
+        let proj_matrix = state.get_proj_matrix(1, false);
+        let height = f64::from(state.get_size().height);
+        (0..8500)
+            .map(|step| {
+                let lat_lng = LatLng::new(f64::from(step) / 100.0, -60.0).unwrap();
+                let point = Projection::project(&lat_lng, state.get_scale());
+                let mut clip = [0.0; 4];
+                matrix::transform_mat4(&mut clip, &[point.x, point.y, 0.0, 1.0], &proj_matrix);
+                ((1.0 - clip[1] / clip[3]) / 2.0 * height, clip[2] / clip[3])
+            })
+            .collect()
+    }
+
+    /// At high pitch the far plane ends the map at GL JS's horizon, below
+    /// the top of the view: the ground drawn below the horizon is nearer
+    /// than the far plane, and the ground drawn above it, up to the flat
+    /// map's geometric horizon, is past it.
+    #[test]
+    fn the_map_ends_at_the_horizon() {
+        let state = pitched(85.0);
+        let horizon_row = 256.0 - state.get_mercator_horizon();
+        let ground = meridian(&state);
+        assert!(ground.iter().filter(|(row, _)| *row > horizon_row).all(|(_, depth)| *depth < 1.0));
+        let past: Vec<_> = ground.iter().filter(|(row, _)| *row < horizon_row - 1.0).collect();
+        assert_ne!(past.len(), 0);
+        assert!(past.iter().all(|(row, depth)| *row > 0.0 && *depth > 1.0));
+    }
+
+    /// Below about 68 degrees of pitch the horizon is above the top of the
+    /// view, and the far plane reaches the ground at the top.
+    #[test]
+    fn the_map_fills_the_view_at_lower_pitch() {
+        let state = pitched(60.0);
+        assert!(state.get_mercator_horizon() > 256.0);
+        let ground = meridian(&state);
+        assert!(ground.iter().filter(|(row, _)| *row >= 0.0).all(|(_, depth)| *depth < 1.0));
+        assert!(ground.iter().any(|(row, _)| *row < 0.0));
+    }
 
     /// The globe's `asinh(tan(φ))` and the Mercator branch's
     /// `0.5 * ln((1 + sin φ) / (1 - sin φ))` give the same y inside the

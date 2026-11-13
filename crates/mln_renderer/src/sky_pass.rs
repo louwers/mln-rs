@@ -143,13 +143,7 @@ impl SkyPass {
             }
 
             if let Some(sky_layer_group) = &self.sky_layer_group {
-                let max_horizon_angle = 89.25 * PI / 180.0;
-                let pitch = state.get_pitch();
-                // `std::min(a, b)`.
-                let a = (PI / 2.0 - pitch).tan() * 0.85;
-                let b = (max_horizon_angle - pitch).tan();
-                let horizon_distance =
-                    f64::from(state.get_camera_to_center_distance() * pixel_ratio) * if b < a { b } else { a };
+                let horizon_distance = state.get_mercator_horizon() * f64::from(pixel_ratio);
                 let roll = state.get_roll();
                 let normal = [(-roll.sin()) as f32, roll.cos() as f32];
                 let horizon = [

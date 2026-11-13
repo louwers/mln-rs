@@ -170,4 +170,41 @@ mod tests {
         assert!(zero_to_one.near_distance > 0.0 && zero_to_one.near_distance < zero_to_one.far_distance);
         assert!(!zero_to_one.globe);
     }
+
+    /// At high pitch the far plane, and the depth range with it, ends at the
+    /// horizon, where the map does, below the top of the view.
+    #[test]
+    fn the_depth_range_ends_at_the_horizon() {
+        let view = MapView {
+            camera: Camera {
+                center: LatLng::new(0.0, -60.0).unwrap(),
+                zoom: 5.0,
+                pitch: 85.0,
+                fov: 40.0,
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(SIZE, 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        };
+        let transform = TransformParameters::new(&view.to_state().unwrap());
+        let projection = compute(&transform, 1.0, BackendType::Vulkan);
+        assert_eq!(transform.state.get_far_z(), projection.far_distance);
+        // The ground north of the center: what is drawn below the horizon
+        // is nearer than the far depth, and what is drawn above it is past.
+        let horizon_row = f64::from(SIZE.height) / 2.0 - transform.state.get_mercator_horizon();
+        let mut past = 0;
+        for step in 0..8500 {
+            let (_, row, depth) =
+                project(&projection.matrix, mercator(&LatLng::new(f64::from(step) / 100.0, -60.0).unwrap()));
+            if row > horizon_row {
+                assert!(depth < 1.0, "{row}: {depth}");
+            } else if row < horizon_row - 1.0 {
+                assert!(row > 0.0 && depth > 1.0, "{row}: {depth}");
+                past += 1;
+            }
+        }
+        assert!(past > 0);
+    }
 }
