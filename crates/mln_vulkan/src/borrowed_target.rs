@@ -716,6 +716,11 @@ impl BorrowedTarget {
                         return None;
                     }
                 };
+                // A semaphore that signaled already exports no descriptor:
+                // the frame is complete.
+                if fd == -1 {
+                    return Some(GpuSync::of(SyncKind::CpuComplete));
+                }
                 // SAFETY: the export made the descriptor, which is the
                 // target's.
                 let fd = unsafe { OwnedFd::from_raw_fd(fd) };
