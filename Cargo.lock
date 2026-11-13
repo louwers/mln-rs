@@ -2414,6 +2414,7 @@ name = "mln-rs-map"
 version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
+ "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-map-types",

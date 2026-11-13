@@ -644,6 +644,14 @@ impl RenderOrchestrator {
             }
         }
 
+        // The update carries the map's whole feature state, so a render
+        // source, whether new, kept or rebuilt after `clear_data`, shows the
+        // state of the update it renders. A source whose state the update
+        // didn't change does nothing.
+        for (id, render_source) in &mut self.render_sources {
+            render_source.set_feature_states(update_parameters.feature_states.get(id));
+        }
+
         // A still image fails at the first resource error, and nothing
         // requests a failed resource again on its own: each new still image
         // retries them instead of waiting on them or rendering without them.

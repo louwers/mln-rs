@@ -215,6 +215,11 @@ pub trait RenderSource {
     ) {
     }
 
+    /// Makes the source's feature state `states`, `None` for no state, in
+    /// place of what it held, as of the next `prepare`. Giving the same
+    /// `states` again changes nothing.
+    fn set_feature_states(&mut self, _states: Option<&std::sync::Arc<crate::bucket::LayerFeatureStates>>) {}
+
     /// `getFeatureState(state, sourceLayerID, featureID)`.
     fn get_feature_state(
         &self,

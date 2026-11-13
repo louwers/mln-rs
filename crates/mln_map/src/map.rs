@@ -36,6 +36,7 @@ use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::vectors::{Vec3, Vec4};
 
+use crate::feature_state::FeatureStateStore;
 use crate::map_event::{CameraChange, MapEvent, RenderFrameStatus, RenderMode};
 use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
@@ -145,6 +146,8 @@ pub struct Map {
     /// The stats of the last frame the renderer finished.
     last_frame_stats: Option<Arc<RenderingStats>>,
     style: Style,
+    /// The state of the sources' features, which each update carries.
+    feature_state: FeatureStateStore,
 
     camera_mutated: bool,
     prefetch_zoom_delta: u8,
@@ -229,6 +232,7 @@ impl Map {
             rendering_stats_view: None,
             last_frame_stats: None,
             style,
+            feature_state: FeatureStateStore::default(),
             camera_mutated: false,
             // util::DEFAULT_PREFETCH_ZOOM_DELTA
             prefetch_zoom_delta: 4,
@@ -324,8 +328,16 @@ impl Map {
             if style_events.is_empty() && renderer_events.is_empty() {
                 break;
             }
+            // A style that loads takes every source's feature state with it.
+            // The updates that its parse asked for are in the same batch, and
+            // go out with the new style's sources, so the state goes first.
+            let state_cleared =
+                style_events.iter().any(|event| matches!(event, StyleEvent::StyleLoaded)) && self.feature_state.clear();
             for event in style_events {
                 self.handle_style_event(event);
+            }
+            if state_cleared {
+                self.on_update();
             }
             for event in renderer_events {
                 self.handle_renderer_event(event);
@@ -537,6 +549,7 @@ impl Map {
             sources: style_impl.get_source_impls(),
             layers: style_impl.get_layer_impls(),
             global_state: Some(style_impl.get_global_state_shared()),
+            feature_states: self.feature_state.shared(),
             file_source: self.file_source.clone(),
             prefetch_zoom_delta: self.prefetch_zoom_delta,
             still_image_request: self.still_image_request.is_some(),
@@ -621,6 +634,75 @@ impl Map {
     pub fn trigger_repaint(&mut self) {
         self.process_events();
         self.on_update();
+    }
+
+    // MARK: - Feature state
+
+    /// Merges `state` into the state of the feature `feature_id` of the
+    /// source `source_id`, in its source layer `source_layer_id`: its keys
+    /// replace the same keys of the feature's state, and the other keys
+    /// stay. `None`, like the empty string, names no source layer.
+    ///
+    /// The map keeps the state until it is removed or a style loads, which
+    /// removes the state of every source, and sends it to the renderer with
+    /// its updates. Publishes an update when the state changes. Returns
+    /// whether it changed.
+    pub fn set_feature_state(
+        &mut self,
+        source_id: &str,
+        source_layer_id: Option<&str>,
+        feature_id: &str,
+        state: mln_style::expression::expression::FeatureState,
+    ) -> bool {
+        self.process_events();
+        let changed = self.feature_state.set(source_id, source_layer_id.unwrap_or(""), feature_id, state);
+        if changed {
+            self.on_update();
+        }
+        changed
+    }
+
+    /// The state of the feature `feature_id` of the source `source_id`, in
+    /// its source layer `source_layer_id`, empty when it has none.
+    pub fn get_feature_state(
+        &self,
+        source_id: &str,
+        source_layer_id: Option<&str>,
+        feature_id: &str,
+    ) -> mln_style::expression::expression::FeatureState {
+        self.feature_state.get(source_id, source_layer_id.unwrap_or(""), feature_id)
+    }
+
+    /// Removes the state of the feature `feature_id` of the source
+    /// `source_id`, in its source layer `source_layer_id`: only its key
+    /// `state_key` when there is one, and that of every feature in the
+    /// source layer without `feature_id`. Publishes an update when the state
+    /// changes. Returns whether it changed.
+    pub fn remove_feature_state(
+        &mut self,
+        source_id: &str,
+        source_layer_id: Option<&str>,
+        feature_id: Option<&str>,
+        state_key: Option<&str>,
+    ) -> bool {
+        self.process_events();
+        let changed = self.feature_state.remove(source_id, source_layer_id.unwrap_or(""), feature_id, state_key);
+        if changed {
+            self.on_update();
+        }
+        changed
+    }
+
+    /// Removes the state of every feature of the source `source_id`, as when
+    /// the source leaves the style. Publishes an update when the state
+    /// changes. Returns whether it changed.
+    pub fn remove_source_feature_state(&mut self, source_id: &str) -> bool {
+        self.process_events();
+        let changed = self.feature_state.remove_source(source_id);
+        if changed {
+            self.on_update();
+        }
+        changed
     }
 
     // MARK: - Style

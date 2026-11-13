@@ -20,7 +20,7 @@ use mln_util::sync::MutexExt;
 use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
-use crate::feature_state::{FeatureState, FeatureStateSelector, FeatureStateStore};
+use crate::feature_state::{FeatureState, FeatureStateSelector};
 use crate::render::{
     Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionShared, Worker, worker_post,
 };
@@ -778,24 +778,24 @@ impl Map {
     /// sources, wait until [`set_style_url`](Self::set_style_url) or
     /// [`set_style_json`](Self::set_style_json) completes.
     ///
+    /// The map's next update for its render session carries the state, so a
+    /// frame shows it, and a rendered query reads it, once the frame renders
+    /// that update. A command that changes no state publishes no update: an
+    /// empty `state` merges nothing.
+    ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// selector without a feature, or an empty state.
+    /// selector without a feature.
     pub fn set_feature_state(
         &self,
         selector: &FeatureStateSelector,
         state: FeatureState,
     ) -> Result<Completion<Applied>, Error> {
         let key = selector.key(true)?;
-        if state.is_empty() {
-            return Err(Error::invalid_argument("feature state must not be empty"));
-        }
-        self.send(
-            move |entry, _| {
-                entry.feature_state.set(key, state);
-                Ok(())
-            },
-            |(), entry| entry.applied(),
-        )
+        self.command(move |map| {
+            let feature_id = key.feature_id.as_deref().unwrap_or_default();
+            map.set_feature_state(&key.source_id, Some(&key.source_layer_id), feature_id, state);
+            Ok(())
+        })
     }
 
     /// The state of the feature that `selector` names, empty when it has
@@ -803,22 +803,30 @@ impl Map {
     /// for a selector without a feature.
     pub fn feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
         let key = selector.key(true)?;
-        self.send(move |entry, _| Ok(entry.feature_state.get(&key)), |state, _| state)
+        self.query(move |map| {
+            let feature_id = key.feature_id.as_deref().unwrap_or_default();
+            Ok(map.get_feature_state(&key.source_id, Some(&key.source_layer_id), feature_id))
+        })
     }
 
     /// Removes the state that `selector` selects: one key of a feature, all
     /// of a feature's state, or that of every feature in a source layer.
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// state key without a feature.
+    /// The removal reaches the render session as
+    /// [`set_feature_state`](Self::set_feature_state) describes, and a
+    /// removal of no state publishes no update. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a state key
+    /// without a feature.
     pub fn remove_feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<Applied>, Error> {
         let key = selector.key(false)?;
-        self.send(
-            move |entry, _| {
-                entry.feature_state.remove(&key);
-                Ok(())
-            },
-            |(), entry| entry.applied(),
-        )
+        self.command(move |map| {
+            map.remove_feature_state(
+                &key.source_id,
+                Some(&key.source_layer_id),
+                key.feature_id.as_deref(),
+                key.state_key.as_deref(),
+            );
+            Ok(())
+        })
     }
 
     // MARK: - Style
@@ -903,7 +911,7 @@ impl Map {
                     return Err(Error::invalid_state(message));
                 }
                 style.remove_source(&source_id);
-                entry.feature_state.remove_source(&source_id);
+                entry.core.remove_source_feature_state(&source_id);
                 Ok(())
             },
             |(), entry| entry.applied(),
@@ -1286,7 +1294,6 @@ pub(crate) struct MapEntry {
     /// Whether a flush of the map's events is on its way.
     flush_scheduled: Arc<AtomicBool>,
     ends: Ends,
-    pub(crate) feature_state: FeatureStateStore,
     /// The callbacks of the custom sources that commands added.
     pub(crate) callback_sources: CallbackSources,
     /// The GeoJSON data that commands set and that is still being built.
@@ -1370,7 +1377,6 @@ pub(crate) fn create(
             session: None,
             flush_scheduled,
             ends: Ends::default(),
-            feature_state: FeatureStateStore::default(),
             callback_sources: CallbackSources::default(),
             geojson_updates: GeoJsonUpdates::default(),
         },
@@ -1479,11 +1485,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     let from_json = entry.pending_style.as_ref().is_some_and(|pending| pending.from_json);
     for event in &events {
         match event {
-            MapEvent::StyleLoaded => {
-                // A new style's sources start without state.
-                entry.feature_state.clear();
-                style_outcome = Some(Ok(()));
-            }
+            MapEvent::StyleLoaded => style_outcome = Some(Ok(())),
             MapEvent::LoadingFailed(StyleLoadError::Parse(message)) if from_json => {
                 style_outcome = Some(Err(Error::invalid_argument(message)));
             }

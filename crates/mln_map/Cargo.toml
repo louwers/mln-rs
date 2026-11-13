@@ -16,6 +16,7 @@ name = "mln_map"
 doctest = false
 
 [dependencies]
+feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true
 mln_actor.workspace = true

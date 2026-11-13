@@ -5,13 +5,21 @@
 // `coalesce_changes` takes the tiles of the render source's pyramid (the same
 // tiles).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use mln_style::expression::expression::FeatureState;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{FeatureStates, LayerFeatureStates};
 use crate::tile::tile::Tile;
+
+/// The feature state of a map's sources, as the map's updates carry it: by
+/// source ID, the state of each source layer's features, where the empty
+/// source layer stands for none. A source without state has no entry, and no
+/// entry holds an empty state. Each source's state is shared, so an update
+/// shares the state of the sources it leaves alone with the update before.
+pub type FeatureStatesBySource = BTreeMap<String, Arc<LayerFeatureStates>>;
 
 /// `SourceFeatureState`.
 #[derive(Debug, Default)]
@@ -21,6 +29,8 @@ pub struct SourceFeatureState {
     deleted_states: LayerFeatureStates,
     /// Goes up in each `coalesce_changes` call that has changes.
     version: u64,
+    /// The state that [`set_states`](Self::set_states) last gave the source.
+    given: Option<Arc<LayerFeatureStates>>,
 }
 
 impl SourceFeatureState {
@@ -83,6 +93,68 @@ impl SourceFeatureState {
         }
         if feature_deletions.is_empty() {
             self.deleted_states.remove(source_layer);
+        }
+    }
+
+    /// Makes the source's state `states`, `None` for no state, as of the next
+    /// `coalesce_changes`, in place of whatever it held or had queued. A
+    /// source given the same `states` again changes nothing, so a map's
+    /// update can give every source its state each time.
+    pub fn set_states(&mut self, states: Option<&Arc<LayerFeatureStates>>) {
+        let unchanged = match (&self.given, states) {
+            (None, None) => true,
+            (Some(given), Some(states)) => Arc::ptr_eq(given, states),
+            _ => false,
+        };
+        if unchanged {
+            return;
+        }
+        self.given = states.cloned();
+        self.state_changes.clear();
+        self.deleted_states.clear();
+        let empty = LayerFeatureStates::new();
+        let target = states.map_or(&empty, |states| &**states);
+        let target_state = |source_layer: &str, feature_id: &str| {
+            target.get(source_layer).and_then(|layer| layer.get(feature_id)).filter(|state| !state.is_empty())
+        };
+
+        // The keys that change or go, as changes and removals of keys that
+        // `coalesce_changes` applies to the current state.
+        for (source_layer, features) in target {
+            let current_layer = self.current_states.get(source_layer);
+            for (feature_id, state) in features {
+                let current = current_layer.and_then(|layer| layer.get(feature_id));
+                let changed: FeatureState = state
+                    .iter()
+                    .filter(|(key, value)| current.and_then(|current| current.get(*key)) != Some(*value))
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                if !changed.is_empty() {
+                    self.state_changes.entry(source_layer.clone()).or_default().insert(feature_id.clone(), changed);
+                }
+                let removed: FeatureState = current
+                    .into_iter()
+                    .flat_map(|current| current.keys())
+                    .filter(|key| !state.contains_key(*key))
+                    .map(|key| (key.clone(), feature::Value::default()))
+                    .collect();
+                // An empty state removes every key below.
+                if !removed.is_empty() && !state.is_empty() {
+                    self.deleted_states.entry(source_layer.clone()).or_default().insert(feature_id.clone(), removed);
+                }
+            }
+        }
+        // The features whose state goes whole. An empty removal map would
+        // remove the whole source layer, so each entry names its feature.
+        for (source_layer, features) in &self.current_states {
+            for (feature_id, current) in features {
+                if !current.is_empty() && target_state(source_layer, feature_id).is_none() {
+                    self.deleted_states
+                        .entry(source_layer.clone())
+                        .or_default()
+                        .insert(feature_id.clone(), FeatureState::new());
+                }
+            }
         }
     }
 
@@ -274,6 +346,45 @@ mod tests {
         fn applied_count(&self) -> usize {
             self.applied.borrow().len()
         }
+
+        /// The states that the tile was given, each feature's last.
+        fn drawn(&self) -> FeatureStates {
+            let mut drawn = FeatureStates::new();
+            for applied in self.applied.borrow().iter() {
+                drawn.extend(applied.get("layer").cloned().unwrap_or_default());
+            }
+            drawn.retain(|_, state| !state.is_empty());
+            drawn
+        }
+    }
+
+    /// The options for one feature's state that `states_of` combines.
+    fn feature_states() -> Vec<FeatureState> {
+        let entries: [&[(&str, &str)]; 5] =
+            [&[], &[("a", "x")], &[("a", "y")], &[("a", "x"), ("b", "x")], &[("b", "y")]];
+        entries
+            .iter()
+            .map(|entries| {
+                entries.iter().map(|(key, text)| ((*key).to_owned(), Value::String((*text).to_owned()))).collect()
+            })
+            .collect()
+    }
+
+    /// The source layer `layer` whose features take `states`, as a map's
+    /// update carries it, and its features.
+    fn states_of(states: &[&FeatureState]) -> (Arc<LayerFeatureStates>, FeatureStates) {
+        let features: FeatureStates = FEATURES
+            .iter()
+            .zip(states)
+            .filter(|(_, state)| !state.is_empty())
+            .map(|(feature, state)| ((*feature).to_owned(), (*state).clone()))
+            .collect();
+        let layers = if features.is_empty() {
+            LayerFeatureStates::new()
+        } else {
+            [("layer".to_owned(), features.clone())].into_iter().collect()
+        };
+        (Arc::new(layers), features)
     }
 
     impl Tile for StubTile {
@@ -457,6 +568,68 @@ mod tests {
                         let drawn = drawn.get(feature).cloned().unwrap_or_default();
                         assert_eq!(drawn, expected, "tile's feature {feature} after {sequence:?}");
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn given_states_replace_what_the_source_held() {
+        let mut state = SourceFeatureState::new();
+        let tile = StubTile::new(0);
+        let (first, _) = states_of(&[&hover(), &hover()]);
+        state.set_states(Some(&first));
+        render_frame(&mut state, &[&tile]);
+        assert_eq!(1, tile.applied_count());
+        assert_eq!(2, tile.drawn().len());
+
+        // The same state again changes nothing.
+        state.set_states(Some(&first));
+        render_frame(&mut state, &[&tile]);
+        assert_eq!(1, tile.applied_count());
+
+        // Feature 2 loses its state, and the tile gets only that change.
+        let (second, _) = states_of(&[&hover(), &FeatureState::new()]);
+        state.set_states(Some(&second));
+        assert!(state.get_state(Some("layer"), "2").is_empty());
+        render_frame(&mut state, &[&tile]);
+        assert_eq!(2, tile.applied_count());
+        assert_eq!(vec!["2"], tile.applied(1)["layer"].keys().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(1, tile.drawn().len());
+
+        // No state takes the rest, and a tile seen for the first time draws
+        // none.
+        state.set_states(None);
+        let fresh = StubTile::new(1);
+        render_frame(&mut state, &[&tile, &fresh]);
+        assert!(tile.drawn().is_empty());
+        assert!(fresh.drawn().is_empty());
+        assert!(state.get_state(Some("layer"), "1").is_empty());
+    }
+
+    // From every state to every other, with a queued call of the renderer's
+    // own API in between, the given state is the one read back before the
+    // render and drawn after it.
+    #[test]
+    fn given_states_win_over_what_was_queued() {
+        let options = feature_states();
+        let targets: Vec<_> =
+            options.iter().flat_map(|one| options.iter().map(move |two| states_of(&[one, two]))).collect();
+        for (first, _) in &targets {
+            for op in ops() {
+                for (second, expected) in &targets {
+                    let mut state = SourceFeatureState::new();
+                    let tile = StubTile::new(0);
+                    state.set_states(Some(first));
+                    render_frame(&mut state, &[&tile]);
+                    apply(&mut state, &mut FeatureStates::new(), op);
+                    // A copy, as the same state again changes nothing.
+                    state.set_states(Some(&Arc::new((**second).clone())));
+                    let context = format!("from {first:?} by {op:?} to {second:?}");
+                    assert_state(&state, expected, &format!("before rendering, {context}"));
+                    render_frame(&mut state, &[&tile]);
+                    assert_state(&state, expected, &format!("after rendering, {context}"));
+                    assert_eq!(&tile.drawn(), expected, "drawn, {context}");
                 }
             }
         }

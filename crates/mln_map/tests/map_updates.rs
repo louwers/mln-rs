@@ -4,9 +4,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use feature::Value;
 use mln_actor::RunLoop;
 use mln_map::{CameraOptions, ErrorKind, Map, MapOptions, UpdateReader};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::expression::expression::FeatureState;
 use mln_util::size::Size;
 
 fn map() -> Map {
@@ -102,6 +104,77 @@ fn a_group_without_changes_publishes_nothing() {
     map.begin_command_group();
     map.end_command_group().expect("the group ends");
     assert_eq!(map.update_generation(), before);
+}
+
+fn hover(value: bool) -> FeatureState {
+    [("hover".to_owned(), Value::Bool(value))].into_iter().collect()
+}
+
+/// The `hover` state of `points`' feature `1` that the latest update carries.
+fn carried_hover(reader: &UpdateReader) -> Option<Value> {
+    let update = reader.latest().expect("an update");
+    let state = update.parameters.feature_states.get("points")?.get("")?.get("1")?.get("hover")?.clone();
+    Some(state)
+}
+
+#[test]
+fn feature_state_changes_publish_updates_that_carry_the_state() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.jump_to(&CameraOptions::default());
+    let reader = map.update_reader();
+    let before = map.update_generation();
+
+    assert!(map.set_feature_state("points", None, "1", hover(true)));
+    assert_eq!(map.update_generation(), before + 1);
+    assert_eq!(carried_hover(&reader), Some(Value::Bool(true)));
+    assert_eq!(map.get_feature_state("points", Some(""), "1"), hover(true));
+
+    // What changes nothing publishes nothing.
+    assert!(!map.set_feature_state("points", None, "1", hover(true)));
+    assert!(!map.set_feature_state("points", None, "1", FeatureState::new()));
+    assert!(!map.remove_feature_state("points", None, Some("2"), None));
+    assert!(!map.remove_feature_state("points", None, Some("1"), Some("count")));
+    assert!(!map.remove_source_feature_state("other"));
+    assert_eq!(map.update_generation(), before + 1);
+
+    // A command group holds the update, and the state with it.
+    map.begin_command_group();
+    assert!(map.set_feature_state("points", None, "1", hover(false)));
+    assert_eq!(carried_hover(&reader), Some(Value::Bool(true)));
+    map.end_command_group().expect("the group ends");
+    assert_eq!(carried_hover(&reader), Some(Value::Bool(false)));
+
+    assert!(map.remove_feature_state("points", None, Some("1"), Some("hover")));
+    assert!(reader.latest().expect("an update").parameters.feature_states.is_empty());
+
+    map.set_feature_state("points", None, "1", hover(true));
+    assert!(map.remove_source_feature_state("points"));
+    assert_eq!(carried_hover(&reader), None);
+}
+
+#[test]
+fn a_style_load_clears_the_feature_state_that_it_publishes() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.jump_to(&CameraOptions::default());
+    let reader = map.update_reader();
+    map.set_feature_state("points", None, "1", hover(true));
+    map.set_feature_state("other", None, "1", hover(true));
+
+    map.style_mut().load_json(
+        r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
+    );
+    map.process_events();
+    assert!(map.get_feature_state("points", None, "1").is_empty());
+    assert!(map.get_feature_state("other", None, "1").is_empty());
+    let update = reader.latest().expect("an update");
+    assert!(update.parameters.feature_states.is_empty());
+    assert_eq!(1, update.parameters.sources.len());
+
+    // State set once the style has loaded stays.
+    map.set_feature_state("points", None, "1", hover(true));
+    assert_eq!(carried_hover(&reader), Some(Value::Bool(true)));
 }
 
 #[test]
