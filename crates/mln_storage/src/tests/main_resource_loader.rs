@@ -18,6 +18,7 @@ use crate::file_source::{FileSource, FileSourceType, MAX_CONCURRENT_REQUESTS_KEY
 use crate::file_source_manager::FileSourceManager;
 use crate::main_resource_loader::MainResourceLoader;
 use crate::network_status::{NetworkStatus, Status};
+use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::FinishedCallback;
@@ -866,6 +867,19 @@ fn cached_resource_low_priority() {
     ));
 
     drop(paused);
+    // The online requests all reach the online file source while it is
+    // offline, so going online starts them in priority order: request 2 was
+    // sent after the expired resources' requests, but its database lookup
+    // could otherwise finish after requests 0 and 1 did, and the free slot
+    // would go to request 3. The loader sends a request to the database, and
+    // to the network once the database answers: the pauses wait for each
+    // thread in turn to finish what it was sent.
+    let dbfs = dbfs.downcast_ref::<DatabaseFileSource>().expect("DatabaseFileSource");
+    let online_fs = online_fs.downcast_ref::<OnlineFileSource>().expect("OnlineFileSource");
+    drop(fs.pause());
+    drop(dbfs.pause());
+    drop(fs.pause());
+    drop(online_fs.pause());
     NetworkStatus::set(Status::Online);
 
     run_loop.run();

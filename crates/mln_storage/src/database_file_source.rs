@@ -197,6 +197,12 @@ pub struct DatabaseFileSource {
 }
 
 impl DatabaseFileSource {
+    /// Holds the database thread until the guard drops (`crate::tests::pause`).
+    #[cfg(test)]
+    pub(crate) fn pause(&self) -> crate::tests::Paused {
+        crate::tests::pause(&self.thread.actor())
+    }
+
     /// A database at `resource_options`' cache path. Offline downloads go
     /// through `file_sources`' network file source.
     #[must_use]
