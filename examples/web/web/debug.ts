@@ -162,7 +162,7 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
     } else {
       legendNote.textContent = bars.length === 0
         ? 'no frames drawn yet'
-        : `last ${Math.min(AVERAGE, bars.length)} frames: ${total.toFixed(1)} ms work on average`;
+        : `last ${Math.min(AVERAGE, bars.length)} frames: ${total.toFixed(1)} ms avg work`;
     }
   }
 
