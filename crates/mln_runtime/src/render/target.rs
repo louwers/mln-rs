@@ -833,7 +833,46 @@ fn missing(error: &Error) -> bool {
     error.kind == mln_util::ErrorKind::Unsupported
 }
 
+/// A session's hold on what its [`Device`] shares with the host: a Vulkan
+/// device's hold on the host's queue lock. [`DeviceLease::revoke`] ends it.
+#[derive(Debug, Default)]
+pub(crate) struct DeviceLease {
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    queue: Option<mln_vulkan::QueueLease>,
+}
+
+impl DeviceLease {
+    /// Ends the hold: the leased device calls the host's queue lock no more,
+    /// and lets go of it.
+    #[cfg_attr(
+        not(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm")))),
+        allow(clippy::unused_self)
+    )]
+    pub(crate) fn revoke(&self) {
+        #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+        if let Some(queue) = &self.queue {
+            queue.revoke();
+        }
+    }
+}
+
 impl Device {
+    /// The device for one session, and the session's lease on it, which
+    /// ends the session's hold on what the device shares with the host when
+    /// the session lets go of the device without dropping it: an abandon
+    /// that keeps its graphics objects.
+    pub(crate) fn lease(self) -> (Device, DeviceLease) {
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => {
+                let (device, queue) = device.lease();
+                (Device::Vulkan(device), DeviceLease { queue: Some(queue) })
+            }
+            #[allow(unreachable_patterns)]
+            device => (device, DeviceLease::default()),
+        }
+    }
+
     /// Whether an abandon keeps a session's graphics objects on the device
     /// until the process exits, which only a detach frees: OpenGL's and
     /// WebGPU's, as the C API promises, since only the session's own thread

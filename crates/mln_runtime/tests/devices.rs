@@ -139,8 +139,9 @@ mod vulkan {
     }
 
     impl mln_vulkan::QueueLock for CountingLock {
-        fn lock(&self) {
+        fn lock(&self) -> bool {
             self.locks.fetch_add(1, Ordering::SeqCst);
+            true
         }
         fn unlock(&self) {
             self.unlocks.fetch_add(1, Ordering::SeqCst);
@@ -190,6 +191,62 @@ mod vulkan {
         assert_eq!(locks, lock.unlocks.load(Ordering::SeqCst));
     }
 
+    /// A queue lock that counts how many times it was dropped.
+    struct DroppedLock(Arc<AtomicUsize>);
+
+    impl mln_vulkan::QueueLock for DroppedLock {
+        fn lock(&self) -> bool {
+            true
+        }
+        fn unlock(&self) {}
+    }
+
+    impl Drop for DroppedLock {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    // A caller-driven session abandoned off its thread keeps its graphics
+    // objects, which hold its device, but lets go of the host's queue lock as
+    // the abandon returns: the session calls it no more.
+    #[test]
+    fn an_abandon_off_the_drivers_thread_lets_go_of_the_hosts_queue_lock() {
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let Some((wrap, _library)) = wrapped(Some(Arc::new(DroppedLock(dropped.clone())))) else { return };
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Offscreen { size: SIZE, device: Some(wrap) };
+        let options = AttachOptions { driver: mln_runtime::Driver::CallerThread, ..AttachOptions::default() };
+        let (session, attached) = map.attach(target, options).unwrap();
+        // The host's graphics thread, which renders a frame, then stops
+        // servicing the session and keeps its driver work until the abandon.
+        let (rendered_sender, rendered) = std::sync::mpsc::channel();
+        let (abandoned_sender, abandoned) = std::sync::mpsc::channel::<()>();
+        std::thread::scope(|scope| {
+            // Dropped as the scope unwinds, before it joins the thread.
+            let abandoned_sender = abandoned_sender;
+            let (session, attached) = (&session, &attached);
+            scope.spawn(move || {
+                let driver = session.take_driver_work().unwrap();
+                service_until(&driver, || attached.is_complete());
+                session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+                let mut results = Vec::new();
+                service_until(&driver, || {
+                    results.extend(session.drain_frame_results().unwrap());
+                    !results.is_empty()
+                });
+                rendered_sender.send(results[0].disposition).unwrap();
+                let _ = abandoned.recv();
+            });
+            assert_eq!(FrameDisposition::Rendered, rendered.recv().unwrap());
+            assert_eq!(0, dropped.load(Ordering::SeqCst));
+            assert_ne!(0, session.abandon().unwrap(), "the abandon kept no graphics objects");
+            assert_eq!(1, dropped.load(Ordering::SeqCst));
+            abandoned_sender.send(()).unwrap();
+        });
+    }
+
     /// A host's lock on a queue that it shares with sessions.
     #[derive(Default)]
     struct HostQueueLock {
@@ -198,12 +255,13 @@ mod vulkan {
     }
 
     impl mln_vulkan::QueueLock for HostQueueLock {
-        fn lock(&self) {
+        fn lock(&self) -> bool {
             let mut locked = self.locked.lock();
             while *locked {
                 self.unlocked.wait(&mut locked);
             }
             *locked = true;
+            true
         }
         fn unlock(&self) {
             *self.locked.lock() = false;
@@ -396,7 +454,7 @@ mod vulkan {
                 self.fences.push(fence);
                 let command_buffers = [command_buffer];
                 let submit = vk::SubmitInfo::default().command_buffers(&command_buffers);
-                self.lock.lock();
+                assert!(self.lock.lock());
                 let submitted = self.device.queue_submit(self.raw.queue, &[submit], fence);
                 self.lock.unlock();
                 submitted.unwrap();

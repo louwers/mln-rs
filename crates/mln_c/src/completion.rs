@@ -12,7 +12,6 @@ use std::sync::Arc;
 use mln_util::ErrorKind;
 use mln_util::logging::{Event, Log};
 
-use crate::abi;
 use crate::buffer::{LentText, Strided};
 use crate::callback::{self, UserData};
 use crate::delivery::{Call, Hold, Queue};
@@ -20,6 +19,7 @@ use crate::error::Error;
 use crate::generated::types::{
     MLN_STATUS_CANCELLED, MLN_STATUS_OK, mln_buffer_view, mln_completion, mln_completion_result,
 };
+use crate::{abi, process_exit};
 
 /// The generations that a map command's completion reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,8 +93,13 @@ impl Sink {
     fn deliver<V: CompletionValue>(self, result: Result<V, Error>, generations: Generations) {
         let Self { callback, user_data, release, queue, hold } = self;
         let run = move || {
+            if process_exit::exiting() {
+                return;
+            }
             invoke(callback, user_data, &result, generations);
-            if let Some(release) = release {
+            if let Some(release) = release
+                && !process_exit::exiting()
+            {
                 // SAFETY: the host's release function, once, after the last
                 // call of the completion.
                 unsafe { release(user_data.get()) };

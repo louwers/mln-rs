@@ -52,7 +52,9 @@ impl Host {
         if !self.drew.swap(false, Ordering::AcqRel) {
             return;
         }
-        if let Some(callback) = callback {
+        if let Some(callback) = callback
+            && !crate::process_exit::exiting()
+        {
             // SAFETY: the host's callback, with its user data, as the header
             // promises; it runs on the session's graphics thread.
             unsafe { callback(self.registration.user_data().get()) };
@@ -66,7 +68,7 @@ impl CustomLayerHost for Host {
             return;
         };
         self.drew.store(true, Ordering::Release);
-        let Some(callback) = self.prerender else { return };
+        let Some(callback) = self.prerender.filter(|_| !crate::process_exit::exiting()) else { return };
         let parameters = mln_custom_layer_prerender_parameters {
             size: size_of::<mln_custom_layer_prerender_parameters>() as u32,
             backend,
@@ -83,7 +85,7 @@ impl CustomLayerHost for Host {
             return;
         };
         self.drew.store(true, Ordering::Release);
-        let Some(callback) = self.render else { return };
+        let Some(callback) = self.render.filter(|_| !crate::process_exit::exiting()) else { return };
         let parameters = mln_custom_layer_render_parameters {
             size: size_of::<mln_custom_layer_render_parameters>() as u32,
             backend,

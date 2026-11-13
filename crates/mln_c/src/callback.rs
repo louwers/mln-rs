@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::delivery::{self, Call, Hold, Queue};
 use crate::error::Error;
 use crate::generated::types::{mln_delivery_queue, mln_user_data_release, mln_wake, mln_wake_callback};
-use crate::handles;
+use crate::{handles, process_exit};
 
 /// A host's `user_data`, which the library passes back to the host's
 /// callbacks on whichever thread runs them.
@@ -40,8 +40,11 @@ impl UserData {
     }
 }
 
-/// Calls `release` with `user_data`.
+/// Calls `release` with `user_data`, unless the process is exiting.
 fn call_release(release: unsafe extern "C" fn(*mut c_void), user_data: UserData) {
+    if process_exit::exiting() {
+        return;
+    }
     // SAFETY: the host's release function, called once with the user data it
     // was registered with, as the headers promise.
     unsafe { release(user_data.get()) }
@@ -118,12 +121,15 @@ impl Registration {
     }
 
     /// Runs `call` with the user data: on this thread now, or from the queue's
-    /// dispatch. Returns false when the released queue refuses it.
+    /// dispatch. Returns false when the released queue refuses it. Once the
+    /// process is exiting, `call` doesn't run.
     pub(crate) fn deliver(&self, call: impl FnOnce(UserData) + Send + 'static) -> bool {
         let user_data = self.user_data;
         match &self.queue {
             None => {
-                call(user_data);
+                if !process_exit::exiting() {
+                    call(user_data);
+                }
                 true
             }
             Some(queue) => queue.push(Call::new(move || call(user_data))).is_ok(),
@@ -206,8 +212,10 @@ impl Wake {
         let Some(callback) = self.callback else { return };
         let user_data = self.user_data;
         let Some(queue) = &self.queue else {
-            // SAFETY: the host's wake callback, with its user data.
-            unsafe { callback(user_data.get()) };
+            if !process_exit::exiting() {
+                // SAFETY: the host's wake callback, with its user data.
+                unsafe { callback(user_data.get()) };
+            }
             return;
         };
         if self.pending.swap(true, Ordering::AcqRel) {

@@ -179,6 +179,8 @@ pub unsafe extern "C" fn mln_log_set_callback(
         let registration =
             Registration::new("log handler", true, handler.user_data, handler.release_user_data, handler.queue)?;
         registration.accept();
+        // Before the log thread can call the host.
+        crate::process_exit::watch();
         INSTALL.call_once(|| Log::set_observer(Box::new(Forwarder)));
         replace(Some(Handler { callback, registration, platform_severities: handler.platform_severities }));
         Ok(())

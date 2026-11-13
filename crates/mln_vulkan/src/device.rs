@@ -55,8 +55,46 @@ fn load_entry() -> Result<ash::Entry, Error> {
 /// A host's lock on a queue that it submits to too. The device holds it
 /// around each submission and present to the queue, never across a wait.
 pub trait QueueLock: Send + Sync {
-    fn lock(&self);
+    /// Takes the lock, and returns whether it did. A lock that refuses
+    /// leaves the queue alone: the call that wanted it fails.
+    fn lock(&self) -> bool;
+    /// Gives back the lock that [`QueueLock::lock`] took.
     fn unlock(&self);
+}
+
+/// A device's hold on the host's queue lock: each [`Device::lease`] makes
+/// one, which its clones share, and [`QueueLease::revoke`] ends.
+struct LockHold(Mutex<Option<Arc<dyn QueueLock>>>);
+
+impl LockHold {
+    fn new(lock: Arc<dyn QueueLock>) -> Arc<LockHold> {
+        Arc::new(LockHold(Mutex::new(Some(lock))))
+    }
+}
+
+/// The end of a [`Device::lease`]'s hold on the host's queue lock.
+pub struct QueueLease(Option<Arc<LockHold>>);
+
+impl QueueLease {
+    /// Ends the lease's hold on the host's queue lock: once this returns,
+    /// the leased device and its clones call the lock no more, and their
+    /// submissions and presents fail with `VK_ERROR_DEVICE_LOST`. It waits
+    /// for one in progress, and lets go of the lock, which the last holder
+    /// to let go drops.
+    pub fn revoke(&self) {
+        if let Some(hold) = &self.0 {
+            // Dropped after the mutex, so a release that the drop runs
+            // doesn't run inside it.
+            let lock = hold.0.lock().take();
+            drop(lock);
+        }
+    }
+}
+
+impl std::fmt::Debug for QueueLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueueLease").field("locked", &self.0.is_some()).finish()
+    }
 }
 
 /// What `MLN_VULKAN_VALIDATION` asks for.
@@ -406,7 +444,6 @@ pub(crate) struct Shared {
     queue_family_index: u32,
     queue: vk::Queue,
     queue_mutex: Arc<Mutex<()>>,
-    host_lock: Option<Arc<dyn QueueLock>>,
     get_instance_proc_addr: vk::PFN_vkGetInstanceProcAddr,
     get_device_proc_addr: vk::PFN_vkGetDeviceProcAddr,
     /// The extensions of the library's instance. A host's instance has those
@@ -422,7 +459,7 @@ pub(crate) struct Shared {
 
 // SAFETY: Vulkan handles may be used from any thread. The queue, the only
 // object here that needs external synchronization, is reached through
-// `with_queue`, which holds its mutex.
+// `Device::with_queue`, which holds its mutex.
 unsafe impl Send for Shared {}
 // SAFETY: as above.
 unsafe impl Sync for Shared {}
@@ -444,6 +481,8 @@ impl Drop for Shared {
 #[derive(Clone)]
 pub struct Device {
     pub(crate) shared: Arc<Shared>,
+    /// The hold on the host's lock on the queue, which clones share.
+    host_lock: Option<Arc<LockHold>>,
 }
 
 impl std::fmt::Debug for Device {
@@ -590,13 +629,13 @@ impl Device {
                 queue_family_index,
                 queue,
                 queue_mutex: queue_mutex(queue),
-                host_lock: None,
                 get_instance_proc_addr,
                 get_device_proc_addr,
                 instance_extensions: Some(extensions),
                 device_extensions: device_extensions.iter().map(|name| (*name).to_owned()).collect(),
                 owned: true,
             }),
+            host_lock: None,
         })
     }
 
@@ -984,13 +1023,13 @@ impl Device {
                 queue_family_index,
                 queue,
                 queue_mutex: queue_mutex(queue),
-                host_lock: queue_lock,
                 get_instance_proc_addr,
                 get_device_proc_addr,
                 instance_extensions: None,
                 device_extensions: enabled_extensions,
                 owned: false,
             }),
+            host_lock: queue_lock.map(LockHold::new),
         })
     }
 
@@ -1000,10 +1039,42 @@ impl Device {
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
     /// device that renderers or clones hold already.
     pub fn with_queue_lock(mut self, lock: Arc<dyn QueueLock>) -> Result<Device, Error> {
-        let shared = Arc::get_mut(&mut self.shared)
-            .ok_or_else(|| Error::invalid_state("the Vulkan device is shared already"))?;
-        shared.host_lock = Some(lock);
+        if Arc::get_mut(&mut self.shared).is_none() {
+            return Err(Error::invalid_state("the Vulkan device is shared already"));
+        }
+        self.host_lock = Some(LockHold::new(lock));
         Ok(self)
+    }
+
+    /// A clone of the device for one user, such as a render session, with
+    /// a hold of its own on the host's queue lock, which the returned lease
+    /// revokes. The device's other clones keep theirs.
+    #[must_use]
+    pub fn lease(&self) -> (Device, QueueLease) {
+        // A revoked hold leases revoked ones, never ones without a lock.
+        let host_lock = self.host_lock.as_ref().map(|hold| Arc::new(LockHold(Mutex::new(hold.0.lock().clone()))));
+        let lease = QueueLease(host_lock.clone());
+        (Device { shared: self.shared.clone(), host_lock }, lease)
+    }
+
+    /// Runs `f` with the queue, holding the queue's mutex and the host's
+    /// lock. Fails with `VK_ERROR_DEVICE_LOST` when the host's lock refuses,
+    /// or the device's hold on it was revoked.
+    pub(crate) fn with_queue<T>(
+        &self,
+        f: impl FnOnce(vk::Queue) -> ash::prelude::VkResult<T>,
+    ) -> ash::prelude::VkResult<T> {
+        let _guard = self.shared.queue_mutex.lock();
+        let Some(hold) = &self.host_lock else { return f(self.shared.queue) };
+        // Held through the call, so a revoke waits for it.
+        let lock = hold.0.lock();
+        let Some(lock) = &*lock else { return Err(vk::Result::ERROR_DEVICE_LOST) };
+        if !lock.lock() {
+            return Err(vk::Result::ERROR_DEVICE_LOST);
+        }
+        let result = f(self.shared.queue);
+        lock.unlock();
+        result
     }
 
     /// The device's raw handles.
@@ -1249,20 +1320,6 @@ impl Shared {
 
     pub(crate) fn debug_utils(&self) -> Option<&ash::ext::debug_utils::Device> {
         self.debug_utils.as_ref()
-    }
-
-    /// Runs `f` with the queue, holding the queue's mutex and the host's
-    /// lock.
-    pub(crate) fn with_queue<R>(&self, f: impl FnOnce(vk::Queue) -> R) -> R {
-        let _guard = self.queue_mutex.lock();
-        if let Some(lock) = &self.host_lock {
-            lock.lock();
-        }
-        let result = f(self.queue);
-        if let Some(lock) = &self.host_lock {
-            lock.unlock();
-        }
-        result
     }
 }
 

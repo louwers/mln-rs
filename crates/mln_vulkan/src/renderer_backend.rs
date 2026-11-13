@@ -174,7 +174,7 @@ impl BackendImpl {
         let device = self.get_device();
         // SAFETY: the caller's submissions are valid for the device, and the
         // queue is held for the call.
-        self.device.shared.with_queue(|queue| unsafe { device.queue_submit(queue, submits, fence) })
+        self.device.with_queue(|queue| unsafe { device.queue_submit(queue, submits, fence) })
     }
 
     /// Presents to the device's queue, which presents to the swapchains
@@ -185,7 +185,7 @@ impl BackendImpl {
         };
         // SAFETY: the caller's present info is valid for the device, and the
         // queue is held for the call.
-        self.device.shared.with_queue(|queue| unsafe { loader.queue_present(queue, info) })
+        self.device.with_queue(|queue| unsafe { loader.queue_present(queue, info) })
     }
 
     /// `setDebugName(object, name)`: names an object for the validation

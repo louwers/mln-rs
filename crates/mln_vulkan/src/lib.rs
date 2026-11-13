@@ -58,7 +58,7 @@ pub use ash;
 pub use borrowed_target::{BorrowedDepth, BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner, PendingReads};
 pub use context::Context;
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
-pub use device::{AdapterId, Device, Features, HostDevice, QueueLock, RawDevice};
+pub use device::{AdapterId, Device, Features, HostDevice, QueueLease, QueueLock, RawDevice};
 pub use exported_target::ExportedTarget;
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;

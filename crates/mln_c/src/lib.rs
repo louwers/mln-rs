@@ -53,6 +53,7 @@ mod logging;
 mod map;
 mod offline;
 mod parse_thread;
+mod process_exit;
 mod projection;
 mod query;
 mod render_session;

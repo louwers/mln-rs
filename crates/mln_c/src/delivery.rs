@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use mln_util::ErrorKind;
 use parking_lot::Mutex;
 
-use crate::abi;
 use crate::callback::{UserData, Wake};
 use crate::error::Error;
 use crate::generated::types::{
     mln_delivery_queue, mln_delivery_queue_options, mln_diagnostic, mln_status, mln_user_data_release, mln_wake,
 };
 use crate::handles::{self, HandleKind, HandleTable};
+use crate::{abi, process_exit};
 
 /// One queued call. Dropping it without running it drops what it owns.
 pub(crate) struct Call {
@@ -160,10 +160,11 @@ impl Queue {
         acquired
     }
 
+    /// Runs the queued calls, until the process begins to exit.
     fn run_calls(&self) {
         {
             let mut state = self.state.lock();
-            if state.closed {
+            if state.closed || process_exit::exiting() {
                 return;
             }
             let State { pending, running, .. } = &mut *state;
@@ -172,7 +173,7 @@ impl Queue {
         loop {
             let call = {
                 let mut state = self.state.lock();
-                if state.closed {
+                if state.closed || process_exit::exiting() {
                     return;
                 }
                 match state.running.pop_front() {
@@ -210,7 +211,9 @@ impl Queue {
             drop(call.run);
         }
         abandoned.extend(held.into_values());
-        if let Some(abandon) = self.abandon {
+        if let Some(abandon) = self.abandon
+            && !process_exit::exiting()
+        {
             for user_data in abandoned {
                 // SAFETY: the host's abandon hook, with the user data of a
                 // registration whose release will never run.

@@ -122,13 +122,21 @@ impl HostQueueLock {
 
 #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 impl mln_vulkan::QueueLock for HostQueueLock {
-    fn lock(&self) {
+    /// Refuses once the process is exiting, when the host's runtime may be
+    /// gone: the queue call that wanted the lock then fails.
+    fn lock(&self) -> bool {
+        if crate::process_exit::exiting() {
+            return false;
+        }
         let _forbid = crate::export::ForbidReentry::enter(QUEUE_LOCK_REENTRY);
         // SAFETY: the host's callback, with its user data, as the header
         // promises.
-        unsafe { (self.lock)(self.user_data.get()) }
+        unsafe { (self.lock)(self.user_data.get()) };
+        true
     }
 
+    /// Gives back a lock that `lock` took, even once the process is exiting,
+    /// so that no host thread waits for it forever.
     fn unlock(&self) {
         let _forbid = crate::export::ForbidReentry::enter(QUEUE_LOCK_REENTRY);
         // SAFETY: as for `lock`.
@@ -146,6 +154,7 @@ impl Drop for HostQueueLock {
     fn drop(&mut self) {
         if *self.accepted.get_mut()
             && let Some(release) = self.release
+            && !crate::process_exit::exiting()
         {
             // SAFETY: the host's release, called once, after the last call.
             unsafe { release(self.user_data.get()) }

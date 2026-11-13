@@ -8,7 +8,13 @@ can still reach the failed case's stack, so the file's later cases each run in
 a process of their own. When a process dies (a crash, or the suite's hang
 watchdog), the case it was running fails.
 
-The run fails when any case fails.
+With --exit-programs, it then runs each exit program that CMakeLists.txt
+builds into that directory, in parallel. Each returns from main while the
+library's threads are at work, so it passes when the process exit that
+follows ends it with status 0 within EXIT_TIMEOUT_SECONDS, the bound that
+maplibre-native-ffi's CTest entries give it.
+
+The run fails when any case fails or any exit program doesn't pass.
 """
 
 from __future__ import annotations
@@ -28,11 +34,13 @@ PREFIX = "tests/native/"
 RESULT = re.compile(r"^(?P<file>tests/native/[^:]+):\d+:(?P<case>\w+):(?P<outcome>PASS|FAIL|IGNORE)(?::(?P<message>.*))?")
 # A process gets at least the watchdog's 30 s for each of its cases.
 PROCESS_TIMEOUT_SECONDS = 600
+EXIT_TIMEOUT_SECONDS = 60
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", type=pathlib.Path, help="the suite binary (mln_native_abi_tests)")
+    parser.add_argument("--exit-programs", type=pathlib.Path, help="the directory of the exit programs to run")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="test files to run at once")
     args = parser.parse_args()
 
@@ -58,7 +66,35 @@ def main() -> int:
     )
     for key in sorted(failures):
         print(f"FAILED: {key}: {failures[key]}")
-    return 1 if failures else 0
+
+    exit_failures = {}
+    if args.exit_programs is not None:
+        programs = sorted(path for path in args.exit_programs.resolve().iterdir() if os.access(path, os.X_OK))
+        if not programs:
+            raise SystemExit(f"{args.exit_programs} has no exit programs")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            outcomes = pool.map(lambda program: run_exit_program(program, env), programs)
+            exit_failures = {f"exit/{program.name}.c": why for program, why in zip(programs, outcomes) if why}
+        print(f"{len(programs)} exit programs: {len(programs) - len(exit_failures)} passed, {len(exit_failures)} failed")
+        for key in sorted(exit_failures):
+            print(f"FAILED: {key}: {exit_failures[key]}")
+    return 1 if failures or exit_failures else 0
+
+
+def run_exit_program(program: pathlib.Path, env: dict[str, str]) -> str | None:
+    """Why the exit program failed, or None when it passed."""
+    try:
+        process = subprocess.run(
+            [program], env=env, capture_output=True, text=True, errors="replace", timeout=EXIT_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        return f"didn't exit within {EXIT_TIMEOUT_SECONDS} s"
+    output = (process.stdout + process.stderr).strip().replace("\n", "; ")
+    if process.returncode < 0:
+        return f"died of signal {-process.returncode}: {output}"
+    if process.returncode != 0:
+        return f"exited with status {process.returncode}: {output}"
+    return None
 
 
 def list_cases(binary: pathlib.Path, env: dict[str, str]) -> list[tuple[str, str]]:

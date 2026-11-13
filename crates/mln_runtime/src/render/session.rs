@@ -23,8 +23,8 @@ use super::frame::{FrameDemand, FrameResult};
 use super::local::Pending;
 use super::query::RenderedQueryGeometry;
 use super::target::{
-    AttachOptions, BorrowedRing, ConsumerSync, Device, Driver, ExportKind, FrameTexture, GpuSync, RenderTarget,
-    Surface, SyncKind, SyncKinds, Wake,
+    AttachOptions, BorrowedRing, ConsumerSync, Device, DeviceLease, Driver, ExportKind, FrameTexture, GpuSync,
+    RenderTarget, Surface, SyncKind, SyncKinds, Wake,
 };
 use super::worker::{self, Init, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
@@ -275,6 +275,9 @@ pub(crate) struct SessionShared {
     /// Held while the session's thread runs a task, so an abandon waits for
     /// the graphics work in progress.
     pub(crate) gate: Mutex<()>,
+    /// The session's lease on the host's device, which an abandon revokes,
+    /// since graphics objects that it keeps hold the device.
+    lease: DeviceLease,
     /// Held while [`RenderSession::send_then`] sends a command and attaches
     /// its callback, and while an attach hands its completion out, which the
     /// session's thread waits for before it delivers results.
@@ -538,6 +541,13 @@ impl SessionShared {
             worker::post(&self.run_loop, |_, _| {});
             crate::web::run_session_now(self.id);
         }
+        // Off the session's thread, the session makes no more graphics
+        // calls: a core worker tore down above, and a caller-driven session
+        // keeps its graphics objects. On it, the teardown that follows
+        // still needs the device.
+        if !on_driver {
+            self.lease.revoke();
+        }
         if kept != 0 {
             let reason = if keep_graphics {
                 "it was abandoned without graphics calls"
@@ -775,6 +785,7 @@ fn attach_unlocked<R>(
     if size.is_empty() {
         return Err(Error::invalid_argument("the target's size must not be empty"));
     }
+    let (target, lease) = target.lease();
     let presentation = matches!(target, TargetInit::Surface { .. });
     let run_loop = RunLoopHandle::new();
     let driver_armed = Arc::new(AtomicBool::new(true));
@@ -834,6 +845,7 @@ fn attach_unlocked<R>(
             viewed_teardown: false,
         }),
         gate: Mutex::new(()),
+        lease,
         frame_wake: options.frame_wake,
         redraw_wake: options.redraw_wake,
         capabilities: RenderSessionCapabilities {

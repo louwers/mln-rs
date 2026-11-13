@@ -59,10 +59,6 @@ objc2-core-foundation = { workspace = true, features = ["CFRunLoop"] }
 objc2-foundation = { workspace = true, features = ["NSRunLoop"] }
 objc2-quartz-core = { workspace = true, features = ["CADisplayLink", "CAFrameRateRange"] }
 
-# The eventfd and timerfd of Android frame pacers.
-[target.'cfg(target_os = "android")'.dependencies]
-libc.workspace = true
-
 # The host's EGL, WGL and WebGL2 contexts, textures and surfaces.
 [target.'cfg(any(windows, all(unix, not(target_vendor = "apple")), target_family = "wasm"))'.dependencies]
 mln_gl = { workspace = true, optional = true }
@@ -79,8 +75,11 @@ wasm-bindgen.workspace = true
 mln_vulkan.workspace = true
 
 # A style's font faces, shaped in-process. The browser build leaves the
-# shaper to a module of its own (crates/mln_renderer/Cargo.toml).
+# shaper to a module of its own (crates/mln_renderer/Cargo.toml). The C
+# runtime: its atexit, which marks the start of process exit, and the eventfd
+# and timerfd of Android frame pacers.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+libc.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 
 # The X11 windows of the window target test.

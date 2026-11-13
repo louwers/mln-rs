@@ -81,6 +81,8 @@ pub unsafe extern "C" fn mln_runtime_create(
         let out_runtime = unsafe { handles::out_handle(out_runtime, "out_runtime") }?;
         #[cfg(target_family = "wasm")]
         crate::web::set_defaults();
+        // Before the runtime's threads can call the host.
+        crate::process_exit::watch();
         let runtime = Runtime::new(&options)?;
         *out_runtime =
             RUNTIMES.insert(Arc::new(RuntimeObject { runtime, maps: Arc::new(Mutex::new(HashMap::new())) }))?;

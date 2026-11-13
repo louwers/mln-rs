@@ -210,3 +210,32 @@ target_link_libraries(
           Threads::Threads
           ${CMAKE_DL_LIBS})
 target_link_options(mln_native_abi_tests PRIVATE "LINKER:--allow-shlib-undefined")
+
+# The exit programs (testdata/tests/native/exit), one executable each in exit/,
+# as maplibre-native-ffi's mln_native_add_exit_tests builds them. Each makes
+# its calls and returns from main while the library's threads are at work, so
+# the process exit that follows is the check: run.py expects each to exit with
+# status 0. A program whose name ends in a tag builds only where the tag is
+# active, as a suite file does.
+file(GLOB exit_programs RELATIVE "${TESTS_DIR}/exit" CONFIGURE_DEPENDS
+     "${TESTS_DIR}/exit/*.c")
+foreach(program IN LISTS exit_programs)
+  get_filename_component(stem "${program}" NAME_WE)
+  string(REGEX MATCH "_([a-z0-9]+)$" tagged "${stem}")
+  if(tagged
+     AND CMAKE_MATCH_1 IN_LIST FILE_TAGS
+     AND NOT CMAKE_MATCH_1 IN_LIST ACTIVE_TAGS)
+    continue()
+  endif()
+  set(target "mln_native_exit_${stem}")
+  add_executable(${target} "${TESTS_DIR}/exit/${program}")
+  set_target_properties(
+    ${target}
+    PROPERTIES C_STANDARD 11
+               C_STANDARD_REQUIRED YES
+               OUTPUT_NAME "${stem}"
+               RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/exit")
+  target_link_libraries(${target} PRIVATE maplibre_native_c
+                                          mln_test_graphics_objects Threads::Threads)
+  target_link_options(${target} PRIVATE "LINKER:--allow-shlib-undefined")
+endforeach()

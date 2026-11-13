@@ -29,7 +29,7 @@ use mln_util::time::Instant;
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::{LocalTarget, Pending, PendingReads};
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
-use super::target::{BorrowedRing, Device, Driver, ExportKind, ExportedRing, Surface};
+use super::target::{BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, Surface};
 use crate::completion::Resolver;
 use crate::map::Published as MapPublished;
 use crate::runtime::Outbox;
@@ -188,6 +188,35 @@ pub(crate) enum TargetInit {
     Surface { surface: Surface, device: Option<Device> },
     Borrowed { ring: BorrowedRing, device: Device, producer: SyncKind },
     Exported { ring: ExportedRing, device: Device, kind: ExportKind, producer: SyncKind },
+}
+
+impl TargetInit {
+    /// The target on the session's lease of the host's device, and the
+    /// lease, as [`Device::lease`] makes them.
+    pub(crate) fn lease(self) -> (TargetInit, DeviceLease) {
+        let lease_some = |device: Option<Device>| match device.map(Device::lease) {
+            Some((device, lease)) => (Some(device), lease),
+            None => (None, DeviceLease::default()),
+        };
+        match self {
+            TargetInit::Offscreen(device) => {
+                let (device, lease) = lease_some(device);
+                (TargetInit::Offscreen(device), lease)
+            }
+            TargetInit::Surface { surface, device } => {
+                let (device, lease) = lease_some(device);
+                (TargetInit::Surface { surface, device }, lease)
+            }
+            TargetInit::Borrowed { ring, device, producer } => {
+                let (device, lease) = device.lease();
+                (TargetInit::Borrowed { ring, device, producer }, lease)
+            }
+            TargetInit::Exported { ring, device, kind, producer } => {
+                let (device, lease) = device.lease();
+                (TargetInit::Exported { ring, device, kind, producer }, lease)
+            }
+        }
+    }
 }
 
 /// Builds the session's renderer into `slot`, on the thread that runs the

@@ -305,8 +305,12 @@ struct HostHeaders {
 }
 
 impl HostHeaders {
-    /// The headers that the callback sets, or none when it fails.
+    /// The headers that the callback sets, or none when it fails or the
+    /// process is exiting.
     fn headers(&self, kind: Kind, url: &str) -> HttpHeaders {
+        if crate::process_exit::exiting() {
+            return HttpHeaders::new();
+        }
         let url = LentText::new(url);
         let collection = Collection::start();
         let mut response = mln_http_header_transform_response {
