@@ -1086,6 +1086,7 @@ struct TurningSource {
     render_source: RenderVectorSource,
     layers: Vec<Arc<dyn LayerProperties>>,
     prefetch_zoom_delta: u8,
+    latitude: f64,
 }
 
 impl TurningSource {
@@ -1119,6 +1120,7 @@ impl TurningSource {
             render_source,
             layers: Tiled::Vector.layers(),
             prefetch_zoom_delta: 0,
+            latitude: 0.0,
         }
     }
 
@@ -1129,7 +1131,7 @@ impl TurningSource {
     /// Moves the camera and updates the source, as a frame would.
     fn update(&mut self, longitude: f64, zoom: f64) {
         self.test.transform.jump_to(&CameraOptions {
-            center: Some(LatLng::new(0.0, longitude).unwrap()),
+            center: Some(LatLng::new(self.latitude, longitude).unwrap()),
             zoom: Some(zoom),
             ..Default::default()
         });
@@ -1229,6 +1231,27 @@ fn globe_fallback_crosses_the_antimeridian() {
     assert_eq!(1, turning.pyramid().get_rendered_tiles().filter(|(id, _)| id.canonical.z == 0).count());
 }
 
+/// While the globe blends into Mercator, a tile's flat half is placed by its
+/// wrap, so the tiles past the antimeridian don't take the zoom-0 tile of
+/// the other wrap.
+#[test]
+fn globe_fallback_keeps_to_its_wrap_while_blending_into_mercator() {
+    let mut turning = TurningSource::new("vertical-perspective", Size::new(512, 512), 0);
+    turning.test.transform.set_projection_definition(&ProjectionDefinition::between_names(
+        "vertical-perspective",
+        "mercator",
+        0.5,
+    ));
+    turning.load(90.0, 2.0);
+    assert_eq!(1, turning.tiles_at(0).len());
+
+    turning.update(150.0, 2.0);
+    let bare = turning.bare_tiles();
+    assert_ne!(Vec::<OverscaledTileID>::new(), bare);
+    assert!(bare.iter().all(|id| id.wrap == 1 && id.canonical.z == 2));
+    assert_eq!(0, turning.pyramid().get_rendered_tiles().filter(|(id, _)| id.canonical.z == 0).count());
+}
+
 /// The first level costs a source that starts at zoom 1 the tiles of it that
 /// the view doesn't show, and a Mercator map nothing.
 #[test]
@@ -1259,6 +1282,21 @@ fn globe_base_level_is_released() {
     assert_eq!(4, turning.tiles_at(1).len());
     turning.test.transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
     turning.update(60.0, 3.0);
+    assert_eq!(Vec::<CanonicalTileID>::new(), turning.tiles_at(1));
+}
+
+/// The globe is larger away from the equator at the same zoom, so the first
+/// level is let go of at a lower zoom there.
+#[test]
+fn globe_base_level_is_released_sooner_away_from_the_equator() {
+    let mut turning = TurningSource::new("vertical-perspective", Size::new(512, 512), 1);
+    turning.latitude = 60.0;
+    turning.load(60.0, 2.6);
+    assert_eq!(4, turning.tiles_at(1).len());
+
+    // At 60 degrees the planet is twice its size at the equator: its radius
+    // passes twice the viewport's side a zoom lower.
+    turning.update(60.0, 2.7);
     assert_eq!(Vec::<CanonicalTileID>::new(), turning.tiles_at(1));
 }
 

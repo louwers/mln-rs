@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode};
+use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source;
@@ -16,6 +16,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::logging::{Event, Log};
+use mln_util::projection::Projection;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -33,8 +34,8 @@ const GLOBE_BASE_LEVEL_MAX_ZOOM: u8 = 1;
 
 /// The largest planet, as its radius over the viewport's longer side, whose
 /// base level is kept loaded. Up to here that side spans about 29 degrees of
-/// the equator or more, so a fling across a few view widths reaches ground
-/// that no tile loaded for the view covers.
+/// arc or more, so a fling across a few view widths reaches ground that no
+/// tile loaded for the view covers.
 const GLOBE_BASE_LEVEL_MAX_RADIUS: f64 = 2.0;
 
 pub(crate) struct TilePyramid {
@@ -88,7 +89,7 @@ where
         // different wraps: a tile there finds its parent under the wrap of
         // the tiles on the other side. The cover's wraps are at most two
         // apart.
-        if self.parameters.transform_state.is_globe_rendering() {
+        if self.finds_tiles_across_wraps() {
             return [-1, 1, -2, 2]
                 .into_iter()
                 .map(|delta| id.unwrap_to(id.wrap.wrapping_add(delta)))
@@ -151,7 +152,7 @@ where
             return;
         }
         // A globe tile found under another wrap is drawn once, under its own.
-        let id = if self.parameters.transform_state.is_globe_rendering() { &key.to_unwrapped() } else { id };
+        let id = if self.finds_tiles_across_wraps() { &key.to_unwrapped() } else { id };
         // addRenderTile(tileID, tile)
         debug_assert!(self.tiles[key].is_renderable());
         self.rendered_tiles.entry(*id).or_insert(*key);
@@ -182,6 +183,19 @@ where
     }
 }
 
+impl<F> UpdateContext<'_, '_, F>
+where
+    F: FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
+{
+    /// Whether a tile lookup that misses looks under the neighbouring wraps:
+    /// on the full globe only. While it blends into Mercator, a tile's flat
+    /// half is placed by its wrap, so a tile of another wrap would land a
+    /// world away there.
+    fn finds_tiles_across_wraps(&self) -> bool {
+        self.parameters.transform_state.get_projection_transition() >= 1.0
+    }
+}
+
 /// Whether every tile of the source's minimum zoom is kept loaded: on the
 /// globe, for a source whose first level is a few tiles, while the planet is
 /// small enough in the view that it soon turns to its far side, and while the
@@ -200,7 +214,10 @@ fn keeps_globe_base_level(
         return false;
     }
     let size = state.get_size();
-    let radius = state.get_scale() * constants::TILE_SIZE_D / std::f64::consts::TAU;
+    let radius = VerticalPerspectiveProjection::globe_radius_pixels(
+        Projection::world_size(state.get_scale()),
+        state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+    );
     radius <= GLOBE_BASE_LEVEL_MAX_RADIUS * f64::from(std::cmp::max(size.width, size.height))
 }
 
