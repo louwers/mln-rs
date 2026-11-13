@@ -213,7 +213,7 @@ mod vulkan {
     #[test]
     fn an_abandon_off_the_drivers_thread_lets_go_of_the_hosts_queue_lock() {
         let dropped = Arc::new(AtomicUsize::new(0));
-        let Some((wrap, _library)) = wrapped(Some(Arc::new(DroppedLock(dropped.clone())))) else { return };
+        let Some((wrap, library)) = wrapped(Some(Arc::new(DroppedLock(dropped.clone())))) else { return };
         let runtime = runtime();
         let map = map_of(&runtime, "#ff0000");
         let target = RenderTarget::Offscreen { size: SIZE, device: Some(wrap) };
@@ -245,6 +245,9 @@ mod vulkan {
             assert_eq!(1, dropped.load(Ordering::SeqCst));
             abandoned_sender.send(()).unwrap();
         });
+        // The session's graphics objects stay on the device until the
+        // process exits, so the host's device does too.
+        std::mem::forget(library);
     }
 
     /// A host's lock on a queue that it shares with sessions.
