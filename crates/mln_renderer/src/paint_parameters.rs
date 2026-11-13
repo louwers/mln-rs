@@ -2,25 +2,21 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::backend::Type as BackendType;
-use mln_gfx::color_mode::{BlendFunction, LinearBlend, Mask};
 use mln_gfx::globe_clip_mask::GlobeClipMask;
 use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
 use mln_gfx::render_pass::RenderPass as GfxRenderPass;
 use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
 use mln_gfx::stencil_mode::Test;
-use mln_gfx::types::{ColorBlendFactorType, DepthFunctionType, StencilOpType};
+use mln_gfx::types::{DepthFunctionType, StencilOpType};
 use mln_gfx::{
-    ColorMode, CommandEncoder, Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, ShaderRegistry,
-    StencilMode,
+    CommandEncoder, Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, ShaderRegistry, StencilMode,
 };
-use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileLodMode, TransformState, ViewportMode};
+use mln_map_types::{MapDebugOptions, ProjectionData, TransformState, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
-use mln_util::Color;
 use mln_util::mat4::Mat4;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
@@ -30,17 +26,17 @@ use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 
-pub struct TransformParameters {
-    pub proj_matrix: Mat4,
-    pub aligned_proj_matrix: Mat4,
-    pub near_clipped_proj_matrix: Mat4,
+pub(crate) struct TransformParameters {
+    pub(crate) proj_matrix: Mat4,
+    pub(crate) aligned_proj_matrix: Mat4,
+    pub(crate) near_clipped_proj_matrix: Mat4,
     /// The near plane of `near_clipped_proj_matrix`, in pixels.
-    pub near_clipped_near_z: f64,
-    pub state: TransformState,
+    pub(crate) near_clipped_near_z: f64,
+    pub(crate) state: TransformState,
 }
 
 impl TransformParameters {
-    pub fn new(state: &TransformState) -> Self {
+    pub(crate) fn new(state: &TransformState) -> Self {
         let state = state.clone();
         // Update the default matrices to the current viewport dimensions.
         let proj_matrix = state.get_proj_matrix(1, false);
@@ -68,86 +64,68 @@ impl TransformParameters {
 }
 
 pub struct PaintParameters<'a> {
-    pub context: &'a dyn Context,
-    pub backend: &'a dyn RendererBackend,
-    pub encoder: Option<Box<dyn CommandEncoder>>,
-    pub render_pass: Option<Box<dyn GfxRenderPass>>,
+    pub(crate) context: &'a dyn Context,
+    pub(crate) backend: &'a dyn RendererBackend,
+    pub(crate) encoder: Option<Box<dyn CommandEncoder>>,
+    pub(crate) render_pass: Option<Box<dyn GfxRenderPass>>,
 
-    pub transform_params: &'a TransformParameters,
-    pub state: &'a TransformState,
+    pub(crate) transform_params: &'a TransformParameters,
+    pub(crate) state: &'a TransformState,
     /// conformance: `const EvaluatedLight& evaluatedLight` (a copy; the
     /// renderer sets it from the render tree's parameters).
-    pub evaluated_light: crate::render_light::EvaluatedLight,
-    pub static_data: &'a RenderStaticData,
+    pub(crate) evaluated_light: crate::render_light::EvaluatedLight,
+    pub(crate) static_data: &'a RenderStaticData,
     /// The orchestrator's line atlas. `new` starts with an empty one, and the
     /// renderer assigns the orchestrator's.
-    pub line_atlas: Rc<RefCell<LineAtlas>>,
-    pub pattern_atlas: Rc<RefCell<PatternAtlas>>,
+    pub(crate) line_atlas: Rc<RefCell<LineAtlas>>,
+    pub(crate) pattern_atlas: Rc<RefCell<PatternAtlas>>,
 
-    pub pass: RenderPass,
-    pub map_mode: MapMode,
-    pub debug_options: MapDebugOptions,
-    /// As in [`UpdateParameters::time_point`](crate::update_parameters::UpdateParameters::time_point).
-    pub time_point: Option<Instant>,
+    pub(crate) pass: RenderPass,
+    pub(crate) debug_options: MapDebugOptions,
 
-    pub pixel_ratio: f32,
-    pub renderable_size: Size,
-    pub pixels_to_gl_units: [f32; 2],
+    pub(crate) pixel_ratio: f32,
+    pub(crate) renderable_size: Size,
+    pub(crate) pixels_to_gl_units: [f32; 2],
 
-    pub shaders: &'a ShaderRegistry,
+    pub(crate) shaders: &'a ShaderRegistry,
 
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
 
-    pub current_layer: u32,
-    pub depth_range_size: f32,
-    pub opaque_pass_cutoff: u32,
-    pub symbol_fade_change: f32,
-    pub frame_count: u64,
+    pub(crate) current_layer: u32,
+    pub(crate) depth_range_size: f32,
+    pub(crate) opaque_pass_cutoff: u32,
+    pub(crate) symbol_fade_change: f32,
 
-    pub tile_lod_min_radius: f64,
-    pub tile_lod_scale: f64,
-    pub tile_lod_pitch_threshold: f64,
-    pub tile_lod_mode: TileLodMode,
-
-    pub scissor_rect: ScissorRect,
-    pub capture_rendered_features: bool,
+    pub(crate) scissor_rect: ScissorRect,
     /// The frame that custom layers draw into, set before their prerender.
-    pub custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
+    pub(crate) custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
 }
 
 /// The WebGPU context's `rawGlobeTileMesh(tile, borders,
 /// SubdivisionGranularitySetting::globe().stencil)`, in the form the gfx trait
 /// takes it (see `Context::render_globe_tile_clipping_masks`).
 fn globe_clip_mesh(tile: &CanonicalTileID, borders: bool) -> (Vec<u8>, Vec<u16>) {
-    let mesh = raw_globe_tile_mesh(tile, borders, &SubdivisionGranularitySetting::globe().stencil);
+    let mesh = raw_globe_tile_mesh(tile, borders, SubdivisionGranularitySetting::globe().stencil);
     (mesh.vertices, mesh.indices)
 }
 
 impl<'a> PaintParameters<'a> {
-    pub const NUM_SUBLAYERS: i32 = 3;
-    pub const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
-    pub const MAX_STENCIL_VALUE: i32 = 255;
+    pub(crate) const NUM_SUBLAYERS: i32 = 3;
+    pub(crate) const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
+    pub(crate) const MAX_STENCIL_VALUE: i32 = 255;
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         context: &'a dyn Context,
         pixel_ratio: f32,
         backend: &'a dyn RendererBackend,
-        map_mode: MapMode,
         debug_options: MapDebugOptions,
-        time_point: Option<Instant>,
         transform_params: &'a TransformParameters,
         static_data: &'a RenderStaticData,
         pattern_atlas: Rc<RefCell<PatternAtlas>>,
-        frame_count: u64,
-        tile_lod_min_radius: f64,
-        tile_lod_scale: f64,
-        tile_lod_pitch_threshold: f64,
-        tile_lod_mode: TileLodMode,
         renderable_size: Size,
         scissor_rect: ScissorRect,
-        capture_rendered_features: bool,
     ) -> Self {
         let state = &transform_params.state;
         let mut pixels_to_gl_units = [2.0f32 / state.get_size().width as f32, -2.0f32 / state.get_size().height as f32];
@@ -168,9 +146,7 @@ impl<'a> PaintParameters<'a> {
             line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
             pattern_atlas,
             pass: RenderPass::Opaque,
-            map_mode,
             debug_options,
-            time_point,
             pixel_ratio,
             renderable_size,
             pixels_to_gl_units,
@@ -183,24 +159,18 @@ impl<'a> PaintParameters<'a> {
             depth_range_size: 1.0,
             opaque_pass_cutoff: 0,
             symbol_fade_change: 0.0,
-            frame_count,
-            tile_lod_min_radius,
-            tile_lod_scale,
-            tile_lod_pitch_threshold,
-            tile_lod_mode,
             scissor_rect,
-            capture_rendered_features,
             custom_layer_frame: None,
         }
     }
 
     #[must_use]
-    pub fn matrix_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> Mat4 {
+    pub(crate) fn matrix_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> Mat4 {
         self.projection_data_for_tile(tile_id, aligned).main_matrix
     }
 
     #[must_use]
-    pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
+    pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
         self.state.get_projection_data_with(
             tile_id,
             if aligned { &self.transform_params.aligned_proj_matrix } else { &self.transform_params.proj_matrix },
@@ -208,7 +178,7 @@ impl<'a> PaintParameters<'a> {
     }
 
     #[must_use]
-    pub fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
+    pub(crate) fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
         // On the globe, 2D layers are ordered by draw order alone; their Z is
         // the back-hemisphere clip.
         if self.current_layer < self.opaque_pass_cutoff || self.state.is_globe_rendering() {
@@ -225,36 +195,17 @@ impl<'a> PaintParameters<'a> {
     /// The depth of `depth_mode_for_sublayer(0, ..)` where 2D layers write
     /// depth, whether or not the current layer does.
     #[must_use]
-    pub fn layer_depth(&self) -> f32 {
+    pub(crate) fn layer_depth(&self) -> f32 {
         let steps = (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32);
         self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON
     }
 
     #[must_use]
-    pub fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
+    pub(crate) fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
         DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(0.0, self.depth_range_size) }
     }
 
-    #[must_use]
-    pub fn color_mode_for_render_pass(&self) -> ColorMode {
-        if self.debug_options.contains(MapDebugOptions::OVERDRAW) {
-            let overdraw: f32 = 1.0 / 8.0;
-            ColorMode {
-                blend_function: BlendFunction::Add(LinearBlend {
-                    src_factor: ColorBlendFactorType::ConstantColor,
-                    dst_factor: ColorBlendFactorType::One,
-                }),
-                blend_color: Color::new_unchecked(overdraw, overdraw, overdraw, 0.0),
-                mask: Mask { r: true, g: true, b: true, a: true },
-            }
-        } else if self.pass == RenderPass::Translucent {
-            ColorMode::alpha_blended()
-        } else {
-            ColorMode::unblended()
-        }
-    }
-
-    pub fn clear_stencil(&mut self) {
+    pub(crate) fn clear_stencil(&mut self) {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();
 
@@ -287,7 +238,7 @@ impl<'a> PaintParameters<'a> {
 
     /// Renders the clipping masks of `tile_ids`, unless the mask already
     /// covers exactly them; false if there is no render pass.
-    pub fn render_tile_clipping_masks_for(&mut self, tile_ids: &[UnwrappedTileID]) -> bool {
+    pub(crate) fn render_tile_clipping_masks_for(&mut self, tile_ids: &[UnwrappedTileID]) -> bool {
         // We can avoid updating the mask if it already contains the same set
         // of tiles.
         let covered = self.tile_clipping_mask_ids.len() == tile_ids.len()
@@ -368,7 +319,7 @@ impl<'a> PaintParameters<'a> {
     }
 
     #[must_use]
-    pub fn stencil_mode_for_clipping(&self, tile_id: &UnwrappedTileID) -> StencilMode {
+    pub(crate) fn stencil_mode_for_clipping(&self, tile_id: &UnwrappedTileID) -> StencilMode {
         let it = self.tile_clipping_mask_ids.get(tile_id);
         debug_assert!(it.is_some());
         let id = it.copied().unwrap_or(0b0000_0000);
@@ -382,7 +333,7 @@ impl<'a> PaintParameters<'a> {
         }
     }
 
-    pub fn stencil_mode_for_3d(&mut self) -> StencilMode {
+    pub(crate) fn stencil_mode_for_3d(&mut self) -> StencilMode {
         if self.next_stencil_id + 1 > Self::MAX_STENCIL_VALUE {
             self.clear_stencil();
         }
@@ -411,7 +362,7 @@ impl<'a> PaintParameters<'a> {
     /// takes each one's value with `stencil_mode_for_3d` as it draws it, so a
     /// clear falls between two draws. (C++ takes the modes keyed by drawable;
     /// see the gfx trait.)
-    pub fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
+    pub(crate) fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
         if modes.len() >= Self::MAX_STENCIL_VALUE as usize {
             return false;
         }

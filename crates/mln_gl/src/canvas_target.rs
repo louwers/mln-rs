@@ -135,11 +135,6 @@ impl CanvasTarget {
         Ok((backend, target))
     }
 
-    /// The size of the frames, in physical pixels.
-    pub fn size(&self) -> Size {
-        self.size.get()
-    }
-
     /// Resizes the canvas's drawing buffer.
     pub fn resize(&self, size: Size) {
         if size == self.size.replace(size) {

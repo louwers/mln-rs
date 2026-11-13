@@ -9,7 +9,7 @@ use crate::parser::read_json;
 
 /// A parsed test manifest.
 #[derive(Clone, Debug, Default)]
-pub struct Manifest {
+pub(crate) struct Manifest {
     manifest_path: String,
     test_root_path: String,
     result_path: String,
@@ -22,37 +22,39 @@ pub struct Manifest {
 
 impl Manifest {
     #[must_use]
-    pub fn get_ignores(&self) -> &[(String, String)] {
+    pub(crate) fn get_ignores(&self) -> &[(String, String)] {
         &self.ignores
     }
     #[must_use]
-    pub fn get_test_paths(&self) -> &[TestPaths] {
+    pub(crate) fn get_test_paths(&self) -> &[TestPaths] {
         &self.test_paths
     }
     #[must_use]
-    pub fn get_test_root_path(&self) -> &str {
+    pub(crate) fn get_test_root_path(&self) -> &str {
         &self.test_root_path
     }
+    #[cfg(test)]
     #[must_use]
-    pub fn get_manifest_path(&self) -> &str {
+    pub(crate) fn get_manifest_path(&self) -> &str {
         &self.manifest_path
     }
+    #[cfg(test)]
     #[must_use]
-    pub fn get_result_path(&self) -> &str {
+    pub(crate) fn get_result_path(&self) -> &str {
         &self.result_path
     }
     #[must_use]
-    pub fn get_cache_path(&self) -> &str {
+    pub(crate) fn get_cache_path(&self) -> &str {
         &self.cache_path
     }
     #[must_use]
-    pub fn get_probes(&self) -> &BTreeSet<String> {
+    pub(crate) fn get_probes(&self) -> &BTreeSet<String> {
         &self.probes
     }
 
     /// Shuffles the tests into an order that depends only on `seed`. It is
     /// not the order the C++ runner picks for the same seed.
-    pub fn do_shuffle(&mut self, seed: u32) {
+    pub(crate) fn do_shuffle(&mut self, seed: u32) {
         fastrand::Rng::with_seed(u64::from(seed)).shuffle(&mut self.test_paths);
     }
 }
@@ -102,10 +104,10 @@ fn get_valid_path(manifest_path: &str, path: &str) -> String {
     String::new()
 }
 
-pub struct ManifestParser;
+pub(crate) struct ManifestParser;
 
 impl ManifestParser {
-    pub fn parse_manifest(manifest_path: &str, mut test_filter: String) -> Option<Manifest> {
+    pub(crate) fn parse_manifest(manifest_path: &str, mut test_filter: String) -> Option<Manifest> {
         let mut manifest = Manifest::default();
         let file_path = manifest_path;
         // C++: manifestPath.substr(0, manifestPath.find(filename)).

@@ -1056,17 +1056,27 @@ fn host_demands_and_a_still_image_demand_never_replace_each_other() {
     demand(&session, DemandMode::WaitForUpdate, 7);
     held.answer();
     still.wait().unwrap();
-    // The host's demand ends with no update, before or after the image's
-    // frame. Usually the image's frame shows the update that the demand waits
-    // for, and a static map publishes another only for its next still image,
-    // so the demand waits until a barrier ends it. But the demand may reach
-    // the session after the map published an update and before the session
-    // served the image with it: the demand then draws that update first,
-    // while the tile is still held, and ends with nothing to show.
+    // Each demand ends once, with a result of its own, and the image's frame
+    // draws the map. How the host's demand ends depends on what it finds
+    // when the session evaluates it, which can happen only after the map has
+    // applied the still image's command:
+    // - Usually the image's frame has shown the latest update, and a static
+    //   map publishes another only for its next still image, so the demand
+    //   waits until the barrier ends it with no update.
+    // - The map may publish an update that the session hasn't served the
+    //   image with yet: the demand draws it first. While the tile is still
+    //   held, that frame shows nothing, and the demand ends with no update;
+    //   once the tile has loaded, the demand's frame draws the map.
     wait(session.barrier());
     let mut results = tokens_and_dispositions(&take_results(&session, 2));
     results.sort_by_key(|(token, _)| *token);
-    assert_eq!(vec![(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate)], results);
+    assert!(
+        matches!(
+            results[..],
+            [(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate | FrameDisposition::Rendered)]
+        ),
+        "{results:?}"
+    );
 }
 
 #[test]

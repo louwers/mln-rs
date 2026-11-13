@@ -32,7 +32,8 @@ impl Position {
         [self.radial, self.azimuthal, self.polar]
     }
 
-    pub fn set(&mut self, position: [f32; 3]) {
+    #[cfg(test)]
+    pub(crate) fn set(&mut self, position: [f32; 3]) {
         self.radial = position[0];
         self.azimuthal = position[1];
         self.polar = position[2];
@@ -41,7 +42,7 @@ impl Position {
 
     /// Utility function to be used only during interpolation; this leaves
     /// spherical coordinates undefined.
-    pub fn set_cartesian(&mut self, position: [f32; 3]) {
+    pub(crate) fn set_cartesian(&mut self, position: [f32; 3]) {
         self.x = position[0];
         self.y = position[1];
         self.z = position[2];

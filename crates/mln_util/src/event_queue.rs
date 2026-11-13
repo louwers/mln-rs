@@ -64,7 +64,7 @@ impl<T> EventQueue<T> {
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.shared.events.lock().is_empty()
     }
 

@@ -38,7 +38,7 @@ pub trait Observer: SourceObserver {
 
 /// The default `Observer nullObserver`.
 #[derive(Default)]
-pub struct NullObserver;
+pub(crate) struct NullObserver;
 
 impl SourceObserver for NullObserver {}
 impl Observer for NullObserver {}

@@ -6,9 +6,11 @@ use std::ops::{Add, AddAssign, Div, Mul, Sub};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(test)]
+use mln_map::CameraError;
 use mln_map::{
-    AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
-    CameraVelocity, GesturePhase, MomentumDecay, TransitionEnd, TransitionOutcome,
+    AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity,
+    GesturePhase, MomentumDecay, TransitionEnd, TransitionOutcome,
 };
 use mln_util::UnitBezier;
 use mln_util::geo::ScreenCoordinate;
@@ -426,7 +428,7 @@ enum Finish {
 ///
 /// Hosts feed it [`Input`]s with their timestamps, in milliseconds on any
 /// clock that only goes forward, and call [`frame`](Self::frame) once a
-/// display frame. Every move goes through the [`GestureCamera`].
+/// display frame. Every move goes through the `GestureCamera`.
 #[derive(Debug)]
 pub struct GestureRecognizer {
     options: GestureOptions,
@@ -456,7 +458,8 @@ impl Default for GestureRecognizer {
 
 impl GestureRecognizer {
     #[must_use]
-    pub fn new(options: GestureOptions) -> Self {
+    #[expect(clippy::large_types_passed_by_value, reason = "the recognizer keeps the options")]
+    pub(crate) fn new(options: GestureOptions) -> Self {
         GestureRecognizer {
             options,
             pointers: Vec::new(),
@@ -471,19 +474,10 @@ impl GestureRecognizer {
         }
     }
 
-    #[must_use]
-    pub fn options(&self) -> &GestureOptions {
-        &self.options
-    }
-
-    /// Takes effect with the next input.
-    pub fn set_options(&mut self, options: GestureOptions) {
-        self.options = options;
-    }
-
     /// A gesture is under way: hosts keep pointer capture and scrolling off.
+    #[cfg(test)]
     #[must_use]
-    pub fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         !matches!(self.mode, Mode::Idle) || self.scroll.is_some()
     }
 
@@ -506,7 +500,8 @@ impl GestureRecognizer {
     /// the phase the recognizer's own steps get (an update of a gesture under
     /// way, or a gesture of its own), and a step that zooms takes over a
     /// running notch ease. `delta.phase` is ignored.
-    pub fn step(&mut self, camera: &mut dyn GestureCamera, delta: CameraDelta) -> Result<(), CameraError> {
+    #[cfg(test)]
+    pub(crate) fn step(&mut self, camera: &mut dyn GestureCamera, delta: CameraDelta) -> Result<(), CameraError> {
         delta.validate()?;
         self.eased_step(camera, delta);
         Ok(())

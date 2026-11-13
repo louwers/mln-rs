@@ -105,7 +105,7 @@ fn host_transform(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_set_resource_transform(
+pub(crate) unsafe extern "C" fn mln_runtime_set_resource_transform(
     runtime: mln_runtime,
     transform: *const mln_resource_transform,
     completion: *const mln_completion,
@@ -167,7 +167,7 @@ pub unsafe extern "C" fn mln_runtime_set_resource_transform(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_clear_resource_transform(
+pub(crate) unsafe extern "C" fn mln_runtime_clear_resource_transform(
     runtime: mln_runtime,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -196,7 +196,7 @@ fn answer(request: mln_resource_transform_request, result: TransformResult) -> R
 /// `url` is a valid view, and `out_diagnostic` is null or valid for the
 /// header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_resource_transform_request_complete(
+pub(crate) unsafe extern "C" fn mln_resource_transform_request_complete(
     request: mln_resource_transform_request,
     url: mln_buffer_view,
     out_diagnostic: *mut mln_diagnostic,
@@ -221,7 +221,7 @@ pub unsafe extern "C" fn mln_resource_transform_request_complete(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_resource_transform_request_fail(
+pub(crate) unsafe extern "C" fn mln_resource_transform_request_fail(
     request: mln_resource_transform_request,
     error: *const mln_resource_transform_error,
     out_diagnostic: *mut mln_diagnostic,
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn mln_resource_transform_request_fail(
 
 /// `mln_resource_transform_request_release()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_resource_transform_request_release(request: mln_resource_transform_request) {
+pub(crate) extern "C" fn mln_resource_transform_request_release(request: mln_resource_transform_request) {
     let _ = release(request);
 }
 
@@ -331,7 +331,7 @@ impl HostHeaders {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_set_http_header_transform(
+pub(crate) unsafe extern "C" fn mln_runtime_set_http_header_transform(
     runtime: mln_runtime,
     transform: *const mln_http_header_transform,
     completion: *const mln_completion,
@@ -392,7 +392,7 @@ pub unsafe extern "C" fn mln_runtime_set_http_header_transform(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_clear_http_header_transform(
+pub(crate) unsafe extern "C" fn mln_runtime_clear_http_header_transform(
     runtime: mln_runtime,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -412,7 +412,7 @@ pub unsafe extern "C" fn mln_runtime_clear_http_header_transform(
 /// `response` is null or valid for the header's use of it, `name` and
 /// `value` are valid views, and `out_diagnostic` is null or valid.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_http_header_transform_response_set_header(
+pub(crate) unsafe extern "C" fn mln_http_header_transform_response_set_header(
     response: *mut mln_http_header_transform_response,
     name: mln_buffer_view,
     value: mln_buffer_view,

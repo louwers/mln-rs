@@ -22,21 +22,21 @@ impl Collator {
     /// # Errors
     ///
     /// When the platform has no collation for the locale.
-    pub fn new(case_sensitive: bool, diacritic_sensitive: bool, locale: Option<&str>) -> Result<Self, String> {
+    pub(crate) fn new(case_sensitive: bool, diacritic_sensitive: bool, locale: Option<&str>) -> Result<Self, String> {
         let sensitivity = Sensitivity { case: case_sensitive, diacritics: diacritic_sensitive };
         let collator = locale::Collator::new(locale.unwrap_or_default(), sensitivity)?;
         Ok(Collator { collator: Arc::new(collator), case_sensitive, diacritic_sensitive })
     }
 
     #[must_use]
-    pub fn compare(&self, lhs: &str, rhs: &str) -> Ordering {
+    pub(crate) fn compare(&self, lhs: &str, rhs: &str) -> Ordering {
         self.collator.compare(lhs, rhs)
     }
 
     /// The locale the collator compares in: the supported language it
     /// resolved to, with the Unicode extensions it honors.
     #[must_use]
-    pub fn resolved_locale(&self) -> &str {
+    pub(crate) fn resolved_locale(&self) -> &str {
         self.collator.resolved_locale()
     }
 }

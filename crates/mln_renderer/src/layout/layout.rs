@@ -23,26 +23,26 @@ use crate::text::glyph_manager::HBShapeResults;
 
 /// The `std::unique_ptr<GeometryTileLayer>` a layout keeps.
 #[derive(Clone)]
-pub struct SourceLayer {
-    pub data: Arc<dyn GeometryTileData + Send + Sync>,
-    pub name: String,
+pub(crate) struct SourceLayer {
+    pub(crate) data: Arc<dyn GeometryTileData + Send + Sync>,
+    pub(crate) name: String,
 }
 
 impl SourceLayer {
-    pub fn new(data: Arc<dyn GeometryTileData + Send + Sync>, name: impl Into<String>) -> Self {
+    pub(crate) fn new(data: Arc<dyn GeometryTileData + Send + Sync>, name: impl Into<String>) -> Self {
         SourceLayer { data, name: name.into() }
     }
 
     /// The layer (`data->getLayer(name)`). The worker only creates layouts
     /// for layers the data has, so neither error is expected.
-    pub fn layer(&self) -> Result<Box<dyn GeometryTileLayer + '_>, Error> {
+    pub(crate) fn layer(&self) -> Result<Box<dyn GeometryTileLayer + '_>, Error> {
         self.data
             .get_layer(&self.name)?
             .ok_or_else(|| Error::native(format!("SourceLayer: the tile data has no layer {:?}", self.name)))
     }
 }
 
-pub trait Layout: Send {
+pub(crate) trait Layout: Send {
     /// Creates the bucket. A feature that fails to lay out,
     /// such as one that [`geometry_too_long`](crate::bucket::geometry_too_long)
     /// reports, fails the bucket; the worker reports it as the tile's error.
@@ -80,13 +80,13 @@ pub trait Layout: Send {
     fn finalize_symbols(&mut self, _results: &mut HBShapeResults) {}
 }
 
-pub struct LayoutParameters<'a> {
-    pub bucket_parameters: &'a BucketParameters,
+pub(crate) struct LayoutParameters<'a> {
+    pub(crate) bucket_parameters: &'a BucketParameters,
     /// symbols: `std::shared_ptr<FontFaces> fontFaces`.
-    pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
-    pub glyph_dependencies: &'a mut GlyphDependencies,
-    pub image_dependencies: &'a mut ImageDependencies,
-    pub available_images: &'a VecSet<String>,
+    pub(crate) font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    pub(crate) glyph_dependencies: &'a mut GlyphDependencies,
+    pub(crate) image_dependencies: &'a mut ImageDependencies,
+    pub(crate) available_images: &'a VecSet<String>,
     /// Port-only: the tile's feature groups, shared by the layouts' filters.
-    pub filter_groups: &'a mut FilterGroups,
+    pub(crate) filter_groups: &'a mut FilterGroups,
 }

@@ -11,7 +11,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::FeatureType;
 
 #[derive(Clone, Debug)]
-pub struct SymbolFeature {
+pub(crate) struct SymbolFeature {
     feature_type: FeatureType,
     id: Identifier,
     properties: PropertyMap,
@@ -19,15 +19,15 @@ pub struct SymbolFeature {
     original_geometry: GeometryCollection,
     /// The mutable copy (`geometry`), merged by mergeLines and cleared once
     /// laid out.
-    pub geometry: GeometryCollection,
-    pub formatted_text: Option<TaggedString>,
-    pub icon: Option<Image>,
-    pub sort_key: f32,
-    pub index: usize,
+    pub(crate) geometry: GeometryCollection,
+    pub(crate) formatted_text: Option<TaggedString>,
+    pub(crate) icon: Option<Image>,
+    pub(crate) sort_key: f32,
+    pub(crate) index: usize,
 }
 
 impl SymbolFeature {
-    pub fn new(feature: &dyn GeometryTileFeature) -> Self {
+    pub(crate) fn new(feature: &dyn GeometryTileFeature) -> Self {
         let geometry = feature.get_geometries().clone();
         SymbolFeature {
             feature_type: feature.get_type(),
@@ -63,10 +63,4 @@ impl GeometryTileFeature for SymbolFeature {
     fn get_geometries(&self) -> &GeometryCollection {
         &self.original_geometry
     }
-}
-
-/// `operator<` (by sort key), for the sorted insert in `SymbolLayout`.
-#[must_use]
-pub fn symbol_feature_less(lhs: &SymbolFeature, rhs: &SymbolFeature) -> bool {
-    lhs.sort_key < rhs.sort_key
 }

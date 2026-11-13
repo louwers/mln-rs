@@ -23,7 +23,8 @@ use crate::expression::{
     Dependency, EvaluationContext, Expression, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
-pub use crate::layer_impl::{FontStack, Impl, ImplBase, downcast_arc};
+pub(crate) use crate::layer_impl::FontStack;
+pub use crate::layer_impl::{Impl, ImplBase, downcast_arc};
 use crate::style_property::StyleProperty;
 
 /// The enums nested in C++ `LayerTypeInfo`.
@@ -109,7 +110,7 @@ pub trait Layer: Any + Send + Sync {
     fn get_property(&self, name: &str) -> StyleProperty;
 
     /// Serializes the layer as a style JSON value; implementations start from
-    /// [`serialize_base`].
+    /// `serialize_base`.
     fn serialize(&self) -> Value;
 
     /// Create a layer, copying all properties except id and paint properties
@@ -258,7 +259,7 @@ fn evaluate_visibility_expression(expression: &dyn Expression, global_state: &Gl
 
 /// Serializes the members every layer type has, for `Layer::serialize` to
 /// extend.
-pub fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
+pub(crate) fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
     let mut result = ValueObject::new();
     result.insert("id".to_owned(), Value::String(layer.get_id()));
     result.insert("type".to_owned(), Value::String(layer.get_type_info().type_.to_owned()));
@@ -300,7 +301,7 @@ pub fn serialize_base(layer: &(impl Layer + ?Sized)) -> Value {
     Value::Object(result)
 }
 
-pub fn serialize_property(out: &mut Value, property: &StyleProperty, property_name: &str, is_paint: bool) {
+pub(crate) fn serialize_property(out: &mut Value, property: &StyleProperty, property_name: &str, is_paint: bool) {
     let Value::Object(object) = out else {
         debug_assert!(false, "serialize_property: not an object");
         return;
@@ -316,7 +317,7 @@ pub fn serialize_property(out: &mut Value, property: &StyleProperty, property_na
     }
 }
 
-pub fn set_property_base(
+pub(crate) fn set_property_base(
     layer: &mut (impl Layer + ?Sized),
     name: &str,
     value: &Convertible<'_>,

@@ -46,7 +46,7 @@ use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 /// The part of `HTTPRequest` that lives on the requesting thread.
-pub struct HTTPRequestState {
+pub(crate) struct HTTPRequestState {
     callback: RefCell<Callback>,
 }
 
@@ -94,6 +94,7 @@ impl Cancellation {
         self.cancelled.load(Ordering::SeqCst)
     }
 
+    #[cfg(target_vendor = "apple")]
     fn set_handler(&self, handler: Box<dyn FnOnce() + Send>) {
         *self.handler.lock() = Some(handler);
         // `cancel` may have run before the handler was there.
@@ -118,15 +119,15 @@ fn header_value<'a>(name: &str, header: &str, line: &'a str) -> Option<&'a str> 
 
 /// What a transport hands back: the status code, the response headers in
 /// order, and the body, which only a 200 or 206 reads.
-pub struct Transfer {
-    pub status: i64,
-    pub headers: Vec<(String, String)>,
-    pub body: Result<Vec<u8>, Box<ResourceError>>,
+pub(crate) struct Transfer {
+    pub(crate) status: i64,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) body: Result<Vec<u8>, Box<ResourceError>>,
 }
 
 /// A request an `HTTPFileSource` hands to its transport: the resource to
 /// fetch, the host's headers, and where its response goes.
-pub struct TransferRequest {
+pub(crate) struct TransferRequest {
     resource: Resource,
     headers: HttpHeaders,
     reply: ActorRef<HTTPRequestState>,
@@ -135,7 +136,7 @@ pub struct TransferRequest {
 
 impl TransferRequest {
     #[must_use]
-    pub fn resource(&self) -> &Resource {
+    pub(crate) fn resource(&self) -> &Resource {
         &self.resource
     }
 
@@ -144,14 +145,14 @@ impl TransferRequest {
     /// URL that sent them. A transport that can't drop them fails a
     /// redirect instead of following it.
     #[must_use]
-    pub fn headers(&self) -> &[(String, String)] {
+    pub(crate) fn headers(&self) -> &[(String, String)] {
         &self.headers
     }
 
     /// Whether the request was dropped, so that nobody waits for the
     /// transfer any more: a transport can skip it.
     #[must_use]
-    pub fn is_cancelled(&self) -> bool {
+    pub(crate) fn is_cancelled(&self) -> bool {
         self.cancellation.is_cancelled()
     }
 
@@ -159,7 +160,8 @@ impl TransferRequest {
     /// finishes, such as cancelling the HTTP stack's task. It runs once, on
     /// the thread that drops the request, or right away if the request is
     /// already dropped; `finish` discards it.
-    pub fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) {
+    #[cfg(target_vendor = "apple")]
+    pub(crate) fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) {
         self.cancellation.set_handler(Box::new(handler));
     }
 
@@ -168,7 +170,7 @@ impl TransferRequest {
     /// builds the response, as the header callback and
     /// `handleResult(CURLcode)` do, and hands it to the requesting thread,
     /// unless the request was dropped. Any thread may call it.
-    pub fn finish(self, transfer: Result<Transfer, Box<ResourceError>>) {
+    pub(crate) fn finish(self, transfer: Result<Transfer, Box<ResourceError>>) {
         self.cancellation.clear_handler();
         let response = build_response(&self.resource, transfer);
         if !self.is_cancelled() {
@@ -178,7 +180,7 @@ impl TransferRequest {
 }
 
 /// How an `HTTPFileSource` performs its requests.
-pub trait HttpTransport: Send + Sync {
+pub(crate) trait HttpTransport: Send + Sync {
     /// Starts the transfer of `request` without blocking the caller, and
     /// calls `request.finish` once it is done, from any thread (ureq: one
     /// of its worker threads; `NSURLSession`: its delegate queue; a browser's
@@ -188,13 +190,6 @@ pub trait HttpTransport: Send + Sync {
 }
 
 static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
-
-/// Sets the transport of the `HTTPFileSource`s created from now on, instead of
-/// the default (`NSURLSession` on Apple platforms, fetch on wasm, ureq
-/// elsewhere): for a host with its own HTTP stack.
-pub fn set_transport(transport: Arc<dyn HttpTransport>) {
-    *TRANSPORT.lock() = Some(transport);
-}
 
 /// The transport `set_transport` set, else the default.
 fn current_transport() -> Arc<dyn HttpTransport> {
@@ -290,7 +285,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
 /// The `Range` request header for a resource's data range, for transports
 /// (`TransferRequest::resource`).
 #[must_use]
-pub fn range_header(resource: &Resource) -> Option<String> {
+pub(crate) fn range_header(resource: &Resource) -> Option<String> {
     resource.data_range.map(|(first, second)| format!("bytes={first}-{second}"))
 }
 
@@ -333,7 +328,7 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
 }
 
 /// Plain HTTP(S) requests, used by the `OnlineFileSource`.
-pub struct HTTPFileSource {
+pub(crate) struct HTTPFileSource {
     transport: Arc<dyn HttpTransport>,
     header_transform: Mutex<HttpHeaderTransform>,
     resource_options: Mutex<ResourceOptions>,
@@ -343,7 +338,7 @@ impl HTTPFileSource {
     /// An HTTP file source over the transport `set_transport` set, else
     /// the platform's default.
     #[must_use]
-    pub fn new(resource_options: &ResourceOptions) -> Self {
+    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
         HTTPFileSource {
             transport: current_transport(),
             header_transform: Mutex::new(HttpHeaderTransform::default()),
@@ -353,7 +348,7 @@ impl HTTPFileSource {
 
     /// `request(const Resource&, Callback)`. The callback runs on the
     /// calling thread's `RunLoop`.
-    pub fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
+    pub(crate) fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         let cancellation = Arc::new(Cancellation::default());

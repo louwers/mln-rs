@@ -11,9 +11,9 @@ use crate::render_source::SourcePrepareParameters;
 /// The glyph and icon (+ pattern) atlas textures of a tile. The upload pass
 /// sets them through the shared pointer, hence the `RefCell`.
 #[derive(Default)]
-pub struct TileAtlasTextures {
-    pub glyph: std::cell::RefCell<Option<mln_gfx::texture2d::Texture2DPtr>>,
-    pub icon: std::cell::RefCell<Option<mln_gfx::texture2d::Texture2DPtr>>,
+pub(crate) struct TileAtlasTextures {
+    pub(crate) glyph: std::cell::RefCell<Option<mln_gfx::texture2d::Texture2DPtr>>,
+    pub(crate) icon: std::cell::RefCell<Option<mln_gfx::texture2d::Texture2DPtr>>,
 }
 
 impl std::fmt::Debug for TileAtlasTextures {
@@ -28,7 +28,7 @@ impl std::fmt::Debug for TileAtlasTextures {
 /// A tile's render data. The defaults of `get_pattern`,
 /// `get_layer_render_data` and `get_bucket` assert in debug builds: the
 /// concrete tile types implement the ones they use.
-pub trait TileRenderData {
+pub(crate) trait TileRenderData {
     fn get_atlas_textures(&self) -> Option<&Rc<TileAtlasTextures>>;
 
     // To be implemented for concrete tile types.
@@ -66,13 +66,13 @@ pub trait TileRenderData {
 }
 
 /// The render data of a tile whose layers share one bucket (raster tiles).
-pub struct SharedBucketTileRenderData {
+pub(crate) struct SharedBucketTileRenderData {
     bucket: Option<BucketPtr>,
 }
 
 impl SharedBucketTileRenderData {
     #[must_use]
-    pub fn new(bucket: Option<BucketPtr>) -> Self {
+    pub(crate) fn new(bucket: Option<BucketPtr>) -> Self {
         SharedBucketTileRenderData { bucket }
     }
 }

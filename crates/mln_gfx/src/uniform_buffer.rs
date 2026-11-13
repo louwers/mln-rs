@@ -59,7 +59,7 @@ impl UniformBufferArray {
     }
 
     /// Create and add a new buffer or update an existing one.
-    pub fn create_or_update(&mut self, id: usize, data: &[u8], context: &dyn Context, persistent: bool) {
+    pub(crate) fn create_or_update(&mut self, id: usize, data: &[u8], context: &dyn Context, persistent: bool) {
         if let Some(ubo) = self.get(id)
             && ubo.get_size() == data.len()
         {

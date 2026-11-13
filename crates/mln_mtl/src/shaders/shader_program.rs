@@ -56,7 +56,7 @@ fn metal_blend_factor(factor: ColorBlendFactorType) -> MTLBlendFactor {
     }
 }
 
-pub struct ShaderProgram {
+pub(crate) struct ShaderProgram {
     shader_program_id: SimpleIdentity,
     shader_name: String,
     backend: Rc<BackendImpl>,
@@ -73,10 +73,10 @@ pub struct ShaderProgram {
 }
 
 impl ShaderProgram {
-    pub const NAME: &'static str = "GenericMTLShader";
+    pub(crate) const NAME: &'static str = "GenericMTLShader";
 
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         name: String,
         backend: Rc<BackendImpl>,
         vertex_function: MTLFunctionPtr,
@@ -97,13 +97,9 @@ impl ShaderProgram {
         }
     }
 
-    pub fn get_shader_name(&self) -> &str {
-        &self.shader_name
-    }
-
     /// The pipeline state for a pass with `formats`, reused from earlier
     /// calls with the same `reuse_hash`.
-    pub fn get_render_pipeline_state(
+    pub(crate) fn get_render_pipeline_state(
         &self,
         formats: AttachmentFormats,
         vertex_descriptor: &MTLVertexDescriptor,
@@ -181,16 +177,16 @@ impl ShaderProgram {
     }
 
     /// The buffer index the vertex attribute at `index` reads from.
-    pub fn get_vertex_buffer_index(&self, index: usize) -> Option<usize> {
+    pub(crate) fn get_vertex_buffer_index(&self, index: usize) -> Option<usize> {
         self.vertex_buffer_indices.get(&index).copied()
     }
 
     /// The buffer index the instance attribute at `index` reads from.
-    pub fn get_instance_buffer_index(&self, index: usize) -> Option<usize> {
+    pub(crate) fn get_instance_buffer_index(&self, index: usize) -> Option<usize> {
         self.instance_buffer_indices.get(&index).copied()
     }
 
-    pub fn init_vertex_attribute(&mut self, info: &AttributeInfo) {
+    pub(crate) fn init_vertex_attribute(&mut self, info: &AttributeInfo) {
         // Indexes must be unique, if there's a conflict check the
         // `attributes` array in the shader.
         debug_assert!(!self.vertex_buffer_indices.contains_key(&info.index));
@@ -198,14 +194,14 @@ impl ShaderProgram {
         self.vertex_buffer_indices.insert(info.index, info.buffer_index);
     }
 
-    pub fn init_instance_attribute(&mut self, info: &AttributeInfo) {
+    pub(crate) fn init_instance_attribute(&mut self, info: &AttributeInfo) {
         // Index is the block index of the instance attribute; attributes
         // that share a block share it.
         self.instance_attributes.set(info.id, info.index as i32, info.data_type, 1);
         self.instance_buffer_indices.insert(info.index, info.buffer_index);
     }
 
-    pub fn init_texture(&mut self, info: &TextureInfo) {
+    pub(crate) fn init_texture(&mut self, info: &TextureInfo) {
         debug_assert!(info.id < self.texture_bindings.len());
         if let Some(binding) = self.texture_bindings.get_mut(info.id) {
             *binding = Some(info.index);
@@ -235,6 +231,6 @@ impl ShaderProgramBase for ShaderProgram {
 }
 
 /// Downcast a shader handle to the Metal program (C++ `static_cast`).
-pub fn as_mtl_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
+pub(crate) fn as_mtl_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
     shader.downcast_ref::<ShaderProgram>()
 }

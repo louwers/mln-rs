@@ -40,7 +40,6 @@
 "crates/mln_image/src/png_writer.rs" = 1
 "crates/mln_map/src/transform.rs" = 1
 "crates/mln_map_types/src/transform_state.rs" = 3
-"crates/mln_map_types/src/util_camera.rs" = 1
 "crates/mln_map_types/src/vertical_perspective_projection.rs" = 1
 "crates/mln_mtl/src/context.rs" = 1
 "crates/mln_renderer/src/algorithm/update_renderables.rs" = 1
@@ -88,7 +87,7 @@
 "crates/mln_renderer/src/tile/worker_codec/transport.rs" = 1
 "crates/mln_renderer/src/tile_pyramid.rs" = 3
 "crates/mln_renderer/src/util/subdivision.rs" = 2
-"crates/mln_renderer/src/util/tile_cover.rs" = 3
+"crates/mln_renderer/src/util/tile_cover.rs" = 2
 "crates/mln_renderer/src/util/tile_cover_impl.rs" = 2
 "crates/mln_renderer/src/util/tile_mesh.rs" = 1
 "crates/mln_sprite/src/sprite_loader.rs" = 1
@@ -99,7 +98,7 @@
 "crates/mln_storage/src/offline.rs" = 1
 "crates/mln_storage/src/offline_database.rs" = 5
 "crates/mln_storage/src/pmtiles_file_source.rs" = 2
-"crates/mln_storage/src/sqlite3.rs" = 4
+"crates/mln_storage/src/sqlite3.rs" = 3
 "crates/mln_storage/src/stub_file_source.rs" = 2
 "crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_style/src/color_ramp_property_value.rs" = 2

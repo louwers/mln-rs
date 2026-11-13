@@ -797,7 +797,7 @@ impl View {
 
 /// Prints once which layers the renderer draws and which it
 /// skips (unported layer types, or sources of unported types).
-pub fn report_style(map: &Map) {
+pub(crate) fn report_style(map: &Map) {
     let style = map.style();
     let json: serde_json::Value = serde_json::from_str(&style.get_json()).unwrap_or_default();
     let declared_sources: BTreeMap<String, String> = json

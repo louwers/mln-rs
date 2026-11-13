@@ -60,9 +60,11 @@ fn trie_get16(c: i32) -> u16 {
 const UBIDI_IX_MIRROR_LENGTH: usize = 3;
 
 // definitions for 16-bit bidi/shaping properties word
+#[cfg(test)]
 const UBIDI_BPT_SHIFT: u32 = 8;
 const UBIDI_MIRROR_DELTA_SHIFT: u32 = 13;
 const UBIDI_CLASS_MASK: u16 = 0x0000_001f;
+#[cfg(test)]
 const UBIDI_BPT_MASK: u16 = 0x0000_0300;
 const UBIDI_ESC_MIRROR_DELTA: i32 = -4;
 const UBIDI_MIRROR_INDEX_SHIFT: u32 = 21;
@@ -79,13 +81,16 @@ fn get_mirror_code_point(m: u32) -> i32 {
     (m & 0x001f_ffff) as i32
 }
 
-pub const U_BPT_NONE: u32 = 0;
-pub const U_BPT_OPEN: u32 = 1;
-pub const U_BPT_CLOSE: u32 = 2;
+#[cfg(test)]
+pub(crate) const U_BPT_NONE: u32 = 0;
+#[cfg(test)]
+pub(crate) const U_BPT_OPEN: u32 = 1;
+#[cfg(test)]
+pub(crate) const U_BPT_CLOSE: u32 = 2;
 
 /// The BiDi class of `c`, a `UCharDirection` (ICU's `u_charDirection`).
 #[must_use]
-pub fn ubidi_get_class(c: i32) -> u8 {
+pub(crate) fn ubidi_get_class(c: i32) -> u8 {
     let props = trie_get16(c);
     (props & UBIDI_CLASS_MASK) as u8
 }
@@ -116,21 +121,23 @@ fn get_mirror(c: i32, props: u16) -> i32 {
 
 /// The mirror image of `c`, or `c` itself (ICU's `u_charMirror`).
 #[must_use]
-pub fn ubidi_get_mirror(c: i32) -> i32 {
+pub(crate) fn ubidi_get_mirror(c: i32) -> i32 {
     let props = trie_get16(c);
     get_mirror(c, props)
 }
 
+#[cfg(test)]
 #[must_use]
-pub fn ubidi_get_paired_bracket_type(c: i32) -> u32 {
+pub(crate) fn ubidi_get_paired_bracket_type(c: i32) -> u32 {
     let props = trie_get16(c);
     u32::from((props & UBIDI_BPT_MASK) >> UBIDI_BPT_SHIFT)
 }
 
 /// The bracket paired with `c`, or `c` itself (ICU's
 /// `u_getBidiPairedBracket`).
+#[cfg(test)]
 #[must_use]
-pub fn ubidi_get_paired_bracket(c: i32) -> i32 {
+pub(crate) fn ubidi_get_paired_bracket(c: i32) -> i32 {
     let props = trie_get16(c);
     if (props & UBIDI_BPT_MASK) == 0 { c } else { get_mirror(c, props) }
 }

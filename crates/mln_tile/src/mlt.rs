@@ -40,18 +40,13 @@ use mlt_core::{GeometryType as WireGeometryType, GeometryValues, ParsedLayer01, 
 /// mlt-core rejects are mlt-core's.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
-pub struct Error {
+pub(crate) struct Error {
     message: String,
 }
 
 impl Error {
-    pub fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Error { message: message.into() }
-    }
-
-    #[must_use]
-    pub fn what(&self) -> &str {
-        &self.message
     }
 }
 
@@ -62,9 +57,9 @@ impl From<mlt_core::MltError> for Error {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Coordinate {
-    pub x: f32,
-    pub y: f32,
+pub(crate) struct Coordinate {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
 }
 
 impl Coordinate {
@@ -74,21 +69,11 @@ impl Coordinate {
     }
 }
 
-pub type CoordVec = Vec<Coordinate>;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GeometryType {
-    Point = 0,
-    LineString = 1,
-    Polygon = 2,
-    MultiPoint = 3,
-    MultiLineString = 4,
-    MultiPolygon = 5,
-}
+pub(crate) type CoordVec = Vec<Coordinate>;
 
 /// The data of the `mlt::geometry::Geometry` subclasses.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Shape {
+pub(crate) enum Shape {
     Point(Coordinate),
     MultiPoint(CoordVec),
     LineString(CoordVec),
@@ -99,30 +84,16 @@ pub enum Shape {
 
 /// A feature's geometry: its type, data and triangle span.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Geometry {
-    pub shape: Shape,
+pub(crate) struct Geometry {
+    pub(crate) shape: Shape,
     /// The geometry's triangles, as a range of the layer's triangle buffer
     /// ([`Layer::triangle_buffer`]); `None` for an empty span.
-    pub triangles: Option<Range<usize>>,
-}
-
-impl Geometry {
-    #[must_use]
-    pub fn type_(&self) -> GeometryType {
-        match self.shape {
-            Shape::Point(_) => GeometryType::Point,
-            Shape::MultiPoint(_) => GeometryType::MultiPoint,
-            Shape::LineString(_) => GeometryType::LineString,
-            Shape::Polygon(_) => GeometryType::Polygon,
-            Shape::MultiLineString(_) => GeometryType::MultiLineString,
-            Shape::MultiPolygon(_) => GeometryType::MultiPolygon,
-        }
-    }
+    pub(crate) triangles: Option<Range<usize>>,
 }
 
 /// The scalar type of a property column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ScalarType {
+pub(crate) enum ScalarType {
     Boolean,
     Int32,
     UInt32,
@@ -136,7 +107,7 @@ pub enum ScalarType {
 /// A property value: the alternatives of C++'s `mlt::Property` that a
 /// column produces (its `std::optional<T>` and `nullptr_t` ones never are).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Property<'a> {
+pub(crate) enum Property<'a> {
     Bool(bool),
     I32(i32),
     U32(u32),
@@ -214,7 +185,7 @@ impl PropertyVec {
 
 /// A property column.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PresentProperties {
+pub(crate) struct PresentProperties {
     type_: ScalarType,
     /// The column has a present stream (C++ `physicalIndexes` is set).
     optional: bool,
@@ -266,7 +237,7 @@ impl PartialEq for StringCodes {
 
 /// Port-only: [`PresentProperties::codes`].
 #[derive(Clone, Copy)]
-pub struct ValueCodes<'a> {
+pub(crate) struct ValueCodes<'a> {
     column: &'a PresentProperties,
     strings: &'a [u32],
 }
@@ -274,7 +245,7 @@ pub struct ValueCodes<'a> {
 impl ValueCodes<'_> {
     /// The code of the value at `logical_index`, `None` for an absent value;
     /// throws where [`PresentProperties::get_property`] does.
-    pub fn get(&self, logical_index: u32) -> Result<Option<u64>, Error> {
+    pub(crate) fn get(&self, logical_index: u32) -> Result<Option<u64>, Error> {
         let i = logical_index as usize;
         let column = self.column;
         if i >= column.values.len() {
@@ -297,19 +268,11 @@ impl ValueCodes<'_> {
 }
 
 impl PresentProperties {
-    pub fn get_type(&self) -> ScalarType {
-        self.type_
-    }
-
-    pub fn is_boolean(&self) -> bool {
-        self.type_ == ScalarType::Boolean
-    }
-
     /// A code for each value, equal codes for equal values (equal values may
     /// differ in code). Numbers and booleans are their bits; strings are
     /// numbered, on the first call. `None` for a string column with more
     /// distinct strings than about a quarter of its values.
-    pub fn codes(&self) -> Option<ValueCodes<'_>> {
+    pub(crate) fn codes(&self) -> Option<ValueCodes<'_>> {
         let strings = match &self.values {
             PropertyVec::Str { data, spans } => self.string_codes.get_or_init(spans, data)?,
             _ => &[],
@@ -321,7 +284,7 @@ impl PresentProperties {
     /// of a column without a present stream fails with "Missing property
     /// value", which C++ throws as a `std::runtime_error` (after a failing
     /// `assert` in debug builds).
-    pub fn get_property(&self, logical_index: u32) -> Result<Option<Property<'_>>, Error> {
+    pub(crate) fn get_property(&self, logical_index: u32) -> Result<Option<Property<'_>>, Error> {
         let i = logical_index as usize;
         if i < self.values.len() {
             Ok(self.values.get(i))
@@ -334,7 +297,7 @@ impl PresentProperties {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Feature {
+pub(crate) struct Feature {
     id: Option<u64>,
     index: u32,
     geometry: Geometry,
@@ -342,24 +305,24 @@ pub struct Feature {
 
 impl Feature {
     #[must_use]
-    pub fn get_id(&self) -> Option<u64> {
+    pub(crate) fn get_id(&self) -> Option<u64> {
         self.id
     }
 
     /// The index of the feature's values in the property columns.
     #[must_use]
-    pub fn get_index(&self) -> u32 {
+    pub(crate) fn get_index(&self) -> u32 {
         self.index
     }
 
     #[must_use]
-    pub fn get_geometry(&self) -> &Geometry {
+    pub(crate) fn get_geometry(&self) -> &Geometry {
         &self.geometry
     }
 
     /// The value of this feature's property `key` in `layer`; `None` for an
     /// unknown key or an absent value.
-    pub fn get_property<'l>(&self, key: &str, layer: &'l Layer) -> Result<Option<Property<'l>>, Error> {
+    pub(crate) fn get_property<'l>(&self, key: &str, layer: &'l Layer) -> Result<Option<Property<'l>>, Error> {
         match layer.get_property_column(key) {
             Some(column) => column.get_property(self.index),
             None => Ok(None),
@@ -368,7 +331,7 @@ impl Feature {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Layer {
+pub(crate) struct Layer {
     name: String,
     extent: u32,
     features: Vec<Feature>,
@@ -382,53 +345,45 @@ pub struct Layer {
 
 impl Layer {
     #[must_use]
-    pub fn get_name(&self) -> &str {
+    pub(crate) fn get_name(&self) -> &str {
         &self.name
     }
 
     #[must_use]
-    pub fn get_extent(&self) -> u32 {
+    pub(crate) fn get_extent(&self) -> u32 {
         self.extent
     }
 
     #[must_use]
-    pub fn get_features(&self) -> &[Feature] {
+    pub(crate) fn get_features(&self) -> &[Feature] {
         &self.features
     }
 
     /// Every property column, in wire order (C++ lists them in hash order).
     #[must_use]
-    pub fn get_properties(&self) -> &[(String, PresentProperties)] {
+    pub(crate) fn get_properties(&self) -> &[(String, PresentProperties)] {
         &self.properties
     }
 
     #[must_use]
-    pub fn get_property_column(&self, key: &str) -> Option<&PresentProperties> {
+    pub(crate) fn get_property_column(&self, key: &str) -> Option<&PresentProperties> {
         self.property_index.get(key).map(|&i| &self.properties[i].1)
     }
 
     /// The buffer that the features' triangle ranges index.
     #[must_use]
-    pub fn triangle_buffer(&self) -> Option<&Arc<[u32]>> {
+    pub(crate) fn triangle_buffer(&self) -> Option<&Arc<[u32]>> {
         self.triangles.as_ref()
-    }
-
-    #[must_use]
-    pub fn get_triangles(&self, feature: &Feature) -> &[u32] {
-        match (&self.triangles, &feature.geometry.triangles) {
-            (Some(buffer), Some(range)) => &buffer[range.clone()],
-            _ => &[],
-        }
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MapLibreTile {
+pub(crate) struct MapLibreTile {
     layers: Vec<Layer>,
 }
 
 impl MapLibreTile {
-    pub fn decode(data: &[u8], support_fast_pfor: bool) -> Result<MapLibreTile, Error> {
+    pub(crate) fn decode(data: &[u8], support_fast_pfor: bool) -> Result<MapLibreTile, Error> {
         let mut parser = mlt_core::Parser::default();
         let layers = parser.parse_layers(data)?;
         let mut decoder = mlt_core::Decoder::default();
@@ -455,14 +410,8 @@ impl MapLibreTile {
     }
 
     #[must_use]
-    pub fn get_layers(&self) -> &[Layer] {
+    pub(crate) fn get_layers(&self) -> &[Layer] {
         &self.layers
-    }
-
-    /// The first layer named `name`.
-    #[must_use]
-    pub fn get_layer(&self, name: &str) -> Option<&Layer> {
-        self.layers.iter().find(|layer| layer.name == name)
     }
 }
 

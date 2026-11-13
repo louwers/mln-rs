@@ -12,7 +12,7 @@ pub type HttpHeaders = Vec<(String, String)>;
 
 /// Returns the headers for a request of `kind` to `url`. It runs on the
 /// thread that starts the request, which waits for it, hence `Send + Sync`.
-pub type HttpHeaderCallback = Arc<dyn Fn(Kind, &str) -> HttpHeaders + Send + Sync>;
+pub(crate) type HttpHeaderCallback = Arc<dyn Fn(Kind, &str) -> HttpHeaders + Send + Sync>;
 
 /// The headers to add to each HTTP request: the callback gets the resource's
 /// kind and the URL the request goes to, after any resource transform, and
@@ -39,16 +39,11 @@ impl HttpHeaderTransform {
     /// The headers for a request of `kind` to `url`: none for a URL that
     /// isn't `http` or `https`.
     #[must_use]
-    pub fn headers(&self, kind: Kind, url: &str) -> HttpHeaders {
+    pub(crate) fn headers(&self, kind: Kind, url: &str) -> HttpHeaders {
         match &self.callback {
             Some(callback) if is_http_url(url) => callback(kind, url),
             _ => HttpHeaders::new(),
         }
-    }
-
-    #[must_use]
-    pub fn is_set(&self) -> bool {
-        self.callback.is_some()
     }
 }
 

@@ -91,7 +91,7 @@ pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 /// FIFO blocks acquiring and presenting on Wayland while the window isn't
 /// visible, which stalls the thread that renders.
 #[must_use]
-pub fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
+pub(crate) fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
     let preferred: &[vk::PresentModeKHR] = if cap_frame_rate {
         &[vk::PresentModeKHR::MAILBOX]
     } else {
@@ -132,7 +132,7 @@ impl SurfaceTarget {
 
     /// [`with_backend`](Self::with_backend) for the surfaces `provider`
     /// makes, which may be of no window, such as `VK_EXT_headless_surface`'s.
-    pub fn with_backend_from_provider(
+    pub(crate) fn with_backend_from_provider(
         device: &Device,
         provider: Rc<dyn SurfaceProvider>,
         framebuffer_size: Size,
@@ -163,7 +163,7 @@ impl SurfaceTarget {
     }
 
     /// [`new`](Self::new) for the surfaces `provider` makes.
-    pub fn from_provider(
+    pub(crate) fn from_provider(
         backend: Rc<RendererBackend>,
         provider: Rc<dyn SurfaceProvider>,
         framebuffer_size: Size,
@@ -272,11 +272,6 @@ impl SurfaceTarget {
             rebuild: Cell::new(false),
             readback_requested: Cell::new(false),
         })
-    }
-
-    /// The backend the target draws on.
-    pub fn backend(&self) -> &Rc<RendererBackend> {
-        &self.backend
     }
 
     /// The format of the swapchain's images.

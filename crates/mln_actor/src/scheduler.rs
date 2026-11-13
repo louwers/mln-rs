@@ -40,13 +40,13 @@ pub trait Scheduler {
 }
 
 pub type SchedulerPtr = Arc<dyn Scheduler + Send + Sync>;
-pub type WeakScheduler = Weak<dyn Scheduler + Send + Sync>;
+pub(crate) type WeakScheduler = Weak<dyn Scheduler + Send + Sync>;
 
 thread_local! {
     static LOCAL_SCHEDULER: RefCell<Option<SchedulerPtr>> = const { RefCell::new(None) };
 }
 
-pub fn set_current(scheduler: Option<SchedulerPtr>) {
+pub(crate) fn set_current(scheduler: Option<SchedulerPtr>) {
     LOCAL_SCHEDULER.with(|s| *s.borrow_mut() = scheduler);
 }
 
@@ -182,7 +182,7 @@ pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 /// `scheduler` with a `Respond` to call once with its result, then or later
 /// and from any thread, and `reply(result)` runs on the current thread's
 /// scheduler. A `Respond` dropped without a call drops the reply.
-pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
+pub(crate) fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
     scheduler: &dyn Scheduler,
     tag: SimpleIdentity,
     task: TaskFn,
@@ -218,7 +218,7 @@ pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
 /// A scheduler plus the tag its tasks are queued under.
 #[derive(Clone)]
 pub struct TaggedScheduler {
-    pub tag: SimpleIdentity,
+    pub(crate) tag: SimpleIdentity,
     scheduler: SchedulerPtr,
 }
 
@@ -228,25 +228,17 @@ impl TaggedScheduler {
     }
 
     #[must_use]
-    pub fn get(&self) -> &SchedulerPtr {
+    pub(crate) fn get(&self) -> &SchedulerPtr {
         &self.scheduler
     }
 
-    pub fn schedule(&self, task: Task) {
+    #[cfg(test)]
+    pub(crate) fn schedule(&self, task: Task) {
         self.scheduler.schedule_tagged(self.tag, task);
     }
 
     pub fn wait_for_empty(&self) {
         self.scheduler.wait_for_empty_tagged(self.tag);
-    }
-
-    pub fn schedule_and_reply_value<R, TaskFn, ReplyFn>(&self, task: TaskFn, reply: ReplyFn)
-    where
-        R: Send + 'static,
-        TaskFn: FnOnce() -> R + Send + 'static,
-        ReplyFn: FnOnce(R) + 'static,
-    {
-        schedule_and_reply_value(&*self.scheduler, self.tag, task, reply);
     }
 
     /// `schedule_and_reply_later` on this scheduler and tag.

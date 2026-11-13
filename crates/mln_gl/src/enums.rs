@@ -9,7 +9,7 @@ use mln_gfx::types::{
 };
 
 #[must_use]
-pub fn draw_mode(value: DrawModeType) -> u32 {
+pub(crate) fn draw_mode(value: DrawModeType) -> u32 {
     match value {
         DrawModeType::Points => glow::POINTS,
         DrawModeType::Lines => glow::LINES,
@@ -22,7 +22,7 @@ pub fn draw_mode(value: DrawModeType) -> u32 {
 }
 
 #[must_use]
-pub fn color_blend_equation(value: ColorBlendEquationType) -> u32 {
+pub(crate) fn color_blend_equation(value: ColorBlendEquationType) -> u32 {
     match value {
         ColorBlendEquationType::Add => glow::FUNC_ADD,
         ColorBlendEquationType::Subtract => glow::FUNC_SUBTRACT,
@@ -31,7 +31,7 @@ pub fn color_blend_equation(value: ColorBlendEquationType) -> u32 {
 }
 
 #[must_use]
-pub fn color_blend_factor(value: ColorBlendFactorType) -> u32 {
+pub(crate) fn color_blend_factor(value: ColorBlendFactorType) -> u32 {
     match value {
         ColorBlendFactorType::Zero => glow::ZERO,
         ColorBlendFactorType::One => glow::ONE,
@@ -52,7 +52,7 @@ pub fn color_blend_factor(value: ColorBlendFactorType) -> u32 {
 }
 
 #[must_use]
-pub fn depth_function(value: DepthFunctionType) -> u32 {
+pub(crate) fn depth_function(value: DepthFunctionType) -> u32 {
     match value {
         DepthFunctionType::Never => glow::NEVER,
         DepthFunctionType::Less => glow::LESS,
@@ -66,7 +66,7 @@ pub fn depth_function(value: DepthFunctionType) -> u32 {
 }
 
 #[must_use]
-pub fn stencil_function(value: StencilFunctionType) -> u32 {
+pub(crate) fn stencil_function(value: StencilFunctionType) -> u32 {
     match value {
         StencilFunctionType::Never => glow::NEVER,
         StencilFunctionType::Less => glow::LESS,
@@ -80,7 +80,7 @@ pub fn stencil_function(value: StencilFunctionType) -> u32 {
 }
 
 #[must_use]
-pub fn stencil_op(value: StencilOpType) -> u32 {
+pub(crate) fn stencil_op(value: StencilOpType) -> u32 {
     match value {
         StencilOpType::Zero => glow::ZERO,
         StencilOpType::Keep => glow::KEEP,
@@ -94,7 +94,7 @@ pub fn stencil_op(value: StencilOpType) -> u32 {
 }
 
 #[must_use]
-pub fn cull_face_side(value: CullFaceSideType) -> u32 {
+pub(crate) fn cull_face_side(value: CullFaceSideType) -> u32 {
     match value {
         CullFaceSideType::Front => glow::FRONT,
         CullFaceSideType::Back => glow::BACK,
@@ -103,7 +103,7 @@ pub fn cull_face_side(value: CullFaceSideType) -> u32 {
 }
 
 #[must_use]
-pub fn cull_face_winding(value: CullFaceWindingType) -> u32 {
+pub(crate) fn cull_face_winding(value: CullFaceWindingType) -> u32 {
     match value {
         CullFaceWindingType::Clockwise => glow::CW,
         CullFaceWindingType::CounterClockwise => glow::CCW,
@@ -111,7 +111,7 @@ pub fn cull_face_winding(value: CullFaceWindingType) -> u32 {
 }
 
 #[must_use]
-pub fn buffer_usage(value: BufferUsageType) -> u32 {
+pub(crate) fn buffer_usage(value: BufferUsageType) -> u32 {
     match value {
         BufferUsageType::StreamDraw => glow::STREAM_DRAW,
         BufferUsageType::StaticDraw => glow::STATIC_DRAW,
@@ -123,7 +123,7 @@ pub fn buffer_usage(value: BufferUsageType) -> u32 {
 /// core profile has no alpha or luminance textures, so a `desktop` context
 /// keeps them in the red channel ([`texture_swizzle`]).
 #[must_use]
-pub fn texture_pixel(value: TexturePixelType, desktop: bool) -> u32 {
+pub(crate) fn texture_pixel(value: TexturePixelType, desktop: bool) -> u32 {
     match value {
         TexturePixelType::RGBA => glow::RGBA,
         TexturePixelType::Alpha | TexturePixelType::Luminance if desktop => glow::RED,
@@ -137,7 +137,7 @@ pub fn texture_pixel(value: TexturePixelType, desktop: bool) -> u32 {
 /// The internal format of a texture of `value` pixels with `type_` channels,
 /// on a `desktop` context or an OpenGL ES one.
 #[must_use]
-pub fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDataType, desktop: bool) -> u32 {
+pub(crate) fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDataType, desktop: bool) -> u32 {
     match (type_, value) {
         (TextureChannelDataType::UnsignedByte, TexturePixelType::Alpha | TexturePixelType::Luminance) if desktop => {
             glow::R8
@@ -157,7 +157,7 @@ pub fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDat
 /// textures from the red channel, or `None` where the texture reads its
 /// channels as they are.
 #[must_use]
-pub fn texture_swizzle(value: TexturePixelType, desktop: bool) -> Option<[u32; 4]> {
+pub(crate) fn texture_swizzle(value: TexturePixelType, desktop: bool) -> Option<[u32; 4]> {
     match value {
         TexturePixelType::Alpha if desktop => Some([glow::ZERO, glow::ZERO, glow::ZERO, glow::RED]),
         TexturePixelType::Luminance if desktop => Some([glow::RED, glow::RED, glow::RED, glow::ONE]),
@@ -166,7 +166,7 @@ pub fn texture_swizzle(value: TexturePixelType, desktop: bool) -> Option<[u32; 4
 }
 
 #[must_use]
-pub fn texture_channel_data(value: TextureChannelDataType) -> u32 {
+pub(crate) fn texture_channel_data(value: TextureChannelDataType) -> u32 {
     match value {
         TextureChannelDataType::UnsignedByte => glow::UNSIGNED_BYTE,
         TextureChannelDataType::HalfFloat => glow::HALF_FLOAT,
@@ -175,7 +175,7 @@ pub fn texture_channel_data(value: TextureChannelDataType) -> u32 {
 }
 
 #[must_use]
-pub fn texture_filter(value: TextureFilterType) -> i32 {
+pub(crate) fn texture_filter(value: TextureFilterType) -> i32 {
     match value {
         TextureFilterType::Nearest => glow::NEAREST as i32,
         TextureFilterType::Linear => glow::LINEAR as i32,
@@ -183,7 +183,7 @@ pub fn texture_filter(value: TextureFilterType) -> i32 {
 }
 
 #[must_use]
-pub fn texture_wrap(value: TextureWrapType) -> i32 {
+pub(crate) fn texture_wrap(value: TextureWrapType) -> i32 {
     match value {
         TextureWrapType::Clamp => glow::CLAMP_TO_EDGE as i32,
         TextureWrapType::Repeat => glow::REPEAT as i32,
@@ -192,14 +192,14 @@ pub fn texture_wrap(value: TextureWrapType) -> i32 {
 
 /// How `glVertexAttribPointer` reads an attribute of `value`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AttributeFormat {
-    pub components: i32,
-    pub type_: u32,
-    pub normalized: bool,
+pub(crate) struct AttributeFormat {
+    pub(crate) components: i32,
+    pub(crate) type_: u32,
+    pub(crate) normalized: bool,
 }
 
 #[must_use]
-pub fn attribute_format(value: AttributeDataType) -> Option<AttributeFormat> {
+pub(crate) fn attribute_format(value: AttributeDataType) -> Option<AttributeFormat> {
     use AttributeDataType as A;
     let (components, type_, normalized) = match value {
         A::Byte => (1, glow::BYTE, false),

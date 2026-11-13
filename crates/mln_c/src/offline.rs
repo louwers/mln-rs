@@ -281,7 +281,7 @@ unsafe fn definition(definition: *const mln_offline_region_definition) -> Result
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_create_offline_region(
+pub(crate) unsafe extern "C" fn mln_runtime_create_offline_region(
     runtime: mln_runtime,
     definition: *const mln_offline_region_definition,
     metadata: *const u8,
@@ -312,7 +312,7 @@ pub unsafe extern "C" fn mln_runtime_create_offline_region(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_get_offline_region(
+pub(crate) unsafe extern "C" fn mln_runtime_get_offline_region(
     runtime: mln_runtime,
     region_id: mln_offline_region_id,
     completion: *const mln_completion,
@@ -332,7 +332,7 @@ pub unsafe extern "C" fn mln_runtime_get_offline_region(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_list_offline_regions(
+pub(crate) unsafe extern "C" fn mln_runtime_list_offline_regions(
     runtime: mln_runtime,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -349,7 +349,7 @@ pub unsafe extern "C" fn mln_runtime_list_offline_regions(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_merge_offline_regions(
+pub(crate) unsafe extern "C" fn mln_runtime_merge_offline_regions(
     runtime: mln_runtime,
     side_database_path: mln_buffer_view,
     completion: *const mln_completion,
@@ -371,7 +371,7 @@ pub unsafe extern "C" fn mln_runtime_merge_offline_regions(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_update_offline_region_metadata(
+pub(crate) unsafe extern "C" fn mln_runtime_update_offline_region_metadata(
     runtime: mln_runtime,
     region_id: mln_offline_region_id,
     metadata: *const u8,
@@ -400,7 +400,7 @@ pub unsafe extern "C" fn mln_runtime_update_offline_region_metadata(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_get_offline_region_status(
+pub(crate) unsafe extern "C" fn mln_runtime_get_offline_region_status(
     runtime: mln_runtime,
     region_id: mln_offline_region_id,
     completion: *const mln_completion,
@@ -425,7 +425,7 @@ pub unsafe extern "C" fn mln_runtime_get_offline_region_status(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_set_offline_region_observed(
+pub(crate) unsafe extern "C" fn mln_runtime_set_offline_region_observed(
     runtime: mln_runtime,
     region_id: mln_offline_region_id,
     events: mln_runtime_event_flags,
@@ -446,7 +446,7 @@ pub unsafe extern "C" fn mln_runtime_set_offline_region_observed(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_set_offline_region_download_state(
+pub(crate) unsafe extern "C" fn mln_runtime_set_offline_region_download_state(
     runtime: mln_runtime,
     region_id: mln_offline_region_id,
     state: mln_offline_region_download_state,
@@ -475,7 +475,7 @@ pub unsafe extern "C" fn mln_runtime_set_offline_region_download_state(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_invalidate_offline_region(
+pub(crate) unsafe extern "C" fn mln_runtime_invalidate_offline_region(
     runtime: mln_runtime,
     region_id: mln_offline_region_id,
     completion: *const mln_completion,
@@ -493,7 +493,7 @@ pub unsafe extern "C" fn mln_runtime_invalidate_offline_region(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_delete_offline_region(
+pub(crate) unsafe extern "C" fn mln_runtime_delete_offline_region(
     runtime: mln_runtime,
     region_id: mln_offline_region_id,
     completion: *const mln_completion,

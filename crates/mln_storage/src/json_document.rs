@@ -9,12 +9,12 @@ use serde_json::Value as Json;
 /// names allowed (`AddMember` appends, `operator[]` finds the first).
 #[derive(Default)]
 pub(crate) struct Document {
-    pub members: Vec<(String, Json)>,
+    pub(crate) members: Vec<(String, Json)>,
 }
 
 impl Document {
     /// `doc.Parse(json)` followed by `if (!doc.IsObject()) doc.SetObject()`.
-    pub fn parse_object(json: &[u8]) -> Self {
+    pub(crate) fn parse_object(json: &[u8]) -> Self {
         // `Parse(const char*)` stops at the first NUL.
         let end = json.iter().position(|&b| b == 0).unwrap_or(json.len());
         match serde_json::from_slice::<Json>(&json[..end]) {
@@ -23,22 +23,22 @@ impl Document {
         }
     }
 
-    pub fn has_member(&self, name: &str) -> bool {
+    pub(crate) fn has_member(&self, name: &str) -> bool {
         self.members.iter().any(|(n, _)| n == name)
     }
 
-    pub fn add_member(&mut self, name: impl Into<String>, value: Json) {
+    pub(crate) fn add_member(&mut self, name: impl Into<String>, value: Json) {
         self.members.push((name.into(), value));
     }
 
     /// `doc[name]` (the member must exist).
-    pub fn get_mut(&mut self, name: &str) -> &mut Json {
+    pub(crate) fn get_mut(&mut self, name: &str) -> &mut Json {
         &mut self.members.iter_mut().find(|(n, _)| n == name).expect("member").1
     }
 
     /// The object as JSON. A name that appears more than once is written
     /// once, where it first appears, with the value added last.
-    pub fn serialize(&self) -> String {
+    pub(crate) fn serialize(&self) -> String {
         Json::Object(self.members.iter().cloned().collect()).to_string()
     }
 }

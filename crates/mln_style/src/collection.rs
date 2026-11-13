@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 /// An element of a collection: it has an `Impl` type, a shared impl and an
 /// id.
-pub trait CollectionElement {
+pub(crate) trait CollectionElement {
     type Impl: ?Sized;
     fn base_impl(&self) -> Arc<Self::Impl>;
     fn get_id(&self) -> String;
@@ -45,7 +45,7 @@ impl CollectionElement for dyn crate::source::Source {
 
 pub type ImmutableVector<I> = Arc<Vec<Arc<I>>>;
 
-pub struct CollectionBase<T: CollectionElement + ?Sized> {
+pub(crate) struct CollectionBase<T: CollectionElement + ?Sized> {
     wrappers: Vec<Box<T>>,
     impls: ImmutableVector<T::Impl>,
 }
@@ -58,46 +58,46 @@ impl<T: CollectionElement + ?Sized> Default for CollectionBase<T> {
 
 impl<T: CollectionElement + ?Sized> CollectionBase<T> {
     #[must_use]
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         self.wrappers.len()
     }
 
     #[must_use]
-    pub fn get(&self, id: &str) -> Option<&T> {
+    pub(crate) fn get(&self, id: &str) -> Option<&T> {
         let i = self.index(id);
         if i < self.size() { Some(self.wrappers[i].as_ref()) } else { None }
     }
 
-    pub fn get_mut(&mut self, id: &str) -> Option<&mut T> {
+    pub(crate) fn get_mut(&mut self, id: &str) -> Option<&mut T> {
         let i = self.index(id);
         if i < self.size() { Some(self.wrappers[i].as_mut()) } else { None }
     }
 
-    pub fn get_wrappers(&self) -> Vec<&T> {
+    pub(crate) fn get_wrappers(&self) -> Vec<&T> {
         self.wrappers.iter().map(std::convert::AsRef::as_ref).collect()
     }
 
-    pub fn get_wrappers_mut(&mut self) -> Vec<&mut T> {
+    pub(crate) fn get_wrappers_mut(&mut self) -> Vec<&mut T> {
         self.wrappers.iter_mut().map(std::convert::AsMut::as_mut).collect()
     }
 
     #[must_use]
-    pub fn get_impls(&self) -> ImmutableVector<T::Impl> {
+    pub(crate) fn get_impls(&self) -> ImmutableVector<T::Impl> {
         self.impls.clone()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
         self.wrappers.iter().map(std::convert::AsRef::as_ref)
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         // mutate(impls, ...): copy-on-write into a new vector.
         self.impls = Arc::new(Vec::new());
         self.wrappers.clear();
     }
 
     #[must_use]
-    pub fn index(&self, id: &str) -> usize {
+    pub(crate) fn index(&self, id: &str) -> usize {
         self.wrappers.iter().position(|e| e.get_id() == id).unwrap_or(self.wrappers.len())
     }
 
@@ -139,7 +139,7 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
 }
 
 /// A collection whose impls are in wrapper order.
-pub struct Collection<T: CollectionElement + ?Sized> {
+pub(crate) struct Collection<T: CollectionElement + ?Sized> {
     base: CollectionBase<T>,
 }
 
@@ -163,7 +163,7 @@ impl<T: CollectionElement + ?Sized> std::ops::DerefMut for Collection<T> {
 }
 
 impl<T: CollectionElement + ?Sized> Collection<T> {
-    pub fn add(&mut self, wrapper: Box<T>, before: Option<&str>) -> &mut T {
+    pub(crate) fn add(&mut self, wrapper: Box<T>, before: Option<&str>) -> &mut T {
         let idx = match before {
             Some(before) => self.base.index(before),
             None => self.base.size(),
@@ -171,13 +171,13 @@ impl<T: CollectionElement + ?Sized> Collection<T> {
         self.base.add_at(idx, idx, wrapper)
     }
 
-    pub fn remove(&mut self, id: &str) -> Option<Box<T>> {
+    pub(crate) fn remove(&mut self, id: &str) -> Option<Box<T>> {
         let idx = self.base.index(id);
         self.base.remove_at(idx, idx)
     }
 
     /// `update(const T& wrapper)` (by the wrapper's id).
-    pub fn update(&mut self, id: &str) {
+    pub(crate) fn update(&mut self, id: &str) {
         let idx = self.base.index(id);
         if idx < self.base.size() {
             let base_impl = self.base.wrappers[idx].base_impl();
@@ -189,7 +189,7 @@ impl<T: CollectionElement + ?Sized> Collection<T> {
 }
 
 /// A collection whose impls are sorted by id.
-pub struct CollectionWithPersistentOrder<T: CollectionElement + ?Sized> {
+pub(crate) struct CollectionWithPersistentOrder<T: CollectionElement + ?Sized> {
     base: CollectionBase<T>,
 }
 
@@ -213,27 +213,16 @@ impl<T: CollectionElement + ?Sized> std::ops::DerefMut for CollectionWithPersist
 }
 
 impl<T: CollectionElement + ?Sized> CollectionWithPersistentOrder<T> {
-    pub fn add(&mut self, wrapper: Box<T>) -> &mut T {
+    pub(crate) fn add(&mut self, wrapper: Box<T>) -> &mut T {
         let i = self.impls_index(&wrapper.get_id());
         let size = self.base.size();
         self.base.add_at(size, i, wrapper)
     }
 
-    pub fn remove(&mut self, id: &str) -> Option<Box<T>> {
+    pub(crate) fn remove(&mut self, id: &str) -> Option<Box<T>> {
         let wrapper_index = self.base.index(id);
         let impl_index = self.impls_index(id);
         self.base.remove_at(wrapper_index, impl_index)
-    }
-
-    pub fn update(&mut self, id: &str) {
-        let impl_index = self.impls_index(id);
-        let idx = self.base.index(id);
-        if idx < self.base.size() {
-            let base_impl = self.base.wrappers[idx].base_impl();
-            self.base.update_at(impl_index, base_impl);
-        } else {
-            debug_assert!(false);
-        }
     }
 
     /// The index of the first impl whose id is not less than `id`.

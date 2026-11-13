@@ -91,7 +91,7 @@ fn same<T: objc2::Message + ?Sized>(a: Option<&Retained<T>>, b: Option<&Retained
     }
 }
 
-pub struct RenderPass {
+pub(crate) struct RenderPass {
     context: Rc<Context>,
     command_buffer: Option<MTLCommandBufferPtr>,
     encoder: RefCell<Option<MTLRenderCommandEncoderPtr>>,
@@ -104,7 +104,7 @@ pub struct RenderPass {
 }
 
 impl RenderPass {
-    pub fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
+    pub(crate) fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
         let context = command_encoder.get_context().clone();
         let mut command_buffer = None;
         let mut encoder = None;
@@ -186,23 +186,15 @@ impl RenderPass {
         pass
     }
 
-    pub fn get_context(&self) -> &Rc<Context> {
-        &self.context
-    }
-
-    pub fn get_command_buffer(&self) -> Option<&MTLCommandBufferPtr> {
-        self.command_buffer.as_ref()
-    }
-
-    pub fn get_metal_encoder(&self) -> Option<MTLRenderCommandEncoderPtr> {
+    pub(crate) fn get_metal_encoder(&self) -> Option<MTLRenderCommandEncoderPtr> {
         self.encoder.borrow().clone()
     }
 
-    pub fn get_attachment_formats(&self) -> AttachmentFormats {
+    pub(crate) fn get_attachment_formats(&self) -> AttachmentFormats {
         self.formats
     }
 
-    pub fn end_encoding(&self) {
+    pub(crate) fn end_encoding(&self) {
         for _ in 0..self.debug_groups.replace(0) {
             if let Some(encoder) = self.encoder.borrow().as_ref() {
                 encoder.popDebugGroup();
@@ -218,7 +210,7 @@ impl RenderPass {
     /// calling Metal directly (a custom layer). The state that the cache
     /// starts from is set on the encoder too, since a draw sets only what
     /// differs from the cache.
-    pub fn reset_state(&self) {
+    pub(crate) fn reset_state(&self) {
         let state = State::default();
         if let Some(encoder) = self.encoder.borrow().as_ref() {
             encoder.setCullMode(state.current_cull_mode);
@@ -230,7 +222,7 @@ impl RenderPass {
 
     /// Applies the given depth/stencil state, if different from the current
     /// one.
-    pub fn set_depth_stencil_state(&self, state: Option<&MTLDepthStencilStatePtr>) {
+    pub(crate) fn set_depth_stencil_state(&self, state: Option<&MTLDepthStencilStatePtr>) {
         let mut s = self.state.borrow_mut();
         if !same(state, s.current_depth_stencil_state.as_ref()) {
             s.current_depth_stencil_state = state.cloned();
@@ -242,7 +234,7 @@ impl RenderPass {
 
     /// Applies the given stencil reference value, if different from the
     /// current one.
-    pub fn set_stencil_reference(&self, reference_value: i32) {
+    pub(crate) fn set_stencil_reference(&self, reference_value: i32) {
         let mut s = self.state.borrow_mut();
         if reference_value != s.current_stencil_reference_value {
             s.current_stencil_reference_value = reference_value;
@@ -253,7 +245,7 @@ impl RenderPass {
     }
 
     /// Binds a texture to the fragment location.
-    pub fn set_fragment_texture(&self, texture: Option<&MTLTexturePtr>, location: usize) {
+    pub(crate) fn set_fragment_texture(&self, texture: Option<&MTLTexturePtr>, location: usize) {
         debug_assert!(location < MAX_BINDS);
         if location >= MAX_BINDS {
             return;
@@ -270,7 +262,7 @@ impl RenderPass {
     }
 
     /// Sets the sampler for a texture binding.
-    pub fn set_fragment_sampler_state(&self, sampler: Option<&MTLSamplerStatePtr>, location: usize) {
+    pub(crate) fn set_fragment_sampler_state(&self, sampler: Option<&MTLSamplerStatePtr>, location: usize) {
         debug_assert!(location < MAX_BINDS);
         if location >= MAX_BINDS {
             return;
@@ -286,7 +278,7 @@ impl RenderPass {
         }
     }
 
-    pub fn set_render_pipeline_state(&self, pipeline_state: &MTLRenderPipelineStatePtr) {
+    pub(crate) fn set_render_pipeline_state(&self, pipeline_state: &MTLRenderPipelineStatePtr) {
         let mut s = self.state.borrow_mut();
         if !same(Some(pipeline_state), s.current_pipeline_state.as_ref()) {
             s.current_pipeline_state = Some(pipeline_state.clone());
@@ -298,7 +290,7 @@ impl RenderPass {
 
     /// Binds `size` bytes of `buffer` from `offset` (the rest of it if
     /// `size` is 0) to the vertex functions at `index`.
-    pub fn bind_vertex(&self, buffer: &BufferResource, offset: usize, index: usize, size: usize) {
+    pub(crate) fn bind_vertex(&self, buffer: &BufferResource, offset: usize, index: usize, size: usize) {
         let actual_size = if size != 0 { size } else { buffer.get_size_in_bytes() - offset };
         debug_assert!(actual_size <= buffer.get_size_in_bytes());
         debug_assert!(index < MAX_BINDS);
@@ -324,14 +316,14 @@ impl RenderPass {
         buffer.bind_vertex(encoder, offset, index, actual_size);
     }
 
-    pub fn unbind_vertex(&self, index: usize) {
+    pub(crate) fn unbind_vertex(&self, index: usize) {
         if index < MAX_BINDS {
             self.state.borrow_mut().vertex_binds[index] = None;
         }
     }
 
     /// `bind_vertex` for the fragment functions.
-    pub fn bind_fragment(&self, buffer: &BufferResource, offset: usize, index: usize, size: usize) {
+    pub(crate) fn bind_fragment(&self, buffer: &BufferResource, offset: usize, index: usize, size: usize) {
         let actual_size = if size != 0 { size } else { buffer.get_size_in_bytes() - offset };
         debug_assert!(actual_size <= buffer.get_size_in_bytes());
         debug_assert!(index < MAX_BINDS);
@@ -356,7 +348,7 @@ impl RenderPass {
         buffer.bind_fragment(encoder, offset, index, actual_size);
     }
 
-    pub fn unbind_fragment(&self, index: usize) {
+    pub(crate) fn unbind_fragment(&self, index: usize) {
         if index < MAX_BINDS {
             self.state.borrow_mut().fragment_binds[index] = None;
         }
@@ -364,7 +356,7 @@ impl RenderPass {
 
     /// Port-only: sets `bytes` for the vertex and fragment functions at
     /// `index`, replacing what is bound there.
-    pub fn set_bytes(&self, bytes: &[u8], index: usize) {
+    pub(crate) fn set_bytes(&self, bytes: &[u8], index: usize) {
         self.unbind_vertex(index);
         self.unbind_fragment(index);
         if let Some(encoder) = self.encoder.borrow().as_ref() {
@@ -378,7 +370,7 @@ impl RenderPass {
     }
 
     /// Port-only: `set_bytes` for the vertex functions only.
-    pub fn set_vertex_bytes(&self, bytes: &[u8], index: usize) {
+    pub(crate) fn set_vertex_bytes(&self, bytes: &[u8], index: usize) {
         self.unbind_vertex(index);
         if let Some(encoder) = self.encoder.borrow().as_ref() {
             // SAFETY: as in `set_bytes`.
@@ -388,7 +380,7 @@ impl RenderPass {
 
     /// Port-only: binds a Metal buffer that has no `BufferResource` (the
     /// context's cached buffers) to the vertex functions at `index`.
-    pub fn set_vertex_buffer(&self, buffer: &MTLBufferPtr, offset: usize, index: usize) {
+    pub(crate) fn set_vertex_buffer(&self, buffer: &MTLBufferPtr, offset: usize, index: usize) {
         self.unbind_vertex(index);
         if let Some(encoder) = self.encoder.borrow().as_ref() {
             // SAFETY: the command buffer retains the buffer; the slot is
@@ -397,7 +389,7 @@ impl RenderPass {
         }
     }
 
-    pub fn set_cull_mode(&self, mode: MTLCullMode) {
+    pub(crate) fn set_cull_mode(&self, mode: MTLCullMode) {
         let mut s = self.state.borrow_mut();
         if mode != s.current_cull_mode {
             if let Some(encoder) = self.encoder.borrow().as_ref() {
@@ -407,7 +399,7 @@ impl RenderPass {
         }
     }
 
-    pub fn set_front_facing_winding(&self, winding: MTLWinding) {
+    pub(crate) fn set_front_facing_winding(&self, winding: MTLWinding) {
         let mut s = self.state.borrow_mut();
         if winding != s.current_winding {
             if let Some(encoder) = self.encoder.borrow().as_ref() {
@@ -418,7 +410,7 @@ impl RenderPass {
     }
 
     /// Sets the scissor rectangle, clipped to the attachments.
-    pub fn set_scissor_rect(&self, mut rect: MTLScissorRect) {
+    pub(crate) fn set_scissor_rect(&self, mut rect: MTLScissorRect) {
         let mut s = self.state.borrow_mut();
         let current = s.current_scissor_rect;
         if rect.x != current.x || rect.y != current.y || rect.width != current.width || rect.height != current.height {
@@ -436,7 +428,7 @@ impl RenderPass {
     }
 
     /// Sets the viewport's depth range.
-    pub fn set_depth_range(&self, range: Range<f32>) {
+    pub(crate) fn set_depth_range(&self, range: Range<f32>) {
         let mut s = self.state.borrow_mut();
         if Some(range) != s.current_depth_range {
             if let Some(encoder) = self.encoder.borrow().as_ref() {

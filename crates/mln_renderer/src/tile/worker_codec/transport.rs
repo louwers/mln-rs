@@ -127,7 +127,7 @@ impl SerializingTransport {
     /// replies on this thread itself rather than through the `ReplySink`):
     /// its bytes and its payloads, which the buckets and images it carries
     /// take as they are.
-    pub fn receive(&self, instance: usize, reply: Encoded) {
+    pub(crate) fn receive(&self, instance: usize, reply: Encoded) {
         let decoded = self.codecs[instance].borrow_mut().decode(reply);
         match decoded {
             Ok(Some((tile, message))) => self.deliver(tile, message),

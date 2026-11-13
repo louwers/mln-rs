@@ -5,7 +5,7 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::Value;
 
-pub type Branch = (Box<dyn Expression>, Box<dyn Expression>);
+pub(crate) type Branch = (Box<dyn Expression>, Box<dyn Expression>);
 
 pub struct Case {
     base: ExpressionBase,
@@ -21,7 +21,7 @@ impl Case {
         Case { base: ExpressionBase::new(Kind::Case, type_, deps), branches, otherwise }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
         let length = value.array_length();
         if length < 4 {

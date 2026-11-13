@@ -21,7 +21,7 @@ const fn aligned_uniform_size(size: usize) -> usize {
     size.div_ceil(UNIFORM_BUFFER_ALIGNMENT) * UNIFORM_BUFFER_ALIGNMENT
 }
 
-pub struct UniformBuffer {
+pub(crate) struct UniformBuffer {
     /// The size of the data, which `get_size` reports. The GPU buffer is
     /// padded to 256 bytes. C++ reports the padded size, so
     /// `UniformBufferArray::createOrUpdate`, which compares it to the data
@@ -48,7 +48,7 @@ pub struct UniformBuffer {
 
 impl UniformBuffer {
     /// A uniform buffer of `size` bytes, holding `data` if there is any.
-    pub fn new(context: &Context, data: Option<&[u8]>, size: usize) -> Self {
+    pub(crate) fn new(context: &Context, data: Option<&[u8]>, size: usize) -> Self {
         Self::with_backend(context.get_backend().clone(), context.weak(), data, size)
     }
 
@@ -78,18 +78,18 @@ impl UniformBuffer {
         UniformBuffer { size, backend, context, buffer, offset, written: Cell::new(written) }
     }
 
-    pub fn get_buffer(&self) -> Option<&wgpu::Buffer> {
+    pub(crate) fn get_buffer(&self) -> Option<&wgpu::Buffer> {
         self.buffer.as_ref()
     }
 
     /// Where this uniform buffer starts in [`get_buffer`](Self::get_buffer).
-    pub fn get_offset(&self) -> u64 {
+    pub(crate) fn get_offset(&self) -> u64 {
         self.offset
     }
 
     /// The size of this uniform buffer in its GPU buffer: the data's, padded
     /// to 256 bytes.
-    pub fn get_aligned_size(&self) -> u64 {
+    pub(crate) fn get_aligned_size(&self) -> u64 {
         aligned_uniform_size(self.size) as u64
     }
 }

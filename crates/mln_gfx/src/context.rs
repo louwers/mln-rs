@@ -58,7 +58,7 @@ pub trait Context: Any {
     }
 
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr;
-    fn create_drawable_builder(&self, name: String) -> UniqueDrawableBuilder;
+    fn create_drawable_builder(&self) -> UniqueDrawableBuilder;
     fn create_uniform_buffer(&self, data: &[u8], persistent: bool, ssbo: bool) -> UniformBufferPtr;
     fn get_generic_shader(
         &self,

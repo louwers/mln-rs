@@ -70,32 +70,32 @@ use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 /// Port-only: serde writes the atlases without the atlas they release their
 /// bins to, which is the side's that gets them (`tile/worker_codec`).
 #[derive(Default, Serialize, Deserialize)]
-pub struct LayoutAtlases {
-    pub glyph_atlas: GlyphAtlas,
-    pub image_atlas: ImageAtlas,
+pub(crate) struct LayoutAtlases {
+    pub(crate) glyph_atlas: GlyphAtlas,
+    pub(crate) image_atlas: ImageAtlas,
     #[serde(skip)]
-    pub dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
+    pub(crate) dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
 }
 
 impl Drop for LayoutAtlases {
     fn drop(&mut self) {
         if let Some(atlas) = &self.dynamic_texture_atlas {
-            atlas.remove_textures(&self.glyph_atlas.texture_handles, &self.glyph_atlas.dynamic_texture);
-            atlas.remove_textures(&self.image_atlas.texture_handles, &self.image_atlas.dynamic_texture);
+            atlas.remove_textures(&self.glyph_atlas.texture_handles, self.glyph_atlas.dynamic_texture.as_ref());
+            atlas.remove_textures(&self.image_atlas.texture_handles, self.image_atlas.dynamic_texture.as_ref());
         }
     }
 }
 
 #[derive(Clone)]
 pub struct LayoutResult {
-    pub layer_render_data: HashMap<String, LayerRenderData>,
-    pub feature_index: Arc<FeatureIndex>,
-    pub atlases: Arc<LayoutAtlases>,
+    pub(crate) layer_render_data: HashMap<String, LayerRenderData>,
+    pub(crate) feature_index: Arc<FeatureIndex>,
+    pub(crate) atlases: Arc<LayoutAtlases>,
 }
 
 impl LayoutResult {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         layer_render_data: HashMap<String, LayerRenderData>,
         feature_index: Arc<FeatureIndex>,
         glyph_atlas: GlyphAtlas,
@@ -110,16 +110,16 @@ impl LayoutResult {
     }
 
     #[must_use]
-    pub fn glyph_atlas(&self) -> &GlyphAtlas {
+    pub(crate) fn glyph_atlas(&self) -> &GlyphAtlas {
         &self.atlases.glyph_atlas
     }
 
     #[must_use]
-    pub fn image_atlas(&self) -> &ImageAtlas {
+    pub(crate) fn image_atlas(&self) -> &ImageAtlas {
         &self.atlases.image_atlas
     }
 
-    pub fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
+    pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn layer::Impl) -> Option<&LayerRenderData> {
         let result = self.layer_render_data.get(&layer_impl.id)?;
         if !std::ptr::eq(result.layer_properties.base_impl.get_type_info(), layer_impl.get_type_info()) {
             // Layer data might be outdated, see issue #12432.
@@ -205,8 +205,8 @@ enum FadeState {
 
 /// The render-thread state of a `GeometryTile`, also the target of its
 /// worker's replies.
-pub struct GeometryTileInner {
-    pub base: TileBase,
+pub(crate) struct GeometryTileInner {
+    pub(crate) base: TileBase,
 
     // symbols: the requestor side (C++ GlyphRequestor/ImageRequestor bases).
     self_weak: Weak<GeometryTileInner>,
@@ -250,7 +250,7 @@ impl GeometryTileInner {
     }
 
     /// The `obsolete` flag.
-    pub fn is_obsolete(&self) -> bool {
+    pub(crate) fn is_obsolete(&self) -> bool {
         self.obsolete.load(Ordering::SeqCst)
     }
 
@@ -260,7 +260,7 @@ impl GeometryTileInner {
         self.mailbox.close();
     }
 
-    pub fn set_error(&self, err: Error) {
+    pub(crate) fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
         // Without data, the worker has nothing to parse, so the tile is
         // complete.
@@ -270,7 +270,7 @@ impl GeometryTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    pub fn set_data(&self, data: Option<SharedTileData>) {
+    pub(crate) fn set_data(&self, data: Option<SharedTileData>) {
         if self.obsolete.load(Ordering::SeqCst) {
             return;
         }
@@ -293,7 +293,7 @@ impl GeometryTileInner {
 
     /// Resets the tile's data and layers and leaves the tile in pending
     /// state, waiting for the new data and layers to come.
-    pub fn reset(&self) {
+    pub(crate) fn reset(&self) {
         // If there is pending work, indicate that work has been cancelled.
         // Clear the pending status.
         if self.base.pending.get() {
@@ -312,7 +312,7 @@ impl GeometryTileInner {
         self.worker.send(WorkerMessage::Reset { correlation_id });
     }
 
-    pub fn on_layout(&self, result: LayoutResult, result_correlation_id: u64) {
+    pub(crate) fn on_layout(&self, result: LayoutResult, result_correlation_id: u64) {
         self.base.loaded.set(true);
         self.base.renderable.set(!self.missing.get());
         if result_correlation_id == self.correlation_id.get() {
@@ -330,7 +330,7 @@ impl GeometryTileInner {
         self.base.observer().on_tile_changed(&self.base);
     }
 
-    pub fn on_error(&self, err: Error, result_correlation_id: u64) {
+    pub(crate) fn on_error(&self, err: Error, result_correlation_id: u64) {
         self.base.loaded.set(true);
         if result_correlation_id == self.correlation_id.get() {
             self.base.pending.set(false);
@@ -340,7 +340,7 @@ impl GeometryTileInner {
     }
 
     /// Requests the images in `pair` from the image manager.
-    pub fn get_images(&self, pair: ImageRequestPair) {
+    pub(crate) fn get_images(&self, pair: ImageRequestPair) {
         let Some(this) = self.self_weak.upgrade() else {
             return;
         };
@@ -348,7 +348,7 @@ impl GeometryTileInner {
         self.image_manager.get_images(&requestor, pair);
     }
 
-    pub fn get_glyphs(&self, glyph_dependencies: GlyphDependencies) {
+    pub(crate) fn get_glyphs(&self, glyph_dependencies: GlyphDependencies) {
         if let Some(file_source) = &self.file_source {
             let Some(this) = self.self_weak.upgrade() else {
                 return;
@@ -359,7 +359,7 @@ impl GeometryTileInner {
     }
 
     /// Runs the member function a worker's message stands for.
-    pub fn handle_worker_message(&self, message: TileMessage) {
+    pub(crate) fn handle_worker_message(&self, message: TileMessage) {
         match message {
             TileMessage::Layout { result, correlation_id } => self.on_layout(result, correlation_id),
             TileMessage::Error { error, correlation_id } => self.on_error(error, correlation_id),
@@ -368,7 +368,7 @@ impl GeometryTileInner {
         }
     }
 
-    pub fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
+    pub(crate) fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
         self.layout_result.borrow().as_ref().map(|result| result.feature_index.clone())
     }
 }
@@ -474,13 +474,13 @@ impl ImageRequestor for GeometryTileInner {
     }
 }
 
-pub struct GeometryTile {
+pub(crate) struct GeometryTile {
     inner: Rc<GeometryTileInner>,
 }
 
 impl GeometryTile {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         id: OverscaledTileID,
         source_id: String,
         parameters: &TileParameters<'_>,
@@ -492,7 +492,6 @@ impl GeometryTile {
         let synchronous = parameters.is_update_synchronous;
         let worker_parameters = WorkerParameters {
             id,
-            source_id: source_id.clone(),
             obsolete: obsolete.clone(),
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
@@ -539,24 +538,26 @@ impl GeometryTile {
     }
 
     #[must_use]
-    pub fn inner(&self) -> &Rc<GeometryTileInner> {
+    pub(crate) fn inner(&self) -> &Rc<GeometryTileInner> {
         &self.inner
     }
 
-    pub fn set_error(&self, err: Error) {
+    #[cfg(test)]
+    pub(crate) fn set_error(&self, err: Error) {
         self.inner.set_error(err);
     }
 
-    pub fn set_data(&self, data: Option<SharedTileData>) {
+    #[cfg(test)]
+    pub(crate) fn set_data(&self, data: Option<SharedTileData>) {
         self.inner.set_data(data);
     }
 
-    pub fn reset(&self) {
+    pub(crate) fn reset(&self) {
         self.inner.reset();
     }
 
     #[must_use]
-    pub fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
+    pub(crate) fn get_feature_index(&self) -> Option<Arc<FeatureIndex>> {
         self.inner.get_feature_index()
     }
 }
@@ -663,6 +664,7 @@ impl Tile for GeometryTile {
         self.inner.pixel_ratio.replace(pixel_ratio) != pixel_ratio
     }
 
+    #[cfg(test)]
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
         self.inner.base.set_observer(observer);
     }
@@ -865,7 +867,7 @@ use crate::source_state::SourceFeatureState;
 
 /// The feature loop of `GeometryTile::querySourceFeatures` and
 /// `GeoJSONTile::querySourceFeatures`.
-pub fn query_layer_source_features(
+pub(crate) fn query_layer_source_features(
     layer: &dyn mln_tile_id::geometry_tile_data::GeometryTileLayer,
     result: &mut Vec<Feature>,
     options: &SourceQueryOptions,
@@ -898,12 +900,4 @@ pub fn query_layer_source_features(
         result.push(Feature::from(converted));
     }
     Ok(())
-}
-
-impl GeometryTile {
-    /// Whether the latest layout has tile data.
-    #[must_use]
-    pub fn has_data(&self) -> bool {
-        self.inner.layout_result.borrow().as_ref().is_some_and(|result| result.feature_index.get_data().is_some())
-    }
 }

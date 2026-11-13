@@ -131,7 +131,7 @@ impl<M: AlphaMode> Image<M> {
     /// Splits the image into its size and pixel buffer (the C++ code moves
     /// `data` out of one image type into another).
     #[must_use]
-    pub fn into_parts(self) -> (Size, Vec<u8>) {
+    pub(crate) fn into_parts(self) -> (Size, Vec<u8>) {
         (self.size, self.data)
     }
 

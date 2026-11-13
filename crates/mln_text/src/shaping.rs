@@ -30,7 +30,7 @@ pub struct AnchorAlignment {
 
 impl AnchorAlignment {
     #[must_use]
-    pub fn new(horizontal: f32, vertical: f32) -> Self {
+    pub(crate) fn new(horizontal: f32, vertical: f32) -> Self {
         AnchorAlignment { horizontal_align: horizontal, vertical_align: vertical }
     }
 
@@ -419,7 +419,7 @@ fn least_bad_breaks(last_line_break: &PotentialBreak, potential_breaks: &[Potent
 /// visual order would be more intuitive, but we can't do that because the
 /// visual order may be changed by line breaks!
 #[must_use]
-pub fn determine_line_breaks(
+pub(crate) fn determine_line_breaks(
     logical_input: &TaggedString,
     spacing: f32,
     max_width: f32,

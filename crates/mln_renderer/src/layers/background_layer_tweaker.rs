@@ -21,13 +21,13 @@ use super::{background_crossfade, background_layer_properties};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
-pub struct BackgroundLayerTweaker {
+pub(crate) struct BackgroundLayerTweaker {
     base: LayerTweakerBase,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl BackgroundLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         BackgroundLayerTweaker { base: LayerTweakerBase::new(id, properties), drawable_uniform_buffer: None }
     }
 }
@@ -134,7 +134,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                &[0.0, 0.0],
+                [0.0, 0.0],
                 TranslateAnchorType::Viewport,
                 false,
                 false,

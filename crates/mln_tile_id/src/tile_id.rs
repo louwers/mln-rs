@@ -46,7 +46,7 @@ impl CanonicalTileID {
     }
 
     #[must_use]
-    pub fn scaled_to(&self, target_z: u8) -> CanonicalTileID {
+    pub(crate) fn scaled_to(&self, target_z: u8) -> CanonicalTileID {
         if target_z <= self.z {
             // parent or same
             let shift = (i32::from(self.z) - i32::from(target_z)) as u32;

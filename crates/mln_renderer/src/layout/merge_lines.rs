@@ -64,7 +64,7 @@ fn merge_from_left(
     index
 }
 
-pub fn merge_lines(features: &mut [SymbolFeature]) {
+pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
     let mut left_index = Index::new();
     let mut right_index = Index::new();
 

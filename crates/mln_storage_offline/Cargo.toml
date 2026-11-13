@@ -40,6 +40,7 @@ path = "tests/offline_download_map.rs"
 httpmock.workspace = true
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
+mln_storage = { workspace = true, features = ["sqlite", "test-support"] }
 parking_lot.workspace = true
 tempfile.workspace = true
 

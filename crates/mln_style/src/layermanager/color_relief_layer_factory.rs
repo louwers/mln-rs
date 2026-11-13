@@ -4,7 +4,7 @@ use super::layer_factory::{LayerFactory, get_source};
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::color_relief_layer::{ColorReliefLayer, Impl};
 
-pub struct ColorReliefLayerFactory;
+pub(crate) struct ColorReliefLayerFactory;
 
 impl LayerFactory for ColorReliefLayerFactory {
     fn get_type_info(&self) -> &'static LayerTypeInfo {

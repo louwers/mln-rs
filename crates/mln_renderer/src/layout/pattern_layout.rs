@@ -38,32 +38,32 @@ use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::render_layer::LayerRenderData;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PatternDependency {
-    pub min: String,
-    pub mid: String,
-    pub max: String,
+pub(crate) struct PatternDependency {
+    pub(crate) min: String,
+    pub(crate) mid: String,
+    pub(crate) max: String,
 }
 
-pub type PatternLayerMap = HashMap<String, PatternDependency>;
+pub(crate) type PatternLayerMap = HashMap<String, PatternDependency>;
 
 /// A feature the filter accepted. The feature itself is read from the source
 /// layer again (see the file comment).
 #[derive(Clone, Debug)]
-pub struct PatternFeature {
-    pub i: usize,
-    pub sort_key: f32,
+pub(crate) struct PatternFeature {
+    pub(crate) i: usize,
+    pub(crate) sort_key: f32,
     patterns: PatternLayerMap,
 }
 
 impl PatternFeature {
     #[must_use]
-    pub fn get_patterns(&self) -> &PatternLayerMap {
+    pub(crate) fn get_patterns(&self) -> &PatternLayerMap {
         &self.patterns
     }
 }
 
 /// The template arguments of a `PatternLayout` instantiation.
-pub trait PatternLayoutSpec: 'static {
+pub(crate) trait PatternLayoutSpec: 'static {
     type Bucket: Bucket;
     type Layout: Clone + Send + Sync;
 
@@ -92,23 +92,23 @@ pub trait PatternLayoutSpec: 'static {
     fn set_subdivision_granularity(_bucket: &mut Self::Bucket, _value: &SubdivisionGranularitySetting) {}
 }
 
-pub struct PatternLayout<S: PatternLayoutSpec> {
-    pub layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
-    pub bucket_leader_id: String,
+pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
+    pub(crate) layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
+    pub(crate) bucket_leader_id: String,
 
-    pub features: Vec<PatternFeature>,
-    pub layout: S::Layout,
+    pub(crate) features: Vec<PatternFeature>,
+    pub(crate) layout: S::Layout,
 
-    pub zoom: f32,
-    pub overscaling: u32,
-    pub subdivision_granularity: SubdivisionGranularitySetting,
-    pub source_layer_id: String,
-    pub has_pattern: bool,
-    pub retain_features_by_id: bool,
+    pub(crate) zoom: f32,
+    pub(crate) overscaling: u32,
+    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) source_layer_id: String,
+    pub(crate) has_pattern: bool,
+    pub(crate) retain_features_by_id: bool,
 
     /// The source layer the layout gets its features from again (see
     /// layout.rs); `None` when built from a borrowed layer.
-    pub source_layer: Option<SourceLayer>,
+    pub(crate) source_layer: Option<SourceLayer>,
 }
 
 fn empty_faded() -> Faded<Image> {
@@ -118,7 +118,7 @@ fn empty_faded() -> Faded<Image> {
 impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// Creates the layout from a borrowed source layer. `sorted` selects the
     /// sort-key variant (see the file comment).
-    pub fn new(
+    pub(crate) fn new(
         parameters: &BucketParameters,
         group: &[Arc<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
@@ -270,7 +270,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
 
     /// Creates the layout and keeps `source_layer`, as the layer factories
     /// do.
-    pub fn with_source_layer(
+    pub(crate) fn with_source_layer(
         parameters: &mut LayoutParameters<'_>,
         group: &[Arc<dyn LayerProperties>],
         source_layer: SourceLayer,
@@ -289,14 +289,14 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         Ok(layout)
     }
 
-    pub fn has_dependencies(&self) -> bool {
+    pub(crate) fn has_dependencies(&self) -> bool {
         self.has_pattern
     }
 
     /// Creates the bucket from the source layer. `insert_feature(geometries,
     /// i, source_layer_id, bucket_leader_id)` adds a feature to the feature
     /// index.
-    pub fn create_bucket_with(
+    pub(crate) fn create_bucket_with(
         &mut self,
         source_layer: &dyn GeometryTileLayer,
         pattern_positions: &ImagePositions,
@@ -354,7 +354,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     }
 }
 
-pub struct FillLayoutSpec;
+pub(crate) struct FillLayoutSpec;
 
 impl PatternLayoutSpec for FillLayoutSpec {
     type Bucket = FillBucket;
@@ -397,7 +397,7 @@ impl PatternLayoutSpec for FillLayoutSpec {
     }
 }
 
-pub struct LineLayoutSpec;
+pub(crate) struct LineLayoutSpec;
 
 impl PatternLayoutSpec for LineLayoutSpec {
     type Bucket = LineBucket;
@@ -442,12 +442,12 @@ impl PatternLayoutSpec for LineLayoutSpec {
 
 /// Whether a fill layout sorts its features: whether the leader's
 /// unevaluated layout sets `fill-sort-key`.
-pub fn fill_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
+pub(crate) fn fill_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
     let properties = (**leader).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
     !properties.layer_impl().layout.get::<FillSortKey>().is_undefined()
 }
 
-pub fn line_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
+pub(crate) fn line_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
     let properties = (**leader).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
     !properties.layer_impl().layout.get::<LineSortKey>().is_undefined()
 }

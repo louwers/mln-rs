@@ -120,7 +120,7 @@ impl<V: bytemuck::Pod> Default for VertexVector<V> {
 
 impl<V: bytemuck::Pod> VertexVector<V> {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -173,23 +173,10 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         0
     }
 
-    pub fn emplace_back(&mut self, vertex: V) {
+    pub(crate) fn emplace_back(&mut self, vertex: V) {
         debug_assert!(!self.base.released.get());
         self.v.get_mut().push(vertex);
         self.base.dirty.set(true);
-    }
-
-    pub fn extend(&mut self, n: usize, val: V) {
-        debug_assert!(!self.base.released.get());
-        let v = self.v.get_mut();
-        v.resize(v.len() + n, val);
-        self.base.dirty.set(true);
-    }
-
-    pub fn at_mut(&mut self, n: usize) -> &mut V {
-        debug_assert!(!self.base.released.get());
-        self.base.dirty.set(true);
-        &mut self.v.get_mut()[n]
     }
 
     pub fn at(&self, n: usize) -> V {
@@ -201,29 +188,12 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         self.v.borrow().len() + self.host_count() + self.freed_count.get()
     }
 
-    pub fn bytes(&self) -> usize {
-        self.elements() * std::mem::size_of::<V>()
-    }
-
     pub fn empty(&self) -> bool {
         self.elements() == 0
     }
 
-    pub fn clear(&mut self) {
-        self.base.dirty.set(true);
-        self.v.get_mut().clear();
-        #[cfg(target_family = "wasm")]
-        self.host.get_mut().take();
-        self.freed_count.set(0);
-        self.base.raw_freed.set(false);
-    }
-
-    pub fn reserve(&mut self, count: usize) {
-        self.v.get_mut().reserve(count);
-    }
-
     /// Indicate that this shared vertex vector instance will no longer be updated.
-    pub fn release(&mut self) {
+    pub(crate) fn release(&mut self) {
         self.base.released.set(true);
         // If we've already created a buffer, we don't need the raw data any more.
         if self.base.buffer.borrow().is_some() {

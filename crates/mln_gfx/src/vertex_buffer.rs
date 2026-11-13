@@ -20,14 +20,13 @@ pub type UniqueVertexBufferResource = Rc<dyn VertexBufferResource>;
 pub trait IndexBufferResource: Any {}
 
 pub struct IndexBuffer {
-    pub elements: usize,
     resource: Box<dyn IndexBufferResource>,
 }
 
 impl IndexBuffer {
     #[must_use]
-    pub fn new(elements: usize, resource: Box<dyn IndexBufferResource>) -> Self {
-        IndexBuffer { elements, resource }
+    pub fn new(resource: Box<dyn IndexBufferResource>) -> Self {
+        IndexBuffer { resource }
     }
 
     /// The backend resource, if it is a `T`. C++ casts unchecked.

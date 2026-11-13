@@ -8,18 +8,18 @@ use crate::type_::{self, Type};
 use crate::utf8_op_helpers::unicode_length_on_validated_utf8;
 use crate::value::{Value, type_of};
 
-pub struct Length {
+pub(crate) struct Length {
     base: ExpressionBase,
     input: Box<dyn Expression>,
 }
 
 impl Length {
     #[must_use]
-    pub fn new(input: Box<dyn Expression>) -> Self {
+    pub(crate) fn new(input: Box<dyn Expression>) -> Self {
         Length { base: ExpressionBase::new(Kind::Length, Type::Number, input.dependencies()), input }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let length = value.array_length();
 
         if length != 2 {

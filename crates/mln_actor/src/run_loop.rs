@@ -237,7 +237,7 @@ impl RunLoop {
 
     /// The current thread's loop, if it has one.
     #[must_use]
-    pub fn try_get() -> Option<RunLoop> {
+    pub(crate) fn try_get() -> Option<RunLoop> {
         CURRENT.with(|c| c.borrow().clone()).map(|inner| RunLoop { inner })
     }
 

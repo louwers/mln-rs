@@ -378,34 +378,34 @@ fn queue_mutex(queue: vk::Queue) -> Arc<Mutex<()>> {
 
 /// What the device's GPU and enabled extensions let renderers do.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Features {
+pub(crate) struct Features {
     /// Timeline semaphores, of Vulkan 1.2 or `VK_KHR_timeline_semaphore`.
-    pub timeline_semaphores: bool,
+    pub(crate) timeline_semaphores: bool,
     /// Exporting a semaphore's payload as a sync file.
-    pub export_sync_fd: bool,
+    pub(crate) export_sync_fd: bool,
     /// Importing a sync file into a semaphore.
-    pub import_sync_fd: bool,
+    pub(crate) import_sync_fd: bool,
     /// Releasing images to `VK_QUEUE_FAMILY_FOREIGN_EXT`.
-    pub foreign_queue_family: bool,
+    pub(crate) foreign_queue_family: bool,
     /// Exporting memory as opaque file descriptors, of
     /// `VK_KHR_external_memory_fd`.
-    pub external_memory_fd: bool,
+    pub(crate) external_memory_fd: bool,
     /// Exporting images as dmabufs with DRM format modifiers, of
     /// `VK_EXT_external_memory_dma_buf` and
     /// `VK_EXT_image_drm_format_modifier` with `VK_KHR_external_memory_fd`.
-    pub dma_buf: bool,
+    pub(crate) dma_buf: bool,
     /// Importing Android hardware buffers into images, of
     /// `VK_ANDROID_external_memory_android_hardware_buffer` with
     /// `VK_EXT_queue_family_foreign`, which it requires.
-    pub android_hardware_buffer: bool,
+    pub(crate) android_hardware_buffer: bool,
     /// Importing D3D11 textures through their NT handles, of
     /// `VK_KHR_external_memory_win32`.
-    pub external_memory_win32: bool,
+    pub(crate) external_memory_win32: bool,
     /// Exporting a timeline semaphore as a D3D12 fence's NT handle, of
     /// `VK_KHR_external_semaphore_win32`.
-    pub export_d3d12_fence: bool,
+    pub(crate) export_d3d12_fence: bool,
     /// Importing a D3D12 fence's NT handle into a timeline semaphore.
-    pub import_d3d12_fence: bool,
+    pub(crate) import_d3d12_fence: bool,
 }
 
 pub(crate) struct Shared {
@@ -415,6 +415,7 @@ pub(crate) struct Shared {
     debug_utils: Option<ash::ext::debug_utils::Device>,
     surface: Option<ash::khr::surface::Instance>,
     swapchain: Option<ash::khr::swapchain::Device>,
+    #[cfg_attr(not(unix), expect(dead_code, reason = "sync files are Unix's"))]
     semaphore_fd: Option<ash::khr::external_semaphore_fd::Device>,
     #[cfg_attr(not(unix), allow(dead_code))]
     memory_fd: Option<ash::khr::external_memory_fd::Device>,
@@ -1092,10 +1093,11 @@ impl Device {
         }
     }
 
-    /// Whether `self` and `other` are clones of one device.
+    /// The device's handle and functions, as ash loads them. The device lives
+    /// as long as a clone of `self` does.
     #[must_use]
-    pub fn same_as(&self, other: &Device) -> bool {
-        Arc::ptr_eq(&self.shared, &other.shared)
+    pub fn ash_device(&self) -> &ash::Device {
+        self.shared.device()
     }
 
     /// Whether renderers on the device can present: its instance has
@@ -1116,7 +1118,7 @@ impl Device {
 
     /// What the device lets renderers do.
     #[must_use]
-    pub fn features(&self) -> Features {
+    pub(crate) fn features(&self) -> Features {
         self.shared.features
     }
 
@@ -1189,16 +1191,6 @@ impl Device {
             }
         })
     }
-
-    /// The name of the GPU.
-    #[must_use]
-    pub fn name(&self) -> String {
-        self.shared
-            .properties
-            .device_name_as_c_str()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    }
 }
 
 impl Shared {
@@ -1254,6 +1246,7 @@ impl Shared {
         self.android_hardware_buffer.as_ref()
     }
 
+    #[cfg_attr(not(unix), expect(dead_code, reason = "sync files are Unix's"))]
     pub(crate) fn semaphore_fd(&self) -> Option<&ash::khr::external_semaphore_fd::Device> {
         self.semaphore_fd.as_ref()
     }
@@ -1325,7 +1318,7 @@ impl Shared {
 
 /// The `VkFormat` of `format`.
 #[must_use]
-pub fn depth_vk_format(format: DepthStencilFormat) -> vk::Format {
+pub(crate) fn depth_vk_format(format: DepthStencilFormat) -> vk::Format {
     match format {
         DepthStencilFormat::Depth24Stencil8 => vk::Format::D24_UNORM_S8_UINT,
         DepthStencilFormat::Depth32FloatStencil8 => vk::Format::D32_SFLOAT_S8_UINT,

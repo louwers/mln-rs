@@ -11,7 +11,9 @@
 // for `GeometryTileFeature::error` (the trait has no other channel).
 
 use std::cell::OnceCell;
-use std::collections::{BTreeSet, HashMap};
+#[cfg(test)]
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
@@ -36,7 +38,7 @@ const POINT: i32 = 1;
 const LINESTRING: i32 = 2;
 const POLYGON: i32 = 3;
 
-pub struct VectorMVTTileFeature<'l> {
+pub(crate) struct VectorMVTTileFeature<'l> {
     layer: &'l MvtLazyLayer<'l>,
     feature: MvtLazyFeature<'l, 'l>,
     lines: OnceCell<GeometryCollection>,
@@ -63,7 +65,7 @@ impl<'l> VectorMVTTileFeature<'l> {
 
     /// The value of the first tag whose key is `key`; `None` for none or a
     /// null value. Fails for a malformed tag before it.
-    pub fn try_get_value(&self, key: &str) -> Result<Option<Value>, Error> {
+    pub(crate) fn try_get_value(&self, key: &str) -> Result<Option<Value>, Error> {
         for property in self.feature.properties() {
             let (tag_key, value) = property?;
             if tag_key == key {
@@ -78,7 +80,7 @@ impl<'l> VectorMVTTileFeature<'l> {
 
     /// Every property, computed once; an error is returned again by the next
     /// call. A repeated key keeps its first value, as in C++.
-    pub fn try_get_properties(&self) -> Result<&PropertyMap, Error> {
+    pub(crate) fn try_get_properties(&self) -> Result<&PropertyMap, Error> {
         if let Some(properties) = self.properties.get() {
             return Ok(properties);
         }
@@ -225,7 +227,7 @@ fn zigzag(value: u32) -> i32 {
 }
 
 /// A layer of a [`VectorMVTTileData`], decoded.
-pub struct VectorMVTTileLayer<'d> {
+pub(crate) struct VectorMVTTileLayer<'d> {
     layer: MvtLazyLayer<'d>,
 }
 
@@ -233,7 +235,7 @@ impl VectorMVTTileLayer<'_> {
     /// The feature at `i`. Fails with [`Error::OutOfRange`] past the end, as
     /// C++ throws `std::out_of_range`, and with fast-mvt's error for a
     /// feature it can't decode.
-    pub fn try_get_feature(&self, i: usize) -> Result<VectorMVTTileFeature<'_>, Error> {
+    pub(crate) fn try_get_feature(&self, i: usize) -> Result<VectorMVTTileFeature<'_>, Error> {
         match self.layer.feature(i) {
             Some(feature) => Ok(VectorMVTTileFeature::new(&self.layer, feature?)),
             None => Err(Error::vector_range_check(i, self.layer.feature_count())),
@@ -330,10 +332,6 @@ impl VectorMVTTileData {
         VectorMVTTileData { data, layers: OnceLock::new() }
     }
 
-    pub fn data(&self) -> &Arc<Vec<u8>> {
-        &self.data
-    }
-
     /// The tile's layers. Only a successful search is kept, as C++ sets
     /// `parsed` after it: a tile that fails is searched again next time.
     fn layers(&self) -> Result<&[LayerEntry], Error> {
@@ -354,7 +352,7 @@ impl VectorMVTTileData {
     /// The first layer named `name`, decoded; `None` if there is none.
     /// Fails if the tile's layers can't be found or the layer can't be
     /// decoded.
-    pub fn try_get_layer(&self, name: &str) -> Result<Option<VectorMVTTileLayer<'_>>, Error> {
+    pub(crate) fn try_get_layer(&self, name: &str) -> Result<Option<VectorMVTTileLayer<'_>>, Error> {
         let entry = self.layers()?.iter().find(|entry| self.data.get(entry.name.clone()) == Some(name.as_bytes()));
         let Some(data) = entry.and_then(|entry| self.data.get(entry.data.clone())) else {
             return Ok(None);
@@ -364,7 +362,8 @@ impl VectorMVTTileData {
 
     /// The names of the tile's layers, each once, in byte order (C++ lists
     /// the keys of a `std::map`).
-    pub fn layer_names(&self) -> Result<Vec<String>, Error> {
+    #[cfg(test)]
+    pub(crate) fn layer_names(&self) -> Result<Vec<String>, Error> {
         let names: BTreeSet<&[u8]> =
             self.layers()?.iter().filter_map(|entry| self.data.get(entry.name.clone())).collect();
         Ok(names.into_iter().map(|name| String::from_utf8_lossy(name).into_owned()).collect())

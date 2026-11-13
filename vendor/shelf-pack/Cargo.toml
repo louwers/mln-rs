@@ -15,10 +15,5 @@ name = "shelf_pack"
 # The doc comments have no examples to run.
 doctest = false
 
-# Port of shelf-pack-cpp/test/test.cpp (no fixtures).
-[[test]]
-name = "shelf_pack_unit_test"
-path = "tests/shelf_pack.rs"
-
 [lints]
 workspace = true

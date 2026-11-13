@@ -24,22 +24,22 @@ fn map_mode(mode: MapMode) -> mln_map::MapMode {
     }
 }
 
-pub struct Impl {
-    pub frontend: HeadlessFrontend,
+pub(crate) struct Impl {
+    pub(crate) frontend: HeadlessFrontend,
     /// The `ProxyFileSource` over the cache database at the resource
     /// options' cache path.
-    pub file_source: Option<Arc<dyn FileSource>>,
-    pub map: Map,
+    pub(crate) file_source: Option<Arc<dyn FileSource>>,
+    pub(crate) map: Map,
 }
 
 impl Impl {
     /// A frontend, file source and map for a test with `metadata`, loading
     /// through `file_sources`.
-    pub fn new(
+    pub(crate) fn new(
         metadata: &TestMetadata,
         file_sources: &FileSourceManager,
         resource_options: &ResourceOptions,
-        impl_options: &ImplOptions,
+        impl_options: ImplOptions,
     ) -> Result<Impl, String> {
         let resource_options = mln_storage::ResourceOptions {
             cache_path: resource_options.cache_path.clone(),
@@ -412,6 +412,6 @@ pub fn factory() -> ImplFactory {
     let file_sources = proxy_file_sources();
     Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions, impl_options: &ImplOptions| {
         let _ = &run_loop;
-        Ok(Box::new(Impl::new(metadata, &file_sources, resource_options, impl_options)?) as Box<dyn TestRunnerImpl>)
+        Ok(Box::new(Impl::new(metadata, &file_sources, resource_options, *impl_options)?) as Box<dyn TestRunnerImpl>)
     })
 }

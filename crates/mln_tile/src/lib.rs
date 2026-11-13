@@ -1,10 +1,10 @@
 //! Tile data: the decoded layers and features of vector tiles, and the
 //! geometry functions that work on them.
 //!
-//! - [`vector_mvt_tile_data`]: Mapbox Vector Tile data (`VectorMVTTileData`,
+//! - `vector_mvt_tile_data`: Mapbox Vector Tile data (`VectorMVTTileData`,
 //!   `VectorMVTTileLayer`, `VectorMVTTileFeature`) on the fast-mvt reader.
-//! - [`vector_mlt_tile_data`]: MapLibre Tile data (`VectorMLTTileData`,
-//!   `VectorMLTTileLayer`, `VectorMLTTileFeature`) on [`mlt`], the C++ MLT
+//! - `vector_mlt_tile_data`: MapLibre Tile data (`VectorMLTTileData`,
+//!   `VectorMLTTileLayer`, `VectorMLTTileFeature`) on `mlt`, the C++ MLT
 //!   decoder's output model filled by the mlt-core crate.
 //! - [`geometry_tile_data`]: ring classification, hole limits, polygon fixup
 //!   on `i_overlay`, coordinate conversion and corner rounding. The feature
@@ -17,17 +17,17 @@
 
 mod error;
 pub mod geometry_tile_data;
-pub mod mlt;
-pub mod vector_mlt_tile_data;
-pub mod vector_mvt_tile_data;
+mod mlt;
+mod vector_mlt_tile_data;
+mod vector_mvt_tile_data;
 
-pub use error::Error;
+pub(crate) use error::Error;
 pub use geometry_tile_data::{
-    classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, fixup_polygons, limit_holes,
-    round_polygon_corners, to_geometry_collection,
+    classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, limit_holes, round_polygon_corners,
+    to_geometry_collection,
 };
-pub use vector_mlt_tile_data::{VectorMLTTileData, VectorMLTTileFeature, VectorMLTTileLayer};
-pub use vector_mvt_tile_data::{VectorMVTTileData, VectorMVTTileFeature, VectorMVTTileLayer};
+pub use vector_mlt_tile_data::VectorMLTTileData;
+pub use vector_mvt_tile_data::VectorMVTTileData;
 
 #[cfg(test)]
 mod malformed_tile_test;

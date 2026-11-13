@@ -20,7 +20,7 @@
 pub mod collection;
 pub mod color_ramp_property_value;
 pub mod conversion;
-pub mod conversion_impl;
+mod conversion_impl;
 pub mod custom_tile_loader;
 pub mod expression;
 pub mod filter;
@@ -29,18 +29,18 @@ pub mod image;
 pub mod layer;
 pub mod layer_impl;
 pub mod layer_properties;
-pub mod layermanager;
+mod layermanager;
 pub mod layers;
-pub mod layout_property;
+mod layout_property;
 #[rustfmt::skip]
 pub mod light;
-pub mod light_impl;
+mod light_impl;
 pub mod map;
 pub mod observer;
-pub mod paint_property;
+mod paint_property;
 pub mod parser;
 pub mod projection;
-pub mod projection_impl;
+mod projection_impl;
 pub mod properties;
 pub mod property_expression;
 pub mod property_value;
@@ -48,12 +48,12 @@ pub mod renderer;
 pub mod serialization;
 #[rustfmt::skip]
 pub mod sky;
-pub mod sky_impl;
+mod sky_impl;
 pub mod source;
 pub mod source_impl;
 pub mod sources;
 pub mod sprite;
-pub mod style;
+mod style;
 pub mod style_impl;
 mod style_json;
 pub mod style_property;
@@ -61,6 +61,15 @@ pub mod transition_options;
 
 pub use layer::{Layer, LayerTypeInfo};
 pub use layers::background_layer::BackgroundLayer;
+// The property macros, at the root so that the generated code and the
+// macros themselves name them as `crate::name!`.
+pub(crate) use layout_property::{data_driven_layout_property, layout_properties, layout_property};
+pub(crate) use paint_property::{
+    __constant_feature_evaluation, __cross_faded_feature_evaluation, __data_driven_feature_evaluation,
+    __data_driven_possibly_evaluated_hooks, color_ramp_property, cross_faded_data_driven_paint_property,
+    cross_faded_paint_property, data_driven_paint_property, paint_property,
+};
+pub(crate) use properties::{__possibly_evaluated_feature_methods, __properties_field_impls, paint_properties};
 pub use property_value::PropertyValue;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};

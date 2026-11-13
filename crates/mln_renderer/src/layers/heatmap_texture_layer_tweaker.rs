@@ -11,12 +11,12 @@ use super::cast_matrix;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase};
 use crate::paint_parameters::PaintParameters;
 
-pub struct HeatmapTextureLayerTweaker {
+pub(crate) struct HeatmapTextureLayerTweaker {
     base: LayerTweakerBase,
 }
 
 impl HeatmapTextureLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         HeatmapTextureLayerTweaker { base: LayerTweakerBase::new(id, properties) }
     }
 }

@@ -2,7 +2,7 @@
 //! WebGL2 through `mln_gl`, for browsers without WebGPU. The build without the
 //! feature has none of this.
 
-pub use mln_gl::CanvasTarget as Target;
+pub(super) use mln_gl::CanvasTarget as Target;
 use mln_util::image::PremultipliedImage;
 
 // The imports and the private items of map.rs.
@@ -12,7 +12,7 @@ use super::{JsValue, Rc, RendererBackend, Size, WebMap, js_error, physical, wasm
 /// no use for: the map's Web Worker reads a frame from the canvas itself
 /// (web/map-worker.ts), since a WebGL2 canvas can't be copied from on the
 /// GPU.
-pub trait Readback {
+pub(super) trait Readback {
     fn request_readback(&self) {}
     fn take_readback(&self) -> Option<PremultipliedImage> {
         None

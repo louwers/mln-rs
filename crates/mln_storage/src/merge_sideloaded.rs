@@ -1,4 +1,4 @@
-pub const MERGE_SIDELOADED_DATABASE_SQL: &str = "INSERT INTO regions\n\
+pub(crate) const MERGE_SIDELOADED_DATABASE_SQL: &str = "INSERT INTO regions\n\
 \x20  SELECT DISTINCT NULL, sr.definition, sr.description\n\
 \x20   FROM side.regions sr \n\
 \x20   LEFT JOIN regions r ON sr.definition = r.definition AND sr.description IS r.description\n\

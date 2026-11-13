@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 
 /// `FT_Encoding` values that matter here (`sfnt_find_encoding`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Encoding {
+pub(crate) enum Encoding {
     None,
     Unicode,
     MsSymbol,
@@ -19,7 +19,7 @@ pub enum Encoding {
 
 /// `sfnt_find_encoding`.
 #[must_use]
-pub fn sfnt_find_encoding(platform_id: u16, encoding_id: u16) -> Encoding {
+pub(crate) fn sfnt_find_encoding(platform_id: u16, encoding_id: u16) -> Encoding {
     match (platform_id, encoding_id) {
         // TT_PLATFORM_ISO, TT_PLATFORM_APPLE_UNICODE, TT_MS_ID_UCS_4 and
         // TT_MS_ID_UNICODE_CS.
@@ -41,45 +41,45 @@ const TT_CMAP_FLAG_OVERLAPPING: i32 = 2;
 
 /// One `FT_CharMap` of a face, built by `tt_face_build_cmaps`.
 #[derive(Clone, Debug)]
-pub struct CharMap {
-    pub platform_id: u16,
-    pub encoding_id: u16,
-    pub encoding: Encoding,
-    pub format: u16,
+pub(crate) struct CharMap {
+    pub(crate) platform_id: u16,
+    pub(crate) encoding_id: u16,
+    pub(crate) encoding: Encoding,
+    pub(crate) format: u16,
     /// Absolute offset of the subtable in the font file (`ttcmap->data`).
-    pub data: usize,
+    pub(crate) data: usize,
     /// The validator's return value.
-    pub flags: i32,
+    pub(crate) flags: i32,
 }
 
 /// Big-endian reads at absolute offsets of the font file.
 #[derive(Clone, Copy)]
-pub struct Bytes<'a>(pub &'a [u8]);
+pub(crate) struct Bytes<'a>(pub(crate) &'a [u8]);
 
 impl Bytes<'_> {
     #[inline]
     #[must_use]
-    pub fn u8(&self, p: usize) -> u32 {
+    pub(crate) fn u8(&self, p: usize) -> u32 {
         u32::from(self.0.get(p).copied().unwrap_or(0))
     }
     #[inline]
     #[must_use]
-    pub fn u16(&self, p: usize) -> u32 {
+    pub(crate) fn u16(&self, p: usize) -> u32 {
         (self.u8(p) << 8) | self.u8(p.wrapping_add(1))
     }
     #[inline]
     #[must_use]
-    pub fn i16(&self, p: usize) -> i32 {
+    pub(crate) fn i16(&self, p: usize) -> i32 {
         i32::from(self.u16(p) as u16 as i16)
     }
     #[inline]
     #[must_use]
-    pub fn u24(&self, p: usize) -> u32 {
+    pub(crate) fn u24(&self, p: usize) -> u32 {
         (self.u8(p) << 16) | (self.u8(p.wrapping_add(1)) << 8) | self.u8(p.wrapping_add(2))
     }
     #[inline]
     #[must_use]
-    pub fn u32(&self, p: usize) -> u32 {
+    pub(crate) fn u32(&self, p: usize) -> u32 {
         (self.u16(p) << 16) | self.u16(p.wrapping_add(2))
     }
 }
@@ -372,7 +372,7 @@ fn validate14(b: Bytes, table: usize, limit: usize) -> Validation {
 /// for every subtable of a supported format that validates.
 /// `cmap` is the (offset, size) of the `cmap` table, if loaded.
 #[must_use]
-pub fn build_cmaps(data: &[u8], cmap: Option<(usize, usize)>) -> Vec<CharMap> {
+pub(crate) fn build_cmaps(data: &[u8], cmap: Option<(usize, usize)>) -> Vec<CharMap> {
     let mut charmaps = Vec::new();
     let Some((table, cmap_size)) = cmap else {
         return charmaps;
@@ -427,7 +427,7 @@ pub fn build_cmaps(data: &[u8], cmap: Option<(usize, usize)>) -> Vec<CharMap> {
 /// `find_unicode_charmap`: the last UCS-4 charmap, else the last Unicode
 /// one (which can be the format 14 subtable: FreeType does not skip it).
 #[must_use]
-pub fn find_unicode_charmap(charmaps: &[CharMap]) -> Option<usize> {
+pub(crate) fn find_unicode_charmap(charmaps: &[CharMap]) -> Option<usize> {
     for (i, cm) in charmaps.iter().enumerate().rev() {
         if cm.encoding == Encoding::Unicode
             && ((cm.platform_id == 3 && cm.encoding_id == 10) || (cm.platform_id == 0 && cm.encoding_id == 4))
@@ -440,21 +440,21 @@ pub fn find_unicode_charmap(charmaps: &[CharMap]) -> Option<usize> {
 
 /// `find_variant_selector_charmap`.
 #[must_use]
-pub fn find_variant_selector_charmap(charmaps: &[CharMap]) -> Option<usize> {
+pub(crate) fn find_variant_selector_charmap(charmaps: &[CharMap]) -> Option<usize> {
     charmaps.iter().position(|cm| cm.platform_id == 0 && cm.encoding_id == 5 && cm.format == 14)
 }
 
 /// The face state a lookup needs: the file, the cmap table end and
 /// `face->root.num_glyphs`.
 #[derive(Clone, Copy)]
-pub struct LookupContext<'a> {
-    pub data: &'a [u8],
-    pub cmap_limit: usize,
-    pub num_glyphs: u32,
+pub(crate) struct LookupContext<'a> {
+    pub(crate) data: &'a [u8],
+    pub(crate) cmap_limit: usize,
+    pub(crate) num_glyphs: u32,
 }
 
 #[must_use]
-pub fn char_index(ctx: LookupContext, cm: &CharMap, char_code: u32) -> u32 {
+pub(crate) fn char_index(ctx: LookupContext, cm: &CharMap, char_code: u32) -> u32 {
     let b = Bytes(ctx.data);
     let table = cm.data;
     match cm.format {
@@ -797,7 +797,7 @@ fn cmap12_char_map_binary(b: Bytes, table: usize, char_code: u32, format13: bool
 /// `FT_Get_Char_Index`: 0 without a selected charmap, and for glyph
 /// indices outside the face.
 #[must_use]
-pub fn get_char_index(ctx: LookupContext, charmap: Option<&CharMap>, charcode: u32) -> u32 {
+pub(crate) fn get_char_index(ctx: LookupContext, charmap: Option<&CharMap>, charcode: u32) -> u32 {
     let Some(cm) = charmap else {
         return 0;
     };
@@ -808,7 +808,7 @@ pub fn get_char_index(ctx: LookupContext, charmap: Option<&CharMap>, charcode: u
 /// The glyph index of `charcode` with `variant_selector`, from the face's
 /// format 14 subtable; 0 when there is none.
 #[must_use]
-pub fn get_char_variant_index(
+pub(crate) fn get_char_variant_index(
     ctx: LookupContext,
     charmaps: &[CharMap],
     charmap: Option<usize>,

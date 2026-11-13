@@ -25,7 +25,8 @@ use crate::resource_options::ResourceOptions;
 /// Creates the file source of one type. It gets the manager that asked, so
 /// a file source built on others (the `ResourceLoader`) takes them from the
 /// same owner.
-pub type FileSourceFactory = Arc<dyn Fn(&FileSourceManager, &ResourceOptions) -> Arc<dyn FileSource> + Send + Sync>;
+pub(crate) type FileSourceFactory =
+    Arc<dyn Fn(&FileSourceManager, &ResourceOptions) -> Arc<dyn FileSource> + Send + Sync>;
 
 struct FileSourceInfo {
     type_: FileSourceType,
@@ -111,7 +112,7 @@ impl FileSourceManager {
 
     /// A manager without factories.
     #[must_use]
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         FileSourceManager { registry: Arc::new(Mutex::new(Registry::default())) }
     }
 

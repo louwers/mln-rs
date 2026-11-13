@@ -16,7 +16,7 @@ use crate::filter::Filter;
 use crate::layer::LayerTypeInfo;
 use crate::serialization::shared_expression;
 
-pub type FontStack = Vec<String>;
+pub(crate) type FontStack = Vec<String>;
 
 /// The data members of `Layer::Impl`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub struct ImplBase {
     // result is kept in `visibility` and re-evaluated by the style whenever
     // the global state changes.
     #[serde(with = "shared_expression::option")]
-    pub visibility_expression: Option<Arc<dyn Expression>>,
+    pub(crate) visibility_expression: Option<Arc<dyn Expression>>,
 
     pub id: String,
     pub source: String,
@@ -51,7 +51,7 @@ impl ImplBase {
         }
     }
 
-    pub fn get_filter_dependencies(&self) -> Dependency {
+    pub(crate) fn get_filter_dependencies(&self) -> Dependency {
         match &self.filter.expression {
             Some(expression) => expression.dependencies(),
             None => Dependency::NONE,
@@ -61,7 +61,7 @@ impl ImplBase {
     /// The base `Layer::Impl::collectLayoutGlobalStateRefs` (the filter's
     /// global-state refs), which overrides call as
     /// `Layer::Impl::collectLayoutGlobalStateRefs(refs)`.
-    pub fn collect_filter_global_state_refs(&self, refs: &mut VecSet<String>) {
+    pub(crate) fn collect_filter_global_state_refs(&self, refs: &mut VecSet<String>) {
         if let Some(expression) = &self.filter.expression {
             crate::expression::collect_global_state_refs(expression.as_ref(), refs);
         }

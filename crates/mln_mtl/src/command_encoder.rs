@@ -18,21 +18,21 @@ use crate::draw_target::as_mtl;
 use crate::render_pass::RenderPass;
 use crate::upload_pass::UploadPass;
 
-pub struct CommandEncoder {
+pub(crate) struct CommandEncoder {
     context: Rc<Context>,
     debug_group_names: RefCell<Vec<String>>,
 }
 
 impl CommandEncoder {
-    pub fn new(context: Rc<Context>) -> Self {
+    pub(crate) fn new(context: Rc<Context>) -> Self {
         CommandEncoder { context, debug_group_names: RefCell::new(Vec::new()) }
     }
 
-    pub fn get_context(&self) -> &Rc<Context> {
+    pub(crate) fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
 
-    pub fn visit_debug_groups(&self, mut f: impl FnMut(&str)) {
+    pub(crate) fn visit_debug_groups(&self, mut f: impl FnMut(&str)) {
         for name in self.debug_group_names.borrow().iter() {
             f(name);
         }

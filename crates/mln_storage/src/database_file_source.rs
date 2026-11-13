@@ -80,7 +80,7 @@ impl DatabaseFileSourceThread {
         });
     }
 
-    pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         let mut offline_response =
             if resource.storage_policy == StoragePolicy::Volatile { None } else { self.db.borrow_mut().get(resource) };
         match &mut offline_response {
@@ -101,7 +101,8 @@ impl DatabaseFileSourceThread {
         req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
     }
 
-    pub fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
+    #[cfg(test)]
+    pub(crate) fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
         self.db.borrow_mut().change_path(path);
         if let Some(callback) = callback {
             callback();
@@ -109,43 +110,40 @@ impl DatabaseFileSourceThread {
     }
 
     /// `forward(resource, response, callback)`.
-    pub fn forward(&self, resource: &Resource, response: &Response, callback: Option<Box<dyn FnMut() + Send>>) {
+    pub(crate) fn forward(&self, resource: &Resource, response: &Response, callback: Option<Box<dyn FnMut() + Send>>) {
         self.db.borrow_mut().put(resource, response);
         if let Some(mut callback) = callback {
             callback();
         }
     }
 
-    pub fn reset_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
+    pub(crate) fn reset_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().reset_database()));
     }
 
-    pub fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
+    pub(crate) fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().pack()));
     }
 
-    pub fn run_pack_database_automatically(&self, autopack: bool) {
-        self.db.borrow_mut().run_pack_database_automatically(autopack);
-    }
-
     /// `put(resource, response)`.
-    pub fn put(&self, resource: &Resource, response: &Response) {
+    #[cfg(test)]
+    pub(crate) fn put(&self, resource: &Resource, response: &Response) {
         self.db.borrow_mut().put(resource, response);
     }
 
-    pub fn invalidate_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
+    pub(crate) fn invalidate_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().invalidate_ambient_cache()));
     }
 
-    pub fn clear_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
+    pub(crate) fn clear_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().clear_ambient_cache()));
     }
 
-    pub fn set_maximum_ambient_cache_size(&self, size: u64, callback: impl FnOnce(Result<(), DatabaseError>)) {
+    pub(crate) fn set_maximum_ambient_cache_size(&self, size: u64, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().set_maximum_ambient_cache_size(size)));
     }
 
-    pub fn reopen_database_read_only(&self, read_only: bool) {
+    pub(crate) fn reopen_database_read_only(&self, read_only: bool) {
         self.db.borrow_mut().reopen_database_read_only(read_only);
     }
 
@@ -203,7 +201,8 @@ impl DatabaseFileSource {
 
     /// Switches to the database at `path`, creating it if needed. The
     /// callback runs on the database thread.
-    pub fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
+    #[cfg(test)]
+    pub(crate) fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
         let path = path.to_owned();
         self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.set_database_path(&path, callback));
     }
@@ -220,14 +219,9 @@ impl DatabaseFileSource {
         self.invoke(move |t| t.pack_database(callback));
     }
 
-    /// Sets whether deleting a region or clearing the ambient cache packs the
-    /// database (the default).
-    pub fn run_pack_database_automatically(&self, autopack: bool) {
-        self.invoke(move |t| t.run_pack_database_automatically(autopack));
-    }
-
     /// `put(resource, response)`.
-    pub fn put(&self, resource: &Resource, response: &Response) {
+    #[cfg(test)]
+    pub(crate) fn put(&self, resource: &Resource, response: &Response) {
         let resource = resource.clone();
         let response = response.clone();
         self.invoke(move |t| t.put(&resource, &response));

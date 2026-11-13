@@ -116,8 +116,8 @@ pub enum IntersectionResult {
 /// aabb.max` (`std::array` element-wise ==).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AABB {
-    pub min: Vec3,
-    pub max: Vec3,
+    pub(crate) min: Vec3,
+    pub(crate) max: Vec3,
 }
 
 impl AABB {
@@ -127,7 +127,7 @@ impl AABB {
     }
 
     #[must_use]
-    pub fn closest_point(&self, point: &Vec3) -> Vec3 {
+    pub(crate) fn closest_point(&self, point: &Vec3) -> Vec3 {
         [
             f64::max(f64::min(self.max[0], point[0]), self.min[0]),
             f64::max(f64::min(self.max[1], point[1]), self.min[1]),
@@ -173,7 +173,7 @@ impl AABB {
     }
 
     #[must_use]
-    pub fn intersects(&self, aabb: &AABB) -> bool {
+    pub(crate) fn intersects(&self, aabb: &AABB) -> bool {
         if self.min[0] > aabb.max[0] || aabb.min[0] > self.max[0] {
             return false;
         }
@@ -213,7 +213,7 @@ pub struct Frustum {
 
 impl Frustum {
     #[must_use]
-    pub fn new(points: &[Vec3; 8], planes: &[Vec4; 6]) -> Self {
+    pub(crate) fn new(points: &[Vec3; 8], planes: &[Vec4; 6]) -> Self {
         let points = *points;
         let planes = *planes;
 

@@ -116,7 +116,7 @@ impl GlyphCache {
     pub fn intern_range(&self, range: GlyphCacheRange) -> Arc<GlyphCacheRange> {
         let mut hasher = DefaultHasher::new();
         for (id, glyph) in &range {
-            id.hash().hash(&mut hasher);
+            GlyphID::hash(*id).hash(&mut hasher);
             Arc::as_ptr(glyph).hash(&mut hasher);
         }
         let hash = hasher.finish();

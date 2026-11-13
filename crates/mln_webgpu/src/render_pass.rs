@@ -23,7 +23,7 @@ use crate::context::Context;
 use crate::custom_layer::CustomLayerPass;
 use crate::draw_target::as_webgpu;
 
-pub struct RenderPass {
+pub(crate) struct RenderPass {
     context: Rc<Context>,
     renderable_size: Size,
     /// Address of the renderable's resource (`clipMaskRenderable` compares it).
@@ -49,7 +49,7 @@ fn debug_groups_enabled() -> bool {
 }
 
 impl RenderPass {
-    pub fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
+    pub(crate) fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
         let context = command_encoder.get_context().clone();
         let backend = context.get_backend().clone();
         let mut pass = RenderPass {
@@ -160,41 +160,37 @@ impl RenderPass {
     /// The wgpu render pass, `None` if it failed to begin.
     /// Its user may set any state, so [`state_filter`](Self::state_filter)
     /// forgets the state it knew.
-    pub fn get_encoder(&self) -> RefMut<'_, Option<wgpu::RenderPass<'static>>> {
+    pub(crate) fn get_encoder(&self) -> RefMut<'_, Option<wgpu::RenderPass<'static>>> {
         *self.state.borrow_mut() = PassState::default();
         self.encoder.borrow_mut()
     }
 
     /// The wgpu render pass behind a filter that drops the commands setting
     /// state the pass already has, `None` if the pass failed to begin.
-    pub fn state_filter(&self) -> Option<StateFilter<'_>> {
+    pub(crate) fn state_filter(&self) -> Option<StateFilter<'_>> {
         let encoder = RefMut::filter_map(self.encoder.borrow_mut(), Option::as_mut).ok()?;
         Some(StateFilter { encoder, state: self.state.borrow_mut() })
     }
 
-    pub fn has_encoder(&self) -> bool {
+    pub(crate) fn has_encoder(&self) -> bool {
         self.encoder.borrow().is_some()
     }
 
-    pub fn get_renderable_size(&self) -> Size {
+    pub(crate) fn get_renderable_size(&self) -> Size {
         self.renderable_size
     }
 
-    pub fn get_renderable_id(&self) -> usize {
+    pub(crate) fn get_renderable_id(&self) -> usize {
         self.renderable_id
-    }
-
-    pub fn get_context(&self) -> &Rc<Context> {
-        &self.context
     }
 
     /// Sets whether the global uniform buffers are bound; the array is the
     /// context's.
-    pub fn set_global_uniform_buffers(&self, bound: bool) {
+    pub(crate) fn set_global_uniform_buffers(&self, bound: bool) {
         self.global_uniform_buffers_bound.set(bound);
     }
 
-    pub fn get_global_uniform_buffers(&self) -> Option<Ref<'_, UniformBufferArray>> {
+    pub(crate) fn get_global_uniform_buffers(&self) -> Option<Ref<'_, UniformBufferArray>> {
         self.global_uniform_buffers_bound.get().then(|| self.context.get_global_uniform_buffers())
     }
 }
@@ -310,40 +306,40 @@ fn changes<T>(tracked: Option<&mut Option<T>>, is_set: impl FnOnce(&T) -> bool, 
 /// A render pass encoder that drops the commands setting state the pass
 /// already has; WebGPU keeps all of it from one draw to the next. What it
 /// knows is the pass's, so it carries over to the pass's next filter.
-pub struct StateFilter<'a> {
+pub(crate) struct StateFilter<'a> {
     encoder: RefMut<'a, wgpu::RenderPass<'static>>,
     state: RefMut<'a, PassState>,
 }
 
 impl StateFilter<'_> {
-    pub fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
+    pub(crate) fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
         if changes(Some(&mut self.state.pipeline), |set| set == pipeline, || pipeline.clone()) {
             self.encoder.set_pipeline(pipeline);
         }
     }
 
-    pub fn set_viewport(&mut self, x: f32, y: f32, width: f32, height: f32, min_depth: f32, max_depth: f32) {
+    pub(crate) fn set_viewport(&mut self, x: f32, y: f32, width: f32, height: f32, min_depth: f32, max_depth: f32) {
         let viewport = [x, y, width, height, min_depth, max_depth].map(f32::to_bits);
         if changes(Some(&mut self.state.viewport), |set| *set == viewport, || viewport) {
             self.encoder.set_viewport(x, y, width, height, min_depth, max_depth);
         }
     }
 
-    pub fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
+    pub(crate) fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
         let rect = [x, y, width, height];
         if changes(Some(&mut self.state.scissor_rect), |set| *set == rect, || rect) {
             self.encoder.set_scissor_rect(x, y, width, height);
         }
     }
 
-    pub fn set_stencil_reference(&mut self, reference: u32) {
+    pub(crate) fn set_stencil_reference(&mut self, reference: u32) {
         if changes(Some(&mut self.state.stencil_reference), |set| *set == reference, || reference) {
             self.encoder.set_stencil_reference(reference);
         }
     }
 
     /// Binds the bytes `range` of `buffer` to vertex buffer `slot`.
-    pub fn set_vertex_buffer(&mut self, slot: u32, buffer: &wgpu::Buffer, range: Range<u64>) {
+    pub(crate) fn set_vertex_buffer(&mut self, slot: u32, buffer: &wgpu::Buffer, range: Range<u64>) {
         let tracked = self.state.vertex_buffers.get_mut(slot as usize);
         if changes(tracked, |(b, r)| b == buffer && *r == range, || (buffer.clone(), range.clone())) {
             self.encoder.set_vertex_buffer(slot, buffer.slice(range));
@@ -351,7 +347,7 @@ impl StateFilter<'_> {
     }
 
     /// Binds the bytes `range` of `buffer` as the index buffer.
-    pub fn set_index_buffer(&mut self, buffer: &wgpu::Buffer, range: Range<u64>, format: wgpu::IndexFormat) {
+    pub(crate) fn set_index_buffer(&mut self, buffer: &wgpu::Buffer, range: Range<u64>, format: wgpu::IndexFormat) {
         let tracked = Some(&mut self.state.index_buffer);
         if changes(
             tracked,
@@ -364,14 +360,14 @@ impl StateFilter<'_> {
 
     /// Binds `bind_group` at `index`, with `dynamic_offset` if its layout
     /// has one dynamic offset and `None` if it has none.
-    pub fn set_bind_group(&mut self, index: u32, bind_group: &wgpu::BindGroup, dynamic_offset: Option<u32>) {
+    pub(crate) fn set_bind_group(&mut self, index: u32, bind_group: &wgpu::BindGroup, dynamic_offset: Option<u32>) {
         let tracked = self.state.bind_groups.get_mut(index as usize);
         if changes(tracked, |(g, o)| g == bind_group && *o == dynamic_offset, || (bind_group.clone(), dynamic_offset)) {
             self.encoder.set_bind_group(index, bind_group, dynamic_offset.as_slice());
         }
     }
 
-    pub fn draw_indexed(&mut self, indices: Range<u32>, base_vertex: i32, instances: Range<u32>) {
+    pub(crate) fn draw_indexed(&mut self, indices: Range<u32>, base_vertex: i32, instances: Range<u32>) {
         self.encoder.draw_indexed(indices, base_vertex, instances);
     }
 }

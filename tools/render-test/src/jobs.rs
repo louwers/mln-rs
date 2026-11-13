@@ -42,7 +42,7 @@ use crate::runner::ImplFactory;
 
 /// The hidden option that makes `render-test` a worker:
 /// `render-test --render-test-worker <dir>`.
-pub const WORKER_FLAG: &str = "--render-test-worker";
+pub(crate) const WORKER_FLAG: &str = "--render-test-worker";
 
 /// In the work directory: the run (JSON), the taken tests (`<index>`, each
 /// holding the process id of the worker that took it) and the results.
@@ -53,7 +53,7 @@ const RESULTS_DIR: &str = "results";
 /// The number of workers for `--jobs=<requested>` and `tests` tests: one per
 /// CPU for 0, and no more than there are tests. Below 2 the tests run in the
 /// runner's process.
-pub fn job_count(requested: usize, tests: usize) -> usize {
+pub(crate) fn job_count(requested: usize, tests: usize) -> usize {
     let jobs =
         if requested == 0 { std::thread::available_parallelism().map_or(1, NonZeroUsize::get) } else { requested };
     jobs.min(tests)
@@ -72,7 +72,12 @@ struct Run {
 /// that a worker ran holds what the statistics, the return code and the
 /// report read (`ResultHeader`).
 #[must_use]
-pub fn run_jobs(arguments: &Arguments, manifest: &Manifest, output_path: &Path, jobs: usize) -> Vec<TestMetadata> {
+pub(crate) fn run_jobs(
+    arguments: &Arguments,
+    manifest: &Manifest,
+    output_path: &Path,
+    jobs: usize,
+) -> Vec<TestMetadata> {
     let dir = output_path.join(".render-test-jobs");
     let (mut crashes, not_run) = match start(arguments, manifest, &dir) {
         Ok(program) => (
@@ -216,7 +221,7 @@ fn unfinished_claims(dir: &Path, pid: u32) -> Vec<usize> {
 /// The worker of `render-test --render-test-worker <dir>`: runs the tests of
 /// the run in `dir` that no other worker has taken, until every test is
 /// taken. Returns 0 when no test is left.
-pub fn run_worker(dir: &Path, factory: Option<ImplFactory>) -> i32 {
+pub(crate) fn run_worker(dir: &Path, factory: Option<ImplFactory>) -> i32 {
     let run: Run = match fs::read(dir.join(RUN_FILE)).and_then(|bytes| Ok(serde_json::from_slice(&bytes)?)) {
         Ok(run) => run,
         Err(e) => {

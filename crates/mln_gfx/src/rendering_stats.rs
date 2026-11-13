@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use mln_tile_id::OverscaledTileID;
 
 /// A bounding box in normalized device coordinates, positive up and right. The
-/// default is empty (inverted), so that [`include`](Self::include) of any bound
+/// default is empty (inverted), so that `include` of any bound
 /// yields that bound.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NDCBound {
@@ -21,7 +21,7 @@ impl Default for NDCBound {
 
 impl NDCBound {
     /// Expand to include the other bounds.
-    pub fn include(&mut self, other: &NDCBound) {
+    pub(crate) fn include(&mut self, other: &NDCBound) {
         self.min_x = self.min_x.min(other.min_x);
         self.max_x = self.max_x.max(other.max_x);
         self.min_y = self.min_y.min(other.min_y);
@@ -39,7 +39,7 @@ pub struct FeatureInfo {
 }
 
 impl FeatureInfo {
-    pub fn merge_from(&mut self, bound: &NDCBound, ids: &HashSet<OverscaledTileID>) {
+    pub(crate) fn merge_from(&mut self, bound: &NDCBound, ids: &HashSet<OverscaledTileID>) {
         self.ndc_bound.include(bound);
         self.tile_ids.extend(ids.iter().copied());
     }
@@ -154,11 +154,4 @@ pub struct RenderingStats {
     /// Collected feature information by layer, if enabled via
     /// `MapOptions::capture_rendered_features`.
     pub frame_rendered_features: FrameRenderedFeaturesMap,
-}
-
-impl RenderingStats {
-    #[must_use]
-    pub fn is_zero(&self) -> bool {
-        *self == RenderingStats::default()
-    }
 }

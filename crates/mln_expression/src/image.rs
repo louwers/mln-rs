@@ -16,7 +16,7 @@ impl Image {
         Image::with_available(image_id, false)
     }
 
-    pub fn with_available(image_id: impl Into<String>, available: bool) -> Self {
+    pub(crate) fn with_available(image_id: impl Into<String>, available: bool) -> Self {
         Image { image_id: image_id.into(), available }
     }
 

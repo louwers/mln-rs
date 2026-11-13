@@ -27,7 +27,7 @@ use crate::types::DepthMaskType;
 use crate::uniform_buffer::UniformBufferArray;
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
-pub type DrawPriority = i64;
+pub(crate) type DrawPriority = i64;
 
 /// Array of textures to bind
 pub type Textures = [Option<Texture2DPtr>; MAX_TEXTURE_COUNT_PER_SHADER];
@@ -51,7 +51,7 @@ impl DrawSegment {
     pub fn get_segment(&self) -> &SegmentBase {
         &self.segment
     }
-    pub fn get_segment_mut(&mut self) -> &mut SegmentBase {
+    pub(crate) fn get_segment_mut(&mut self) -> &mut SegmentBase {
         &mut self.segment
     }
 }
@@ -70,22 +70,22 @@ pub struct DrawableBase {
     pub shader: Option<ShaderProgramBasePtr>,
     pub render_pass: RenderPass,
     pub tile_id: Option<OverscaledTileID>,
-    pub draw_priority: DrawPriority,
+    pub(crate) draw_priority: DrawPriority,
     pub line_width: i32,
     pub sub_layer_index: i32,
     pub depth_type: DepthMaskType,
     /// Layer-specific data.
-    pub drawable_data: Option<Box<dyn Any>>,
+    pub(crate) drawable_data: Option<Box<dyn Any>>,
     pub vertex_attributes: Option<VertexAttributeArrayPtr>,
     pub instance_attributes: Option<VertexAttributeArrayPtr>,
     pub attribute_update_time: Option<Instant>,
     pub textures: Textures,
-    pub tweakers: Vec<DrawableTweakerPtr>,
+    pub(crate) tweakers: Vec<DrawableTweakerPtr>,
     /// Keeps the layer tweaker alive; the drawable doesn't otherwise use it.
     /// `LayerTweaker` lives in `mln_renderer`, so the handle is opaque here.
-    pub layer_tweaker: Option<Rc<dyn Any>>,
-    pub type_: usize,
-    pub origin: Option<Point<f64>>,
+    pub(crate) layer_tweaker: Option<Rc<dyn Any>>,
+    pub(crate) type_: usize,
+    pub(crate) origin: Option<Point<f64>>,
     pub ubo_index: u32,
     pub create_time: Instant,
     // Drawable::Impl
@@ -94,9 +94,9 @@ pub struct DrawableBase {
     /// The bucket and binders handle. Buckets and binders are renderer
     /// types, so the slot is opaque here;
     /// the renderer stores its own handle and downcasts it in the tweakers.
-    pub binders: Option<Rc<dyn Any>>,
+    pub(crate) binders: Option<Rc<dyn Any>>,
     /// The render tile handle, opaque for the same reason.
-    pub render_tile: Option<Rc<dyn Any>>,
+    pub(crate) render_tile: Option<Rc<dyn Any>>,
 }
 
 impl DrawableBase {

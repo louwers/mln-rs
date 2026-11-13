@@ -35,7 +35,7 @@ use crate::bucket::Bucket;
 /// A bucket's vertices or indices. The worker fills it through `get_mut`;
 /// the render thread can move the data out (`BucketGeometry`), after which
 /// `len` still counts it.
-pub struct GeometryVec<T> {
+pub(crate) struct GeometryVec<T> {
     v: Mutex<Vec<T>>,
     /// The data while it is still in the JS array it arrived in; `v` is
     /// empty then.
@@ -53,7 +53,7 @@ impl<T> Default for GeometryVec<T> {
 
 impl<T> GeometryVec<T> {
     #[must_use]
-    pub fn new(v: Vec<T>) -> Self {
+    pub(crate) fn new(v: Vec<T>) -> Self {
         GeometryVec {
             v: Mutex::new(v),
             #[cfg(target_family = "wasm")]
@@ -63,7 +63,7 @@ impl<T> GeometryVec<T> {
     }
 
     /// The data, to fill. Not after it is moved out.
-    pub fn get_mut(&mut self) -> &mut Vec<T>
+    pub(crate) fn get_mut(&mut self) -> &mut Vec<T>
     where
         T: bytemuck::Pod,
     {
@@ -76,7 +76,7 @@ impl<T> GeometryVec<T> {
     }
 
     /// The element count, which stays when the data is moved out.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         #[cfg(target_family = "wasm")]
         if let Some(bytes) = &*self.host.lock() {
             return bytes.len() / size_of::<T>() + self.moved.load(Ordering::Relaxed);
@@ -84,17 +84,17 @@ impl<T> GeometryVec<T> {
         self.v.lock().len() + self.moved.load(Ordering::Relaxed)
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// True once the data has moved to the render thread's gfx vector.
-    pub fn is_moved(&self) -> bool {
+    pub(crate) fn is_moved(&self) -> bool {
         self.moved.load(Ordering::Relaxed) != 0
     }
 
     /// The data, empty once it is moved out.
-    pub fn data(&self) -> MutexGuard<'_, Vec<T>>
+    pub(crate) fn data(&self) -> MutexGuard<'_, Vec<T>>
     where
         T: bytemuck::Pod,
     {
@@ -207,7 +207,7 @@ impl<'de, T: bytemuck::Pod> Deserialize<'de> for GeometryVec<T> {
 /// The gfx vectors of a tile's bucket geometry. The tile keeps one per
 /// layout result, so it lives as long as the buckets it was made from.
 #[derive(Default)]
-pub struct BucketGeometry {
+pub(crate) struct BucketGeometry {
     vertices: RefCell<HashMap<(SimpleIdentity, usize), VertexVectorBasePtr>>,
     indexes: RefCell<HashMap<(SimpleIdentity, usize), IndexVectorBasePtr>>,
 }
@@ -226,7 +226,7 @@ fn keep(bucket: &dyn Bucket) -> bool {
 
 impl BucketGeometry {
     /// The shared vertex vector of `vec`, one of `bucket`'s.
-    pub fn vertices<V: bytemuck::Pod>(&self, bucket: &dyn Bucket, vec: &GeometryVec<V>) -> VertexVectorBasePtr {
+    pub(crate) fn vertices<V: bytemuck::Pod>(&self, bucket: &dyn Bucket, vec: &GeometryVec<V>) -> VertexVectorBasePtr {
         self.vertices
             .borrow_mut()
             .entry(key(bucket, vec))
@@ -235,7 +235,7 @@ impl BucketGeometry {
     }
 
     /// The shared index vector of `vec`, one of `bucket`'s.
-    pub fn indexes(&self, bucket: &dyn Bucket, vec: &GeometryVec<u16>) -> IndexVectorBasePtr {
+    pub(crate) fn indexes(&self, bucket: &dyn Bucket, vec: &GeometryVec<u16>) -> IndexVectorBasePtr {
         self.indexes
             .borrow_mut()
             .entry(key(bucket, vec))
@@ -247,20 +247,20 @@ impl BucketGeometry {
 /// A released gfx vertex vector holding a copy of `vertices`: drawables
 /// replace such vectors instead of modifying them, so they free their CPU
 /// copy once uploaded.
-pub fn released_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorBasePtr {
+pub(crate) fn released_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorBasePtr {
     Rc::new(VertexVector::from_vec_released(vertices.to_vec()))
 }
 
 /// A released gfx index vector holding a copy of `indexes`, see
 /// `released_vertices`.
 #[must_use]
-pub fn released_indexes(indexes: &[u16]) -> IndexVectorBasePtr {
+pub(crate) fn released_indexes(indexes: &[u16]) -> IndexVectorBasePtr {
     Rc::new(RefCell::new(IndexVectorBase::new_released(indexes.to_vec())))
 }
 
 /// The shared vertex vector of one of `bucket`'s vectors, from the tile's
 /// `geometry` when it has one, else a copy.
-pub fn bucket_vertices<V: bytemuck::Pod>(
+pub(crate) fn bucket_vertices<V: bytemuck::Pod>(
     geometry: Option<&BucketGeometry>,
     bucket: &dyn Bucket,
     vec: &GeometryVec<V>,
@@ -273,7 +273,7 @@ pub fn bucket_vertices<V: bytemuck::Pod>(
 
 /// The shared index vector of one of `bucket`'s vectors, see
 /// `bucket_vertices`.
-pub fn bucket_indexes(
+pub(crate) fn bucket_indexes(
     geometry: Option<&BucketGeometry>,
     bucket: &dyn Bucket,
     vec: &GeometryVec<u16>,
@@ -287,7 +287,7 @@ pub fn bucket_indexes(
 /// The shared vertex vector of a layer's data-driven paint values. Values
 /// that feature state rewrites stay in the bucket, and the drawables get a
 /// copy each time they change.
-pub fn paint_vertices(
+pub(crate) fn paint_vertices(
     geometry: Option<&BucketGeometry>,
     bucket: &dyn Bucket,
     buffer: &crate::paint_property_binder::InterleavedVertexBuffer,

@@ -4,7 +4,7 @@ use super::layer_factory::{LayerFactory, get_source};
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::fill_extrusion_layer::{FillExtrusionLayer, Impl};
 
-pub struct FillExtrusionLayerFactory;
+pub(crate) struct FillExtrusionLayerFactory;
 
 impl LayerFactory for FillExtrusionLayerFactory {
     fn get_type_info(&self) -> &'static LayerTypeInfo {
