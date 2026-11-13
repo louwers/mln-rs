@@ -8,4 +8,4 @@ use mln_tile_id::CanonicalTileID;
 /// the { 0, 0, 0 } tile. If it's empty, no part of the tile will be
 /// rendered. `TileMasks` are typically generated with
 /// `algorithm::updateTileMasks()`.
-pub type TileMask = BTreeSet<CanonicalTileID>;
+pub(crate) type TileMask = BTreeSet<CanonicalTileID>;

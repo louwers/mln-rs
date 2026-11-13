@@ -10,7 +10,7 @@ use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::Value;
 
-pub struct CollatorExpression {
+pub(crate) struct CollatorExpression {
     base: ExpressionBase,
     case_sensitive: Box<dyn Expression>,
     diacritic_sensitive: Box<dyn Expression>,
@@ -19,7 +19,7 @@ pub struct CollatorExpression {
 
 impl CollatorExpression {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         case_sensitive: Box<dyn Expression>,
         diacritic_sensitive: Box<dyn Expression>,
         locale: Option<Box<dyn Expression>>,
@@ -37,7 +37,7 @@ impl CollatorExpression {
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         if value.array_length() != 2 {
             ctx.error("Expected one argument.".to_owned());
             return None;

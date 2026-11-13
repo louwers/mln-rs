@@ -39,7 +39,7 @@ fn format_number(
     locale::format_number(number, locale, currency.as_deref(), FractionDigits::new(min, max))
 }
 
-pub struct NumberFormat {
+pub(crate) struct NumberFormat {
     base: ExpressionBase,
     number: Box<dyn Expression>,
     locale: Option<Box<dyn Expression>>,
@@ -68,7 +68,7 @@ fn static_cast_u8(d: f64) -> u8 {
 
 impl NumberFormat {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         number: Box<dyn Expression>,
         locale: Option<Box<dyn Expression>>,
         currency: Option<Box<dyn Expression>>,
@@ -90,7 +90,7 @@ impl NumberFormat {
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let length = value.array_length();
 
         if length != 3 {

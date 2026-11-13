@@ -98,7 +98,7 @@ struct ClipMasks {
     projection_buffer_size: usize,
 }
 
-pub struct Context {
+pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
@@ -140,7 +140,7 @@ fn clip_mask_stencil_mode(stencil_ref: i32) -> StencilMode {
 impl Context {
     /// Creates the context of `backend`, whose GL context must be current.
     #[must_use]
-    pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
+    pub(crate) fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         let gl = backend.gl();
         // SAFETY: the parameters are GL ES 3.0's.
         let (alignment, extensions) =
@@ -179,36 +179,37 @@ impl Context {
     }
 
     /// The owning `Rc`, for the passes of a frame.
-    pub fn rc(&self) -> Rc<Context> {
+    pub(crate) fn rc(&self) -> Rc<Context> {
         self.weak_self.upgrade().expect("gl::Context used after drop")
     }
 
-    pub fn weak(&self) -> Weak<Context> {
+    pub(crate) fn weak(&self) -> Weak<Context> {
         self.weak_self.clone()
     }
 
-    pub fn get_backend(&self) -> &Rc<BackendImpl> {
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    pub(crate) fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
     }
 
     /// The GL functions of the backend's context.
-    pub fn gl(&self) -> &Gl {
+    pub(crate) fn gl(&self) -> &Gl {
         self.backend.gl()
     }
 
     /// The GL state the context last set.
-    pub fn state(&self) -> &State {
+    pub(crate) fn state(&self) -> &State {
         &self.state
     }
 
-    pub fn uniform_buffer_offset_alignment(&self) -> usize {
+    pub(crate) fn uniform_buffer_offset_alignment(&self) -> usize {
         self.uniform_buffer_offset_alignment
     }
 
     /// Whether the context is of desktop OpenGL (3.3 or later) rather than
     /// OpenGL ES or WebGL2. Its shaders compile as GLSL 3.30, and it has no
     /// alpha or luminance textures.
-    pub fn is_desktop(&self) -> bool {
+    pub(crate) fn is_desktop(&self) -> bool {
         self.desktop
     }
 
@@ -251,7 +252,7 @@ impl Context {
     /// stats until it is abandoned. An index buffer
     /// (`GL_ELEMENT_ARRAY_BUFFER`) is bound with no vertex array, whose state
     /// that binding belongs to.
-    pub fn create_buffer(&self, target: u32, data: &[u8], usage: u32) -> Option<BufferID> {
+    pub(crate) fn create_buffer(&self, target: u32, data: &[u8], usage: u32) -> Option<BufferID> {
         let buffer = self.create_uncounted_buffer(target, data, usage)?;
         self.count_buffer(data.len());
         Some(buffer)
@@ -282,7 +283,7 @@ impl Context {
     /// `create_buffer` of bytes that are still in a JS array
     /// (`mln_util::host_bytes`), written from there.
     #[cfg(target_family = "wasm")]
-    pub fn create_buffer_from_host(
+    pub(crate) fn create_buffer_from_host(
         &self,
         target: u32,
         data: &mln_util::host_bytes::HostBytes,
@@ -304,7 +305,7 @@ impl Context {
     }
 
     /// Replaces the start of `buffer`, bound to `target`, with `data`.
-    pub fn update_buffer(&self, target: u32, buffer: BufferID, data: &[u8]) {
+    pub(crate) fn update_buffer(&self, target: u32, buffer: BufferID, data: &[u8]) {
         let gl = self.gl();
         if target == glow::ELEMENT_ARRAY_BUFFER {
             self.state.bind_vertex_array(gl, None);
@@ -321,7 +322,7 @@ impl Context {
 
     /// Leaves `buffer`, which `create_buffer` made with `bytes` bytes, to be
     /// deleted.
-    pub fn abandon_buffer(&self, buffer: BufferID, bytes: usize) {
+    pub(crate) fn abandon_buffer(&self, buffer: BufferID, bytes: usize) {
         self.uncount_buffer(bytes);
         self.abandon_uncounted_buffer(buffer);
     }
@@ -330,23 +331,24 @@ impl Context {
         self.abandoned.borrow_mut().buffers.push(buffer);
     }
 
-    pub fn abandon_program(&self, program: ProgramID) {
+    pub(crate) fn abandon_program(&self, program: ProgramID) {
         self.abandoned.borrow_mut().programs.push(program);
     }
 
-    pub fn abandon_texture(&self, texture: TextureID) {
+    pub(crate) fn abandon_texture(&self, texture: TextureID) {
         self.abandoned.borrow_mut().textures.push(texture);
     }
 
-    pub fn abandon_vertex_array(&self, vertex_array: VertexArrayID) {
+    pub(crate) fn abandon_vertex_array(&self, vertex_array: VertexArrayID) {
         self.abandoned.borrow_mut().vertex_arrays.push(vertex_array);
     }
 
-    pub fn abandon_framebuffer(&self, framebuffer: FramebufferID) {
+    pub(crate) fn abandon_framebuffer(&self, framebuffer: FramebufferID) {
         self.abandoned.borrow_mut().framebuffers.push(framebuffer);
     }
 
-    pub fn abandon_renderbuffer(&self, renderbuffer: RenderbufferID) {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn abandon_renderbuffer(&self, renderbuffer: RenderbufferID) {
         self.abandoned.borrow_mut().renderbuffers.push(renderbuffer);
     }
 
@@ -407,7 +409,7 @@ impl Context {
 
     /// Compiles the concatenated `sources` as a shader of `type_`, or returns
     /// the compiler's log.
-    pub fn create_shader(&self, type_: u32, sources: &[&str]) -> Result<ShaderID, String> {
+    pub(crate) fn create_shader(&self, type_: u32, sources: &[&str]) -> Result<ShaderID, String> {
         let gl = self.gl();
         // SAFETY: the shader is new, and deleted if it doesn't compile.
         unsafe {
@@ -426,7 +428,7 @@ impl Context {
     /// Links the shaders, which it deletes, into a program with
     /// `location0_attrib_name` at attribute location 0, or returns the
     /// linker's log.
-    pub fn create_program(
+    pub(crate) fn create_program(
         &self,
         vertex_shader: ShaderID,
         fragment_shader: ShaderID,
@@ -458,32 +460,32 @@ impl Context {
 
     // --- render state ---
 
-    pub fn set_depth_mode(&self, depth: &DepthMode) {
+    pub(crate) fn set_depth_mode(&self, depth: &DepthMode) {
         self.state.set_depth_mode(self.gl(), depth);
     }
 
-    pub fn set_stencil_mode(&self, stencil: &StencilMode) {
+    pub(crate) fn set_stencil_mode(&self, stencil: &StencilMode) {
         self.state.set_stencil_mode(self.gl(), stencil);
     }
 
-    pub fn set_color_mode(&self, color: &ColorMode) {
+    pub(crate) fn set_color_mode(&self, color: &ColorMode) {
         self.state.set_color_mode(self.gl(), color);
     }
 
-    pub fn set_cull_face_mode(&self, mode: &CullFaceMode) {
+    pub(crate) fn set_cull_face_mode(&self, mode: CullFaceMode) {
         self.state.set_cull_face_mode(self.gl(), mode);
     }
 
     /// Forgets the GL state the context tracks, so that the next draw sets
     /// all of it again. Call it after code outside the context changed it.
-    pub fn set_dirty_state(&self) {
+    pub(crate) fn set_dirty_state(&self) {
         self.state.set_dirty();
     }
 
     /// Sets the scissor rectangle. The renderer's rectangles have their origin
     /// at the top left, as on WebGPU and Metal; GL's is at the bottom left. A
     /// rectangle that covers the framebuffer turns the test off.
-    pub fn set_scissor_test(&self, rect: &ScissorRect) {
+    pub(crate) fn set_scissor_test(&self, rect: &ScissorRect) {
         let size = self.framebuffer_size.get();
         let covers = rect.x <= 0
             && rect.y <= 0
@@ -495,13 +497,13 @@ impl Context {
         self.state.set_scissor(self.gl(), scissor);
     }
 
-    pub fn clear(&self, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
+    pub(crate) fn clear(&self, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
         self.state.clear(self.gl(), color, depth, stencil);
     }
 
     /// Binds `framebuffer` (none: the default one) to draw all of its `size`
     /// (C++: the `bind` of each renderable resource).
-    pub fn bind_framebuffer(&self, framebuffer: Option<FramebufferID>, size: Size, has_stencil: bool) {
+    pub(crate) fn bind_framebuffer(&self, framebuffer: Option<FramebufferID>, size: Size, has_stencil: bool) {
         let gl = self.gl();
         self.state.bind_framebuffer(gl, framebuffer);
         self.state.set_scissor(gl, None);
@@ -513,17 +515,17 @@ impl Context {
 
     /// The framebuffer being drawn into, as `bind_framebuffer` bound it: none
     /// for the default one, its size, and whether it has a stencil buffer.
-    pub fn bound_framebuffer(&self) -> (Option<FramebufferID>, Size, bool) {
+    pub(crate) fn bound_framebuffer(&self) -> (Option<FramebufferID>, Size, bool) {
         (self.framebuffer.get(), self.framebuffer_size.get(), self.framebuffer_has_stencil.get())
     }
 
     /// Whether the framebuffer being drawn into has a stencil buffer.
-    pub fn has_stencil_buffer(&self) -> bool {
+    pub(crate) fn has_stencil_buffer(&self) -> bool {
         self.framebuffer_has_stencil.get()
     }
 
     /// Reads the RGBA pixels of the bound framebuffer, the top row first.
-    pub fn read_framebuffer(&self, size: Size) -> Vec<u8> {
+    pub(crate) fn read_framebuffer(&self, size: Size) -> Vec<u8> {
         let stride = size.width as usize * 4;
         let mut data = vec![0u8; stride * size.height as usize];
         if data.is_empty() {
@@ -561,7 +563,7 @@ impl Context {
 
     /// Makes `buffers` the uniform buffers of the layer group whose drawables
     /// are drawn next.
-    pub fn set_layer_uniform_buffers(&self, buffers: &UniformBufferArray) {
+    pub(crate) fn set_layer_uniform_buffers(&self, buffers: &UniformBufferArray) {
         self.layer_uniform_buffers.borrow_mut().assign_from(buffers);
     }
 
@@ -569,7 +571,12 @@ impl Context {
     /// (`drawable_buffers`), else the layer group's, else the global one. A
     /// layer's buffer of an element per drawable is bound at the element
     /// `ubo_index`.
-    pub fn bind_uniform_blocks(&self, shader: &ShaderProgram, drawable_buffers: &UniformBufferArray, ubo_index: u32) {
+    pub(crate) fn bind_uniform_blocks(
+        &self,
+        shader: &ShaderProgram,
+        drawable_buffers: &UniformBufferArray,
+        ubo_index: u32,
+    ) {
         let gl = self.gl();
         let layer_buffers = self.layer_uniform_buffers.borrow();
         let global_buffers = self.global_uniform_buffers.borrow();
@@ -613,7 +620,7 @@ impl Context {
     // --- textures ---
 
     /// Creates a texture, of the concrete type.
-    pub fn create_gl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
+    pub(crate) fn create_gl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self.weak())))
     }
 
@@ -693,7 +700,7 @@ impl Context {
         };
 
         self.set_clip_mask_state();
-        self.set_cull_face_mode(&CullFaceMode::disabled());
+        self.set_cull_face_mode(CullFaceMode::disabled());
         // The shader reads none of its blocks in this variant, but WebGL2
         // wants a buffer for each.
         self.bind_uniform_blocks(shader, &UniformBufferArray::new(), 0);
@@ -767,7 +774,7 @@ impl Context {
         self.set_clip_mask_state();
         // The far side of a limb tile projects inside the disc; cull it or it
         // overwrites the tile in front.
-        self.set_cull_face_mode(&CullFaceMode::back_ccw());
+        self.set_cull_face_mode(CullFaceMode::back_ccw());
 
         // Each mask is drawn with a border first, then exactly, as GL JS
         // does: where a tile meets finer ones, its coarser edge leaves a
@@ -868,8 +875,8 @@ impl GfxContext for Context {
         VertexAttributeArray::new_ptr()
     }
 
-    fn create_drawable_builder(&self, name: String) -> UniqueDrawableBuilder {
-        Box::new(DrawableBuilder::new(name))
+    fn create_drawable_builder(&self) -> UniqueDrawableBuilder {
+        Box::new(DrawableBuilder::new())
     }
 
     fn create_uniform_buffer(&self, data: &[u8], _persistent: bool, ssbo: bool) -> UniformBufferPtr {

@@ -14,13 +14,13 @@ use crate::tile::custom_tile::CustomGeometryTile;
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
-pub struct RenderCustomGeometrySource {
+pub(crate) struct RenderCustomGeometrySource {
     tile_source: RenderTileSource,
 }
 
 impl RenderCustomGeometrySource {
     #[must_use]
-    pub fn new(impl_: Arc<custom_geometry_source::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<custom_geometry_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderCustomGeometrySource { tile_source: RenderTileSource::new(impl_) }
     }
@@ -28,19 +28,11 @@ impl RenderCustomGeometrySource {
     fn impl_(&self) -> Arc<custom_geometry_source::Impl> {
         downcast_arc::<custom_geometry_source::Impl>(&self.tile_source.base.base_impl)
     }
-
-    pub fn tile_source(&self) -> &RenderTileSource {
-        &self.tile_source
-    }
 }
 
 impl RenderSource for RenderCustomGeometrySource {
     fn base(&self) -> &RenderSourceBase {
         &self.tile_source.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderSourceBase {
-        &mut self.tile_source.base
     }
 
     fn is_loaded(&self) -> bool {

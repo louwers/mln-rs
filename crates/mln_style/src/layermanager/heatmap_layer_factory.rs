@@ -4,7 +4,7 @@ use super::layer_factory::{LayerFactory, get_source};
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::heatmap_layer::{HeatmapLayer, Impl};
 
-pub struct HeatmapLayerFactory;
+pub(crate) struct HeatmapLayerFactory;
 
 impl LayerFactory for HeatmapLayerFactory {
     fn get_type_info(&self) -> &'static LayerTypeInfo {

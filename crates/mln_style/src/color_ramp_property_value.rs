@@ -55,7 +55,7 @@ impl From<ColorRampPropertyValue> for ColorRampParts {
 
 impl ColorRampPropertyValue {
     #[must_use]
-    pub fn new(value: Option<Arc<dyn Expression>>) -> Self {
+    pub(crate) fn new(value: Option<Arc<dyn Expression>>) -> Self {
         let global_state_refs = match &value {
             Some(expression) if expression.has(Dependency::GLOBAL_STATE) => {
                 let mut refs = VecSet::new();
@@ -86,12 +86,8 @@ impl ColorRampPropertyValue {
     }
 
     #[must_use]
-    pub fn is_data_driven(&self) -> bool {
-        false
-    }
-
-    #[must_use]
-    pub fn has_data_driven_property_difference(&self, _other: &ColorRampPropertyValue) -> bool {
+    #[expect(clippy::unused_self, reason = "matches `PropertyValue::has_data_driven_property_difference`")]
+    pub(crate) fn has_data_driven_property_difference(&self, _other: &ColorRampPropertyValue) -> bool {
         false
     }
 

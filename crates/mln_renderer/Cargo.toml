@@ -52,115 +52,12 @@ postcard.workspace = true
 serde.workspace = true
 shelf_pack.workspace = true
 
-# test/util/tile_cover.test.cpp: needs mln_map's Transform, which is above
-# this crate, so it is an integration test rather than a unit test.
-[[test]]
-name = "tile_cover_test"
-path = "tests/tile_cover_test.rs"
-
-# test/tile/geojson_tile.test.cpp and the GeoJSON parts of
-# test/style/source.test.cpp: need mln_map's Transform (above this crate).
-[[test]]
-name = "geojson_tile_test"
-path = "tests/geojson_tile_test.rs"
-
-[[test]]
-name = "source_test"
-path = "tests/source_test.rs"
-
-# Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
-# backend) and test/renderer/fill_bucket.test.cpp.
-[[test]]
-name = "bucket_test"
-path = "tests/bucket_test.rs"
-
-# Ports test/layout/sort_key.test.cpp.
-[[test]]
-name = "sort_key_test"
-path = "tests/sort_key_test.rs"
-
-# The VectorTile tests of test/tile/vector_tile.test.cpp.
-[[test]]
-name = "vector_tile_test"
-path = "tests/vector_tile_test.rs"
-
-# gtests-data: the test/tile gtests that need the renderer's tiles or
-# mln_map's Transform (tests/tile/main.rs lists them).
-[[test]]
-name = "tile_test"
-path = "tests/tile/main.rs"
-
-# gtests-data: the test/text gtests that need mln_renderer (GlyphManager,
-# SymbolLayout) or mln_expression's Formatted (tests/text/main.rs lists them).
-[[test]]
-name = "text_test"
-path = "tests/text/main.rs"
-
-# gtests-core: test/algorithm/update_renderables.test.cpp.
-[[test]]
-name = "gtest_update_renderables"
-path = "tests/gtest_update_renderables.rs"
-
-# gtests-core: test/geometry/line_atlas.test.cpp.
-[[test]]
-name = "gtest_line_atlas"
-path = "tests/gtest_line_atlas.rs"
-
-# gtests-core: test/renderer/image_manager.test.cpp.
-[[test]]
-name = "gtest_image_manager"
-path = "tests/gtest_image_manager.rs"
-
-# gtests-core: test/renderer/pattern_atlas.test.cpp.
-[[test]]
-name = "gtest_pattern_atlas"
-path = "tests/gtest_pattern_atlas.rs"
-
-# gtests-core: test/renderer/style_diff.test.cpp.
-[[test]]
-name = "gtest_style_diff"
-path = "tests/gtest_style_diff.rs"
-
-# gtests-core: test/renderer/dynamic_texture_atlas.test.cpp.
-[[test]]
-name = "gtest_dynamic_texture_atlas"
-path = "tests/gtest_dynamic_texture_atlas.rs"
-
-# Port-only: malformed vector tiles become tile errors, not panics.
-[[test]]
-name = "malformed_tile_test"
-path = "tests/malformed_tile_test.rs"
-
-# Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
-[[test]]
-name = "gtest_tile_range"
-path = "tests/gtest_tile_range.rs"
-
-[[test]]
-name = "gtest_tile_lod"
-path = "tests/gtest_tile_lod.rs"
-
-[[test]]
-name = "gtest_sky"
-path = "tests/gtest_sky.rs"
-
-[[test]]
-name = "gtest_subdivision"
-path = "tests/gtest_subdivision.rs"
-
-[[test]]
-name = "gtest_fill_large_mesh_arrays"
-path = "tests/gtest_fill_large_mesh_arrays.rs"
-
-[[test]]
-name = "gtest_fill_generator"
-path = "tests/gtest_fill_generator.rs"
-
 [dev-dependencies]
 geojson = { package = "mln-rs-geojson", path = "../../vendor/geojson" }
 mln_conversion = { package = "mln-rs-conversion", path = "../mln_conversion" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
 mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
+mln_storage = { workspace = true, features = ["test-support"] }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 mlt-core.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }

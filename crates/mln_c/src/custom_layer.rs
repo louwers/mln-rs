@@ -212,7 +212,7 @@ mod native {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_add_custom_layer(
+pub(crate) unsafe extern "C" fn mln_map_add_custom_layer(
     map: mln_map,
     layer_id: mln_buffer_view,
     before_layer_id: mln_buffer_view,

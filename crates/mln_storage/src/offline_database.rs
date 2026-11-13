@@ -37,7 +37,7 @@ use crate::sqlite3::{
 
 /// The most rows whose `accessed` timestamp waits to be written. Reads of
 /// other rows while the queue is full don't update their timestamps.
-pub const MAX_PENDING_ACCESSED: usize = 4096;
+pub(crate) const MAX_PENDING_ACCESSED: usize = 4096;
 
 /// Why a database operation failed.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -185,7 +185,7 @@ impl OfflineDatabase {
     /// requests resolve to the same URL), this function creates a synthetic
     /// key based on the requested data range.
     #[must_use]
-    pub fn cache_key(resource: &Resource) -> String {
+    pub(crate) fn cache_key(resource: &Resource) -> String {
         let Some((first, second)) = resource.data_range else {
             return resource.url.clone();
         };
@@ -266,7 +266,8 @@ impl OfflineDatabase {
         }
     }
 
-    pub fn change_path(&mut self, path: &str) {
+    #[cfg(test)]
+    pub(crate) fn change_path(&mut self, path: &str) {
         Log::info(Event::Database, "Changing the database path.");
         self.cleanup();
         self.path = path.to_owned();
@@ -288,20 +289,20 @@ impl OfflineDatabase {
     /// timestamps waiting to be written; the owner then calls
     /// [`flush_accessed`](Self::flush_accessed) later. It runs inside `get`
     /// and `get_region_resource`, so it must not use this database.
-    pub fn set_accessed_callback(&mut self, callback: Box<dyn FnMut() + Send>) {
+    pub(crate) fn set_accessed_callback(&mut self, callback: Box<dyn FnMut() + Send>) {
         self.accessed_callback = Some(callback);
     }
 
     /// The number of rows whose `accessed` timestamp waits to be written.
     #[must_use]
-    pub fn pending_accessed_count(&self) -> usize {
+    pub(crate) fn pending_accessed_count(&self) -> usize {
         self.pending_resource_accessed.len() + self.pending_tile_accessed.len()
     }
 
     /// Writes the waiting `accessed` timestamps in one transaction, never
     /// moving a row's timestamp back. Returns false and keeps them waiting
     /// when that fails or the database is read-only or closed.
-    pub fn flush_accessed(&mut self) -> bool {
+    pub(crate) fn flush_accessed(&mut self) -> bool {
         if self.pending_accessed_count() == 0 {
             return true;
         }
@@ -972,7 +973,7 @@ impl OfflineDatabase {
 
     /// Forces revalidation of the ambient cache's tiles and resources with
     /// the server before using them.
-    pub fn invalidate_ambient_cache(&mut self) -> Option<DatabaseError> {
+    pub(crate) fn invalidate_ambient_cache(&mut self) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
 
@@ -999,7 +1000,7 @@ impl OfflineDatabase {
     }
 
     /// Clears the ambient cache, freeing space.
-    pub fn clear_ambient_cache(&mut self) -> Option<DatabaseError> {
+    pub(crate) fn clear_ambient_cache(&mut self) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
             // The deleted rows' ids may be reused.
@@ -1269,7 +1270,8 @@ impl OfflineDatabase {
         }
     }
 
-    pub fn has_region_resource(&mut self, resource: &Resource) -> Option<i64> {
+    #[cfg(test)]
+    pub(crate) fn has_region_resource(&mut self, resource: &Resource) -> Option<i64> {
         self.check_region_resource(resource).map(|(size, _)| size)
     }
 
@@ -1393,7 +1395,8 @@ impl OfflineDatabase {
         Ok(())
     }
 
-    pub fn get_region_definition(&mut self, region_id: i64) -> Result<OfflineRegionDefinition, DatabaseError> {
+    #[cfg(test)]
+    pub(crate) fn get_region_definition(&mut self, region_id: i64) -> Result<OfflineRegionDefinition, DatabaseError> {
         let result = (|| -> DbResult<OfflineRegionDefinition> {
             // `query.run(); query.get<std::string>(0)`: no row reads as "".
             let definition = self
@@ -1611,7 +1614,7 @@ impl OfflineDatabase {
         Ok(None)
     }
 
-    pub fn set_maximum_ambient_cache_size(&mut self, size: u64) -> Option<DatabaseError> {
+    pub(crate) fn set_maximum_ambient_cache_size(&mut self, size: u64) -> Option<DatabaseError> {
         // Eviction uses the stored timestamps if this fails.
         self.flush_accessed();
         let previous_maximum_ambient_cache_size = self.maximum_ambient_cache_size;
@@ -1665,7 +1668,7 @@ impl OfflineDatabase {
         }
     }
 
-    pub fn pack(&mut self) -> Option<DatabaseError> {
+    pub(crate) fn pack(&mut self) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             if self.db.is_none() {
                 self.initialize()?;
@@ -1675,11 +1678,12 @@ impl OfflineDatabase {
         self.exception_ptr(result, "pack storage")
     }
 
-    pub fn run_pack_database_automatically(&mut self, autopack: bool) {
+    #[cfg(test)]
+    pub(crate) fn run_pack_database_automatically(&mut self, autopack: bool) {
         self.autopack = autopack;
     }
 
-    pub fn reopen_database_read_only(&mut self, read_only: bool) {
+    pub(crate) fn reopen_database_read_only(&mut self, read_only: bool) {
         if self.read_only == read_only {
             return;
         }
@@ -1692,7 +1696,7 @@ impl OfflineDatabase {
 
     /// Deletes the database file and starts an empty one. Returns the error,
     /// if any.
-    pub fn reset_database(&mut self) -> Option<DatabaseError> {
+    pub(crate) fn reset_database(&mut self) -> Option<DatabaseError> {
         let result = self.remove_existing().and_then(|()| self.initialize());
         self.exception_ptr(result, "reset database")
     }

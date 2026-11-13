@@ -744,7 +744,7 @@ fn optional_text_value(text: Option<&str>) -> OptionalText {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_global_state_property(
+pub(crate) unsafe extern "C" fn mln_map_set_global_state_property(
     map: mln_map,
     property_name: mln_buffer_view,
     value: mln_buffer_view,
@@ -766,7 +766,7 @@ pub unsafe extern "C" fn mln_map_set_global_state_property(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_global_state(
+pub(crate) unsafe extern "C" fn mln_map_get_global_state(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -785,7 +785,7 @@ pub unsafe extern "C" fn mln_map_get_global_state(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_add_style_source_json(
+pub(crate) unsafe extern "C" fn mln_map_add_style_source_json(
     map: mln_map,
     source_id: mln_buffer_view,
     source_json: mln_buffer_view,
@@ -807,7 +807,7 @@ pub unsafe extern "C" fn mln_map_add_style_source_json(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_remove_style_source(
+pub(crate) unsafe extern "C" fn mln_map_remove_style_source(
     map: mln_map,
     source_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -827,7 +827,7 @@ pub unsafe extern "C" fn mln_map_remove_style_source(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_source(
+pub(crate) unsafe extern "C" fn mln_map_get_style_source(
     map: mln_map,
     source_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -854,7 +854,7 @@ pub unsafe extern "C" fn mln_map_get_style_source(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_source_volatile(
+pub(crate) unsafe extern "C" fn mln_map_set_style_source_volatile(
     map: mln_map,
     source_id: mln_buffer_view,
     is_volatile: bool,
@@ -875,7 +875,7 @@ pub unsafe extern "C" fn mln_map_set_style_source_volatile(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_list_style_sources(
+pub(crate) unsafe extern "C" fn mln_map_list_style_sources(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -898,7 +898,7 @@ pub unsafe extern "C" fn mln_map_list_style_sources(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_add_geo_json_source(
+pub(crate) unsafe extern "C" fn mln_map_add_geo_json_source(
     map: mln_map,
     source_id: mln_buffer_view,
     options: *const mln_geo_json_source_options,
@@ -927,7 +927,7 @@ pub unsafe extern "C" fn mln_map_add_geo_json_source(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_geo_json_source_url(
+pub(crate) unsafe extern "C" fn mln_map_set_geo_json_source_url(
     map: mln_map,
     source_id: mln_buffer_view,
     url: mln_buffer_view,
@@ -948,7 +948,7 @@ pub unsafe extern "C" fn mln_map_set_geo_json_source_url(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_geo_json_source_data(
+pub(crate) unsafe extern "C" fn mln_map_set_geo_json_source_data(
     map: mln_map,
     source_id: mln_buffer_view,
     data: mln_buffer_view,
@@ -978,7 +978,7 @@ pub unsafe extern "C" fn mln_map_set_geo_json_source_data(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_geo_json_source_synchronous_tiling(
+pub(crate) unsafe extern "C" fn mln_map_set_geo_json_source_synchronous_tiling(
     map: mln_map,
     source_id: mln_buffer_view,
     enabled: bool,
@@ -1059,7 +1059,7 @@ fn add_callback_source(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_add_custom_geometry_source(
+pub(crate) unsafe extern "C" fn mln_map_add_custom_geometry_source(
     map: mln_map,
     source_id: mln_buffer_view,
     options: *const mln_custom_geometry_source_options,
@@ -1142,7 +1142,7 @@ pub unsafe extern "C" fn mln_map_add_custom_geometry_source(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_data(
+pub(crate) unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_data(
     map: mln_map,
     source_id: mln_buffer_view,
     tile_id: mln_canonical_tile_id,
@@ -1168,7 +1168,7 @@ pub unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_data(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_error(
+pub(crate) unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_error(
     map: mln_map,
     source_id: mln_buffer_view,
     tile_id: mln_canonical_tile_id,
@@ -1195,7 +1195,7 @@ pub unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_error(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_tile(
+pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_tile(
     map: mln_map,
     source_id: mln_buffer_view,
     tile_id: mln_canonical_tile_id,
@@ -1220,7 +1220,7 @@ pub unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_tile(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_region(
+pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_region(
     map: mln_map,
     source_id: mln_buffer_view,
     bounds: mln_lat_lng_bounds,
@@ -1245,7 +1245,7 @@ pub unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_region(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_add_custom_vector_source(
+pub(crate) unsafe extern "C" fn mln_map_add_custom_vector_source(
     map: mln_map,
     source_id: mln_buffer_view,
     options: *const mln_custom_vector_source_options,
@@ -1292,7 +1292,7 @@ pub unsafe extern "C" fn mln_map_add_custom_vector_source(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_custom_vector_source_tile_data(
+pub(crate) unsafe extern "C" fn mln_map_set_custom_vector_source_tile_data(
     map: mln_map,
     source_id: mln_buffer_view,
     tile_id: mln_canonical_tile_id,
@@ -1327,7 +1327,7 @@ pub unsafe extern "C" fn mln_map_set_custom_vector_source_tile_data(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_custom_vector_source_tile_error(
+pub(crate) unsafe extern "C" fn mln_map_set_custom_vector_source_tile_error(
     map: mln_map,
     source_id: mln_buffer_view,
     tile_id: mln_canonical_tile_id,
@@ -1354,7 +1354,7 @@ pub unsafe extern "C" fn mln_map_set_custom_vector_source_tile_error(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_invalidate_custom_vector_source_tile(
+pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_vector_source_tile(
     map: mln_map,
     source_id: mln_buffer_view,
     tile_id: mln_canonical_tile_id,
@@ -1379,7 +1379,7 @@ pub unsafe extern "C" fn mln_map_invalidate_custom_vector_source_tile(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_invalidate_custom_vector_source_region(
+pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_vector_source_region(
     map: mln_map,
     source_id: mln_buffer_view,
     bounds: mln_lat_lng_bounds,
@@ -1406,7 +1406,7 @@ pub unsafe extern "C" fn mln_map_invalidate_custom_vector_source_region(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_image(
+pub(crate) unsafe extern "C" fn mln_map_set_style_image(
     map: mln_map,
     image_id: mln_buffer_view,
     image: *const mln_premultiplied_rgba8_image,
@@ -1428,7 +1428,7 @@ pub unsafe extern "C" fn mln_map_set_style_image(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_remove_style_image(
+pub(crate) unsafe extern "C" fn mln_map_remove_style_image(
     map: mln_map,
     image_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -1448,7 +1448,7 @@ pub unsafe extern "C" fn mln_map_remove_style_image(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_image(
+pub(crate) unsafe extern "C" fn mln_map_get_style_image(
     map: mln_map,
     image_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -1470,7 +1470,7 @@ pub unsafe extern "C" fn mln_map_get_style_image(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_add_image_source_image(
+pub(crate) unsafe extern "C" fn mln_map_add_image_source_image(
     map: mln_map,
     source_id: mln_buffer_view,
     coordinates: *const mln_lat_lng,
@@ -1495,7 +1495,7 @@ pub unsafe extern "C" fn mln_map_add_image_source_image(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_image_source_url(
+pub(crate) unsafe extern "C" fn mln_map_set_image_source_url(
     map: mln_map,
     source_id: mln_buffer_view,
     url: mln_buffer_view,
@@ -1516,7 +1516,7 @@ pub unsafe extern "C" fn mln_map_set_image_source_url(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_image_source_image(
+pub(crate) unsafe extern "C" fn mln_map_set_image_source_image(
     map: mln_map,
     source_id: mln_buffer_view,
     image: *const mln_premultiplied_rgba8_image,
@@ -1537,7 +1537,7 @@ pub unsafe extern "C" fn mln_map_set_image_source_image(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_image_source_coordinates(
+pub(crate) unsafe extern "C" fn mln_map_set_image_source_coordinates(
     map: mln_map,
     source_id: mln_buffer_view,
     coordinates: *const mln_lat_lng,
@@ -1560,7 +1560,7 @@ pub unsafe extern "C" fn mln_map_set_image_source_coordinates(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_image_source_coordinates(
+pub(crate) unsafe extern "C" fn mln_map_get_image_source_coordinates(
     map: mln_map,
     source_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -1589,7 +1589,7 @@ pub unsafe extern "C" fn mln_map_get_image_source_coordinates(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_add_style_layer_json(
+pub(crate) unsafe extern "C" fn mln_map_add_style_layer_json(
     map: mln_map,
     layer_json: mln_buffer_view,
     before_layer_id: mln_buffer_view,
@@ -1611,7 +1611,7 @@ pub unsafe extern "C" fn mln_map_add_style_layer_json(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_remove_style_layer(
+pub(crate) unsafe extern "C" fn mln_map_remove_style_layer(
     map: mln_map,
     layer_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -1631,7 +1631,7 @@ pub unsafe extern "C" fn mln_map_remove_style_layer(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_layer(
+pub(crate) unsafe extern "C" fn mln_map_get_style_layer(
     map: mln_map,
     layer_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -1658,7 +1658,7 @@ pub unsafe extern "C" fn mln_map_get_style_layer(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_list_style_layers(
+pub(crate) unsafe extern "C" fn mln_map_list_style_layers(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -1679,7 +1679,7 @@ pub unsafe extern "C" fn mln_map_list_style_layers(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_move_style_layer(
+pub(crate) unsafe extern "C" fn mln_map_move_style_layer(
     map: mln_map,
     layer_id: mln_buffer_view,
     before_layer_id: mln_buffer_view,
@@ -1701,7 +1701,7 @@ pub unsafe extern "C" fn mln_map_move_style_layer(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_layer_json(
+pub(crate) unsafe extern "C" fn mln_map_get_style_layer_json(
     map: mln_map,
     layer_id: mln_buffer_view,
     completion: *const mln_completion,
@@ -1721,7 +1721,7 @@ pub unsafe extern "C" fn mln_map_get_style_layer_json(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_layer_property(
+pub(crate) unsafe extern "C" fn mln_map_set_style_layer_property(
     map: mln_map,
     layer_id: mln_buffer_view,
     property_name: mln_buffer_view,
@@ -1749,7 +1749,7 @@ pub unsafe extern "C" fn mln_map_set_style_layer_property(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_layer_property(
+pub(crate) unsafe extern "C" fn mln_map_get_style_layer_property(
     map: mln_map,
     layer_id: mln_buffer_view,
     property_name: mln_buffer_view,
@@ -1780,7 +1780,7 @@ pub unsafe extern "C" fn mln_map_get_style_layer_property(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_root_property(
+pub(crate) unsafe extern "C" fn mln_map_set_style_root_property(
     map: mln_map,
     property_name: mln_buffer_view,
     value: mln_buffer_view,
@@ -1801,7 +1801,7 @@ pub unsafe extern "C" fn mln_map_set_style_root_property(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_root_property(
+pub(crate) unsafe extern "C" fn mln_map_get_style_root_property(
     map: mln_map,
     property_name: mln_buffer_view,
     completion: *const mln_completion,
@@ -1823,7 +1823,7 @@ pub unsafe extern "C" fn mln_map_get_style_root_property(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_light_property(
+pub(crate) unsafe extern "C" fn mln_map_set_style_light_property(
     map: mln_map,
     property_name: mln_buffer_view,
     value: mln_buffer_view,
@@ -1844,7 +1844,7 @@ pub unsafe extern "C" fn mln_map_set_style_light_property(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_light_property(
+pub(crate) unsafe extern "C" fn mln_map_get_style_light_property(
     map: mln_map,
     property_name: mln_buffer_view,
     completion: *const mln_completion,
@@ -1914,7 +1914,7 @@ fn from_transition_options(options: TransitionOptions) -> mln_style_transition_o
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_transition_options(
+pub(crate) unsafe extern "C" fn mln_map_set_style_transition_options(
     map: mln_map,
     options: *const mln_style_transition_options,
     completion: *const mln_completion,
@@ -1943,7 +1943,7 @@ pub unsafe extern "C" fn mln_map_set_style_transition_options(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_style_transition_options(
+pub(crate) unsafe extern "C" fn mln_map_get_style_transition_options(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,

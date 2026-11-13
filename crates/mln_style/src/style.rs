@@ -11,7 +11,7 @@ use crate::map::camera::CameraOptions;
 use crate::projection::Projection;
 use crate::sky::Sky;
 use crate::source::Source;
-pub use crate::style_impl::{Impl, LayerRefMut, LightRefMut, ProjectionRefMut, SkyRefMut};
+pub(crate) use crate::style_impl::{Impl, LayerRefMut, LightRefMut, ProjectionRefMut};
 use crate::transition_options::TransitionOptions;
 
 /// Why a style failed to load.
@@ -124,13 +124,13 @@ impl Style {
     }
 
     // Light
-    pub fn get_light_mut(&mut self) -> LightRefMut<'_> {
+    pub(crate) fn get_light_mut(&mut self) -> LightRefMut<'_> {
         self.impl_.mutated = true;
         self.impl_.get_light_mut()
     }
 
     #[must_use]
-    pub fn get_light(&self) -> &Light {
+    pub(crate) fn get_light(&self) -> &Light {
         self.impl_.get_light()
     }
 
@@ -140,18 +140,13 @@ impl Style {
 
     // Sky
     /// Sets the sky; `None` removes it.
-    pub fn set_sky(&mut self, sky: Option<Sky>) {
+    pub(crate) fn set_sky(&mut self, sky: Option<Sky>) {
         self.impl_.mutated = true;
         self.impl_.set_sky(sky);
     }
 
-    pub fn get_sky_mut(&mut self) -> Option<SkyRefMut<'_>> {
-        self.impl_.mutated = true;
-        self.impl_.get_sky_mut()
-    }
-
     #[must_use]
-    pub fn get_sky(&self) -> Option<&Sky> {
+    pub(crate) fn get_sky(&self) -> Option<&Sky> {
         self.impl_.get_sky()
     }
 
@@ -173,7 +168,7 @@ impl Style {
 
     // Global state, used by the "global-state" expression.
     #[must_use]
-    pub fn get_global_state(&self) -> GlobalStateMap {
+    pub(crate) fn get_global_state(&self) -> GlobalStateMap {
         self.impl_.get_global_state()
     }
 

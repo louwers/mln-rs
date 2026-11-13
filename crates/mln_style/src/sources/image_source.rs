@@ -26,17 +26,17 @@ pub struct Impl {
 
 impl Impl {
     #[must_use]
-    pub fn new(id: String, coords: [LatLng; 4]) -> Self {
+    pub(crate) fn new(id: String, coords: [LatLng; 4]) -> Self {
         Impl { base: ImplBase::new(SourceType::Image, id), coords, image: None }
     }
 
     #[must_use]
-    pub fn with_coordinates(other: &Impl, coords: [LatLng; 4]) -> Self {
+    pub(crate) fn with_coordinates(other: &Impl, coords: [LatLng; 4]) -> Self {
         Impl { base: other.base.clone(), coords, image: other.image.clone() }
     }
 
     #[must_use]
-    pub fn with_image(rhs: &Impl, image: PremultipliedImage) -> Self {
+    pub(crate) fn with_image(rhs: &Impl, image: PremultipliedImage) -> Self {
         Impl { base: rhs.base.clone(), coords: rhs.coords, image: Some(Arc::new(image)) }
     }
 
@@ -103,7 +103,7 @@ impl ImageSource {
     }
 
     #[must_use]
-    pub fn impl_(&self) -> Arc<Impl> {
+    pub(crate) fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 

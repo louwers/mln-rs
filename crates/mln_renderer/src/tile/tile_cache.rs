@@ -10,7 +10,7 @@ use mln_tile_id::OverscaledTileID;
 
 use crate::tile::tile::{Tile, TileNecessity};
 
-pub struct TileCache {
+pub(crate) struct TileCache {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
     /// The cached tiles' keys, oldest first.
     ordered_keys: Vec<OverscaledTileID>,
@@ -22,7 +22,7 @@ impl TileCache {
     /// A cache of `size` tiles. It takes no thread pool: released tiles are
     /// dropped on the render thread (see the file comment).
     #[must_use]
-    pub fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize) -> Self {
         TileCache { tiles: BTreeMap::new(), ordered_keys: Vec::new(), pending_releases: Vec::new(), size }
     }
 
@@ -32,7 +32,7 @@ impl TileCache {
     }
 
     /// Change the maximum size of the cache.
-    pub fn set_size(&mut self, size: usize) {
+    pub(crate) fn set_size(&mut self, size: usize) {
         self.size = size;
 
         while self.ordered_keys.len() > self.size {
@@ -53,7 +53,7 @@ impl TileCache {
     ///
     /// Unlike C++, which releases a tile that isn't renderable yet, a tile
     /// that is still loading is kept, and goes on loading here.
-    pub fn add(&mut self, key: OverscaledTileID, tile: Box<dyn Tile>) {
+    pub(crate) fn add(&mut self, key: OverscaledTileID, tile: Box<dyn Tile>) {
         if self.size == 0 {
             self.evict(tile);
             return;
@@ -84,7 +84,7 @@ impl TileCache {
         debug_assert!(self.ordered_keys.len() <= self.size);
     }
 
-    pub fn pop(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
+    pub(crate) fn pop(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
         let tile = self.tiles.remove(key);
         if tile.is_some() {
             self.remove_key(key);
@@ -98,7 +98,7 @@ impl TileCache {
     /// Unlike C++, where only renderable tiles reach the cache, the tile may
     /// still be loading (see [`add`](Self::add)); it goes on loading under
     /// its new wrap.
-    pub fn pop_any_wrap(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
+    pub(crate) fn pop_any_wrap(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
         let found = *self
             .tiles
             .keys()
@@ -110,16 +110,17 @@ impl TileCache {
     }
 
     #[must_use]
-    pub fn get(&self, key: &OverscaledTileID) -> Option<&dyn Tile> {
+    pub(crate) fn get(&self, key: &OverscaledTileID) -> Option<&dyn Tile> {
         self.tiles.get(key).map(AsRef::as_ref)
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn has(&self, key: &OverscaledTileID) -> bool {
+    pub(crate) fn has(&self, key: &OverscaledTileID) -> bool {
         self.tiles.contains_key(key)
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         let tiles = std::mem::take(&mut self.tiles);
         for (_, tile) in tiles {
             self.evict(tile);
@@ -138,21 +139,15 @@ impl TileCache {
     }
 
     /// Set aside a tile to be destroyed later, without blocking
-    pub fn deferred_release(&mut self, tile: Box<dyn Tile>) {
+    pub(crate) fn deferred_release(&mut self, tile: Box<dyn Tile>) {
         tile.cancel();
         self.pending_releases.push(tile);
     }
 
     /// Schedule any accumulated deferred tiles to be destroyed (see the
     /// file comment: here they are dropped right away).
-    pub fn defer_pending_releases(&mut self) {
+    pub(crate) fn defer_pending_releases(&mut self) {
         self.pending_releases.clear();
-    }
-
-    /// The cached tile ids (oldest first), for tests.
-    #[must_use]
-    pub fn ordered_keys(&self) -> &[OverscaledTileID] {
-        &self.ordered_keys
     }
 }
 

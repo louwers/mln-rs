@@ -49,7 +49,7 @@ pub fn set_font_face_engine(engine: Arc<dyn FontFaceEngine>) {
 }
 
 /// The engine `set_font_face_engine` set, else the default.
-pub fn font_face_engine() -> Arc<dyn FontFaceEngine> {
+pub(crate) fn font_face_engine() -> Arc<dyn FontFaceEngine> {
     if let Some(engine) = ENGINE.lock().clone() {
         return engine;
     }

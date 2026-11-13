@@ -24,7 +24,7 @@ const TOKEN_RESERVED_CHARS: &[u8] = b"{}";
 
 /// Whether `source` contains a `{token}`.
 #[must_use]
-pub fn has_tokens(source: &str) -> bool {
+pub(crate) fn has_tokens(source: &str) -> bool {
     let bytes = source.as_bytes();
     let end = bytes.len();
     let mut pos = 0;
@@ -48,19 +48,19 @@ pub fn has_tokens(source: &str) -> bool {
 }
 
 #[must_use]
-pub fn convert_token_string_to_format_expression(source: &str) -> Box<dyn Expression> {
+pub(crate) fn convert_token_string_to_format_expression(source: &str) -> Box<dyn Expression> {
     let text_expression = convert_token_string_to_expression(source);
     let sections = vec![FormatExpressionSection::new(text_expression)];
     Box::new(FormatExpression::new(sections))
 }
 
 #[must_use]
-pub fn convert_token_string_to_image_expression(source: &str) -> Box<dyn Expression> {
+pub(crate) fn convert_token_string_to_image_expression(source: &str) -> Box<dyn Expression> {
     Box::new(ImageExpression::new(convert_token_string_to_expression(source)))
 }
 
 #[must_use]
-pub fn convert_token_string_to_expression(source: &str) -> Box<dyn Expression> {
+pub(crate) fn convert_token_string_to_expression(source: &str) -> Box<dyn Expression> {
     let mut inputs: Vec<Box<dyn Expression>> = Vec::new();
 
     // Byte positions; '{' and '}' are ASCII, so every slice is valid UTF-8.
@@ -96,7 +96,7 @@ pub fn convert_token_string_to_expression(source: &str) -> Box<dyn Expression> {
     }
 }
 
-pub fn convert_function_to_expression<T>(
+pub(crate) fn convert_function_to_expression<T>(
     value: &Convertible<'_>,
     error: &mut Error,
     convert_tokens: bool,

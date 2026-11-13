@@ -13,32 +13,40 @@ use crate::types::{
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tile {
     pub features: FeatureCollection<i16>,
-    pub num_points: u32,
-    pub num_simplified: u32,
+    pub(crate) num_points: u32,
+    pub(crate) num_simplified: u32,
 }
 
 /// `InternalTile`
 #[derive(Clone, Debug)]
-pub struct InternalTile {
-    pub extent: u16,
-    pub z: u8,
-    pub x: u32,
-    pub y: u32,
+pub(crate) struct InternalTile {
+    pub(crate) extent: u16,
+    pub(crate) z: u8,
+    pub(crate) x: u32,
+    pub(crate) y: u32,
 
-    pub z2: f64,
-    pub tolerance: f64,
-    pub sq_tolerance: f64,
-    pub line_metrics: bool,
+    pub(crate) z2: f64,
+    pub(crate) tolerance: f64,
+    pub(crate) sq_tolerance: f64,
+    pub(crate) line_metrics: bool,
 
-    pub source_features: VtFeatures,
-    pub bbox: BoxD,
+    pub(crate) source_features: VtFeatures,
+    pub(crate) bbox: BoxD,
 
-    pub tile: Tile,
+    pub(crate) tile: Tile,
 }
 
 impl InternalTile {
     #[must_use]
-    pub fn new(source: &VtFeatures, z: u8, x: u32, y: u32, extent: u16, tolerance: f64, line_metrics: bool) -> Self {
+    pub(crate) fn new(
+        source: &VtFeatures,
+        z: u8,
+        x: u32,
+        y: u32,
+        extent: u16,
+        tolerance: f64,
+        line_metrics: bool,
+    ) -> Self {
         let mut t = InternalTile {
             extent,
             z,

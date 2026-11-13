@@ -51,7 +51,7 @@ impl BorrowedTextures {
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
     /// depth textures that aren't one for each texture.
-    pub fn check(&self) -> Result<(), Error> {
+    pub(crate) fn check(&self) -> Result<(), Error> {
         if !self.depth_textures.is_empty() && self.depth_textures.len() != self.textures.len() {
             return Err(Error::invalid_argument("a ring's depth textures must be one for each of its textures"));
         }
@@ -202,7 +202,7 @@ impl BorrowedTarget {
     }
 
     /// How many textures the ring has.
-    pub fn depth(&self) -> usize {
+    pub(crate) fn depth(&self) -> usize {
         self.textures.borrow().textures.len()
     }
 
@@ -401,10 +401,6 @@ impl HostSurfaceTarget {
             image: RefCell::new(None),
         };
         Ok((backend, target))
-    }
-
-    pub fn size(&self) -> Size {
-        self.size.get()
     }
 
     /// Draws the next frame at `size` pixels, which the host's surface has.

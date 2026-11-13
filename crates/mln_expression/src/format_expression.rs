@@ -18,11 +18,11 @@ use crate::value::{Value, from_expression_value, to_string, type_of};
 #[derive(Clone)]
 pub struct FormatExpressionSection {
     /// Content can be expression that evaluates to String or Image.
-    pub content: Arc<dyn Expression>,
+    pub(crate) content: Arc<dyn Expression>,
 
     // Text related section options.
-    pub font_scale: Option<Arc<dyn Expression>>,
-    pub text_font: Option<Arc<dyn Expression>>,
+    pub(crate) font_scale: Option<Arc<dyn Expression>>,
+    pub(crate) text_font: Option<Arc<dyn Expression>>,
     pub text_color: Option<Arc<dyn Expression>>,
 }
 
@@ -80,7 +80,7 @@ impl FormatExpression {
         &self.sections
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let args_length = value.array_length();
         if args_length < 2 {
             ctx.error("Expected at least one argument.".to_owned());

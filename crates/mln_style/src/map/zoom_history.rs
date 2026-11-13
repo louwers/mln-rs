@@ -5,10 +5,10 @@ use mln_util::time::Instant;
 #[derive(Clone, Copy, Debug)]
 pub struct ZoomHistory {
     pub last_zoom: f32,
-    pub last_floor_zoom: f32,
-    pub last_integer_zoom: f32,
+    pub(crate) last_floor_zoom: f32,
+    pub(crate) last_integer_zoom: f32,
     /// When the zoom last crossed an integer; `None` for long ago.
-    pub last_integer_zoom_time: Option<Instant>,
+    pub(crate) last_integer_zoom_time: Option<Instant>,
     pub first: bool,
 }
 

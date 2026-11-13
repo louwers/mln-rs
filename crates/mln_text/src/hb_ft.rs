@@ -17,7 +17,7 @@ use crate::freetype::FreeTypeFace;
 use crate::ft::cmap::Encoding;
 
 /// `hb_ft_font_t` for one face.
-pub struct HbFtFont<'a> {
+pub(crate) struct HbFtFont<'a> {
     face: &'a FreeTypeFace,
     /// Whether the selected charmap is a symbol charmap.
     symbol: bool,
@@ -29,7 +29,7 @@ pub struct HbFtFont<'a> {
 impl<'a> HbFtFont<'a> {
     /// `_hb_ft_font_create` (`hb_ft_font_create` without the scale part).
     #[must_use]
-    pub fn new(face: &'a FreeTypeFace) -> Self {
+    pub(crate) fn new(face: &'a FreeTypeFace) -> Self {
         let ft = face.get_face().expect("hb-ft needs a valid face");
         let symbol = ft.charmap.is_some_and(|i| ft.charmaps[i].encoding == Encoding::MsSymbol);
         // OS/2 `get_font_page`: `version == 0 ? fsSelection & 0xFF00 : 0`;
@@ -42,7 +42,7 @@ impl<'a> HbFtFont<'a> {
     /// `hb_ft_font_changed`: `hb_font_set_scale` from the FreeType size,
     /// `(x_scale * units_per_EM + 2^15) >> 16` in unsigned 64-bit.
     #[must_use]
-    pub fn scale(face: &FreeTypeFace) -> (i32, i32) {
+    pub(crate) fn scale(face: &FreeTypeFace) -> (i32, i32) {
         let ft = face.get_face().expect("hb-ft needs a valid face");
         let upem = u64::from(ft.units_per_em);
         let x = ((ft.x_scale as u64).wrapping_mul(upem).wrapping_add(1 << 15) >> 16) as i32;

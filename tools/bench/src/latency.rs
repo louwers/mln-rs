@@ -25,19 +25,19 @@ static TILE_REQUESTS: AtomicUsize = AtomicUsize::new(0);
 
 /// Delays every tile request by `latency` from now on, as a network would
 /// answer it; zero passes them on at once.
-pub fn set_tile_latency(latency: Duration) {
+pub(crate) fn set_tile_latency(latency: Duration) {
     LATENCY_MS.store(latency.as_millis() as u64, Ordering::SeqCst);
 }
 
 /// The tile requests that reached the files since the last call, and those
 /// cancelled while they waited out the delay.
-pub fn take_tile_requests() -> usize {
+pub(crate) fn take_tile_requests() -> usize {
     TILE_REQUESTS.swap(0, Ordering::SeqCst)
 }
 
 /// Wraps the `ResourceLoader` factory of `file_sources`. Must run before
 /// the first map asks it for its file source.
-pub fn register(file_sources: &FileSourceManager) {
+pub(crate) fn register(file_sources: &FileSourceManager) {
     let inner =
         file_sources.unregister_file_source_factory(FileSourceType::ResourceLoader).expect("a ResourceLoader factory");
     file_sources.register_file_source_factory(

@@ -21,7 +21,7 @@ use crate::tile::raster_tile::RasterTileMessage;
 use crate::tile::tile_worker_transport::WorkerParameters;
 
 /// What a worker instance gets from the map side.
-pub enum WorkerAction {
+pub(crate) enum WorkerAction {
     /// Create the worker of `tile`; its parameters have the instance's atlas.
     Create { tile: u64, parameters: WorkerParameters },
     /// Create the `RasterTileWorker` of `tile`.
@@ -39,7 +39,7 @@ pub enum WorkerAction {
 }
 
 /// A worker instance's side.
-pub struct WorkerCodec {
+pub(crate) struct WorkerCodec {
     /// The values the map side defined, by key, and the keys of the textures
     /// of the instance's atlas.
     tables: shared::Tables,
@@ -55,7 +55,7 @@ impl Default for WorkerCodec {
 }
 
 impl WorkerCodec {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         WorkerCodec::default()
     }
 
@@ -80,7 +80,7 @@ impl WorkerCodec {
 
     /// Decodes a request, and does what it forgets and releases. Fails only
     /// for bytes that aren't a request.
-    pub fn decode(&mut self, bytes: &[u8]) -> Result<WorkerAction, String> {
+    pub(crate) fn decode(&mut self, bytes: &[u8]) -> Result<WorkerAction, String> {
         let (request, message): (Request, &[u8]) = self.tables.open(|| envelope::take(bytes))?;
         self.tables.forget(&request.forget);
         if !request.release.is_empty() {
@@ -90,7 +90,7 @@ impl WorkerCodec {
                 if let Some(texture) = release.texture
                     && textures.iter().any(|known| Arc::ptr_eq(known, &texture))
                 {
-                    self.atlas.remove_textures(&release.handles, &Some(texture));
+                    self.atlas.remove_textures(&release.handles, Some(texture).as_ref());
                 }
             }
             // The atlas frees only the textures nothing else holds.
@@ -111,13 +111,13 @@ impl WorkerCodec {
     }
 
     /// Decodes the message of a `WorkerAction::Message` as an `M`.
-    pub fn decode_message<M: DeserializeOwned>(&mut self, message: &[u8]) -> Result<M, String> {
+    pub(crate) fn decode_message<M: DeserializeOwned>(&mut self, message: &[u8]) -> Result<M, String> {
         self.tables.open(|| envelope::decode(message))
     }
 
     /// Encodes what the worker of `tile` sends its tile, its arrays as
     /// payloads. What can't cross becomes an error for the tile.
-    pub fn encode(&mut self, tile: u64, message: TileMessage) -> Encoded {
+    pub(crate) fn encode(&mut self, tile: u64, message: TileMessage) -> Encoded {
         let (correlation_id, atlases) = match &message {
             TileMessage::Layout { result, correlation_id } => (*correlation_id, Some(result.atlases.clone())),
             TileMessage::Error { correlation_id, .. } => (*correlation_id, None),
@@ -135,7 +135,7 @@ impl WorkerCodec {
     }
 
     /// Encodes what the `RasterTileWorker` of `tile` sends its tile.
-    pub fn encode_raster(&mut self, tile: u64, message: &RasterTileMessage) -> Encoded {
+    pub(crate) fn encode_raster(&mut self, tile: u64, message: &RasterTileMessage) -> Encoded {
         let (&RasterTileMessage::Parsed { correlation_id, .. } | &RasterTileMessage::Error { correlation_id, .. }) =
             message;
         self.encode_reply(tile, correlation_id, None, message, |error| RasterTileMessage::Error {
@@ -145,7 +145,7 @@ impl WorkerCodec {
     }
 
     /// Encodes what the `RasterDEMTileWorker` of `tile` sends its tile.
-    pub fn encode_raster_dem(&mut self, tile: u64, message: &RasterDEMTileMessage) -> Encoded {
+    pub(crate) fn encode_raster_dem(&mut self, tile: u64, message: &RasterDEMTileMessage) -> Encoded {
         let (&RasterDEMTileMessage::Parsed { correlation_id, .. }
         | &RasterDEMTileMessage::Error { correlation_id, .. }) = message;
         self.encode_reply(tile, correlation_id, None, message, |error| RasterDEMTileMessage::Error {

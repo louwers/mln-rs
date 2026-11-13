@@ -22,13 +22,13 @@ impl Stops {
 
     /// The first index whose key is not less than `key`.
     #[must_use]
-    pub fn lower_bound(&self, key: f64) -> usize {
+    pub(crate) fn lower_bound(&self, key: f64) -> usize {
         self.stops.partition_point(|(k, _)| *k < key)
     }
 
     /// The first index whose key is greater than `key`.
     #[must_use]
-    pub fn upper_bound(&self, key: f64) -> usize {
+    pub(crate) fn upper_bound(&self, key: f64) -> usize {
         self.stops.partition_point(|(k, _)| key.partial_cmp(k) != Some(Ordering::Less))
     }
 
@@ -44,7 +44,7 @@ impl Stops {
     }
 
     /// `stops[key] = value`: inserts or replaces.
-    pub fn insert_or_assign(&mut self, key: f64, value: Box<dyn Expression>) {
+    pub(crate) fn insert_or_assign(&mut self, key: f64, value: Box<dyn Expression>) {
         let i = self.lower_bound(key);
         if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
             self.stops[i].1 = value;
@@ -54,32 +54,32 @@ impl Stops {
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.stops.len()
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.stops.is_empty()
     }
 
     #[must_use]
-    pub fn get(&self, i: usize) -> (f64, &dyn Expression) {
+    pub(crate) fn get(&self, i: usize) -> (f64, &dyn Expression) {
         let (k, v) = &self.stops[i];
         (*k, &**v)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (f64, &dyn Expression)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (f64, &dyn Expression)> {
         self.stops.iter().map(|(k, v)| (*k, &**v))
     }
 
-    pub fn values(&self) -> impl Iterator<Item = &Box<dyn Expression>> {
+    pub(crate) fn values(&self) -> impl Iterator<Item = &Box<dyn Expression>> {
         self.stops.iter().map(|(_, v)| v)
     }
 
     /// Whether both have the same stops with equal outputs.
     #[must_use]
-    pub fn children_equal(&self, rhs: &Stops) -> bool {
+    pub(crate) fn children_equal(&self, rhs: &Stops) -> bool {
         if self.stops.len() != rhs.stops.len() {
             return false;
         }
@@ -90,7 +90,7 @@ impl Stops {
 /// The smallest range of stops that covers the interval from `lower` to
 /// `upper`.
 #[must_use]
-pub fn get_covering_stops(stops: &Stops, lower: f64, upper: f64) -> Range<f32> {
+pub(crate) fn get_covering_stops(stops: &Stops, lower: f64, upper: f64) -> Range<f32> {
     debug_assert!(!stops.is_empty());
     if stops.is_empty() {
         return Range::new(f32::NAN, f32::NAN);

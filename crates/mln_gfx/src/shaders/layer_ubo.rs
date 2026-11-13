@@ -1,21 +1,5 @@
 use bytemuck::{Pod, Zeroable};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum AttributeSource {
-    Constant,
-    PerVertex,
-    Computed,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum ExpressionFunction {
-    Constant,
-    Linear,
-    Exponential,
-}
-
 /// The global paint parameters uniform block (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]

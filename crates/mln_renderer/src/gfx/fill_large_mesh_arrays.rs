@@ -75,10 +75,10 @@ fn fill_segments<const SIZE: usize, V, L: AsRef<[u32]>>(
 
 /// The outline lines drawn over a mesh's vertices, one list of vertex pairs
 /// per ring.
-pub struct MeshLines<'a> {
-    pub segments: &'a mut Vec<SegmentBase>,
-    pub indexes: &'a mut Vec<u16>,
-    pub lists: &'a [Vec<u32>],
+pub(crate) struct MeshLines<'a> {
+    pub(crate) segments: &'a mut Vec<SegmentBase>,
+    pub(crate) indexes: &'a mut Vec<u16>,
+    pub(crate) lists: &'a [Vec<u32>],
 }
 
 /// GL JS's `fillLargeMeshArrays`: appends a triangle mesh, and the outline
@@ -89,7 +89,7 @@ pub struct MeshLines<'a> {
 /// indices to draw. `max_vertices` is the 16-bit index space
 /// (`MAX_SEGMENT_VERTICES`, the C++ default) unless a test asks for less.
 #[allow(clippy::too_many_arguments)]
-pub fn fill_large_mesh_arrays<V>(
+pub(crate) fn fill_large_mesh_arrays<V>(
     vertices: &mut Vec<V>,
     layout_vertex: impl Fn(i16, i16) -> V,
     triangle_segments: &mut Vec<SegmentBase>,

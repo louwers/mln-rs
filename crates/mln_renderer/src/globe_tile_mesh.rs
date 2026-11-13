@@ -22,19 +22,23 @@ use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
 /// position + texture-position vertices. Each part is gridded like the tile
 /// it stands in for, so it meets that tile's neighbours edge to edge; texture
 /// positions stay inside the tile so the pole rows sample the tile's edge.
-pub struct GlobeTileMesh<V: bytemuck::Pod> {
-    pub vertices: Rc<VertexVector<V>>,
-    pub indices: IndexVectorBasePtr,
-    pub segments: Vec<SegmentBase>,
+pub(crate) struct GlobeTileMesh<V: bytemuck::Pod> {
+    pub(crate) vertices: Rc<VertexVector<V>>,
+    pub(crate) indices: IndexVectorBasePtr,
+    pub(crate) segments: Vec<SegmentBase>,
 }
 
 impl<V: bytemuck::Pod> GlobeTileMesh<V> {
-    pub fn new(canonical: &CanonicalTileID, mask: &TileMask, layout_vertex: fn(Point<i16>, Point<u16>) -> V) -> Self {
+    pub(crate) fn new(
+        canonical: &CanonicalTileID,
+        mask: &TileMask,
+        layout_vertex: fn(Point<i16>, Point<u16>) -> V,
+    ) -> Self {
         let mut vertices: Vec<V> = Vec::new();
         let mut indices: Vec<u16> = Vec::new();
         let mut segments: Vec<SegmentBase> = Vec::new();
         for part in mask {
-            let mesh = create_tile_mesh(&TileMeshOptions {
+            let mesh = create_tile_mesh(TileMeshOptions {
                 granularity: SubdivisionGranularitySetting::globe()
                     .tile
                     .get_granularity_for_zoom_level(canonical.z.wrapping_add(part.z)),
@@ -87,7 +91,7 @@ struct Entry<V: bytemuck::Pod> {
 
 /// The grids a layer has built so far, one per zoom, pole row and mask: the
 /// mesh depends on nothing else.
-pub struct GlobeTileMeshCache<V: bytemuck::Pod> {
+pub(crate) struct GlobeTileMeshCache<V: bytemuck::Pod> {
     uses: u64,
     meshes: BTreeMap<(u8, bool, bool, TileMask), Entry<V>>,
 }
@@ -102,11 +106,11 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
     const MAX_MESHES: usize = 64;
 
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn get(
+    pub(crate) fn get(
         &mut self,
         canonical: &CanonicalTileID,
         mask: &TileMask,
@@ -136,12 +140,13 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
         &entry.mesh
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.meshes.clear();
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         self.meshes.len()
     }
 }
@@ -149,23 +154,23 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
 /// The same grid as raw `Short2` positions, for drawables built from raw
 /// vertex bytes.
 #[derive(Debug, Default)]
-pub struct RawGlobeTileMesh {
-    pub vertices: Vec<u8>,
-    pub vertex_count: usize,
-    pub indices: Vec<u16>,
-    pub segments: Vec<SegmentBase>,
+pub(crate) struct RawGlobeTileMesh {
+    pub(crate) vertices: Vec<u8>,
+    pub(crate) vertex_count: usize,
+    pub(crate) indices: Vec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
 }
 
 /// The globe mesh of the tile `canonical`, with borders if
 /// `generate_borders`. C++ defaults `granularity` to the globe's tile
 /// granularity.
 #[must_use]
-pub fn raw_globe_tile_mesh(
+pub(crate) fn raw_globe_tile_mesh(
     canonical: &CanonicalTileID,
     generate_borders: bool,
-    granularity: &SubdivisionGranularityExpression,
+    granularity: SubdivisionGranularityExpression,
 ) -> RawGlobeTileMesh {
-    let mesh = create_tile_mesh(&TileMeshOptions {
+    let mesh = create_tile_mesh(TileMeshOptions {
         granularity: granularity.get_granularity_for_zoom_level(canonical.z),
         generate_borders,
         extend_to_north_pole: canonical.y == 0,

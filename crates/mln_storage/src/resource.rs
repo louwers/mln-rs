@@ -60,8 +60,9 @@ pub struct LoadingMethod(pub u8);
 
 #[allow(non_upper_case_globals)]
 impl LoadingMethod {
-    pub const None: LoadingMethod = LoadingMethod(0b00);
-    pub const Cache: LoadingMethod = LoadingMethod(0b01);
+    #[cfg(test)]
+    pub(crate) const None: LoadingMethod = LoadingMethod(0b00);
+    pub(crate) const Cache: LoadingMethod = LoadingMethod(0b01);
     pub const Network: LoadingMethod = LoadingMethod(0b10);
 
     pub const CacheOnly: LoadingMethod = Self::Cache;
@@ -123,11 +124,11 @@ fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
 }
 
 impl Resource {
-    pub fn new(kind: Kind, url: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: Kind, url: impl Into<String>) -> Self {
         Self::with_tile_data(kind, url, None, LoadingMethod::All)
     }
 
-    pub fn with_tile_data(
+    pub(crate) fn with_tile_data(
         kind: Kind,
         url: impl Into<String>,
         tile_data: Option<TileData>,

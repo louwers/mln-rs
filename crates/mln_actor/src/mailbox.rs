@@ -23,7 +23,7 @@ use crate::local_object;
 use crate::scheduler::{Scheduler, WeakScheduler};
 
 /// A call on the mailbox's target object.
-pub type Message = Box<dyn FnOnce(&dyn Any) + Send + 'static>;
+pub(crate) type Message = Box<dyn FnOnce(&dyn Any) + Send + 'static>;
 
 struct State {
     queue: VecDeque<Message>,
@@ -74,11 +74,6 @@ impl Mailbox {
         }
     }
 
-    pub fn open_tagged(&self, scheduler: &Arc<dyn Scheduler + Send + Sync>, tag: SimpleIdentity, object: Rc<dyn Any>) {
-        self.state.lock().scheduler_tag = Some(tag);
-        self.open(scheduler, object);
-    }
-
     /// No message runs after this returns. Call it on the target's thread (it
     /// unregisters the target there).
     pub fn close(&self) {
@@ -93,7 +88,7 @@ impl Mailbox {
         drop(object);
     }
 
-    pub fn push(&self, message: Message) {
+    pub(crate) fn push(&self, message: Message) {
         let mut state = self.state.lock();
         if state.closed {
             return;
@@ -107,7 +102,7 @@ impl Mailbox {
     }
 
     /// Runs the first message, and schedules the next one.
-    pub fn receive(&self) {
+    pub(crate) fn receive(&self) {
         let (message, was_empty) = {
             let mut state = self.state.lock();
             if state.closed {

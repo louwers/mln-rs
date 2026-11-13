@@ -118,7 +118,7 @@ fn capture_rendered_features(
                 tile_id,
                 state,
                 transform_params,
-                translation,
+                *translation,
                 translation_anchor,
                 /*near_clipped=*/ true,
             )
@@ -194,12 +194,11 @@ fn read_paint_properties(
 /// The builder of a tile's depth pass or color pass drawables.
 fn create_builder(
     context: &dyn Context,
-    name: String,
     shader: &mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr,
     enable_color: bool,
     tweaker: Option<&DrawableTweakerPtr>,
 ) -> UniqueDrawableBuilder {
-    let mut builder = context.create_drawable_builder(name);
+    let mut builder = context.create_drawable_builder();
     builder.set_shader(Some(shader.clone()));
     builder.set_is_3d(true);
     builder.set_enable_color(enable_color);
@@ -215,7 +214,7 @@ fn create_builder(
     builder
 }
 
-pub struct RenderFillExtrusionLayer {
+pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
     // Paint properties
     unevaluated: FillExtrusionPaintProperties::Unevaluated,
@@ -231,7 +230,7 @@ pub struct RenderFillExtrusionLayer {
 }
 
 impl RenderFillExtrusionLayer {
-    pub fn new(impl_: Arc<FillExtrusionLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<FillExtrusionLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(FillExtrusionLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -311,7 +310,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&self.base.evaluated_properties);
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
-            evaluated.get::<FillExtrusionTranslate>(),
+            *evaluated.get::<FillExtrusionTranslate>(),
             *evaluated.get::<FillExtrusionTranslateAnchor>(),
             transform_state.get_bearing() as f32,
             pixels_to_tile_units,
@@ -400,7 +399,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
             });
         }
 
-        let layer_prefix = format!("{}/", self.get_id());
         let has_pattern = !self.unevaluated.get::<FillExtrusionPattern>().is_undefined();
         let opaque = *evaluated.get::<FillExtrusionOpacity>() >= 1.0;
 
@@ -489,7 +487,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
-                drawable_has_layer_tweaker(drawable, &layer_tweaker)
+                drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
             };
             if self.update_tile(draw_pass, &tile_id, update_existing) {
                 continue;
@@ -540,30 +538,16 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let do_depth_pass = !opaque || has_pattern;
 
             if do_depth_pass && depth_builder.is_none() {
-                depth_builder =
-                    Some(create_builder(context, format!("{layer_prefix}depth"), &shader, false, tweaker.as_ref()));
+                depth_builder = Some(create_builder(context, &shader, false, tweaker.as_ref()));
             }
             if color_builder.is_none() {
-                color_builder =
-                    Some(create_builder(context, format!("{layer_prefix}color"), &shader, true, tweaker.as_ref()));
+                color_builder = Some(create_builder(context, &shader, true, tweaker.as_ref()));
             }
             if do_depth_pass && instanced_depth_builder.is_none() {
-                instanced_depth_builder = Some(create_builder(
-                    context,
-                    format!("{layer_prefix}depthInstanced"),
-                    &instanced_shader,
-                    false,
-                    tweaker.as_ref(),
-                ));
+                instanced_depth_builder = Some(create_builder(context, &instanced_shader, false, tweaker.as_ref()));
             }
             if instanced_color_builder.is_none() {
-                instanced_color_builder = Some(create_builder(
-                    context,
-                    format!("{layer_prefix}colorInstanced"),
-                    &instanced_shader,
-                    true,
-                    tweaker.as_ref(),
-                ));
+                instanced_color_builder = Some(create_builder(context, &instanced_shader, true, tweaker.as_ref()));
             }
 
             if has_pattern

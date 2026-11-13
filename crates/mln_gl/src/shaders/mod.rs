@@ -2,7 +2,7 @@
 
 /// The C++ core's GLSL, with the port's changes.
 #[rustfmt::skip]
-pub mod glsl_sources;
-pub mod shader_group;
-pub mod shader_program;
-pub mod shader_source;
+pub(crate) mod glsl_sources;
+pub(crate) mod shader_group;
+pub(crate) mod shader_program;
+pub(crate) mod shader_source;

@@ -397,7 +397,7 @@ const KNOWN_DEBUG_FLAGS: u32 = MLN_MAP_DEBUG_TILE_BORDERS
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_debug_flags(
+pub(crate) unsafe extern "C" fn mln_map_set_debug_flags(
     map: mln_map,
     flags: mln_map_debug_flags,
     completion: *const mln_completion,
@@ -418,7 +418,7 @@ pub unsafe extern "C" fn mln_map_set_debug_flags(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_rendering_stats_view_enabled(
+pub(crate) unsafe extern "C" fn mln_map_set_rendering_stats_view_enabled(
     map: mln_map,
     enabled: bool,
     completion: *const mln_completion,
@@ -436,7 +436,7 @@ pub unsafe extern "C" fn mln_map_set_rendering_stats_view_enabled(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_globe_free_bearing_enabled(
+pub(crate) unsafe extern "C" fn mln_map_set_globe_free_bearing_enabled(
     map: mln_map,
     enabled: bool,
     completion: *const mln_completion,
@@ -454,7 +454,7 @@ pub unsafe extern "C" fn mln_map_set_globe_free_bearing_enabled(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_dump_debug_logs(
+pub(crate) unsafe extern "C" fn mln_map_dump_debug_logs(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -521,7 +521,7 @@ fn viewport_options(options: &mln_map_viewport_options) -> Result<ViewportOption
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_viewport_options(
+pub(crate) unsafe extern "C" fn mln_map_set_viewport_options(
     map: mln_map,
     options: *const mln_map_viewport_options,
     completion: *const mln_completion,
@@ -575,7 +575,7 @@ fn tile_options(options: &mln_map_tile_options) -> Result<TileOptions, Error> {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_tile_options(
+pub(crate) unsafe extern "C" fn mln_map_set_tile_options(
     map: mln_map,
     options: *const mln_map_tile_options,
     completion: *const mln_completion,
@@ -597,7 +597,7 @@ pub unsafe extern "C" fn mln_map_set_tile_options(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_update_camera(
+pub(crate) unsafe extern "C" fn mln_map_update_camera(
     map: mln_map,
     update: *const mln_camera_update,
     completion: *const mln_completion,
@@ -631,7 +631,7 @@ const KNOWN_DELTA_FIELDS: u32 = MLN_CAMERA_DELTA_OFFSET
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_apply_camera_delta(
+pub(crate) unsafe extern "C" fn mln_map_apply_camera_delta(
     map: mln_map,
     delta: *const mln_camera_delta,
     completion: *const mln_completion,
@@ -669,7 +669,7 @@ pub unsafe extern "C" fn mln_map_apply_camera_delta(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_cancel_camera_transitions(
+pub(crate) unsafe extern "C" fn mln_map_cancel_camera_transitions(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -686,7 +686,7 @@ pub unsafe extern "C" fn mln_map_cancel_camera_transitions(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_cancel_camera_transitions_with_id(
+pub(crate) unsafe extern "C" fn mln_map_cancel_camera_transitions_with_id(
     map: mln_map,
     transition_id: u64,
     completion: *const mln_completion,
@@ -704,7 +704,7 @@ pub unsafe extern "C" fn mln_map_cancel_camera_transitions_with_id(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_get_camera(
+pub(crate) unsafe extern "C" fn mln_map_get_camera(
     map: mln_map,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -725,7 +725,7 @@ pub unsafe extern "C" fn mln_map_get_camera(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_lat_lng_bounds_for_camera(
+pub(crate) unsafe extern "C" fn mln_map_lat_lng_bounds_for_camera(
     map: mln_map,
     camera: *const mln_camera_options,
     completion: *const mln_completion,
@@ -834,7 +834,7 @@ unsafe fn camera_for(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_camera_for_lat_lng_bounds(
+pub(crate) unsafe extern "C" fn mln_map_camera_for_lat_lng_bounds(
     map: mln_map,
     bounds: mln_lat_lng_bounds,
     fit_options: *const mln_camera_fit_options,
@@ -854,7 +854,7 @@ pub unsafe extern "C" fn mln_map_camera_for_lat_lng_bounds(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_camera_for_lat_lngs(
+pub(crate) unsafe extern "C" fn mln_map_camera_for_lat_lngs(
     map: mln_map,
     coordinates: *const mln_lat_lng,
     coordinate_count: usize,
@@ -876,7 +876,7 @@ pub unsafe extern "C" fn mln_map_camera_for_lat_lngs(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_camera_for_geometry(
+pub(crate) unsafe extern "C" fn mln_map_camera_for_geometry(
     map: mln_map,
     geometry: mln_buffer_view,
     fit_options: *const mln_camera_fit_options,
@@ -919,7 +919,7 @@ unsafe fn fit_camera(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_fit_camera_to_lat_lng_bounds(
+pub(crate) unsafe extern "C" fn mln_map_fit_camera_to_lat_lng_bounds(
     map: mln_map,
     bounds: mln_lat_lng_bounds,
     update: *const mln_camera_fit_update,
@@ -939,7 +939,7 @@ pub unsafe extern "C" fn mln_map_fit_camera_to_lat_lng_bounds(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_fit_camera_to_lat_lngs(
+pub(crate) unsafe extern "C" fn mln_map_fit_camera_to_lat_lngs(
     map: mln_map,
     coordinates: *const mln_lat_lng,
     coordinate_count: usize,
@@ -961,7 +961,7 @@ pub unsafe extern "C" fn mln_map_fit_camera_to_lat_lngs(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_fit_camera_to_geometry(
+pub(crate) unsafe extern "C" fn mln_map_fit_camera_to_geometry(
     map: mln_map,
     geometry: mln_buffer_view,
     update: *const mln_camera_fit_update,
@@ -1023,7 +1023,7 @@ fn bound_options(options: &mln_bound_options) -> Result<BoundOptions, Error> {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_bounds(
+pub(crate) unsafe extern "C" fn mln_map_set_bounds(
     map: mln_map,
     options: *const mln_bound_options,
     completion: *const mln_completion,
@@ -1069,7 +1069,7 @@ fn free_camera_options(options: &mln_free_camera_options) -> Result<FreeCameraOp
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_free_camera_options(
+pub(crate) unsafe extern "C" fn mln_map_set_free_camera_options(
     map: mln_map,
     options: *const mln_free_camera_options,
     completion: *const mln_completion,
@@ -1107,7 +1107,7 @@ fn projection_mode(options: &mln_projection_mode_options) -> Result<ProjectionMo
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_projection_mode(
+pub(crate) unsafe extern "C" fn mln_map_set_projection_mode(
     map: mln_map,
     options: *const mln_projection_mode_options,
     completion: *const mln_completion,
@@ -1183,7 +1183,7 @@ fn camera_for_tile(tile: mln_canonical_tile_id, logical_size: mln_logical_size) 
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_camera_for_tile(
+pub(crate) unsafe extern "C" fn mln_camera_for_tile(
     tile: mln_canonical_tile_id,
     logical_size: mln_logical_size,
     out_camera: *mut mln_camera_options,

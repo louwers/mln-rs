@@ -20,12 +20,12 @@ fn angle_to(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
 }
 
 #[must_use]
-pub fn get_angle_window_size(text_left: f32, text_right: f32, glyph_size: f32, box_scale: f32) -> f32 {
+pub(crate) fn get_angle_window_size(text_left: f32, text_right: f32, glyph_size: f32, box_scale: f32) -> f32 {
     if (text_left - text_right) == 0.0 { 0.0 } else { 3.0f32 / 5.0f32 * glyph_size * box_scale }
 }
 
 #[must_use]
-pub fn get_line_length(line: &GeometryCoordinates) -> f32 {
+pub(crate) fn get_line_length(line: &GeometryCoordinates) -> f32 {
     let mut line_length: f32 = 0.0;
     for segment in line.windows(2) {
         line_length += dist(segment[0], segment[1]);
@@ -107,7 +107,7 @@ fn resample(
 
 #[allow(clippy::too_many_arguments)]
 #[must_use]
-pub fn get_anchors(
+pub(crate) fn get_anchors(
     line: &GeometryCoordinates,
     mut spacing: f32,
     max_angle: f32,
@@ -161,7 +161,7 @@ pub fn get_anchors(
 
 #[allow(clippy::too_many_arguments)]
 #[must_use]
-pub fn get_center_anchor(
+pub(crate) fn get_center_anchor(
     line: &GeometryCoordinates,
     max_angle: f32,
     text_left: f32,

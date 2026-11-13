@@ -20,7 +20,7 @@ use zune_jpeg::zune_core::bytestream::ZCursor;
 use zune_jpeg::zune_core::colorspace::ColorSpace;
 use zune_jpeg::zune_core::options::DecoderOptions;
 
-pub fn decode_jpeg(data: &[u8]) -> Result<PremultipliedImage, Error> {
+pub(crate) fn decode_jpeg(data: &[u8]) -> Result<PremultipliedImage, Error> {
     let invalid = |e: DecodeErrors| Error::invalid_argument(format!("JPEG Reader: libjpeg could not read image: {e}"));
     let options = DecoderOptions::default().set_strict_mode(true);
 

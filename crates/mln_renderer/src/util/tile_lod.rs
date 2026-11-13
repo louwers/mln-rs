@@ -4,7 +4,7 @@ use mln_math::deg2rad;
 
 /// The pitch at which Mercator's horizon reaches the top of the screen, in
 /// degrees.
-pub const MAX_MERCATOR_HORIZON_ANGLE_DEGREES: f64 = 89.25;
+pub(crate) const MAX_MERCATOR_HORIZON_ANGLE_DEGREES: f64 = 89.25;
 
 const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
 const TILE_CULLING_HORIZON_ONSET_DEGREES: f64 = 15.0;
@@ -26,7 +26,7 @@ fn integral_of_cos_x_by_p(p: f64, x1: f64, x2: f64) -> f64 {
 /// projections (the Mercator cover uses it whenever terrain is present or the
 /// pitch passes 78.5 - fov/2 degrees).
 #[derive(Clone, Copy, Debug)]
-pub struct TileZoomFunction {
+pub(crate) struct TileZoomFunction {
     camera_vertical_fov: f64,
     pitch_tile_loading_behavior: f64,
     tile_count_pitch0: f64,
@@ -34,15 +34,15 @@ pub struct TileZoomFunction {
 }
 
 impl TileZoomFunction {
-    pub const DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN: f64 = 9.314;
-    pub const DEFAULT_TILE_COUNT_MAX_MIN_RATIO: f64 = 3.0;
+    pub(crate) const DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN: f64 = 9.314;
+    pub(crate) const DEFAULT_TILE_COUNT_MAX_MIN_RATIO: f64 = 3.0;
 
     /// The terms that depend on the field of view alone are computed once
     /// here, for a whole cover. (C++ defaults the last two arguments to
     /// `DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN` and
     /// `DEFAULT_TILE_COUNT_MAX_MIN_RATIO`.)
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         camera_vertical_fov_degrees: f64,
         max_zoom_levels_on_screen: f64,
         tile_count_max_min_ratio: f64,
@@ -69,7 +69,7 @@ impl TileZoomFunction {
     /// The zoom to load a tile at. Distances share one unit (GL JS uses
     /// Mercator units at zoom 0). Returns an unrounded zoom.
     #[must_use]
-    pub fn call(
+    pub(crate) fn call(
         &self,
         requested_center_zoom: f64,
         distance_to_tile_2d: f64,
@@ -103,7 +103,7 @@ impl TileZoomFunction {
 /// `max_content_elevation` the tallest content the style is known to hold;
 /// both are zero without terrain (C++ defaults them to 0).
 #[must_use]
-pub fn elevation_for_tile_culling(
+pub(crate) fn elevation_for_tile_culling(
     pitch_degrees: f64,
     fov_degrees: f64,
     center_elevation: f64,

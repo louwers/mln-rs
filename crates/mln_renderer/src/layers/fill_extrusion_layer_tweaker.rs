@@ -27,7 +27,7 @@ use crate::frame_projection::zero_to_one_clip_z;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
-pub struct FillExtrusionLayerTweaker {
+pub(crate) struct FillExtrusionLayerTweaker {
     base: LayerTweakerBase,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
     tile_props_uniform_buffer: Option<UniformBufferPtr>,
@@ -35,7 +35,7 @@ pub struct FillExtrusionLayerTweaker {
 }
 
 impl FillExtrusionLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         FillExtrusionLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             drawable_uniform_buffer: None,
@@ -145,7 +145,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             let mut projection = get_projection_data(
                 &tile_id,
                 parameters,
-                &translation,
+                translation,
                 anchor,
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,

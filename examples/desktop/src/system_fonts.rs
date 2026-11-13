@@ -153,7 +153,7 @@ const SCRIPTS: &[Script] = &[
 ];
 
 /// A system font face chosen as a fallback.
-pub struct SystemFontFace {
+pub(crate) struct SystemFontFace {
     /// Its family name.
     pub family: String,
     pub face: FontFace,
@@ -161,7 +161,7 @@ pub struct SystemFontFace {
 
 /// The fallback font faces for the scripts in `SCRIPTS`, from the fonts
 /// installed on this system: at most one per script.
-pub fn fallback_font_faces() -> Vec<SystemFontFace> {
+pub(crate) fn fallback_font_faces() -> Vec<SystemFontFace> {
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
 
@@ -195,7 +195,7 @@ pub fn fallback_font_faces() -> Vec<SystemFontFace> {
 }
 
 /// The faces only, for `Style::set_fallback_font_face_list`.
-pub fn into_font_faces(faces: Vec<SystemFontFace>) -> FontFaces {
+pub(crate) fn into_font_faces(faces: Vec<SystemFontFace>) -> FontFaces {
     faces.into_iter().map(|face| face.face).collect()
 }
 

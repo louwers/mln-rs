@@ -525,13 +525,13 @@ impl State {
     }
 }
 
-pub struct PMTilesFileSourceThread {
+pub(crate) struct PMTilesFileSourceThread {
     state: Rc<State>,
 }
 
 impl PMTilesFileSourceThread {
     /// Generate a tilejson resource from .pmtiles file
-    pub fn request_tilejson(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request_tilejson(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let url = extract_url(&resource.url);
 
         let (this, r, url2) = (self.state.clone(), r.clone(), url.clone());
@@ -555,7 +555,7 @@ impl PMTilesFileSourceThread {
     }
 
     /// Load data for specific tile
-    pub fn request_tile(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request_tile(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let url = extract_url(&resource.url);
         // C++ dereferences `resource.tileData` unchecked.
         let Some(tile_data) = resource.tile_data.clone() else {
@@ -701,7 +701,7 @@ impl Drop for PMTilesFileSourceThread {
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 /// The `Pmtiles` file source: `pmtiles://` URLs of local or remote archives.
-pub struct PMTilesFileSource {
+pub(crate) struct PMTilesFileSource {
     thread: Thread<PMTilesFileSourceThread>,
     resource_options: Arc<Mutex<ResourceOptions>>,
 }
@@ -710,7 +710,7 @@ impl PMTilesFileSource {
     /// A PMTiles file source that reads archives through `file_sources`'
     /// `ResourceLoader`.
     #[must_use]
-    pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
+    pub(crate) fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let resource_options = Arc::new(Mutex::new(resource_options.clone()));
         let ro = resource_options.clone();
         let file_sources = file_sources.clone();

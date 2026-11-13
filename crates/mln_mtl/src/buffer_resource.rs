@@ -28,9 +28,9 @@ thread_local! {
     static NEXT_ID: Cell<u64> = const { Cell::new(1) };
 }
 
-pub type VersionType = u16;
+pub(crate) type VersionType = u16;
 
-pub struct BufferResource {
+pub(crate) struct BufferResource {
     id: u64,
     backend: Rc<BackendImpl>,
     context: Weak<Context>,
@@ -73,7 +73,7 @@ impl BufferResource {
     /// stay in memory and are bound with `setVertexBytes`; the others are
     /// `MTLBuffer`s. Metal draws indexed primitives only from an
     /// `MTLBuffer`. `persistent` hints that the buffer is reused many times.
-    pub fn new(
+    pub(crate) fn new(
         context: &Context,
         data: Option<&[u8]>,
         size: usize,
@@ -122,38 +122,27 @@ impl BufferResource {
     }
 
     /// The context, unless it is gone.
-    pub fn context(&self) -> Option<Rc<Context>> {
+    pub(crate) fn context(&self) -> Option<Rc<Context>> {
         self.context.upgrade()
     }
 
-    pub fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> u64 {
         self.id
     }
 
-    pub fn get_size_in_bytes(&self) -> usize {
+    pub(crate) fn get_size_in_bytes(&self) -> usize {
         self.size
     }
 
-    /// A copy of the contents.
-    pub fn contents(&self) -> Vec<u8> {
-        if let Some(buffer) = self.buffer.borrow().as_ref() {
-            // SAFETY: the buffer is shared memory of `size` bytes, and no
-            // command reading it writes to it.
-            unsafe { std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), self.size) }.to_vec()
-        } else {
-            self.raw.borrow().clone()
-        }
-    }
-
-    pub fn get_metal_buffer(&self) -> Option<MTLBufferPtr> {
+    pub(crate) fn get_metal_buffer(&self) -> Option<MTLBufferPtr> {
         self.buffer.borrow().clone()
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         self.buffer.borrow().is_some() || !self.raw.borrow().is_empty()
     }
 
-    pub fn get_version(&self) -> VersionType {
+    pub(crate) fn get_version(&self) -> VersionType {
         self.version.get()
     }
 
@@ -161,7 +150,7 @@ impl BufferResource {
     ///
     /// An `MTLBuffer` may still be in use by the previous frame, so it is
     /// replaced by a new buffer rather than written to.
-    pub fn update(&self, data: &[u8], offset: usize) {
+    pub(crate) fn update(&self, data: &[u8], offset: usize) {
         debug_assert!(data.len() + offset <= self.size);
         let update_size = data.len().min(self.size.saturating_sub(offset));
         if update_size == 0 {
@@ -214,11 +203,11 @@ impl BufferResource {
     }
 
     /// Whether a binding made at `version` is stale.
-    pub fn need_rebind(&self, version: VersionType) -> bool {
+    pub(crate) fn need_rebind(&self, version: VersionType) -> bool {
         self.version.get() != version
     }
 
-    pub fn bind_vertex(
+    pub(crate) fn bind_vertex(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
         offset: usize,
@@ -241,7 +230,7 @@ impl BufferResource {
         }
     }
 
-    pub fn bind_fragment(
+    pub(crate) fn bind_fragment(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
         offset: usize,
@@ -263,7 +252,7 @@ impl BufferResource {
     }
 
     /// Moves the offset of this buffer, already bound at `index`.
-    pub fn update_vertex_bind_offset(
+    pub(crate) fn update_vertex_bind_offset(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
         offset: usize,
@@ -281,7 +270,7 @@ impl BufferResource {
         }
     }
 
-    pub fn update_fragment_bind_offset(
+    pub(crate) fn update_fragment_bind_offset(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
         offset: usize,

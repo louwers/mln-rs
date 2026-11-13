@@ -13,7 +13,7 @@ pub struct DataDrivenPropertyEvaluator<'a, T, const USE_INTEGER_ZOOM: bool = fal
 }
 
 impl<'a, T, const USE_INTEGER_ZOOM: bool> DataDrivenPropertyEvaluator<'a, T, USE_INTEGER_ZOOM> {
-    pub fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
+    pub(crate) fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
         DataDrivenPropertyEvaluator { parameters, default_value }
     }
 }
@@ -72,7 +72,7 @@ pub struct DataDrivenFadedPropertyEvaluator<'a, T> {
 }
 
 impl<'a, T: Clone> DataDrivenFadedPropertyEvaluator<'a, T> {
-    pub fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
+    pub(crate) fn new(parameters: &'a PropertyEvaluationParameters, default_value: T) -> Self {
         DataDrivenFadedPropertyEvaluator { parameters, default_value }
     }
 

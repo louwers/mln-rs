@@ -19,7 +19,7 @@ use crate::generated::types::{mln_diagnostic, mln_status};
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_android_init(
+pub(crate) unsafe extern "C" fn mln_android_init(
     jni_env: *mut c_void,
     context: *mut c_void,
     out_diagnostic: *mut mln_diagnostic,

@@ -58,7 +58,7 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &FillLayerImpl {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
-pub enum FillVariant {
+pub(crate) enum FillVariant {
     Fill,
     FillPattern,
     FillOutline,
@@ -70,7 +70,7 @@ impl FillVariant {
     /// The fill variant of a drawable type; `None` for other types, which the
     /// tweaker handles in its fallback arm.
     #[must_use]
-    pub fn from_type(type_: usize) -> Option<FillVariant> {
+    pub(crate) fn from_type(type_: usize) -> Option<FillVariant> {
         match type_ {
             0 => Some(FillVariant::Fill),
             1 => Some(FillVariant::FillPattern),
@@ -114,7 +114,7 @@ fn capture_rendered_features(
         tile.get_overscaled_tile_id(),
         state,
         transform_params,
-        evaluated.get::<FillTranslate>(),
+        *evaluated.get::<FillTranslate>(),
         *evaluated.get::<FillTranslateAnchor>(),
         |vertex_offset| {
             if !alpha_is_constant {
@@ -191,7 +191,7 @@ fn read_fill_attributes(
     );
 }
 
-pub struct RenderFillLayer {
+pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
     // Paint properties
     unevaluated: FillPaintProperties::Unevaluated,
@@ -204,7 +204,7 @@ pub struct RenderFillLayer {
 }
 
 impl RenderFillLayer {
-    pub fn new(impl_: Arc<FillLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<FillLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -288,7 +288,7 @@ impl RenderLayer for RenderFillLayer {
         let evaluated = get_evaluated::<FillLayerProperties>(&self.base.evaluated_properties);
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
-            evaluated.get::<FillTranslate>(),
+            *evaluated.get::<FillTranslate>(),
             *evaluated.get::<FillTranslateAnchor>(),
             transform_state.get_bearing() as f32,
             pixels_to_tile_units,
@@ -375,7 +375,6 @@ impl RenderLayer for RenderFillLayer {
         let mut pattern_builder: Option<UniqueDrawableBuilder> = None;
         let mut outline_pattern_builder: Option<UniqueDrawableBuilder> = None;
 
-        let layer_prefix = format!("{}/", self.get_id());
         let render_pass = RenderPass::Translucent;
 
         let common_init = |builder: &mut dyn DrawableBuilder| {
@@ -442,7 +441,7 @@ impl RenderLayer for RenderFillLayer {
             // shared vectors; the backend upload guard fires automatically
             // when those change.
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
-                let current = drawable_has_layer_tweaker(drawable, &layer_tweaker);
+                let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
                 if current && FillVariant::from_type(drawable.get_type()) != Some(FillVariant::FillOutlineTriangulated)
                 {
                     refresh_if_bucket_updated(drawable, |attrs| {
@@ -579,7 +578,7 @@ impl RenderLayer for RenderFillLayer {
                 };
 
                 if fill_builder.is_none() && fill_shader.is_some() {
-                    let mut builder = context.create_drawable_builder(format!("{layer_prefix}fill"));
+                    let mut builder = context.create_drawable_builder();
                     // Only write opaque fills to the depth buffer, matching
                     // `fillRenderPass` in legacy rendering
                     let opaque = evaluated.get::<FillColor>().constant_or(&Color::default()).a >= 1.0
@@ -593,7 +592,7 @@ impl RenderLayer for RenderFillLayer {
                     fill_builder = Some(builder);
                 }
                 if do_outline && outline_builder.is_none() && outline_shader.is_some() {
-                    let mut builder = context.create_drawable_builder(format!("{layer_prefix}fill-outline"));
+                    let mut builder = context.create_drawable_builder();
                     common_init(builder.as_mut());
                     builder.set_depth_type(DepthMaskType::ReadOnly);
                     builder.set_line_width(LINE_WIDTH);
@@ -703,7 +702,7 @@ impl RenderLayer for RenderFillLayer {
                     });
 
                 if pattern_builder.is_none() {
-                    let mut builder = context.create_drawable_builder(format!("{layer_prefix}fill-pattern"));
+                    let mut builder = context.create_drawable_builder();
                     common_init(builder.as_mut());
                     builder.set_shader(fill_shader.clone());
                     builder.set_depth_type(DepthMaskType::ReadWrite);
@@ -713,7 +712,7 @@ impl RenderLayer for RenderFillLayer {
                     pattern_builder = Some(builder);
                 }
                 if do_outline && outline_pattern_builder.is_none() {
-                    let mut builder = context.create_drawable_builder(format!("{layer_prefix}fill-outline-pattern"));
+                    let mut builder = context.create_drawable_builder();
                     common_init(builder.as_mut());
                     builder.set_shader(outline_shader.clone());
                     builder.set_line_width(LINE_WIDTH);

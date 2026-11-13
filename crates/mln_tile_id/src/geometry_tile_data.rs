@@ -42,8 +42,9 @@ impl GeometryCollection {
 
     /// Three indices per triangle, counted from the feature's first vertex;
     /// empty unless the tile carried triangles.
+    #[cfg(test)]
     #[must_use]
-    pub fn get_triangles(&self) -> &[u32] {
+    pub(crate) fn get_triangles(&self) -> &[u32] {
         match &self.triangles {
             Some((owner, range)) => &owner[range.clone()],
             None => &[],

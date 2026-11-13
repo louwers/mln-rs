@@ -491,6 +491,10 @@ impl Default for SurfaceOptions {
 /// `GLFWWebGPUBackend`'s surface without the window: frames presented to a
 /// `wgpu::Surface`.
 pub struct SurfaceTarget {
+    #[expect(
+        dead_code,
+        reason = "keeps the backend that the surface's frames render with alive as long as the target"
+    )]
     backend: Rc<RendererBackend>,
     state: Rc<SurfaceState>,
     image: Rc<DrawTarget>,
@@ -590,12 +594,6 @@ impl SurfaceTarget {
         Ok(SurfaceTarget { backend, state, image })
     }
 
-    /// The backend the target draws on.
-    #[must_use]
-    pub fn backend(&self) -> &Rc<RendererBackend> {
-        &self.backend
-    }
-
     /// The format the surface is configured with.
     #[must_use]
     pub fn format(&self) -> wgpu::TextureFormat {
@@ -614,10 +612,6 @@ impl SurfaceTarget {
             self.image.set_size(size);
             self.state.surface_needs_reconfigure.set(true);
         }
-    }
-
-    pub fn process_events(&self) {
-        self.state.process_events();
     }
 
     /// Port-only: copy the next presented frame (see `take_readback`).

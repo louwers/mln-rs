@@ -245,12 +245,6 @@ impl Layer {
         // SAFETY: the caller's contract.
         unsafe { Retained::retain(layer.cast()) }.map(Layer)
     }
-
-    /// The layer, as a pointer for other APIs.
-    #[must_use]
-    pub fn as_ptr(&self) -> *mut std::ffi::c_void {
-        Retained::as_ptr(&self.0).cast_mut().cast()
-    }
 }
 
 impl std::fmt::Debug for Layer {

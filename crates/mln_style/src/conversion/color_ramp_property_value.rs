@@ -6,7 +6,7 @@ use crate::expression::{Dependency, ParsingContext, Type, is_expression};
 
 /// Converts a color ramp property value. The two flags are ignored, as in
 /// C++.
-pub fn convert_color_ramp_property_value(
+pub(crate) fn convert_color_ramp_property_value(
     value: &Convertible<'_>,
     error: &mut Error,
     _allow_data_expressions: bool,

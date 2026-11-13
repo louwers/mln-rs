@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use mln_style_types::image::RectU16;
@@ -79,7 +79,7 @@ impl GlyphID {
 
     /// The `hash` member of the union (x86-64 / arm64 are little endian).
     #[must_use]
-    pub fn hash(&self) -> u32 {
+    pub(crate) fn hash(self) -> u32 {
         (u32::from(self.type_.0) << 16) | u32::from(self.code)
     }
 }
@@ -140,7 +140,7 @@ impl Glyph {
     /// The SDF border around each glyph bitmap. We're using this value
     /// throughout the Mapbox GL ecosystem. If this is different, the glyphs
     /// also need to be reencoded.
-    pub const BORDER_SIZE: u8 = 3;
+    pub(crate) const BORDER_SIZE: u8 = 3;
 }
 
 pub type Glyphs = BTreeMap<GlyphID, Option<Arc<Glyph>>>;
@@ -148,11 +148,11 @@ pub type GlyphMap = VecMap<FontStackHash, Glyphs>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PositionedGlyph {
-    pub glyph: GlyphID,
+    pub(crate) glyph: GlyphID,
     pub x: f32,
     pub y: f32,
     pub vertical: bool,
-    pub font: FontStackHash,
+    pub(crate) font: FontStackHash,
     pub scale: f32,
     pub rect: RectU16,
     pub metrics: GlyphMetrics,
@@ -237,7 +237,7 @@ impl Shaping {
     pub const Y_OFFSET: i32 = -17;
 
     #[must_use]
-    pub fn new(x: f32, y: f32, writing_mode: WritingModeType) -> Self {
+    pub(crate) fn new(x: f32, y: f32, writing_mode: WritingModeType) -> Self {
         Shaping { top: y, bottom: y, left: x, right: x, writing_mode, ..Default::default() }
     }
 
@@ -268,7 +268,7 @@ impl FontData {
 
     /// The same bytes, for readers that take any shared bytes.
     #[must_use]
-    pub fn shared(&self) -> Arc<dyn AsRef<[u8]> + Send + Sync> {
+    pub(crate) fn shared(&self) -> Arc<dyn AsRef<[u8]> + Send + Sync> {
         self.0.clone()
     }
 }
@@ -354,13 +354,6 @@ impl FontFace {
 
 pub type FontFaces = Vec<FontFace>;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct HBShapeRequest {
-    pub str_: Vec<u16>,
-    pub font_stack: FontStack,
-    pub type_: GlyphIDType,
-}
-
 pub type HBShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<u16>>>>;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -369,15 +362,13 @@ pub struct GlyphDependencies {
     pub shapes: HBShapeRequests,
 }
 
-pub type GlyphRangeDependencies = VecMap<FontStack, HashSet<GlyphRange>>;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GlyphPosition {
     pub rect: RectU16,
     pub metrics: GlyphMetrics,
 }
 
-pub type GlyphPositionMap = BTreeMap<GlyphID, GlyphPosition>;
+pub(crate) type GlyphPositionMap = BTreeMap<GlyphID, GlyphPosition>;
 pub type GlyphPositions = VecMap<FontStackHash, GlyphPositionMap>;
 
 /// Advances the process-wide glyph type counter, skipping `FontPBF` when it

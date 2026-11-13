@@ -8,12 +8,12 @@ use crate::tile::tile::{TileBase, TileOperation};
 
 /// Observes a tile's changes and errors. All methods default to doing
 /// nothing.
-pub trait TileObserver {
+pub(crate) trait TileObserver {
     fn on_tile_changed(&self, _tile: &TileBase) {}
     fn on_tile_error(&self, _tile: &TileBase, _error: Error) {}
     fn on_tile_action(&self, _id: &OverscaledTileID, _source_id: &str, _op: TileOperation) {}
 }
 
-pub struct NullTileObserver;
+pub(crate) struct NullTileObserver;
 
 impl TileObserver for NullTileObserver {}
