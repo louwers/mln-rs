@@ -39,7 +39,7 @@ static void describe_ring(mln_test_target_call* call) {
       .textures = call->textures.webgpu,
       .texture_count = 1,
       .format = {some_texture_format, sizeof(some_texture_format) - 1},
-    };
+  };
 }
 
 static void webgpu_attach_rejects_malformed_calls(void) {

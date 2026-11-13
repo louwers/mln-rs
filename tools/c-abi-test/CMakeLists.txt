@@ -114,13 +114,6 @@ file(
   CONFIGURE
   OUTPUT "${registry_dir}/mln_native_test_registry.inc"
   CONTENT "${registry}")
-# The harness reads the cases a build expects to fail from this file.
-# maplibre-native-ffi lists the cases that mln-rs fails; against crates/mln_c,
-# every case must pass, so the list is empty.
-file(
-  CONFIGURE
-  OUTPUT "${registry_dir}/mln_native_expected_failures.inc"
-  CONTENT "")
 
 include(FetchContent)
 fetchcontent_declare(

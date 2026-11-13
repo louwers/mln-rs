@@ -408,7 +408,7 @@ update-testdata checkout=cpp:
 # The headers go to crates/mln_c/include and the ABI suite and exit programs, with the support files, fixtures and GPU
 # fixtures they build with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then the
 # declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's t3/build-on-mln-rs branch at
-# 385c24b2bb56, which reshapes the API around mln-rs and builds the C library from it, ahead of its merge
+# 8d3304342e61, which reshapes the API around mln-rs and builds the C library from it, ahead of its merge
 # (maplibre/maplibre-native-ffi#1801).
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
