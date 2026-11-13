@@ -711,9 +711,12 @@ fn an_abandon_from_a_completion_that_the_worker_delivers_is_busy() {
     take_one(&session);
     let (sender, receiver) = channel();
     let abandoned = session.clone();
-    session.reduce_memory_use().unwrap().on_complete(move |result| {
-        let _ = sender.send((result, abandoned.abandon().map_err(|error| error.kind)));
-    });
+    // A plain `on_complete` would run on this thread once the work ran.
+    session
+        .send_then(RenderSession::reduce_memory_use, move |result| {
+            let _ = sender.send((result, abandoned.abandon().map_err(|error| error.kind)));
+        })
+        .unwrap();
     let (result, abandon) = receiver.recv_timeout(TIMEOUT).unwrap();
     result.unwrap();
     assert_eq!(Err(ErrorKind::Busy), abandon);
