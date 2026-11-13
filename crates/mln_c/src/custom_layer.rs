@@ -2,7 +2,6 @@
 //! `CustomLayerHost`, which hands the callbacks the backend's commands as the
 //! header's variants.
 
-use core::ffi::c_void;
 use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -109,7 +108,8 @@ impl CustomLayerHost for Host {
 /// such as WebGPU outside a browser, gives the host nothing to draw with.
 mod native {
     #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-    use super::c_void;
+    use core::ffi::c_void;
+
     use super::{Any, mln_custom_layer_encoder_data, mln_custom_layer_pass_data, mln_render_backend};
 
     #[allow(unused_variables, clippy::needless_pass_by_ref_mut)]
