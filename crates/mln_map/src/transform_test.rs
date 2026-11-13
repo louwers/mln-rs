@@ -4115,12 +4115,12 @@ fn ease_with_an_easing_follows_it() {
         transform.resize(Size::new(1000, 1000)).unwrap();
         let from = ll(48.0, 11.0);
         let to = ll(48.002, 11.003);
-        transform.jump_to(&cam().with_center(Some(from)).with_zoom(Some(15.5)));
+        transform.jump_to(&CameraOptions { center: Some(from), zoom: Some(15.5), ..Default::default() });
         let scale = transform.get_state().get_scale();
         let (start_point, end_point) = (Projection::project(&from, scale), Projection::project(&to, scale));
         let animation = AnimationOptions { easing: Some(easing), ..AnimationOptions::new(seconds(4)) };
         let start = start_clock(&mut transform);
-        transform.ease_to(&cam().with_center(Some(to)), &animation);
+        transform.ease_to(&CameraOptions { center: Some(to), ..Default::default() }, &animation);
         for quarter in 1..4_i32 {
             let t = f64::from(quarter) / 4.0;
             transform.update_transitions(start + milliseconds(i64::from(quarter) * 1000));
