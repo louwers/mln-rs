@@ -10,13 +10,13 @@ use crate::simplify::simplify;
 use crate::types::{VtFeature, VtFeatures, VtGeometry, VtLineString, VtLinearRing, VtPoint, VtPolygon};
 
 /// `project` (the visitor that converts to projected `vt_geometry`).
-pub struct Project {
-    pub tolerance: f64,
+pub(crate) struct Project {
+    pub(crate) tolerance: f64,
 }
 
 impl Project {
     #[must_use]
-    pub fn point(&self, p: &Point<f64>) -> VtPoint {
+    pub(crate) fn point(p: &Point<f64>) -> VtPoint {
         let sine = (p.y * PI / 180.0).sin();
         let x = p.x / 360.0 + 0.5;
         // std::max(std::min(y, 1.0), 0.0)
@@ -27,7 +27,7 @@ impl Project {
     }
 
     #[must_use]
-    pub fn line_string(&self, points: &LineString<f64>) -> VtLineString {
+    pub(crate) fn line_string(&self, points: &LineString<f64>) -> VtLineString {
         let mut result = VtLineString::default();
         let len = points.len();
 
@@ -38,7 +38,7 @@ impl Project {
         result.reserve(len);
 
         for p in points {
-            result.push(self.point(p));
+            result.push(Self::point(p));
         }
 
         for i in 0..len - 1 {
@@ -56,7 +56,7 @@ impl Project {
     }
 
     #[must_use]
-    pub fn linear_ring(&self, ring: &LinearRing<f64>) -> VtLinearRing {
+    pub(crate) fn linear_ring(&self, ring: &LinearRing<f64>) -> VtLinearRing {
         let mut result = VtLinearRing::default();
         let (Some(first), Some(last)) = (ring.first(), ring.last()) else {
             return result;
@@ -65,12 +65,12 @@ impl Project {
         result.reserve(ring.len() + 1);
 
         for p in ring {
-            result.push(self.point(p));
+            result.push(Self::point(p));
         }
         // GeoJSON requires rings to be closed. One that isn't is closed
         // here, so that an outline draws its last edge.
         if first != last {
-            result.push(self.point(first));
+            result.push(Self::point(first));
         }
         let len = result.len();
 
@@ -89,16 +89,16 @@ impl Project {
     }
 
     #[must_use]
-    pub fn polygon(&self, rings: &[LinearRing<f64>]) -> VtPolygon {
+    pub(crate) fn polygon(&self, rings: &[LinearRing<f64>]) -> VtPolygon {
         rings.iter().map(|r| self.linear_ring(r)).collect()
     }
 
     #[must_use]
-    pub fn geometry(&self, geometry: &Geometry<f64>) -> VtGeometry {
+    pub(crate) fn geometry(&self, geometry: &Geometry<f64>) -> VtGeometry {
         match geometry {
             Geometry::Empty => VtGeometry::Empty,
-            Geometry::Point(p) => VtGeometry::Point(self.point(p)),
-            Geometry::MultiPoint(points) => VtGeometry::MultiPoint(points.iter().map(|p| self.point(p)).collect()),
+            Geometry::Point(p) => VtGeometry::Point(Self::point(p)),
+            Geometry::MultiPoint(points) => VtGeometry::MultiPoint(points.iter().map(Self::point).collect()),
             Geometry::LineString(points) => VtGeometry::LineString(self.line_string(points)),
             Geometry::MultiLineString(lines) => {
                 VtGeometry::MultiLineString(lines.iter().map(|l| self.line_string(l)).collect())
@@ -116,7 +116,7 @@ impl Project {
 
 /// `convert(features, tolerance, generateId)`
 #[must_use]
-pub fn convert(features: &FeatureCollection<f64>, tolerance: f64, generate_id: bool) -> VtFeatures {
+pub(crate) fn convert(features: &FeatureCollection<f64>, tolerance: f64, generate_id: bool) -> VtFeatures {
     let mut projected = VtFeatures::with_capacity(features.len());
     let mut gen_id: u64 = 0;
     for feature in features {

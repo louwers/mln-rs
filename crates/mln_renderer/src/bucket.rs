@@ -22,16 +22,16 @@ use serde::{Deserialize, Serialize};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::RenderLayer;
 
-pub type BucketPtr = Arc<dyn Bucket>;
+pub(crate) type BucketPtr = Arc<dyn Bucket>;
 
-pub type FeatureStates = std::collections::HashMap<String, mln_style::expression::expression::FeatureState>;
+pub(crate) type FeatureStates = std::collections::HashMap<String, mln_style::expression::expression::FeatureState>;
 pub type LayerFeatureStates = std::collections::HashMap<String, FeatureStates>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RetainedFeature {
-    pub feature_id: String,
-    pub vertex_offset: usize,
-    pub vertex_count: usize,
+pub(crate) struct RetainedFeature {
+    pub(crate) feature_id: String,
+    pub(crate) vertex_offset: usize,
+    pub(crate) vertex_count: usize,
 }
 
 /// The data members of `Bucket`.
@@ -39,18 +39,18 @@ pub struct RetainedFeature {
 /// Port-only: serde writes what a worker sets (`tile/worker_codec`); the
 /// upload flag, the id and the version are the side's that has the bucket.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BucketBase {
+pub(crate) struct BucketBase {
     #[serde(skip)]
-    pub uploaded: AtomicBool,
+    pub(crate) uploaded: AtomicBool,
     #[serde(skip, default = "SimpleIdentity::new")]
-    pub bucket_id: SimpleIdentity,
-    pub retain_features_by_id: bool,
-    pub retained_features: Vec<RetainedFeature>,
+    pub(crate) bucket_id: SimpleIdentity,
+    pub(crate) retain_features_by_id: bool,
+    pub(crate) retained_features: Vec<RetainedFeature>,
     /// Bumped by `update` (feature state); the render layers compare it to
     /// refresh their drawables' copies of the vertex data. C++ updates the
     /// shared vertex vectors in place instead.
     #[serde(skip)]
-    pub version: AtomicU64,
+    pub(crate) version: AtomicU64,
 }
 
 impl Default for BucketBase {
@@ -68,11 +68,11 @@ impl Default for BucketBase {
 /// The error of a polygon with more vertices than a 16-bit index can
 /// address. The tile that holds it fails to lay out.
 #[must_use]
-pub fn geometry_too_long() -> Error {
+pub(crate) fn geometry_too_long() -> Error {
     Error::native("a polygon has more vertices than a 16-bit index can address")
 }
 
-pub trait Bucket: Any + Send + Sync {
+pub(crate) trait Bucket: Any + Send + Sync {
     fn base(&self) -> &BucketBase;
     fn base_mut(&mut self) -> &mut BucketBase;
 
@@ -155,14 +155,14 @@ pub trait Bucket: Any + Send + Sync {
 
 impl dyn Bucket {
     /// Downcasts to the bucket type `B`; `None` if it is another type.
-    pub fn downcast_ref<B: Bucket>(&self) -> Option<&B> {
+    pub(crate) fn downcast_ref<B: Bucket>(&self) -> Option<&B> {
         (self as &dyn Any).downcast_ref()
     }
 }
 
 static UNIDENTIFIED_FEATURE_INDEX: AtomicUsize = AtomicUsize::new(0);
 
-pub fn get_retain_feature_id(feature: &dyn GeometryTileFeature) -> String {
+pub(crate) fn get_retain_feature_id(feature: &dyn GeometryTileFeature) -> String {
     if let Some(id_str) = feature_id_to_string(&feature.get_id())
         && !id_str.is_empty()
     {

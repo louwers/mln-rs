@@ -20,23 +20,23 @@ use serde::{Deserialize, Serialize};
 use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
 use crate::tile::worker_codec::fields;
 
-pub type ImageVersionMap = HashMap<String, u32>;
+pub(crate) type ImageVersionMap = HashMap<String, u32>;
 
-pub type DynamicTextureAtlasPtr = Arc<DynamicTextureAtlas>;
+pub(crate) type DynamicTextureAtlasPtr = Arc<DynamicTextureAtlas>;
 
 /// Port-only: what a `LayoutResult`'s atlases release their bins to. In
 /// C++ that is always the map's `DynamicTextureAtlas`; for a tile worker in
 /// another wasm instance it is the map side's mirror of that instance's
 /// atlas (`tile/worker_codec`), which sends the releases on.
-pub trait TextureAtlas: Send + Sync {
-    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>);
+pub(crate) trait TextureAtlas: Send + Sync {
+    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: Option<&DynamicTexturePtr>);
     /// Drops the dynamic textures that are no longer in use. Render thread
     /// only.
     fn remove_unused_dynamic_textures(&self);
 }
 
 impl TextureAtlas for DynamicTextureAtlas {
-    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>) {
+    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: Option<&DynamicTexturePtr>) {
         DynamicTextureAtlas::remove_textures(self, texture_handles, dynamic_texture);
     }
 
@@ -62,24 +62,24 @@ fn rect_without_extra_padding(rect: RectU16) -> RectU16 {
 /// Where a tile's glyphs are in the dynamic texture. Serde writes the
 /// texture by key, as the worker instance's (`tile/worker_codec`).
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub struct GlyphAtlas {
-    pub glyph_positions: GlyphPositions,
-    pub texture_handles: Vec<TextureHandle>,
+pub(crate) struct GlyphAtlas {
+    pub(crate) glyph_positions: GlyphPositions,
+    pub(crate) texture_handles: Vec<TextureHandle>,
     #[serde(with = "fields::texture")]
-    pub dynamic_texture: Option<DynamicTexturePtr>,
+    pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
 }
 
 /// Where a tile's icons and patterns are in the dynamic texture. Serde
 /// writes the texture by key, as the worker instance's (`tile/worker_codec`).
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub struct ImageAtlas {
+pub(crate) struct ImageAtlas {
     #[serde(with = "sorted::map")]
-    pub icon_positions: ImagePositions,
+    pub(crate) icon_positions: ImagePositions,
     #[serde(with = "sorted::map")]
-    pub pattern_positions: ImagePositions,
-    pub texture_handles: Vec<TextureHandle>,
+    pub(crate) pattern_positions: ImagePositions,
+    pub(crate) texture_handles: Vec<TextureHandle>,
     #[serde(with = "fields::texture")]
-    pub dynamic_texture: Option<DynamicTexturePtr>,
+    pub(crate) dynamic_texture: Option<DynamicTexturePtr>,
 }
 
 /// Identifies an image's allocation: (dynamic texture, image revision,
@@ -135,7 +135,7 @@ struct State {
 }
 
 #[derive(Default)]
-pub struct DynamicTextureAtlas {
+pub(crate) struct DynamicTextureAtlas {
     state: Mutex<State>,
 }
 
@@ -156,11 +156,11 @@ fn pixel_type_key(t: TexturePixelType) -> u8 {
 
 impl DynamicTextureAtlas {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         DynamicTextureAtlas::default()
     }
 
-    pub fn upload_glyphs(&self, glyphs: &GlyphMap) -> GlyphAtlas {
+    pub(crate) fn upload_glyphs(&self, glyphs: &GlyphMap) -> GlyphAtlas {
         let mut state = self.state.lock();
 
         let mut glyph_atlas = GlyphAtlas::default();
@@ -256,7 +256,7 @@ impl DynamicTextureAtlas {
         glyph_atlas
     }
 
-    pub fn upload_icons_and_patterns(
+    pub(crate) fn upload_icons_and_patterns(
         &self,
         icons: &ImageMap,
         patterns: &ImageMap,
@@ -497,7 +497,11 @@ impl DynamicTextureAtlas {
         }
     }
 
-    pub fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>) {
+    pub(crate) fn remove_textures(
+        &self,
+        texture_handles: &[TextureHandle],
+        dynamic_texture: Option<&DynamicTexturePtr>,
+    ) {
         let Some(dynamic_texture) = dynamic_texture else {
             return;
         };
@@ -512,14 +516,14 @@ impl DynamicTextureAtlas {
     /// Port-only: the textures of the atlas, the dummy ones included, for
     /// the map side's mirror of a tile worker's atlas in another wasm
     /// instance (`tile/worker_codec`).
-    pub fn textures(&self) -> Vec<DynamicTexturePtr> {
+    pub(crate) fn textures(&self) -> Vec<DynamicTexturePtr> {
         let state = self.state.lock();
         state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()).cloned().collect()
     }
 
     /// Drops the empty dynamic textures that no atlas references any more,
     /// so the last reference goes on the render thread. Render thread only.
-    pub fn remove_unused_dynamic_textures(&self) {
+    pub(crate) fn remove_unused_dynamic_textures(&self) {
         let mut state = self.state.lock();
 
         // release textures not referenced elsewhere (by an atlas still alive

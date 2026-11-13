@@ -4,8 +4,11 @@
 use std::f64::consts::PI;
 
 use mln_util::constants::{EARTH_RADIUS_M, M2PI};
+#[cfg(test)]
 use mln_util::geo::{LatLng, LatLngAltitude};
-use mln_util::mat3::{vec3_cross, vec3_length, vec3_sub};
+#[cfg(test)]
+use mln_util::mat3::vec3_sub;
+use mln_util::mat3::{vec3_cross, vec3_length};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
 use mln_util::quaternion::Quaternion;
@@ -13,10 +16,12 @@ use mln_util::vectors::Vec3;
 
 use crate::camera::FreeCameraOptions;
 
+#[cfg(test)]
 fn mercator_x_from_lng(lng: f64) -> f64 {
     (180.0 + lng) / 360.0
 }
 
+#[cfg(test)]
 fn mercator_y_from_lat(lat: f64) -> f64 {
     (180.0 - (180.0 / PI * ((PI / 4.0) + lat * PI / 360.0).tan().ln())) / 360.0
 }
@@ -25,10 +30,12 @@ fn lat_from_mercator_y(y: f64) -> f64 {
     mln_math::rad2deg(2.0 * (PI - y * M2PI).exp().atan() - (PI / 2.0))
 }
 
+#[cfg(test)]
 fn lng_from_mercator_x(x: f64) -> f64 {
     x * 360.0 - 180.0
 }
 
+#[cfg(test)]
 fn to_mercator(location: &LatLng, altitude_meters: f64) -> Vec3 {
     let pixels_per_meter = 1.0 / Projection::get_meters_per_pixel_at_latitude(location.latitude(), 0.0);
     let world_size = Projection::world_size(2.0f64.powf(0.0));
@@ -96,21 +103,13 @@ impl Camera {
     }
 
     #[must_use]
-    pub fn get_position(&self) -> Vec3 {
+    pub(crate) fn get_position(&self) -> Vec3 {
         let p = get_column(&self.transform, 3);
         [p[0], p[1], p[2]]
     }
 
     #[must_use]
-    pub fn get_camera_to_world(&self, scale: f64, flipped_y: bool) -> Mat4 {
-        let mut camera_to_world = [0.0; 16];
-        // C++ ignores the result.
-        let _ = matrix::invert(&mut camera_to_world, &self.get_world_to_camera(scale, flipped_y));
-        camera_to_world
-    }
-
-    #[must_use]
-    pub fn get_world_to_camera(&self, scale: f64, flipped_y: bool) -> Mat4 {
+    pub(crate) fn get_world_to_camera(&self, scale: f64, flipped_y: bool) -> Mat4 {
         // transformation chain from world space to camera space:
         // 1. Height value (z) of renderables is in meters. Scale z coordinate
         //    by pixelsPerMeter
@@ -154,34 +153,35 @@ impl Camera {
     }
 
     #[must_use]
-    pub fn get_camera_to_clip_perspective(&self, fovy: f64, aspect_ratio: f64, near_z: f64, far_z: f64) -> Mat4 {
+    #[expect(clippy::unused_self, reason = "a camera's projection, beside its other matrices")]
+    pub(crate) fn get_camera_to_clip_perspective(&self, fovy: f64, aspect_ratio: f64, near_z: f64, far_z: f64) -> Mat4 {
         let mut projection = [0.0; 16];
         matrix::perspective(&mut projection, fovy, aspect_ratio, near_z, far_z);
         projection
     }
 
     #[must_use]
-    pub fn forward(&self) -> Vec3 {
+    pub(crate) fn forward(&self) -> Vec3 {
         let column = get_column(&self.transform, 2);
         // The forward direction is towards the map, [0, 0, -1]
         [-column[0], -column[1], -column[2]]
     }
 
     #[must_use]
-    pub fn right(&self) -> Vec3 {
+    pub(crate) fn right(&self) -> Vec3 {
         let column = get_column(&self.transform, 0);
         [column[0], column[1], column[2]]
     }
 
     #[must_use]
-    pub fn up(&self) -> Vec3 {
+    pub(crate) fn up(&self) -> Vec3 {
         let column = get_column(&self.transform, 1);
         // Up direction has to be flipped due to y-axis pointing towards south
         [-column[0], -column[1], -column[2]]
     }
 
     #[must_use]
-    pub fn get_orientation(&self) -> &Quaternion {
+    pub(crate) fn get_orientation(&self) -> &Quaternion {
         &self.orientation
     }
 
@@ -205,17 +205,17 @@ impl Camera {
         update_transform_orientation(&mut self.transform, &self.orientation);
     }
 
-    pub fn set_orientation_quaternion(&mut self, orientation: &Quaternion) {
+    pub(crate) fn set_orientation_quaternion(&mut self, orientation: &Quaternion) {
         self.orientation = *orientation;
         update_transform_orientation(&mut self.transform, &self.orientation);
     }
 
-    pub fn set_position(&mut self, position: &Vec3) {
+    pub(crate) fn set_position(&mut self, position: &Vec3) {
         update_transform_position(&mut self.transform, position);
     }
 
     #[must_use]
-    pub fn orientation_from_frame(forward: &Vec3, up: &Vec3) -> Option<Quaternion> {
+    pub(crate) fn orientation_from_frame(forward: &Vec3, up: &Vec3) -> Option<Quaternion> {
         let epsilon = 1e-15;
 
         let right = vec3_cross(up, forward);
@@ -240,15 +240,17 @@ impl Camera {
 impl FreeCameraOptions {
     /// Helper function for setting the mercator position as Lat&Lng and
     /// altitude in meters.
-    pub fn set_location(&mut self, location: &LatLngAltitude) {
+    #[cfg(test)]
+    pub(crate) fn set_location(&mut self, location: &LatLngAltitude) {
         self.position = Some(to_mercator(&location.location, location.altitude));
     }
 
     /// Helper function for converting mercator position into Lat&Lng and
     /// altitude in meters. This function fails to return a value if
     /// `position` is invalid or is not set.
+    #[cfg(test)]
     #[must_use]
-    pub fn get_location(&self) -> Option<LatLngAltitude> {
+    pub(crate) fn get_location(&self) -> Option<LatLngAltitude> {
         let position_value = self.position?;
         if position_value[1] < 0.0 || position_value[1] > 1.0 {
             return None;
@@ -270,7 +272,8 @@ impl FreeCameraOptions {
     /// focus point on the map. Up vector is required in certain scenarios
     /// where bearing can't be deduced from the viewing direction.
     /// (`lookAtPoint(const LatLng&, const std::optional<vec3>& upVector = std::nullopt)`.)
-    pub fn look_at_point(&mut self, location: &LatLng, up_vector: Option<Vec3>) {
+    #[cfg(test)]
+    pub(crate) fn look_at_point(&mut self, location: &LatLng, up_vector: Option<Vec3>) {
         self.orientation = None;
         let Some(position) = self.position else {
             return;
@@ -292,7 +295,8 @@ impl FreeCameraOptions {
 
     /// Helper function for setting the orientation of the camera as a roll,
     /// pitch, and a bearing. All values are in degrees.
-    pub fn set_roll_pitch_bearing(&mut self, roll: f64, pitch: f64, bearing: f64) {
+    #[cfg(test)]
+    pub(crate) fn set_roll_pitch_bearing(&mut self, roll: f64, pitch: f64, bearing: f64) {
         self.orientation = Some(
             orientation_from_roll_pitch_bearing(
                 mln_math::deg2rad(roll),

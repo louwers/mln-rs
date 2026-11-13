@@ -39,7 +39,7 @@ struct Elements {
     uploaded_size: usize,
 }
 
-pub struct UniformBuffer {
+pub(crate) struct UniformBuffer {
     context: Weak<Context>,
     size: usize,
     /// The GL buffer; of a layer's buffer of elements, made by its first
@@ -50,7 +50,7 @@ pub struct UniformBuffer {
 }
 
 impl UniformBuffer {
-    pub fn new(context: &Context, data: &[u8], elements: bool) -> Self {
+    pub(crate) fn new(context: &Context, data: &[u8], elements: bool) -> Self {
         {
             let mut stats = context.rendering_stats();
             stats.num_uniform_buffers += 1;
@@ -79,7 +79,7 @@ impl UniformBuffer {
     /// The buffer range to bind for a uniform block of `block_size` bytes:
     /// the whole buffer, or the element `index` of a buffer of
     /// `element_size` byte elements.
-    pub fn range(
+    pub(crate) fn range(
         &self,
         context: &Context,
         index: u32,

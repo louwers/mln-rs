@@ -162,7 +162,7 @@ fn replace(handler: Option<Handler>) {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_log_set_callback(
+pub(crate) unsafe extern "C" fn mln_log_set_callback(
     handler: *const mln_log_handler,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn mln_log_set_callback(
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_log_clear_callback(out_diagnostic: *mut mln_diagnostic) -> mln_status {
+pub(crate) unsafe extern "C" fn mln_log_clear_callback(out_diagnostic: *mut mln_diagnostic) -> mln_status {
     export!(out_diagnostic, {
         replace(None);
         Ok(())
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn mln_log_clear_callback(out_diagnostic: *mut mln_diagnos
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_log_set_async_severity_mask(
+pub(crate) unsafe extern "C" fn mln_log_set_async_severity_mask(
     mask: mln_log_severity_flags,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {

@@ -67,7 +67,7 @@ impl MatchLabel for i64 {
 }
 
 /// The output of each label, sorted by label (C++ uses an unordered map).
-pub type Branches<T> = VecMap<T, Arc<dyn Expression>>;
+pub(crate) type Branches<T> = VecMap<T, Arc<dyn Expression>>;
 
 pub struct Match<T: MatchLabel> {
     base: ExpressionBase,
@@ -276,7 +276,7 @@ fn create<T: MatchLabel>(
     Some(Box::new(Match::<T>::new(output_type, input, typed_branches, otherwise)))
 }
 
-pub fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+pub(crate) fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
     debug_assert!(value.is_array());
     let length = value.array_length();
     if length < 5 {

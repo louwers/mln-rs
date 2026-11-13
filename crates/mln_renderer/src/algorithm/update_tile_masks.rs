@@ -48,7 +48,7 @@ fn compute_tile_masks(
 /// Updates the `TileMask`s of all renderable tiles, which are sorted by id.
 /// A tile's mask describes the regions of the tile that are *not* covered by
 /// other renderable tiles, as tile ids relative to the tile.
-pub fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
+pub(crate) fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
     for (i, (id, tile)) in renderables.iter().enumerate() {
         if !tile_needs_mask(*tile) {
             continue;

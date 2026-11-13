@@ -51,7 +51,7 @@ fn convert_coords(scale: f64, coords: &[Coordinate]) -> GeometryCoordinates {
     coords.iter().map(|c| convert_point(scale, *c)).collect()
 }
 
-pub struct VectorMLTTileFeature<'l> {
+pub(crate) struct VectorMLTTileFeature<'l> {
     layer: &'l mlt::Layer,
     feature: &'l mlt::Feature,
     extent: u32,
@@ -64,7 +64,7 @@ pub struct VectorMLTTileFeature<'l> {
 
 impl<'l> VectorMLTTileFeature<'l> {
     #[must_use]
-    pub fn new(layer: &'l mlt::Layer, feature: &'l mlt::Feature, extent: u32) -> Self {
+    pub(crate) fn new(layer: &'l mlt::Layer, feature: &'l mlt::Feature, extent: u32) -> Self {
         VectorMLTTileFeature {
             layer,
             feature,
@@ -80,21 +80,16 @@ impl<'l> VectorMLTTileFeature<'l> {
         let _ = self.error.set(MlnError::native(error.to_string()));
     }
 
-    /// The `mlt::Feature` (for the difftest).
-    pub fn feature(&self) -> &'l mlt::Feature {
-        self.feature
-    }
-
     /// The value of the property `key`; `None` for an unknown key or an
     /// absent value.
-    pub fn try_get_value(&self, key: &str) -> Result<Option<Value>, mlt::Error> {
+    pub(crate) fn try_get_value(&self, key: &str) -> Result<Option<Value>, mlt::Error> {
         Ok(self.feature.get_property(key, self.layer)?.map(property_value))
     }
 
     /// Every property, `null_value` for an absent value. If a column fails,
     /// the next call returns the columns read before it, as the C++ map is
     /// already engaged (here in wire order; C++ in hash order).
-    pub fn try_get_properties(&self) -> Result<&PropertyMap, mlt::Error> {
+    pub(crate) fn try_get_properties(&self) -> Result<&PropertyMap, mlt::Error> {
         if let Some(properties) = self.properties.get() {
             return Ok(properties);
         }
@@ -191,7 +186,7 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
 
 /// A layer of a decoded tile. It holds the tile, as C++ holds its
 /// `shared_ptr`.
-pub struct VectorMLTTileLayer {
+pub(crate) struct VectorMLTTileLayer {
     tile: Arc<MapLibreTile>,
     layer: usize,
 }
@@ -199,14 +194,14 @@ pub struct VectorMLTTileLayer {
 impl VectorMLTTileLayer {
     /// The `mlt::Layer`.
     #[must_use]
-    pub fn layer(&self) -> &mlt::Layer {
+    pub(crate) fn layer(&self) -> &mlt::Layer {
         &self.tile.get_layers()[self.layer]
     }
 
     /// The feature at `index`. Panics for an index past the end, where C++
     /// indexes the feature vector unchecked.
     #[must_use]
-    pub fn feature(&self, index: usize) -> VectorMLTTileFeature<'_> {
+    pub(crate) fn feature(&self, index: usize) -> VectorMLTTileFeature<'_> {
         let layer = self.layer();
         VectorMLTTileFeature::new(layer, &layer.get_features()[index], layer.get_extent())
     }
@@ -274,7 +269,7 @@ struct State {
 }
 
 /// MapLibre Tile data. The tile is decoded on the first layer lookup (or
-/// [`layer_names`](Self::layer_names)); a decoding error is logged and leaves
+/// `layer_names`); a decoding error is logged and leaves
 /// it without layers.
 pub struct VectorMLTTileData {
     state: Mutex<State>,
@@ -289,7 +284,7 @@ impl VectorMLTTileData {
 
     /// The decoded tile (`Impl::getLayer`'s decoding step): decodes once,
     /// then drops the raw data.
-    pub fn tile(&self) -> Option<Arc<MapLibreTile>> {
+    pub(crate) fn tile(&self) -> Option<Arc<MapLibreTile>> {
         let mut state = self.state.lock();
         if let Some(data) = &state.data
             && state.tile.is_none()
@@ -305,7 +300,7 @@ impl VectorMLTTileData {
     }
 
     /// The first layer named `name`, with its concrete type.
-    pub fn get_mlt_layer(&self, name: &str) -> Option<VectorMLTTileLayer> {
+    pub(crate) fn get_mlt_layer(&self, name: &str) -> Option<VectorMLTTileLayer> {
         let tile = self.tile()?;
         let layer = tile.get_layers().iter().position(|layer| layer.get_name() == name)?;
         Some(VectorMLTTileLayer { tile, layer })
@@ -313,7 +308,8 @@ impl VectorMLTTileData {
 
     /// The names of the tile's layers, in tile order (MVT data lists them
     /// sorted), duplicates included.
-    pub fn layer_names(&self) -> Vec<String> {
+    #[cfg(test)]
+    pub(crate) fn layer_names(&self) -> Vec<String> {
         let decode = {
             let state = self.state.lock();
             state.data.as_ref().is_some_and(|data| !data.is_empty()) && state.tile.is_none()

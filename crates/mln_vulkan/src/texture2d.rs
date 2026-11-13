@@ -27,7 +27,7 @@ use crate::context::Context;
 use crate::renderer_backend::BackendImpl;
 
 /// An image, its memory and its view.
-pub struct ImageAllocation {
+pub(crate) struct ImageAllocation {
     id: u64,
     backend: Rc<BackendImpl>,
     image: vk::Image,
@@ -38,7 +38,7 @@ pub struct ImageAllocation {
 impl ImageAllocation {
     /// Creates an image in device memory (`MemoryLocation::GpuOnly`) or in
     /// memory the CPU reads (`GpuToCpu`).
-    pub fn create(
+    pub(crate) fn create(
         backend: &Rc<BackendImpl>,
         image_info: &vk::ImageCreateInfo<'_>,
         location: MemoryLocation,
@@ -85,7 +85,7 @@ impl ImageAllocation {
     }
 
     /// Creates the image's view, of every mip level of `aspect`.
-    pub fn create_view(
+    pub(crate) fn create_view(
         &mut self,
         format: vk::Format,
         components: vk::ComponentMapping,
@@ -115,23 +115,23 @@ impl ImageAllocation {
     }
 
     #[must_use]
-    pub fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> u64 {
         self.id
     }
 
     #[must_use]
-    pub fn image(&self) -> vk::Image {
+    pub(crate) fn image(&self) -> vk::Image {
         self.image
     }
 
     #[must_use]
-    pub fn image_view(&self) -> vk::ImageView {
+    pub(crate) fn image_view(&self) -> vk::ImageView {
         self.image_view
     }
 
     /// The image's memory, if the CPU can read it.
     #[must_use]
-    pub fn mapped_ptr(&self) -> Option<*const u8> {
+    pub(crate) fn mapped_ptr(&self) -> Option<*const u8> {
         self.allocation.as_ref()?.mapped_ptr().map(|p| p.as_ptr().cast::<u8>().cast_const())
     }
 }
@@ -154,7 +154,7 @@ impl Drop for ImageAllocation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Texture2DUsage {
+pub(crate) enum Texture2DUsage {
     ShaderInput,
     Attachment,
     Read,
@@ -232,7 +232,7 @@ pub(crate) fn transition_image(
 }
 
 impl Texture2D {
-    pub fn new(context: &Context) -> Self {
+    pub(crate) fn new(context: &Context) -> Self {
         Texture2D {
             context: context.weak(),
             backend: context.get_backend().clone(),
@@ -251,18 +251,13 @@ impl Texture2D {
         }
     }
 
-    pub fn set_usage(&mut self, value: Texture2DUsage) {
+    pub(crate) fn set_usage(&mut self, value: Texture2DUsage) {
         self.texture_usage = value;
         self.texture_dirty = true;
     }
 
     #[must_use]
-    pub fn is_dirty(&self) -> bool {
-        self.sampler_state_dirty || self.texture_dirty
-    }
-
-    #[must_use]
-    pub fn get_vulkan_format(&self) -> vk::Format {
+    pub(crate) fn get_vulkan_format(&self) -> vk::Format {
         Self::vulkan_format(self.pixel_format, self.channel_type)
     }
 
@@ -279,14 +274,8 @@ impl Texture2D {
 
     /// The ids of the image and of the sampler (`unique_id`), 0 without one.
     #[must_use]
-    pub fn get_ids(&self) -> (u64, u64) {
+    pub(crate) fn get_ids(&self) -> (u64, u64) {
         (self.image_allocation.as_ref().map_or(0, |allocation| allocation.id()), self.sampler_id)
-    }
-
-    /// The image, null until the texture is created.
-    #[must_use]
-    pub fn get_vulkan_image(&self) -> vk::Image {
-        self.image_allocation.as_ref().map_or(vk::Image::null(), |allocation| allocation.image())
     }
 
     /// The sampler of the current configuration.
@@ -667,7 +656,7 @@ impl Texture2D {
 
     /// Records a copy of `image`, in the transfer source layout, into this
     /// texture.
-    pub fn copy_image(
+    pub(crate) fn copy_image(
         &mut self,
         image: vk::Image,
         image_size: Size,
@@ -704,7 +693,7 @@ impl Texture2D {
     }
 
     /// `copy_image` with a blit, which converts between the images' formats.
-    pub fn blit_image(
+    pub(crate) fn blit_image(
         &mut self,
         image: vk::Image,
         image_size: Size,
@@ -746,7 +735,7 @@ impl Texture2D {
 
     /// Reads the pixels of a texture made to be read (`Texture2DUsage::Read`)
     /// or rendered to (`Attachment`).
-    pub fn read_image(&mut self) -> Option<PremultipliedImage> {
+    pub(crate) fn read_image(&mut self) -> Option<PremultipliedImage> {
         let allocation = self.image_allocation.clone()?;
         let image_size = texture2d::Texture2D::get_data_size(self);
         let row_size = self.size.width as usize * texture2d::Texture2D::get_pixel_stride(self);

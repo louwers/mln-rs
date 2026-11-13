@@ -4,23 +4,23 @@
 //! and its [`Map`]s, whose commands run on the runtime's thread and report
 //! through a [`Completion`], and the [`RenderSession`]s that draw them.
 //!
-//! Every library crate of <https://github.com/louwers/mln-rs> is
-//! re-exported here under its crate name: `mln_rs::mln_map`,
-//! `mln_rs::mln_util`, `mln_rs::geojson_vt`, and so on. They are published as
-//! the `mln-rs-*` packages, which only exist for this crate.
+//! The library crates of <https://github.com/louwers/mln-rs> are re-exported
+//! here under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
+//! `mln_rs::geojson_vt`, and so on. They are published as the `mln-rs-*`
+//! packages, which only exist for this crate. The actor runtime (`mln_actor`)
+//! and the headless frontend (`mln_headless`) are internal to the port and
+//! not re-exported.
 
 pub use feature;
 pub use geojson;
 pub use geojson_vt;
 pub use geometry;
 pub use kdbush;
-pub use mln_actor;
 pub use mln_conversion;
 pub use mln_expression;
 pub use mln_gestures;
 pub use mln_gfx;
 pub use mln_gl;
-pub use mln_headless;
 pub use mln_image;
 pub use mln_map;
 pub use mln_map_types;

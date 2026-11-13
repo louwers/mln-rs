@@ -63,7 +63,7 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &RasterLayerImpl {
     impl_.downcast_ref::<RasterLayerImpl>().expect("RenderRasterLayer: not a raster layer impl")
 }
 
-pub struct RenderRasterLayer {
+pub(crate) struct RenderRasterLayer {
     base: RenderLayerBase,
     // Paint properties
     unevaluated: RasterPaintProperties::Unevaluated,
@@ -83,7 +83,7 @@ pub struct RenderRasterLayer {
 }
 
 impl RenderRasterLayer {
-    pub fn new(impl_: Arc<RasterLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<RasterLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(RasterLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -179,14 +179,14 @@ impl RenderRasterLayer {
                 changes.push(ChangeRequest::AddLayerTweaker(group.clone(), Rc::downgrade(tweaker)));
             }
             self.image_layer_group = Some(group);
-            activate_layer_group(&self.image_layer_group, self.base.is_renderable, changes);
+            activate_layer_group(self.image_layer_group.as_ref(), self.base.is_renderable, changes);
         }
         let image_layer_group = self.image_layer_group.clone().expect("image layer group");
 
         // Create a drawable for each tile the image is drawn in
         // TODO: Share textures
         for tile_id in &image_data.tile_ids {
-            let mut builder = context.create_drawable_builder("raster".to_owned());
+            let mut builder = context.create_drawable_builder();
             builder.set_shader(raster_shader.cloned());
             builder.set_render_pass(RenderPass::Translucent);
             builder.set_sub_layer_index(0);
@@ -313,7 +313,7 @@ impl RenderLayer for RenderRasterLayer {
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
         crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
         if self.image_layer_group.is_some() {
-            activate_layer_group(&self.image_layer_group, will_render, changes);
+            activate_layer_group(self.image_layer_group.as_ref(), will_render, changes);
         }
     }
 
@@ -330,9 +330,9 @@ impl RenderLayer for RenderRasterLayer {
         // RenderLayer::layerRemoved
         self.remove_all_drawables();
         let group = self.base.layer_group.clone();
-        activate_layer_group(&group, false, changes);
+        activate_layer_group(group.as_ref(), false, changes);
         if self.image_layer_group.is_some() {
-            activate_layer_group(&self.image_layer_group, false, changes);
+            activate_layer_group(self.image_layer_group.as_ref(), false, changes);
         }
     }
 
@@ -340,9 +340,9 @@ impl RenderLayer for RenderRasterLayer {
         // RenderLayer::layerIndexChanged
         self.base.layer_index = new_layer_index;
         let group = self.base.layer_group.clone();
-        change_layer_index(&group, new_layer_index, changes);
+        change_layer_index(group.as_ref(), new_layer_index, changes);
 
-        change_layer_index(&self.image_layer_group, new_layer_index, changes);
+        change_layer_index(self.image_layer_group.as_ref(), new_layer_index, changes);
     }
 
     fn update(
@@ -513,7 +513,7 @@ impl RenderLayer for RenderRasterLayer {
                     // Only current drawables are updated, ones produced for
                     // a previous style retain the attribute values for that
                     // style.
-                    if !drawable_has_layer_tweaker(drawable, &layer_tweaker) {
+                    if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
                         return false;
                     }
                     // buildVertexData(none, &drawable, bucket): the bucket
@@ -537,7 +537,7 @@ impl RenderLayer for RenderRasterLayer {
             }
 
             // Otherwise, create new ones.
-            let mut builder = context.create_drawable_builder("raster".to_owned());
+            let mut builder = context.create_drawable_builder();
             builder.set_shader(raster_shader.clone());
             builder.set_render_pass(render_pass);
             builder.set_sub_layer_index(0);

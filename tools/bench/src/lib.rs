@@ -8,10 +8,10 @@
 
 pub mod cases;
 pub mod compare;
-pub mod latency;
+mod latency;
 pub mod meter;
 pub mod scene;
-pub mod stats;
+mod stats;
 
 use std::path::PathBuf;
 
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 pub struct Metric {
     pub name: String,
     pub value: f64,
-    pub lead: bool,
+    pub(crate) lead: bool,
 }
 
 /// A case's metrics, in the order the report shows them.
@@ -30,27 +30,23 @@ pub struct Metric {
 pub struct Metrics(pub Vec<Metric>);
 
 impl Metrics {
-    pub fn lead(&mut self, name: &str, value: f64) {
+    pub(crate) fn lead(&mut self, name: &str, value: f64) {
         self.0.push(Metric { name: name.to_string(), value, lead: true });
     }
 
-    pub fn other(&mut self, name: &str, value: f64) {
+    pub(crate) fn other(&mut self, name: &str, value: f64) {
         self.0.push(Metric { name: name.to_string(), value, lead: false });
     }
 
     /// Keeps `name` as context only, for a case where it isn't the point.
-    pub fn demote(&mut self, name: &str) {
+    pub(crate) fn demote(&mut self, name: &str) {
         for metric in self.0.iter_mut().filter(|metric| metric.name == name) {
             metric.lead = false;
         }
     }
 
-    pub fn extend(&mut self, other: Metrics) {
-        self.0.extend(other.0);
-    }
-
     #[must_use]
-    pub fn get(&self, name: &str) -> Option<&Metric> {
+    pub(crate) fn get(&self, name: &str) -> Option<&Metric> {
         self.0.iter().find(|metric| metric.name == name)
     }
 }
@@ -97,7 +93,7 @@ pub struct Context {
 impl Context {
     /// `count` iterations, scaled, and at least one.
     #[must_use]
-    pub fn iterations(&self, count: usize) -> usize {
+    pub(crate) fn iterations(&self, count: usize) -> usize {
         ((count as f64 * self.scale).round() as usize).max(1)
     }
 }

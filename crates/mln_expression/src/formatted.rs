@@ -7,15 +7,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::image::Image;
 
-pub const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
-pub const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";
+pub(crate) const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
+pub(crate) const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";
 pub const K_FORMATTED_SECTION_TEXT_COLOR: &str = "text-color";
 
 /// A list of font names.
-pub type FontStack = Vec<String>;
+pub(crate) type FontStack = Vec<String>;
 
 #[must_use]
-pub fn font_stack_to_string(font_stack: &FontStack) -> String {
+pub(crate) fn font_stack_to_string(font_stack: &FontStack) -> String {
     font_stack.join(",")
 }
 

@@ -31,11 +31,11 @@ use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides};
 use mln_style::layers::symbol_layer_properties::{
-    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconKeepUpright, IconOffset, IconOpacity,
-    IconPitchAlignment, IconRotationAlignment, IconSize, IconTextFit, IconTranslate, IconTranslateAnchor,
-    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties, SymbolPlacement, SymbolScreenSpace,
-    SymbolSortKey, TextColor, TextField, TextHaloBlur, TextHaloColor, TextHaloWidth, TextKeepUpright, TextOpacity,
-    TextPitchAlignment, TextRotationAlignment, TextTranslate, TextTranslateAnchor,
+    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOffset, IconOpacity, IconPitchAlignment,
+    IconRotationAlignment, IconSize, IconTextFit, IconTranslate, IconTranslateAnchor, SymbolLayerProperties,
+    SymbolLayoutProperties, SymbolPaintProperties, SymbolPlacement, SymbolScreenSpace, SymbolSortKey, TextColor,
+    TextField, TextHaloBlur, TextHaloColor, TextHaloWidth, TextOpacity, TextPitchAlignment, TextRotationAlignment,
+    TextTranslate, TextTranslateAnchor,
 };
 use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
@@ -82,36 +82,33 @@ const SYMBOL_TEXT_AND_ICON_SHADER_NAME: &str = "SymbolTextAndIconShader";
 const POS_OFFSET_ATTRIB_NAME: &str = "a_pos_offset";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SymbolType {
+pub(crate) enum SymbolType {
     Text,
     IconRGBA,
     IconSDF,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct SymbolPropertyValues {
-    pub pitch_alignment: AlignmentType,
-    pub rotation_alignment: AlignmentType,
-    pub keep_upright: bool,
-    pub translate: [f32; 2],
-    pub translate_anchor: TranslateAnchorType,
-    pub has_halo: bool,
-    pub has_fill: bool,
+pub(crate) struct SymbolPropertyValues {
+    pub(crate) pitch_alignment: AlignmentType,
+    pub(crate) rotation_alignment: AlignmentType,
+    pub(crate) translate: [f32; 2],
+    pub(crate) translate_anchor: TranslateAnchorType,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct SymbolDrawableData {
-    pub is_halo: bool,
-    pub bucket_variable_placement: bool,
-    pub symbol_type: SymbolType,
-    pub pitch_alignment: AlignmentType,
-    pub rotation_alignment: AlignmentType,
-    pub placement: SymbolPlacementType,
-    pub text_fit: IconTextFitType,
-    pub is_offset: bool,
+pub(crate) struct SymbolDrawableData {
+    pub(crate) is_halo: bool,
+    pub(crate) bucket_variable_placement: bool,
+    pub(crate) symbol_type: SymbolType,
+    pub(crate) pitch_alignment: AlignmentType,
+    pub(crate) rotation_alignment: AlignmentType,
+    pub(crate) placement: SymbolPlacementType,
+    pub(crate) text_fit: IconTextFitType,
+    pub(crate) is_offset: bool,
     /// The bucket segment the drawable draws (`sortFeaturesByKey`), or all
     /// of them.
-    pub segment: Option<usize>,
+    pub(crate) segment: Option<usize>,
 }
 
 /// The bucket change counters a tile's drawables reflect.
@@ -135,36 +132,28 @@ impl TileVersions {
 }
 
 #[must_use]
-pub fn icon_property_values(
+pub(crate) fn icon_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
     SymbolPropertyValues {
         pitch_alignment: *layout.get::<IconPitchAlignment>(),
         rotation_alignment: *layout.get::<IconRotationAlignment>(),
-        keep_upright: *layout.get::<IconKeepUpright>(),
         translate: *evaluated.get::<IconTranslate>(),
         translate_anchor: *evaluated.get::<IconTranslateAnchor>(),
-        has_halo: evaluated.get::<IconHaloColor>().constant_or(&Color::black()).a > 0.0
-            && evaluated.get::<IconHaloWidth>().constant_or(&1.0) != 0.0,
-        has_fill: evaluated.get::<IconColor>().constant_or(&Color::black()).a > 0.0,
     }
 }
 
 #[must_use]
-pub fn text_property_values(
+pub(crate) fn text_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> SymbolPropertyValues {
     SymbolPropertyValues {
         pitch_alignment: *layout.get::<TextPitchAlignment>(),
         rotation_alignment: *layout.get::<TextRotationAlignment>(),
-        keep_upright: *layout.get::<TextKeepUpright>(),
         translate: *evaluated.get::<TextTranslate>(),
         translate_anchor: *evaluated.get::<TextTranslateAnchor>(),
-        has_halo: evaluated.get::<TextHaloColor>().constant_or(&Color::black()).a > 0.0
-            && evaluated.get::<TextHaloWidth>().constant_or(&1.0) != 0.0,
-        has_fill: evaluated.get::<TextColor>().constant_or(&Color::black()).a > 0.0,
     }
 }
 
@@ -252,7 +241,7 @@ fn capture_rendered_features(
             &tile_id,
             state,
             transform_params,
-            translation,
+            *translation,
             anchor,
             /*origin=*/ None,
             /*near_clipped=*/ false,
@@ -281,7 +270,7 @@ fn capture_rendered_features(
         if is_screen_space {
             return [0.0, 0.0];
         }
-        let translate = RenderTile::tile_unit_translation(&tile_id, translation, anchor, state);
+        let translate = RenderTile::tile_unit_translation(&tile_id, *translation, anchor, state);
         [f64::from(translate[0]), f64::from(translate[1])]
     };
     let text_tile_translation = tile_translation(text_translation, text_translation_anchor);
@@ -826,7 +815,7 @@ impl SegmentGroup {
     }
 }
 
-pub struct RenderSymbolLayer {
+pub(crate) struct RenderSymbolLayer {
     base: RenderLayerBase,
     unevaluated: SymbolPaintProperties::Unevaluated,
     has_format_section_overrides: bool,
@@ -848,7 +837,7 @@ pub struct RenderSymbolLayer {
 }
 
 impl RenderSymbolLayer {
-    pub fn new(impl_: Arc<SymbolLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<SymbolLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(SymbolLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -893,7 +882,7 @@ impl RenderSymbolLayer {
                 format!("{}-collision", self.get_id()),
             );
             if self.collision_tile_layer_group.is_some() {
-                activate_layer_group(&self.collision_tile_layer_group, true, changes);
+                activate_layer_group(self.collision_tile_layer_group.as_ref(), true, changes);
             }
         }
         let group = self.collision_tile_layer_group.clone()?;
@@ -942,7 +931,7 @@ impl RenderSymbolLayer {
         let suffix = if is_text { "text/" } else { "icon/" };
         let layer_collision_prefix = format!("{}-collision/", self.get_id());
 
-        let mut collision_builder = context.create_drawable_builder(layer_collision_prefix.clone());
+        let mut collision_builder = context.create_drawable_builder();
         collision_builder.set_sub_layer_index(0);
         collision_builder.set_enable_depth(false);
         collision_builder.set_render_pass(passes);
@@ -1097,7 +1086,7 @@ impl RenderLayer for RenderSymbolLayer {
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
         crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
         if self.collision_tile_layer_group.is_some() {
-            activate_layer_group(&self.collision_tile_layer_group, will_render, changes);
+            activate_layer_group(self.collision_tile_layer_group.as_ref(), will_render, changes);
         }
     }
 
@@ -1105,9 +1094,9 @@ impl RenderLayer for RenderSymbolLayer {
         // RenderLayer::layerRemoved
         self.remove_all_drawables();
         let group = self.base.layer_group.clone();
-        activate_layer_group(&group, false, changes);
+        activate_layer_group(group.as_ref(), false, changes);
         if self.collision_tile_layer_group.is_some() {
-            activate_layer_group(&self.collision_tile_layer_group, false, changes);
+            activate_layer_group(self.collision_tile_layer_group.as_ref(), false, changes);
         }
     }
 
@@ -1115,9 +1104,9 @@ impl RenderLayer for RenderSymbolLayer {
         // RenderLayer::layerIndexChanged
         self.base.layer_index = new_layer_index;
         let group = self.base.layer_group.clone();
-        change_layer_index(&group, new_layer_index, changes);
+        change_layer_index(group.as_ref(), new_layer_index, changes);
 
-        change_layer_index(&self.collision_tile_layer_group, new_layer_index, changes);
+        change_layer_index(self.collision_tile_layer_group.as_ref(), new_layer_index, changes);
     }
 
     fn remove_all_drawables(&mut self) {
@@ -1405,7 +1394,7 @@ impl RenderLayer for RenderSymbolLayer {
             let layer_id = self.get_id().to_owned();
             let mut refreshed_attributes: Vec<*const ()> = Vec::new();
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
-                if !super::drawable_has_layer_tweaker(drawable, &layer_tweaker) {
+                if !super::drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
                     // This drawable was produced on a previous style/bucket,
                     // and should not be updated.
                     return false;
@@ -1622,7 +1611,7 @@ impl RenderLayer for RenderSymbolLayer {
                 }
 
                 let builder = builder.get_or_insert_with(|| {
-                    let mut builder = context.create_drawable_builder(layer_prefix.clone());
+                    let mut builder = context.create_drawable_builder();
                     builder.set_sub_layer_index(0);
                     builder.set_render_pass(passes);
                     builder.set_cull_face_mode(&CullFaceMode::disabled());

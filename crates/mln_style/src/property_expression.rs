@@ -27,7 +27,7 @@ fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<V
 ///
 /// C++ also caches `zoomCurve` (raw pointers into the shared expression).
 /// A Rust struct cannot hold borrows of its own `Arc`, so
-/// [`get_zoom_curve`](Self::get_zoom_curve) recomputes it with
+/// `get_zoom_curve` recomputes it with
 /// `find_zoom_curve_checked` (a pure function of the expression).
 #[derive(Debug)]
 pub struct PropertyExpressionBase {
@@ -60,7 +60,7 @@ impl Clone for PropertyExpressionBase {
 }
 
 impl PropertyExpressionBase {
-    pub fn new(expression: Arc<dyn Expression>) -> Self {
+    pub(crate) fn new(expression: Arc<dyn Expression>) -> Self {
         let global_state_refs = collect_global_state_refs_shared(expression.as_ref());
         let is_zoom_constant = !expression.has(Dependency::ZOOM);
         let is_feature_constant = !expression.has(Dependency::FEATURE);
@@ -91,7 +91,7 @@ impl PropertyExpressionBase {
     }
 
     #[must_use]
-    pub fn is_runtime_constant(&self) -> bool {
+    pub(crate) fn is_runtime_constant(&self) -> bool {
         self.is_runtime_constant
     }
 
@@ -132,7 +132,7 @@ impl PropertyExpressionBase {
         self.use_integer_zoom
     }
 
-    pub fn set_use_integer_zoom(&mut self, value: bool) {
+    pub(crate) fn set_use_integer_zoom(&mut self, value: bool) {
         self.use_integer_zoom = value;
     }
 
@@ -151,7 +151,7 @@ impl PropertyExpressionBase {
     /// context carries a state of its own, so a value shown before a global
     /// state change keeps its look while it transitions out. The first pin
     /// wins: a value already showing an older state keeps showing it.
-    pub fn pin_global_state(&mut self, global_state: Arc<GlobalStateMap>) {
+    pub(crate) fn pin_global_state(&mut self, global_state: Arc<GlobalStateMap>) {
         if self.global_state_pinned {
             return;
         }
@@ -160,24 +160,24 @@ impl PropertyExpressionBase {
     }
 
     #[must_use]
-    pub fn get_captured_global_state(&self) -> Option<&Arc<GlobalStateMap>> {
+    pub(crate) fn get_captured_global_state(&self) -> Option<&Arc<GlobalStateMap>> {
         self.captured_global_state.as_ref()
     }
 
     /// None if the expression does not reference the global state.
     #[must_use]
-    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
+    pub(crate) fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         self.global_state_refs.as_deref()
     }
 
     #[must_use]
-    pub fn get_dependencies(&self) -> Dependency {
+    pub(crate) fn get_dependencies(&self) -> Dependency {
         self.expression.dependencies()
     }
 
     /// The expression's zoom curve (recomputed, see the struct comment).
     #[must_use]
-    pub fn get_zoom_curve(&self) -> ZoomCurvePtr<'_> {
+    pub(crate) fn get_zoom_curve(&self) -> ZoomCurvePtr<'_> {
         if self.expression.has(Dependency::ZOOM) {
             find_zoom_curve_checked(self.expression.as_ref())
         } else {
@@ -280,7 +280,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         self.evaluate(&EvaluationContext::from_feature(Some(feature)), final_default_value)
     }
 
-    pub fn evaluate_feature_images(
+    pub(crate) fn evaluate_feature_images(
         &self,
         feature: &dyn GeometryTileFeature,
         available_images: &VecSet<String>,
@@ -292,38 +292,11 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    pub fn evaluate_feature_canonical(
-        &self,
-        feature: &dyn GeometryTileFeature,
-        canonical: &CanonicalTileID,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::from_feature(Some(feature)).with_canonical_tile_id(Some(canonical)),
-            final_default_value,
-        )
-    }
-
-    pub fn evaluate_feature_images_canonical(
-        &self,
-        feature: &dyn GeometryTileFeature,
-        available_images: &VecSet<String>,
-        canonical: &CanonicalTileID,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::from_feature(Some(feature))
-                .with_available_images(Some(available_images))
-                .with_canonical_tile_id(Some(canonical)),
-            final_default_value,
-        )
-    }
-
     pub fn evaluate_zoom_feature(&self, zoom: f32, feature: &dyn GeometryTileFeature, final_default_value: T) -> T {
         self.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(feature)), final_default_value)
     }
 
-    pub fn evaluate_zoom_feature_images(
+    pub(crate) fn evaluate_zoom_feature_images(
         &self,
         zoom: f32,
         feature: &dyn GeometryTileFeature,
@@ -336,7 +309,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    pub fn evaluate_zoom_feature_images_canonical(
+    pub(crate) fn evaluate_zoom_feature_images_canonical(
         &self,
         zoom: f32,
         feature: &dyn GeometryTileFeature,
@@ -352,7 +325,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    pub fn evaluate_zoom_feature_canonical(
+    pub(crate) fn evaluate_zoom_feature_canonical(
         &self,
         zoom: f32,
         feature: &dyn GeometryTileFeature,
@@ -365,7 +338,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    pub fn evaluate_zoom_feature_state(
+    pub(crate) fn evaluate_zoom_feature_state(
         &self,
         zoom: f32,
         feature: &dyn GeometryTileFeature,
@@ -379,7 +352,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         )
     }
 
-    pub fn possible_outputs(&self) -> Vec<Option<T>> {
+    pub(crate) fn possible_outputs(&self) -> Vec<Option<T>> {
         from_expression_values::<T>(&self.base.expression.possible_outputs())
     }
 

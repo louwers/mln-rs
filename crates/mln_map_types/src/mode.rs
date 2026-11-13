@@ -56,8 +56,6 @@ impl MapDebugOptions {
     pub const TIMESTAMPS: MapDebugOptions = MapDebugOptions(1 << 3);
     pub const COLLISION: MapDebugOptions = MapDebugOptions(1 << 4);
     pub const OVERDRAW: MapDebugOptions = MapDebugOptions(1 << 5);
-    pub const STENCIL_CLIP: MapDebugOptions = MapDebugOptions(1 << 6);
-    pub const DEPTH_BUFFER: MapDebugOptions = MapDebugOptions(1 << 7);
 
     #[must_use]
     pub const fn contains(self, rhs: MapDebugOptions) -> bool {

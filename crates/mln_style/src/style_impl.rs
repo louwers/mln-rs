@@ -56,7 +56,7 @@ use crate::sprite::Sprite;
 use crate::style::StyleLoadError;
 use crate::transition_options::TransitionOptions;
 
-pub type ImageImpls = Vec<Arc<image::Impl>>;
+pub(crate) type ImageImpls = Vec<Arc<image::Impl>>;
 
 /// The members of `Style::Impl` that its `SpriteLoaderObserver` half changes.
 struct SpriteShared {
@@ -255,8 +255,8 @@ pub struct Impl {
     /// The parsed style's sprites.
     sprites: Vec<Sprite>,
 
-    pub mutated: bool,
-    pub loaded: bool,
+    pub(crate) mutated: bool,
+    pub(crate) loaded: bool,
 }
 
 impl std::fmt::Debug for Impl {
@@ -273,7 +273,7 @@ impl Impl {
     /// A style without a file source (`Impl(nullptr, pixelRatio,
     /// threadPool)`) on the background thread pool.
     #[must_use]
-    pub fn new(pixel_ratio: f32) -> Self {
+    pub(crate) fn new(pixel_ratio: f32) -> Self {
         Self::with_file_source(
             None,
             pixel_ratio,
@@ -282,7 +282,7 @@ impl Impl {
     }
 
     #[must_use]
-    pub fn with_file_source(
+    pub(crate) fn with_file_source(
         file_source: Option<Arc<dyn FileSource>>,
         pixel_ratio: f32,
         thread_pool: TaggedScheduler,
@@ -333,12 +333,12 @@ impl Impl {
     }
 
     /// Cancels any pending style request.
-    pub fn cancel_pending_request(&mut self) {
+    pub(crate) fn cancel_pending_request(&mut self) {
         self.style_request = None;
         self.style_responses.borrow_mut().clear();
     }
 
-    pub fn load_json(&mut self, json: &str) {
+    pub(crate) fn load_json(&mut self, json: &str) {
         self.shared.borrow_mut().last_error = None;
         self.observer().on_style_loading();
 
@@ -347,7 +347,7 @@ impl Impl {
         self.parse(json);
     }
 
-    pub fn load_url(&mut self, url: &str) {
+    pub(crate) fn load_url(&mut self, url: &str) {
         let Some(file_source) = self.file_source.clone() else {
             self.observer()
                 .on_style_error(StyleLoadError::Load("Unable to find resource provider for style url.".to_owned()));
@@ -502,11 +502,11 @@ impl Impl {
         self.observer().on_style_loaded();
     }
 
-    pub fn get_json(&self) -> String {
+    pub(crate) fn get_json(&self) -> String {
         self.json.clone()
     }
 
-    pub fn get_url(&self) -> String {
+    pub(crate) fn get_url(&self) -> String {
         self.url.clone()
     }
 
@@ -518,7 +518,7 @@ impl Impl {
         self.shared.borrow().last_error.clone()
     }
 
-    pub fn set_transition_options(&mut self, options: &TransitionOptions) {
+    pub(crate) fn set_transition_options(&mut self, options: &TransitionOptions) {
         if self.transition_options.duration == options.duration
             && self.transition_options.delay == options.delay
             && self.transition_options.enable_placement_transitions == options.enable_placement_transitions
@@ -535,7 +535,7 @@ impl Impl {
 
     /// Set a global state property. A null value resets the property to the
     /// default defined in the style's root "state" property (or null).
-    pub fn set_global_state_property(&mut self, property: &str, value: &Value) {
+    pub(crate) fn set_global_state_property(&mut self, property: &str, value: &Value) {
         let mut new_value = value;
         if matches!(value, Value::Null)
             && let Some(default) = self.global_state_defaults.get(property)
@@ -561,7 +561,7 @@ impl Impl {
     /// Replaces the defaults that the style's root `state` gives, and sets
     /// every global state property to its new default, as a style that
     /// loads with this `state` would.
-    pub fn set_global_state_defaults(&mut self, defaults: GlobalStateMap) {
+    pub(crate) fn set_global_state_defaults(&mut self, defaults: GlobalStateMap) {
         self.global_state = Arc::new(defaults.clone());
         self.global_state_defaults = defaults;
         self.reevaluate_layer_visibilities();
@@ -569,13 +569,13 @@ impl Impl {
     }
 
     /// The defaults that the style's root `state` gives.
-    pub fn get_global_state_defaults(&self) -> &GlobalStateMap {
+    pub(crate) fn get_global_state_defaults(&self) -> &GlobalStateMap {
         &self.global_state_defaults
     }
 
     /// Re-evaluate the visibility expressions of all layers against the
     /// current global state.
-    pub fn reevaluate_layer_visibilities(&mut self) {
+    pub(crate) fn reevaluate_layer_visibilities(&mut self) {
         let global_state = self.global_state.clone();
         let mut changed = Vec::new();
         for layer in self.layers.get_wrappers_mut() {
@@ -591,7 +591,7 @@ impl Impl {
         }
     }
 
-    pub fn get_global_state(&self) -> GlobalStateMap {
+    pub(crate) fn get_global_state(&self) -> GlobalStateMap {
         (*self.global_state).clone()
     }
 
@@ -601,16 +601,16 @@ impl Impl {
 
     // Sources
 
-    pub fn get_sources(&self) -> Vec<&dyn Source> {
+    pub(crate) fn get_sources(&self) -> Vec<&dyn Source> {
         self.sources.get_wrappers()
     }
 
-    pub fn get_source(&self, id: &str) -> Option<&dyn Source> {
+    pub(crate) fn get_source(&self, id: &str) -> Option<&dyn Source> {
         self.sources.get(id)
     }
 
     /// See [`Style::add_source`](crate::Style::add_source).
-    pub fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
+    pub(crate) fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
         if self.sources.get(&source.get_id()).is_some() {
             return Err(Error::already_exists(format!("Source {} already exists", source.get_id())));
         }
@@ -624,7 +624,7 @@ impl Impl {
         Ok(())
     }
 
-    pub fn remove_source(&mut self, id: &str) -> Option<Box<dyn Source>> {
+    pub(crate) fn remove_source(&mut self, id: &str) -> Option<Box<dyn Source>> {
         // Check if source is in use
         for layer in self.layers.iter() {
             if layer.get_source_id() == id {
@@ -645,24 +645,24 @@ impl Impl {
 
     // Layers
 
-    pub fn get_layers(&self) -> Vec<&dyn Layer> {
+    pub(crate) fn get_layers(&self) -> Vec<&dyn Layer> {
         self.layers.get_wrappers()
     }
 
-    pub fn get_layer(&self, id: &str) -> Option<&dyn Layer> {
+    pub(crate) fn get_layer(&self, id: &str) -> Option<&dyn Layer> {
         self.layers.get(id)
     }
 
     /// The layer `id`, for mutation: the guard notifies this style
     /// (`on_layer_changed`) when dropped if the layer changed.
-    pub fn get_layer_mut(&mut self, id: &str) -> Option<LayerRefMut<'_>> {
+    pub(crate) fn get_layer_mut(&mut self, id: &str) -> Option<LayerRefMut<'_>> {
         let before = self.layers.get(id)?.base_impl();
         Some(LayerRefMut { style: self, id: id.to_owned(), before })
     }
 
     /// Adds a layer before the layer `before`, or on top. See
     /// [`Style::add_layer`](crate::Style::add_layer).
-    pub fn add_layer(&mut self, layer: Box<dyn Layer>, before: Option<&str>) -> Result<&mut dyn Layer, Error> {
+    pub(crate) fn add_layer(&mut self, layer: Box<dyn Layer>, before: Option<&str>) -> Result<&mut dyn Layer, Error> {
         // TODO: verify source
         if let Some(source) = self.sources.get(&layer.get_source_id())
             && !source.supports_layer_type(layer.base_impl().get_type_info())
@@ -696,14 +696,14 @@ impl Impl {
 
     /// Moves the layer `id` below the layer `before`, or above every layer,
     /// as one change. Returns false when the style has no layer `id`.
-    pub fn move_layer(&mut self, id: &str, before: Option<&str>) -> bool {
+    pub(crate) fn move_layer(&mut self, id: &str, before: Option<&str>) -> bool {
         let Some(layer) = self.layers.remove(id) else { return false };
         self.layers.add(layer, before);
         self.observer().on_update();
         true
     }
 
-    pub fn remove_layer(&mut self, id: &str) -> Option<Box<dyn Layer>> {
+    pub(crate) fn remove_layer(&mut self, id: &str) -> Option<Box<dyn Layer>> {
         let layer = self.layers.remove(id);
 
         if layer.is_some() {
@@ -715,17 +715,17 @@ impl Impl {
 
     // Light
 
-    pub fn set_light(&mut self, light: Light) {
+    pub(crate) fn set_light(&mut self, light: Light) {
         self.light = light;
         self.on_light_changed();
     }
 
-    pub fn get_light(&self) -> &Light {
+    pub(crate) fn get_light(&self) -> &Light {
         &self.light
     }
 
     /// The light, for mutation (see `get_layer_mut`).
-    pub fn get_light_mut(&mut self) -> LightRefMut<'_> {
+    pub(crate) fn get_light_mut(&mut self) -> LightRefMut<'_> {
         let before = self.light.impl_.clone();
         LightRefMut { style: self, before }
     }
@@ -733,26 +733,18 @@ impl Impl {
     // Sky
 
     /// Sets the sky; `None` removes it.
-    pub fn set_sky(&mut self, sky: Option<Sky>) {
+    pub(crate) fn set_sky(&mut self, sky: Option<Sky>) {
         self.sky = sky;
         self.observer().on_update();
     }
 
-    pub fn get_sky(&self) -> Option<&Sky> {
+    pub(crate) fn get_sky(&self) -> Option<&Sky> {
         self.sky.as_ref()
-    }
-
-    /// The sky, if there is one, for mutation (see `get_layer_mut`).
-    pub fn get_sky_mut(&mut self) -> Option<SkyRefMut<'_>> {
-        let observer = self.observer();
-        let sky = self.sky.as_mut()?;
-        let before = sky.impl_.clone();
-        Some(SkyRefMut { sky, before, observer })
     }
 
     // Projection
 
-    pub fn set_projection(&mut self, projection: Projection) {
+    pub(crate) fn set_projection(&mut self, projection: Projection) {
         self.projection = projection;
         self.on_projection_changed();
     }
@@ -762,27 +754,27 @@ impl Impl {
     }
 
     /// The projection, for mutation (see `get_layer_mut`).
-    pub fn get_projection_mut(&mut self) -> ProjectionRefMut<'_> {
+    pub(crate) fn get_projection_mut(&mut self) -> ProjectionRefMut<'_> {
         let before = self.projection.impl_.clone();
         ProjectionRefMut { style: self, before }
     }
 
-    pub fn get_name(&self) -> String {
+    pub(crate) fn get_name(&self) -> String {
         self.name.clone()
     }
 
-    pub fn get_default_camera(&self) -> CameraOptions {
+    pub(crate) fn get_default_camera(&self) -> CameraOptions {
         self.default_camera
     }
 
     // Images
 
-    pub fn get_image(&self, id: &str) -> Option<Arc<image::Impl>> {
+    pub(crate) fn get_image(&self, id: &str) -> Option<Arc<image::Impl>> {
         self.shared.borrow().images.iter().find(|image| image.id == id).cloned()
     }
 
     /// Adds an image, replacing the image with the same id.
-    pub fn add_image(&mut self, image: Arc<image::Impl>) {
+    pub(crate) fn add_image(&mut self, image: Arc<image::Impl>) {
         let mut new_images = (*self.shared.borrow().images).clone();
         let it = new_images.partition_point(|a| a.id < image.id);
         if it < new_images.len() && new_images[it].id == image.id {
@@ -795,7 +787,7 @@ impl Impl {
         self.observer().on_update();
     }
 
-    pub fn remove_image(&mut self, id: &str) {
+    pub(crate) fn remove_image(&mut self, id: &str) {
         let mut new_images = (*self.shared.borrow().images).clone();
         let Some(found) = new_images.iter().position(|image| image.id == id) else {
             Log::warning(Event::General, format!("Image '{id}' is not present in style, cannot remove"));
@@ -812,7 +804,7 @@ impl Impl {
     }
 
     /// symbols: `setFallbackFontFaces(faces)`.
-    pub fn set_fallback_font_faces(&mut self, faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>) {
+    pub(crate) fn set_fallback_font_faces(&mut self, faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>) {
         self.fallback_font_faces = faces;
     }
 
@@ -893,10 +885,6 @@ impl Impl {
         self.sources.iter().all(super::source::Source::loaded)
     }
 
-    pub fn pixel_ratio(&self) -> f32 {
-        self.pixel_ratio
-    }
-
     /// Sets the pixel ratio that the style loads its sprites for. Where
     /// that picks the sprites' other resolution, the style loads them
     /// again, and keeps its images until the new ones arrive.
@@ -916,23 +904,15 @@ impl Impl {
 
     // SpriteLoaderObserver implementation.
 
-    pub fn on_sprite_loaded(&mut self, sprite: Option<&Sprite>, images: Vec<Arc<image::Impl>>) {
-        on_sprite_loaded(&self.shared, sprite, images);
-    }
-
-    pub fn on_sprite_error(&mut self, sprite: Option<&Sprite>, error: Error) {
+    pub(crate) fn on_sprite_error(&mut self, sprite: Option<&Sprite>, error: Error) {
         on_sprite_error(&self.shared, sprite, error);
-    }
-
-    pub fn on_sprite_requested(&mut self, sprite: Option<&Sprite>) {
-        on_sprite_requested(&self.shared, sprite);
     }
 
     // The SourceObserver implementation is StyleSourceObserver.
 
     // LayerObserver implementation.
 
-    pub fn on_layer_changed(&mut self, id: &str) {
+    pub(crate) fn on_layer_changed(&mut self, id: &str) {
         let global_state = self.global_state.clone();
         if let Some(layer) = self.layers.get_mut(id) {
             layer.reevaluate_visibility(&global_state);
@@ -943,19 +923,15 @@ impl Impl {
 
     // LightObserver implementation.
 
-    pub fn on_light_changed(&mut self) {
+    pub(crate) fn on_light_changed(&mut self) {
         self.observer().on_update();
     }
 
     // SkyObserver implementation.
 
-    pub fn on_sky_changed(&mut self) {
-        self.observer().on_update();
-    }
-
     // ProjectionObserver implementation.
 
-    pub fn on_projection_changed(&mut self) {
+    pub(crate) fn on_projection_changed(&mut self) {
         self.observer().on_update();
     }
 }
@@ -1030,7 +1006,7 @@ impl Drop for LayerRefMut<'_> {
 
 /// The mutable light of a style; notifies the style when dropped (see
 /// `Impl::get_light_mut`).
-pub struct LightRefMut<'a> {
+pub(crate) struct LightRefMut<'a> {
     style: &'a mut Impl,
     before: Arc<light::Impl>,
 }
@@ -1052,36 +1028,6 @@ impl Drop for LightRefMut<'_> {
     fn drop(&mut self) {
         if !Arc::ptr_eq(&self.before, &self.style.light.impl_) {
             self.style.on_light_changed();
-        }
-    }
-}
-
-/// The mutable sky of a style; notifies the style when dropped (see
-/// `Impl::get_sky_mut`).
-pub struct SkyRefMut<'a> {
-    sky: &'a mut Sky,
-    before: Arc<sky::Impl>,
-    /// The style's observer, which `Impl::on_sky_changed` notifies.
-    observer: Rc<dyn Observer>,
-}
-
-impl std::ops::Deref for SkyRefMut<'_> {
-    type Target = Sky;
-    fn deref(&self) -> &Sky {
-        self.sky
-    }
-}
-
-impl std::ops::DerefMut for SkyRefMut<'_> {
-    fn deref_mut(&mut self) -> &mut Sky {
-        self.sky
-    }
-}
-
-impl Drop for SkyRefMut<'_> {
-    fn drop(&mut self) {
-        if !Arc::ptr_eq(&self.before, &self.sky.impl_) {
-            self.observer.on_update();
         }
     }
 }

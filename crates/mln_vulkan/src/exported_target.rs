@@ -913,7 +913,6 @@ impl Generation {
 /// queued for the host to acquire.
 pub struct ExportedTarget {
     backend: Rc<RendererBackend>,
-    kind: ExportKind,
     layout: Layout,
     depth: usize,
     producer: SyncKind,
@@ -976,18 +975,12 @@ impl ExportedTarget {
         let current = Generation::new(&backend, &layout, ring.depth, size, producer, depth_format)?;
         Ok(ExportedTarget {
             backend,
-            kind,
             layout,
             depth: ring.depth,
             producer,
             depth_format,
             generations: RefCell::new(Generations::new(current)),
         })
-    }
-
-    /// How the target shares its images.
-    pub fn kind(&self) -> ExportKind {
-        self.kind
     }
 
     /// Has the next frame draw into the image at `slot`.

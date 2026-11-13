@@ -5,18 +5,17 @@
 //! renderer (dispatch on `LayerTypeInfo`). A cut point of the C++ include
 //! cycle.
 
-pub mod background_layer_factory;
-pub mod circle_layer_factory;
-pub mod color_relief_layer_factory;
-pub mod fill_extrusion_layer_factory;
-pub mod fill_layer_factory;
-pub mod heatmap_layer_factory;
-pub mod hillshade_layer_factory;
-pub mod layer_factory;
-pub mod layer_manager;
-pub mod line_layer_factory;
-pub mod raster_layer_factory;
-pub mod symbol_layer_factory;
+pub(crate) mod background_layer_factory;
+pub(crate) mod circle_layer_factory;
+pub(crate) mod color_relief_layer_factory;
+pub(crate) mod fill_extrusion_layer_factory;
+pub(crate) mod fill_layer_factory;
+pub(crate) mod heatmap_layer_factory;
+pub(crate) mod hillshade_layer_factory;
+pub(crate) mod layer_factory;
+pub(crate) mod layer_manager;
+pub(crate) mod line_layer_factory;
+pub(crate) mod raster_layer_factory;
+pub(crate) mod symbol_layer_factory;
 
-pub use layer_factory::LayerFactory;
-pub use layer_manager::LayerManager;
+pub(crate) use layer_manager::LayerManager;

@@ -11,7 +11,7 @@ use crate::shaders::program_parameters::ProgramParameters;
 
 /// The data members of `gfx::RendererBackend`.
 pub struct RendererBackendBase {
-    pub unique_id: SimpleIdentity,
+    pub(crate) unique_id: SimpleIdentity,
     context: OnceCell<Rc<dyn Context>>,
 }
 

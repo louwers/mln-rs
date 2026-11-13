@@ -40,7 +40,7 @@ const DISCONNECT: JsValue = JsValue::NULL;
 
 /// Tile worker instances behind `MessagePort`s, instance `i` behind port `i`.
 /// Dropping it disconnects them.
-pub struct PortInstances {
+pub(crate) struct PortInstances {
     ports: Vec<web_sys::MessagePort>,
     _listeners: Vec<Closure<dyn FnMut(web_sys::MessageEvent)>>,
 }
@@ -49,7 +49,7 @@ impl PortInstances {
     /// Instances behind `ports`, which must not be empty. Their replies go to
     /// `reply(instance, reply)`, and a panic of an instance to
     /// `fatal(instance, message)`, on this thread, as their messages arrive.
-    pub fn new(
+    pub(crate) fn new(
         ports: Vec<web_sys::MessagePort>,
         reply: impl Fn(usize, Encoded) + 'static,
         fatal: impl Fn(usize, JsValue) + 'static,

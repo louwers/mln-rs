@@ -24,7 +24,7 @@ use mln_util::logging::{Event, Log};
 
 use crate::layer::LayerTypeInfo;
 use crate::observer::SourceObserver;
-pub use crate::source_impl::{Impl, ImplBase, downcast_arc};
+pub use crate::source_impl::{Impl, downcast_arc};
 
 /// The data members of `Source`.
 pub struct SourceBase {
@@ -46,34 +46,34 @@ struct NullSourceObserver;
 impl SourceObserver for NullSourceObserver {}
 
 impl SourceBase {
-    pub fn new(impl_: Arc<dyn Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<dyn Impl>) -> Self {
         SourceBase { base_impl: RefCell::new(impl_), observer: RefCell::new(None), loaded: Cell::new(false) }
     }
 
-    pub fn base_impl(&self) -> Arc<dyn Impl> {
+    pub(crate) fn base_impl(&self) -> Arc<dyn Impl> {
         self.base_impl.borrow().clone()
     }
 
-    pub fn set_base_impl(&self, impl_: Arc<dyn Impl>) {
+    pub(crate) fn set_base_impl(&self, impl_: Arc<dyn Impl>) {
         *self.base_impl.borrow_mut() = impl_;
     }
 
-    pub fn observer(&self) -> Rc<dyn SourceObserver> {
+    pub(crate) fn observer(&self) -> Rc<dyn SourceObserver> {
         match &*self.observer.borrow() {
             Some(observer) => observer.clone(),
             None => Rc::new(NullSourceObserver),
         }
     }
 
-    pub fn set_observer(&self, observer: Option<Rc<dyn SourceObserver>>) {
+    pub(crate) fn set_observer(&self, observer: Option<Rc<dyn SourceObserver>>) {
         *self.observer.borrow_mut() = observer;
     }
 
-    pub fn loaded(&self) -> bool {
+    pub(crate) fn loaded(&self) -> bool {
         self.loaded.get()
     }
 
-    pub fn set_loaded(&self, loaded: bool) {
+    pub(crate) fn set_loaded(&self, loaded: bool) {
         self.loaded.set(loaded);
     }
 }

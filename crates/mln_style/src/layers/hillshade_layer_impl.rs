@@ -5,13 +5,13 @@ use crate::layers::hillshade_layer_properties::HillshadePaintProperties;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
-    pub base: ImplBase,
+    pub(crate) base: ImplBase,
     pub paint: HillshadePaintProperties::Transitionable,
 }
 
 impl Impl {
     #[must_use]
-    pub fn new(layer_id: String, source_id: String) -> Self {
+    pub(crate) fn new(layer_id: String, source_id: String) -> Self {
         Impl { base: ImplBase::new(layer_id, source_id), paint: HillshadePaintProperties::Transitionable::default() }
     }
 }

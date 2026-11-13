@@ -51,21 +51,21 @@ crate::paint_property_binders!(
 /// data (8 bytes in all).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct LineLayoutVertex {
-    pub a1: [i16; 2],
-    pub a2: [u8; 4],
+pub(crate) struct LineLayoutVertex {
+    pub(crate) a1: [i16; 2],
+    pub(crate) a2: [u8; 4],
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct LineBucket {
-    pub base: BucketBase,
-    pub layout: LineLayoutProperties::PossiblyEvaluated,
-    pub vertices: GeometryVec<LineLayoutVertex>,
-    pub triangles: GeometryVec<u16>,
-    pub segments: Vec<SegmentBase>,
+pub(crate) struct LineBucket {
+    pub(crate) base: BucketBase,
+    pub(crate) layout: LineLayoutProperties::PossiblyEvaluated,
+    pub(crate) vertices: GeometryVec<LineLayoutVertex>,
+    pub(crate) triangles: GeometryVec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: VecMap<String, RwLock<LineBinders>>,
+    pub(crate) paint_property_binders: VecMap<String, RwLock<LineBinders>>,
     zoom: f32,
     overscaling: u32,
     subdivision_granularity: SubdivisionGranularitySetting,
@@ -76,13 +76,13 @@ pub struct LineBucket {
 /// extrude normals for line joins, because the x-value remains 0 for the
 /// texture normal array, while the extrude normal actually moves the vertex
 /// to create the acute/bevelled line join.
-pub const EXTRUDE_SCALE: i8 = 63;
+pub(crate) const EXTRUDE_SCALE: i8 = 63;
 
 static WARNED_INVALID_GEOMETRY: AtomicBool = AtomicBool::new(false);
 
 impl LineBucket {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         layout: LineLayoutProperties::PossiblyEvaluated,
         layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
@@ -107,7 +107,7 @@ impl LineBucket {
         }
     }
 
-    pub fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
+    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
         self.subdivision_granularity = *value;
     }
 
@@ -119,7 +119,7 @@ impl LineBucket {
     /// @param up whether the line normal points up or down
     /// @param dir direction of the line cap (-1/0/1)
     #[must_use]
-    pub fn layout_vertex(
+    pub(crate) fn layout_vertex(
         p: Point<i16>,
         e: Point<f64>,
         round: bool,

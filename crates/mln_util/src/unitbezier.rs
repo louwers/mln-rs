@@ -49,23 +49,13 @@ impl UnitBezier {
     }
 
     #[must_use]
-    pub fn p1(&self) -> (f64, f64) {
-        (self.cx / 3.0, self.cy / 3.0)
-    }
-
-    #[must_use]
-    pub fn p2(&self) -> (f64, f64) {
-        ((self.bx + (3.0 * self.cx / 3.0) + self.cx) / 3.0, (self.by + (3.0 * self.cy / 3.0) + self.cy) / 3.0)
-    }
-
-    #[must_use]
-    pub fn sample_curve_x(&self, t: f64) -> f64 {
+    pub(crate) fn sample_curve_x(&self, t: f64) -> f64 {
         // `ax t^3 + bx t^2 + cx t` expanded using Horner's rule.
         ((self.ax * t + self.bx) * t + self.cx) * t
     }
 
     #[must_use]
-    pub fn sample_curve_y(&self, t: f64) -> f64 {
+    pub(crate) fn sample_curve_y(&self, t: f64) -> f64 {
         ((self.ay * t + self.by) * t + self.cy) * t
     }
 

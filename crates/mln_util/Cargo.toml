@@ -33,12 +33,6 @@ web-time.workspace = true
 # host_bytes: tile workers' vertex and index arrays, kept in JS until upload.
 js-sys.workspace = true
 
-# Ported C++ gtests of test/util (markers `// gtest: Group.Name`), for
-# mln_util and the low crates next to it.
-[[test]]
-name = "mln_util_gtest"
-path = "tests/gtest/main.rs"
-
 # Ports test/util/padding.test.cpp: its expression cases need mln_style.
 [[test]]
 name = "gtest_padding"

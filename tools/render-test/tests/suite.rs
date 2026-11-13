@@ -14,7 +14,7 @@ use render_test::runner::ImplFactory;
 
 /// The runner's exit code for `args` (after `--manifestPath`, `--output`
 /// and `--jobs`).
-pub fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
+pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
     let manifest = if cfg!(target_os = "macos") { "manifests/macos-wgpu.json" } else { "manifests/linux-wgpu.json" };
     let output = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let jobs = std::env::var("RENDER_TEST_JOBS").unwrap_or_else(|_| "0".to_string());

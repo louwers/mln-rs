@@ -29,12 +29,12 @@ pub struct EvaluationError {
 }
 
 impl EvaluationError {
-    pub fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         EvaluationError { message: message.into() }
     }
 }
 
-pub type EvalResult<T> = Result<T, EvaluationError>;
+pub(crate) type EvalResult<T> = Result<T, EvaluationError>;
 
 pub type EvaluationResult = Result<Value, EvaluationError>;
 
@@ -74,7 +74,10 @@ impl<'a> EvaluationContext<'a> {
     }
 
     #[must_use]
-    pub fn from_accumulated(accumulated: Option<&'a MbglValue>, feature: Option<&'a dyn GeometryTileFeature>) -> Self {
+    pub(crate) fn from_accumulated(
+        accumulated: Option<&'a MbglValue>,
+        feature: Option<&'a dyn GeometryTileFeature>,
+    ) -> Self {
         EvaluationContext { accumulated, feature, ..Default::default() }
     }
 
@@ -94,17 +97,6 @@ impl<'a> EvaluationContext<'a> {
         color_ramp_parameter: Option<f64>,
     ) -> Self {
         EvaluationContext { zoom, feature, color_ramp_parameter, ..Default::default() }
-    }
-
-    /// The four-argument constructor with `elevation`.
-    #[must_use]
-    pub fn with_color_ramp_elevation(
-        zoom: Option<f32>,
-        feature: Option<&'a dyn GeometryTileFeature>,
-        color_ramp_parameter: Option<f64>,
-        elevation: Option<f32>,
-    ) -> Self {
-        EvaluationContext { zoom, feature, color_ramp_parameter, elevation, ..Default::default() }
     }
 
     #[must_use]
@@ -131,8 +123,9 @@ impl<'a> EvaluationContext<'a> {
         self
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn with_elevation(mut self, elevation: f32) -> Self {
+    pub(crate) fn with_elevation(mut self, elevation: f32) -> Self {
         self.elevation = Some(elevation);
         self
     }
@@ -196,7 +189,7 @@ impl Dependency {
     /// Zoom level
     pub const ZOOM: Dependency = Dependency(1 << 2);
     /// Not used yet, "distance-from-center" not supported
-    pub const LOCATION: Dependency = Dependency(1 << 3);
+    pub(crate) const LOCATION: Dependency = Dependency(1 << 3);
     /// Create variable binding ("let")
     pub const BIND: Dependency = Dependency(1 << 4);
     /// Use variable binding
@@ -207,8 +200,6 @@ impl Dependency {
     pub const ELEVATION: Dependency = Dependency(1 << 7);
     /// Global state ("global-state")
     pub const GLOBAL_STATE: Dependency = Dependency(1 << 8);
-    pub const MASK_COUNT: u32 = 9;
-    pub const ALL: Dependency = Dependency((1 << Self::MASK_COUNT) - 1);
 
     /// `bool(a & b)` (`util/bitmask_operations.hpp`).
     #[must_use]
@@ -268,7 +259,7 @@ impl fmt::Debug for Dependency {
 /// The fields of the C++ `Expression` base class.
 #[derive(Clone, Debug)]
 pub struct ExpressionBase {
-    pub dependencies: Dependency,
+    pub(crate) dependencies: Dependency,
     kind: Kind,
     type_: Type,
 }
@@ -328,7 +319,7 @@ pub trait Expression: Any + Send + Sync {
 }
 
 /// The base-class `Expression::serialize()`.
-pub fn default_serialize<E: Expression + ?Sized>(e: &E) -> MbglValue {
+pub(crate) fn default_serialize<E: Expression + ?Sized>(e: &E) -> MbglValue {
     let mut serialized = vec![MbglValue::String(e.get_operator())];
     e.each_child(&mut |child| serialized.push(child.serialize()));
     MbglValue::Array(serialized)
@@ -351,13 +342,8 @@ pub fn downcast<T: Expression>(e: &dyn Expression) -> Option<&T> {
     (e as &dyn Any).downcast_ref()
 }
 
-/// The dependencies of an optional child; none when it is absent.
-pub fn deps_of_opt<E: std::ops::Deref<Target = dyn Expression>>(e: &Option<E>) -> Dependency {
-    e.as_ref().map_or(Dependency::NONE, |e| e.dependencies())
-}
-
 /// The union of the dependencies of `container`'s expressions.
-pub fn collect_dependencies<'a, I, E>(container: I) -> Dependency
+pub(crate) fn collect_dependencies<'a, I, E>(container: I) -> Dependency
 where
     I: IntoIterator<Item = &'a E>,
     E: std::ops::Deref<Target = dyn Expression> + 'a,
@@ -366,7 +352,7 @@ where
 }
 
 /// Whether two lists of expressions are equal, element by element.
-pub fn children_equal<E, F>(lhs: &[E], rhs: &[F]) -> bool
+pub(crate) fn children_equal<E, F>(lhs: &[E], rhs: &[F]) -> bool
 where
     E: std::ops::Deref<Target = dyn Expression>,
     F: std::ops::Deref<Target = dyn Expression>,
@@ -453,7 +439,8 @@ impl GeometryTileFeature for GeoJSONFeature<'_> {
     }
 }
 
-pub fn evaluate_feature(
+#[cfg(test)]
+pub(crate) fn evaluate_feature(
     e: &dyn Expression,
     zoom: Option<f32>,
     feature: &Feature<f64>,

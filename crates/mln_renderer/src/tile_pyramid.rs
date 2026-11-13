@@ -26,7 +26,7 @@ use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, tile_cover};
 
-pub struct TilePyramid {
+pub(crate) struct TilePyramid {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
     cache: TileCache,
 
@@ -174,7 +174,7 @@ impl Default for TilePyramid {
 impl TilePyramid {
     /// An empty pyramid. Takes no thread pool (see `TileCache::new`).
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         TilePyramid {
             tiles: BTreeMap::new(),
             cache: TileCache::new(0),
@@ -188,12 +188,12 @@ impl TilePyramid {
     }
 
     #[must_use]
-    pub fn is_loaded(&self) -> bool {
+    pub(crate) fn is_loaded(&self) -> bool {
         self.tiles.values().all(|tile| tile.is_complete())
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn update(
+    pub(crate) fn update(
         &mut self,
         layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
@@ -376,12 +376,12 @@ impl TilePyramid {
         if !pan_tiles.is_empty() {
             // `[](const UnwrappedTileID&, Tile&) {}` and no prefetched tiles.
             ctx.render = false;
-            update_renderables(&mut ctx, &pan_tiles, &zoom_range, max_parent_tile_overscale_factor);
+            update_renderables(&mut ctx, &pan_tiles, zoom_range, max_parent_tile_overscale_factor);
         }
 
         ctx.render = true;
         ctx.pass_rank = 0;
-        update_renderables(&mut ctx, &ideal_tiles, &zoom_range, max_parent_tile_overscale_factor);
+        update_renderables(&mut ctx, &ideal_tiles, zoom_range, max_parent_tile_overscale_factor);
 
         let previously_rendered: Vec<(UnwrappedTileID, OverscaledTileID)> =
             ctx.previously_rendered_tiles.iter().map(|(id, key)| (*id, *key)).collect();
@@ -471,18 +471,18 @@ impl TilePyramid {
     }
 
     /// The rendered tiles, sorted by tile id.
-    pub fn get_rendered_tiles(&self) -> impl Iterator<Item = (&UnwrappedTileID, &dyn Tile)> + '_ {
+    pub(crate) fn get_rendered_tiles(&self) -> impl Iterator<Item = (&UnwrappedTileID, &dyn Tile)> + '_ {
         self.rendered_tiles.iter().map(|(id, key)| (id, self.tiles[key].as_ref()))
     }
 
     #[must_use]
-    pub fn rendered_tile_count(&self) -> usize {
+    pub(crate) fn rendered_tile_count(&self) -> usize {
         self.rendered_tiles.len()
     }
 
     /// The tile with this id, from the pyramid or the cache.
     #[must_use]
-    pub fn get_tile(&self, tile_id: &OverscaledTileID) -> Option<&dyn Tile> {
+    pub(crate) fn get_tile(&self, tile_id: &OverscaledTileID) -> Option<&dyn Tile> {
         match self.tiles.get(tile_id) {
             Some(tile) => Some(tile.as_ref()),
             None => self.cache.get(tile_id),
@@ -491,7 +491,7 @@ impl TilePyramid {
 
     // query
     #[allow(clippy::too_many_arguments)]
-    pub fn query_rendered_features(
+    pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         transform_state: &mln_map_types::TransformState,
@@ -736,7 +736,7 @@ impl TilePyramid {
         Ok(result)
     }
 
-    pub fn query_source_features(
+    pub(crate) fn query_source_features(
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
@@ -748,11 +748,6 @@ impl TilePyramid {
         }
 
         Ok(result)
-    }
-
-    #[must_use]
-    pub fn get_rendered_tile(&self, tile_id: &UnwrappedTileID) -> Option<&dyn Tile> {
-        self.rendered_tiles.get(tile_id).map(|key| self.tiles[key].as_ref())
     }
 
     /// On the globe every wrap of a tile is the same piece of the sphere, and
@@ -810,7 +805,7 @@ impl TilePyramid {
     ///
     /// This enables us to reuse the tiles at more ideal locations and
     /// prevent flickering.
-    pub fn handle_wrap_jump(&mut self, lng: f32) {
+    pub(crate) fn handle_wrap_jump(&mut self, lng: f32) {
         let lng_difference = lng - self.prev_lng;
         let world_difference = lng_difference / 360.0f32;
         let wrap_delta = world_difference.round() as i16;
@@ -839,36 +834,36 @@ impl TilePyramid {
         }
     }
 
-    pub fn set_cache_enabled(&mut self, enable: bool) {
+    pub(crate) fn set_cache_enabled(&mut self, enable: bool) {
         self.cache_enabled = enable;
     }
 
-    pub fn reduce_memory_use(&mut self) {
+    pub(crate) fn reduce_memory_use(&mut self) {
         self.cache.clear();
     }
 
-    pub fn retry_failed_tiles(&self) {
+    pub(crate) fn retry_failed_tiles(&self) {
         for tile in self.tiles.values() {
             tile.retry_failed_load();
         }
     }
 
-    pub fn set_observer(&mut self, observer: Rc<dyn TileObserver>) {
+    pub(crate) fn set_observer(&mut self, observer: Rc<dyn TileObserver>) {
         self.observer = observer;
     }
 
-    pub fn dump_debug_logs(&self) {
+    pub(crate) fn dump_debug_logs(&self) {
         for tile in self.tiles.values() {
             tile.dump_debug_logs();
         }
     }
 
     #[must_use]
-    pub fn get_tiles(&self) -> &BTreeMap<OverscaledTileID, Box<dyn Tile>> {
+    pub(crate) fn get_tiles(&self) -> &BTreeMap<OverscaledTileID, Box<dyn Tile>> {
         &self.tiles
     }
 
-    pub fn clear_all(&mut self) {
+    pub(crate) fn clear_all(&mut self) {
         self.fading_tiles = false;
         self.tiles.clear();
         self.rendered_tiles.clear();
@@ -877,7 +872,7 @@ impl TilePyramid {
         self.cache.defer_pending_releases();
     }
 
-    pub fn update_fading_tiles(&mut self) {
+    pub(crate) fn update_fading_tiles(&mut self) {
         self.fading_tiles = false;
         for key in self.rendered_tiles.values() {
             let tile = &self.tiles[key];
@@ -889,13 +884,7 @@ impl TilePyramid {
     }
 
     #[must_use]
-    pub fn has_fading_tiles(&self) -> bool {
+    pub(crate) fn has_fading_tiles(&self) -> bool {
         self.fading_tiles
-    }
-
-    /// The tile cache, for tests.
-    #[must_use]
-    pub fn cache(&self) -> &TileCache {
-        &self.cache
     }
 }

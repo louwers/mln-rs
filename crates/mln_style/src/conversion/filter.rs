@@ -188,7 +188,7 @@ fn convert_legacy_filter_array(
     Some(output)
 }
 
-pub fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error) -> ParseResult {
+pub(crate) fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error) -> ParseResult {
     if values.is_undefined() {
         return Some(Box::new(Literal::new(Value::Bool(true))));
     }
@@ -243,7 +243,7 @@ pub fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error) -> Par
 }
 
 #[must_use]
-pub fn serialize_legacy_filter(values: &Convertible<'_>) -> Option<MbglValue> {
+pub(crate) fn serialize_legacy_filter(values: &Convertible<'_>) -> Option<MbglValue> {
     if values.is_undefined() {
         None
     } else if values.is_array() {

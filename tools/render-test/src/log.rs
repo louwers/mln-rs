@@ -1,5 +1,5 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Event {
+pub(crate) enum Event {
     General,
     ParseStyle,
 }
@@ -23,14 +23,14 @@ fn record(severity: &str, event: Event, msg: &str) {
     }
 }
 
-pub fn info(event: Event, msg: &str) {
+pub(crate) fn info(event: Event, msg: &str) {
     record("INFO", event, msg);
 }
 
-pub fn warning(event: Event, msg: &str) {
+pub(crate) fn warning(event: Event, msg: &str) {
     record("WARNING", event, msg);
 }
 
-pub fn error(event: Event, msg: &str) {
+pub(crate) fn error(event: Event, msg: &str) {
     record("ERROR", event, msg);
 }

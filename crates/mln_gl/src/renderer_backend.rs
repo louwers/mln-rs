@@ -26,7 +26,7 @@ use crate::types::Gl;
 
 /// The platform's GL context, which a backend makes current around its
 /// frames (C++: the pure virtual `activate` and `deactivate`).
-pub trait PlatformContext {
+pub(crate) trait PlatformContext {
     fn make_current(&self);
     fn done_current(&self);
 
@@ -39,7 +39,7 @@ pub trait PlatformContext {
 }
 
 /// The context state the backend and its `Context` share.
-pub struct BackendImpl {
+pub(crate) struct BackendImpl {
     // Dropped before the platform's context, which its functions belong to.
     // An `Arc` for the code that draws beside the backend with a library
     // that wants one (a window's overlay); it stays on the context's thread.
@@ -52,35 +52,36 @@ pub struct BackendImpl {
 
 impl BackendImpl {
     #[must_use]
-    pub fn gl(&self) -> &Gl {
+    pub(crate) fn gl(&self) -> &Gl {
         &self.gl
     }
 
     /// The GL functions, to share with code that draws on the context's
     /// thread.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     #[must_use]
-    pub fn gl_shared(&self) -> &Arc<Gl> {
+    pub(crate) fn gl_shared(&self) -> &Arc<Gl> {
         &self.gl
     }
 
     #[cfg(target_family = "wasm")]
     #[must_use]
-    pub fn webgl2(&self) -> &web_sys::WebGl2RenderingContext {
+    pub(crate) fn webgl2(&self) -> &web_sys::WebGl2RenderingContext {
         &self.webgl2
     }
 
-    pub fn make_current(&self) {
+    pub(crate) fn make_current(&self) {
         self.platform.make_current();
     }
 
     /// Whether something else used the context since the last
     /// `make_current`; reading it clears it.
     #[must_use]
-    pub fn take_state_lost(&self) -> bool {
+    pub(crate) fn take_state_lost(&self) -> bool {
         self.platform.take_state_lost()
     }
 
-    pub fn done_current(&self) {
+    pub(crate) fn done_current(&self) {
         self.platform.done_current();
     }
 }
@@ -122,7 +123,7 @@ impl RendererBackend {
 
     /// The backend's context, made on first use. Call inside a
     /// `BackendScope`.
-    pub fn gl_context(&self) -> Option<Rc<Context>> {
+    pub(crate) fn gl_context(&self) -> Option<Rc<Context>> {
         let context = renderer_backend::RendererBackend::get_context(self);
         context.downcast_ref::<Context>().map(Context::rc)
     }
@@ -135,11 +136,7 @@ impl RendererBackend {
         unsafe { self.gl().get_parameter_string(glow::RENDERER) }
     }
 
-    pub fn backend_impl(&self) -> &Rc<BackendImpl> {
-        &self.impl_
-    }
-
-    pub fn gl(&self) -> &Gl {
+    pub(crate) fn gl(&self) -> &Gl {
         self.impl_.gl()
     }
 
@@ -158,7 +155,7 @@ impl RendererBackend {
     /// Makes the backend's context current. Where another renderer used the
     /// context since the backend's last frame, the context forgets the GL state
     /// it cached.
-    pub fn activate(&self) {
+    pub(crate) fn activate(&self) {
         self.impl_.make_current();
         if self.impl_.take_state_lost()
             && let Some(context) = self.base.existing_context()
@@ -168,17 +165,18 @@ impl RendererBackend {
         }
     }
 
-    pub fn deactivate(&self) {
+    pub(crate) fn deactivate(&self) {
         self.impl_.done_current();
     }
 
-    pub fn create_context(&self) -> Rc<Context> {
+    pub(crate) fn create_context(&self) -> Rc<Context> {
         Context::new(self.impl_.clone())
     }
 
     /// Registers one shader group per built-in shader. A duplicate
     /// registration is an error, which C++ throws and this logs.
-    pub fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
+    #[expect(clippy::unused_self, reason = "each backend registers its shaders through its own `init_shaders`")]
+    pub(crate) fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
         for &shader_id in REGISTERED_SHADERS {
             let Some(source) = shader_source(shader_id) else {
                 continue;

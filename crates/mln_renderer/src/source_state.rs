@@ -20,7 +20,7 @@ use crate::tile::tile::Tile;
 pub type FeatureStatesBySource = BTreeMap<String, Arc<LayerFeatureStates>>;
 
 #[derive(Debug, Default)]
-pub struct SourceFeatureState {
+pub(crate) struct SourceFeatureState {
     current_states: LayerFeatureStates,
     state_changes: LayerFeatureStates,
     deleted_states: LayerFeatureStates,
@@ -32,11 +32,11 @@ pub struct SourceFeatureState {
 
 impl SourceFeatureState {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn update_state(&mut self, source_layer_id: Option<&str>, feature_id: &str, new_state: &FeatureState) {
+    pub(crate) fn update_state(&mut self, source_layer_id: Option<&str>, feature_id: &str, new_state: &FeatureState) {
         let source_layer = source_layer_id.unwrap_or("").to_owned();
         for (key, value) in new_state {
             let layer_states = self.state_changes.entry(source_layer.clone()).or_default();
@@ -96,7 +96,7 @@ impl SourceFeatureState {
     /// `coalesce_changes`, in place of whatever it held or had queued. A
     /// source given the same `states` again changes nothing, so a map's
     /// update can give every source its state each time.
-    pub fn set_states(&mut self, states: Option<&Arc<LayerFeatureStates>>) {
+    pub(crate) fn set_states(&mut self, states: Option<&Arc<LayerFeatureStates>>) {
         let unchanged = match (&self.given, states) {
             (None, None) => true,
             (Some(given), Some(states)) => Arc::ptr_eq(given, states),
@@ -155,7 +155,7 @@ impl SourceFeatureState {
     }
 
     #[must_use]
-    pub fn get_state(&self, source_layer_id: Option<&str>, feature_id: &str) -> FeatureState {
+    pub(crate) fn get_state(&self, source_layer_id: Option<&str>, feature_id: &str) -> FeatureState {
         let source_layer = source_layer_id.unwrap_or("");
         let current = self
             .current_states
@@ -190,7 +190,7 @@ impl SourceFeatureState {
     /// version gets this frame's changes; a tile with new buckets, or one that
     /// was not rendered in a frame with changes, gets the whole state; a tile
     /// that is up to date gets nothing.
-    pub fn coalesce_changes<'a>(&mut self, tiles: impl IntoIterator<Item = &'a dyn Tile>) {
+    pub(crate) fn coalesce_changes<'a>(&mut self, tiles: impl IntoIterator<Item = &'a dyn Tile>) {
         let mut changes: LayerFeatureStates = LayerFeatureStates::new();
         let state_changes = std::mem::take(&mut self.state_changes);
         for (source_layer, layer_state_changes) in &state_changes {
@@ -245,7 +245,12 @@ impl SourceFeatureState {
         }
     }
 
-    pub fn remove_state(&mut self, source_layer_id: Option<&str>, feature_id: Option<&str>, state_key: Option<&str>) {
+    pub(crate) fn remove_state(
+        &mut self,
+        source_layer_id: Option<&str>,
+        feature_id: Option<&str>,
+        state_key: Option<&str>,
+    ) {
         let source_layer = source_layer_id.unwrap_or("");
 
         let layer_deletions = self.deleted_states.get(source_layer);

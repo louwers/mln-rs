@@ -59,7 +59,7 @@ fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &LineLayerImpl {
 
 const POS_NORMAL_ATTRIB_NAME: &str = "a_pos_normal";
 
-pub fn apply_color_ramp(
+pub(crate) fn apply_color_ramp(
     color_value: &mln_style::color_ramp_property_value::ColorRampPropertyValue,
     image: &mut PremultipliedImage,
     global_state: Option<&GlobalStateMap>,
@@ -115,7 +115,7 @@ fn capture_rendered_features(
         tile.get_overscaled_tile_id(),
         state,
         transform_params,
-        evaluated.get::<LineTranslate>(),
+        *evaluated.get::<LineTranslate>(),
         *evaluated.get::<LineTranslateAnchor>(),
         |vertex_offset| {
             if !alpha_is_constant {
@@ -233,7 +233,7 @@ fn read_line_attributes(
     );
 }
 
-pub struct RenderLineLayer {
+pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
     // Paint properties
     unevaluated: LinePaintProperties::Unevaluated,
@@ -254,7 +254,7 @@ pub struct RenderLineLayer {
 }
 
 impl RenderLineLayer {
-    pub fn new(impl_: Arc<LineLayerImpl>) -> Self {
+    pub(crate) fn new(impl_: Arc<LineLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
         let properties: Arc<dyn LayerProperties> = Arc::new(LineLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
@@ -446,7 +446,7 @@ impl RenderLayer for RenderLineLayer {
         // Translate query geometry
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
-            evaluated.get::<LineTranslate>(),
+            *evaluated.get::<LineTranslate>(),
             *evaluated.get::<LineTranslateAnchor>(),
             transform_state.get_bearing() as f32,
             pixels_to_tile_units,
@@ -572,8 +572,8 @@ impl RenderLayer for RenderLineLayer {
             tile_layer_group.set_stencil_tiles(Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect())));
         }
 
-        let create_line_builder = |name: &str, shader: ShaderProgramBasePtr| -> UniqueDrawableBuilder {
-            let mut builder = context.create_drawable_builder(name.to_owned());
+        let create_line_builder = |shader: ShaderProgramBasePtr| -> UniqueDrawableBuilder {
+            let mut builder = context.create_drawable_builder();
             builder.set_shader(Some(shader));
             builder.set_render_pass(render_pass);
             builder.set_sub_layer_index(0);
@@ -691,7 +691,7 @@ impl RenderLayer for RenderLineLayer {
 
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
                 // A drawable produced on a previous style/bucket should not be updated.
-                let current = drawable_has_layer_tweaker(drawable, &layer_tweaker);
+                let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
                 if current {
                     refresh_if_bucket_updated(drawable, |attrs| {
                         read_line_attributes(
@@ -776,7 +776,7 @@ impl RenderLayer for RenderLineLayer {
                     continue;
                 };
 
-                let mut builder = create_line_builder("lineGradientSDF", shader);
+                let mut builder = create_line_builder(shader);
 
                 // vertices and attributes
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
@@ -789,7 +789,7 @@ impl RenderLayer for RenderLineLayer {
 
                     builder.flush(context);
                     for drawable in builder.clear_drawables() {
-                        add_drawable(drawable, LineType::GradientSDF);
+                        add_drawable(drawable, LineType::GradientSdf);
                     }
                 }
             } else if has_dasharray {
@@ -809,7 +809,7 @@ impl RenderLayer for RenderLineLayer {
                     continue;
                 };
 
-                let mut builder = create_line_builder("lineSDF", shader);
+                let mut builder = create_line_builder(shader);
 
                 // vertices, attributes and segments
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
@@ -817,7 +817,7 @@ impl RenderLayer for RenderLineLayer {
 
                 builder.flush(context);
                 for drawable in builder.clear_drawables() {
-                    add_drawable(drawable, LineType::SDF);
+                    add_drawable(drawable, LineType::Sdf);
                 }
             } else if !self.unevaluated.get::<LinePattern>().is_undefined() {
                 // pattern line (conformance)
@@ -836,7 +836,7 @@ impl RenderLayer for RenderLineLayer {
                     continue;
                 };
 
-                let mut builder = create_line_builder("linePattern", shader);
+                let mut builder = create_line_builder(shader);
 
                 // vertices and attributes
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
@@ -881,7 +881,7 @@ impl RenderLayer for RenderLineLayer {
                     continue;
                 };
 
-                let mut builder = create_line_builder("lineGradient", shader);
+                let mut builder = create_line_builder(shader);
 
                 // vertices and attributes
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
@@ -914,7 +914,7 @@ impl RenderLayer for RenderLineLayer {
                     continue;
                 };
 
-                let mut builder = create_line_builder("line", shader);
+                let mut builder = create_line_builder(shader);
 
                 // vertices, attributes and segments
                 add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);

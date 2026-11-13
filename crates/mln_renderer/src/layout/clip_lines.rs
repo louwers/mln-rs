@@ -11,7 +11,7 @@ fn intersect(a0: i16, a1: i16, edge: i16, b0: i16, b1: i16) -> i16 {
 /// Clips `lines` to the box `[x1, x2) × [y1, y2)`. A segment that crosses
 /// the box is cut where it meets an edge, so it can end on `x2` or `y2`.
 #[must_use]
-pub fn clip_lines(lines: &GeometryCollection, x1: i16, y1: i16, x2: i16, y2: i16) -> GeometryCollection {
+pub(crate) fn clip_lines(lines: &GeometryCollection, x1: i16, y1: i16, x2: i16, y2: i16) -> GeometryCollection {
     let mut clipped_lines = GeometryCollection::new();
 
     for line in lines.iter() {

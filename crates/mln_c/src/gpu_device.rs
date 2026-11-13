@@ -298,7 +298,7 @@ fn create(request: Request) -> Result<(Device, Option<std::sync::Arc<HostQueueLo
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_create(
+pub(crate) unsafe extern "C" fn mln_gpu_device_create(
     options: *const mln_gpu_device_options,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -435,7 +435,7 @@ fn depth_stencil_flags(formats: ::mln_runtime::DepthStencilFormats) -> types::ml
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_get_capabilities(
+pub(crate) unsafe extern "C" fn mln_gpu_device_get_capabilities(
     device: mln_gpu_device,
     out_capabilities: *mut mln_gpu_device_capabilities,
     out_diagnostic: *mut mln_diagnostic,
@@ -454,7 +454,7 @@ pub unsafe extern "C" fn mln_gpu_device_get_capabilities(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
     context: *const mln_web_gpu_context_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -481,7 +481,7 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
     descriptor: *const mln_vulkan_device_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -589,7 +589,7 @@ unsafe fn vulkan_extensions(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_metal(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_metal(
     descriptor: *const mln_metal_device_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -624,7 +624,7 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_metal(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_wrap_open_gl(
+pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_open_gl(
     context: *const mln_open_gl_context_descriptor,
     out_device: *mut mln_gpu_device,
     out_diagnostic: *mut mln_diagnostic,
@@ -730,7 +730,7 @@ fn open_gl_platform(context: &mln_open_gl_context_descriptor) -> Result<&'static
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_gpu_device_get_vulkan_context(
+pub(crate) unsafe extern "C" fn mln_gpu_device_get_vulkan_context(
     device: mln_gpu_device,
     out_result: *mut mln_gpu_device_vulkan_context_result,
     out_diagnostic: *mut mln_diagnostic,
@@ -765,7 +765,7 @@ pub unsafe extern "C" fn mln_gpu_device_get_vulkan_context(
 /// `mln_gpu_device_release()`. Sessions on the device hold it until they
 /// end.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_gpu_device_release(device: mln_gpu_device) {
+pub(crate) extern "C" fn mln_gpu_device_release(device: mln_gpu_device) {
     if device != handles::NULL {
         let _ = release(device);
     }

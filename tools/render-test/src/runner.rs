@@ -37,12 +37,12 @@ use crate::test_runner_common::{deep_equal, tokenize};
 /// The camera fields the operations set.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CameraOptions {
-    pub center: Option<LatLng>,
-    pub center_altitude: Option<f64>,
-    pub zoom: Option<f64>,
-    pub bearing: Option<f64>,
-    pub pitch: Option<f64>,
-    pub roll: Option<f64>,
+    pub(crate) center: Option<LatLng>,
+    pub(crate) center_altitude: Option<f64>,
+    pub(crate) zoom: Option<f64>,
+    pub(crate) bearing: Option<f64>,
+    pub(crate) pitch: Option<f64>,
+    pub(crate) roll: Option<f64>,
 }
 
 /// How a `TestRunnerImpl` call can fail, standing in for the C++ return
@@ -70,7 +70,7 @@ fn unsupported<T>(what: &str) -> Result<T, MapError> {
 /// The resource options the runner sets.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResourceOptions {
-    pub cache_path: String,
+    pub(crate) cache_path: String,
 }
 
 /// A frontend, file source and map for one map mode, pixel ratio and
@@ -223,23 +223,23 @@ pub trait TestRunnerImpl {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedSymbol {
     /// Contents of the label (UTF-16)
-    pub key: Vec<u16>,
-    pub text_collision_box: Option<[f32; 4]>,
-    pub icon_collision_box: Option<[f32; 4]>,
-    pub text_placed: bool,
-    pub icon_placed: bool,
-    pub intersects_tile_border: bool,
-    pub viewport_padding: f32,
-    pub layer: String,
+    pub(crate) key: Vec<u16>,
+    pub(crate) text_collision_box: Option<[f32; 4]>,
+    pub(crate) icon_collision_box: Option<[f32; 4]>,
+    pub(crate) text_placed: bool,
+    pub(crate) icon_placed: bool,
+    pub(crate) intersects_tile_border: bool,
+    pub(crate) viewport_padding: f32,
+    pub(crate) layer: String,
 }
 
 /// An `UnwrappedTileID` of the tile-mode cover.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TileId {
-    pub z: u8,
-    pub x: u32,
-    pub y: u32,
-    pub wrap: i16,
+    pub(crate) z: u8,
+    pub(crate) x: u32,
+    pub(crate) y: u32,
+    pub(crate) wrap: i16,
 }
 
 /// A query test's `queryGeometry`: a point or a box.
@@ -263,19 +263,19 @@ pub struct ImplOptions {
     /// Set by `--tileWorkerCodec=<n>`: the map's tile workers are in n
     /// worker instances, reached through the worker codec (0: on the map's
     /// thread pool, as in C++).
-    pub tile_worker_codec: usize,
+    pub(crate) tile_worker_codec: usize,
 }
 
-pub struct TestContext<'a> {
+pub(crate) struct TestContext<'a> {
     metadata: &'a mut TestMetadata,
     runner_impl: Option<&'a mut dyn TestRunnerImpl>,
-    pub active_gfx_probe: GfxProbe,
-    pub baseline_gfx_probe: GfxProbe,
-    pub gfx_probe_active: bool,
+    pub(crate) active_gfx_probe: GfxProbe,
+    pub(crate) baseline_gfx_probe: GfxProbe,
+    pub(crate) gfx_probe_active: bool,
 }
 
 impl<'a> TestContext<'a> {
-    pub fn new(metadata: &'a mut TestMetadata) -> Self {
+    pub(crate) fn new(metadata: &'a mut TestMetadata) -> Self {
         TestContext {
             metadata,
             runner_impl: None,
@@ -286,23 +286,24 @@ impl<'a> TestContext<'a> {
     }
 
     /// A context whose `runnerImpl` is already set.
-    pub fn with_impl(metadata: &'a mut TestMetadata, runner_impl: &'a mut dyn TestRunnerImpl) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_impl(metadata: &'a mut TestMetadata, runner_impl: &'a mut dyn TestRunnerImpl) -> Self {
         TestContext { runner_impl: Some(runner_impl), ..TestContext::new(metadata) }
     }
 
-    pub fn get_metadata(&mut self) -> &mut TestMetadata {
+    pub(crate) fn get_metadata(&mut self) -> &mut TestMetadata {
         self.metadata
     }
 
     /// The map of the test. Panics if the context has none (C++ asserts
     /// `runnerImpl`).
-    pub fn get_map(&mut self) -> &mut dyn TestRunnerImpl {
+    pub(crate) fn get_map(&mut self) -> &mut dyn TestRunnerImpl {
         &mut **self.runner_impl.as_mut().expect("runnerImpl")
     }
 
     /// For an uncaught C++ exception (`MapError::Exception`): errors the
     /// test instead of ending the run.
-    pub fn fail_exception(&mut self, what: &str) -> bool {
+    pub(crate) fn fail_exception(&mut self, what: &str) -> bool {
         log::warning(Event::General, &format!("{}: uncaught exception: {what}", self.metadata.id));
         self.metadata.error_message = what.to_string();
         self.metadata.render_errored += 1;
@@ -311,7 +312,7 @@ impl<'a> TestContext<'a> {
 
     /// For operations the runner doesn't support: logs, records the
     /// message and errors the test, so it can never pass by skipping work.
-    pub fn fail_unsupported(&mut self, what: &str) -> bool {
+    pub(crate) fn fail_unsupported(&mut self, what: &str) -> bool {
         let message = format!("Unsupported: {what}");
         log::warning(Event::General, &format!("{}: {message}", self.metadata.id));
         self.metadata.error_message = message;
@@ -321,11 +322,11 @@ impl<'a> TestContext<'a> {
 }
 
 /// An operation of a test; returns `false` to stop the test.
-pub type TestOperation = Box<dyn Fn(&mut TestContext<'_>) -> bool>;
-pub type TestOperations = Vec<TestOperation>;
+pub(crate) type TestOperation = Box<dyn Fn(&mut TestContext<'_>) -> bool>;
+pub(crate) type TestOperations = Vec<TestOperation>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum UpdateResults {
+pub(crate) enum UpdateResults {
     No,
     Default,
     Platform,
@@ -333,7 +334,7 @@ pub enum UpdateResults {
     Rebaseline,
 }
 
-pub struct TestRunner {
+pub(crate) struct TestRunner {
     maps: HashMap<String, Box<dyn TestRunnerImpl>>,
     manifest: Manifest,
     update_results: UpdateResults,
@@ -352,7 +353,7 @@ pub struct TestRunner {
 
 impl TestRunner {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         manifest: Manifest,
         update_results: UpdateResults,
         factory: Option<ImplFactory>,
@@ -372,25 +373,16 @@ impl TestRunner {
     }
 
     /// Sets what the factory sets up the maps with from now on.
-    pub fn set_impl_options(&mut self, options: ImplOptions) {
+    pub(crate) fn set_impl_options(&mut self, options: ImplOptions) {
         self.impl_options = options;
     }
 
     /// Errors a test that runs longer than `limit` (`None`: no limit).
-    pub fn set_test_timeout(&mut self, limit: Option<Duration>) {
+    pub(crate) fn set_test_timeout(&mut self, limit: Option<Duration>) {
         self.watchdog = limit.map(crate::watchdog::Watchdog::new);
     }
 
-    #[must_use]
-    pub fn get_manifest(&self) -> &Manifest {
-        &self.manifest
-    }
-
-    pub fn do_shuffle(&mut self, seed: u32) {
-        self.manifest.do_shuffle(seed);
-    }
-
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.maps.clear();
     }
 
@@ -482,7 +474,7 @@ impl TestRunner {
         }
     }
 
-    pub fn check_render_test_results(&self, actual_image: &PremultipliedImage, metadata: &mut TestMetadata) {
+    pub(crate) fn check_render_test_results(&self, actual_image: &PremultipliedImage, metadata: &mut TestMetadata) {
         let expectations = metadata.paths.expectations.clone();
 
         if metadata.outputs_image {
@@ -585,7 +577,7 @@ impl TestRunner {
         }
     }
 
-    pub fn check_probing_results(&self, result_metadata: &mut TestMetadata) {
+    pub(crate) fn check_probing_results(&self, result_metadata: &mut TestMetadata) {
         fn append(metadata: &mut TestMetadata, s: &str) {
             if metadata.error_message.is_empty() {
                 metadata.error_message += s;
@@ -884,7 +876,7 @@ impl TestRunner {
         }
     }
 
-    pub fn append_label_cut_off_results(
+    pub(crate) fn append_label_cut_off_results(
         result_metadata: &mut TestMetadata,
         cut_off_labels_report: &str,
         duplications_report: &str,
@@ -900,7 +892,7 @@ impl TestRunner {
         }
     }
 
-    pub fn run(&mut self, metadata: &mut TestMetadata) {
+    pub(crate) fn run(&mut self, metadata: &mut TestMetadata) {
         ProxyFileSource::set_tracking_active(false);
 
         let mut ctx = TestContext::new(metadata);
@@ -1400,7 +1392,7 @@ fn get_after_operations(manifest: &Manifest) -> TestOperations {
 
 /// A line diff of the two values' JSON for the report.
 #[must_use]
-pub fn simple_diff(result: &Value, expected: &Value) -> String {
+pub(crate) fn simple_diff(result: &Value, expected: &Value) -> String {
     let result_tokens = tokenize(&to_json_value(result));
     let expected_tokens = tokenize(&to_json_value(expected));
     let max_length = result_tokens.len().max(expected_tokens.len());
@@ -1438,7 +1430,7 @@ pub fn simple_diff(result: &Value, expected: &Value) -> String {
 /// `v` as `std::ostream << float` writes it with the default format (`%g`,
 /// precision 6).
 #[must_use]
-pub fn ostream_float(v: f64) -> String {
+pub(crate) fn ostream_float(v: f64) -> String {
     if v.is_nan() {
         return if v.is_sign_negative() { "-nan" } else { "nan" }.to_string();
     }

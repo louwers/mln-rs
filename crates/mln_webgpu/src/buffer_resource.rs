@@ -2,9 +2,9 @@ use std::rc::Rc;
 
 use crate::context::Context;
 
-pub type VersionType = u16;
+pub(crate) type VersionType = u16;
 
-pub struct BufferResource {
+pub(crate) struct BufferResource {
     context: Rc<Context>,
     buffer: Option<wgpu::Buffer>,
     size: usize,
@@ -13,7 +13,7 @@ pub struct BufferResource {
 
 impl BufferResource {
     /// A buffer of `size` bytes for `usage`, holding `data` if it's given.
-    pub fn new(context: Rc<Context>, data: Option<&[u8]>, size: usize, usage: wgpu::BufferUsages) -> Self {
+    pub(crate) fn new(context: Rc<Context>, data: Option<&[u8]>, size: usize, usage: wgpu::BufferUsages) -> Self {
         let mut res = BufferResource { context, buffer: None, size, version: 0 };
         if size == 0 {
             return res;
@@ -46,7 +46,7 @@ impl BufferResource {
     /// Port-only: a buffer of the bytes in the JS array `data`, written to
     /// the GPU from there.
     #[cfg(target_family = "wasm")]
-    pub fn new_from_host(
+    pub(crate) fn new_from_host(
         context: Rc<Context>,
         data: &mln_util::host_bytes::HostBytes,
         usage: wgpu::BufferUsages,
@@ -58,7 +58,7 @@ impl BufferResource {
         res
     }
 
-    pub fn update(&mut self, data: &[u8], offset: usize) {
+    pub(crate) fn update(&mut self, data: &[u8], offset: usize) {
         let update_size = data.len();
         if update_size == 0 {
             return;
@@ -73,29 +73,24 @@ impl BufferResource {
     }
 
     #[must_use]
-    pub fn get_size_in_bytes(&self) -> usize {
+    pub(crate) fn get_size_in_bytes(&self) -> usize {
         self.size
     }
     /// The bytes of the GPU buffer, padded from the data size; 0 without one.
-    pub fn get_allocated_size(&self) -> u64 {
+    pub(crate) fn get_allocated_size(&self) -> u64 {
         self.buffer.as_ref().map_or(0, wgpu::Buffer::size)
     }
     #[must_use]
-    pub fn get_context(&self) -> &Rc<Context> {
+    pub(crate) fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
     #[must_use]
-    pub fn get_buffer(&self) -> Option<&wgpu::Buffer> {
+    pub(crate) fn get_buffer(&self) -> Option<&wgpu::Buffer> {
         self.buffer.as_ref()
     }
     #[must_use]
-    pub fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         self.buffer.is_some()
-    }
-    /// Used to detect whether buffer contents have changed
-    #[must_use]
-    pub fn get_version(&self) -> VersionType {
-        self.version
     }
 }
 

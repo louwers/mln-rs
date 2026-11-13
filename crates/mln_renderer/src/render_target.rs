@@ -21,44 +21,36 @@ use crate::paint_parameters::PaintParameters;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 
-pub type RenderTargetPtr = Rc<RefCell<RenderTarget>>;
+pub(crate) type RenderTargetPtr = Rc<RefCell<RenderTarget>>;
 
 /// Render target class
 pub struct RenderTarget {
     offscreen_texture: Box<dyn OffscreenTexture>,
-    size: Size,
     layer_groups_by_layer_index: VecMap<i32, LayerGroupBasePtr>,
 }
 
 impl RenderTarget {
-    pub fn new(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub(crate) fn new(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget {
             offscreen_texture: context.create_offscreen_texture(size, type_),
-            size,
             layer_groups_by_layer_index: VecMap::new(),
         }
     }
 
     /// Creates a shared render target of `size` with channel type `type_`.
-    pub fn create(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
+    pub(crate) fn create(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
         Rc::new(RefCell::new(RenderTarget::new(context, size, type_)))
     }
 
     /// Get the render target texture
     #[must_use]
-    pub fn get_texture(&self) -> Texture2DPtr {
+    pub(crate) fn get_texture(&self) -> Texture2DPtr {
         self.offscreen_texture.get_texture()
-    }
-
-    /// The size the render target was created with (the texture's size).
-    #[must_use]
-    pub fn get_size(&self) -> Size {
-        self.size
     }
 
     /// Add a layer group to the render target; `replace`: replace if
     /// exists. Returns whether added.
-    pub fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr, replace: bool) -> bool {
+    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr, replace: bool) -> bool {
         let index = layer_group.borrow().get_layer_index();
         match self.layer_groups_by_layer_index.entry(index) {
             mln_vec_map::Entry::Vacant(entry) => {
@@ -78,31 +70,20 @@ impl RenderTarget {
         }
     }
 
-    /// Remove a layer group by layer index; returns whether removed.
-    pub fn remove_layer_group(&mut self, layer_index: i32) -> bool {
-        self.layer_groups_by_layer_index.remove(&layer_index).is_some()
-    }
-
-    /// Get the layer group count
-    #[must_use]
-    pub fn num_layer_groups(&self) -> usize {
-        self.layer_groups_by_layer_index.len()
-    }
-
     /// Get a specific layer group by index, if existent.
     #[must_use]
-    pub fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupBasePtr> {
+    pub(crate) fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupBasePtr> {
         self.layer_groups_by_layer_index.get(&layer_index)
     }
 
     /// The contained layer groups, in layer index order.
     #[must_use]
-    pub fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
+    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
         self.layer_groups_by_layer_index.values().cloned().collect()
     }
 
     /// Upload the layer groups
-    pub fn upload(&self, upload_pass: &dyn UploadPass) {
+    pub(crate) fn upload(&self, upload_pass: &dyn UploadPass) {
         for layer_group in self.layer_groups_by_layer_index.values() {
             layer_group.borrow_mut().upload(upload_pass);
         }
@@ -110,7 +91,7 @@ impl RenderTarget {
 
     /// Render the layer groups. `renderTree` is only passed on to
     /// `runTweakers` in C++; the orchestrator runs them here.
-    pub fn render(&self, orchestrator: &mut RenderOrchestrator, parameters: &mut PaintParameters<'_>) {
+    pub(crate) fn render(&self, orchestrator: &mut RenderOrchestrator, parameters: &mut PaintParameters<'_>) {
         let target = self.offscreen_texture.draw_target();
         {
             let encoder = parameters.encoder.as_ref().expect("encoder");

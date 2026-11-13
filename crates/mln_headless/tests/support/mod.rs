@@ -42,26 +42,26 @@ use parking_lot::Mutex;
 // MARK: - Fixtures
 
 /// testdata/, the copy of the C++ repository's files these tests read.
-pub fn cpp_root() -> PathBuf {
+pub(crate) fn cpp_root() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata")
 }
 
 /// Reads the file at `path`, relative to [`cpp_root`].
-pub fn read_bytes(path: &str) -> Vec<u8> {
+pub(crate) fn read_bytes(path: &str) -> Vec<u8> {
     let full = cpp_root().join(path);
     std::fs::read(&full).unwrap_or_else(|e| panic!("{}: {e}", full.display()))
 }
 
-pub fn read_file(path: &str) -> String {
+pub(crate) fn read_file(path: &str) -> String {
     String::from_utf8(read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-pub fn decode_image(path: &str) -> PremultipliedImage {
+pub(crate) fn decode_image(path: &str) -> PremultipliedImage {
     mln_image::decode_image(&read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
 /// A `Response` with `data` = the fixture's bytes.
-pub fn file_response(path: &str) -> Response {
+pub(crate) fn file_response(path: &str) -> Response {
     let mut response = Response::new();
     response.data = Some(Arc::new(read_bytes(path)));
     response
@@ -76,7 +76,7 @@ fn write_output(base: &str, name: &str, image: &PremultipliedImage) {
     }
 }
 
-pub fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64) -> f64 {
+pub(crate) fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64) -> f64 {
     let expected = decode_image(&format!("{base}/expected.png"));
     let mut diff = PremultipliedImage::new(expected.size);
 
@@ -103,7 +103,7 @@ pub fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: 
 
 /// Asserts that `actual` matches the expected image of one of `bases`.
 #[track_caller]
-pub fn check_images(bases: &[&str], actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
+pub(crate) fn check_images(bases: &[&str], actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
     let diffs: Vec<f64> = bases.iter().map(|base| get_image_diff(base, actual, pixel_threshold)).collect();
     assert!(
         diffs.iter().any(|diff| *diff <= image_threshold),
@@ -114,7 +114,7 @@ pub fn check_images(bases: &[&str], actual: &PremultipliedImage, image_threshold
 /// Asserts that `actual` differs from `<base>/expected.png` by at most
 /// `image_threshold`. The C++ defaults for both thresholds are 0.
 #[track_caller]
-pub fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
+pub(crate) fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
     let diff = get_image_diff(base, actual, pixel_threshold);
     assert!(
         diff <= image_threshold,
@@ -124,7 +124,7 @@ pub fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64
 
 /// The channel values of the centre pixel (C++ `image.data.get() +
 /// (height / 2) * stride + (width / 2) * channels`).
-pub fn center_pixel(image: &PremultipliedImage) -> [u8; 4] {
+pub(crate) fn center_pixel(image: &PremultipliedImage) -> [u8; 4] {
     let offset = (image.size.height as usize / 2) * image.stride() + (image.size.width as usize / 2) * 4;
     [image.data[offset], image.data[offset + 1], image.data[offset + 2], image.data[offset + 3]]
 }
@@ -134,7 +134,7 @@ pub fn center_pixel(image: &PremultipliedImage) -> [u8; 4] {
 /// A custom geometry source's fetch function that answers with `features`
 /// through the handle in `handle`, once it's set, as the C++ tests answer
 /// through `getSource("custom")`.
-pub fn answer_with(
+pub(crate) fn answer_with(
     handle: &Arc<OnceLock<CustomGeometrySourceHandle>>,
     features: impl Fn(&CanonicalTileID) -> Vec<geojson::Feature> + Send + Sync + 'static,
 ) -> TileFunction {
@@ -150,7 +150,7 @@ pub fn answer_with(
 
 /// gtest's `DoubleNear`-free `ASSERT_DOUBLE_EQ`: within 4 ULPs.
 #[track_caller]
-pub fn assert_double_eq(actual: f64, expected: f64) {
+pub(crate) fn assert_double_eq(actual: f64, expected: f64) {
     fn biased(x: f64) -> u64 {
         const SIGN: u64 = 1 << 63;
         let bits = x.to_bits();
@@ -167,7 +167,7 @@ pub fn assert_double_eq(actual: f64, expected: f64) {
 
 /// `EXPECT_NEAR(a, b, tolerance)`.
 #[track_caller]
-pub fn assert_near(actual: f64, expected: f64, tolerance: f64) {
+pub(crate) fn assert_near(actual: f64, expected: f64, tolerance: f64) {
     assert!(
         (actual - expected).abs() <= tolerance,
         "expected {expected} +- {tolerance}, got {actual} (difference {})",
@@ -182,7 +182,7 @@ type SlotCallback<A> = Box<dyn FnMut(A)>;
 
 /// A `std::function` member of `StubMapObserver`. A callback may replace or
 /// clear any slot, including its own, while it runs.
-pub struct CallbackSlot<A> {
+pub(crate) struct CallbackSlot<A> {
     callback: RefCell<Option<SlotCallback<A>>>,
     generation: Cell<u64>,
 }
@@ -194,17 +194,17 @@ impl<A> Default for CallbackSlot<A> {
 }
 
 impl<A> CallbackSlot<A> {
-    pub fn set(&self, callback: impl FnMut(A) + 'static) {
+    pub(crate) fn set(&self, callback: impl FnMut(A) + 'static) {
         *self.callback.borrow_mut() = Some(Box::new(callback));
         self.generation.set(self.generation.get() + 1);
     }
 
-    pub fn clear(&self) {
+    pub(crate) fn clear(&self) {
         *self.callback.borrow_mut() = None;
         self.generation.set(self.generation.get() + 1);
     }
 
-    pub fn call(&self, arg: A) {
+    pub(crate) fn call(&self, arg: A) {
         let generation = self.generation.get();
         let callback = self.callback.borrow_mut().take();
         if let Some(mut callback) = callback {
@@ -219,7 +219,7 @@ impl<A> CallbackSlot<A> {
 /// A map observer that forwards each event to a settable callback,
 /// including the source and sprite events.
 #[derive(Default)]
-pub struct StubMapObserver {
+pub(crate) struct StubMapObserver {
     pub will_start_loading_map_callback: CallbackSlot<()>,
     pub did_finish_loading_map_callback: CallbackSlot<()>,
     pub did_fail_loading_map_callback: CallbackSlot<()>,
@@ -239,7 +239,7 @@ pub struct StubMapObserver {
 
 impl StubMapObserver {
     /// Calls the callback of `event`.
-    pub fn dispatch(&self, event: MapEvent) {
+    pub(crate) fn dispatch(&self, event: MapEvent) {
         match event {
             MapEvent::LoadingStarted => self.will_start_loading_map_callback.call(()),
             MapEvent::LoadingFinished => self.did_finish_loading_map_callback.call(()),
@@ -267,7 +267,7 @@ impl StubMapObserver {
     /// Takes the map's events and calls their callbacks, which may use the
     /// map. Does nothing while someone holds the map: they dispatch the
     /// events when they let go of it.
-    pub fn dispatch_events(&self, map: &RefCell<Map>) {
+    pub(crate) fn dispatch_events(&self, map: &RefCell<Map>) {
         let Ok(mut map) = map.try_borrow_mut() else {
             return;
         };
@@ -280,7 +280,7 @@ impl StubMapObserver {
 
     /// Dispatches `map`'s events from the run loop whenever the map has
     /// some, while the returned task lives.
-    pub fn observe(self: &Rc<Self>, map: &Rc<RefCell<Map>>) -> AsyncTask {
+    pub(crate) fn observe(self: &Rc<Self>, map: &Rc<RefCell<Map>>) -> AsyncTask {
         let task = {
             let observer = Rc::downgrade(self);
             let map = Rc::downgrade(map);
@@ -324,7 +324,7 @@ impl Drop for FakeFileRequest {
 }
 
 /// Records the requests made; the test responds to them.
-pub struct FakeFileSource {
+pub(crate) struct FakeFileSource {
     requests: LocalObject<FakeRequests>,
     next_id: Mutex<u64>,
     resource_options: Mutex<ResourceOptions>,
@@ -332,7 +332,7 @@ pub struct FakeFileSource {
 
 impl FakeFileSource {
     /// A file source with the default resource options.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         FakeFileSource {
             requests: LocalObject::new(RefCell::new(Vec::new())),
             next_id: Mutex::new(0),
@@ -344,13 +344,13 @@ impl FakeFileSource {
         self.requests.get().expect("FakeFileSource used from another thread")
     }
 
-    pub fn requests_len(&self) -> usize {
+    pub(crate) fn requests_len(&self) -> usize {
         self.list().borrow().len()
     }
 
     /// `respond(kind, response)`: answers the first pending request of that
     /// kind; returns whether there was one.
-    pub fn respond(&self, kind: Kind, response: &Response) -> bool {
+    pub(crate) fn respond(&self, kind: Kind, response: &Response) -> bool {
         let callback = {
             let list = self.list();
             let list = list.borrow();
@@ -418,19 +418,19 @@ impl mln_util::logging::Observer for Recorder {
 
 /// Captures the log records of the calling thread while it lives (C++
 /// installs a process-wide observer).
-pub struct FixtureLog {
+pub(crate) struct FixtureLog {
     messages: LogRecords,
 }
 
 impl FixtureLog {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let messages: LogRecords = Arc::new(Mutex::new(Vec::new()));
         let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
     /// Counts the matching records, and marks them checked.
-    pub fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
+    pub(crate) fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
         let mut count = 0;
         for ((s, e, c, m), checked) in self.messages.lock().iter_mut() {
             if *s == severity && *e == event && *c == code && m == msg {
@@ -442,7 +442,7 @@ impl FixtureLog {
     }
 
     /// The records nobody counted.
-    pub fn unchecked(&self) -> Vec<LogRecord> {
+    pub(crate) fn unchecked(&self) -> Vec<LogRecord> {
         self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(record, _)| record.clone()).collect()
     }
 }
@@ -464,7 +464,7 @@ impl Drop for FixtureLog {
 /// Runs `run_loop`, stopping it and failing after `seconds` if nothing
 /// stopped it: a hang fails the test instead of hanging the test run.
 #[track_caller]
-pub fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
+pub(crate) fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
     let timed_out = Rc::new(Cell::new(false));
     let timer = Timer::new();
     {
@@ -491,7 +491,7 @@ pub fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
 /// and renderer reported, and the observer gets the map's events when the
 /// call through it, or through [`render`](Self::render), returns, as C++
 /// observers get the calls at once. Otherwise they come from the run loop.
-pub struct MapTest<FS: FileSource + 'static = StubFileSource> {
+pub(crate) struct MapTest<FS: FileSource + 'static = StubFileSource> {
     events: AsyncTask,
     pub map: Rc<RefCell<Map>>,
     pub frontend: HeadlessFrontend,
@@ -502,11 +502,11 @@ pub struct MapTest<FS: FileSource + 'static = StubFileSource> {
 
 impl MapTest<StubFileSource> {
     /// A test at pixel ratio 1, in `MapMode::Static`.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with_mode(1.0, MapMode::Static)
     }
 
-    pub fn with_mode(pixel_ratio: f32, mode: MapMode) -> Self {
+    pub(crate) fn with_mode(pixel_ratio: f32, mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
         Self::create(run_loop, file_source, pixel_ratio, mode)
@@ -514,7 +514,7 @@ impl MapTest<StubFileSource> {
 }
 
 impl MapTest<FakeFileSource> {
-    pub fn fake() -> Self {
+    pub(crate) fn fake() -> Self {
         let run_loop = RunLoop::new();
         let file_source = Arc::new(FakeFileSource::new());
         Self::create(run_loop, file_source, 1.0, MapMode::Static)
@@ -525,7 +525,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     /// The shared constructor: `fileSource`, `frontend(pixelRatio)`,
     /// `map(frontend, observer, fileSource, MapOptions().withMapMode(mode)
     /// .withSize(frontend.getSize()).withPixelRatio(pixelRatio))`.
-    pub fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
+    pub(crate) fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
         let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.get_size(), pixel_ratio, ..Default::default() };
@@ -538,35 +538,35 @@ impl<FS: FileSource + 'static> MapTest<FS> {
 
     /// `test.map`: the map, whose events reach the observer when the
     /// guard drops.
-    pub fn map(&self) -> MapGuard<'_> {
+    pub(crate) fn map(&self) -> MapGuard<'_> {
         let mut map = self.map.borrow_mut();
         map.process_events();
         MapGuard { map: Some(map), cell: &self.map, observer: &self.observer }
     }
 
     /// A handle for callbacks (no reference cycle through the observer).
-    pub fn weak_map(&self) -> Weak<RefCell<Map>> {
+    pub(crate) fn weak_map(&self) -> Weak<RefCell<Map>> {
         Rc::downgrade(&self.map)
     }
 
     /// `test.frontend.render(test.map)`; C++ rethrows a still image error.
-    pub fn render(&self) -> RenderResult {
+    pub(crate) fn render(&self) -> RenderResult {
         self.try_render().unwrap_or_else(|e| panic!("render: {e}"))
     }
 
-    pub fn try_render(&self) -> Result<RenderResult, Error> {
+    pub(crate) fn try_render(&self) -> Result<RenderResult, Error> {
         let mut frontend = self.frontend.clone();
         frontend.render(&mut self.map())
     }
 
-    pub fn load_json(&self, json: &str) {
+    pub(crate) fn load_json(&self, json: &str) {
         self.map().style_mut().load_json(json);
     }
 }
 
 /// The map of a [`MapTest`], borrowed. When it drops, the observer gets the
 /// map's events.
-pub struct MapGuard<'a> {
+pub(crate) struct MapGuard<'a> {
     map: Option<RefMut<'a, Map>>,
     cell: &'a RefCell<Map>,
     observer: &'a StubMapObserver,

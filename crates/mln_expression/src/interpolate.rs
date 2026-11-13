@@ -92,18 +92,8 @@ impl Interpolate {
     }
 
     #[must_use]
-    pub fn get_input(&self) -> &dyn Expression {
+    pub(crate) fn get_input(&self) -> &dyn Expression {
         &*self.input
-    }
-
-    #[must_use]
-    pub fn get_interpolator(&self) -> &Interpolator {
-        &self.interpolator
-    }
-
-    #[must_use]
-    pub fn get_color_space(&self) -> ColorSpace {
-        self.color_space
     }
 
     #[must_use]
@@ -319,7 +309,7 @@ pub(crate) fn parse_stop_label(value: &Convertible<'_>) -> Option<f64> {
     }
 }
 
-pub fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+pub(crate) fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
     debug_assert!(value.is_array());
 
     let length = value.array_length();

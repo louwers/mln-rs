@@ -22,7 +22,7 @@ pub enum BlendFunction {
 
 impl BlendFunction {
     #[must_use]
-    pub fn which(&self) -> usize {
+    pub(crate) fn which(self) -> usize {
         match self {
             BlendFunction::Replace => 0,
             BlendFunction::Add(_) => 1,

@@ -132,10 +132,6 @@ pub fn interpolate<T: Interpolate>(from: &T, to: &T, t: f64) -> T {
     from.interpolate(to, t)
 }
 
-pub fn interpolate_f32<T: Interpolate>(from: &T, to: &T, t: f32) -> T {
-    from.interpolate_f32(to, t)
-}
-
 #[must_use]
 pub fn interpolation_factor(base: f32, range: Range<f32>, z: f32) -> f32 {
     let zoom_diff = range.max - range.min;

@@ -18,7 +18,7 @@ use crate::context::Context;
 use crate::custom_layer::CustomLayerPass;
 use crate::draw_target::as_vulkan;
 
-pub struct RenderPass {
+pub(crate) struct RenderPass {
     context: Rc<Context>,
     command_buffer: vk::CommandBuffer,
     render_pass: vk::RenderPass,
@@ -31,7 +31,7 @@ impl RenderPass {
     /// Begins a pass over `descriptor`'s draw target. Without a framebuffer
     /// to draw into, as in a frame that acquired no image, the pass isn't
     /// encoding (`is_encoding`) and what is drawn in it is skipped.
-    pub fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
+    pub(crate) fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
         let context = command_encoder.get_context().clone();
         let command_buffer = command_encoder.get_command_buffer();
         let mut pass = RenderPass {
@@ -83,35 +83,30 @@ impl RenderPass {
         pass
     }
 
-    #[must_use]
-    pub fn get_context(&self) -> &Rc<Context> {
-        &self.context
-    }
-
     /// The command buffer the pass records into.
     #[must_use]
-    pub fn get_command_buffer(&self) -> vk::CommandBuffer {
+    pub(crate) fn get_command_buffer(&self) -> vk::CommandBuffer {
         self.command_buffer
     }
 
     /// The render pass of the draw target, which pipelines are made for.
     #[must_use]
-    pub fn get_vulkan_render_pass(&self) -> vk::RenderPass {
+    pub(crate) fn get_vulkan_render_pass(&self) -> vk::RenderPass {
         self.render_pass
     }
 
     /// The extent of the draw target's attachments.
-    pub fn get_extent(&self) -> vk::Extent2D {
+    pub(crate) fn get_extent(&self) -> vk::Extent2D {
         self.extent
     }
 
     /// Whether draws can be recorded.
     #[must_use]
-    pub fn is_encoding(&self) -> bool {
+    pub(crate) fn is_encoding(&self) -> bool {
         self.encoding
     }
 
-    pub fn end_encoding(&mut self) {
+    pub(crate) fn end_encoding(&mut self) {
         if std::mem::take(&mut self.encoding) {
             // SAFETY: the command buffer is in this render pass.
             unsafe { self.context.get_backend().get_device().cmd_end_render_pass(self.command_buffer) };

@@ -11,31 +11,30 @@ use mln_util::chrono::{Timestamp, iso8601};
 use crate::geometry::debug_font_data::SIMPLEX;
 
 /// The tile's parse status and timestamps, as text in tile coordinates.
-pub struct DebugBucket {
-    pub renderable: bool,
-    pub complete: bool,
-    pub modified: Option<Timestamp>,
-    pub expires: Option<Timestamp>,
-    pub debug_mode: MapDebugOptions,
-    pub source_name: String,
+pub(crate) struct DebugBucket {
+    pub(crate) renderable: bool,
+    pub(crate) complete: bool,
+    pub(crate) modified: Option<Timestamp>,
+    pub(crate) expires: Option<Timestamp>,
+    pub(crate) debug_mode: MapDebugOptions,
 
     /// The text, one line per entry, empty without `PARSE_STATUS` and
     /// `TIMESTAMPS`.
-    pub text: Vec<String>,
+    pub(crate) text: Vec<String>,
     /// The strokes of the text's glyphs.
-    pub strokes: Vec<GeometryCoordinates>,
+    pub(crate) strokes: Vec<GeometryCoordinates>,
 }
 
 impl DebugBucket {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         id: &OverscaledTileID,
         renderable: bool,
         complete: bool,
         modified: Option<Timestamp>,
         expires: Option<Timestamp>,
         debug_mode: MapDebugOptions,
-        source_name: String,
+        source_name: &str,
     ) -> Self {
         let mut text = Vec::new();
         let mut strokes = Vec::new();
@@ -64,7 +63,7 @@ impl DebugBucket {
             add_text(format!("expires: {}", iso8601(expires)), 50.0, baseline + 200.0, 5.0);
         }
 
-        DebugBucket { renderable, complete, modified, expires, debug_mode, source_name, text, strokes }
+        DebugBucket { renderable, complete, modified, expires, debug_mode, text, strokes }
     }
 }
 
@@ -110,7 +109,7 @@ mod tests {
 
     fn bucket(debug_mode: MapDebugOptions, modified: Option<Timestamp>, expires: Option<Timestamp>) -> DebugBucket {
         let id = OverscaledTileID::new(3, 0, CanonicalTileID::new(2, 1, 3));
-        DebugBucket::new(&id, true, false, modified, expires, debug_mode, "streets".to_owned())
+        DebugBucket::new(&id, true, false, modified, expires, debug_mode, "streets")
     }
 
     #[test]

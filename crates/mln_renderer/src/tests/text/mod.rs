@@ -1,0 +1,61 @@
+// Ported gtests of test/text/*.test.cpp that need mln_renderer (GlyphManager,
+// SymbolLayout), sit above mln_text (Formatted is mln_expression's) or read
+// its fixtures (GlyphCache), one module per C++ file. The others are ported next to their code: bidi,
+// tagged_string, glyph_pbf and shaping in mln_text;
+// quads, get_anchors and cross_tile_symbol_index in crate::text;
+// local_glyph_rasterizer in mln_headless (it renders a map).
+
+mod calculate_tile_distances;
+mod formatted;
+mod glyph_cache;
+mod glyph_manager;
+mod glyph_manager_bitmaps;
+
+use std::path::PathBuf;
+
+use mln_util::logging::{Event, EventSeverity, Log, Observer};
+
+/// A path of the C++ repository, in the copy of its files these tests read
+/// (testdata/).
+#[must_use]
+pub(crate) fn cpp_path(relative: &str) -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
+}
+
+/// Reads a C++ test fixture.
+#[must_use]
+pub(crate) fn read_file(relative: &str) -> Vec<u8> {
+    let path = cpp_path(relative);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+struct NullObserver;
+
+impl Observer for NullObserver {
+    fn on_record(&self, _: EventSeverity, _: Event, _: i64, _: &str) -> bool {
+        true
+    }
+}
+
+/// Silences the calling thread's log until dropped.
+pub(crate) struct SquelchLog;
+
+impl SquelchLog {
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        let _ = Log::set_thread_observer(Some(Box::new(NullObserver)));
+        SquelchLog
+    }
+}
+
+impl Default for SquelchLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for SquelchLog {
+    fn drop(&mut self) {
+        let _ = Log::set_thread_observer(None);
+    }
+}

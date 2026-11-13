@@ -23,7 +23,7 @@ struct Pattern {
     position: ImagePosition,
 }
 
-pub struct PatternAtlas {
+pub(crate) struct PatternAtlas {
     shelf_pack: ShelfPack,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
@@ -39,7 +39,7 @@ impl Default for PatternAtlas {
 
 impl PatternAtlas {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         PatternAtlas {
             shelf_pack: ShelfPack::new(64, 64, shelf_pack_options()),
             patterns: HashMap::new(),
@@ -50,11 +50,11 @@ impl PatternAtlas {
     }
 
     #[must_use]
-    pub fn get_pattern(&self, id: &str) -> Option<ImagePosition> {
+    pub(crate) fn get_pattern(&self, id: &str) -> Option<ImagePosition> {
         self.patterns.get(id).map(|pattern| pattern.position.clone())
     }
 
-    pub fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
+    pub(crate) fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
         if self.patterns.contains_key(&image.id) {
             return None;
         }
@@ -105,7 +105,7 @@ impl PatternAtlas {
         Some(position)
     }
 
-    pub fn remove_pattern(&mut self, id: &str) {
+    pub(crate) fn remove_pattern(&mut self, id: &str) {
         if let Some(pattern) = self.patterns.remove(id) {
             // Clear pattern from the atlas image.
             let b = self.shelf_pack.bin(pattern.bin);
@@ -117,7 +117,7 @@ impl PatternAtlas {
     }
 
     #[must_use]
-    pub fn get_pixel_size(&self) -> Size {
+    pub(crate) fn get_pixel_size(&self) -> Size {
         Size::new(self.shelf_pack.width() as u32, self.shelf_pack.height() as u32)
     }
 
@@ -127,7 +127,7 @@ impl PatternAtlas {
     /// texture is created again. C++ uploads the larger image into the old
     /// texture (`webgpu::Texture2D` never resizes an existing texture), which
     /// Dawn reports as a validation error and wgpu treats as fatal.
-    pub fn upload(&mut self, upload_pass: &dyn UploadPass) {
+    pub(crate) fn upload(&mut self, upload_pass: &dyn UploadPass) {
         if let Some(texture) = &self.atlas_texture_2d {
             let texture_size = texture.borrow().get_size();
             if texture_size != self.atlas_image.size && !texture_size.is_empty() {
@@ -150,17 +150,18 @@ impl PatternAtlas {
     }
 
     #[must_use]
-    pub fn texture(&self) -> Option<&Texture2DPtr> {
+    pub(crate) fn texture(&self) -> Option<&Texture2DPtr> {
         self.atlas_texture_2d.as_ref()
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn get_atlas_image_for_test(&self) -> &PremultipliedImage {
+    pub(crate) fn get_atlas_image_for_test(&self) -> &PremultipliedImage {
         &self.atlas_image
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.patterns.is_empty()
     }
 }

@@ -32,7 +32,7 @@ pub struct SubdivisionGranularitySetting {
     pub tile: SubdivisionGranularityExpression,
     pub stencil: SubdivisionGranularityExpression,
     /// Circle vertices per axis: 1, 3, 5 or 7.
-    pub circle: u8,
+    pub(crate) circle: u8,
 }
 
 impl Default for SubdivisionGranularitySetting {

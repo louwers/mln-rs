@@ -18,11 +18,6 @@ impl Rotation {
     const PERIOD: f64 = 360.0;
 
     #[must_use]
-    pub const fn period(&self) -> f64 {
-        Self::PERIOD
-    }
-
-    #[must_use]
     pub fn get_angle(&self) -> f64 {
         self.angle
     }
@@ -39,8 +34,7 @@ impl Interpolate for Rotation {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         let a = self;
         let b = to;
-        debug_assert_eq!(a.period(), b.period());
-        let period = a.period();
+        let period = Rotation::PERIOD;
         let a_angle = a.get_angle() % period;
         let b_angle = b.get_angle() % period;
 

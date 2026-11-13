@@ -3,16 +3,6 @@ use bytemuck::{Pod, Zeroable};
 /// Maximum number of illumination sources supported
 pub const MAX_ILLUMINATION_SOURCES: usize = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum HillshadeMethod {
-    Standard = 0,
-    Combined = 1,
-    Igor = 2,
-    Multidirectional = 3,
-    Basic = 4,
-}
-
 /// The hillshade shader's per-drawable uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]

@@ -30,17 +30,8 @@ mln_tile_id.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
 
-[[test]]
-name = "map_events"
-path = "tests/map_events.rs"
-
-[[test]]
-name = "map_snapshot"
-path = "tests/map_snapshot.rs"
-
-[[test]]
-name = "map_updates"
-path = "tests/map_updates.rs"
+[dev-dependencies]
+mln_storage = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

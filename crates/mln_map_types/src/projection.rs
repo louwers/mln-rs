@@ -23,7 +23,7 @@ pub struct ProjectionData {
     pub translate: Vec2,
     /// The camera on the unit sphere's scale, for the line of sight to points
     /// above the surface.
-    pub camera_position: Vec3,
+    pub(crate) camera_position: Vec3,
 }
 
 /// A tile point in clip space, as the vertex shaders would place it.
@@ -36,7 +36,7 @@ pub struct ProjectedTilePoint {
 }
 
 /// The tile-to-world matrix of a tile, the same on every projection.
-pub fn mercator_tile_matrix(matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64) {
+pub(crate) fn mercator_tile_matrix(matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64) {
     let tile_scale: u64 = 1u64 << tile_id.canonical.z;
     let s = WebMercator::world_size(scale) / tile_scale as f64;
 
@@ -55,7 +55,7 @@ pub fn mercator_tile_matrix(matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale:
 
 /// The Mercator extent of a tile, the same on every projection.
 #[must_use]
-pub fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> Vec4 {
+pub(crate) fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> Vec4 {
     let tile_scale = (1u64 << tile_id.canonical.z) as f64;
     [
         f64::from(tile_id.canonical.x) / tile_scale,
@@ -67,7 +67,7 @@ pub fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> Vec4 {
 
 /// How a [`TransformState`] places tiles on the screen. Both variants
 /// project locations onto the same Mercator plane, so the tile-to-world matrix
-/// is [`mercator_tile_matrix`] on either.
+/// is `mercator_tile_matrix` on either.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Projection {
     #[default]
@@ -104,7 +104,7 @@ impl Projection {
     /// The clip-space position of a tile point, `elevation` meters above the
     /// surface, computed the way the vertex shaders do it.
     #[must_use]
-    pub fn project_tile_point(
+    pub(crate) fn project_tile_point(
         self,
         data: &ProjectionData,
         tile_id: &UnwrappedTileID,
@@ -131,7 +131,7 @@ impl Projection {
     /// Where the vertex shaders draw a tile point: `project_tile_point`,
     /// except while one projection hands over to another.
     #[must_use]
-    pub fn drawn_tile_point(
+    pub(crate) fn drawn_tile_point(
         self,
         data: &ProjectionData,
         tile_id: &UnwrappedTileID,

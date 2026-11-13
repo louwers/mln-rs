@@ -4,7 +4,7 @@ use super::layer_factory::{LayerFactory, get_source};
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::circle_layer::{CircleLayer, Impl};
 
-pub struct CircleLayerFactory;
+pub(crate) struct CircleLayerFactory;
 
 impl LayerFactory for CircleLayerFactory {
     fn get_type_info(&self) -> &'static LayerTypeInfo {

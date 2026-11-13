@@ -20,14 +20,14 @@ use crate::layer_tweaker::{
 };
 use crate::paint_parameters::PaintParameters;
 
-pub struct CircleLayerTweaker {
+pub(crate) struct CircleLayerTweaker {
     base: LayerTweakerBase,
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl CircleLayerTweaker {
-    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
+    pub(crate) fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         CircleLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,
@@ -126,7 +126,7 @@ impl LayerTweaker for CircleLayerTweaker {
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
-                translation,
+                *translation,
                 anchor,
                 NEAR_CLIPPED,
                 IN_VIEWPORT_PIXEL_UNITS,

@@ -70,7 +70,7 @@ const BUFFER_USAGE: MTLResourceOptions = MTLResourceOptions::StorageModeShared;
 /// The size of the buffer bound where an attribute has no data.
 const EMPTY_VERTEX_BUFFER_SIZE: usize = 32;
 
-pub struct Context {
+pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
@@ -153,7 +153,7 @@ fn map_operation(op: StencilOpType) -> MTLStencilOperation {
 
 impl Context {
     #[must_use]
-    pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
+    pub(crate) fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
@@ -174,15 +174,15 @@ impl Context {
 
     /// The owning `Rc` (resources keep the context alive, as the C++
     /// `Context&` members assume).
-    pub fn rc(&self) -> Rc<Context> {
+    pub(crate) fn rc(&self) -> Rc<Context> {
         self.weak_self.upgrade().expect("mtl::Context used after drop")
     }
 
-    pub fn weak(&self) -> Weak<Context> {
+    pub(crate) fn weak(&self) -> Weak<Context> {
         self.weak_self.clone()
     }
 
-    pub fn get_backend(&self) -> &Rc<BackendImpl> {
+    pub(crate) fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
     }
 
@@ -196,7 +196,7 @@ impl Context {
         self.globe_clip_meshes.borrow_mut().clear();
     }
 
-    pub fn create_buffer(
+    pub(crate) fn create_buffer(
         &self,
         data: Option<&[u8]>,
         size: usize,
@@ -208,7 +208,7 @@ impl Context {
 
     /// Compiles `source` with the program's defines and `additional_defines`
     /// as preprocessor macros.
-    pub fn create_program(
+    pub(crate) fn create_program(
         &self,
         name: String,
         source: &str,
@@ -265,11 +265,11 @@ impl Context {
     }
 
     /// Creates a texture, of the concrete type.
-    pub fn create_mtl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
+    pub(crate) fn create_mtl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self.rc())))
     }
 
-    pub fn create_offscreen_texture_with(
+    pub(crate) fn create_offscreen_texture_with(
         &self,
         size: Size,
         type_: TextureChannelDataType,
@@ -281,7 +281,7 @@ impl Context {
 
     /// A depth-stencil state of the modes whose attachment `render_pass` has
     /// (Metal's validation rejects a depth test without a depth attachment).
-    pub fn make_depth_stencil_state(
+    pub(crate) fn make_depth_stencil_state(
         &self,
         depth_mode: &DepthMode,
         stencil_mode: &StencilMode,
@@ -315,7 +315,7 @@ impl Context {
 
     /// The four corners of the tile extent as short2. They are written out
     /// here because C++'s `RenderStaticData` is a renderer type.
-    pub fn get_tile_vertex_buffer(&self) -> Option<MTLBufferPtr> {
+    pub(crate) fn get_tile_vertex_buffer(&self) -> Option<MTLBufferPtr> {
         let mut cached = self.tile_vertex_buffer.borrow_mut();
         if cached.is_none() {
             const EXTENT: i16 = 8192; // util::EXTENT
@@ -326,7 +326,7 @@ impl Context {
     }
 
     /// The indices of the two triangles of a tile quad.
-    pub fn get_tile_index_buffer(&self) -> Option<MTLBufferPtr> {
+    pub(crate) fn get_tile_index_buffer(&self) -> Option<MTLBufferPtr> {
         let mut cached = self.tile_index_buffer.borrow_mut();
         if cached.is_none() {
             let indices: [u16; 6] = [0, 1, 2, 1, 2, 3];
@@ -338,7 +338,7 @@ impl Context {
     /// An empty vertex buffer, bound where an attribute's values come from a
     /// uniform instead. Shaders don't read it, but Metal requires a
     /// binding.
-    pub fn get_empty_vertex_buffer(&self) -> Option<MTLBufferPtr> {
+    pub(crate) fn get_empty_vertex_buffer(&self) -> Option<MTLBufferPtr> {
         let mut cached = self.empty_vertex_buffer.borrow_mut();
         if cached.is_none() {
             *cached = self.backend.get_device().newBufferWithLength_options(EMPTY_VERTEX_BUFFER_SIZE, BUFFER_USAGE);
@@ -630,8 +630,8 @@ impl GfxContext for Context {
         VertexAttributeArray::new_ptr()
     }
 
-    fn create_drawable_builder(&self, name: String) -> UniqueDrawableBuilder {
-        Box::new(DrawableBuilder::new(name))
+    fn create_drawable_builder(&self) -> UniqueDrawableBuilder {
+        Box::new(DrawableBuilder::new())
     }
 
     fn create_uniform_buffer(&self, data: &[u8], persistent: bool, _ssbo: bool) -> UniformBufferPtr {

@@ -29,13 +29,13 @@ pub struct Impl {
 
 impl Impl {
     #[must_use]
-    pub fn new(source_type: SourceType, id: String, tile_size: u16) -> Self {
+    pub(crate) fn new(source_type: SourceType, id: String, tile_size: u16) -> Self {
         Impl { base: ImplBase::new(source_type, id), tileset: None, tile_size }
     }
 
     /// `Impl(const Impl&, Tileset)`.
     #[must_use]
-    pub fn with_tileset(other: &Impl, tileset: Tileset) -> Self {
+    pub(crate) fn with_tileset(other: &Impl, tileset: Tileset) -> Self {
         Impl { base: other.base.clone(), tileset: Some(tileset), tile_size: other.tile_size }
     }
 
@@ -132,7 +132,7 @@ impl TileSource {
     }
 
     #[must_use]
-    pub fn impl_(&self) -> Arc<Impl> {
+    pub(crate) fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
@@ -308,8 +308,9 @@ impl VectorSource {
     }
 
     /// Gets the tile urls for this vector source.
+    #[cfg(test)]
     #[must_use]
-    pub fn get_tiles(&self) -> Vec<String> {
+    pub(crate) fn get_tiles(&self) -> Vec<String> {
         match &self.tile_source.impl_().tileset {
             Some(tileset) => tileset.tiles.clone(),
             None => Vec::new(),

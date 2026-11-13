@@ -25,8 +25,8 @@ pub(crate) enum EntryResource {
 /// binding.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct BindGroupKey {
-    pub layout: wgpu::BindGroupLayout,
-    pub resources: Vec<(u32, EntryResource)>,
+    pub(crate) layout: wgpu::BindGroupLayout,
+    pub(crate) resources: Vec<(u32, EntryResource)>,
 }
 
 type Entries = RefCell<HashMap<BindGroupKey, Weak<SharedBindGroup>>>;
@@ -34,8 +34,8 @@ type Entries = RefCell<HashMap<BindGroupKey, Weak<SharedBindGroup>>>;
 /// A bind group of a [`BindGroupCache`], and what it was created from.
 /// Dropping the last `Rc` takes it out of the cache.
 pub(crate) struct SharedBindGroup {
-    pub handle: wgpu::BindGroup,
-    pub key: BindGroupKey,
+    pub(crate) handle: wgpu::BindGroup,
+    pub(crate) key: BindGroupKey,
     cache: Weak<Entries>,
 }
 
@@ -64,7 +64,7 @@ pub(crate) struct BindGroupCache {
 
 impl BindGroupCache {
     /// The live bind group created from `key`, or a new one `create` makes.
-    pub fn get_or_create(
+    pub(crate) fn get_or_create(
         &self,
         key: BindGroupKey,
         create: impl FnOnce(&BindGroupKey) -> wgpu::BindGroup,
@@ -105,7 +105,7 @@ pub(crate) struct IndexTable {
 }
 
 impl IndexTable {
-    pub fn new(device: &wgpu::Device) -> IndexTable {
+    pub(crate) fn new(device: &wgpu::Device) -> IndexTable {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("UBO index"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -125,13 +125,13 @@ impl IndexTable {
     }
 
     /// The layout of the group, which every shader's index group uses.
-    pub fn layout(&self) -> &wgpu::BindGroupLayout {
+    pub(crate) fn layout(&self) -> &wgpu::BindGroupLayout {
         &self.layout
     }
 
     /// Makes the table hold `index`. Returns the size of the buffer it
     /// replaced (0 if none) and of the new one, if it made one.
-    pub fn reserve(&mut self, device: &wgpu::Device, index: u32) -> Option<(u64, u64)> {
+    pub(crate) fn reserve(&mut self, device: &wgpu::Device, index: u32) -> Option<(u64, u64)> {
         let replaced = match &self.table {
             Some((_, _, capacity)) if index < *capacity => return None,
             Some((buffer, _, _)) => buffer.size(),
@@ -166,7 +166,7 @@ impl IndexTable {
 
     /// The bind group and the dynamic offset that select `index`, `None` if
     /// the table doesn't hold it (see [`reserve`](Self::reserve)).
-    pub fn get(&self, index: u32) -> Option<(&wgpu::BindGroup, u32)> {
+    pub(crate) fn get(&self, index: u32) -> Option<(&wgpu::BindGroup, u32)> {
         let (_, bind_group, capacity) = self.table.as_ref()?;
         (index < *capacity).then(|| (bind_group, index * self.stride))
     }

@@ -29,7 +29,7 @@ struct Corner {
 /// Whether the label fits on the line without the sum of the angles within
 /// `window_size` exceeding `max_angle`.
 #[must_use]
-pub fn check_max_angle(
+pub(crate) fn check_max_angle(
     line: &GeometryCoordinates,
     anchor: &Anchor,
     label_length: f32,

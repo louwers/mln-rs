@@ -80,7 +80,6 @@ fn layers(jsons: &[&str]) -> Vec<Arc<dyn LayerProperties>> {
 fn parameters() -> WorkerParameters {
     WorkerParameters {
         id: OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0)),
-        source_id: "s".to_owned(),
         obsolete: Arc::new(AtomicBool::new(false)),
         mode: MapMode::Static,
         pixel_ratio: 1.0,
@@ -157,7 +156,6 @@ fn worker(parameters: WorkerParameters, replies: &Replies) -> GeometryTileWorker
         None,
         Box::new(replies.clone()),
         parameters.id,
-        parameters.source_id,
         parameters.obsolete,
         parameters.mode,
         parameters.pixel_ratio,

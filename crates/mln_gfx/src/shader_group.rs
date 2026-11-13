@@ -13,7 +13,7 @@ use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 
 pub type StringIDSetsPair = (HashSet<String>, HashSet<usize>);
 
-pub type PropertyHashType = u64;
+pub(crate) type PropertyHashType = u64;
 
 /// The define that compiles a shader's globe variant.
 pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";

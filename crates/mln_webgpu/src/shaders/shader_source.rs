@@ -37,46 +37,39 @@ use super::{fill_extrusion_wgsl, wgsl_sources};
 
 /// The WGSL members of a `ShaderSource` specialisation, as extracted.
 #[derive(Debug)]
-pub struct WgslShaderSource {
+pub(crate) struct WgslShaderSource {
     /// The `BuiltIn` enumerator name.
-    pub built_in: &'static str,
-    pub name: &'static str,
-    pub vertex: Option<&'static str>,
-    pub fragment: Option<&'static str>,
-    pub prelude: Option<&'static str>,
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests name the shaders they check by them"))]
+    pub(crate) built_in: &'static str,
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests name the shaders they check by them"))]
+    pub(crate) name: &'static str,
+    pub(crate) vertex: Option<&'static str>,
+    pub(crate) fragment: Option<&'static str>,
+    pub(crate) prelude: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct AttributeInfo {
-    pub index: usize,
-    pub data_type: AttributeDataType,
-    pub id: usize,
+pub(crate) struct AttributeInfo {
+    pub(crate) index: usize,
+    pub(crate) data_type: AttributeDataType,
+    pub(crate) id: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct TextureInfo {
-    pub index: usize,
-    pub id: usize,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct UniformBlockInfo {
-    pub index: usize,
-    pub vertex: bool,
-    pub fragment: bool,
-    pub size: usize,
-    pub id: usize,
+pub(crate) struct TextureInfo {
+    pub(crate) index: usize,
+    pub(crate) id: usize,
 }
 
 /// A complete specialisation: WGSL plus the `attributes`,
 /// `instanceAttributes` and `textures` tables.
 #[derive(Debug)]
-pub struct ShaderSource {
-    pub wgsl: &'static WgslShaderSource,
-    pub name: &'static str,
-    pub attributes: &'static [AttributeInfo],
-    pub instance_attributes: &'static [AttributeInfo],
-    pub textures: &'static [TextureInfo],
+pub(crate) struct ShaderSource {
+    pub(crate) wgsl: &'static WgslShaderSource,
+    pub(crate) name: &'static str,
+    pub(crate) attributes: &'static [AttributeInfo],
+    pub(crate) instance_attributes: &'static [AttributeInfo],
+    pub(crate) textures: &'static [TextureInfo],
 }
 
 // src/mln/shaders/webgpu/background.cpp
@@ -491,7 +484,7 @@ shader_source!(GLOBE_DEPTH_SHADER, GLOBE_DEPTH_SHADER, "GlobeDepthShader", GLOBE
 /// The WebGPU source of `shader_id`, or `None` for the shaders without WGSL
 /// yet.
 #[must_use]
-pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
+pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
         BuiltIn::BackgroundShader => Some(&BACKGROUND_SHADER),
         BuiltIn::BackgroundPatternShader => Some(&BACKGROUND_PATTERN_SHADER),
@@ -533,6 +526,6 @@ pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
 }
 
 #[must_use]
-pub fn prelude() -> &'static str {
+pub(crate) fn prelude() -> &'static str {
     wgsl_sources::PRELUDE.prelude.expect("Prelude without prelude")
 }

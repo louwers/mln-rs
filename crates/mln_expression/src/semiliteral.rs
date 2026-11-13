@@ -16,21 +16,21 @@ fn array_type(elements: &[Box<dyn Expression>]) -> type_::Array {
     type_::Array::with_n(if homogeneous { item_type } else { Type::Value }, Some(elements.len()))
 }
 
-pub struct Semiliteral {
+pub(crate) struct Semiliteral {
     base: ExpressionBase,
     elements: Vec<Box<dyn Expression>>,
 }
 
 impl Semiliteral {
     #[must_use]
-    pub fn new(elements: Vec<Box<dyn Expression>>) -> Self {
+    pub(crate) fn new(elements: Vec<Box<dyn Expression>>) -> Self {
         Semiliteral {
             base: ExpressionBase::new(Kind::Semiliteral, array_type(&elements).into(), collect_dependencies(&elements)),
             elements,
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         if value.array_length() != 2 {
             ctx.error(format!(
                 "'semiliteral' expression requires exactly one argument, but found {} instead.",

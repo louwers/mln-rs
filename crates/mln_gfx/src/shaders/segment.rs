@@ -46,8 +46,6 @@ impl SegmentBase {
     }
 }
 
-pub type SegmentVector = Vec<SegmentBase>;
-
 /// The most vertices a segment holds, since they are addressed by 16-bit
 /// indices.
 pub const MAX_SEGMENT_VERTICES: usize = u16::MAX as usize;

@@ -13,6 +13,7 @@ mod conversion_source_options;
 mod conversion_tileset;
 mod expression_global_state;
 mod filter;
+mod format_section_override_test;
 mod layer_properties;
 mod layer_round_trip;
 mod m1_render_test_styles;

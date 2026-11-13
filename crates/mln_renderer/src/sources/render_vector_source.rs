@@ -18,7 +18,7 @@ use crate::tile::vector_tile::VectorTile;
 use crate::tile_parameters::TileParameters;
 
 /// The render source of a vector source.
-pub struct RenderVectorSource {
+pub(crate) struct RenderVectorSource {
     tile_source: RenderTileSource,
     cached_tileset: Option<Tileset>,
     fast_pfor_enabled: bool,
@@ -26,7 +26,7 @@ pub struct RenderVectorSource {
 
 impl RenderVectorSource {
     #[must_use]
-    pub fn new(impl_: Arc<tile_source::Impl>) -> Self {
+    pub(crate) fn new(impl_: Arc<tile_source::Impl>) -> Self {
         let impl_: Arc<dyn source::Impl> = impl_;
         RenderVectorSource { tile_source: RenderTileSource::new(impl_), cached_tileset: None, fast_pfor_enabled: false }
     }
@@ -76,10 +76,6 @@ impl RenderVectorSource {
             },
         );
     }
-
-    pub fn tile_source(&self) -> &RenderTileSource {
-        &self.tile_source
-    }
 }
 
 use mln_style::source_impl::Impl as _;
@@ -87,10 +83,6 @@ use mln_style::source_impl::Impl as _;
 impl RenderSource for RenderVectorSource {
     fn base(&self) -> &RenderSourceBase {
         &self.tile_source.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderSourceBase {
-        &mut self.tile_source.base
     }
 
     fn is_loaded(&self) -> bool {
