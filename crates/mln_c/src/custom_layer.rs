@@ -43,7 +43,7 @@ impl Host {
         view.extent.scale_factor = map::exact_scale_factor(self.scale_factor, view.extent.scale_factor);
         mln_custom_layer_frame {
             view,
-            projection: render_session::frame_projection(&frame.projection),
+            frame_projection: render_session::frame_projection(&frame.projection),
             width: frame.width,
             height: frame.height,
         }

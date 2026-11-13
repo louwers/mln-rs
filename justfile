@@ -325,7 +325,7 @@ update-testdata checkout=cpp:
 # builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
 # fix the suite's own bugs and drop its uses of the location-indicator layer type, which mln-rs doesn't have, and the
 # declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's t3/gpu-device-targets branch at
-# b5a6422eb15a, which changes the render target headers and adds frame depth and custom layers ahead of their merge.
+# 08f3fefffebb, which changes the render target headers and adds frame depth and custom layers ahead of their merge.
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash

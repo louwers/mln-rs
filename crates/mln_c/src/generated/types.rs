@@ -3079,15 +3079,15 @@ pub struct mln_style_transition_options {
 }
 /** The frame that a custom layer draws into, as its callbacks get it.
 
- The view and the projection are the ones that the frame draws the map with,
- so they are never newer than the frame, unlike the map's camera.*/
+ The view and the frame projection are the ones that the frame draws the map
+ with, so they are never newer than the frame, unlike the map's camera.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_custom_layer_frame {
     /// The camera, extent, and scale factor that the frame shows.
     pub view: mln_map_view,
     /// Where the frame draws the map, and the depth that it writes there.
-    pub projection: mln_frame_projection,
+    pub frame_projection: mln_frame_projection,
     /// The width of the frame's attachments, in physical pixels.
     pub width: u32,
     /// The height of the frame's attachments, in physical pixels.
@@ -3265,7 +3265,7 @@ pub struct mln_custom_layer_render_parameters {
     pub pass: mln_custom_layer_pass_data,
     pub frame: mln_custom_layer_frame,
     /** The depth that a 2D layer at the layer's place in the style writes, as
- mln_frame_projection describes, between `frame.projection.far_depth` and
+ mln_frame_projection describes, between `frame.frame_projection.far_depth` and
  1.
 
  The map draws the opaque fragments of its 2D layers before the render
@@ -3299,7 +3299,7 @@ pub type mln_custom_layer_prerender_callback = ::core::option::Option<
  The map draws its layers below the custom layer before the callback, and
  those above it after, except for the opaque fragments of 2D layers, which it
  draws before either, as mln_custom_layer_render_parameters.layer_depth
- describes. Draw through `frame.projection.matrix` to depth-test against the
+ describes. Draw through `frame.frame_projection.matrix` to depth-test against the
  map's 3D layers.
 
  Threads:
