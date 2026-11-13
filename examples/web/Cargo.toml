@@ -39,6 +39,7 @@ mln_renderer.workspace = true
 mln_storage.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true
+mln_web_host.workspace = true
 mln_webgpu.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true

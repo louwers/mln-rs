@@ -2326,6 +2326,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
+ "mln-rs-web-host",
  "mln-rs-webgpu",
 ]
 
@@ -3052,11 +3053,26 @@ dependencies = [
  "mln-rs-storage",
  "mln-rs-text",
  "mln-rs-util",
+ "mln-rs-web-host",
  "mln-rs-webgpu",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
+]
+
+[[package]]
+name = "mln-rs-web-host"
+version = "0.0.11"
+dependencies = [
+ "js-sys",
+ "mln-rs-actor",
+ "mln-rs-renderer",
+ "mln-rs-text",
+ "mln-rs-util",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

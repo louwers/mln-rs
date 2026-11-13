@@ -82,15 +82,15 @@ check:
 # needs the target, which rust-toolchain.toml installs. Clippy, so that examples/web, which only builds there, is linted
 # too. Three runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
 # on, its SQLite built through sqlite-wasm-rs, which needs a clang that targets wasm32, and the in-process font-face
-# shaper), the browser build's two modules as `just web` builds them, which leave both out, and the map's module with
-# its `webgl` feature. The check fails if anything turns SQLite back on in the browser build, or brings in a C build
-# (`cc`) that would need that clang, or if the module that draws with WebGPU gets the OpenGL backend (mln_gl and its
-# GL bindings), which only the `webgl` module needs, or if the browser build brings in ICU4X: it takes its locale
-# services from the browser's `Intl`.
+# shaper), the browser build's two modules as `just web` builds them, which leave both out, with mln_web_host, the glue
+# they share, and the map's module with its `webgl` feature. The check fails if anything turns SQLite back on in the
+# browser build, or brings in a C build (`cc`) that would need that clang, or if the module that draws with WebGPU gets
+# the OpenGL backend (mln_gl and its GL bindings), which only the `webgl` module needs, or if the browser build brings
+# in ICU4X: it takes its locale services from the browser's `Intl`.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:  _dev-shell
     {{dev_shell}} cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
-    cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+    cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper -p mln-rs-web-host
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --features webgl
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal,build --prefix none | grep -q '^cc '

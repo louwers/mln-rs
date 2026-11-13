@@ -30,6 +30,12 @@ fn installs_once() {
     scheduler::install_cooperative(Arc::new(CooperativeScheduler::new()));
 }
 
+#[test]
+fn installing_once_keeps_the_installed_scheduler() {
+    let installed = cooperative();
+    assert!(Arc::ptr_eq(scheduler::install_cooperative_once(), installed));
+}
+
 struct Counter {
     count: Cell<usize>,
     total: Arc<AtomicUsize>,

@@ -91,6 +91,15 @@ pub fn install_cooperative(scheduler: Arc<CooperativeScheduler>) {
     }
 }
 
+/// Port-only: the installed cooperative scheduler, after installing a new
+/// one if none is: `install_cooperative` for hosts that may each try to
+/// install it, such as libraries that share a wasm instance. The first
+/// install must still come before anything gets a scheduler or starts a
+/// `Thread`.
+pub fn install_cooperative_once() -> &'static Arc<CooperativeScheduler> {
+    COOPERATIVE.get_or_init(|| Arc::new(CooperativeScheduler::new()))
+}
+
 /// Port-only: the scheduler `install_cooperative` installed, if any.
 pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
     COOPERATIVE.get()

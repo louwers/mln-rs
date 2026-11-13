@@ -1,8 +1,9 @@
 // The map's Web Worker: its own instance of the page's module, rendering
 // into the page's canvas (an OffscreenCanvas), so that the map's work never
-// runs on the page's thread. Its tile workers (worker.ts) talk to it
-// directly, each over a MessageChannel port the page connected: requests
-// go as bytes, and replies come back as bytes and payloads, transferred.
+// runs on the page's thread. Its tile workers (worker.ts) talk to its
+// instance directly, each over a MessageChannel port the page connected:
+// requests go as bytes, and replies come back as bytes and payloads,
+// transferred.
 //
 // The page sends a preload as soon as it starts, the start once the module
 // compiled, then the rest of ToMap (protocol.ts); this worker answers with
@@ -10,7 +11,7 @@
 //
 // A panic aborts the instance it happens in (wasm32-unknown-unknown can't
 // unwind), and nothing may call into it after that. When this instance or a
-// tile worker's panics, the map stops: no more frames, ticks or replies, and
+// tile worker's panics, the map stops: no more frames or work between them, and
 // a fatal message goes to the page, with the message the panic hook left in
 // `mlnPanic` (src/lib.rs) or a tile worker sent. `panic`, if given, is a
 // message to panic with once the map exists (`panic_for_check`), for
@@ -22,7 +23,7 @@
 // can't start the map, the worker says `unsupported` rather than `fatal`.
 
 import type { WebMap } from './pkg/mln_web.js';
-import type { Bindings, Box, Camera, FromMap, FromTileWorker, Input, Loaded, Start, ToMap } from './protocol.ts';
+import type { Bindings, Box, Camera, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
 
 // Every URL this worker fetched, and how many times: the map's fetches look
 // the global `fetch` up at each call, and so do the preloads below.
@@ -38,7 +39,7 @@ const webgl2 = self.name === 'webgl2';
 
 // Imported rather than a static import, so that the preloads below don't
 // wait for it.
-const bindings: Promise<Bindings<'WebMap' | 'set_preloads' | 'panic_for_check'>> = webgl2
+const bindings: Promise<Bindings<'WebMap' | 'set_preloads' | 'panic_for_check' | 'mlnWebStopPump'>> = webgl2
   ? import('./pkg/webgl/mln_web.js')
   : import('./pkg/mln_web.js');
 
@@ -60,10 +61,17 @@ onmessage = ({ data }: MessageEvent<ToMap>) => {
 const post = (message: FromMap, transfer: Transferable[] = []) => postMessage(message, transfer);
 
 let stopped = false;
+// Stops the instance's work between frames, once it has started.
+let stopPump = () => {};
 
 function fatal(where: string, error: unknown): undefined {
   if (stopped) return;
   stopped = true;
+  try {
+    stopPump();
+  } catch {
+    // The instance panicked: nothing runs in it any more.
+  }
   post({ type: 'fatal', message: `${where}: ${self.mlnPanic ?? String(error)}` });
 }
 
@@ -186,22 +194,17 @@ function percentEncode(text: string): string {
 async function run(
   { module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily, panic }: Start,
 ): Promise<Handle> {
-  const { default: init, WebMap, set_preloads, panic_for_check } = await bindings;
+  const { default: init, WebMap, set_preloads, panic_for_check, mlnWebStopPump } = await bindings;
   await init({ module_or_path: module });
+  stopPump = mlnWebStopPump;
   set_preloads(takePreload);
 
   // The map's work between frames (finished fetches, worker replies, queued
-  // tasks) runs as soon as the map asks for it, in a task of its own, rather
-  // than waiting for the next animation frame: each step of a load (a tile's
-  // response, its parsing, the next request) would otherwise wait a frame.
-  const ticks = new MessageChannel();
-  let tickScheduled = false;
-  const wake = () => {
-    if (!tickScheduled && !stopped) {
-      tickScheduled = true;
-      ticks.port2.postMessage(null);
-    }
-  };
+  // tasks) runs as soon as the map asks for it, in a task of its own
+  // (mln_web_host's pump), rather than waiting for the next animation frame:
+  // each step of a load (a tile's response, its parsing, the next request)
+  // would otherwise wait a frame.
+  //
   // A style's font faces are shaped by a second module, which only this
   // worker loads, the first time a style declares them.
   const loadShaper = async () => {
@@ -209,12 +212,10 @@ async function run(
     await shaper.default();
     return shaper;
   };
-  const toTileWorker = (instance: number, bytes: Uint8Array) => {
-    if (!stopped) ports[instance]?.postMessage(bytes, [bytes.buffer]);
-  };
+  const tileWorkerFatal = (instance: number, message: unknown) => fatal(`tile worker ${instance}`, message);
   let map: WebMap;
   try {
-    map = await WebMap.create(canvas, width, height, ratio, ports.length, toTileWorker, wake, loadShaper,
+    map = await WebMap.create(canvas, width, height, ratio, ports, tileWorkerFatal, loadShaper,
       localIdeographFontFamily);
   } catch (error) {
     if (self.mlnPanic !== undefined) throw error;
@@ -222,19 +223,6 @@ async function run(
     post({ type: 'unsupported', message: error instanceof Error ? error.message : String(error) });
     return () => {};
   }
-
-  ticks.port1.onmessage = () => {
-    tickScheduled = false;
-    guard(() => {
-      if (map.tick(4)) wake();
-    });
-  };
-  ports.forEach((port, instance) => {
-    port.onmessage = ({ data }: MessageEvent<FromTileWorker>) => {
-      if ('fatal' in data) fatal(`tile worker ${instance}`, data.fatal);
-      else guard(() => data.forEach((reply) => map.receive(instance, reply)));
-    };
-  });
 
   if (panic) panic_for_check(panic);
 
