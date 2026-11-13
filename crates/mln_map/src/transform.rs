@@ -644,9 +644,12 @@ impl Transform {
             && self.state.get_lat_lng_bounds() == LatLngBounds::default()
             && !self.is_gesture_in_progress()
             && duration != Duration::zero()
+            && animation.easing.is_none()
         {
-            // reuse flyTo, without exaggerated animation, to achieve constant
-            // ground speed.
+            // A plain timed ease flies without the zoom-out. The flight's
+            // ground speed rises and falls along its path even at a constant
+            // zoom, so an ease given an easing interpolates instead, and
+            // moves as that easing says, as GL JS's easeTo does.
             self.fly_to(&camera, animation, true);
             return;
         }

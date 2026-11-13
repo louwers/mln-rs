@@ -3996,6 +3996,39 @@ fn independent_camera_tracks() {
     assert!(!transform.in_transition());
 }
 
+// A timed ease with an easing moves the center along the straight line at
+// the easing's pace, as GL JS's easeTo does, rather than at the pace of a
+// flight, which is slow, then fast, then slow even at a constant zoom.
+#[test]
+fn ease_with_an_easing_follows_it() {
+    let ease_out = UnitBezier::new(0.0, 0.0, 0.58, 1.0);
+    for easing in [LINEAR, ease_out] {
+        let mut transform = new_transform();
+        transform.resize(Size::new(1000, 1000)).unwrap();
+        let from = ll(48.0, 11.0);
+        let to = ll(48.002, 11.003);
+        transform.jump_to(&cam().with_center(Some(from)).with_zoom(Some(15.5)));
+        let scale = transform.get_state().get_scale();
+        let (start_point, end_point) = (Projection::project(&from, scale), Projection::project(&to, scale));
+        let animation = AnimationOptions { easing: Some(easing), ..AnimationOptions::new(seconds(4)) };
+        let start = start_clock(&mut transform);
+        transform.ease_to(&cam().with_center(Some(to)), &animation);
+        for quarter in 1..4_i32 {
+            let t = f64::from(quarter) / 4.0;
+            transform.update_transitions(start + milliseconds(i64::from(quarter) * 1000));
+            let point = Projection::project(&transform.get_lat_lng(WrapMode::Unwrapped), scale);
+            let expected = easing.solve(t, 0.001);
+            assert_near((point.x - start_point.x) / (end_point.x - start_point.x), expected, 1e-5);
+            assert_near((point.y - start_point.y) / (end_point.y - start_point.y), expected, 1e-5);
+            assert_near(transform.get_zoom(), 15.5, 1e-9);
+        }
+        transform.update_transitions(start + seconds(4));
+        assert!(!transform.in_transition());
+        assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), to.latitude(), 1e-9);
+        assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), to.longitude(), 1e-9);
+    }
+}
+
 // gtest: Transform.PartialReplacementKeepsCommandAndTiming
 #[test]
 fn partial_replacement_keeps_command_and_timing() {
