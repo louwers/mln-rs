@@ -101,6 +101,9 @@ enum WindowSurface {
     /// An OpenHarmony window, which the surface takes its own reference to.
     #[cfg(target_env = "ohos")]
     Ohos(NonNull<c_void>),
+    /// A `CAMetalLayer`, which the surface retains.
+    #[cfg(target_vendor = "apple")]
+    MetalLayer(NonNull<c_void>),
 }
 
 impl WindowSurface {
@@ -111,8 +114,8 @@ impl WindowSurface {
     ///
     /// # Safety
     ///
-    /// An Android or `OpenHarmony` window is the host's live window, which the
-    /// header's contract keeps alive through the call.
+    /// An Android or `OpenHarmony` window or a Metal layer is the host's live
+    /// object, which the header's contract keeps alive through the call.
     #[cfg_attr(not(target_env = "ohos"), allow(clippy::unnecessary_wraps, reason = "OpenHarmony's checks the window"))]
     unsafe fn into_surface(self) -> Result<Surface, Error> {
         match self {
@@ -125,6 +128,9 @@ impl WindowSurface {
             // SAFETY: the caller's contract; the surface keeps its own
             // reference from here on.
             WindowSurface::Ohos(window) => unsafe { OhosWindow::reference(window) }.map(Surface::window),
+            #[cfg(target_vendor = "apple")]
+            // SAFETY: as above.
+            WindowSurface::MetalLayer(layer) => Ok(Surface::metal_layer(unsafe { mln_mtl::Layer::from_raw(layer) })),
         }
     }
 }
@@ -780,15 +786,7 @@ unsafe fn exported_ring(
 fn metal_layer(size: Size, layer: NonNull<c_void>) -> Target {
     #[cfg(target_vendor = "apple")]
     {
-        // SAFETY: the host's layer, which the header's contract keeps alive.
-        match unsafe { mln_mtl::Layer::from_raw(layer.as_ptr()) } {
-            Some(layer) => Target::Surface {
-                size,
-                kind: SurfaceType::MetalLayer,
-                surface: WindowSurface::Ready(Surface::metal_layer(layer)),
-            },
-            None => Target::Unsupported("a null layer"),
-        }
+        Target::Surface { size, kind: SurfaceType::MetalLayer, surface: WindowSurface::MetalLayer(layer) }
     }
     #[cfg(not(target_vendor = "apple"))]
     {
@@ -1039,7 +1037,9 @@ mod tests {
 
     #[test]
     fn targets_check_their_kind_size_and_objects() {
-        use crate::generated::types::{mln_android_window_target, mln_offscreen_target, mln_render_target_data};
+        use crate::generated::types::{
+            mln_android_window_target, mln_metal_layer_target, mln_offscreen_target, mln_render_target_data,
+        };
         let fake = NonNull::<c_void>::dangling().as_ptr();
         let Ok(Target::Surface { size, kind, .. }) = read(&wayland(fake, fake), Some(2.0)) else {
             panic!("a Wayland surface is a surface target")
@@ -1073,6 +1073,18 @@ mod tests {
         #[cfg(not(target_os = "android"))]
         assert!(matches!(read(&android(fake), None), Ok(Target::Unsupported(_))));
         assert_eq!(read(&android(core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+
+        // Reading a layer target leaves the layer alone: the call retains it
+        // once its handles check out.
+        let metal = |layer| {
+            let data = mln_render_target_data { metal_layer: mln_metal_layer_target { logical_size, layer } };
+            target(MLN_RENDER_TARGET_KIND_METAL_LAYER, data)
+        };
+        #[cfg(target_vendor = "apple")]
+        assert!(matches!(read(&metal(fake), None), Ok(Target::Surface { kind: SurfaceType::MetalLayer, .. })));
+        #[cfg(not(target_vendor = "apple"))]
+        assert!(matches!(read(&metal(fake), None), Ok(Target::Unsupported(_))));
+        assert_eq!(read(&metal(core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
 
         // OpenHarmony takes only its own windows: see the OpenHarmony test.
         #[cfg(not(target_env = "ohos"))]

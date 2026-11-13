@@ -23,6 +23,7 @@ use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use objc2::Message;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
@@ -236,14 +237,15 @@ impl Layer {
         Layer(layer)
     }
 
-    /// The layer `layer` points to, retained, or `None` for a null pointer.
+    /// The layer `layer` points to, retained.
     ///
     /// # Safety
     ///
-    /// `layer` is null or a live `CAMetalLayer`.
-    pub unsafe fn from_raw(layer: *mut std::ffi::c_void) -> Option<Layer> {
+    /// `layer` is a live `CAMetalLayer`.
+    #[must_use]
+    pub unsafe fn from_raw(layer: std::ptr::NonNull<std::ffi::c_void>) -> Layer {
         // SAFETY: the caller's contract.
-        unsafe { Retained::retain(layer.cast()) }.map(Layer)
+        Layer(unsafe { layer.cast::<CAMetalLayer>().as_ref() }.retain())
     }
 }
 
