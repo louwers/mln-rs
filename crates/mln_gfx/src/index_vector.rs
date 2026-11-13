@@ -1,5 +1,3 @@
-// Ports src/mln/gfx/index_vector.hpp
-
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,13 +7,13 @@ use mln_util::host_bytes::HostBytes;
 
 use crate::draw_mode::DrawMode;
 
-/// `gfx::IndexBufferBase`: backend buffer attached to a shared index vector.
+/// A backend buffer attached to a shared index vector.
 pub trait IndexBufferBase: Any {
     fn as_any(&self) -> &dyn Any;
 }
 
-/// `gfx::IndexVectorBase`. `IndexVector<DrawMode>` only adds a grouped
-/// `emplace_back`, see `emplace_back_group`.
+/// Indexes for a draw, and the backend buffer they were uploaded to.
+/// `emplace_back_group` appends whole primitives of a draw mode.
 #[derive(Default)]
 pub struct IndexVectorBase {
     v: Vec<u16>,
@@ -30,8 +28,8 @@ pub struct IndexVectorBase {
     freed_count: usize,
 }
 
-/// `std::shared_ptr<IndexVectorBase>`; the upload pass attaches the buffer
-/// through the shared pointer, hence the `RefCell`.
+/// A shared index vector. The upload pass attaches the buffer through the
+/// shared handle, hence the `RefCell`.
 pub type IndexVectorBasePtr = Rc<RefCell<IndexVectorBase>>;
 
 impl IndexVectorBase {
@@ -194,8 +192,8 @@ impl IndexVectorBase {
         &self.v
     }
 
-    /// `IndexVector<DrawMode>::emplace_back(args...)`: the argument count must
-    /// be a multiple of the draw mode's group size.
+    /// Appends `indexes`, whose count must be a multiple of `mode`'s group
+    /// size.
     pub fn emplace_back_group(&mut self, mode: DrawMode, indexes: &[u16]) {
         debug_assert!(indexes.len().is_multiple_of(mode.buffer_group_size()), "wrong buffer element count");
         debug_assert!(!self.released);

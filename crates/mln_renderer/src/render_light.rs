@@ -1,15 +1,10 @@
-// Ports src/mln/renderer/render_light.hpp and src/mln/renderer/render_light.cpp.
-
 use mln_style::light::{self, LightProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::immutable::Immutable;
 
-/// `TransitioningLight = style::LightProperties::Unevaluated`.
 pub type TransitioningLight = LightProperties::Unevaluated;
-/// `EvaluatedLight = style::LightProperties::PossiblyEvaluated`.
 pub type EvaluatedLight = LightProperties::PossiblyEvaluated;
 
-/// `RenderLight`.
 pub struct RenderLight {
     pub impl_: Immutable<light::Impl>,
     transitioning: TransitioningLight,
@@ -17,7 +12,6 @@ pub struct RenderLight {
 }
 
 impl RenderLight {
-    /// `RenderLight(Immutable<style::Light::Impl>)`.
     #[must_use]
     pub fn new(impl_: Immutable<light::Impl>) -> Self {
         let transitioning = impl_.properties.untransitioned();

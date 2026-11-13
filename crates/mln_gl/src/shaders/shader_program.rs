@@ -1,6 +1,3 @@
-// Ports include/mln/shaders/gl/shader_program_gl.hpp and
-// src/mln/shaders/gl/shader_program_gl.cpp
-//
 // Differences from C++:
 // - The program keeps the uniform blocks it has, with the binding point and
 //   the sizes of each, for `Context::bind_uniform_blocks`.
@@ -35,11 +32,9 @@ pub struct UniformBlock {
     pub id: usize,
     /// `GL_UNIFORM_BLOCK_DATA_SIZE`
     pub size: usize,
-    /// `UniformBlockInfo::element_size`
     pub element_size: usize,
 }
 
-/// `gl::ShaderProgramGL`
 pub struct ShaderProgram {
     shader_program_id: SimpleIdentity,
     context: Weak<Context>,
@@ -51,7 +46,6 @@ pub struct ShaderProgram {
     uniform_blocks: Vec<UniformBlock>,
 }
 
-/// `mapType(GLenum attrType)`
 fn map_type(attribute_type: u32) -> AttributeDataType {
     use AttributeDataType as T;
     match attribute_type {
@@ -74,11 +68,8 @@ fn map_type(attribute_type: u32) -> AttributeDataType {
 impl ShaderProgram {
     pub const NAME: &'static str = "GenericGLShader";
 
-    /// `ShaderProgramGL::create(context, programParameters, firstAttribName,
-    /// uniformBlocksInfo, texturesInfo, attributesInfo, vertexSource,
-    /// fragmentSource, additionalDefines)`: compiles and links `source` with
-    /// the program's defines and `additional_defines`, or logs why it
-    /// couldn't (C++ throws).
+    /// Compiles and links `source` with the program's defines and
+    /// `additional_defines`, or logs why it couldn't (C++ throws).
     pub fn create(
         context: &Context,
         name: &str,
@@ -200,7 +191,6 @@ impl ShaderProgram {
         })
     }
 
-    /// `getGLProgramID()`
     #[must_use]
     pub fn get_gl_program_id(&self) -> ProgramID {
         self.program

@@ -1,6 +1,5 @@
-// Ports include/mln/gfx/drawable_atlases_tweaker.hpp and
-// src/mln/gfx/drawable_atlases_tweaker.cpp. It reads the renderer's
-// `TileAtlasTextures`, so it lives in mln_renderer.
+// This tweaker reads the renderer's `TileAtlasTextures`, so it lives in
+// mln_renderer rather than mln_gfx.
 
 use std::rc::Rc;
 

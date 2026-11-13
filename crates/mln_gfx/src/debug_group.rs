@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/debug_group.hpp
-
 /// Something that debug groups can be pushed to (`CommandEncoder`,
 /// `RenderPass`, `UploadPass`).
 pub trait DebugGroupTarget {
@@ -7,7 +5,7 @@ pub trait DebugGroupTarget {
     fn pop_debug_group(&self);
 }
 
-/// `gfx::DebugGroup<T>`: pushes on creation, pops on drop.
+/// A debug group, pushed on creation and popped on drop.
 pub struct DebugGroup<'a> {
     target: Option<&'a dyn DebugGroupTarget>,
 }

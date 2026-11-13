@@ -1,6 +1,3 @@
-// Ports include/mln/mtl/upload_pass.hpp, src/mln/mtl/upload_pass.cpp and
-// src/mln/mtl/vertex_attribute.cpp (`VertexAttribute::getBuffer`)
-//
 // The bindings this pass builds leave `buffer_index` at 0: C++ reads it from
 // `mtl::VertexAttribute`, which the gfx attribute array of the port can't
 // hold, so the drawable sets it from its shader (`Drawable::upload`).
@@ -32,8 +29,7 @@ pub struct UploadPass {
     context: Rc<Context>,
 }
 
-/// `struct VertexBuffer : gfx::VertexBufferBase`: the buffer attached to a
-/// shared vertex vector.
+/// The buffer attached to a shared vertex vector.
 struct VertexBuffer {
     resource: Rc<VertexBufferResource>,
 }
@@ -72,7 +68,6 @@ impl UploadPass {
         )
     }
 
-    /// `getBuffer(const VertexVectorBasePtr&, usage, forceUpdate)`
     #[must_use]
     pub fn get_buffer(
         &self,
@@ -114,7 +109,6 @@ impl UploadPass {
         None
     }
 
-    /// `mtl::VertexAttribute::getBuffer(attrib, uploadPass, usage, forceUpdate)`
     pub fn get_attribute_buffer(
         &self,
         attrib: &mut VertexAttribute,

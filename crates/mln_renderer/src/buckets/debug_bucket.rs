@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/buckets/debug_bucket.hpp and
-// src/mln/renderer/buckets/debug_bucket.cpp.
-//
 // C++ keeps the text as line-list vertices for the DebugShader. WebGPU draws
 // line primitives one pixel wide, so the text is kept as strokes instead,
 // which TileSourceRenderItem draws as polylines, like the tile borders.
@@ -13,8 +10,7 @@ use mln_util::chrono::{Timestamp, iso8601};
 
 use crate::geometry::debug_font_data::SIMPLEX;
 
-/// `DebugBucket`: the tile's parse status and timestamps, as text in tile
-/// coordinates.
+/// The tile's parse status and timestamps, as text in tile coordinates.
 pub struct DebugBucket {
     pub renderable: bool,
     pub complete: bool,
@@ -72,9 +68,9 @@ impl DebugBucket {
     }
 }
 
-/// `addText`: appends the strokes of `text`'s printable ASCII characters,
-/// starting at `left` on `baseline` (tile units, y down), with font units
-/// scaled by `scale`.
+/// Appends the strokes of `text`'s printable ASCII characters, starting at
+/// `left` on `baseline` (tile units, y down), with font units scaled by
+/// `scale`.
 fn add_strokes(strokes: &mut Vec<GeometryCoordinates>, text: &str, mut left: f64, baseline: f64, scale: f64) {
     for c in text.bytes() {
         if !(32..127).contains(&c) {

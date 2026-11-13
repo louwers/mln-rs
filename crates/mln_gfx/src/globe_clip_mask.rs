@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/globe_clip_mask.hpp.
-
 use mln_tile_id::CanonicalTileID;
 
 use crate::shaders::layer_ubo::ProjectionUBO;

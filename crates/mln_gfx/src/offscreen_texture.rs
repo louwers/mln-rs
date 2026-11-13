@@ -1,5 +1,3 @@
-// Ports src/mln/gfx/offscreen_texture.hpp
-
 use std::any::Any;
 
 use mln_util::image::PremultipliedImage;
@@ -8,7 +6,7 @@ use crate::command_encoder::CommandEncoder;
 use crate::frame::DrawTarget;
 use crate::texture2d::Texture2DPtr;
 
-/// `gfx::OffscreenTexture`: a texture that render passes draw into.
+/// A texture that render passes draw into.
 pub trait OffscreenTexture: Any {
     /// What a render pass draws into the texture through.
     fn draw_target(&self) -> &dyn DrawTarget;

@@ -1,8 +1,6 @@
-// Ports src/mln/layout/symbol_projection.hpp and
-// src/mln/layout/symbol_projection.cpp: the label-plane matrices and the
-// CPU line-label projection (see the C++ file's overview of coordinate
-// spaces). MLN_USE_SYMBOL_INSTANCING is off: four dynamic vertices per
-// glyph.
+// The label-plane matrices and the CPU line-label projection. Symbols are
+// not instanced (C++'s `MLN_USE_SYMBOL_INSTANCING` is off): each glyph has
+// four dynamic vertices.
 
 use geometry::Point;
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
@@ -17,7 +15,6 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::render_tile::RenderTile;
 
-/// `getTileSkewVectors(state, vecEast, vecSouth)`.
 pub fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
     let cos_roll = state.get_roll().cos();
     let sin_roll = state.get_roll().sin();
@@ -49,7 +46,6 @@ pub fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
     (vec_east, vec_south)
 }
 
-/// `getTileSkewMatrix(state)`.
 pub fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
     let (vec_east, vec_south) = get_tile_skew_vectors(state);
     let mut m: Mat4 = [0.0; 16];
@@ -61,10 +57,9 @@ pub fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
     m
 }
 
-/// `getLabelPlaneMatrix(pitchWithMap, rotateWithMap, state,
-/// pixelsToTileUnits)`: a matrix for converting to the correct label
-/// coordinate space, from tile units when pitched with the map and from clip
-/// space otherwise; the shaders apply the tile's projection themselves.
+/// A matrix for converting to the label coordinate space, from tile units
+/// when pitched with the map and from clip space otherwise; the shaders apply
+/// the tile's projection themselves.
 pub fn get_label_plane_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
@@ -94,10 +89,8 @@ pub fn get_label_plane_matrix(
     m
 }
 
-/// `getGlCoordMatrix(pitchWithMap, rotateWithMap, state,
-/// pixelsToTileUnits)`: a matrix for converting from the correct label
-/// coordinate space back to tile units when pitched with the map, and to gl
-/// coords otherwise.
+/// A matrix for converting from the label coordinate space back to tile
+/// units when pitched with the map, and to GL coordinates otherwise.
 pub fn get_gl_coord_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
@@ -126,7 +119,6 @@ pub fn get_gl_coord_matrix(
     m
 }
 
-/// `TileDistance`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileDistance {
     pub prev_tile_distance: f32,
@@ -140,7 +132,6 @@ impl TileDistance {
     }
 }
 
-/// `PlacedGlyph`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlacedGlyph {
     pub point: Point<f32>,
@@ -155,30 +146,25 @@ impl PlacedGlyph {
     }
 }
 
-/// `PointAndCameraDistance = std::pair<Point<float>, float>`.
 pub type PointAndCameraDistance = (Point<f32>, f32);
 
-/// `Point<float> + Point<float>`.
 fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
     Point::new(a.x + b.x, a.y + b.y)
 }
 
-/// `Point<float> - Point<float>`.
 fn sub(a: Point<f32>, b: Point<f32>) -> Point<f32> {
     Point::new(a.x - b.x, a.y - b.y)
 }
 
-/// `Point<float> * float`.
 fn mul(a: Point<f32>, b: f32) -> Point<f32> {
     Point::new(a.x * b, a.y * b)
 }
 
-/// `util::mag<float>(Point<float>)` (util/math.hpp): a float sqrt.
+/// The length of `a`, with an `f32` square root.
 fn mag_f32(a: Point<f32>) -> f32 {
     (a.x * a.x + a.y * a.y).sqrt()
 }
 
-/// `util::unit<float>(Point<float>)`.
 fn unit_f32(a: Point<f32>) -> Point<f32> {
     let magnitude = mag_f32(a);
     if magnitude == 0.0 {
@@ -187,19 +173,16 @@ fn unit_f32(a: Point<f32>) -> Point<f32> {
     mul(a, 1.0 / magnitude)
 }
 
-/// `util::perp(Point<float>)`.
 fn perp(a: Point<f32>) -> Point<f32> {
     Point::new(-a.y, a.x)
 }
 
-/// `util::dist<float>(Point<float>, Point<float>)`.
 fn dist_f32(a: Point<f32>, b: Point<f32>) -> f32 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
     (dx * dx + dy * dy).sqrt()
 }
 
-/// `convertPoint<float>(Point<int16_t>)`.
 fn convert_point(p: Point<i16>) -> Point<f32> {
     Point::new(f32::from(p.x), f32::from(p.y))
 }
@@ -213,7 +196,6 @@ pub fn project(point: Point<f32>, matrix: &Mat4) -> PointAndCameraDistance {
     (Point::new((pos[0] / pos[3]) as f32, (pos[1] / pos[3]) as f32), pos[3] as f32)
 }
 
-/// `evaluateSizeForFeature(zoomEvaluatedSize, placedSymbol)`.
 #[must_use]
 pub fn evaluate_size_for_feature(zoom_evaluated_size: &ZoomEvaluatedSize, placed_symbol: &PlacedSymbol) -> f32 {
     if zoom_evaluated_size.is_feature_constant {
@@ -225,7 +207,6 @@ pub fn evaluate_size_for_feature(zoom_evaluated_size: &ZoomEvaluatedSize, placed
     }
 }
 
-/// `PlacementResult`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlacementResult {
     Ok,
@@ -247,7 +228,8 @@ pub struct LabelPlaneProjector<'a> {
 }
 
 impl<'a> LabelPlaneProjector<'a> {
-    /// C++ defaults `translation` to (0, 0).
+    /// A projector into the label plane. C++ defaults `translation` to
+    /// (0, 0).
     #[must_use]
     pub fn new(
         tile: &TileProjector<'a>,
@@ -356,14 +338,14 @@ impl LineProjectionCache {
     }
 }
 
-/// `isVisible(anchorPos, clippingBuffer)`, with the anchor in clip space.
+/// Whether the anchor, in clip space, is within `clipping_buffer` of the
+/// origin.
 fn is_visible(anchor_pos: &Point<f64>, clipping_buffer: &[f64; 2]) -> bool {
     let x = anchor_pos.x;
     let y = anchor_pos.y;
     x >= -clipping_buffer[0] && x <= clipping_buffer[0] && y >= -clipping_buffer[1] && y <= clipping_buffer[1]
 }
 
-/// `addDynamicAttributes(anchorPoint, angle, dynamicAttributeData)`.
 pub fn add_dynamic_attributes(
     anchor_point: Point<f32>,
     angle: f32,
@@ -376,7 +358,6 @@ pub fn add_dynamic_attributes(
     dynamic_attribute_data.push(dynamic_attributes);
 }
 
-/// `hideGlyphs(numGlyphs, dynamicVertexArray)`.
 pub fn hide_glyphs(num_glyphs: usize, dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>) {
     let count = 4;
     let offscreen_point = Point::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
@@ -388,7 +369,7 @@ pub fn hide_glyphs(num_glyphs: usize, dynamic_vertex_array: &mut Vec<SymbolDynam
     }
 }
 
-/// `projectTruncatedLineSegment(...)`; `project_point` takes a tile point to
+/// Projects a truncated line segment; `project_point` takes a tile point to
 /// the space the line is laid out in.
 fn project_truncated_line_segment(
     previous_tile_point: Point<f32>,
@@ -409,7 +390,6 @@ fn project_truncated_line_segment(
     add(previous_projected_point, mul(projected_unit_segment, minimum_length / mag_f32(projected_unit_segment)))
 }
 
-/// `placeGlyphAlongLine(...)`.
 #[allow(clippy::too_many_arguments)]
 fn place_glyph_along_line(
     offset_x: f32,
@@ -517,7 +497,6 @@ fn place_glyph_along_line(
     ))
 }
 
-/// `placeFirstAndLastGlyph(...)`.
 #[allow(clippy::too_many_arguments)]
 pub fn place_first_and_last_glyph(
     font_scale: f32,
@@ -575,7 +554,6 @@ pub fn place_first_and_last_glyph(
     Some((first_placed_glyph, last_placed_glyph))
 }
 
-/// `requiresOrientationChange(writingModes, firstPoint, lastPoint, aspectRatio)`.
 fn requires_orientation_change(
     writing_modes: WritingModeType,
     first_point: Point<f32>,
@@ -606,7 +584,6 @@ fn requires_orientation_change(
     None
 }
 
-/// `placeGlyphsAlongLine(...)`.
 #[allow(clippy::too_many_arguments)]
 fn place_glyphs_along_line(
     symbol: &PlacedSymbol,
@@ -739,9 +716,6 @@ fn place_glyphs_along_line(
     PlacementResult::Ok
 }
 
-/// `reprojectLineLabels(dynamicVertexArray, placedSymbols, tileProjector,
-/// pitchWithMap, rotateWithMap, keepUpright, tile, sizeBinder, state,
-/// translation)`.
 #[allow(clippy::too_many_arguments)]
 pub fn reproject_line_labels(
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,

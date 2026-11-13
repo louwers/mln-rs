@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/layer_group.hpp and src/mln/mtl/layer_group.cpp
-
 use std::any::Any;
 
 use mln_gfx::depth_mode::DepthMode;

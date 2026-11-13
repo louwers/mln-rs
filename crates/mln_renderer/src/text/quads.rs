@@ -1,5 +1,3 @@
-// Ports src/mln/text/quads.hpp and src/mln/text/quads.cpp.
-
 use geometry::Point;
 use mln_math::{deg2radf, fmaxf, fminf};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
@@ -11,7 +9,6 @@ use mln_util::constants::ONE_EM;
 
 use crate::layout::symbol_instance::SymbolContent;
 
-/// `SymbolQuad`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SymbolQuad {
     pub tl: Point<f32>,
@@ -29,8 +26,6 @@ pub struct SymbolQuad {
 }
 
 impl SymbolQuad {
-    /// `SymbolQuad(tl, tr, bl, br, tex, writingMode, glyphOffset, isSDF,
-    /// pixelOffsetTL, pixelOffsetBR, minFontScale, sectionIndex = 0)`.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
@@ -64,23 +59,19 @@ impl SymbolQuad {
     }
 }
 
-/// `SymbolQuads`.
 pub type SymbolQuads = Vec<SymbolQuad>;
 
-/// `border = ImagePosition::padding` (a `uint16_t`).
+/// The border around an image in the atlas: its padding.
 const BORDER: u16 = ImagePosition::PADDING;
 
-/// `Point<float> - Point<float>`.
 fn sub(a: Point<f32>, b: Point<f32>) -> Point<f32> {
     Point::new(a.x - b.x, a.y - b.y)
 }
 
-/// `Point<float> + Point<float>`.
 fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
     Point::new(a.x + b.x, a.y + b.y)
 }
 
-/// `util::rotate(Point<float>, float angle)` (util/math.hpp).
 fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     let cos = angle.cos();
     let sin = angle.sin();
@@ -89,12 +80,10 @@ fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
     Point::new(x, y)
 }
 
-/// `util::matrixMultiply(std::array<float, 4>, Point<float>)` (util/math.hpp).
 fn matrix_multiply(m: &[f32; 4], p: Point<f32>) -> Point<f32> {
     Point::new(m[0] * p.x + m[1] * p.y, m[2] * p.x + m[3] * p.y)
 }
 
-/// `computeStretchSum`.
 #[must_use]
 pub fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
     let mut sum: f32 = 0.0;
@@ -104,7 +93,6 @@ pub fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
     sum
 }
 
-/// `sumWithinRange`.
 #[must_use]
 pub fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
     let mut sum: f32 = 0.0;
@@ -114,14 +102,12 @@ pub fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
     sum
 }
 
-/// `getEmOffset`.
 #[inline]
 #[must_use]
 pub fn get_em_offset(stretch_offset: f32, stretch_size: f32, icon_size: f32, icon_offset: f32) -> f32 {
     icon_offset + icon_size * stretch_offset / stretch_size
 }
 
-/// `getPxOffset`.
 #[inline]
 #[must_use]
 pub fn get_px_offset(fixed_offset: f32, fixed_size: f32, stretch_offset: f32, stretch_size: f32) -> f32 {
@@ -138,7 +124,6 @@ pub struct Cut {
 /// `Cuts`.
 pub type Cuts = Vec<Cut>;
 
-/// `stretchZonesToCuts`.
 #[must_use]
 pub fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, stretch_size: f32) -> Cuts {
     // `-border` is the `int` -1.
@@ -155,7 +140,6 @@ pub fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, st
     cuts
 }
 
-/// `getIconQuads`.
 #[must_use]
 pub fn get_icon_quads(
     shaped_icon: &PositionedIcon,
@@ -309,7 +293,6 @@ pub fn get_icon_quads(
     quads
 }
 
-/// `getGlyphQuads`.
 #[must_use]
 pub fn get_glyph_quads(
     shaped_text: &Shaping,
@@ -475,7 +458,6 @@ pub fn get_glyph_quads(
 
 #[cfg(test)]
 mod tests {
-    // Ports test/text/quads.test.cpp.
     use mln_style_types::image::Impl as ImageImpl;
     use mln_style_types::{IconTextFitType, SymbolAnchorType};
     use mln_text::glyph::{GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};

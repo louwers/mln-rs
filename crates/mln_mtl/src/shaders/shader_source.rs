@@ -1,8 +1,3 @@
-// Ports the Metal `ShaderSource<BuiltIn, Backend::Type::Metal>`
-// specialisations: the MSL strings come from include/mln/shaders/mtl/*.hpp
-// through the `msl_sources` module; the attribute/texture tables from
-// src/mln/shaders/mtl/*.cpp are below.
-//
 // The tables describe the vertex layout the port's renderer produces, which
 // is C++'s with MLN_USE_FILL_EXTRUSION_INSTANCING on and
 // MLN_USE_SYMBOL_INSTANCING off: the symbol tables are the non-instanced ones,
@@ -67,8 +62,7 @@ pub struct MslShaderSource {
     pub source: &'static str,
 }
 
-/// `shaders::AttributeInfo` (`include/mln/shaders/mtl/shader_program.hpp`):
-/// the vertex attribute `id` is `[[attribute(index)]]`, read from vertex
+/// The vertex attribute `id` is `[[attribute(index)]]`, read from vertex
 /// buffer `[[buffer(buffer_index)]]`.
 #[derive(Clone, Copy, Debug)]
 pub struct AttributeInfo {
@@ -78,8 +72,8 @@ pub struct AttributeInfo {
     pub id: usize,
 }
 
-/// `shaders::TextureInfo`: texture `id` binds to `[[texture(index)]]` and its
-/// sampler to `[[sampler(index)]]`.
+/// Texture `id` binds to `[[texture(index)]]` and its sampler to
+/// `[[sampler(index)]]`.
 #[derive(Clone, Copy, Debug)]
 pub struct TextureInfo {
     pub index: usize,
@@ -106,7 +100,6 @@ const COLOR_RELIEF_UBO_COUNT: usize = COLOR_RELIEF_LAYER_UBO_COUNT;
 const DEBUG_UBO_COUNT: usize = ID_DEBUG_UBO + 1;
 const FILL_UBO_COUNT: usize = FILL_LAYER_UBO_COUNT;
 const FILL_EXTRUSION_UBO_COUNT: usize = FILL_EXTRUSION_LAYER_UBO_COUNT;
-/// `globeDepthUBOCount` (`include/mln/shaders/mtl/globe_depth.hpp`).
 const GLOBE_DEPTH_UBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 const HEATMAP_UBO_COUNT: usize = HEATMAP_LAYER_UBO_COUNT;
 const HEATMAP_TEXTURE_UBO_COUNT: usize = ID_HEATMAP_TEXTURE_PROPS_UBO + 1;
@@ -491,8 +484,8 @@ shader_source!(
     &[tex(0, ID_SYMBOL_IMAGE_TEXTURE), tex(1, ID_SYMBOL_IMAGE_ICON_TEXTURE)]
 );
 
-/// `ShaderSource<shader_id, Metal>`, or `None` for the shaders the port's
-/// renderer doesn't draw with: the wide vector.
+/// The Metal source of `shader_id`, or `None` for the shaders the renderer
+/// doesn't draw with: the wide vector.
 #[must_use]
 pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {

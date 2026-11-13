@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/texture2d.hpp and src/mln/vulkan/texture2d.cpp
-//
 // Differences from C++:
 // - C++ records every upload into the frame's command buffer. The port does
 //   too between a frame's passes; an upload outside a frame or inside a
@@ -29,7 +27,7 @@ use crate::buffer_resource::{BufferAllocation, unique_id};
 use crate::context::Context;
 use crate::renderer_backend::BackendImpl;
 
-/// `ImageAllocation`: an image, its memory and its view.
+/// An image, its memory and its view.
 pub struct ImageAllocation {
     id: u64,
     backend: Rc<BackendImpl>,
@@ -39,8 +37,8 @@ pub struct ImageAllocation {
 }
 
 impl ImageAllocation {
-    /// `create(allocInfo, imageInfo)`: an image in device memory
-    /// (`MemoryLocation::GpuOnly`) or in memory the CPU reads (`GpuToCpu`).
+    /// Creates an image in device memory (`MemoryLocation::GpuOnly`) or in
+    /// memory the CPU reads (`GpuToCpu`).
     pub fn create(
         backend: &Rc<BackendImpl>,
         image_info: &vk::ImageCreateInfo<'_>,
@@ -140,7 +138,6 @@ impl ImageAllocation {
 }
 
 impl Drop for ImageAllocation {
-    /// `destroy()`
     fn drop(&mut self) {
         let device = self.backend.get_device();
         // SAFETY: the owner of the allocation waited for the commands that
@@ -293,7 +290,7 @@ impl Texture2D {
         self.image_allocation.as_ref().map_or(vk::Image::null(), |allocation| allocation.image())
     }
 
-    /// `getVulkanSampler()`: the sampler of the current configuration.
+    /// The sampler of the current configuration.
     pub fn get_vulkan_sampler(&mut self) -> vk::Sampler {
         if self.sampler_state_dirty {
             self.create_sampler();
@@ -454,7 +451,6 @@ impl Texture2D {
         self.sampler_state_dirty = false;
     }
 
-    /// `destroyTexture(deferred = true)`
     fn destroy_texture(&mut self) {
         let Some(allocation) = self.image_allocation.take() else {
             return;
@@ -471,7 +467,6 @@ impl Texture2D {
         }
     }
 
-    /// `destroySampler(deferred = true)`
     fn destroy_sampler(&mut self) {
         let sampler = std::mem::replace(&mut self.sampler, vk::Sampler::null());
         if sampler == vk::Sampler::null() {
@@ -573,7 +568,7 @@ impl Texture2D {
         self.image_layout = vk::ImageLayout::GENERAL;
     }
 
-    /// `generateMips(buffer)`: blits each mip level from the one above.
+    /// Blits each mip level from the one above.
     fn generate_mips(&mut self, command_buffer: vk::CommandBuffer) {
         let mip_levels = self.get_mip_levels();
         let Some(image) = self.image_allocation.as_ref().map(|allocation| allocation.image()) else {
@@ -629,8 +624,8 @@ impl Texture2D {
         self.transition_to_shader_read_layout(command_buffer);
     }
 
-    /// `uploadSubRegion(pixelData, size, xOffset, yOffset, buffer, submit)`:
-    /// records the copy of `pixel_data` into the region.
+    /// Records the copy of `staging` into the region of `size` at `x_offset`,
+    /// `y_offset`.
     fn record_upload_sub_region(
         &mut self,
         command_buffer: vk::CommandBuffer,
@@ -671,8 +666,7 @@ impl Texture2D {
         }
     }
 
-    /// `copyImage(image, imageSize, xOffset, yOffset, commandBuffer)`:
-    /// records a copy of `image`, in the transfer source layout, into this
+    /// Records a copy of `image`, in the transfer source layout, into this
     /// texture.
     pub fn copy_image(
         &mut self,
@@ -710,7 +704,6 @@ impl Texture2D {
         self.transition_to_general_layout(command_buffer);
     }
 
-    /// `blitImage(image, imageSize, xOffset, yOffset, commandBuffer)`:
     /// `copy_image` with a blit, which converts between the images' formats.
     pub fn blit_image(
         &mut self,
@@ -752,8 +745,8 @@ impl Texture2D {
         self.transition_to_general_layout(command_buffer);
     }
 
-    /// `readImage()`: the pixels of a texture made to be read
-    /// (`Texture2DUsage::Read`) or rendered to (`Attachment`).
+    /// Reads the pixels of a texture made to be read (`Texture2DUsage::Read`)
+    /// or rendered to (`Attachment`).
     pub fn read_image(&mut self) -> Option<PremultipliedImage> {
         let allocation = self.image_allocation.clone()?;
         let image_size = texture2d::Texture2D::get_data_size(self);

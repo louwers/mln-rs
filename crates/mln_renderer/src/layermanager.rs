@@ -1,8 +1,6 @@
-// Ports the render half of src/mln/layermanager/layer_manager.cpp and the
-// layer factories (`createBucket`, `createLayout`, `createRenderLayer`).
-// The style half (`createLayer`) is mln_style::layermanager; the dispatch
-// here is on the layer's `LayerTypeInfo`, as `LayerManager::findFactory`
-// does.
+// The render half of the layer manager: `create_render_layer`,
+// `create_bucket` and `create_layout`. The style half (`create_layer`) is
+// `mln_style::layermanager`. They dispatch on the layer's `LayerTypeInfo`.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -37,7 +35,6 @@ use crate::layout::pattern_layout::{
 };
 use crate::render_layer::RenderLayerPtr;
 
-/// `LayerManager::createRenderLayer(Immutable<style::Layer::Impl>)`.
 pub fn create_render_layer(impl_: &Immutable<dyn layer::Impl>) -> Option<RenderLayerPtr> {
     let type_info = impl_.get_type_info();
     if std::ptr::eq(type_info, CustomLayerImpl::static_type_info()) {
@@ -114,8 +111,7 @@ pub fn create_render_layer(impl_: &Immutable<dyn layer::Impl>) -> Option<RenderL
     None
 }
 
-/// `LayerManager::createBucket(parameters, layers)`: the layer types without
-/// a layout.
+/// Creates the bucket of a layer type that has no layout.
 pub fn create_bucket(
     parameters: &BucketParameters,
     layers: &[Immutable<dyn LayerProperties>],
@@ -130,7 +126,6 @@ pub fn create_bucket(
     None
 }
 
-/// `LayerManager::createLayout(parameters, tileLayer, layers)`.
 pub fn create_layout(
     parameters: &mut LayoutParameters<'_>,
     tile_layer: SourceLayer,

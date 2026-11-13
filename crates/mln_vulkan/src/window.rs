@@ -112,7 +112,6 @@ struct SurfaceCreateInfoOhos {
 /// `VK_STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS`.
 const STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS: vk::StructureType = vk::StructureType::from_raw(1_000_685_000);
 
-/// `PFN_vkCreateSurfaceOHOS`.
 type CreateSurfaceOhos = unsafe extern "system" fn(
     vk::Instance,
     *const SurfaceCreateInfoOhos,

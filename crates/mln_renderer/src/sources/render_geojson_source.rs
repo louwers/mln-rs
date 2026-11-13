@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/sources/render_geojson_source.hpp and
-// src/mln/renderer/sources/render_geojson_source.cpp.
-
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
@@ -23,7 +20,7 @@ use crate::tile::geojson_tile::GeoJSONTile;
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
-/// `std::weak_ptr::lock()` equality: both empty or both the same object.
+/// Whether `a` and `b` are both empty or both the same object.
 fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>) -> bool {
     match (a, b) {
         (None, None) => true,
@@ -32,8 +29,7 @@ fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>)
     }
 }
 
-/// `getProperty<uint64_t>(cont, name)`: the property if it is an unsigned
-/// integer.
+/// The property `name`, if it is an unsigned integer.
 fn get_uint_property(properties: &feature::PropertyMap, name: &str) -> Option<u64> {
     match properties.get(name) {
         Some(feature::Value::Uint(value)) => Some(*value),
@@ -68,7 +64,6 @@ fn supercluster_extension(
     })
 }
 
-/// `RenderGeoJSONSource`.
 pub struct RenderGeoJSONSource {
     tile_source: RenderTileSource,
     data: Option<Weak<dyn GeoJSONData>>,
@@ -77,13 +72,11 @@ pub struct RenderGeoJSONSource {
 }
 
 impl RenderGeoJSONSource {
-    /// `RenderGeoJSONSource(Immutable<style::GeoJSONSource::Impl>, const TaggedScheduler&)`.
     pub fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
         RenderGeoJSONSource { tile_source: RenderTileSource::new(impl_), data: None, tiles_update_synchronously: false }
     }
 
-    /// `impl()`.
     fn impl_(&self) -> Arc<geojson_source_impl::Impl> {
         static_immutable_cast::<geojson_source_impl::Impl>(&self.tile_source.base.base_impl)
     }

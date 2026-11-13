@@ -1,5 +1,3 @@
-// Ports test/util/offscreen_texture.test.cpp.
-//
 // The C++ file is `#if MLN_RENDER_BACKEND_OPENGL`. EmptyRed and
 // RenderToTexture drive OpenGL directly (glClear, GL shader programs and
 // framebuffers), so they aren't ported; ClearRenderPassColor only uses the gfx
@@ -40,7 +38,6 @@ fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64)
     pixels as f64 / (f64::from(expected.size.width) * f64::from(expected.size.height))
 }
 
-/// `test::checkImage(base, actual, imageThreshold, pixelThreshold)`.
 #[track_caller]
 fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
     let diff = get_image_diff(base, actual, pixel_threshold);

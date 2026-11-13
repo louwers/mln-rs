@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/collision_layer_tweaker.hpp,
-// src/mln/renderer/layers/collision_layer_tweaker.cpp and
-// src/mln/gfx/collision_drawable_data.hpp.
-
 use mln_gfx::LayerGroupBase;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::shader_defines::{
@@ -16,7 +12,6 @@ use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
-/// `gfx::CollisionDrawableData`.
 #[derive(Clone, Copy, Debug)]
 pub struct CollisionDrawableData {
     pub translate: [f32; 2],

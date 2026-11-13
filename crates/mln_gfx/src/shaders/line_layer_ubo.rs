@@ -1,13 +1,9 @@
-// Ports include/mln/shaders/line_layer_ubo.hpp (the WebGPU-relevant parts;
-// `LineExpressionUBO` holds `gfx::GPUExpression`s, which only the Metal
-// backend fills).
-
 use bytemuck::{Pod, Zeroable};
 
 //
 // Line
 
-/// `struct alignas(16) LineDrawableUBO` (96 bytes).
+/// The line shader's per-drawable uniform block (96 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineDrawableUBO {
@@ -29,7 +25,7 @@ const _: () = assert!(std::mem::size_of::<LineDrawableUBO>() == 6 * 16);
 //
 // Line gradient
 
-/// `struct alignas(16) LineGradientDrawableUBO` (96 bytes).
+/// The line gradient shader's per-drawable uniform block (96 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineGradientDrawableUBO {
@@ -51,7 +47,7 @@ const _: () = assert!(std::mem::size_of::<LineGradientDrawableUBO>() == 6 * 16);
 //
 // Line pattern
 
-/// `struct alignas(16) LinePatternDrawableUBO` (112 bytes).
+/// The line pattern shader's per-drawable uniform block (112 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LinePatternDrawableUBO {
@@ -74,7 +70,7 @@ pub struct LinePatternDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<LinePatternDrawableUBO>() == 7 * 16);
 
-/// `struct alignas(16) LinePatternTilePropsUBO` (64 bytes).
+/// The line pattern shader's per-tile uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LinePatternTilePropsUBO {
@@ -91,7 +87,7 @@ const _: () = assert!(std::mem::size_of::<LinePatternTilePropsUBO>() == 4 * 16);
 //
 // Line SDF
 
-/// `struct alignas(16) LineSDFDrawableUBO` (128 bytes).
+/// The line SDF shader's per-drawable uniform block (128 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineSDFDrawableUBO {
@@ -116,7 +112,7 @@ pub struct LineSDFDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<LineSDFDrawableUBO>() == 8 * 16);
 
-/// `struct alignas(16) LineSDFTilePropsUBO` (16 bytes).
+/// The line SDF shader's per-tile uniform block (16 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineSDFTilePropsUBO {
@@ -128,7 +124,7 @@ pub struct LineSDFTilePropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<LineSDFTilePropsUBO>() == 16);
 
-/// `enum class LineExpressionMask : uint32_t` (bit flags).
+/// Bit flags for the line properties that are expressions.
 pub mod line_expression_mask {
     pub const NONE: u32 = 0;
     pub const COLOR: u32 = 1 << 0;
@@ -163,8 +159,8 @@ pub struct LineEvaluatedPropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<LineEvaluatedPropsUBO>() == 3 * 16);
 
-/// `union LineDrawableUnionUBO` (`MLN_UBO_CONSOLIDATION`): 128 bytes, the
-/// size of `LineSDFDrawableUBO`.
+/// Any line per-drawable uniform block, for consolidated UBOs: 128 bytes,
+/// the size of `LineSDFDrawableUBO`.
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineDrawableUnionUBO {
@@ -186,8 +182,8 @@ impl LineDrawableUnionUBO {
     }
 }
 
-/// `union LineTilePropsUnionUBO`: 64 bytes, the size of
-/// `LinePatternTilePropsUBO`.
+/// Any line per-tile uniform block, for consolidated UBOs: 64 bytes, the
+/// size of `LinePatternTilePropsUBO`.
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineTilePropsUnionUBO {

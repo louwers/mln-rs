@@ -1,6 +1,3 @@
-// Ports test/text/formatted.test.cpp (style::expression::Formatted lives in
-// mln_expression).
-
 use mln_expression::formatted::{Formatted, FormattedSection};
 use mln_expression::image::Image;
 

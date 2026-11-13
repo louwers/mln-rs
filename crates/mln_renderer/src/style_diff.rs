@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/style_diff.hpp and src/mln/renderer/style_diff.cpp.
-//
 // C++ keeps added/removed/changed in `std::unordered_map`s; iteration order
 // of those maps is unspecified there. The port uses `VecMap` (ordered by
 // id); where the renderer iterates them (creating/removing render layers),

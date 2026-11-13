@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/sources/render_image_source.hpp and
-// src/mln/renderer/sources/render_image_source.cpp (conformance).
-//
 // C++ moves the `ImageSourceRenderData` into the render tree in
 // `createRenderItem` and the raster layers keep a raw pointer to it from
 // `prepare`; here it is an `Rc` both hold.
@@ -170,7 +167,6 @@ fn build_image_mesh(bucket: &RasterBucket, corners: &GeometryCoordinates, cells:
     bucket.set_geometry(vertices, indices, segments);
 }
 
-/// `ImageSourceRenderData`.
 pub struct ImageSourceRenderData {
     pub bucket: Option<Arc<RasterBucket>>,
     pub tile_ids: Vec<UnwrappedTileID>,
@@ -219,7 +215,6 @@ impl RenderItem for ImageSourceRenderItem {
     }
 }
 
-/// `RenderImageSource`.
 pub struct RenderImageSource {
     base: RenderSourceBase,
     bucket: Option<Arc<RasterBucket>>,

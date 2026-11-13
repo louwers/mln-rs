@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/drawable_builder.hpp and src/mln/mtl/drawable_builder.cpp
-
 use std::cell::RefCell;
 use std::rc::Rc;
 

@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/layer_group.hpp and src/mln/webgpu/layer_group.cpp
-
 use std::any::Any;
 
 use mln_gfx::depth_mode::DepthMode;

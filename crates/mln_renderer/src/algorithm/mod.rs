@@ -1,4 +1,5 @@
-//! Ports `src/mln/algorithm`.
+//! Tile-pyramid algorithms: choosing the renderable tiles and computing
+//! their masks.
 //!
 //! TODO(port): `generate_clip_ids`.
 

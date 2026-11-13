@@ -1,10 +1,7 @@
-// Ports include/mln/gfx/stencil_mode.hpp
-
 use crate::types::{StencilFunctionType, StencilOpType};
 
-/// `StencilMode::Test = variant<Never, Less, Equal, LessEqual, Greater,
-/// NotEqual, GreaterEqual, Always>` (same order). `SimpleTest`s (Never,
-/// Always) have no mask; `MaskedTest`s carry one.
+/// A stencil test, in C++'s variant order. `Never` and `Always` have no mask;
+/// the others carry one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Test {
     Never,
@@ -72,8 +69,8 @@ impl StencilMode {
     }
 }
 
-/// C++ value-initializes `StencilMode` members of `Drawable::Impl` (first
-/// variant `Never`, zeros, `StencilOpType::Zero`).
+/// `Never`, zeros and `StencilOpType::Zero`, as C++ value-initializes a
+/// drawable's stencil mode.
 impl Default for StencilMode {
     fn default() -> Self {
         StencilMode {

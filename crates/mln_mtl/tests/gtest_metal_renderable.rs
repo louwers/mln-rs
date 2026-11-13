@@ -1,7 +1,5 @@
 #![cfg(target_vendor = "apple")]
 
-// Ports test/renderer/metal_renderable.test.cpp
-
 use std::rc::Rc;
 
 use mln_gfx::backend_scope::{BackendScope, ScopeType};

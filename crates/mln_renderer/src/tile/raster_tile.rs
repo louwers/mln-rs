@@ -1,6 +1,3 @@
-// Ports src/mln/tile/raster_tile.hpp, src/mln/tile/raster_tile.cpp,
-// src/mln/tile/raster_tile_worker.hpp and src/mln/tile/raster_tile_worker.cpp.
-//
 // As for GeometryTile (see geometry_tile.rs), the state the worker's
 // replies change is `RasterTileInner`, the target of the tile's mailbox.
 // The tile and its worker exchange only `RasterWorkerMessage`s and
@@ -40,7 +37,6 @@ use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
 /// another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterWorkerMessage {
-    /// `parse(data, correlationID)`.
     Parse {
         #[serde(with = "shared_bytes::option")]
         data: Option<Data>,
@@ -53,13 +49,10 @@ pub enum RasterWorkerMessage {
 /// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterTileMessage {
-    /// `onParsed(std::move(bucket), correlationID)`.
     Parsed { bucket: Option<Arc<RasterBucket>>, correlation_id: u64 },
-    /// `onError(std::current_exception(), correlationID)`.
     Error { error: Error, correlation_id: u64 },
 }
 
-/// `RasterTileWorker`.
 pub struct RasterTileWorker {
     /// The tile, which gets the replies in the order of their parses
     /// although images may decode asynchronously (`ordered_replies.rs`).
@@ -67,7 +60,6 @@ pub struct RasterTileWorker {
 }
 
 impl RasterTileWorker {
-    /// `RasterTileWorker(ActorRef<RasterTileWorker>, ActorRef<RasterTile>)`.
     #[must_use]
     pub fn new(parent: Box<dyn TileEndpoint<RasterTileMessage>>) -> Self {
         RasterTileWorker { parent: OrderedReplies::new(parent) }
@@ -80,9 +72,8 @@ impl RasterTileWorker {
         }
     }
 
-    /// `parse(data, correlationID)`. The reply goes once the image has
-    /// decoded, which may be after this returns (decoder.rs in
-    /// `mln_image`).
+    /// Decodes `data` on the worker. The reply goes once the image has
+    /// decoded, which may be after this returns (decoder.rs in `mln_image`).
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64) {
         let parent = self.parent.slot();
         let Some(data) = data else {
@@ -112,7 +103,7 @@ pub struct RasterTileInner {
     /// the tile unrenderable. Otherwise such a tile is empty, renderable without a bucket.
     missing: Cell<bool>,
     bucket: RefCell<Option<Arc<RasterBucket>>>,
-    /// `Actor<RasterTileWorker> worker`, behind its transport.
+    /// The tile's worker, behind its transport.
     worker: Box<dyn WorkerEndpoint<RasterWorkerMessage>>,
     mailbox: Arc<Mailbox>,
 }
@@ -126,7 +117,6 @@ impl RasterTileInner {
         }
     }
 
-    /// `onParsed(std::unique_ptr<RasterBucket>, correlationID)`.
     pub fn on_parsed(&self, result: Option<Arc<RasterBucket>>, result_correlation_id: u64) {
         if !self.obsolete.get() {
             let renderable = result.is_some() || !self.missing.get();
@@ -141,7 +131,6 @@ impl RasterTileInner {
         }
     }
 
-    /// `onError(std::exception_ptr, correlationID)`.
     pub fn on_error(&self, err: Error, result_correlation_id: u64) {
         self.base.loaded.set(true);
         if result_correlation_id == self.correlation_id.get() {
@@ -151,7 +140,6 @@ impl RasterTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
-    /// `markObsolete()`.
     fn mark_obsolete(&self) {
         self.obsolete.set(true);
         if self.base.pending.get() {
@@ -164,7 +152,6 @@ impl RasterTileInner {
 }
 
 impl LoaderTile for RasterTileInner {
-    /// `setError(std::exception_ptr)`.
     fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
         self.base.observer().on_tile_error(&self.base, err);
@@ -182,13 +169,11 @@ impl LoaderTile for RasterTileInner {
         self.base.on_tile_action(op);
     }
 
-    /// `setMetadata(modified, expires)`.
     fn set_metadata(&self, modified: Option<Timestamp>, expires: Option<Timestamp>) {
         self.base.modified.set(modified);
         self.base.expires.set(expires);
     }
 
-    /// `setData(data)`.
     fn set_data(&self, data: Option<Data>, _encoding: VectorTileEncoding) {
         self.parse(data, false);
     }
@@ -214,14 +199,12 @@ impl RasterTileInner {
     }
 }
 
-/// `RasterTile`.
 pub struct RasterTile {
     inner: Rc<RasterTileInner>,
     loader: Option<TileLoader>,
 }
 
 impl RasterTile {
-    /// `RasterTile(id, sourceID, parameters, tileset, observer)`.
     #[must_use]
     pub fn new(
         id: OverscaledTileID,

@@ -1,5 +1,3 @@
-// Ports test/layout/sort_key.test.cpp.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 

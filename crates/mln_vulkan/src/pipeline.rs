@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/pipeline.hpp and src/mln/vulkan/pipeline.cpp
-//
 // Differences from C++:
 // - `setRenderable` takes the render pass and extent, which the port's
 //   render pass keeps (`RenderPass::get_vulkan_render_pass`).
@@ -276,7 +274,7 @@ impl PipelineInfo {
         self.front_face = Self::vulkan_front_face(value.winding);
     }
 
-    /// `setScissorRect(value)`; call it after `set_render_target`, whose
+    /// Sets the scissor rectangle. Call it after `set_render_target`, whose
     /// extent it is clipped to.
     pub fn set_scissor_rect(&mut self, value: &ScissorRect) {
         self.scissor_rect = Self::vulkan_scissor_rect(value, self.view_extent);
@@ -350,8 +348,8 @@ impl PipelineInfo {
         self.stencil_depth_fail = Self::vulkan_stencil_op(value.depth_fail);
     }
 
-    /// `setRenderable(value)`: the render pass the pipeline draws in, and
-    /// the extent of its attachments.
+    /// Sets the render pass the pipeline draws in, and the extent of its
+    /// attachments.
     pub fn set_render_target(&mut self, render_pass: vk::RenderPass, extent: vk::Extent2D) {
         self.render_pass = render_pass;
         self.view_extent = extent;

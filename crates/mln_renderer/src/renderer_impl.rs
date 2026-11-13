@@ -1,8 +1,3 @@
-// Ports src/mln/renderer/renderer_impl.hpp and src/mln/renderer/renderer_impl.cpp
-// (the non-OpenGL branches). The Metal branch's autorelease pool is the Metal
-// backend's (mln_mtl renderer_backend.rs), and its frame capture, off in
-// C++, is not ported.
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -45,9 +40,6 @@ pub struct RendererImpl {
 }
 
 impl RendererImpl {
-    /// `Renderer::Impl(gfx::RendererBackend&, float pixelRatio,
-    /// const std::optional<std::string>& localFontFamily,
-    /// std::shared_ptr<GlyphCache>)`.
     pub fn new(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,

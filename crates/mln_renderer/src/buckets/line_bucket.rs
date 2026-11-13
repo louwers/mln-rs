@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/buckets/line_bucket.hpp and line_bucket.cpp
-
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -38,7 +36,6 @@ use crate::render_layer::RenderLayer;
 use crate::util::subdivision::subdivide_vertex_line;
 
 crate::paint_property_binders!(
-    /// `LineBinders = PaintPropertyBinders<LinePaintProperties::DataDrivenProperties>`.
     pub struct LineBinders for LinePaintProperties::PossiblyEvaluated {
         line_blur: LineBlur => PaintPropertyBinder<f32>,
         line_color: LineColor => PaintPropertyBinder<Color>,
@@ -51,8 +48,8 @@ crate::paint_property_binders!(
     }
 );
 
-/// `LineLayoutVertex = gfx::Vertex<TypeList<attributes::pos_normal,
-/// attributes::data<uint8_t, 4>>>` (8 bytes).
+/// A line layout vertex: position and normal, then four bytes of extrusion
+/// data (8 bytes in all).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct LineLayoutVertex {
@@ -65,7 +62,6 @@ pub struct LineBucket {
     pub base: BucketBase,
     pub layout: LineLayoutProperties::PossiblyEvaluated,
     pub vertices: GeometryVec<LineLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     pub triangles: GeometryVec<u16>,
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s: `update` (feature state) changes them while the
@@ -86,7 +82,6 @@ pub const EXTRUDE_SCALE: i8 = 63;
 static WARNED_INVALID_GEOMETRY: AtomicBool = AtomicBool::new(false);
 
 impl LineBucket {
-    /// `LineBucket(layout, layerPaintProperties, zoom, overscaling)`.
     #[must_use]
     pub fn new(
         layout: LineLayoutProperties::PossiblyEvaluated,
@@ -117,7 +112,7 @@ impl LineBucket {
         self.subdivision_granularity = *value;
     }
 
-    /// `layoutVertex(p, e, round, up, dir, linesofar = 0)`.
+    /// The layout vertex of a line point.
     ///
     /// @param p vertex position
     /// @param e extrude normal

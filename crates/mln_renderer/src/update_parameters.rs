@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/update_parameters.hpp
-
 use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};

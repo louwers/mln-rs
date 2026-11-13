@@ -1,6 +1,3 @@
-// Ports src/mln/renderer/layers/heatmap_texture_layer_tweaker.hpp and
-// src/mln/renderer/layers/heatmap_texture_layer_tweaker.cpp.
-
 use mln_gfx::LayerGroupBase;
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::shader_defines::ID_HEATMAP_TEXTURE_PROPS_UBO;

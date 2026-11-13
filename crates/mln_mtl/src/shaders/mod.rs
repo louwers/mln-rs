@@ -1,4 +1,4 @@
-//! Ports include/mln/shaders/mtl and src/mln/shaders/mtl.
+//! The Metal shaders: their MSL, sources, programs and shader groups.
 
 /// The C++ core's MSL, with the port's changes.
 #[rustfmt::skip]

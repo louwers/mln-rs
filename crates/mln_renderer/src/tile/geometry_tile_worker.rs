@@ -1,6 +1,3 @@
-// Ports src/mln/tile/geometry_tile_worker.hpp and
-// src/mln/tile/geometry_tile_worker.cpp.
-//
 // The in-process transport makes the worker a pool actor
 // (mln_actor::actor::Actor) on the map's thread pool, as in C++. Its parent
 // GeometryTile lives on the render thread and is reached through a mailbox
@@ -66,7 +63,6 @@ use crate::tile::worker_codec::fields;
 /// cloned).
 pub type SharedTileData = Arc<dyn GeometryTileData + Send + Sync>;
 
-/// `ImageVersionMap`.
 pub use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,16 +78,13 @@ enum State {
 /// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum WorkerMessage {
-    /// `setData(data, availableImages, correlationID)`.
     SetData {
         #[serde(with = "fields::tile_data")]
         data: Option<SharedTileData>,
         available_images: Immutable<VecSet<String>>,
         correlation_id: u64,
     },
-    /// `setLayers(layers, globalState, availableImages,
-    /// subdivisionGranularity, correlationID)`, with the pixel ratio to lay
-    /// the layers out for.
+    /// Sets the layers, with the pixel ratio to lay them out for.
     SetLayers {
         #[serde(with = "fields::layers")]
         layers: Vec<Immutable<dyn LayerProperties>>,
@@ -101,19 +94,27 @@ pub enum WorkerMessage {
         pixel_ratio: f32,
         correlation_id: u64,
     },
-    /// `setAvailableImages(availableImages, correlationID)`: parse again
-    /// with images added since the last parse.
-    SetAvailableImages { available_images: Immutable<VecSet<String>>, correlation_id: u64 },
-    /// `reset(correlationID)`.
-    Reset { correlation_id: u64 },
-    /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
-    SetShowCollisionBoxes { show_collision_boxes: bool, correlation_id: u64 },
+    /// Parses again with the images added since the last parse.
+    SetAvailableImages {
+        available_images: Immutable<VecSet<String>>,
+        correlation_id: u64,
+    },
+    Reset {
+        correlation_id: u64,
+    },
+    SetShowCollisionBoxes {
+        show_collision_boxes: bool,
+        correlation_id: u64,
+    },
     /// Forget the glyphs that came back missing and lay out again, which
     /// requests them again.
-    RetryMissingGlyphs { correlation_id: u64 },
-    /// `onGlyphsAvailable(newGlyphMap, results)`.
-    GlyphsAvailable { glyph_map: GlyphMap, results: HBShapeResults },
-    /// `onImagesAvailable(iconMap, patternMap, versionMap, imageCorrelationID)`.
+    RetryMissingGlyphs {
+        correlation_id: u64,
+    },
+    GlyphsAvailable {
+        glyph_map: GlyphMap,
+        results: HBShapeResults,
+    },
     ImagesAvailable {
         #[serde(with = "shared_image_map")]
         icon_map: ImageMap,
@@ -146,18 +147,14 @@ impl WorkerMessage {
 /// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum TileMessage {
-    /// `onLayout(result, correlationID)`.
     Layout { result: LayoutResult, correlation_id: u64 },
-    /// `onError(error, correlationID)`.
     Error { error: Error, correlation_id: u64 },
-    /// `getGlyphs(glyphDependencies)`.
     GetGlyphs(GlyphDependencies),
-    /// `getImages(pair)`.
     GetImages(ImageRequestPair),
 }
 
-/// `OptionalActorRef<GeometryTileWorker>` (the worker's `self`): `None` for
-/// the synchronous worker, whose self-sent messages are direct calls.
+/// The worker's reference to itself: `None` for the synchronous worker, whose
+/// self-sent messages are direct calls.
 pub type SelfRef = Option<PoolActorRef<GeometryTileWorker>>;
 
 /// The tile data a `GeometryTileWorker` received.
@@ -168,7 +165,6 @@ enum ReceivedData {
     Received(Option<SharedTileData>),
 }
 
-/// `GeometryTileWorker`.
 pub struct GeometryTileWorker {
     self_ref: SelfRef,
     parent: Box<dyn TileEndpoint>,
@@ -215,9 +211,6 @@ pub struct GeometryTileWorker {
 }
 
 impl GeometryTileWorker {
-    /// `GeometryTileWorker(self, parent, scheduler, id, sourceID, obsolete,
-    /// mode, pixelRatio, showCollisionBoxes, dynamicTextureAtlas, fontFaces,
-    /// captureRenderedFeatures, observer)`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         self_ref: SelfRef,
@@ -340,7 +333,6 @@ impl GeometryTileWorker {
        See the C++ file for the full description.
     */
 
-    /// `setData(data, availableImages, correlationID)`.
     pub fn set_data(
         &mut self,
         data: Option<SharedTileData>,
@@ -365,8 +357,6 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `setLayers(layers, globalState, availableImages,
-    /// subdivisionGranularity, correlationID)`.
     pub fn set_layers(
         &mut self,
         layers: Vec<Immutable<dyn LayerProperties>>,
@@ -396,7 +386,6 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `setAvailableImages(availableImages, correlationID)`.
     pub fn set_available_images(&mut self, available_images: Immutable<VecSet<String>>, correlation_id: u64) {
         self.guarded(|this| {
             this.available_images = available_images;
@@ -416,7 +405,6 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `reset(correlationID)`.
     pub fn reset(&mut self, correlation_id: u64) {
         self.layers = None;
         self.data = ReceivedData::Pending;
@@ -430,7 +418,6 @@ impl GeometryTileWorker {
         }
     }
 
-    /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
     pub fn set_show_collision_boxes(&mut self, show_collision_boxes: bool, correlation_id: u64) {
         self.guarded(|this| {
             this.show_collision_boxes = show_collision_boxes;
@@ -477,7 +464,6 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `symbolDependenciesChanged()`.
     fn symbol_dependencies_changed(&mut self) {
         self.guarded(|this| {
             match this.state {
@@ -502,7 +488,6 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `coalesced()`.
     fn coalesced(&mut self) {
         self.guarded(|this| {
             match this.state {
@@ -532,8 +517,8 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `coalesce()`. The synchronous worker's self-sent `coalesced` is a
-    /// direct call.
+    /// Enters the coalescing state and sends itself `coalesced`; the
+    /// synchronous worker calls it directly.
     fn coalesce(&mut self) {
         self.state = State::Coalescing;
         match &self.self_ref {
@@ -543,7 +528,6 @@ impl GeometryTileWorker {
         }
     }
 
-    /// `onGlyphsAvailable(newGlyphMap, results)`.
     pub fn on_glyphs_available(&mut self, new_glyph_map: GlyphMap, mut results: HBShapeResults) {
         // C++ moves the pending glyphs out of `newGlyphMap` in the first loop
         // and adds the rest (the shaped glyphs) in the second.
@@ -595,7 +579,6 @@ impl GeometryTileWorker {
         self.symbol_dependencies_changed();
     }
 
-    /// `requestNewDependencies(glyphDependencies, imageDependencies)`.
     fn request_new_dependencies(
         &mut self,
         glyph_dependencies: &GlyphDependencies,
@@ -640,7 +623,6 @@ impl GeometryTileWorker {
         }
     }
 
-    /// `onImagesAvailable(iconMap, patternMap, versionMap, imageCorrelationID)`.
     pub fn on_images_available(
         &mut self,
         new_icon_map: ImageMap,
@@ -658,7 +640,6 @@ impl GeometryTileWorker {
         self.symbol_dependencies_changed();
     }
 
-    /// `parse()`.
     fn parse(&mut self) -> Result<(), Error> {
         // Avoid small reallocations for populated cells. If we had a total
         // feature count, this could be based on that and the cell count.
@@ -842,7 +823,6 @@ impl GeometryTileWorker {
         self.feature_index.is_some()
     }
 
-    /// `finalizeLayout()`.
     fn finalize_layout(&mut self) -> Result<(), Error> {
         if matches!(self.data, ReceivedData::Pending)
             || self.layers.is_none()

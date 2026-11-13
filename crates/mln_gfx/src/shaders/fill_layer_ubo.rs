@@ -1,11 +1,9 @@
-// Ports include/mln/shaders/fill_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
 //
 // Fill
 
-/// `struct alignas(16) FillDrawableUBO` (80 bytes).
+/// The fill shader's per-drawable uniform block (80 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillDrawableUBO {
@@ -23,7 +21,7 @@ const _: () = assert!(std::mem::size_of::<FillDrawableUBO>() == 5 * 16);
 //
 // Fill outline
 
-/// `struct alignas(16) FillOutlineDrawableUBO` (80 bytes).
+/// The fill outline shader's per-drawable uniform block (80 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillOutlineDrawableUBO {
@@ -41,7 +39,7 @@ const _: () = assert!(std::mem::size_of::<FillOutlineDrawableUBO>() == 5 * 16);
 //
 // Fill pattern
 
-/// `struct alignas(16) FillPatternDrawableUBO` (112 bytes).
+/// The fill pattern shader's per-drawable uniform block (112 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillPatternDrawableUBO {
@@ -62,7 +60,7 @@ pub struct FillPatternDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<FillPatternDrawableUBO>() == 7 * 16);
 
-/// `struct alignas(16) FillPatternTilePropsUBO` (48 bytes).
+/// The fill pattern shader's per-tile uniform block (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillPatternTilePropsUBO {
@@ -78,18 +76,19 @@ const _: () = assert!(std::mem::size_of::<FillPatternTilePropsUBO>() == 3 * 16);
 //
 // Fill pattern outline
 
-/// `struct alignas(16) FillOutlinePatternDrawableUBO` (112 bytes): same
-/// layout as `FillPatternDrawableUBO`.
+/// The fill outline pattern shader's per-drawable uniform block, laid out as
+/// `FillPatternDrawableUBO`.
 pub type FillOutlinePatternDrawableUBO = FillPatternDrawableUBO;
 
-/// `struct alignas(16) FillOutlinePatternTilePropsUBO` (48 bytes): same
-/// layout as `FillPatternTilePropsUBO`.
+/// The fill outline pattern shader's per-tile uniform block, laid out as
+/// `FillPatternTilePropsUBO`.
 pub type FillOutlinePatternTilePropsUBO = FillPatternTilePropsUBO;
 
 //
 // Fill outline triangulated
 
-/// `struct alignas(16) FillOutlineTriangulatedDrawableUBO` (80 bytes).
+/// The fill outline triangulated shader's per-drawable uniform block (80
+/// bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillOutlineTriangulatedDrawableUBO {
@@ -116,8 +115,8 @@ pub struct FillEvaluatedPropsUBO {
 }
 const _: () = assert!(std::mem::size_of::<FillEvaluatedPropsUBO>() == 3 * 16);
 
-/// `union FillDrawableUnionUBO` (`MLN_UBO_CONSOLIDATION`): the size of the
-/// largest member, 112 bytes. Members are written with the `from_*`
+/// Any fill per-drawable uniform block, for consolidated UBOs: a C++ union, the
+/// size of the largest member, 112 bytes. Members are written with the `from_*`
 /// constructors; the rest stays zero (C++ value-initializes the vector).
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -137,25 +136,21 @@ impl FillDrawableUnionUBO {
         let src = bytemuck::bytes_of(member);
         self.bytes[..src.len()].copy_from_slice(src);
     }
-    /// `.fillDrawableUBO = {...}`
     pub fn set_fill(&mut self, ubo: &FillDrawableUBO) {
         self.write(ubo);
     }
-    /// `.fillOutlineDrawableUBO = {...}`
     pub fn set_fill_outline(&mut self, ubo: &FillOutlineDrawableUBO) {
         self.write(ubo);
     }
-    /// `.fillPatternDrawableUBO = {...}` / `.fillOutlinePatternDrawableUBO = {...}`
     pub fn set_fill_pattern(&mut self, ubo: &FillPatternDrawableUBO) {
         self.write(ubo);
     }
-    /// `.fillOutlineTriangulatedDrawableUBO = {...}`
     pub fn set_fill_outline_triangulated(&mut self, ubo: &FillOutlineTriangulatedDrawableUBO) {
         self.write(ubo);
     }
 }
 
-/// `union FillTilePropsUnionUBO` (48 bytes).
+/// Any fill per-tile uniform block, for consolidated UBOs (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillTilePropsUnionUBO {

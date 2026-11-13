@@ -1,5 +1,3 @@
-// Ports include/mln/gl/types.hpp: the names of GL objects.
-//
 // C++ names them by `GLuint`; glow by a type per kind of object, an integer
 // natively and a key to the browser's object on WebGL2.
 

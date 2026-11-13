@@ -1,5 +1,3 @@
-// Ports include/mln/gl/layer_group_gl.hpp and src/mln/gl/layer_group_gl.cpp
-//
 // Differences from C++:
 // - A group hands its uniform buffers to the context, which binds the ones
 //   each drawable's shader reads (`Context::bind_uniform_blocks`).
@@ -25,7 +23,6 @@ fn gl_context(parameters: &dyn PaintParameters) -> Option<&Context> {
     parameters.context().as_any().downcast_ref::<Context>()
 }
 
-/// `gl::TileLayerGroupGL`
 pub struct TileLayerGroup {
     inner: layer_group::TileLayerGroup,
     uniform_buffers: UniformBufferArray,
@@ -181,7 +178,6 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
     }
 }
 
-/// `gl::LayerGroupGL`
 pub struct LayerGroup {
     inner: layer_group::LayerGroup,
     uniform_buffers: UniformBufferArray,

@@ -1,5 +1,3 @@
-// Ports src/mln/text/get_anchors.hpp and src/mln/text/get_anchors.cpp.
-
 use mln_math::fmaxf;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
@@ -8,26 +6,24 @@ use mln_util::interpolate::Interpolate;
 use crate::geometry::anchor::{Anchor, Anchors};
 use crate::text::check_max_angle::check_max_angle;
 
-/// `util::dist<float>(a, b)` on `Point<int16_t>` (util/math.hpp): a double
-/// sqrt of the `int` sum, narrowed to float.
+/// The distance from `a` to `b` as C++ computes it: an `f64` square root of
+/// the integer sum, narrowed to `f32`.
 fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
     let dx = f64::from(i32::from(b.x) - i32::from(a.x));
     let dy = f64::from(i32::from(b.y) - i32::from(a.y));
     (dx * dx + dy * dy).sqrt() as f32
 }
 
-/// `util::angle_to(a, b)` on `Point<int16_t>`, in double.
+/// The angle from `b` to `a`, in `f64`.
 fn angle_to(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
     f64::from(i32::from(a.y) - i32::from(b.y)).atan2(f64::from(i32::from(a.x) - i32::from(b.x)))
 }
 
-/// `getAngleWindowSize`.
 #[must_use]
 pub fn get_angle_window_size(text_left: f32, text_right: f32, glyph_size: f32, box_scale: f32) -> f32 {
     if (text_left - text_right) == 0.0 { 0.0 } else { 3.0f32 / 5.0f32 * glyph_size * box_scale }
 }
 
-/// `getLineLength`.
 #[must_use]
 pub fn get_line_length(line: &GeometryCoordinates) -> f32 {
     let mut line_length: f32 = 0.0;
@@ -109,7 +105,6 @@ fn resample(
     anchors
 }
 
-/// `getAnchors`.
 #[allow(clippy::too_many_arguments)]
 #[must_use]
 pub fn get_anchors(
@@ -164,7 +159,6 @@ pub fn get_anchors(
     resample(line, offset, spacing, angle_window_size, max_angle, label_length, continued_line, false)
 }
 
-/// `getCenterAnchor`.
 #[allow(clippy::too_many_arguments)]
 #[must_use]
 pub fn get_center_anchor(
@@ -215,7 +209,6 @@ pub fn get_center_anchor(
 
 #[cfg(test)]
 mod tests {
-    // Ports test/text/get_anchors.test.cpp.
     use std::f32::consts::{FRAC_PI_4, PI};
 
     use geometry::Point;

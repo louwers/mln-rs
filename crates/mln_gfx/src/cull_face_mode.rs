@@ -1,5 +1,3 @@
-// Ports src/mln/gfx/cull_face_mode.hpp
-
 use crate::types::{CullFaceSideType, CullFaceWindingType};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

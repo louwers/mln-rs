@@ -1,5 +1,5 @@
-//! Ports the `src/mln/util` files that belong to the renderer
-//! (`util/tile_cover`).
+//! Renderer utilities: tile cover, tile level of detail, tile meshes,
+//! subdivision and triangulation.
 
 pub mod subdivision;
 pub mod tile_cover;

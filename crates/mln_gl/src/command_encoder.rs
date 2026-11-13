@@ -1,5 +1,3 @@
-// Ports src/mln/gl/command_encoder.hpp and src/mln/gl/command_encoder.cpp
-//
 // Debug groups are GL_KHR_debug's, which WebGL2 doesn't have; they are not
 // ported.
 

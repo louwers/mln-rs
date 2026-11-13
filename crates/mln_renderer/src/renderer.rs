@@ -1,5 +1,3 @@
-// Ports include/mln/renderer/renderer.hpp and src/mln/renderer/renderer.cpp.
-//
 // C++ keeps a `gfx::RendererBackend&`; the frontend owns the backend, so the
 // renderer shares it through an `Rc`.
 
@@ -21,17 +19,14 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// `Renderer(gfx::RendererBackend&, float pixelRatio, const
-    /// std::optional<std::string>& localFontFamily = std::nullopt)`: a
-    /// renderer with a glyph cache of its own. `local_font_family` is the
+    /// A renderer with a glyph cache of its own. `local_font_family` is the
     /// platform's `LocalGlyphRasterizer`'s (see `DefaultLocalGlyphRasterizer`).
     pub fn new(backend: Rc<dyn RendererBackend>, pixel_ratio: f32, local_font_family: Option<String>) -> Self {
         Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default())
     }
 
-    /// `Renderer(gfx::RendererBackend&, float pixelRatio, localFontFamily,
-    /// std::shared_ptr<GlyphCache>)`: renderers given the same `GlyphCache`
-    /// share the glyphs they parse from glyph PBFs.
+    /// A renderer that uses `glyph_cache`: renderers given the same
+    /// `GlyphCache` share the glyphs they parse from glyph PBFs.
     pub fn with_glyph_cache(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
@@ -102,7 +97,6 @@ impl Renderer {
 
     // query: `Err` is the exception C++ throws out of the query (a
     // malformed tile).
-    /// `queryRenderedFeatures(const ScreenLineString&, const RenderedQueryOptions&)`.
     pub fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -111,7 +105,6 @@ impl Renderer {
         self.impl_ref().orchestrator.query_rendered_features(geometry, options)
     }
 
-    /// `queryRenderedFeatures(const ScreenCoordinate&, const RenderedQueryOptions&)`.
     pub fn query_rendered_features_at_point(
         &self,
         point: &mln_util::geo::ScreenCoordinate,
@@ -120,7 +113,6 @@ impl Renderer {
         self.impl_ref().orchestrator.query_rendered_features(&[*point], options)
     }
 
-    /// `queryRenderedFeatures(const ScreenBox&, const RenderedQueryOptions&)`.
     pub fn query_rendered_features_in_box(
         &self,
         min: &mln_util::geo::ScreenCoordinate,
@@ -134,7 +126,6 @@ impl Renderer {
         )
     }
 
-    /// `querySourceFeatures(sourceID, options)`.
     pub fn query_source_features(
         &self,
         source_id: &str,
@@ -143,12 +134,11 @@ impl Renderer {
         self.impl_ref().orchestrator.query_source_features(source_id, options)
     }
 
-    /// `queryFeatureExtensions(sourceID, feature, extension, extensionField,
-    /// args)`: for a GeoJSON source with `cluster` on, the "supercluster"
-    /// extension's "children", "leaves" or "expansion-zoom" of a cluster
-    /// feature (one with a `cluster_id` property). Anything else is a null
-    /// value. `Err` is the `std::runtime_error` C++ throws for a cluster ID
-    /// the source doesn't have.
+    /// Queries a feature extension: for a GeoJSON source with `cluster` on,
+    /// the "supercluster" extension's "children", "leaves" or
+    /// "expansion-zoom" of a cluster feature (one with a `cluster_id`
+    /// property). Anything else is a null value. `Err` for a cluster ID the
+    /// source doesn't have.
     pub fn query_feature_extensions(
         &self,
         source_id: &str,
@@ -160,14 +150,12 @@ impl Renderer {
         self.impl_ref().orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 
-    /// `getPlacedSymbolsData()`.
     #[must_use]
     pub fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
         self.impl_ref().orchestrator.get_placed_symbols_data()
     }
 
-    /// `dumpDebugLogs()`: logs every render source's tiles and the image
-    /// manager's state.
+    /// Logs every render source's tiles and the image manager's state.
     pub fn dump_debug_logs(&self) {
         self.impl_ref().orchestrator.dump_debug_logs();
     }
@@ -176,7 +164,6 @@ impl Renderer {
     // queryFeatureExtensions.
 
     // layers: feature state
-    /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.
     pub fn set_feature_state(
         &mut self,
         source_id: &str,
@@ -187,7 +174,6 @@ impl Renderer {
         self.impl_mut().orchestrator.set_feature_state(source_id, source_layer_id, feature_id, state);
     }
 
-    /// `getFeatureState(sourceID, sourceLayerID, featureID)`.
     #[must_use]
     pub fn get_feature_state(
         &self,
@@ -198,7 +184,6 @@ impl Renderer {
         self.impl_ref().orchestrator.get_feature_state(source_id, source_layer_id, feature_id)
     }
 
-    /// `removeFeatureState(sourceID, sourceLayerID, featureID, stateKey)`.
     pub fn remove_feature_state(
         &mut self,
         source_id: &str,

@@ -1,5 +1,3 @@
-// Ports test/renderer/backend_scope.test.cpp.
-//
 // C++ builds the test on OpenGL only (`#if MLN_RENDER_BACKEND_OPENGL`) because
 // its stub derives from `gl::RendererBackend`; what it tests is
 // `gfx::BackendScope`, which is backend-independent. The stub here
@@ -63,7 +61,7 @@ impl RendererBackend for StubRendererBackend {
     }
 }
 
-/// `gfx::BackendScope test{backend}` (the default scope type is Explicit).
+/// A scope of the default type, `Explicit`.
 fn scope(backend: &StubRendererBackend) -> BackendScope<'_> {
     BackendScope::new(backend, ScopeType::Explicit)
 }

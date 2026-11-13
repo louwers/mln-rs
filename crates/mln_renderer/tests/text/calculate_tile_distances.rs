@@ -1,5 +1,3 @@
-// Ports test/text/calculate_tile_distances.test.cpp.
-
 use geometry::Point;
 use mln_renderer::geometry::anchor::Anchor;
 use mln_renderer::layout::symbol_layout::SymbolLayout;

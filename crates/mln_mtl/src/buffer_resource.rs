@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/buffer_resource.hpp and src/mln/mtl/buffer_resource.cpp
-//
 // The resource reaches the device through the backend state and the
 // rendering stats through a `Weak` context: the context's global uniform
 // buffers hold resources, so an `Rc` back would keep the context alive.
@@ -21,9 +19,9 @@ use crate::context::Context;
 use crate::mtl_fwd::MTLBufferPtr;
 use crate::renderer_backend::BackendImpl;
 
-/// `setVertexBytes:length:atIndex:` is the best option for binding a very
-/// small amount (less than 4 KB) of dynamic buffer data, which avoids the
-/// overhead of creating an intermediary `MTLBuffer` object.
+/// The size below which data is bound with `setVertexBytes:length:atIndex:`,
+/// the best option for a very small amount (less than 4 KB) of dynamic buffer
+/// data, which avoids the overhead of creating an intermediary `MTLBuffer`.
 const BUFFER_THRESHOLD: usize = 4096;
 
 thread_local! {
@@ -215,7 +213,7 @@ impl BufferResource {
         self.version.set(self.version.get().wrapping_add(1));
     }
 
-    /// `needReBind(version)`: whether a binding made at `version` is stale.
+    /// Whether a binding made at `version` is stale.
     pub fn need_rebind(&self, version: VersionType) -> bool {
         self.version.get() != version
     }

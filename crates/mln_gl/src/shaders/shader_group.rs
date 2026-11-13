@@ -1,5 +1,3 @@
-// Ports include/mln/shaders/gl/shader_group_gl.hpp
-//
 // The C++ `ShaderGroupGL<BuiltIn ShaderID>` template is one type here
 // holding the `BuiltIn` value.
 

@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/drawable_builder.hpp and src/mln/vulkan/drawable_builder.cpp
-
 use std::cell::RefCell;
 use std::rc::Rc;
 

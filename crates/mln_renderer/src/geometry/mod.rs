@@ -1,4 +1,5 @@
-//! Ports the renderer-side files of `src/mln/geometry`.
+//! Renderer-side geometry: symbol anchors, the debug font, DEM data and the
+//! feature index.
 
 pub mod anchor;
 pub mod debug_font_data; // layers: debug

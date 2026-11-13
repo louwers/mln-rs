@@ -47,11 +47,11 @@ pub struct Request {
 
 #[derive(Serialize, Deserialize)]
 pub enum Action {
-    /// `GeometryTileWorker(...)`: a worker for the tile `tile`.
+    /// Creates a worker for the geometry tile `tile`.
     Create { tile: u64, parameters: WorkerParameters },
-    /// `RasterTileWorker(...)`: a worker for the raster tile `tile`.
+    /// Creates a worker for the raster tile `tile`.
     CreateRaster { tile: u64 },
-    /// `RasterDEMTileWorker(...)`: a worker for the raster-dem tile `tile`.
+    /// Creates a worker for the raster-dem tile `tile`.
     CreateRasterDEM { tile: u64 },
     /// A message for the worker of `tile`, of its type, which follows.
     Message { tile: u64, about: About },

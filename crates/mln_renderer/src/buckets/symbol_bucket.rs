@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/buckets/symbol_bucket.hpp and
-// src/mln/renderer/buckets/symbol_bucket.cpp (the non-instanced vertex
-// layout: MLN_USE_SYMBOL_INSTANCING is off for WebGPU).
-//
 // The bucket is built on the worker thread and then shared (`BucketPtr =
 // Arc<dyn Bucket>`); placement, cross-tile indexing and sorting change it on
 // the render thread afterwards, as C++ does through the shared pointer. The
@@ -45,7 +41,6 @@ use crate::layout::symbol_instance::SymbolInstance;
 use crate::paint_property_binder::PaintPropertyBinder;
 
 crate::paint_property_binders!(
-    /// `SymbolIconBinders = PaintPropertyBinders<IconPaintProperties::DataDrivenProperties>`.
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
         icon_opacity: IconOpacity => PaintPropertyBinder<f32>,
         icon_color: IconColor => PaintPropertyBinder<Color>,
@@ -56,7 +51,6 @@ crate::paint_property_binders!(
 );
 
 crate::paint_property_binders!(
-    /// `SymbolTextBinders = PaintPropertyBinders<TextPaintProperties::DataDrivenProperties>`.
     pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
         text_opacity: TextOpacity => PaintPropertyBinder<f32>,
         text_color: TextColor => PaintPropertyBinder<Color>,
@@ -66,9 +60,8 @@ crate::paint_property_binders!(
     }
 );
 
-/// `SymbolLayoutAttributes = gfx::Vertex<TypeList<attributes::pos_offset,
-/// attributes::data<uint16_t, 4>, attributes::pixeloffset>>`, and the
-/// quad's atlas origin.
+/// The layout attributes of a symbol quad's vertex, and the quad's atlas
+/// origin.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct SymbolLayoutVertex {
@@ -84,21 +77,18 @@ pub struct SymbolLayoutVertex {
     pub a4: [u16; 2],
 }
 
-/// `SymbolDynamicLayoutAttributes = gfx::Vertex<TypeList<attributes::projected_pos>>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct SymbolDynamicLayoutVertex {
     pub a1: [f32; 3],
 }
 
-/// `SymbolOpacityAttributes = gfx::Vertex<TypeList<attributes::fade_opacity>>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct SymbolOpacityVertex {
     pub a1: [f32; 1],
 }
 
-/// `CollisionBoxLayoutVertexAttributes`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct CollisionBoxLayoutVertex {
@@ -107,7 +97,6 @@ pub struct CollisionBoxLayoutVertex {
     pub a3: [i16; 2],
 }
 
-/// `CollisionBoxDynamicVertexAttributes`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct CollisionBoxDynamicVertex {
@@ -119,7 +108,6 @@ pub const MAX_GLYPH_ICON_SIZE: u16 = 255;
 pub const SIZE_PACK_FACTOR: u16 = 128;
 pub const MAX_PACKED_SIZE: u16 = MAX_GLYPH_ICON_SIZE * SIZE_PACK_FACTOR;
 
-/// `SortKeyRange`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SortKeyRange {
     pub sort_key: f32,
@@ -127,7 +115,6 @@ pub struct SortKeyRange {
     pub end: usize,
 }
 
-/// `ZoomEvaluatedSize`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ZoomEvaluatedSize {
     pub is_zoom_constant: bool,
@@ -137,18 +124,19 @@ pub struct ZoomEvaluatedSize {
     pub layout_size: f32,
 }
 
-/// `SymbolSizeBinder` and its three implementations.
+/// Evaluates a symbol's `text-size` or `icon-size`: a constant, a source
+/// function or a composite function.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SymbolSizeBinder {
-    /// `ConstantSymbolSizeBinder`.
     Constant {
         layout_size: f32,
         covering_ranges: Option<(Range<f32>, Range<f32>)>,
         expression: Option<PropertyExpression<f32>>,
     },
-    /// `SourceFunctionSymbolSizeBinder`.
-    SourceFunction { expression: PropertyExpression<f32>, default_value: f32 },
-    /// `CompositeFunctionSymbolSizeBinder`.
+    SourceFunction {
+        expression: PropertyExpression<f32>,
+        default_value: f32,
+    },
     CompositeFunction {
         expression: PropertyExpression<f32>,
         default_value: f32,
@@ -158,7 +146,6 @@ pub enum SymbolSizeBinder {
 }
 
 impl SymbolSizeBinder {
-    /// `SymbolSizeBinder::create(tileZoom, sizeProperty, defaultValue)`.
     #[must_use]
     pub fn create(tile_zoom: f32, size_property: &PropertyValue<f32>, default_value: f32) -> Self {
         if size_property.is_undefined() {
@@ -202,7 +189,6 @@ impl SymbolSizeBinder {
         }
     }
 
-    /// `getVertexSizeData(feature)`.
     pub fn get_vertex_size_data(&self, feature: &dyn GeometryTileFeature) -> Range<f32> {
         match self {
             SymbolSizeBinder::Constant { .. } => Range { min: 0.0, max: 0.0 },
@@ -217,7 +203,6 @@ impl SymbolSizeBinder {
         }
     }
 
-    /// `evaluateForZoom(currentZoom)`.
     #[must_use]
     pub fn evaluate_for_zoom(&self, current_zoom: f32) -> ZoomEvaluatedSize {
         let unused = 0.0_f32;
@@ -268,7 +253,6 @@ impl SymbolSizeBinder {
     }
 }
 
-/// `PlacedSymbol`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PlacedSymbol {
     pub anchor_point: Point<f32>,
@@ -330,7 +314,6 @@ impl PlacedSymbol {
     }
 }
 
-/// `SymbolBucket::Buffer`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Buffer {
     pub attribute_data: GeometryVec<SymbolLayoutVertex>,
@@ -345,7 +328,7 @@ pub struct Buffer {
     pub layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
     #[serde(with = "pod")]
     pub opacity_attribute_data: Vec<SymbolOpacityVertex>,
-    /// `TriangleIndexVector` (3 indices per triangle).
+    /// Three indices per triangle.
     #[serde(with = "pod")]
     pub triangles: Vec<u16>,
     pub segments: Vec<SegmentBase>,
@@ -355,13 +338,12 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    /// `updateModified()`.
     pub fn update_modified(&mut self) {
         self.modified += 1;
     }
 
-    /// `dynamicAttributeDataFor(layerID)`: the positions a layer draws, its
-    /// own when it has them, the leader's otherwise.
+    /// The positions `layer_id` draws: its own when it has them, the
+    /// leader's otherwise.
     pub fn dynamic_attribute_data_for(&self, layer_id: &str) -> &Vec<SymbolDynamicLayoutVertex> {
         self.layer_dynamic_attribute_data.get(layer_id).unwrap_or(&self.dynamic_attribute_data)
     }
@@ -380,9 +362,8 @@ impl Buffer {
         (positions, &self.placed_symbols)
     }
 
-    /// `hasVisibleVertices(offset, count)`: whether any of the `count`
-    /// opacity vertices from `offset` can draw. A range placement hasn't
-    /// filled yet counts as visible.
+    /// Whether any of the `count` opacity vertices from `offset` can draw. A
+    /// range that placement hasn't filled yet counts as visible.
     pub fn has_visible_vertices(&self, offset: usize, count: usize) -> bool {
         let Some(range) = offset.checked_add(count).and_then(|end| self.opacity_attribute_data.get(offset..end)) else {
             return true;
@@ -405,7 +386,7 @@ impl Buffer {
     }
 }
 
-/// `SymbolBucket::CollisionBuffer` (+ box lines / circle triangles).
+/// The vertices and indices of a symbol bucket's collision boxes or circles.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CollisionBuffer {
     #[serde(with = "pod")]
@@ -455,7 +436,6 @@ pub struct SymbolBucketState {
 }
 
 impl SymbolBucketState {
-    /// `hasLayerDynamicAttributeData(layerID)`.
     pub fn has_layer_dynamic_attribute_data(&self, layer_id: &str) -> bool {
         self.text.layer_dynamic_attribute_data.contains_key(layer_id)
             || self.icon.layer_dynamic_attribute_data.contains_key(layer_id)
@@ -469,7 +449,6 @@ fn next_bucket_instance_id() -> u32 {
     MAX_BUCKET_INSTANCE_ID.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-/// `SymbolBucket`.
 #[derive(Serialize, Deserialize)]
 pub struct SymbolBucket {
     pub base: BucketBase,
@@ -616,14 +595,12 @@ impl SymbolBucket {
         self.state().text_collision_circle.as_ref().is_some_and(|b| !b.segments.is_empty())
     }
 
-    /// `hasFormatSectionOverrides()`.
     pub fn has_format_section_overrides(&self) -> bool {
         *self
             .has_format_section_overrides
             .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(self.layout.get::<TextField>()))
     }
 
-    /// `hasVariableTextAnchors()`.
     pub fn has_variable_text_anchors(&self) -> bool {
         let tvao = self.layout.get::<TextVariableAnchorOffset>();
         let has_text_variable_anchor_offset = if tvao.is_constant() {
@@ -635,7 +612,6 @@ impl SymbolBucket {
         has_text_variable_anchor_offset || !self.layout.get::<TextVariableAnchor>().is_empty()
     }
 
-    /// `sortFeatures(angle)`.
     pub fn sort_features(&self, angle: f32) {
         if !self.sort_features_by_y {
             return;
@@ -705,7 +681,8 @@ impl SymbolBucket {
         state.feature_sort_order = Some(Arc::new(symbols_sort_order));
     }
 
-    /// `getSymbols(range)`: indices into `symbolInstances`.
+    /// The indices into `symbol_instances` of a sort key range, or all
+    /// `count` of them if `range` is `None` or invalid.
     pub fn get_symbols(&self, range: Option<&SortKeyRange>, count: usize) -> std::ops::Range<usize> {
         match range {
             Some(range) if range.start < range.end && range.end <= count => range.start..range.end,
@@ -733,8 +710,7 @@ impl SymbolBucket {
         }
     }
 
-    /// `layoutAttributes(labelAnchor, o, glyphOffsetY, tx, ty, sizeData,
-    /// isSDF, pixelOffset, minFontScale)`, with the quad's atlas origin
+    /// The layout vertex of a quad corner, with the quad's atlas origin
     /// (`tex_origin`, see [`SymbolLayoutVertex::a4`]).
     #[allow(clippy::too_many_arguments)]
     #[must_use]
@@ -773,19 +749,16 @@ impl SymbolBucket {
         }
     }
 
-    /// `dynamicLayoutAttributes(anchorPoint, labelAngle)`.
     #[must_use]
     pub fn dynamic_layout_attributes(anchor_point: Point<f32>, label_angle: f32) -> SymbolDynamicLayoutVertex {
         SymbolDynamicLayoutVertex { a1: [anchor_point.x, anchor_point.y, label_angle] }
     }
 
-    /// `opacityAttributes(placed, opacity)`.
     #[must_use]
     pub fn opacity_attributes(placed: bool, opacity: f32) -> SymbolOpacityVertex {
         SymbolOpacityVertex { a1: [((u32::from((opacity * 127.0) as u8) << 1) | u32::from(placed)) as f32] }
     }
 
-    /// `collisionLayoutVertex(a, anchor, o)`.
     #[must_use]
     pub fn collision_layout_vertex(a: Point<f32>, anchor: Point<f32>, o: Point<f32>) -> CollisionBoxLayoutVertex {
         CollisionBoxLayoutVertex {
@@ -795,14 +768,12 @@ impl SymbolBucket {
         }
     }
 
-    /// `collisionDynamicVertex(placed, notUsed, shift)`.
     #[must_use]
     pub fn collision_dynamic_vertex(placed: bool, not_used: bool, shift: Point<f32>) -> CollisionBoxDynamicVertex {
         CollisionBoxDynamicVertex { a1: [u16::from(placed), u16::from(not_used)], a2: [shift.x, shift.y] }
     }
 }
 
-/// `addPlacedSymbol(triangles, placedSymbol)`.
 fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
     let end_index = placed_symbol.start_index + placed_symbol.glyph_offsets.len() * 4;
     let mut vertex_index = placed_symbol.start_index;
@@ -813,8 +784,8 @@ fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
     }
 }
 
-/// `getSortedSymbols(angle)`: indices of `symbolInstances`, sorted by
-/// viewport Y, then by descending data feature index. Equal keys keep their
+/// Returns the indices of `symbol_instances`, sorted by viewport Y at
+/// `angle`, then by descending data feature index. Equal keys keep their
 /// index order.
 #[must_use]
 pub fn get_sorted_symbols(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
@@ -852,9 +823,7 @@ impl Bucket for SymbolBucket {
             || self.has_text_collision_circle_data()
     }
 
-    /// `update(states, layer, layerID, imagePositions)` (feature state).
-    /// text-conformance: this is the `Bucket` override (it was an inherent
-    /// method, so `GeometryTile`'s `bucket.update` hit the no-op default).
+    /// Re-evaluates the feature-state dependent attribute values.
     fn update(
         &self,
         states: &FeatureStates,
@@ -873,7 +842,7 @@ impl Bucket for SymbolBucket {
     }
 }
 
-/// `TextSize::defaultValue()` / `IconSize::defaultValue()` as `f32`.
+/// The default `text-size` or `icon-size`, as `f32`.
 trait DefaultValueF32 {
     fn default_value_f32() -> f32;
 }

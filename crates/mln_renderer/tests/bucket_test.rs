@@ -1,6 +1,3 @@
-// Ports test/gl/bucket.test.cpp (the Buckets.* tests; the OpenGL headless
-// backend is the WebGPU one here) and test/renderer/fill_bucket.test.cpp.
-
 use std::any::Any;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -48,7 +45,6 @@ use mln_vec_map::VecMap;
 use mln_webgpu::upload_pass::UploadPass as WebGpuUploadPass;
 use mln_webgpu::{Device, OffscreenTarget};
 
-/// `StubGeometryTileFeature(id, type, geometry, properties)`.
 struct StubGeometryTileFeature {
     properties: PropertyMap,
     id: Identifier,
@@ -181,7 +177,7 @@ fn fill_extrusion_bucket_rounds_corners() {
     assert_eq!(fill_extrusion_vertex_count(&square, 10.0), 21);
 }
 
-/// `StubIndexBuffer`: an index buffer that stands in for an upload.
+/// An index buffer that stands in for an upload.
 struct StubIndexBuffer;
 
 impl IndexBufferBase for StubIndexBuffer {
@@ -649,7 +645,7 @@ impl Observer for Recorder {
     }
 }
 
-/// `FixtureLog` for the calling thread.
+/// Captures the calling thread's log records.
 struct FixtureLog(Records);
 
 impl FixtureLog {

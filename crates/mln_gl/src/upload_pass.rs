@@ -1,6 +1,3 @@
-// Ports src/mln/gl/upload_pass.hpp, src/mln/gl/upload_pass.cpp and
-// src/mln/gl/vertex_attribute_gl.cpp
-//
 // Differences from C++:
 // - `buildAttributeBindings` gives every attribute with data of its own a
 //   buffer of its own, as the Metal backend does. C++ converts those values
@@ -34,8 +31,7 @@ pub struct UploadPass {
     context: Rc<Context>,
 }
 
-/// `struct VertexBufferGL : gfx::VertexBufferBase`: the buffer attached to a
-/// shared vertex vector.
+/// The buffer attached to a shared vertex vector.
 struct VertexBuffer {
     resource: Rc<VertexBufferResource>,
 }
@@ -47,7 +43,6 @@ impl VertexBufferBase for VertexBuffer {
 }
 
 impl UploadPass {
-    /// `UploadPass(commandEncoder, name)`
     #[must_use]
     pub fn new(command_encoder: &CommandEncoder, _name: &str) -> Self {
         UploadPass { context: command_encoder.get_context().clone() }
@@ -93,7 +88,6 @@ impl UploadPass {
         )
     }
 
-    /// `getBuffer(const VertexVectorBasePtr&, usage)`
     #[must_use]
     pub fn get_buffer(
         &self,

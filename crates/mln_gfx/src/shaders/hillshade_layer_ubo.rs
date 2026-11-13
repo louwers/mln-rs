@@ -1,11 +1,8 @@
-// Ports include/mln/shaders/hillshade_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
 /// Maximum number of illumination sources supported
 pub const MAX_ILLUMINATION_SOURCES: usize = 4;
 
-/// `enum class HillshadeMethod : int32_t`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
 pub enum HillshadeMethod {
@@ -16,7 +13,7 @@ pub enum HillshadeMethod {
     Basic = 4,
 }
 
-/// `struct alignas(16) HillshadeDrawableUBO` (64 bytes).
+/// The hillshade shader's per-drawable uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct HillshadeDrawableUBO {
@@ -25,7 +22,7 @@ pub struct HillshadeDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<HillshadeDrawableUBO>() == 4 * 16);
 
-/// `struct alignas(16) HillshadeTilePropsUBO` (32 bytes).
+/// The hillshade shader's per-tile uniform block (32 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct HillshadeTilePropsUBO {

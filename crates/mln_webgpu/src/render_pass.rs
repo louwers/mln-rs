@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/render_pass.hpp and src/mln/webgpu/render_pass.cpp
-//
 // The C++ pass keeps the descriptor (with a `Renderable&`); drawables read
 // `getDescriptor().renderable` for its size (and pass it, unused, to
 // `getRenderPipeline`). The port keeps the size and an identity of the
@@ -159,7 +157,7 @@ impl RenderPass {
         pass
     }
 
-    /// `getEncoder()`: the wgpu render pass, `None` if it failed to begin.
+    /// The wgpu render pass, `None` if it failed to begin.
     /// Its user may set any state, so [`state_filter`](Self::state_filter)
     /// forgets the state it knew.
     pub fn get_encoder(&self) -> RefMut<'_, Option<wgpu::RenderPass<'static>>> {
@@ -178,7 +176,6 @@ impl RenderPass {
         self.encoder.borrow().is_some()
     }
 
-    /// `getDescriptor().renderable.getSize()`
     pub fn get_renderable_size(&self) -> Size {
         self.renderable_size
     }
@@ -191,8 +188,8 @@ impl RenderPass {
         &self.context
     }
 
-    /// `setGlobalUniformBuffers(ptr)`: bound or not; the array is the
-    /// context's (`Context::bindGlobalUniformBuffers`).
+    /// Sets whether the global uniform buffers are bound; the array is the
+    /// context's.
     pub fn set_global_uniform_buffers(&self, bound: bool) {
         self.global_uniform_buffers_bound.set(bound);
     }

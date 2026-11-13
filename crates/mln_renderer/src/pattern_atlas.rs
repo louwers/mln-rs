@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/pattern_atlas.hpp and src/mln/renderer/pattern_atlas.cpp.
-
 use std::collections::HashMap;
 
 use geometry::Point;
@@ -40,7 +38,6 @@ impl Default for PatternAtlas {
 }
 
 impl PatternAtlas {
-    /// `PatternAtlas() : shelfPack(64, 64, shelfPackOptions())`.
     #[must_use]
     pub fn new() -> Self {
         PatternAtlas {
@@ -52,13 +49,11 @@ impl PatternAtlas {
         }
     }
 
-    /// `getPattern(id)`.
     #[must_use]
     pub fn get_pattern(&self, id: &str) -> Option<ImagePosition> {
         self.patterns.get(id).map(|pattern| pattern.position.clone())
     }
 
-    /// `addPattern(const style::Image::Impl&)`.
     pub fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
         if self.patterns.contains_key(&image.id) {
             return None;
@@ -110,7 +105,6 @@ impl PatternAtlas {
         Some(position)
     }
 
-    /// `removePattern(id)`.
     pub fn remove_pattern(&mut self, id: &str) {
         if let Some(pattern) = self.patterns.remove(id) {
             // Clear pattern from the atlas image.
@@ -127,7 +121,7 @@ impl PatternAtlas {
         Size::new(self.shelf_pack.width() as u32, self.shelf_pack.height() as u32)
     }
 
-    /// `upload(gfx::UploadPass&)`.
+    /// Uploads the atlas image to its texture.
     ///
     /// Deviation: when the atlas grew since the texture was created, the
     /// texture is created again. C++ uploads the larger image into the old
@@ -155,7 +149,6 @@ impl PatternAtlas {
         self.dirty = false;
     }
 
-    /// `texture()`.
     #[must_use]
     pub fn texture(&self) -> Option<&Texture2DPtr> {
         self.atlas_texture_2d.as_ref()
@@ -166,7 +159,6 @@ impl PatternAtlas {
         &self.atlas_image
     }
 
-    /// `isEmpty()`.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.patterns.is_empty()

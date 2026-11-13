@@ -1,6 +1,3 @@
-// Ports test/util/tile_lod.test.cpp (util::TileZoomFunction and
-// util::elevationForTileCulling live in mln_renderer::util::tile_lod).
-
 use mln_math::deg2rad;
 use mln_renderer::util::tile_lod::{self, TileZoomFunction};
 
@@ -21,7 +18,8 @@ fn assert_near(val1: f64, val2: f64, abs_error: f64) {
     assert!((val1 - val2).abs() <= abs_error, "|{val1} - {val2}| > {abs_error}");
 }
 
-/// `util::TileZoomFunction(fov)`: C++ defaults the other two arguments.
+/// A tile zoom function for `camera_vertical_fov_degrees`, with the default
+/// other arguments.
 fn tile_zoom_function(camera_vertical_fov_degrees: f64) -> TileZoomFunction {
     TileZoomFunction::new(
         camera_vertical_fov_degrees,

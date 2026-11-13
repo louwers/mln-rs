@@ -1,4 +1,4 @@
-//! Ports `src/mln/renderer/sources`.
+//! The render sources: the renderer's side of each style source type.
 //!
 //! TODO(port): the annotation source.
 

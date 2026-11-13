@@ -1,12 +1,10 @@
-// Ports `shaders::ClipUBO` from include/mln/shaders/webgpu/clipping_mask.hpp.
-//
 // Lives in mln_gfx because the renderer builds the UBOs
 // (`PaintParameters::renderTileClippingMasks`, paint_parameters.cpp) and
 // passes them to `Context::render_tile_clipping_masks`.
 
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) ClipUBO` (80 bytes)
+/// The clipping mask uniform block (80 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct ClipUBO {

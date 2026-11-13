@@ -1,5 +1,3 @@
-// Ports src/mln/gl/context.hpp and src/mln/gl/context.cpp
-//
 // Resources hold a `Weak<Context>` where C++ holds `Context&`: a resource
 // that outlives the context has nothing left to delete, and the context can
 // cache resources of its own.
@@ -95,7 +93,6 @@ struct ClipMasks {
     /// Where the Mercator shader takes its matrix.
     matrix_location: Option<UniformLocation>,
     globe_shader: Option<Weak<dyn ShaderProgramBase>>,
-    /// `RenderStaticData::tileVertices()` and `quadTriangleIndices()`.
     tile_mesh: Option<ClipMesh>,
     /// The globe's clip mask meshes, by zoom, whether the tile is on the
     /// top or bottom row (with a pole cap) and whether it has a border.
@@ -132,7 +129,7 @@ pub struct Context {
     clip_masks: RefCell<ClipMasks>,
 }
 
-/// `clipMaskStencilMode`, writing `stencil_ref`.
+/// The stencil mode that draws a clipping mask, writing `stencil_ref`.
 fn clip_mask_stencil_mode(stencil_ref: i32) -> StencilMode {
     StencilMode {
         test: Test::Always,
@@ -145,7 +142,7 @@ fn clip_mask_stencil_mode(stencil_ref: i32) -> StencilMode {
 }
 
 impl Context {
-    /// `Context(RendererBackend&)`. The backend's context must be current.
+    /// Creates the context of `backend`, whose GL context must be current.
     #[must_use]
     pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         let gl = backend.gl();
@@ -194,7 +191,6 @@ impl Context {
         self.weak_self.clone()
     }
 
-    /// `getBackend()`
     pub fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
     }
@@ -413,8 +409,8 @@ impl Context {
 
     // --- shaders ---
 
-    /// `createShader(type, sources)`: compiles the concatenated `sources`,
-    /// or returns the compiler's log.
+    /// Compiles the concatenated `sources` as a shader of `type_`, or returns
+    /// the compiler's log.
     pub fn create_shader(&self, type_: u32, sources: &[&str]) -> Result<ShaderID, String> {
         let gl = self.gl();
         // SAFETY: the shader is new, and deleted if it doesn't compile.
@@ -431,8 +427,8 @@ impl Context {
         }
     }
 
-    /// `createProgram(vertexShader, fragmentShader, location0AttribName)` and
-    /// `linkProgram`: links the shaders, which it deletes, or returns the
+    /// Links the shaders, which it deletes, into a program with
+    /// `location0_attrib_name` at attribute location 0, or returns the
     /// linker's log.
     pub fn create_program(
         &self,
@@ -466,22 +462,18 @@ impl Context {
 
     // --- render state ---
 
-    /// `setDepthMode`
     pub fn set_depth_mode(&self, depth: &DepthMode) {
         self.state.set_depth_mode(self.gl(), depth);
     }
 
-    /// `setStencilMode`
     pub fn set_stencil_mode(&self, stencil: &StencilMode) {
         self.state.set_stencil_mode(self.gl(), stencil);
     }
 
-    /// `setColorMode`
     pub fn set_color_mode(&self, color: &ColorMode) {
         self.state.set_color_mode(self.gl(), color);
     }
 
-    /// `setCullFaceMode`
     pub fn set_cull_face_mode(&self, mode: &CullFaceMode) {
         self.state.set_cull_face_mode(self.gl(), mode);
     }
@@ -492,8 +484,8 @@ impl Context {
         self.state.set_dirty();
     }
 
-    /// `setScissorTest`. The renderer's rectangles have their origin at the
-    /// top left, as on WebGPU and Metal; GL's is at the bottom left. A
+    /// Sets the scissor rectangle. The renderer's rectangles have their origin
+    /// at the top left, as on WebGPU and Metal; GL's is at the bottom left. A
     /// rectangle that covers the framebuffer turns the test off.
     pub fn set_scissor_test(&self, rect: &ScissorRect) {
         let size = self.framebuffer_size.get();
@@ -507,7 +499,6 @@ impl Context {
         self.state.set_scissor(self.gl(), scissor);
     }
 
-    /// `clear(color, depth, stencil)`
     pub fn clear(&self, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
         self.state.clear(self.gl(), color, depth, stencil);
     }
@@ -530,13 +521,12 @@ impl Context {
         (self.framebuffer.get(), self.framebuffer_size.get(), self.framebuffer_has_stencil.get())
     }
 
-    /// `hasStencilBuffer()`, of the framebuffer being drawn into.
+    /// Whether the framebuffer being drawn into has a stencil buffer.
     pub fn has_stencil_buffer(&self) -> bool {
         self.framebuffer_has_stencil.get()
     }
 
-    /// `readFramebuffer<PremultipliedImage>(size, flip = true)`: the RGBA
-    /// pixels of the bound framebuffer, the top row first.
+    /// Reads the RGBA pixels of the bound framebuffer, the top row first.
     pub fn read_framebuffer(&self, size: Size) -> Vec<u8> {
         let stride = size.width as usize * 4;
         let mut data = vec![0u8; stride * size.height as usize];
@@ -626,7 +616,7 @@ impl Context {
 
     // --- textures ---
 
-    /// `createTexture2D()` with the concrete type.
+    /// Creates a texture, of the concrete type.
     pub fn create_gl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self.weak())))
     }
@@ -676,7 +666,6 @@ impl Context {
         self.state.set_scissor(self.gl(), None);
     }
 
-    /// `renderTileClippingMasks(renderPass, staticData, tileUBOs)`
     fn render_tile_clipping_masks_impl(&self, shaders: &ShaderRegistry, tile_ubos: &[ClipUBO]) -> bool {
         // Without a stencil buffer every stencil test passes.
         if !self.has_stencil_buffer() {
@@ -730,8 +719,8 @@ impl Context {
         true
     }
 
-    /// `renderGlobeTileClippingMasks(renderPass, staticData, masks)`, with
-    /// `mesh` making a tile's mesh in place of C++'s `rawGlobeTileMesh`.
+    /// Draws the globe's tile clipping masks, with `mesh` making a tile's
+    /// mesh in place of C++'s `rawGlobeTileMesh`.
     fn render_globe_tile_clipping_masks_impl(
         &self,
         shaders: &ShaderRegistry,
@@ -862,9 +851,10 @@ impl GfxContext for Context {
         unsafe { self.gl().finish() };
     }
 
-    /// `createOffscreenTexture(size, type)`. Where a half-float texture
-    /// can't be rendered into (a WebGL2 without `EXT_color_buffer_float`), the
-    /// texture has bytes, as the heatmap's has in C++ on such a context.
+    /// Creates an offscreen texture of `size` with `type_` channels. Where a
+    /// half-float texture can't be rendered into (a WebGL2 without
+    /// `EXT_color_buffer_float`), the texture has bytes, as the heatmap's has
+    /// in C++ on such a context.
     fn create_offscreen_texture(
         &self,
         size: Size,

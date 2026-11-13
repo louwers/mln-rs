@@ -1,8 +1,3 @@
-// Ports src/mln/renderer/sources/render_raster_dem_source.hpp and
-// src/mln/renderer/sources/render_raster_dem_source.cpp (with the
-// RenderTileSetSource half of render_tile_source.cpp, as
-// render_raster_source.rs).
-//
 // C++ backfills the DEM borders in `onTileChanged`, when a tile has been
 // parsed. Here the tiles' observer is shared by the tiles and can't reach
 // the pyramid, so `update` (which runs before every frame's layer updates)
@@ -34,10 +29,9 @@ use crate::tile::raster_dem_tile::{DEMTileNeighbors, RasterDEMTile};
 use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
-/// `RenderRasterDEMSource` (a `RenderTileSetSource`).
+/// The render source of a raster-dem source.
 pub struct RenderRasterDEMSource {
     tile_source: RenderTileSource,
-    /// `RenderTileSetSource::cachedTileset`.
     cached_tileset: Option<Tileset>,
 }
 
@@ -68,8 +62,6 @@ impl RenderRasterDEMSource {
         static_immutable_cast::<tile_source::Impl>(&self.tile_source.base.base_impl)
     }
 
-    /// `updateInternal(tileset, layers, needsRendering, needsRelayout,
-    /// parameters)`.
     fn update_internal(
         &mut self,
         tileset: &Tileset,
@@ -112,8 +104,8 @@ impl RenderRasterDEMSource {
         }
     }
 
-    /// `onTileChanged(Tile&)` (without the forward to `RenderTileSource`,
-    /// which the tile's observer does).
+    /// Backfills the borders of `demtile` and its neighbours from each other.
+    /// The tile's observer forwards the change to the `RenderTileSource`.
     fn on_tile_changed(&self, demtile: &RasterDEMTile) {
         if !(demtile.is_renderable() && demtile.neighboring_tiles() != DEMTileNeighbors::COMPLETE) {
             return;
@@ -183,7 +175,6 @@ impl RenderSource for RenderRasterDEMSource {
         self.tile_source.is_loaded()
     }
 
-    /// `RenderTileSetSource::update`.
     fn update(
         &mut self,
         base_impl: Immutable<dyn source::Impl>,
@@ -265,7 +256,6 @@ impl RenderSource for RenderRasterDEMSource {
         self.tile_source.dump_debug_logs();
     }
 
-    /// `RenderTileSetSource::getMaxZoom()`.
     fn get_max_zoom(&self) -> u8 {
         self.cached_tileset.as_ref().map_or(constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
     }

@@ -1,5 +1,3 @@
-// Ports test/renderer/style_diff.test.cpp.
-
 use std::sync::Arc;
 
 use mln_renderer::style_diff::diff_layers;

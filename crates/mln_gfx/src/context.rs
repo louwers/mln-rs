@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/context.hpp and src/mln/gfx/context.cpp
-//
 // All methods take `&self`: the context is reached from everywhere
 // (`PaintParameters`, render layers, upload passes) and wgpu's API is `&self`
 // too; the backend keeps mutable state in cells.
@@ -142,7 +140,7 @@ pub trait Context: Any {
 }
 
 impl dyn Context {
-    /// `emplaceOrUpdateUniformBuffer<T>(ptr, const T* data)` for a `Pod` UBO.
+    /// `emplace_or_update_uniform_buffer` with the bytes of a `Pod` UBO.
     pub fn emplace_or_update_uniform_buffer_pod<T: bytemuck::Pod>(
         &self,
         ptr: &mut Option<UniformBufferPtr>,

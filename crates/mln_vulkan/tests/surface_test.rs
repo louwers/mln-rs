@@ -166,10 +166,10 @@ fn surface_backend(size: Size, cap_frame_rate: bool) -> Option<Window> {
     surface_backend_on(Rc::default(), size, cap_frame_rate)
 }
 
-/// `PaintParameters::numSublayers` and `depthEpsilon`.
 const NUM_SUBLAYERS: u32 = 3;
 const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
-/// `1 - (numLayerGroups() + 2) * numSublayers * depthEpsilon` for one layer group.
+/// `1 - (layer_groups + 2) * NUM_SUBLAYERS * DEPTH_EPSILON`, for one layer
+/// group.
 const DEPTH_RANGE_SIZE: f32 = 1.0 - ((1 + 2) * NUM_SUBLAYERS) as f32 * DEPTH_EPSILON;
 
 /// The gfx-facing part of the renderer's `PaintParameters`, as in

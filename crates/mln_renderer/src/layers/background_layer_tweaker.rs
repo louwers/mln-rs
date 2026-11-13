@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/background_layer_tweaker.hpp and
-// src/mln/renderer/layers/background_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
-// branches: the port's backend is WebGPU).
-
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
@@ -35,7 +31,6 @@ impl BackgroundLayerTweaker {
     }
 }
 
-/// `util::cast<float>(mat4)`.
 fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
     std::array::from_fn(|i| m[i] as f32)
 }

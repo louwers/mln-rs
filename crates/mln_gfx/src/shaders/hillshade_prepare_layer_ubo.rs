@@ -1,8 +1,6 @@
-// Ports include/mln/shaders/hillshade_prepare_layer_ubo.hpp
-
 use bytemuck::{Pod, Zeroable};
 
-/// `struct alignas(16) HillshadePrepareDrawableUBO` (64 bytes).
+/// The hillshade prepare shader's per-drawable uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct HillshadePrepareDrawableUBO {
@@ -11,7 +9,7 @@ pub struct HillshadePrepareDrawableUBO {
 }
 const _: () = assert!(std::mem::size_of::<HillshadePrepareDrawableUBO>() == 4 * 16);
 
-/// `struct alignas(16) HillshadePrepareTilePropsUBO` (32 bytes).
+/// The hillshade prepare shader's per-tile uniform block (32 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct HillshadePrepareTilePropsUBO {

@@ -1,6 +1,3 @@
-// Ports the structs of include/mln/shaders/layer_ubo.hpp (the id enum is in
-// shader_defines.rs).
-
 use bytemuck::{Pod, Zeroable};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,7 +16,7 @@ pub enum ExpressionFunction {
     Exponential,
 }
 
-/// `struct alignas(16) GlobalPaintParamsUBO` (48 bytes).
+/// The global paint parameters uniform block (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct GlobalPaintParamsUBO {
@@ -36,8 +33,8 @@ pub struct GlobalPaintParamsUBO {
 }
 const _: () = assert!(std::mem::size_of::<GlobalPaintParamsUBO>() == 3 * 16);
 
-/// `struct alignas(16) ProjectionUBO` (176 bytes): the per-drawable
-/// projection block (see `ProjectionData`).
+/// The per-drawable projection uniform block (176 bytes); see
+/// `ProjectionData`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct ProjectionUBO {

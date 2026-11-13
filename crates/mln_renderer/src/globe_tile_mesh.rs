@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/globe_tile_mesh.hpp.
-//
 // The C++ templates take the layout function's type; here it is a function
 // pointer, `fn(Point<i16>, Point<u16>) -> V`, as `decltype(&layoutVertex)`
 // is in C++.
@@ -158,8 +156,9 @@ pub struct RawGlobeTileMesh {
     pub segments: Vec<SegmentBase>,
 }
 
-/// `rawGlobeTileMesh(canonical, generateBorders, granularity)`; C++ defaults
-/// `granularity` to the globe's tile granularity.
+/// The globe mesh of the tile `canonical`, with borders if
+/// `generate_borders`. C++ defaults `granularity` to the globe's tile
+/// granularity.
 #[must_use]
 pub fn raw_globe_tile_mesh(
     canonical: &CanonicalTileID,

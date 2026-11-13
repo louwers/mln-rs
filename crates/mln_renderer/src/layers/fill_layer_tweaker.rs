@@ -1,7 +1,3 @@
-// Ports src/mln/renderer/layers/fill_layer_tweaker.hpp and
-// src/mln/renderer/layers/fill_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
-// branches: the port's backend is WebGPU).
-
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::fill_layer_ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO,
@@ -50,7 +46,6 @@ impl FillLayerTweaker {
     }
 }
 
-/// `util::cast<float>(std::array<uint16_t, 4>)`.
 fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
     [f32::from(a[0]), f32::from(a[1]), f32::from(a[2]), f32::from(a[3])]
 }

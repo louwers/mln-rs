@@ -1,6 +1,3 @@
-// Ports include/mln/shaders/program_parameters.hpp and
-// src/mln/shaders/program_parameters.cpp
-
 use std::cell::OnceCell;
 
 use mln_vec_map::VecMap;

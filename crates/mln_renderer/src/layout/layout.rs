@@ -1,5 +1,3 @@
-// Ports src/mln/layout/layout.hpp.
-//
 // C++ hands `createLayout` a `std::unique_ptr<GeometryTileLayer>` that owns
 // (a share of) the tile data. A Rust `GeometryTileLayer` borrows its
 // `GeometryTileData`, and the worker keeps layouts with pending
@@ -44,10 +42,8 @@ impl SourceLayer {
     }
 }
 
-/// `Layout`.
 pub trait Layout: Send {
-    /// `createBucket(patternPositions, featureIndex, renderData, firstLoad,
-    /// showCollisionBoxes, canonical)`. A feature that fails to lay out,
+    /// Creates the bucket. A feature that fails to lay out,
     /// such as one that [`geometry_too_long`](crate::bucket::geometry_too_long)
     /// reports, fails the bucket; the worker reports it as the tile's error.
     fn create_bucket(
@@ -66,8 +62,8 @@ pub trait Layout: Send {
 
     fn has_dependencies(&self) -> bool;
 
-    /// `prepareSymbols(glyphMap, glyphPositions, imageMap, imagePositions)`
-    /// (symbol layouts; the default does nothing, as in C++).
+    /// Prepares a symbol layout's symbols once its glyphs and images are
+    /// available. The default does nothing.
     fn prepare_symbols(
         &mut self,
         _glyph_map: &GlyphMap,
@@ -77,16 +73,13 @@ pub trait Layout: Send {
     ) {
     }
 
-    /// `needFinalizeSymbols()`.
     fn need_finalize_symbols(&self) -> bool {
         false
     }
 
-    /// `finalizeSymbols(HBShapeResults&)`.
     fn finalize_symbols(&mut self, _results: &mut HBShapeResults) {}
 }
 
-/// `LayoutParameters`.
 pub struct LayoutParameters<'a> {
     pub bucket_parameters: &'a BucketParameters,
     /// symbols: `std::shared_ptr<FontFaces> fontFaces`.

@@ -1,5 +1,3 @@
-// Ports src/mln/algorithm/update_renderables.hpp.
-//
 // C++ passes four callbacks that all touch the caller's tile map and hands
 // `Tile*`s between them. Here the caller implements `RenderablesContext`,
 // and tiles are named by their key in the caller's tile storage (the
@@ -14,17 +12,15 @@ use crate::tile::tile::TileNecessity;
 
 /// The tile storage and the callbacks `updateRenderables` works with.
 pub trait RenderablesContext {
-    /// `getTile(tileID)`: the key of the existing tile, if any.
+    /// Returns the key of the existing tile with this id, if there is one.
     fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID>;
-    /// `createTile(tileID)`: creates and stores the tile; `None` if none
-    /// is created (e.g. outside TileJSON bounds).
+    /// Creates and stores the tile with this id and returns its key; `None`
+    /// if no tile is created (e.g. outside the TileJSON bounds).
     fn create_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID>;
-    /// `retainTile(tile, necessity)`.
     fn retain_tile(&mut self, tile: &OverscaledTileID, necessity: TileNecessity);
-    /// `renderTile(tileID, tile)`.
     fn render_tile(&mut self, id: &UnwrappedTileID, tile: &OverscaledTileID);
 
-    /// `prefetchedTiles`: (tile id, storage key) pairs.
+    /// Returns the prefetched tiles, as (tile id, storage key) pairs.
     fn prefetched_tiles(&self) -> Vec<PrefetchedTile>;
 
     fn is_renderable(&self, tile: &OverscaledTileID) -> bool;
@@ -35,9 +31,6 @@ pub trait RenderablesContext {
 /// A `PrefetchedTileMap` entry: a tile's id, and its key in the storage.
 pub type PrefetchedTile = (OverscaledTileID, OverscaledTileID);
 
-/// `algorithm::updateRenderables(getTile, createTile, retainTile,
-/// renderTile, idealTileIDs, prefetchedTiles, zoomRange,
-/// maxParentOverscaleFactor)`.
 pub fn update_renderables<C: RenderablesContext>(
     ctx: &mut C,
     ideal_tile_ids: &[OverscaledTileID],

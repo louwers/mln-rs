@@ -1,8 +1,3 @@
-// Ports src/mln/renderer/render_orchestrator.hpp and
-// src/mln/renderer/render_orchestrator.cpp: the style diffing of layer
-// impls into render layers, layer evaluation, the render tree, and the layer
-// group bookkeeping of the drawable path.
-//
 // The orchestrator is the RenderSourceObserver of its render sources; their
 // tiles call it from asynchronous replies while the orchestrator is owned by
 // the renderer, so that half is `OrchestratorSourceObserver`, an `Rc` that
@@ -107,7 +102,6 @@ struct OrchestratorGlyphObserver {
 }
 
 impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObserver {
-    /// `onGlyphsError(fontStack, glyphRange, error)`.
     fn on_glyphs_error(
         &self,
         font_stack: &mln_util::font_stack::FontStack,
@@ -134,12 +128,10 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
         self.events.emit(RendererEvent::ResourceError(error));
     }
 
-    /// `onGlyphsLoaded(fontStack, range)`.
     fn on_glyphs_loaded(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
         self.events.emit(RendererEvent::GlyphsLoaded { font_stack: font_stack.clone(), range: *range });
     }
 
-    /// `onGlyphsRequested(fontStack, range)`.
     fn on_glyphs_requested(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
         self.events.emit(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range: *range });
     }
@@ -151,12 +143,10 @@ struct OrchestratorSourceObserver {
 }
 
 impl RenderSourceObserver for OrchestratorSourceObserver {
-    /// `onTileChanged(RenderSource&, const OverscaledTileID&)`.
     fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {
         self.events.emit(RendererEvent::Invalidate);
     }
 
-    /// `onTileError(RenderSource&, const OverscaledTileID&, std::exception_ptr)`.
     fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: Error) {
         Log::error(Event::Style, format!("Failed to load tile {tile_id} for source {source_id}: {error}"));
         self.events.emit(RendererEvent::ResourceError(error));
@@ -167,8 +157,6 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
         self.events.emit(RendererEvent::Invalidate);
     }
 
-    /// `onTileAction(RenderSource&, TileOperation, const OverscaledTileID&,
-    /// const std::string&)`.
     fn on_tile_action(&self, _source_id: &str, op: TileOperation, tile_id: &OverscaledTileID, tile_source_id: &str) {
         self.events.emit(RendererEvent::TileAction { op, id: *tile_id, source_id: tile_source_id.to_owned() });
     }
@@ -232,15 +220,14 @@ pub struct RenderOrchestrator {
 
     global_state: Option<Arc<GlobalStateMap>>,
 
-    /// `std::multimap<int32_t, LayerGroupBasePtr>`: ordered by layer index,
-    /// insertion order within an index.
+    /// Ordered by layer index, and by insertion order within an index.
     layer_groups_by_layer_index: VecMap<i32, Vec<LayerGroupBasePtr>>,
 
     /// The `layerTweakers` (weak pointers) each C++ `LayerGroupBase` holds,
     /// keyed by the layer group's id (see `change_request.rs`).
     layer_group_tweakers: HashMap<SimpleIdentity, Vec<Weak<RefCell<dyn LayerTweaker>>>>,
 
-    /// `RenderItem::DebugLayerGroupMap debugLayerGroups` (layers: debug).
+    /// The debug layer groups (layers: debug).
     debug_layer_groups: crate::render_tree::DebugLayerGroupMap,
     /// The tweaker of each debug layer group, with the group it was made
     /// for. The render items that fill the groups last one frame, so the
@@ -260,9 +247,6 @@ pub struct RenderOrchestrator {
 }
 
 impl RenderOrchestrator {
-    /// `RenderOrchestrator(bool backgroundLayerAsColor, TaggedScheduler&,
-    /// const std::optional<std::string>& localFontFamily,
-    /// std::shared_ptr<GlyphCache>)`.
     // C++ gets the map's thread pool; the port uses the background pool
     // with its own tag.
     pub fn new(
@@ -339,12 +323,11 @@ impl RenderOrchestrator {
         self.events.emit(event);
     }
 
-    /// `getRenderSource(id)`.
     pub fn get_render_source(&self, id: &str) -> Option<&dyn RenderSource> {
         self.render_sources.get(id).map(AsRef::as_ref)
     }
 
-    /// `RenderTree::getLineAtlas()` (the orchestrator's atlas).
+    /// The orchestrator's line atlas.
     pub fn get_line_atlas(&self) -> &Rc<RefCell<LineAtlas>> {
         &self.line_atlas
     }
@@ -1135,21 +1118,19 @@ impl RenderOrchestrator {
         self.layer_groups_by_layer_index.values().flatten().cloned().collect()
     }
 
-    /// `visitLayerGroups(f)`.
     pub fn visit_layer_groups(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
         for group in self.layer_groups() {
             f(&mut *group.borrow_mut());
         }
     }
 
-    /// `visitLayerGroupsReversed(f)`.
     pub fn visit_layer_groups_reversed(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
         for group in self.layer_groups().into_iter().rev() {
             f(&mut *group.borrow_mut());
         }
     }
 
-    /// `updateDebugLayerGroups(renderTree, parameters)` (layers: debug).
+    /// Updates the debug layer groups (layers: debug).
     pub fn update_debug_layer_groups(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
         for item in render_tree.get_source_render_items() {
             item.update_debug_drawables(&mut self.debug_layer_groups, parameters);
@@ -1182,8 +1163,7 @@ impl RenderOrchestrator {
         self.debug_layer_groups.values().cloned().collect()
     }
 
-    /// `LayerGroupBase::runTweakers(renderTree, parameters)`: runs the live
-    /// tweakers of the group and drops the expired ones.
+    /// Runs the live tweakers of the layer group and drops the expired ones.
     pub fn run_tweakers(&mut self, layer_group: &LayerGroupBasePtr, parameters: &PaintParameters<'_>) {
         let id = layer_group.borrow().get_id();
         let Some(tweakers) = self.layer_group_tweakers.get_mut(&id) else {
@@ -1273,23 +1253,20 @@ impl RenderOrchestrator {
         );
     }
 
-    /// `moveFrameRenderedFeatures()`: the features the layers rendered in
-    /// the last `update_layers`, leaving none.
+    /// Takes the features the layers rendered in the last `update_layers`,
+    /// leaving none.
     pub fn move_frame_rendered_features(&mut self) -> FrameRenderedFeaturesMap {
         std::mem::take(&mut self.frame_rendered_features)
     }
 
-    /// `getSkyLayerGroup()`.
     pub fn get_sky_layer_group(&self) -> Option<LayerGroupBasePtr> {
         self.sky_pass.get_sky_layer_group().cloned()
     }
 
-    /// `getAtmosphereLayerGroup()`.
     pub fn get_atmosphere_layer_group(&self) -> Option<LayerGroupBasePtr> {
         self.sky_pass.get_atmosphere_layer_group().cloned()
     }
 
-    /// `getGlobeDepthLayerGroup()`.
     pub fn get_globe_depth_layer_group(&self) -> Option<LayerGroupBasePtr> {
         self.globe_depth_pass.get_layer_group().cloned()
     }
@@ -1323,7 +1300,6 @@ impl RenderOrchestrator {
     }
 
     // dem-heatmap: render targets.
-    /// `addRenderTarget(RenderTargetPtr)`.
     pub fn add_render_target(&mut self, render_target: crate::render_target::RenderTargetPtr) -> bool {
         if self.render_targets.iter().any(|t| Rc::ptr_eq(t, &render_target)) {
             false
@@ -1333,7 +1309,6 @@ impl RenderOrchestrator {
         }
     }
 
-    /// `removeRenderTarget(const RenderTargetPtr&)`.
     pub fn remove_render_target(&mut self, render_target: &crate::render_target::RenderTargetPtr) -> bool {
         match self.render_targets.iter().position(|t| Rc::ptr_eq(t, render_target)) {
             Some(pos) => {
@@ -1351,8 +1326,8 @@ impl RenderOrchestrator {
     }
 
     // query
-    /// `queryRenderedFeatures(geometry, options)`. `Err`: the exception C++
-    /// throws out of the query (a malformed tile).
+    /// Queries the rendered features in `geometry`. `Err` if the query fails
+    /// (a malformed tile).
     pub fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -1372,7 +1347,6 @@ impl RenderOrchestrator {
         self.query_rendered_features_in(geometry, options, &layers)
     }
 
-    /// `queryRenderedSymbols(resultsByLayer, geometry, layers, options)`.
     fn query_rendered_symbols(
         &self,
         results_by_layer: &mut crate::geometry::feature_index::QueryResults,
@@ -1431,7 +1405,6 @@ impl RenderOrchestrator {
         Ok(())
     }
 
-    /// `queryRenderedFeatures(geometry, options, layers)`.
     fn query_rendered_features_in(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -1495,12 +1468,12 @@ impl RenderOrchestrator {
         Ok(result)
     }
 
-    /// `getPlacedSymbolsData()` (a copy: the placement is shared).
+    /// A copy of the placed symbols' data (the placement is shared).
     pub fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
         self.placement_controller.get_placement().get_placed_symbols_data().to_vec()
     }
 
-    /// `querySourceFeatures(sourceID, options)`. `Err`: as
+    /// Queries the features of the source `source_id`. `Err`: as
     /// [`query_rendered_features`](Self::query_rendered_features).
     pub fn query_source_features(
         &self,
@@ -1514,8 +1487,8 @@ impl RenderOrchestrator {
         source.query_source_features(options, self.global_state.as_deref())
     }
 
-    /// `queryFeatureExtensions(sourceID, feature, extension, extensionField,
-    /// args)`: a null value for a source the style doesn't have.
+    /// Queries a feature extension of the source `source_id`; a null value
+    /// for a source the style doesn't have.
     pub fn query_feature_extensions(
         &self,
         source_id: &str,
@@ -1530,7 +1503,6 @@ impl RenderOrchestrator {
         }
     }
 
-    /// `dumpDebugLogs()`.
     pub fn dump_debug_logs(&self) {
         for source in self.render_sources.values() {
             source.dump_debug_logs();
@@ -1541,7 +1513,6 @@ impl RenderOrchestrator {
     // TODO(port): queryShapeAnnotations, queryFeatureExtensions, debug layer
     // groups and the glyph/tile observer callbacks.
     // layers: feature state
-    /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.
     pub fn set_feature_state(
         &mut self,
         source_id: &str,
@@ -1554,7 +1525,6 @@ impl RenderOrchestrator {
         }
     }
 
-    /// `getFeatureState(state, sourceID, sourceLayerID, featureID)`.
     pub fn get_feature_state(
         &self,
         source_id: &str,
@@ -1567,7 +1537,6 @@ impl RenderOrchestrator {
         }
     }
 
-    /// `removeFeatureState(sourceID, sourceLayerID, featureID, stateKey)`.
     pub fn remove_feature_state(
         &mut self,
         source_id: &str,
@@ -1592,7 +1561,6 @@ impl RenderOrchestrator {
         }
     }
 
-    /// `reduceMemoryUse()`.
     pub fn reduce_memory_use(&mut self) {
         self.filtered_layers_for_source.shrink_to_fit();
         for source in self.render_sources.values_mut() {

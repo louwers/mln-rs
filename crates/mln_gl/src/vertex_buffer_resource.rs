@@ -1,6 +1,3 @@
-// Ports src/mln/gl/vertex_buffer_resource.hpp/.cpp and
-// src/mln/gl/index_buffer_resource.hpp/.cpp
-
 use std::any::Any;
 use std::cell::Cell;
 use std::rc::Weak;
@@ -44,7 +41,6 @@ impl VertexBufferResource {
         VertexBufferResource { context: context.weak(), buffer, byte_size, last_updated: Cell::new(None) }
     }
 
-    /// `getBuffer()`
     pub fn get_buffer(&self) -> Option<BufferID> {
         self.buffer
     }
@@ -123,7 +119,6 @@ impl IndexBufferResource {
         IndexBufferResource { context: context.weak(), buffer, byte_size }
     }
 
-    /// `getBuffer()`
     #[must_use]
     pub fn get_buffer(&self) -> Option<BufferID> {
         self.buffer

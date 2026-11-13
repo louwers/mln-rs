@@ -1,7 +1,3 @@
-// Ports src/mln/text/cross_tile_symbol_index.hpp and
-// src/mln/text/cross_tile_symbol_index.cpp, plus
-// `SymbolBucket::registerAtCrossTileIndex` (symbol_bucket.cpp).
-//
 // C++ shares `maxCrossTileID` between the layer indexes by reference
 // (`uint32_t&`); here it is an `Rc<Cell<u32>>`. The bucket's symbol
 // instances live behind its state lock (see symbol_bucket.rs).
@@ -25,7 +21,6 @@ use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::RenderLayer;
 use crate::render_tile::RenderTile;
 
-/// `IndexedSymbolInstance`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IndexedSymbolInstance {
     pub cross_tile_id: u32,
@@ -39,7 +34,6 @@ impl IndexedSymbolInstance {
     }
 }
 
-/// `TileLayerIndex`.
 #[derive(Clone, Debug)]
 pub struct TileLayerIndex {
     pub coord: OverscaledTileID,
@@ -49,7 +43,6 @@ pub struct TileLayerIndex {
 }
 
 impl TileLayerIndex {
-    /// `TileLayerIndex(coord, symbolInstances, bucketInstanceId, bucketLeaderId)`.
     #[must_use]
     pub fn new(
         coord: OverscaledTileID,
@@ -73,7 +66,6 @@ impl TileLayerIndex {
         index
     }
 
-    /// `getScaledCoordinates(symbolInstance, childTileCoord)`.
     #[must_use]
     pub fn get_scaled_coordinates(
         &self,
@@ -92,7 +84,6 @@ impl TileLayerIndex {
         Point::new((f64::from(x) * scale).floor() as i64, (f64::from(y) * scale).floor() as i64)
     }
 
-    /// `findMatches(bucket, newCoord, zoomCrossTileIDs)`.
     pub fn find_matches(
         &self,
         symbol_instances: &mut [SymbolInstance],
@@ -142,7 +133,6 @@ impl TileLayerIndex {
     }
 }
 
-/// `isInVewport(posMatrix, point)`.
 fn is_in_viewport(projector: &TileProjector<'_>, point: Point<f32>) -> bool {
     // buffer covers area of the next zoom level (current zoom - 1 covered area).
     const BUFFER: f64 = 1.0;
@@ -153,9 +143,9 @@ fn is_in_viewport(projector: &TileProjector<'_>, point: Point<f32>) -> bool {
     !projected.occluded && (p.x > -EDGE && p.y > -EDGE && p.x < EDGE && p.y < EDGE)
 }
 
-/// `removeBucketCrossTileIDs(zoom, removedBucket)`. A free function over the
-/// used-ID sets so callers can pass an index that is still borrowed from
-/// `CrossTileSymbolLayerIndex::indexes`.
+/// Frees the cross-tile ids of a removed bucket at `zoom`. A free function
+/// over the used-ID sets so callers can pass an index that is still borrowed
+/// from `CrossTileSymbolLayerIndex::indexes`.
 fn remove_bucket_cross_tile_ids(
     used_cross_tile_ids: &mut VecMap<u8, BTreeSet<u32>>,
     zoom: u8,
@@ -168,7 +158,6 @@ fn remove_bucket_cross_tile_ids(
     }
 }
 
-/// `CrossTileSymbolLayerIndex`.
 #[derive(Debug)]
 pub struct CrossTileSymbolLayerIndex {
     indexes: VecMap<u8, VecMap<OverscaledTileID, TileLayerIndex>>,
@@ -178,7 +167,6 @@ pub struct CrossTileSymbolLayerIndex {
 }
 
 impl CrossTileSymbolLayerIndex {
-    /// `CrossTileSymbolLayerIndex(uint32_t& maxCrossTileID)`.
     pub fn new(max_cross_tile_id: Rc<Cell<u32>>) -> Self {
         CrossTileSymbolLayerIndex {
             indexes: VecMap::new(),
@@ -212,7 +200,6 @@ impl CrossTileSymbolLayerIndex {
         self.lng = new_lng;
     }
 
-    /// `addBucket(tileID, tileMatrix, bucket)`.
     pub fn add_bucket(
         &mut self,
         tile_id: &OverscaledTileID,
@@ -319,7 +306,6 @@ impl CrossTileSymbolLayerIndex {
         true
     }
 
-    /// `removeStaleBuckets(currentIDs)`.
     pub fn remove_stale_buckets(&mut self, current_ids: &HashSet<u32>) -> bool {
         let mut tiles_changed = false;
         let zooms: Vec<u8> = self.indexes.keys().copied().collect();
@@ -339,7 +325,7 @@ impl CrossTileSymbolLayerIndex {
     }
 }
 
-/// `CrossTileSymbolIndex::AddLayerResult` (bit flags).
+/// What adding a layer to the index changed, as bit flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AddLayerResult(pub u8);
 
@@ -348,7 +334,6 @@ impl AddLayerResult {
     pub const BUCKETS_ADDED: AddLayerResult = AddLayerResult(1 << 0);
     pub const BUCKETS_REMOVED: AddLayerResult = AddLayerResult(1 << 1);
 
-    /// C++ `bool operator&(AddLayerResult, AddLayerResult)`.
     #[must_use]
     pub fn contains(self, rhs: AddLayerResult) -> bool {
         (self.0 & rhs.0) != 0
@@ -361,7 +346,6 @@ impl std::ops::BitOrAssign for AddLayerResult {
     }
 }
 
-/// `CrossTileSymbolIndex`.
 #[derive(Debug, Default)]
 pub struct CrossTileSymbolIndex {
     layer_indexes: VecMap<String, CrossTileSymbolLayerIndex>,
@@ -374,7 +358,6 @@ impl CrossTileSymbolIndex {
         CrossTileSymbolIndex::default()
     }
 
-    /// `addLayer(layer, lng)`.
     pub fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, state: &TransformState) -> AddLayerResult {
         let max_cross_tile_id = self.max_cross_tile_id.clone();
         let layer_index = self
@@ -404,19 +387,17 @@ impl CrossTileSymbolIndex {
         result
     }
 
-    /// `pruneUnusedLayers(usedLayers)`.
     pub fn prune_unused_layers(&mut self, used_layers: &VecSet<String>) {
         self.layer_indexes.retain(|id, _| used_layers.contains(id));
     }
 
-    /// `reset()`.
     pub fn reset(&mut self) {
         self.layer_indexes.clear();
     }
 }
 
-/// `Bucket::registerAtCrossTileIndex(index, renderTile, state)`: only
-/// symbol buckets override the default `{0, false}`.
+/// Registers `bucket` at the cross-tile index. Only symbol buckets register;
+/// other buckets return `(0, false)`.
 pub fn register_at_cross_tile_index(
     bucket: &dyn Bucket,
     index: &mut CrossTileSymbolLayerIndex,
@@ -430,7 +411,6 @@ pub fn register_at_cross_tile_index(
 }
 
 impl SymbolBucket {
-    /// `registerAtCrossTileIndex(index, renderTile, state)`.
     pub fn register_at_cross_tile_index(
         &self,
         index: &mut CrossTileSymbolLayerIndex,
@@ -448,7 +428,6 @@ impl SymbolBucket {
 
 #[cfg(test)]
 mod tests {
-    // Ports test/text/cross_tile_symbol_index.test.cpp.
     use std::sync::Arc;
 
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;

@@ -1,5 +1,3 @@
-// Ports src/mln/geometry/dem_data.hpp and src/mln/geometry/dem_data.cpp
-//
 // C++ keeps the image behind a `shared_ptr` that textures share; here the
 // image is owned and textures get a copy (`get_image`), because the DEM
 // lives in a bucket shared between threads.
@@ -64,8 +62,7 @@ fn set_pixel(data: &mut [u8], i: usize, value: [u8; 4]) {
 }
 
 impl DEMData {
-    /// `DEMData(const PremultipliedImage&, Tileset::RasterEncoding)`. C++
-    /// throws `std::runtime_error("raster-dem tiles must be square.")`.
+    /// Decodes a DEM image with `encoding`; `Err` if the image isn't square.
     pub fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
         let dim = image.size.height as i32;
         // extra two pixels per row for border backfilling on either edge
@@ -205,13 +202,11 @@ impl DEMData {
             - unpack[3]) as i32
     }
 
-    /// `getUnpackVector()`.
     #[must_use]
     pub fn get_unpack_vector(&self) -> [f32; 4] {
         get_unpack_vector(self.encoding)
     }
 
-    /// `getImage()`.
     #[must_use]
     pub fn get_image(&self) -> &PremultipliedImage {
         &self.image
@@ -220,11 +215,10 @@ impl DEMData {
 
 #[cfg(test)]
 mod tests {
-    // Ports test/geometry/dem_data.test.cpp.
     use super::*;
 
-    /// `fakeImage(Size)`: alpha 1, other channels pseudo-random (C++
-    /// `std::rand() % 255`; any values do).
+    /// An image with alpha 1 and pseudo-random other channels (any values
+    /// do).
     fn fake_image(size: Size) -> PremultipliedImage {
         let mut img = PremultipliedImage::new(size);
         let mut state: u32 = 12345;

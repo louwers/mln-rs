@@ -1,6 +1,3 @@
-// Ports test/gfx/fill_generator.test.cpp (gfx::generateFillAndOutineBuffers
-// lives in mln_renderer::gfx::fill_generator).
-
 use std::sync::Arc;
 
 use geometry::Point;
@@ -13,7 +10,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 
-/// `util::EXTENT` as a tile coordinate.
+/// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
 
 fn p(x: i16, y: i16) -> GeometryCoordinate {
@@ -31,20 +28,16 @@ type Line = [i16; 4];
 #[derive(Default)]
 struct Buffers {
     fill_vertices: Vec<FillLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     fill_indexes: Vec<u16>,
     fill_segments: Vec<SegmentBase>,
     line_vertices: Vec<LineLayoutVertex>,
-    /// `gfx::IndexVector<gfx::Triangles>`.
     line_indexes: Vec<u16>,
     line_segments: Vec<SegmentBase>,
-    /// `gfx::IndexVector<gfx::Lines>`.
     basic_line_indexes: Vec<u16>,
     basic_line_segments: Vec<SegmentBase>,
 }
 
-/// `gfx::generateFillAndOutineBuffers(geometry, ..., canonical,
-/// subdivisionGranularity)` into fresh buffers.
+/// Runs `generate_fill_and_outline_buffers` into fresh buffers.
 fn generate(geometry: &GeometryCollection, canonical: &CanonicalTileID, granularity: u32) -> Buffers {
     let mut buffers = Buffers::default();
     generate_fill_and_outline_buffers(

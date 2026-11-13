@@ -1,5 +1,3 @@
-// Ports src/mln/renderer/globe_depth_pass.hpp and src/mln/renderer/globe_depth_pass.cpp.
-//
 // The `MLN_UBO_CONSOLIDATION` path, as for the WebGPU backend: the projection
 // blocks live in one layer-level array, so the `GlobeDepthTweaker` the other
 // backends use is not ported.

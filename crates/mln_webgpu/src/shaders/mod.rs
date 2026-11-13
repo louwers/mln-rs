@@ -1,4 +1,5 @@
-//! Ports include/mln/shaders/webgpu and src/mln/shaders/webgpu.
+//! The WebGPU shaders: their WGSL and its preprocessor, and the shader
+//! sources, programs and groups.
 
 pub mod fill_extrusion_wgsl;
 pub mod shader_group;

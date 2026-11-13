@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/offscreen_texture.hpp and src/mln/webgpu/offscreen_texture.cpp
-//
 // wgpu vs. Dawn/wgpu-native: the readback maps the staging buffer and blocks
 // with `Device::poll(PollType::Wait)` (C++: `wgpuInstanceWaitAny` on Dawn, a
 // 1000 x 1 ms `wgpuDevicePoll` loop on wgpu-native).
@@ -299,7 +297,6 @@ impl TargetResource for OffscreenTextureResource {
     }
 }
 
-/// `webgpu::OffscreenTexture`
 pub struct OffscreenTexture {
     target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,

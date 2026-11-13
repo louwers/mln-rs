@@ -1,6 +1,5 @@
-//! Ports the C++ Metal backend (`src/mln/mtl`, `include/mln/mtl`,
-//! `include/mln/shaders/mtl`, `src/mln/shaders/mtl`, and the headless
-//! backend from platform/default) onto the `objc2-metal` bindings.
+//! The Metal backend: the `mln_gfx` traits implemented on the `objc2-metal`
+//! bindings, with its shaders and render targets.
 //!
 //! The C++ backend calls Metal through metal-cpp; this port makes the same
 //! calls through objc2. `NS::SharedPtr`s become `Retained` objects, and the

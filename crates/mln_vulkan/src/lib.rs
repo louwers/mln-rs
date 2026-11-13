@@ -1,7 +1,6 @@
-//! Ports the C++ Vulkan backend (`src/mln/vulkan`, `include/mln/vulkan`,
-//! `include/mln/shaders/vulkan`, `src/mln/shaders/vulkan`, the headless
-//! backend from platform/default and the window backend from platform/glfw)
-//! onto the `ash` bindings.
+//! The Vulkan backend: the `mln_gfx` traits implemented on the `ash`
+//! bindings, with its shaders and its offscreen, window and borrowed render
+//! targets.
 //!
 //! The C++ backend calls Vulkan through vulkan-hpp, allocates with
 //! `VulkanMemoryAllocator` and compiles its GLSL with glslang; this port makes

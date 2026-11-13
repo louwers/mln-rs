@@ -1,5 +1,3 @@
-// Ports include/mln/shaders/shader_source.hpp (generated in C++)
-//
 // The per-backend `ShaderSource<BuiltIn, Backend::Type>` specialisations live
 // with their backend (mln_webgpu::shaders).
 

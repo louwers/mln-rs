@@ -1,6 +1,5 @@
-//! Ports the C++ WebGPU backend (`src/mln/webgpu`, `include/mln/webgpu`,
-//! `include/mln/shaders/webgpu`, `src/mln/shaders/webgpu`, and the headless
-//! backend from platform/default) onto the `wgpu` crate.
+//! The WebGPU backend: the `mln_gfx` traits implemented on the `wgpu` crate,
+//! with its shaders and render targets.
 //!
 //! A [`RendererBackend`] renders on a [`Device`], into an [`OffscreenTarget`]
 //! or a [`SurfaceTarget`] built on it.

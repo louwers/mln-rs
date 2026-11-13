@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/context.hpp and src/mln/webgpu/context.cpp
-//
 // Cycle avoidance: C++ members are references; resources here hold
 // `Rc<Context>`, so the context itself keeps no `Rc` to a resource that
 // points back at it (the cached tile buffers are raw wgpu buffers, the clip
@@ -83,7 +81,7 @@ pub struct Context {
     clip_mask_uniform_buffer: RefCell<Option<wgpu::Buffer>>,
     globe_clip_mask_shader: RefCell<Option<Weak<dyn ShaderProgramBase>>>,
     globe_clip_mask_pipeline_hash: Cell<Option<u64>>,
-    /// `globeClipMeshes`: per zoom, north pole row, south pole row and
+    /// The globe clip meshes, by zoom, north pole row, south pole row and
     /// border.
     globe_clip_meshes: RefCell<BTreeMap<(u8, bool, bool, bool), GlobeClipMesh>>,
     // `defaultVertexBuffers`: the default attribute buffers of
@@ -98,7 +96,6 @@ pub struct Context {
     bind_groups: BindGroupCache,
 }
 
-/// `clipMaskStencilMode`
 fn clip_mask_stencil_mode() -> StencilMode {
     StencilMode {
         test: Test::Always,
@@ -110,13 +107,11 @@ fn clip_mask_stencil_mode() -> StencilMode {
     }
 }
 
-/// `clipMaskDepthMode`
 fn clip_mask_depth_mode() -> DepthMode {
     DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly, range: Range::new(0.0, 1.0) }
 }
 
 impl Context {
-    /// `Context(RendererBackend&)`
     pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
@@ -187,7 +182,6 @@ impl Context {
         self.weak_self.clone()
     }
 
-    /// `getBackend()`
     pub fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
     }
@@ -220,7 +214,6 @@ impl Context {
         stats.buffer_update_bytes = stats.buffer_update_bytes.wrapping_add(bytes);
     }
 
-    /// `createOffscreenTexture(size, type, depth, stencil)`
     pub fn create_offscreen_texture_with(
         &self,
         size: Size,
@@ -231,7 +224,7 @@ impl Context {
         OffscreenTexture::new(self.rc(), size, type_, depth, stencil)
     }
 
-    /// `createTexture2D()` with the concrete type.
+    /// Creates a texture, of the concrete type.
     pub fn create_webgpu_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
         Rc::new(RefCell::new(Texture2D::new(self.rc())))
     }
@@ -267,9 +260,8 @@ impl Context {
         Some((buffer, data.len() as u64))
     }
 
-    /// `getTileVertexBuffer()`: `RenderStaticData::tileVertices()`, the four
-    /// corners of the tile extent as short2 (inlined: `RenderStaticData` is a
-    /// renderer type).
+    /// The four corners of the tile extent as short2. They are written out
+    /// here because C++'s `RenderStaticData` is a renderer type.
     pub fn get_tile_vertex_buffer(&self) -> Option<(wgpu::Buffer, u64)> {
         let mut cached = self.tile_vertex_buffer.borrow_mut();
         if cached.is_none() {
@@ -280,7 +272,7 @@ impl Context {
         cached.clone()
     }
 
-    /// `getTileIndexBuffer()`: `RenderStaticData::quadTriangleIndices()`.
+    /// The indices of the two triangles of a tile quad.
     pub fn get_tile_index_buffer(&self) -> Option<(wgpu::Buffer, u64)> {
         let mut cached = self.tile_index_buffer.borrow_mut();
         if cached.is_none() {
@@ -333,8 +325,8 @@ impl Context {
         Some(shader)
     }
 
-    /// `renderGlobeTileClippingMasks(renderPass, staticData, masks)`; `mesh`
-    /// is the caller's `rawGlobeTileMesh` (see the trait method).
+    /// Draws the globe's tile clipping masks; `mesh` makes a tile's mesh (see
+    /// the trait method).
     fn render_globe_tile_clipping_masks_impl(
         &self,
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
@@ -491,7 +483,6 @@ impl Context {
         true
     }
 
-    /// `renderTileClippingMasks(renderPass, staticData, tileUBOs)`
     fn render_tile_clipping_masks_impl(
         &self,
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
@@ -622,7 +613,7 @@ impl Context {
         true
     }
 
-    /// `createUniformBuffer` with the concrete type.
+    /// Creates a uniform buffer holding `data`, of the concrete type.
     pub fn create_webgpu_uniform_buffer(&self, data: &[u8]) -> Rc<UniformBuffer> {
         Rc::new(UniformBuffer::new(self, Some(data), data.len()))
     }
@@ -660,7 +651,8 @@ impl GfxContext for Context {
         // TODO(port): backend.getThreadPool().runRenderJobs()
     }
 
-    /// `createOffscreenTexture(size, type)`: depth, no stencil.
+    /// Creates an offscreen texture of `size` with `type_` channels, with
+    /// depth but no stencil.
     fn create_offscreen_texture(
         &self,
         size: Size,

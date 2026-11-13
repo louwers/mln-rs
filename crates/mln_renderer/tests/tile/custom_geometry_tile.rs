@@ -1,6 +1,3 @@
-// Ports test/tile/custom_geometry_tile.test.cpp, with the tests of ffi
-// patches 0069 and 0070.
-//
 // C++ calls a CustomTileLoader directly and reaches it from the tiles
 // through a mailbox on the test's run loop. Here the loader is an actor on
 // the run loop, so the test reaches it through messages too.
@@ -66,7 +63,6 @@ fn tile(
 type OnTileChanged = Box<dyn Fn(&TileBase)>;
 type OnTileError = Box<dyn Fn(&TileBase, Error)>;
 
-/// `StubTileObserver` (`test/src/mln/test/stub_tile_observer.hpp`).
 #[derive(Default)]
 struct StubTileObserver {
     tile_changed: RefCell<Option<OnTileChanged>>,

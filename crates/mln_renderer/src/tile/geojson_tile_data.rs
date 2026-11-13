@@ -1,5 +1,3 @@
-// Ports src/mln/tile/geojson_tile_data.hpp.
-//
 // Implements a simple in-memory Tile type that holds GeoJSON values. A
 // GeoJSON tile can only have one layer, and it is always returned
 // regardless of which layer is requested.
@@ -14,13 +12,10 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileData, Geom
 use mln_util::error::Error;
 use mln_util::geometry::{FeatureType, to_feature_type};
 
-/// `mapbox::feature::feature_collection<int16_t>`.
 pub type TileFeatureCollection = Vec<Feature<i16>>;
 
-/// `GeoJSONTileFeature`.
 pub struct GeoJSONTileFeature<'a> {
     pub feature: &'a Feature<i16>,
-    /// `mutable std::optional<GeometryCollection> geometry`.
     geometry: OnceCell<GeometryCollection>,
 }
 
@@ -53,7 +48,6 @@ impl GeometryTileFeature for GeoJSONTileFeature<'_> {
     }
 }
 
-/// `GeoJSONTileLayer`.
 pub struct GeoJSONTileLayer {
     features: Arc<TileFeatureCollection>,
 }
@@ -79,7 +73,6 @@ impl GeometryTileLayer for GeoJSONTileLayer {
     }
 }
 
-/// `GeoJSONTileData`.
 #[derive(Clone)]
 pub struct GeoJSONTileData {
     features: Arc<TileFeatureCollection>,

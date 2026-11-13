@@ -1,5 +1,3 @@
-// Ports test/tile/geojson_tile.test.cpp.
-
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -26,7 +24,6 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-/// `GeoJSONTileTest`.
 struct GeoJSONTileTest {
     run_loop: RunLoop,
     transform: Transform,
@@ -71,7 +68,6 @@ impl GeoJSONTileTest {
     }
 }
 
-/// `FakeGeoJSONData`.
 #[derive(Debug)]
 struct FakeGeoJSONData {
     features: TileFeatures,
@@ -107,7 +103,6 @@ fn circle_layer_properties() -> Immutable<dyn LayerProperties> {
 
 type OnTileChanged = Box<dyn Fn(&TileBase)>;
 
-/// `StubTileObserver` (`test/src/mln/test/stub_tile_observer.hpp`).
 #[derive(Default)]
 struct StubTileObserver {
     tile_changed: RefCell<Option<OnTileChanged>>,

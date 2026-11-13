@@ -1,6 +1,3 @@
-// Ports src/mln/geometry/debug_font_data.hpp: the Hershey Simplex font that
-// the tile debug text is drawn with.
-
 /// A glyph: its advance and its strokes, as x, y pairs in font units with
 /// y up. A `-1, -1` pair ends a stroke.
 pub struct Glyph {

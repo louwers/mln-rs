@@ -1,5 +1,3 @@
-// Ports include/mln/vulkan/tile_layer_group.hpp and src/mln/vulkan/tile_layer_group.cpp
-
 use std::any::Any;
 
 use mln_gfx::depth_mode::DepthMode;

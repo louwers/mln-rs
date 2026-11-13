@@ -1,11 +1,7 @@
-// Ports src/mln/renderer/render_pass.hpp (+ util/bitmask_operations.hpp for
-// it). Lives in mln_gfx because gfx::Drawable and the layer groups use it;
-// see the crate docs.
-
 use std::ops::{BitAnd, BitOr, BitOrAssign};
 
-/// `mln::RenderPass : uint8_t`, a bitmask (`Opaque | Translucent` is a valid
-/// value), so a newtype rather than a Rust enum. The associated constants
+/// The render passes a layer draws in. A bitmask (`Opaque | Translucent` is a
+/// valid value), so a newtype rather than a Rust enum. The associated constants
 /// keep the C++ enumerator names.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RenderPass(pub u8);
@@ -17,7 +13,6 @@ impl RenderPass {
     pub const Translucent: RenderPass = RenderPass(1 << 1);
     pub const Pass3D: RenderPass = RenderPass(1 << 2);
 
-    /// `mln::underlying_type(pass)`
     #[must_use]
     pub fn underlying_type(self) -> u8 {
         self.0

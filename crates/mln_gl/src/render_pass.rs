@@ -1,5 +1,3 @@
-// Ports src/mln/gl/render_pass.hpp and src/mln/gl/render_pass.cpp
-//
 // A GL render pass is the framebuffer bound when it begins: its drawables
 // draw through the context, and it keeps the framebuffer to bind it again
 // after a custom layer.
@@ -29,8 +27,8 @@ pub struct RenderPass {
 }
 
 impl RenderPass {
-    /// `RenderPass(commandEncoder, name, descriptor)`: binds the draw
-    /// target and clears what the descriptor has values for.
+    /// Starts a pass: binds the draw target and clears what the descriptor
+    /// has values for.
     #[must_use]
     pub fn new(command_encoder: &CommandEncoder, _name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
         if let Some(target) = as_gl(descriptor.target) {

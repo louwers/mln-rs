@@ -1,5 +1,3 @@
-// Ports include/mln/mtl/mtl_fwd.hpp: the owning pointers to Metal objects.
-
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{

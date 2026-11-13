@@ -1,6 +1,3 @@
-// Ports include/mln/gl/drawable_gl.hpp, src/mln/gl/drawable_gl_impl.hpp and
-// src/mln/gl/drawable_gl.cpp
-//
 // Differences from C++:
 // - Raw vertices become an attribute with a buffer of its own, as on the
 //   other backends (see upload_pass.rs).
@@ -43,7 +40,7 @@ use crate::upload_pass::UploadPass;
 use crate::vertex_array::VertexArray;
 use crate::vertex_buffer_resource::IndexBufferResource;
 
-/// `struct IndexBufferGL : gfx::IndexBufferBase`: adapts `gfx::IndexBuffer`.
+/// The uploaded buffer of an index vector.
 struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
@@ -54,7 +51,6 @@ impl IndexBufferBase for IndexBuffer {
     }
 }
 
-/// `gl::DrawableGL::Impl`
 struct DrawableImpl {
     segments: Vec<UniqueDrawSegment>,
     /// The vertex array of each segment (`DrawSegmentGL::vertexArray`).
@@ -98,12 +94,10 @@ impl Drawable {
         }
     }
 
-    /// `setVertexAttrId`
     pub fn set_vertex_attr_id(&mut self, id: usize) {
         self.impl_.vertex_attr_id = id;
     }
 
-    /// `upload(gfx::UploadPass&)`
     pub fn upload(&mut self, upload_pass: &UploadPass) {
         const USAGE: BufferUsageType = BufferUsageType::StaticDraw;
 
@@ -233,7 +227,6 @@ impl Drawable {
         self.base.attribute_update_time = Some(Instant::now());
     }
 
-    /// `makeStencilMode(parameters)`
     fn make_stencil_mode(&self, parameters: &dyn PaintParameters) -> StencilMode {
         if self.base.enable_stencil
             && !self.base.is_3d
@@ -244,7 +237,7 @@ impl Drawable {
         StencilMode::disabled()
     }
 
-    /// `bindTextures()`: each texture to the unit its sampler reads.
+    /// Binds each texture to the unit its sampler reads.
     fn bind_textures(&self, context: &Context, shader: &dyn ShaderProgramBase) {
         for (id, texture) in self.base.textures.iter().enumerate() {
             let Some(texture) = texture else { continue };

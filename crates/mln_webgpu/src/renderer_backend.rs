@@ -1,5 +1,3 @@
-// Ports include/mln/webgpu/renderer_backend.hpp and src/mln/webgpu/renderer_backend.cpp
-//
 // The C++ backend stores raw `WGPUDevice`/`WGPUQueue`/instance handles in its
 // `Impl` and every resource reaches them through `Context& -> getBackend()`.
 // Here the `Impl` is shared (`Rc<BackendImpl>`) by the backend and the
@@ -24,13 +22,12 @@ use crate::shaders::shader_group::ShaderGroup;
 use crate::shaders::shader_source::shader_source;
 use crate::writes::Writes;
 
-/// `RendererBackend::Impl`
 #[derive(Default)]
 pub struct BackendImpl {
     instance: RefCell<Option<wgpu::Instance>>,
     device: RefCell<Option<wgpu::Device>>,
     queue: RefCell<Option<wgpu::Queue>>,
-    /// `wgpu::TextureFormat::Undefined` is `None`.
+    /// `None` for no format, C++'s `Undefined`.
     depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
     color_format: Cell<Option<wgpu::TextureFormat>>,
     writes: RefCell<Writes>,
@@ -163,7 +160,7 @@ impl BackendImpl {
     }
 }
 
-/// `webgpu::RendererBackend`: a renderer's context on a [`Device`].
+/// A renderer's context on a [`Device`].
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
@@ -237,7 +234,7 @@ impl RendererBackend {
         &self.impl_
     }
 
-    /// `context.reset()`, which also releases the buffers the context caches
+    /// Drops the context, releasing the buffers it caches first
     /// (`Context::release_cached_buffers`).
     pub(crate) fn reset_context(&mut self) {
         if let Some(context) = self.base.reset_context()
@@ -247,12 +244,11 @@ impl RendererBackend {
         }
     }
 
-    /// `createContext()`
     pub fn create_context(&self) -> Rc<Context> {
         Context::new(self.impl_.clone())
     }
 
-    /// `initShaders`: register one `webgpu::ShaderGroup` per built-in shader.
+    /// Registers one shader group per built-in shader.
     ///
     /// C++ registers all 31 types; a type whose WGSL is not part of this
     /// build is skipped (TODO(port): all sources once the

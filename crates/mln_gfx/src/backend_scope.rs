@@ -1,5 +1,3 @@
-// Ports include/mln/gfx/backend_scope.hpp and src/mln/renderer/backend_scope.cpp
-//
 // The C++ scopes form a thread-local doubly linked list and re-activate the
 // prior scope's backend when a nested scope for a *different* backend ends.
 // TODO(port): that cross-backend hand-over (deactivate prior / re-activate

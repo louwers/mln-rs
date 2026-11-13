@@ -1,6 +1,3 @@
-// Ports include/mln/renderer/render_target.hpp and
-// src/mln/renderer/render_target.cpp.
-//
 // C++ `gfx::Context::createRenderTarget` returns `std::make_shared<RenderTarget>`;
 // RenderTarget is a renderer type and mln_gfx can't name it, so callers use
 // `RenderTarget::new(context, size, type)` directly. The tweakers of the
@@ -24,7 +21,6 @@ use crate::paint_parameters::PaintParameters;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 
-/// `RenderTargetPtr = std::shared_ptr<RenderTarget>`.
 pub type RenderTargetPtr = Rc<RefCell<RenderTarget>>;
 
 /// Render target class
@@ -35,7 +31,6 @@ pub struct RenderTarget {
 }
 
 impl RenderTarget {
-    /// `RenderTarget(context, size, type)`.
     pub fn new(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget {
             offscreen_texture: context.create_offscreen_texture(size, type_),
@@ -44,7 +39,7 @@ impl RenderTarget {
         }
     }
 
-    /// `context.createRenderTarget(size, type)` as a shared pointer.
+    /// Creates a shared render target of `size` with channel type `type_`.
     pub fn create(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
         Rc::new(RefCell::new(RenderTarget::new(context, size, type_)))
     }

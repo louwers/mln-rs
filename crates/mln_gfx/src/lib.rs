@@ -1,14 +1,14 @@
-//! Ports the backend-independent `gfx/` abstractions of the C++ core
-//! (`include/mln/gfx`, `src/mln/gfx`), the backend-independent `shaders/`
-//! code and the drawable-path files from `renderer/` that the backends
-//! implement. `mln_webgpu` implements the traits on `wgpu`, `mln_mtl` on
-//! Metal, `mln_vulkan` on Vulkan and `mln_gl` on OpenGL ES 3.0.
+//! The backend-independent graphics layer: the traits and types the renderer
+//! draws through, the backend-independent shader code (uniform buffer
+//! layouts, defines, shader groups), and the drawables and layer groups that
+//! the backends implement. `mln_webgpu` implements the traits on `wgpu`,
+//! `mln_mtl` on Metal, `mln_vulkan` on Vulkan and `mln_gl` on OpenGL ES 3.0.
 //!
-//! Crate cut (the C++ include cycle): `renderer/layer_group.hpp` and
-//! `renderer/render_pass.hpp` live here (`renderer::layer_group`,
-//! `renderer::render_pass`), and `mln::PaintParameters` is seen through the
-//! `paint_parameters::PaintParameters` trait, because the backends cannot
-//! depend on `mln_renderer`. `LayerTweaker` stays in the renderer.
+//! The layer groups (`renderer::layer_group`) and the render pass bitmask
+//! (`renderer::render_pass`) live here, and the renderer's paint parameters
+//! are seen through the `paint_parameters::PaintParameters` trait, because
+//! the backends cannot depend on `mln_renderer`. `LayerTweaker` stays in the
+//! renderer.
 //!
 //! Ownership follows the single render thread of the C++ renderer: shared
 //! pointers are `Rc`, mutation through them uses `RefCell`/`Cell`.
