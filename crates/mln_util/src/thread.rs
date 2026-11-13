@@ -52,7 +52,7 @@ fn with_aligned_stack<F: FnOnce() -> T, T>(f: F) -> T {
 
     struct Call<F, T> {
         f: Option<F>,
-        result: Option<std::thread::Result<T>>,
+        result: std::thread::Result<T>,
     }
 
     // A panic can't unwind through the assembly, so `run` catches it and the
@@ -61,11 +61,11 @@ fn with_aligned_stack<F: FnOnce() -> T, T>(f: F) -> T {
         // SAFETY: the exclusive borrow of `call` below, for this call only.
         let call = unsafe { &mut *call };
         if let Some(f) = call.f.take() {
-            call.result = Some(panic::catch_unwind(AssertUnwindSafe(f)));
+            call.result = panic::catch_unwind(AssertUnwindSafe(f));
         }
     }
 
-    let mut call = Call { f: Some(f), result: None };
+    let mut call = Call { f: Some(f), result: Err(Box::new("the aligned call didn't run")) };
     let run: extern "C" fn(*mut Call<F, T>) = run::<F, T>;
     // SAFETY: s2 is callee-saved, so it holds the stack pointer across the
     // call to `run`, which follows the C ABI. Aligning moves the stack
@@ -84,9 +84,8 @@ fn with_aligned_stack<F: FnOnce() -> T, T>(f: F) -> T {
         );
     }
     match call.result {
-        Some(Ok(value)) => value,
-        Some(Err(payload)) => panic::resume_unwind(payload),
-        None => unreachable!("the aligned call runs `f`"),
+        Ok(value) => value,
+        Err(payload) => panic::resume_unwind(payload),
     }
 }
 
