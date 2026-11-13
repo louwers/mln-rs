@@ -781,7 +781,7 @@ mod globe {
             &projection.main_matrix,
             &horizon,
             [f64::from(size.width) / 2.0, f64::from(size.height) / 2.0],
-            &projection.camera_position,
+            &transform.get_globe_camera_position(),
         );
 
         let children = |node: &Node| -> [Node; 4] {
