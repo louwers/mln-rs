@@ -378,8 +378,14 @@ impl Map {
             StyleEvent::SpriteError(sprite, error) => self.emit(MapEvent::SpriteError(sprite, error)),
             StyleEvent::SpriteRequested(sprite) => self.emit(MapEvent::SpriteRequested(sprite)),
             // C++ parses inside the file source callback (the lambda in
-            // Style::Impl::loadURL).
-            StyleEvent::StyleResponse => self.style.impl_.process_style_responses(),
+            // Style::Impl::loadURL). A style that parses here loads a batch
+            // later, and the updates in between carry its sources, so its
+            // feature state goes now.
+            StyleEvent::StyleResponse => {
+                if self.style.impl_.process_style_responses() {
+                    self.feature_state.clear();
+                }
+            }
         }
     }
 

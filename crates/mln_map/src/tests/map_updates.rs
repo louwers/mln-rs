@@ -6,11 +6,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use feature::Value;
 use mln_actor::RunLoop;
+use mln_renderer::RendererEvent;
 use mln_renderer::update_slot::Update;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_storage::{Kind, Response};
 use mln_style::expression::expression::FeatureState;
 use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 use crate::{CameraOptions, ErrorKind, Map, MapOptions, UpdateReader};
 
@@ -178,6 +181,52 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
     // State set once the style has loaded stays.
     map.set_feature_state("points", None, "1", hover(true));
     assert_eq!(carried_hover(&reader), Some(Value::Bool(true)));
+}
+
+/// A URL style parses in a later batch than the one that loads it, and its
+/// load comes a batch later again: an update in between, as a renderer's
+/// invalidation asks for, carries the new style's source.
+#[test]
+fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    file_source.set_response(Kind::Style, |_| {
+        let mut response = Response::new();
+        let style = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#;
+        response.data = Some(Arc::new(style.as_bytes().to_vec()));
+        Some(response)
+    });
+    let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
+    let mut map = Map::with_file_source(Arc::new(file_source), options).expect("map");
+    map.jump_to(&CameraOptions::default());
+    map.set_feature_state("points", None, "1", hover(true));
+
+    // For each update that carries the style's source, whether it carried
+    // any feature state.
+    let reader = map.update_reader();
+    // The waker's own reader, which goes before `reader`: dropping a reader
+    // drops its waker under the slot's lock, which a reader's drop takes.
+    let peek = Arc::new(Mutex::new(Some(reader.clone())));
+    let carried: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let (waker_peek, waker_carried) = (Arc::clone(&peek), Arc::clone(&carried));
+    reader.set_waker(Some(Arc::new(move || {
+        if let Some(update) = waker_peek.lock().as_ref().and_then(UpdateReader::latest)
+            && !update.parameters.sources.is_empty()
+        {
+            waker_carried.lock().push(!update.parameters.feature_states.is_empty());
+        }
+    })));
+
+    map.style_mut().load_url("http://style");
+    map.process_events();
+    run_loop.run_once();
+    map.renderer_events().push(RendererEvent::Invalidate);
+    map.process_events();
+    peek.lock().take();
+    assert!(map.style().is_loaded());
+    let carried = carried.lock().clone();
+    assert!(!carried.is_empty(), "no update carried the style's source");
+    assert!(!carried.contains(&true), "an update carried the old state: {carried:?}");
 }
 
 #[test]

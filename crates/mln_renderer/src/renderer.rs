@@ -238,6 +238,13 @@ impl Renderer {
     }
 
     // layers: feature state
+    /// Merges `state` into a feature's state.
+    ///
+    /// An update whose feature state for the source differs from the last
+    /// update's replaces the source's state with the update's, undoing what
+    /// this and [`remove_feature_state`](Self::remove_feature_state) did. A
+    /// renderer that a map drives takes its state from the map's
+    /// `set_feature_state`.
     pub fn set_feature_state(
         &mut self,
         source_id: &str,
@@ -258,6 +265,9 @@ impl Renderer {
         self.orchestrator.get_feature_state(source_id, source_layer_id, feature_id)
     }
 
+    /// Removes a key of a feature's state, a feature's whole state, or a
+    /// source layer's. An update replaces the source's state as it does for
+    /// [`set_feature_state`](Self::set_feature_state).
     pub fn remove_feature_state(
         &mut self,
         source_id: &str,
