@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::bucket::BucketPtr;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::tile::ordered_replies::OrderedReplies;
-use crate::tile::tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, TileUpdateParameters};
+use crate::tile::tile::{Kind, Tile, TileBase, TileLoadOrder, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_loader::{LoaderTile, TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile::tile_worker_transport::{TileEndpoint, WorkerEndpoint};
@@ -261,6 +261,12 @@ impl Tile for RasterTile {
     fn set_necessity(&self, necessity: TileNecessity) {
         if let Some(loader) = &self.loader {
             loader.set_necessity(necessity);
+        }
+    }
+
+    fn set_load_order(&self, order: TileLoadOrder) {
+        if let Some(loader) = &self.loader {
+            loader.set_load_order(order);
         }
     }
 

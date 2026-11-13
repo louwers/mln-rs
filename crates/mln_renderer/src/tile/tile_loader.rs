@@ -16,7 +16,7 @@ use mln_util::tileset::Tileset;
 
 use crate::tile::geometry_tile::GeometryTileInner;
 use crate::tile::geometry_tile_worker::SharedTileData;
-use crate::tile::tile::{TileNecessity, TileOperation, TileUpdateParameters};
+use crate::tile::tile::{TileLoadOrder, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile_parameters::TileParameters;
 
 fn get_cant_load_tile_error() -> Error {
@@ -208,6 +208,12 @@ impl TileLoader {
                 make_optional(&self.state);
             }
         }
+    }
+
+    /// Sets when the tile's network request starts among those waiting. The
+    /// requests share the resource's order, so one that waits now moves.
+    pub fn set_load_order(&self, order: TileLoadOrder) {
+        self.state.borrow().resource.order.set(order.value());
     }
 
     pub fn set_update_parameters(&self, params: &TileUpdateParameters) {

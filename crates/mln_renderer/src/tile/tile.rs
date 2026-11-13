@@ -34,6 +34,44 @@ pub enum TileNecessity {
     Required,
 }
 
+/// When a tile's network request starts among the requests that wait for a
+/// connection; lower starts sooner. Every tile's comes after the requests
+/// for anything else (styles, sources, sprites, glyphs), which leave theirs
+/// at zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TileLoadOrder(u32);
+
+impl TileLoadOrder {
+    const RANKS: u32 = 1 << 24;
+
+    /// A tile that no cover of the current view holds.
+    pub const UNWANTED: TileLoadOrder = TileLoadOrder(u32::MAX);
+
+    /// The `rank`th tile that the coarse cover of the current view retains:
+    /// there are few of them, and each gives a large part of the view
+    /// something to show.
+    #[must_use]
+    pub fn coarse(rank: usize) -> Self {
+        Self::band(1, rank)
+    }
+
+    /// The `rank`th tile that the ideal cover of the current view retains.
+    #[must_use]
+    pub fn ideal(rank: usize) -> Self {
+        Self::band(2, rank)
+    }
+
+    fn band(band: u32, rank: usize) -> Self {
+        TileLoadOrder(band * Self::RANKS + (rank as u32).min(Self::RANKS - 1))
+    }
+
+    /// The value for a resource's `RequestOrder`.
+    #[must_use]
+    pub fn value(self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TileOperation {
@@ -203,6 +241,10 @@ pub trait Tile: Any {
     }
 
     fn set_necessity(&self, _necessity: TileNecessity) {}
+
+    /// Sets when the tile's network request starts among those waiting,
+    /// for a request that waits now as for a later one.
+    fn set_load_order(&self, _order: TileLoadOrder) {}
 
     fn set_update_parameters(&self, _parameters: &TileUpdateParameters) {}
 

@@ -69,7 +69,7 @@ pub use mbtiles_file_source::MBTilesFileSource;
 pub use offline_database::OfflineDatabase;
 pub use online_file_source::OnlineFileSource;
 pub use pmtiles_file_source::PMTilesFileSource;
-pub use resource::{Kind, LoadingMethod, Resource, StoragePolicy, TileData};
+pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy, TileData};
 pub use resource_options::ResourceOptions;
 pub use response::{Data, ResourceError, Response};
 

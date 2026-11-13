@@ -20,7 +20,7 @@ use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
-use crate::tile::tile::{Tile, TileNecessity, TileUpdateParameters};
+use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_cache::TileCache;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_parameters::TileParameters;
@@ -62,6 +62,10 @@ where
     /// Whether `renderTile` marks tiles and updates `previouslyRenderedTiles`
     /// (the ideal pass; the pan pass passes a no-op).
     render: bool,
+    /// The tiles the current pass has retained. A pass retains tiles in its
+    /// cover's order, nearest the view's centre first, each followed by the
+    /// parents that stand in for it.
+    pass_rank: usize,
 }
 
 impl<F> RenderablesContext for UpdateContext<'_, '_, F>
@@ -108,6 +112,12 @@ where
                 minimum_update_interval: self.minimum_update_interval,
                 is_volatile: self.is_volatile,
             });
+            // The pan pass comes first, so a tile of both covers loads with
+            // the coarse ones.
+            let order =
+                if self.render { TileLoadOrder::ideal(self.pass_rank) } else { TileLoadOrder::coarse(self.pass_rank) };
+            self.pass_rank += 1;
+            tile.set_load_order(order);
             tile.set_necessity(necessity);
             tile.base().retained_necessity.set(necessity);
         }
@@ -360,6 +370,7 @@ impl TilePyramid {
             is_volatile,
             create_tile,
             render: false,
+            pass_rank: 0,
         };
 
         if !pan_tiles.is_empty() {
@@ -369,6 +380,7 @@ impl TilePyramid {
         }
 
         ctx.render = true;
+        ctx.pass_rank = 0;
         update_renderables(&mut ctx, &ideal_tiles, &zoom_range, max_parent_tile_overscale_factor);
 
         let previously_rendered: Vec<(UnwrappedTileID, OverscaledTileID)> =
@@ -419,7 +431,9 @@ impl TilePyramid {
                     // so that it goes on loading in the cache (C++ releases
                     // it, and optional, it would stop loading). A view that
                     // turns back and forth needs the tiles at its corners
-                    // for moments too short to load them each time.
+                    // for moments too short to load them each time. Its
+                    // request waits behind those of the tiles in view.
+                    tile.set_load_order(TileLoadOrder::UNWANTED);
                     self.cache.add(key, tile);
                 } else {
                     // A fallback that looked only in the cache, and found

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use mln_util::chrono::Timestamp;
@@ -29,6 +31,27 @@ pub enum Priority {
     #[default]
     Regular,
     Low,
+}
+
+/// Where a request stands among the waiting requests of its [`Priority`]:
+/// a file source that makes requests wait starts the one with the lowest
+/// value first, and those with the same value in the order they came.
+///
+/// A clone shares the value, so whoever made a request can change where it
+/// stands while it waits, through the [`Resource`] it kept. A request that
+/// has started isn't affected.
+#[derive(Clone, Debug, Default)]
+pub struct RequestOrder(Arc<AtomicU32>);
+
+impl RequestOrder {
+    #[must_use]
+    pub fn get(&self) -> u32 {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn set(&self, order: u32) {
+        self.0.store(order, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -76,6 +99,9 @@ pub struct Resource {
     pub loading_method: LoadingMethod,
     pub usage: Usage,
     pub priority: Priority,
+    /// Zero, ahead of every request that sets it, unless the requester says
+    /// otherwise.
+    pub order: RequestOrder,
     pub url: String,
 
     /// Includes auxiliary data if this is a tile request.
@@ -138,6 +164,7 @@ impl Resource {
             loading_method,
             usage: Usage::Online,
             priority: Priority::Regular,
+            order: RequestOrder::default(),
             url: url.into(),
             tile_data,
             data_range: None,

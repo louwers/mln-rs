@@ -8,7 +8,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
 
 use crate::tile::geometry_tile::GeometryTile;
-use crate::tile::tile::{Tile, TileBase, TileNecessity, TileUpdateParameters};
+use crate::tile::tile::{Tile, TileBase, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_loader::{TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile_parameters::TileParameters;
@@ -66,6 +66,12 @@ impl Tile for VectorTile {
     fn set_necessity(&self, necessity: TileNecessity) {
         if let Some(loader) = &self.loader {
             loader.set_necessity(necessity);
+        }
+    }
+
+    fn set_load_order(&self, order: TileLoadOrder) {
+        if let Some(loader) = &self.loader {
+            loader.set_load_order(order);
         }
     }
 

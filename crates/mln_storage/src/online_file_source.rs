@@ -3,7 +3,8 @@
 // `util::Timer` (first request at once, then revalidation when the response
 // expires, or retries with backoff after errors), queued while
 // `maximumConcurrentRequests` transfers are active (regular priority before
-// low priority), and performed by the HTTPFileSource.
+// low priority, and within a priority by the resource's `RequestOrder`), and
+// performed by the HTTPFileSource.
 //
 // C++ keys its sets by `OnlineFileRequest*`; here every request has an id
 // (the caller's request id), so `allRequests`/`activeRequests` iterate in id
@@ -36,7 +37,7 @@ use crate::http_file_source::HTTPFileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::http_timeout::{error_retry_timeout, expiration_timeout};
 use crate::network_status::{NetworkStatus, Status};
-use crate::resource::{Priority, Resource};
+use crate::resource::{Priority, RequestOrder, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::{ResourceTransform, TransformResult};
 use crate::response::{Reason, ResourceError, Response};
@@ -98,33 +99,47 @@ impl Drop for OnlineFileRequest {
     }
 }
 
-/// A FIFO preferring regular over low priority requests.
+/// What waiting requests start by, lowest first: regular priority before
+/// low priority, then the resource's [`RequestOrder`] as it is now.
+fn start_key(priority: Priority, order: &RequestOrder) -> (bool, u32) {
+    (priority == Priority::Low, order.get())
+}
+
+/// The requests waiting for room in the active set, in the order they
+/// started to wait.
 #[derive(Default)]
 struct PendingRequests {
-    regular: VecDeque<u64>,
-    low: VecDeque<u64>,
+    requests: VecDeque<PendingRequest>,
+}
+
+struct PendingRequest {
+    id: u64,
+    priority: Priority,
+    order: RequestOrder,
 }
 
 impl PendingRequests {
     fn remove(&mut self, id: u64) {
-        self.regular.retain(|&r| r != id);
-        self.low.retain(|&r| r != id);
+        self.requests.retain(|request| request.id != id);
     }
 
-    fn insert(&mut self, id: u64, priority: Priority) {
-        if priority == Priority::Regular {
-            self.regular.push_back(id);
-        } else {
-            self.low.push_back(id);
-        }
+    fn insert(&mut self, id: u64, resource: &Resource) {
+        self.requests.push_back(PendingRequest { id, priority: resource.priority, order: resource.order.clone() });
     }
 
+    /// Removes the request to start next: the one with the lowest
+    /// [`start_key`], and of those the one that has waited longest. A
+    /// request's order may change while it waits, so every call reads them
+    /// all.
     fn pop(&mut self) -> Option<u64> {
-        self.regular.pop_front().or_else(|| self.low.pop_front())
+        // `min_by_key` returns the first of equal elements.
+        let (index, _) =
+            self.requests.iter().enumerate().min_by_key(|(_, request)| start_key(request.priority, &request.order))?;
+        self.requests.remove(index).map(|request| request.id)
     }
 
     fn contains(&self, id: u64) -> bool {
-        self.regular.contains(&id) || self.low.contains(&id)
+        self.requests.iter().any(|request| request.id == id)
     }
 }
 
@@ -254,8 +269,7 @@ impl ThreadState {
         debug_assert!(req.request.borrow().is_none());
 
         if self.active_requests.borrow().len() >= self.maximum_concurrent_requests.get() as usize {
-            let priority = req.resource.borrow().priority;
-            self.pending_requests.borrow_mut().insert(id, priority);
+            self.pending_requests.borrow_mut().insert(id, &req.resource.borrow());
         } else {
             self.activate_request(&req);
         }
@@ -309,15 +323,15 @@ impl ThreadState {
     }
 
     fn network_is_reachable_again(&self) {
-        let requests: Vec<Rc<OnlineFileRequest>> =
+        let mut requests: Vec<Rc<OnlineFileRequest>> =
             self.all_requests.borrow().iter().filter_map(|id| self.get(*id)).collect();
-        // Notify regular priority requests, then low priority requests.
-        for priority in [Priority::Regular, Priority::Low] {
-            for req in &requests {
-                if req.resource.borrow().priority == priority {
-                    req.network_is_reachable_again();
-                }
-            }
+        // Notify the requests in the order they would start in.
+        requests.sort_by_key(|req| {
+            let resource = req.resource.borrow();
+            start_key(resource.priority, &resource.order)
+        });
+        for req in &requests {
+            req.network_is_reachable_again();
         }
     }
 }
@@ -671,5 +685,101 @@ impl FileSource for OnlineFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.cached_resource_options.lock().clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resource::Kind;
+
+    fn resource(priority: Priority, order: u32) -> Resource {
+        let mut resource = Resource::new(Kind::Tile, "");
+        resource.set_priority(priority);
+        resource.order.set(order);
+        resource
+    }
+
+    fn drain(pending: &mut PendingRequests) -> Vec<u64> {
+        std::iter::from_fn(|| pending.pop()).collect()
+    }
+
+    #[test]
+    fn pending_requests_start_in_arrival_order_by_default() {
+        let mut pending = PendingRequests::default();
+        for id in [3, 1, 2] {
+            pending.insert(id, &Resource::new(Kind::Unknown, ""));
+        }
+        assert_eq!(drain(&mut pending), [3, 1, 2]);
+    }
+
+    #[test]
+    fn pending_requests_start_by_priority_then_order_then_arrival() {
+        let mut pending = PendingRequests::default();
+        pending.insert(1, &resource(Priority::Low, 0));
+        pending.insert(2, &resource(Priority::Regular, 7));
+        pending.insert(3, &resource(Priority::Regular, 5));
+        pending.insert(4, &resource(Priority::Low, 9));
+        pending.insert(5, &resource(Priority::Regular, 7));
+        pending.insert(6, &resource(Priority::Low, 0));
+        assert_eq!(drain(&mut pending), [3, 2, 5, 1, 6, 4]);
+    }
+
+    /// A requester changes a waiting request's order through the resource it
+    /// kept, a clone of the one it requested with.
+    #[test]
+    fn pending_request_moves_when_its_order_changes() {
+        let mut pending = PendingRequests::default();
+        let resources =
+            [resource(Priority::Regular, 1), resource(Priority::Regular, 2), resource(Priority::Regular, 3)];
+        for (id, resource) in (1..).zip(&resources) {
+            pending.insert(id, &resource.clone());
+        }
+
+        resources[2].order.set(0);
+        assert_eq!(pending.pop(), Some(3));
+
+        resources[0].order.set(u32::MAX);
+        assert_eq!(drain(&mut pending), [2, 1]);
+    }
+
+    /// A low priority request stays behind every regular one, whatever its
+    /// order.
+    #[test]
+    fn pending_order_does_not_cross_priorities() {
+        let mut pending = PendingRequests::default();
+        let low = resource(Priority::Low, 5);
+        pending.insert(1, &low);
+        pending.insert(2, &resource(Priority::Regular, u32::MAX));
+        low.order.set(0);
+        assert_eq!(drain(&mut pending), [2, 1]);
+    }
+
+    /// Requests that leave their order alone, as those for styles, sources,
+    /// sprites and glyphs do, start before every request that set one,
+    /// however many of those came first.
+    #[test]
+    fn pending_requests_without_an_order_start_first() {
+        let mut pending = PendingRequests::default();
+        for id in 1..=100 {
+            pending.insert(id, &resource(Priority::Regular, 1000 - id as u32));
+        }
+        pending.insert(101, &Resource::new(Kind::Glyphs, ""));
+        pending.insert(102, &Resource::new(Kind::SpriteImage, ""));
+        assert_eq!(pending.pop(), Some(101));
+        assert_eq!(pending.pop(), Some(102));
+        assert_eq!(pending.pop(), Some(100));
+    }
+
+    #[test]
+    fn pending_request_removed_does_not_start() {
+        let mut pending = PendingRequests::default();
+        for (id, order) in [(1, 2), (2, 1), (3, 3)] {
+            pending.insert(id, &resource(Priority::Regular, order));
+        }
+        assert!(pending.contains(2));
+        pending.remove(2);
+        assert!(!pending.contains(2));
+        assert_eq!(drain(&mut pending), [1, 3]);
     }
 }

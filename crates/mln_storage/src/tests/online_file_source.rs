@@ -694,6 +694,58 @@ fn low_high_priority_requests_many() {
     run_loop.run();
 }
 
+/// Waiting requests start by their resources' order as it is when a
+/// connection frees up, which the requester may have changed since it made
+/// the request, and one cancelled meanwhile doesn't start.
+#[test]
+fn pending_requests_start_by_order() {
+    let _serial = serial();
+    let server = HttpServer::new();
+    let run_loop = RunLoop::new();
+    let fs = online_file_source();
+    let answered: Rc<RefCell<Vec<usize>>> = Rc::default();
+
+    NetworkStatus::set(Status::Offline);
+    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    let paused = fs.pause();
+
+    // The first request starts at once; the others wait for it.
+    let resources: Vec<Resource> = [0, 1, 2, 3, 4]
+        .into_iter()
+        .map(|order| {
+            let resource = Resource::new(Kind::Unknown, server.url(&format!("/load/{order}")));
+            resource.order.set(order);
+            resource
+        })
+        .collect();
+    let mut requests: Vec<Option<Box<dyn crate::AsyncRequest>>> = resources
+        .iter()
+        .enumerate()
+        .map(|(index, resource)| {
+            let (answered, stop) = (answered.clone(), run_loop.clone());
+            Some(fs.request(
+                resource,
+                Box::new(move |_: Response| {
+                    answered.borrow_mut().push(index);
+                    if answered.borrow().len() == 4 {
+                        stop.stop();
+                    }
+                }),
+            ))
+        })
+        .collect();
+
+    resources[4].order.set(1);
+    resources[1].order.set(5);
+    requests[2] = None;
+
+    // Online before resuming, as in LowHighPriorityRequests.
+    NetworkStatus::set(Status::Online);
+    drop(paused);
+    run_loop.run();
+    assert_eq!(*answered.borrow(), [0, 4, 3, 1]);
+}
+
 // gtest: OnlineFileSource.MaximumConcurrentRequests
 #[test]
 fn maximum_concurrent_requests() {
