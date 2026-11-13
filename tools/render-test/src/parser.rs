@@ -613,9 +613,9 @@ fn parse_feature_state(state: &serde_json::Value, metadata: &mut TestMetadata) -
 }
 
 /// Operations the runner recognises but cannot run, each with what it
-/// lacks. As an operation or a manifest probe, each errors the test when it
-/// runs (`TestContext::fail_unsupported`), so the test can't pass by skipping
-/// it.
+/// lacks. Each errors the test when it runs (`TestContext::fail_unsupported`),
+/// so the test can't pass by skipping it; so do the `probeMemory` and
+/// `probeGFX` manifest probes.
 const UNSUPPORTED_OPERATIONS: [(&str, &str); 5] = [
     (MEMORY_PROBE_START_OP, "no allocation counting"),
     (MEMORY_PROBE_OP, "no allocation counting"),
@@ -623,11 +623,6 @@ const UNSUPPORTED_OPERATIONS: [(&str, &str); 5] = [
     (PAN_GESTURE_OP, "no flyTo animation sampled at frame times"),
     (GFX_PROBE_OP, "no rendering stats from the frontend"),
 ];
-
-/// Whether `name` is in [`UNSUPPORTED_OPERATIONS`].
-pub(crate) fn is_unsupported_operation(name: &str) -> bool {
-    UNSUPPORTED_OPERATIONS.iter().any(|(operation, _)| *operation == name)
-}
 
 /// The operation for `name` from [`UNSUPPORTED_OPERATIONS`]: it errors the
 /// test, naming what the runner lacks.

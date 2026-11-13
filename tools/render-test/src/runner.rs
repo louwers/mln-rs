@@ -29,11 +29,11 @@ use crate::manifest_parser::Manifest;
 use crate::metadata::{
     GfxProbe, MapMode, MemoryProbe, NetworkProbe, RenderedQueryOptions, ScreenBox, TestMetadata, check_value,
 };
-use crate::parser::test_operation_names::NETWORK_PROBE_OP;
+use crate::parser::test_operation_names::{GFX_PROBE_OP, MEMORY_PROBE_OP, NETWORK_PROBE_OP};
 use crate::parser::{
-    TileLodMode, is_unsupported_operation, parse_test_operations, read_expected_image_entries,
-    read_expected_json_entries, read_expected_metric_entries, read_expected_metrics, read_json, to_json_features,
-    to_json_value, unsupported_operation_entry,
+    TileLodMode, parse_test_operations, read_expected_image_entries, read_expected_json_entries,
+    read_expected_metric_entries, read_expected_metrics, read_json, to_json_features, to_json_value,
+    unsupported_operation_entry,
 };
 use crate::test_runner_common::{deep_equal, tokenize};
 
@@ -1400,7 +1400,7 @@ fn get_before_operations(manifest: &Manifest) -> TestOperations {
             }));
             continue;
         }
-        if is_unsupported_operation(probe) {
+        if probe == MEMORY_PROBE_OP || probe == GFX_PROBE_OP {
             result.push(unsupported_operation_entry(probe));
             continue;
         }
@@ -1423,7 +1423,7 @@ fn get_after_operations(manifest: &Manifest) -> TestOperations {
             }));
             continue;
         }
-        if is_unsupported_operation(probe) {
+        if probe == MEMORY_PROBE_OP || probe == GFX_PROBE_OP {
             result.push(unsupported_operation_entry(probe));
             continue;
         }
