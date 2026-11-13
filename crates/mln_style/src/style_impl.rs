@@ -227,6 +227,9 @@ pub struct Impl {
     style_request: Option<Box<dyn AsyncRequest>>,
     /// Responses to `style_request` waiting for `process_style_responses`.
     style_responses: Rc<RefCell<VecDeque<Response>>>,
+    /// Whether a response to `style_request` has brought a style, which a
+    /// later response without content or not modified confirms.
+    style_delivered: bool,
     file_source: Option<Arc<dyn FileSource>>,
 
     url: String,
@@ -311,6 +314,7 @@ impl Impl {
             sprite_loader,
             style_request: None,
             style_responses: Rc::new(RefCell::new(VecDeque::new())),
+            style_delivered: false,
             file_source,
             url: String::new(),
             json: String::new(),
@@ -370,6 +374,7 @@ impl Impl {
         self.url = url.to_owned();
 
         self.style_responses.borrow_mut().clear();
+        self.style_delivered = false;
         let responses = Rc::downgrade(&self.style_responses);
         let shared = Rc::downgrade(&self.shared);
         self.style_request = Some(file_source.request(
@@ -397,16 +402,30 @@ impl Impl {
                 continue;
             }
 
-            if let Some(error) = &res.error {
-                let message = format!("loading style failed: {}", error.message);
+            // C++ ignores a response without content or not modified, as one
+            // that confirms the style an earlier response brought. Without
+            // one, the load has no style, so it fails.
+            let empty = res.no_content || res.not_modified;
+            let error = match &res.error {
+                Some(error) => Some(error.message.clone()),
+                None if empty && !self.style_delivered => Some(
+                    if res.no_content {
+                        "the style request returned no content"
+                    } else {
+                        "the style request returned not modified, but no earlier response delivered the style"
+                    }
+                    .to_owned(),
+                ),
+                None => None,
+            };
+            if let Some(error) = error {
+                let message = format!("loading style failed: {error}");
                 Log::error(Event::Setup, &message);
                 let observer = self.observer();
                 observer.on_style_error(StyleLoadError::Load(message));
-                observer.on_resource_error(Error::native(error.message.clone()));
-            } else if !res.not_modified
-                && !res.no_content
-                && let Some(data) = &res.data
-            {
+                observer.on_resource_error(Error::native(error));
+            } else if !empty && let Some(data) = &res.data {
+                self.style_delivered = true;
                 let json = String::from_utf8_lossy(data).into_owned();
                 self.parse(&json);
             }

@@ -1,4 +1,4 @@
-// Number formatting and `util::stof`.
+// Number formatting, and the longest number prefix of a string.
 
 /// `value` as JavaScript's `Number.prototype.toString()` writes it: the
 /// shortest digits that read back as `value`, positional from `1e-6` up to
@@ -23,24 +23,6 @@ pub fn to_string_double(value: f64) -> String {
         "Infinity".into()
     } else {
         "-Infinity".into()
-    }
-}
-
-/// The exceptions `std::stof` throws (libstdc++: `what()` is `"stof"`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("stof")]
-pub enum StofError {
-    /// `std::invalid_argument`: nothing could be converted.
-    InvalidArgument,
-    /// `std::out_of_range`: a finite number outside the normal `f32` range.
-    OutOfRange,
-}
-
-impl StofError {
-    /// `what()`.
-    #[must_use]
-    pub fn what(&self) -> &'static str {
-        "stof"
     }
 }
 
@@ -80,22 +62,6 @@ pub fn float_prefix(s: &str) -> &str {
     &s[..end]
 }
 
-/// `util::stof`: the number at the start of `s` ([`float_prefix`]) as `f32`.
-/// An error when there is none, or when a finite number overflows to infinity
-/// or is nonzero and below the normal range once rounded to `f32` precision
-/// with an unbounded exponent.
-pub fn stof(s: &str) -> Result<f32, StofError> {
-    let number = float_prefix(s);
-    let value: f32 = number.parse().map_err(|_| StofError::InvalidArgument)?;
-    let finite = number.bytes().any(|c| c.is_ascii_digit());
-    let mantissa = number.split(['e', 'E']).next().unwrap_or_default();
-    let nonzero = mantissa.bytes().any(|c| (b'1'..=b'9').contains(&c));
-    // Halfway between `f32::MIN_POSITIVE` and the 24-bit value below it.
-    let tiny = f64::from(f32::MIN_POSITIVE) * (1.0 - 2f64.powi(-25));
-    let underflow = nonzero && number.parse::<f64>().is_ok_and(|v| v.abs() < tiny);
-    if (finite && value.is_infinite()) || underflow { Err(StofError::OutOfRange) } else { Ok(value) }
-}
-
 /// `util::toHex(uint32_t)`.
 #[must_use]
 pub fn to_hex_u32(value: u32) -> String {
@@ -129,23 +95,6 @@ mod tests {
         assert_eq!(to_string_double(5e-324), "5e-324");
         assert_eq!(to_string_double(f64::NAN), "NaN");
         assert_eq!(to_string_double(f64::NEG_INFINITY), "-Infinity");
-    }
-
-    #[test]
-    fn stof_errors() {
-        assert_eq!(stof("1.5x"), Ok(1.5));
-        assert_eq!(stof(" x"), Err(StofError::InvalidArgument));
-        assert_eq!(stof("1e39"), Err(StofError::OutOfRange));
-        assert_eq!(stof("1e-50"), Err(StofError::OutOfRange));
-        assert_eq!(stof("0"), Ok(0.0));
-        assert_eq!(stof("1e-40"), Err(StofError::OutOfRange));
-        assert_eq!(stof("1.1754943e-38"), Err(StofError::OutOfRange));
-        assert_eq!(stof("-1.1754943e-38"), Err(StofError::OutOfRange));
-        assert_eq!(stof("1.17549434e-38"), Ok(f32::MIN_POSITIVE));
-        assert_eq!(stof("1.17549435e-38"), Ok(f32::MIN_POSITIVE));
-        assert_eq!(stof("0e-999"), Ok(0.0));
-        assert_eq!(stof("-Infinity"), Ok(f32::NEG_INFINITY));
-        assert!(stof("nan").is_ok_and(f32::is_nan));
     }
 
     #[test]

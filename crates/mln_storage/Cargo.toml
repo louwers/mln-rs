@@ -16,6 +16,7 @@ name = "mln_storage"
 doctest = false
 
 [dependencies]
+bytes.workspace = true
 feature.workspace = true
 geojson.workspace = true
 mln_actor.workspace = true

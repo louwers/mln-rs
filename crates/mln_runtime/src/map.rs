@@ -20,7 +20,7 @@ use mln_util::sync::MutexExt;
 use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
-use crate::feature_state::{FeatureState, FeatureStateSelector, FeatureStateStore};
+use crate::feature_state::{FeatureState, FeatureStateSelector};
 use crate::render::{
     Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionShared, Worker, worker_post,
 };
@@ -109,6 +109,9 @@ pub(crate) struct Published {
     /// The sequence number of the last command that ran.
     applied: AtomicU64,
     event_mask: AtomicU64,
+    /// The still image that waits for a frame, as the
+    /// `still_image_request_id` of the updates that ask for it, or 0.
+    still_image: AtomicU64,
 }
 
 impl Published {
@@ -117,11 +120,19 @@ impl Published {
         self.applied.load(Ordering::SeqCst)
     }
 
+    /// The still image that waits for a frame, as the
+    /// `still_image_request_id` of the updates that ask for it, or 0 when
+    /// none waits.
+    pub(crate) fn pending_still_image(&self) -> u64 {
+        self.still_image.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn new(event_mask: EventMask) -> Self {
         Published {
             snapshot: Mutex::new(None),
             applied: AtomicU64::new(0),
             event_mask: AtomicU64::new(event_mask.bits()),
+            still_image: AtomicU64::new(0),
         }
     }
 }
@@ -557,7 +568,18 @@ impl Map {
     /// Renders a still image of a static or tile map, once every resource
     /// that it needs has loaded. The map's render session draws it, and
     /// [`RenderSession::read_texture`] reads its pixels once the completion
-    /// reports success. Without a session, the image waits for the next one.
+    /// reports success.
+    ///
+    /// While the image waits, the session has a demand of its own for it,
+    /// whose [`FrameResult`](crate::FrameResult) has no token. The demand
+    /// waits for the map to load what the image needs, and parks while a
+    /// borrowed ring has no texture to render into. It finishes with the
+    /// image's frame, which completes the image once its result is queued:
+    /// a frame of the host's demands completes none. The host's demands
+    /// neither replace it nor are replaced by it. When the session ends its
+    /// demands, by a barrier, a target's release or a detach, the demand
+    /// ends too, and the image waits for the next one: once the barrier ran,
+    /// the target came back, or the next session attached.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
     /// continuous map. Completes with
@@ -778,24 +800,24 @@ impl Map {
     /// sources, wait until [`set_style_url`](Self::set_style_url) or
     /// [`set_style_json`](Self::set_style_json) completes.
     ///
+    /// The map's next update for its render session carries the state, so a
+    /// frame shows it, and a rendered query reads it, once the frame renders
+    /// that update. A command that changes no state publishes no update: an
+    /// empty `state` merges nothing.
+    ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// selector without a feature, or an empty state.
+    /// selector without a feature.
     pub fn set_feature_state(
         &self,
         selector: &FeatureStateSelector,
         state: FeatureState,
     ) -> Result<Completion<Applied>, Error> {
         let key = selector.key(true)?;
-        if state.is_empty() {
-            return Err(Error::invalid_argument("feature state must not be empty"));
-        }
-        self.send(
-            move |entry, _| {
-                entry.feature_state.set(key, state);
-                Ok(())
-            },
-            |(), entry| entry.applied(),
-        )
+        self.command(move |map| {
+            let feature_id = key.feature_id.as_deref().unwrap_or_default();
+            map.set_feature_state(&key.source_id, Some(&key.source_layer_id), feature_id, state);
+            Ok(())
+        })
     }
 
     /// The state of the feature that `selector` names, empty when it has
@@ -803,22 +825,30 @@ impl Map {
     /// for a selector without a feature.
     pub fn feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
         let key = selector.key(true)?;
-        self.send(move |entry, _| Ok(entry.feature_state.get(&key)), |state, _| state)
+        self.query(move |map| {
+            let feature_id = key.feature_id.as_deref().unwrap_or_default();
+            Ok(map.get_feature_state(&key.source_id, Some(&key.source_layer_id), feature_id))
+        })
     }
 
     /// Removes the state that `selector` selects: one key of a feature, all
     /// of a feature's state, or that of every feature in a source layer.
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// state key without a feature.
+    /// The removal reaches the render session as
+    /// [`set_feature_state`](Self::set_feature_state) describes, and a
+    /// removal of no state publishes no update. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a state key
+    /// without a feature.
     pub fn remove_feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<Applied>, Error> {
         let key = selector.key(false)?;
-        self.send(
-            move |entry, _| {
-                entry.feature_state.remove(&key);
-                Ok(())
-            },
-            |(), entry| entry.applied(),
-        )
+        self.command(move |map| {
+            map.remove_feature_state(
+                &key.source_id,
+                Some(&key.source_layer_id),
+                key.feature_id.as_deref(),
+                key.state_key.as_deref(),
+            );
+            Ok(())
+        })
     }
 
     // MARK: - Style
@@ -903,7 +933,7 @@ impl Map {
                     return Err(Error::invalid_state(message));
                 }
                 style.remove_source(&source_id);
-                entry.feature_state.remove_source(&source_id);
+                entry.core.remove_source_feature_state(&source_id);
                 Ok(())
             },
             |(), entry| entry.applied(),
@@ -1286,7 +1316,6 @@ pub(crate) struct MapEntry {
     /// Whether a flush of the map's events is on its way.
     flush_scheduled: Arc<AtomicBool>,
     ends: Ends,
-    pub(crate) feature_state: FeatureStateStore,
     /// The callbacks of the custom sources that commands added.
     pub(crate) callback_sources: CallbackSources,
     /// The GeoJSON data that commands set and that is still being built.
@@ -1370,7 +1399,6 @@ pub(crate) fn create(
             session: None,
             flush_scheduled,
             ends: Ends::default(),
-            feature_state: FeatureStateStore::default(),
             callback_sources: CallbackSources::default(),
             geojson_updates: GeoJsonUpdates::default(),
         },
@@ -1479,11 +1507,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     let from_json = entry.pending_style.as_ref().is_some_and(|pending| pending.from_json);
     for event in &events {
         match event {
-            MapEvent::StyleLoaded => {
-                // A new style's sources start without state.
-                entry.feature_state.clear();
-                style_outcome = Some(Ok(()));
-            }
+            MapEvent::StyleLoaded => style_outcome = Some(Ok(())),
             MapEvent::LoadingFailed(StyleLoadError::Parse(message)) if from_json => {
                 style_outcome = Some(Err(Error::invalid_argument(message)));
             }
@@ -1494,6 +1518,14 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     let style_outcome = style_outcome.map(|outcome| (outcome, entry.pending_style.take(), entry.applied()));
     let still_outcome = entry.pending_still.as_ref().and_then(|pending| pending.outcome.borrow_mut().take());
     let still = still_outcome.and_then(|outcome| Some((outcome, entry.pending_still.take()?.resolver)));
+    // The session demands a frame for the image while it waits, and lets
+    // the demand go once it doesn't.
+    let still_image = entry.pending_still.as_ref().and(entry.core.pending_still_image()).unwrap_or(0);
+    if entry.published.still_image.swap(still_image, Ordering::SeqCst) != still_image
+        && let Some(link) = &entry.session
+    {
+        worker_post(&link.run_loop, Worker::still_image_changed);
+    }
 
     let mask = entry.mask;
     let events: Vec<RuntimeEvent> = events

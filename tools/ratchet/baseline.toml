@@ -153,7 +153,6 @@
 "crates/mln_webgpu/src/upload_pass.rs" = 1
 "vendor/geojson-vt/src/lib.rs" = 2
 "vendor/geojson/src/geojson_impl.rs" = 4
-"vendor/pmtiles/src/lib.rs" = 2
 "vendor/supercluster/src/lib.rs" = 1
 
 [todo-port]
@@ -199,7 +198,7 @@
 "crates/mln_renderer/src/layers/render_heatmap_layer.rs" = 2
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 1
 "crates/mln_renderer/src/render_layer.rs" = 2
-"crates/mln_renderer/src/render_orchestrator.rs" = 13
+"crates/mln_renderer/src/render_orchestrator.rs" = 12
 "crates/mln_renderer/src/render_source.rs" = 1
 "crates/mln_renderer/src/render_static_data.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
@@ -262,4 +261,3 @@
 "vendor/geojson/src/lib.rs" = 1
 "vendor/geojson/tests/geojson.rs" = 1
 "vendor/geometry/src/lib.rs" = 1
-"vendor/pmtiles/src/lib.rs" = 1

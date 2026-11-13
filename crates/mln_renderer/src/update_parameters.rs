@@ -32,6 +32,9 @@ pub struct UpdateParameters {
     pub layers: ImmutableVector<dyn layer::Impl>,
     /// The style's global state, used by "global-state" expressions.
     pub global_state: Option<Arc<GlobalStateMap>>,
+    /// The map's feature state. Each render source takes its own, in place
+    /// of what it held.
+    pub feature_states: Arc<crate::source_state::FeatureStatesBySource>,
 
     // TODO(port): mapbox::base::WeakPtr<AnnotationManager> annotationManager.
     pub file_source: Option<Arc<dyn mln_storage::FileSource>>,

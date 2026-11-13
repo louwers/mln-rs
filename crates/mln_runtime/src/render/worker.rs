@@ -215,6 +215,25 @@ struct PendingDemand {
     serial: u64,
 }
 
+/// The demand that renders the map's still image while the image waits for
+/// a frame. Its result has no token.
+struct StillDemand {
+    /// The update that the demand tried and drew nothing of, since a
+    /// resource that the image needs had yet to load. The demand waits for
+    /// a newer one.
+    tried: Option<u64>,
+}
+
+/// A frame that the worker rendered, or tried to, and has yet to publish.
+struct RenderedFrame {
+    result: FrameResult,
+    /// The renderer's events of the frame.
+    events: Vec<RendererEvent>,
+    /// The ring slot that the frame rendered into, with what the host may
+    /// acquire of it.
+    slot: Option<(usize, Option<Published>)>,
+}
+
 /// Work that waits for the work sent before it: resizes that haven't
 /// landed, and demands that wait for the map's commands.
 struct Behind {
@@ -275,8 +294,12 @@ pub(crate) struct Worker {
     /// The update generation and session generation of the last render.
     rendered_update: u64,
     rendered_generation: u64,
-    /// The latest update that the session tried a still image with.
-    still_attempted: u64,
+    /// The demand of the map's still image, while the image waits for a
+    /// frame.
+    still: Option<StillDemand>,
+    /// The `still_image_request_id` of the last still image that the
+    /// session rendered.
+    still_rendered: u64,
     /// Whether the target holds a frame since it attached or resized.
     has_frame: bool,
     /// The sources of the last render.
@@ -408,7 +431,8 @@ impl Worker {
             ring,
             rendered_update: 0,
             rendered_generation: 0,
-            still_attempted: 0,
+            still: None,
+            still_rendered: 0,
             has_frame: false,
             sources: None,
             torn_down: false,
@@ -573,8 +597,9 @@ impl Worker {
         self.pump(outbox);
     }
 
-    /// Evaluates the demands whose commands ran and those whose update came,
-    /// then a still image that the map waits for.
+    /// Evaluates the demands whose commands ran, then the demand of a still
+    /// image that the map waits for, then the demands whose update came: an
+    /// update that the image's frame showed is no news to them.
     fn pump(&mut self, outbox: &mut Outbox) {
         if self.torn_down {
             return;
@@ -589,14 +614,14 @@ impl Worker {
         while let Some(pending) = self.parked.pop_front() {
             if let Some(pending) = self.evaluate(pending, outbox) {
                 self.parked.push_front(pending);
-                return self.run_queued(outbox);
+                self.run_queued(outbox);
+                return self.serve_still(outbox);
             }
         }
         self.run_queued(outbox);
+        self.serve_still(outbox);
         let latest = self.latest_generation();
-        // A ring replacement on its way gives the demands that wait a new
-        // target, which they render to once it lands.
-        let retargeting = self.shared.state.lock_unpoisoned().pending_retargets != 0;
+        let retargeting = self.retargeting();
         let (updated, waiting): (Vec<_>, Vec<_>) =
             self.waiting.drain(..).partition(|(_, seen)| !retargeting && latest > *seen);
         self.waiting = waiting;
@@ -605,7 +630,12 @@ impl Worker {
                 self.parked.push_back(pending);
             }
         }
-        self.render_still_image(outbox);
+    }
+
+    /// Whether a ring replacement is on its way, which gives the demands
+    /// that wait a new target: they render to it once it lands.
+    fn retargeting(&self) -> bool {
+        self.shared.state.lock_unpoisoned().pending_retargets != 0
     }
 
     /// Runs the demands whose map commands ran and the work that waits
@@ -697,7 +727,8 @@ impl Worker {
                     RingPick::None => None,
                     RingPick::Slot(slot) => Some(slot),
                 };
-                self.render(token, &update, slot, outbox);
+                let frame = self.render(token, &update, slot);
+                self.publish_rendered(frame, outbox);
             }
             _ if pending.demand.mode == DemandMode::WaitForUpdate => self.waiting.push((pending, latest_generation)),
             _ => self.publish(&FrameResult::unrendered(token, FrameDisposition::NoUpdate, latest_generation), outbox),
@@ -705,50 +736,127 @@ impl Worker {
         None
     }
 
-    /// Renders an update that asks for a still image, once for each update
-    /// that reaches a target that can take the frame.
-    fn render_still_image(&mut self, outbox: &mut Outbox) {
+    /// The map's still image changed: one waits for a frame, or none does.
+    pub(crate) fn still_image_changed(&mut self, outbox: &mut Outbox) {
+        self.serve_still(outbox);
+    }
+
+    /// The still image that waits for a frame, as the
+    /// `still_image_request_id` of the updates that ask for it, or 0.
+    fn pending_still_image(&self) -> u64 {
+        self.map_published.as_ref().map_or(0, |published| published.pending_still_image())
+    }
+
+    /// Serves the map's still image: demands a frame for it while it waits
+    /// for one, and renders the demand once the target can take a frame and
+    /// the map has an update that it hasn't tried. The demand finishes with
+    /// the image's frame. One that draws nothing, because a resource that
+    /// the image needs is still loading, waits for the map's next update,
+    /// and one that finds the ring full parks until the host releases a
+    /// frame. A host's demands neither replace nor wait for it. Ending the
+    /// demands on their way ends it too, until the session can render again:
+    /// a barrier demands the image again once it ran, a new target once it
+    /// lands, and the next session once it attaches.
+    fn serve_still(&mut self, outbox: &mut Outbox) {
+        let pending = self.pending_still_image();
+        if pending == 0 {
+            // The image completed or failed meanwhile.
+            if self.still.take().is_some() {
+                let result = FrameResult::unrendered(None, FrameDisposition::NoUpdate, self.latest_generation());
+                self.publish(&result, outbox);
+            }
+            return;
+        }
+        if self.still.is_none() {
+            if pending <= self.still_rendered || !self.can_render() {
+                return;
+            }
+            self.still = Some(StillDemand { tried: None });
+        }
         let Some(update) = self.latest() else { return };
-        let Some(gfx) = self.gfx.as_ref() else { return };
-        if !update.parameters.still_image_request || update.generation <= self.still_attempted || !gfx.ready_for_frame()
+        // The update that asks for the image comes before the map says that
+        // the image waits.
+        let asks = update.parameters.still_image_request && update.parameters.still_image_request_id == pending;
+        let tried = self.still.as_ref().and_then(|still| still.tried);
+        if !asks
+            || tried == Some(update.generation)
+            || self.retargeting()
+            || !self.gfx.as_ref().is_some_and(Gfx::ready_for_frame)
         {
             return;
         }
         let slot = match self.pick_slot() {
-            RingPick::Full | RingPick::Quarantined => return,
+            RingPick::Full => return,
+            RingPick::Quarantined => {
+                self.still = None;
+                let result = FrameResult::unrendered(None, FrameDisposition::TargetNotReady, update.generation);
+                return self.publish(&result, outbox);
+            }
             RingPick::None => None,
             RingPick::Slot(slot) => Some(slot),
         };
-        self.still_attempted = update.generation;
-        self.render(None, &update, slot, outbox);
+        let frame = self.render(None, &update, slot);
+        match frame.result.disposition {
+            FrameDisposition::Rendered => {
+                self.still = None;
+                self.still_rendered = pending;
+                self.publish_rendered(frame, outbox);
+            }
+            disposition => {
+                // A frame that a surface dropped is tried again.
+                if disposition == FrameDisposition::NoUpdate
+                    && let Some(still) = self.still.as_mut()
+                {
+                    still.tried = Some(update.generation);
+                }
+                if let Some((slot, published)) = frame.slot {
+                    self.end_slot(slot, published);
+                }
+                self.forward(frame.events);
+            }
+        }
+    }
+
+    /// Whether the session can render a frame for a demand of its own: it
+    /// attached, has a target, and a ring with a texture it may render into.
+    fn can_render(&self) -> bool {
+        if self.torn_down || self.reader.is_none() || self.gfx.is_none() {
+            return false;
+        }
+        let state = self.shared.state.lock_unpoisoned();
+        state.lifecycle == RenderSessionState::Attached
+            && state.has_target
+            && (state.ring.is_empty() || !state.ring.iter().all(|slot| slot.quarantined))
     }
 
     fn generation(&self) -> u64 {
         self.shared.state.lock_unpoisoned().generation
     }
 
-    /// Renders `update` for the demand `token` into the ring's `slot`, which
+    /// Renders `update` for the demand `token`, or for the still image's
+    /// demand when it has none, into the ring's `slot`, which
     /// [`pick_slot`](Self::pick_slot) marked, or into a target without a
-    /// ring, and publishes its result. A still map draws no frame until
-    /// everything that it shows has loaded, and a surface without a texture
-    /// to render into takes no frame. A frame that a surface drops, having
-    /// had no image for it after all, finishes as not ready, and the next
-    /// demand draws the map again.
-    fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>, outbox: &mut Outbox) {
+    /// ring. Returns the frame, which
+    /// [`publish_rendered`](Self::publish_rendered) publishes. A still map draws no frame until everything that it shows
+    /// has loaded, and a surface without a texture to render into takes no
+    /// frame. A frame that a surface drops, having had no image for it after
+    /// all, finishes as not ready, and the next demand draws the map again.
+    /// Only the still image's own frame completes the image.
+    fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>) -> RenderedFrame {
         let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
             if let Some(slot) = slot {
                 self.end_slot(slot, None);
             }
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return self.publish(&result, outbox);
+            return RenderedFrame { result, events: Vec::new(), slot: None };
         };
         if let Some(slot) = slot
             && gfx.target.select_slot(slot).is_err()
         {
             self.end_slot(slot, None);
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return self.publish(&result, outbox);
+            return RenderedFrame { result, events: Vec::new(), slot: None };
         }
         let handoff = {
             let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
@@ -758,17 +866,22 @@ impl Worker {
             let mut state = self.shared.state.lock_unpoisoned();
             state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
         }
+        let mut events = self.renderer_events.take();
+        if token.is_some() {
+            for event in &mut events {
+                if let RendererEvent::RenderFrameFinished { still_image_request_id, .. } = event {
+                    *still_image_request_id = 0;
+                }
+            }
+        }
         if gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped)) {
-            let events = self.renderer_events.take();
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            self.publish(&result, outbox);
-            return self.forward(events);
+            return RenderedFrame { result, events, slot: None };
         }
         let projection = gfx.renderer.frame_projection();
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
         self.sources = Some(update.parameters.sources.clone());
-        let events = self.renderer_events.take();
         let report = events.iter().rev().find_map(|event| match event {
             RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => Some(FrameReport {
                 mode: match mode {
@@ -817,10 +930,15 @@ impl Worker {
             };
             (slot, published)
         });
-        // The result goes out before the map hears of the frame, so a still
-        // image completes with its frame's result queued.
-        self.publish_frame(slot, &result, outbox);
-        self.forward(events);
+        RenderedFrame { result, events, slot }
+    }
+
+    /// Publishes a frame: its result and ring slot, then the renderer's
+    /// events of the frame, which go to the map after the result, so that a
+    /// still image completes with its frame's result queued.
+    fn publish_rendered(&self, frame: RenderedFrame, outbox: &mut Outbox) {
+        self.publish_frame(frame.slot, &frame.result, outbox);
+        self.forward(frame.events);
     }
 
     /// Queues a frame result for the host, and wakes it unless it was woken
@@ -854,7 +972,8 @@ impl Worker {
         }
     }
 
-    /// Ends every demand on its way with `disposition`.
+    /// Ends every demand on its way with `disposition`, the still image's
+    /// included.
     pub(crate) fn end_demands(&mut self, disposition: FrameDisposition, outbox: &mut Outbox) {
         let latest = self.latest_generation();
         let pending: Vec<_> = self
@@ -866,6 +985,16 @@ impl Worker {
         for pending in pending {
             self.publish(&FrameResult::unrendered(Some(pending.demand.token), disposition, latest), outbox);
         }
+        if self.still.take().is_some() {
+            self.publish(&FrameResult::unrendered(None, disposition, latest), outbox);
+        }
+    }
+
+    /// Ends every demand on its way as a barrier does, then demands the
+    /// still image again, if one waits, once the barrier ran.
+    pub(crate) fn barrier(&mut self, outbox: &mut Outbox) {
+        self.end_demands(FrameDisposition::NoUpdate, outbox);
+        post(&self.shared.run_loop, Worker::still_image_changed);
     }
 
     // MARK: - Borrowed rings
@@ -1269,6 +1398,8 @@ impl Worker {
         self.target_changed(size, replaced.is_ok().then_some(true));
         if replaced.is_ok() {
             self.wake_for_redraw(outbox);
+            // A still image that waits for a target gets its demand again.
+            post(&self.shared.run_loop, Worker::still_image_changed);
         }
         replaced
     }
@@ -1281,6 +1412,11 @@ impl Worker {
     pub(crate) fn clear_data(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
         self.renderer()?.clear_data();
         self.rendered_update = 0;
+        // The renderer loads what the image needs again, once it tries.
+        if let Some(still) = self.still.as_mut() {
+            still.tried = None;
+            post(&self.shared.run_loop, Worker::still_image_changed);
+        }
         self.wake_for_redraw(outbox);
         Ok(())
     }

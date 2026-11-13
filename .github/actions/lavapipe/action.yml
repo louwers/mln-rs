@@ -1,7 +1,8 @@
 name: Mesa's software rasterizers
 description: >-
-  Installs Mesa's Vulkan drivers and points the Vulkan loader at lavapipe,
-  the software rasterizer the GPU tests on Linux run on. With
+  Installs Mesa's Vulkan drivers and a Vulkan loader that is safe to use from
+  several threads, and points the loader at lavapipe, the software
+  rasterizer the GPU tests on Linux run on. With
   `validation-layer`, also Vulkan's validation layer, and with `egl`, Mesa's
   EGL, for OpenGL ES on llvmpipe.
 
@@ -26,6 +27,15 @@ inputs:
 # Mesa's EGL depends on its gallium drivers and its GBM at exactly its own
 # version. The runner image has both, but packages-egl.sha256 pins them too,
 # so that an image with another Mesa gets the EGL's.
+#
+# packages.sha256 also pins Ubuntu 26.10's Vulkan loader, 1.4.357, in place
+# of the image's 1.4.341. That one names an object
+# (vkSetDebugUtilsObjectNameEXT, which the Vulkan backend calls under the
+# validation layer, and wgpu in a debug build) by walking the devices under a
+# lock that vkCreateDevice and vkDestroyDevice don't take, so a thread that
+# names one while another destroys a device can read the freed device and
+# crash. The loader takes the same lock since 1.4.350
+# (KhronosGroup/Vulkan-Loader#1866). It depends on libc only.
 runs:
   using: composite
   steps:

@@ -24,7 +24,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
+use mln_renderer::{OverscaledTileID, Renderer, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -40,6 +40,7 @@ use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::raster_layer::RasterLayer;
+use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::projection::Projection;
 use mln_style::property_expression::PropertyExpression;
 use mln_style::sources::custom_geometry_source::{
@@ -1866,6 +1867,53 @@ fn no_hang_on_missing_image() {
     test.render();
 }
 
+/// Reducing the renderer's memory use removes the images that the map was
+/// given for missing-image events and that no layer uses anymore, except
+/// those set to be kept unused.
+#[test]
+fn reduce_memory_use_removes_unused_requested_images() {
+    let test = MapTest::new();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "points": {"type": "geojson", "data": {"type": "Feature", "properties": {},
+          "geometry": {"type": "Point", "coordinates": [0, 0]}}}
+      },
+      "layers": [
+        {"id": "kept", "type": "symbol", "source": "points", "layout": {"icon-image": "kept-icon"}},
+        {"id": "dropped", "type": "symbol", "source": "points", "layout": {"icon-image": "dropped-icon"}}
+      ]
+    }"#,
+    );
+    test.render();
+    let image = |id: &str, keep_unused: bool| {
+        let mut image = (*style_image(id, red_image(1, 1), 1.0)).clone();
+        image.keep_unused = keep_unused;
+        Arc::new(image)
+    };
+    test.map().style_mut().add_image(image("kept-icon", true));
+    test.map().style_mut().add_image(image("dropped-icon", false));
+    test.map().style_mut().add_image(image("other-icon", false));
+    test.render();
+    let reduce_memory_use = || {
+        test.frontend.with_renderer(Renderer::reduce_memory_use);
+        test.run_loop.run_once();
+        let map = test.map();
+        ["kept-icon", "dropped-icon", "other-icon"].map(|id| map.style().get_image(id).is_some())
+    };
+    assert_eq!(reduce_memory_use(), [true, true, true]);
+
+    for layer in ["kept", "dropped"] {
+        let mut map = test.map();
+        let mut layer = map.style_mut().get_layer_mut(layer).expect("the layer");
+        let symbol = layer.downcast_mut::<SymbolLayer>().expect("SymbolLayer");
+        symbol.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("other-icon")));
+    }
+    test.render();
+    assert_eq!(reduce_memory_use(), [true, false, true]);
+}
+
 // gtest: Map.EmptyImageNameIsNoImage
 #[test]
 fn empty_image_name_is_no_image() {
@@ -2744,6 +2792,55 @@ fn invalid_utf8_in_tile() {
     // crashing.
     let Err(error) = test.try_render() else { panic!("the tile with invalid UTF-8 should fail") };
     assert!(error.to_string().contains("invalid UTF-8"), "{error}");
+}
+
+// A continuous map whose tiles all fail still finishes loading, even when
+// the tiles fail after the map has stopped repainting.
+#[test]
+fn continuous_map_finishes_loading_when_its_tiles_fail() {
+    let _log = FixtureLog::new();
+
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
+    let test = MapTest::create(RunLoop::new(), file_source, 1.0, MapMode::Continuous);
+    test.file_source
+        .set_response(Kind::Tile, |_| Some(file_response("test/fixtures/map/invalid_utf8/invalidutf8feature.mvt")));
+
+    test.map().jump_to(&cam().with_zoom(Some(11.0)));
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "invalidutf8": {
+          "type": "vector",
+          "tiles": ["http://example.com/{z}-{x}-{y}.vector.pbf"]
+        }
+      },
+      "layers": [{
+        "id": "mountain_peak",
+        "type": "symbol",
+        "source": "invalidutf8",
+        "source-layer": "points",
+        "layout": {
+            "text-field": "{name}"
+        }
+      }]
+    }"#,
+    );
+
+    // The tiles are answered only once a frame needs no repaint, so no
+    // frame is coming when they fail.
+    {
+        let file_source = test.file_source.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |status| {
+            if !status.needs_repaint {
+                file_source.respond_to_all();
+            }
+        });
+    }
+    let run_loop = test.run_loop.clone();
+    test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
+
+    run_with_timeout(&test.run_loop, 60);
 }
 
 // gtest: Map.ObserveTileLifecycle

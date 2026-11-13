@@ -6,19 +6,23 @@
 
 mod support;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 
-use mln_map::{CameraOptions, CameraUpdate, MapMode};
+use mln_map::{CameraOptions, CameraUpdate, MapEvent, MapMode, TileOperation};
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
     LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
-    RenderedQueryOptions, Runtime, SourceQueryOptions,
+    RenderedQueryOptions, ResourceRequest, Runtime, RuntimeEvent, RuntimeEventKind, SourceQueryOptions,
 };
-use mln_util::geo::ScreenCoordinate;
+use mln_storage::resource::Kind;
+use mln_storage::response::Reason;
+use mln_storage::{ResourceError, Response};
+use mln_util::chrono::Timestamp;
+use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::size::Size;
-use support::{TIMEOUT, eventually, runtime, wait, wait_err};
+use support::{EventLog, TIMEOUT, eventually, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -933,6 +937,262 @@ fn map_release_cancels_the_pending_still_image() {
     assert_eq!(ErrorKind::InvalidState, wait_err(map.request_still_image()).kind);
     wait(map.release());
     assert_eq!(ErrorKind::Cancelled, pending.wait().unwrap_err().kind);
+}
+
+/// One vector source with one tile at zoom 0, which a still image of a
+/// 64 by 64 map needs.
+const TILED_STYLE: &str = r##"{"version":8,"sources":{"tiles":{"type":"vector","tiles":["custom://tiles/{z}/{x}/{y}.pbf"],"minzoom":0,"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}},{"id":"fill","type":"fill","source":"tiles","source-layer":"any"}]}"##;
+
+/// A tile without content, which loads as an empty tile.
+fn empty_tile() -> Response {
+    Response { no_content: true, ..Response::default() }
+}
+
+/// A static map of `TILED_STYLE` whose provider holds the first tile
+/// request, so that a still image waits for the test to answer it, and
+/// answers every later one with an empty tile.
+struct HeldTile {
+    map: Map,
+    held: Arc<Mutex<Option<ResourceRequest>>>,
+    requests: Arc<AtomicUsize>,
+}
+
+impl HeldTile {
+    fn new(runtime: &Runtime) -> HeldTile {
+        let held = Arc::new(Mutex::new(None));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let (holder, counter) = (held.clone(), requests.clone());
+        wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                *holder.lock().unwrap() = Some(request);
+            } else {
+                // A request that the renderer cancelled meanwhile takes no
+                // answer.
+                let _ = request.respond(empty_tile());
+            }
+        }));
+        let map = map_in_mode(runtime, MapMode::Static);
+        wait(map.set_style_json(TILED_STYLE));
+        HeldTile { map, held, requests }
+    }
+
+    /// Waits until the renderer has asked for the tile `count` times.
+    fn wait_for_requests(&self, count: usize) {
+        assert!(eventually(|| self.requests.load(Ordering::SeqCst) >= count), "the tile was never requested");
+    }
+
+    /// Answers the held request with an empty tile, unless the renderer
+    /// cancelled it.
+    fn answer(&self) {
+        if let Some(request) = self.held.lock().unwrap().take() {
+            let _ = request.respond(empty_tile());
+        }
+    }
+}
+
+fn tokens_and_dispositions(results: &[FrameResult]) -> Vec<(Option<u64>, FrameDisposition)> {
+    results.iter().map(|result| (result.token, result.disposition)).collect()
+}
+
+#[test]
+fn a_still_image_waits_for_the_next_session() {
+    let runtime = runtime();
+    let held = HeldTile::new(&runtime);
+    let still = held.map.request_still_image().unwrap();
+    let first = attach(&held.map);
+    held.wait_for_requests(1);
+    wait(first.detach());
+    let ended = first.drain_frame_results().unwrap();
+    assert_eq!(vec![(None, FrameDisposition::TargetNotReady)], tokens_and_dispositions(&ended));
+    assert!(!still.is_complete());
+
+    // The detach cancelled the held request, so the next session's renderer
+    // asks for the tile again, and gets an empty one.
+    let second = attach(&held.map);
+    still.wait().unwrap();
+    let rendered = second.drain_frame_results().unwrap();
+    assert_eq!(vec![(None, FrameDisposition::Rendered)], tokens_and_dispositions(&rendered));
+    assert_eq!([255, 0, 0, 255], center_pixel(&second, SIZE));
+    held.answer();
+}
+
+#[test]
+fn a_barrier_ends_a_still_image_demand_until_the_next() {
+    let runtime = runtime();
+    let held = HeldTile::new(&runtime);
+    let session = attach(&held.map);
+    let still = held.map.request_still_image().unwrap();
+    held.wait_for_requests(1);
+    wait(session.barrier());
+    let ended = take_one(&session);
+    assert_eq!((None, FrameDisposition::NoUpdate), (ended.token, ended.disposition));
+    assert!(!still.is_complete());
+
+    // The demand that the barrier made again renders the image once the
+    // tile loads.
+    held.answer();
+    still.wait().unwrap();
+    let rendered = session.drain_frame_results().unwrap();
+    assert_eq!(vec![(None, FrameDisposition::Rendered)], tokens_and_dispositions(&rendered));
+}
+
+#[test]
+fn host_demands_and_a_still_image_demand_never_replace_each_other() {
+    let runtime = runtime();
+    let held = HeldTile::new(&runtime);
+    let session = attach(&held.map);
+    let still = held.map.request_still_image().unwrap();
+    held.wait_for_requests(1);
+    demand(&session, DemandMode::WaitForUpdate, 7);
+    held.answer();
+    still.wait().unwrap();
+    // The image's frame showed the update that the host's demand waits for,
+    // and a static map publishes another only for its next still image, so
+    // the host's demand waits until a barrier ends it.
+    wait(session.barrier());
+    let results = take_results(&session, 2);
+    assert_eq!(
+        vec![(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate)],
+        tokens_and_dispositions(&results)
+    );
+}
+
+#[test]
+fn a_still_image_that_fails_ends_its_demand() {
+    let runtime = runtime();
+    wait(runtime.set_resource_provider(|request: ResourceRequest| {
+        let error = ResourceError::new(Reason::Other, "no tile here");
+        let _ = request.respond(Response { error: Some(Box::new(error)), ..Response::default() });
+    }));
+    let map = map_in_mode(&runtime, MapMode::Static);
+    wait(map.set_style_json(TILED_STYLE));
+    let session = attach(&map);
+    assert_eq!(ErrorKind::Native, wait_err(map.request_still_image()).kind);
+    let ended = take_one(&session);
+    assert_eq!((None, FrameDisposition::NoUpdate), (ended.token, ended.disposition));
+}
+
+// MARK: - The tile cache
+
+/// One vector source with tiles up to zoom 14.
+const TILE_CACHE_STYLE: &str = r#"{"version":8,"sources":{"tiles":{"type":"vector","tiles":["custom://tiles/{z}/{x}/{y}.pbf"],"minzoom":0,"maxzoom":14}},"layers":[{"id":"lines","type":"line","source":"tiles","source-layer":"any"}]}"#;
+
+/// Serves empty tiles that are fresh for years, so a request for a tile that
+/// the map kept only revalidates it. It counts the other requests, the
+/// loads, and holds them while the test says so.
+#[derive(Clone, Default)]
+struct TileServer {
+    loads: Arc<AtomicUsize>,
+    /// The loads that wait, or `None` while the server answers at once.
+    held: Arc<Mutex<Option<Vec<ResourceRequest>>>>,
+}
+
+impl TileServer {
+    fn answer(request: ResourceRequest, revalidation: bool) {
+        let expires = Some(Timestamp::from_secs(4_102_444_800));
+        let _ = request.respond(Response { expires, not_modified: revalidation, ..empty_tile() });
+    }
+
+    fn serve(&self, request: ResourceRequest) {
+        let revalidation = request.resource().prior_expires.is_some();
+        if request.resource().kind == Kind::Tile && !revalidation {
+            self.loads.fetch_add(1, Ordering::SeqCst);
+            if let Some(held) = self.held.lock().unwrap().as_mut() {
+                return held.push(request);
+            }
+        }
+        TileServer::answer(request, revalidation);
+    }
+
+    fn hold(&self) {
+        *self.held.lock().unwrap() = Some(Vec::new());
+    }
+
+    fn release(&self) {
+        for request in self.held.lock().unwrap().take().unwrap_or_default() {
+            TileServer::answer(request, false);
+        }
+    }
+}
+
+/// Whether `event` reports that the map looked for a tile of zoom 0 in the
+/// cache, as it does once the tiles of a view fall back on their parents all
+/// the way up.
+fn looked_up_zoom_0(event: &RuntimeEvent) -> bool {
+    matches!(
+        &event.kind,
+        RuntimeEventKind::Map(MapEvent::TileAction { op: TileOperation::RequestedFromCache, id, .. })
+            if id.canonical.z == 0
+    )
+}
+
+/// Renders still images of a view, of a view elsewhere, and of the first
+/// view again, and returns how many tiles the first image loads and how many
+/// the last one does. The ambient cache is off, so a tile that the map let
+/// go loads again. The tiles of the first two views load only once the map
+/// has looked for their parents in the cache, up to zoom 0: as with tiles
+/// that take a while to load, the map then holds many tiles that load
+/// nothing.
+fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
+    let runtime = runtime();
+    wait(runtime.set_maximum_ambient_cache_size(0));
+    let server = TileServer::default();
+    let serving = server.clone();
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| serving.serve(request)));
+    let size = Size::new(256, 256);
+    let mut options = MapOptions::new(mln_map::MapOptions::new().with_size(size).with_map_mode(MapMode::Static));
+    if let Some(enabled) = tile_cache_enabled {
+        options = options.with_tile_cache_enabled(enabled);
+    }
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
+    wait(map.set_style_json(TILE_CACHE_STYLE));
+    let (_session, attached) = map.attach(offscreen(size), AttachOptions::default()).unwrap();
+    attached.wait().unwrap();
+    let render_at = |latitude: f64, longitude: f64, fall_back: bool| {
+        let camera = CameraOptions {
+            center: Some(LatLng::new(latitude, longitude).unwrap()),
+            zoom: Some(10.0),
+            ..CameraOptions::default()
+        };
+        wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }));
+        let log = fall_back.then(|| {
+            server.hold();
+            EventLog::install(&runtime)
+        });
+        let still = map.request_still_image().unwrap();
+        if let Some(log) = log {
+            assert!(log.wait_for(looked_up_zoom_0).is_some(), "the tiles never fell back on zoom 0");
+            server.release();
+        }
+        still.wait().unwrap();
+        server.loads.load(Ordering::SeqCst)
+    };
+    let first = render_at(0.0, 0.0, true);
+    let elsewhere = render_at(40.0, 100.0, true);
+    let returning = render_at(0.0, 0.0, false) - elsewhere;
+    (first, returning)
+}
+
+#[test]
+fn a_map_keeps_the_tiles_that_left_the_view_by_default() {
+    let (first, returning) = render_and_return(None);
+    assert!(first > 0);
+    assert_eq!(0, returning);
+}
+
+#[test]
+fn a_map_with_the_tile_cache_enabled_keeps_them() {
+    let (first, returning) = render_and_return(Some(true));
+    assert!(first > 0);
+    assert_eq!(0, returning);
+}
+
+#[test]
+fn a_map_with_the_tile_cache_disabled_loads_them_again() {
+    let (first, returning) = render_and_return(Some(false));
+    assert!(first > 0);
+    assert_eq!(first, returning);
 }
 
 // MARK: - Queries

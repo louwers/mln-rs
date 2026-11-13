@@ -24,7 +24,9 @@ pub(crate) unsafe fn bytes<'a>(view: mln_buffer_view, name: &str) -> Result<&'a 
     Ok(unsafe { core::slice::from_raw_parts(view.data.cast::<u8>(), view.size) })
 }
 
-/// The UTF-8 text that a caller's view names.
+/// The UTF-8 text that a caller's view names, which has no NUL: text ends at
+/// its size, so a NUL inside it is a caller's mistake, and the C strings that
+/// some of it becomes, such as paths, would end there.
 ///
 /// # Safety
 ///
@@ -32,6 +34,9 @@ pub(crate) unsafe fn bytes<'a>(view: mln_buffer_view, name: &str) -> Result<&'a 
 pub(crate) unsafe fn text<'a>(view: mln_buffer_view, name: &str) -> Result<&'a str, Error> {
     // SAFETY: the caller's contract.
     let bytes = unsafe { bytes(view, name) }?;
+    if bytes.contains(&0) {
+        return Err(Error::invalid_argument(format!("{name} must not contain embedded NUL")));
+    }
     core::str::from_utf8(bytes).map_err(|error| Error::invalid_argument(format!("{name} is not valid UTF-8: {error}")))
 }
 
@@ -130,6 +135,9 @@ mod tests {
             assert_eq!(null.message(), "data is null with a nonzero size");
             let invalid = text(view(b"\xff"), "json").unwrap_err();
             assert!(invalid.message().starts_with("json is not valid UTF-8"), "{invalid}");
+            let nul = text(view(b"before\0after"), "url").unwrap_err();
+            assert_eq!(nul.message(), "url must not contain embedded NUL");
+            assert_eq!(bytes(view(b"a\0b"), "data").unwrap(), b"a\0b");
         }
     }
 

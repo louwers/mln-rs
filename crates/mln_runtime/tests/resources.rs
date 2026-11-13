@@ -307,6 +307,39 @@ fn cache_operations_change_what_the_ambient_cache_serves() {
 }
 
 #[test]
+fn an_offline_operation_sent_before_a_release_completes_first() {
+    let dir = TempDir::new();
+    let cache = dir.path("release.db");
+    let bounds = LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap());
+    let definition =
+        OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
+    let runtime =
+        Runtime::new(&RuntimeOptions { cache_path: Some(cache.clone()), ..RuntimeOptions::default() }).unwrap();
+    // The gate holds the runtime's thread until the release is sent, so the
+    // release reaches the thread before the database's answer.
+    let (open, gate) = std::sync::mpsc::channel::<()>();
+    let (entered, parked) = std::sync::mpsc::channel::<()>();
+    runtime.clear_resource_provider().unwrap().on_complete(move |_| {
+        let _ = entered.send(());
+        let _ = gate.recv_timeout(support::TIMEOUT);
+    });
+    parked.recv_timeout(support::TIMEOUT).unwrap();
+    let (record, order) = std::sync::mpsc::channel();
+    let record_created = record.clone();
+    let created = runtime.offline().create_region(definition, b"raced".to_vec()).unwrap();
+    created.on_complete(move |result| drop(record_created.send(result.map(|_| "created").map_err(|e| e.message))));
+    let released = runtime.release().unwrap();
+    released.on_complete(move |result| drop(record.send(result.map(|()| "released").map_err(|e| e.message))));
+    drop(open);
+    let next = || order.recv_timeout(support::TIMEOUT).unwrap();
+    assert_eq!([Ok("created"), Ok("released")], [next(), next()]);
+
+    let reopened = Runtime::new(&RuntimeOptions { cache_path: Some(cache), ..RuntimeOptions::default() }).unwrap();
+    assert_eq!(1, wait(reopened.offline().regions()).len());
+    wait(reopened.release());
+}
+
+#[test]
 fn a_merge_takes_only_a_readable_database_file() {
     let dir = TempDir::new();
     let side = dir.path("side.db");

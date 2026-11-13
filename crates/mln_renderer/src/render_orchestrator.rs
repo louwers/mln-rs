@@ -160,6 +160,11 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
     fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: Error) {
         Log::error(Event::Style, format!("Failed to load tile {tile_id} for source {source_id}: {error}"));
         self.events.emit(RendererEvent::ResourceError(error));
+        // A failed tile is done loading, and its parents or children may
+        // stand in for it, as when it changes: a continuous map needs a frame
+        // to see that, or it never reports that it finished loading. The
+        // error goes first, so the still image it fails isn't rendered again.
+        self.events.emit(RendererEvent::Invalidate);
     }
 
     /// `onTileAction(RenderSource&, TileOperation, const OverscaledTileID&,
@@ -642,6 +647,14 @@ impl RenderOrchestrator {
                 // `emplace` keeps an existing entry.
                 self.render_sources.entry(id.clone()).or_insert(render_source);
             }
+        }
+
+        // The update carries the map's whole feature state, so a render
+        // source, whether new, kept or rebuilt after `clear_data`, shows the
+        // state of the update it renders. A source whose state the update
+        // didn't change does nothing.
+        for (id, render_source) in &mut self.render_sources {
+            render_source.set_feature_states(update_parameters.feature_states.get(id));
         }
 
         // A still image fails at the first resource error, and nothing
@@ -1585,8 +1598,8 @@ impl RenderOrchestrator {
         for source in self.render_sources.values_mut() {
             source.reduce_memory_use();
         }
-        // TODO(port): imageManager->reduceMemoryUse(), observer->onInvalidate()
-        // as C++ does afterwards.
+        self.image_manager.reduce_memory_use();
+        self.events.emit(RendererEvent::Invalidate);
     }
 
     pub fn get_tile_cache_enabled(&self) -> bool {

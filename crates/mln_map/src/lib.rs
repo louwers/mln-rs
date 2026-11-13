@@ -3,6 +3,7 @@
 //! (`CameraOptions`, `MapMode`, `TransformState`, ...) lives in
 //! `mln_map_types` and is re-exported here.
 
+mod feature_state;
 pub mod map;
 pub mod map_event;
 pub mod map_options;

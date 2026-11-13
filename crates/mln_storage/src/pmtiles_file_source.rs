@@ -21,12 +21,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use bytes::Bytes;
 use mln_actor::{ActorRef, Thread};
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
-use pmtiles::{EntryV3, HeaderV3};
+use pmtiles::{Compression, DirEntry, Directory, Header, PmtError, TileCoord, TileId, TileType};
 use serde_json::Value as Json;
 
 use crate::async_request::AsyncRequest;
@@ -46,8 +47,29 @@ const PMTILES_HEADER_LENGTH: u64 = 127;
 // limit so it doesn't grow unlimited
 const MAX_DIRECTORY_CACHE_ENTRIES: usize = 100;
 
-// temporary, remove this when it's available in `pmtiles.hpp`
-const TILETYPE_MLT: u8 = 0x6;
+/// `pmtiles::deserialize_header`, with its checks and its exceptions' texts,
+/// then the fields through the pmtiles crate. Unlike C++, the crate refuses a
+/// compression or a tile type that the spec doesn't define; a compression
+/// that C++ would read and then refuse fails with C++'s message.
+fn deserialize_header(s: &[u8]) -> Result<Header, String> {
+    if !s.starts_with(b"PMTiles") {
+        return Err("pmtiles magic number exception".to_owned());
+    }
+    if s.len() != 127 || s.get(7) != Some(&0x3) {
+        return Err("pmtiles version: must be 3".to_owned());
+    }
+    Header::try_from_bytes(Bytes::copy_from_slice(s)).map_err(|e| match e {
+        PmtError::InvalidCompression => "Compression method not supported".to_owned(),
+        e => e.to_string(),
+    })
+}
+
+/// `pmtiles::zxy_to_tileid`, with its exceptions' texts.
+fn zxy_to_tileid(z: u8, x: u32, y: u32) -> Result<TileId, &'static str> {
+    TileCoord::new(z, x, y)
+        .map(TileId::from)
+        .map_err(|_| if z > 31 { "tile zoom exceeds 64-bit limit" } else { "tile x/y outside zoom level bounds" })
+}
 
 fn accepts_url(url: &str) -> bool {
     url.starts_with(PMTILES_PROTOCOL)
@@ -81,9 +103,9 @@ struct State {
     file_sources: FileSourceManager,
 
     file_source: RefCell<Option<Arc<dyn FileSource>>>,
-    header_cache: RefCell<VecMap<String, HeaderV3>>,
+    header_cache: RefCell<VecMap<String, Rc<Header>>>,
     metadata_cache: RefCell<VecMap<String, String>>,
-    directory_cache: RefCell<VecMap<String, VecMap<String, Vec<EntryV3>>>>,
+    directory_cache: RefCell<VecMap<String, VecMap<String, Directory>>>,
     directory_cache_control: RefCell<VecMap<String, Vec<String>>>,
     tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
@@ -148,18 +170,16 @@ impl State {
                 return;
             };
 
-            let header = pmtiles::deserialize_header(&data[..data.len().min(127)]).map_err(|e| e.to_string()).and_then(
-                |header| {
-                    let supported = |c: u8| c == pmtiles::COMPRESSION_NONE || c == pmtiles::COMPRESSION_GZIP;
-                    if !supported(header.internal_compression) || !supported(header.tile_compression) {
-                        return Err("Compression method not supported".to_owned());
-                    }
-                    Ok(header)
-                },
-            );
+            let header = deserialize_header(&data[..data.len().min(127)]).and_then(|header| {
+                let supported = |c: Compression| c == Compression::None || c == Compression::Gzip;
+                if !supported(header.internal_compression()) || !supported(header.tile_compression) {
+                    return Err("Compression method not supported".to_owned());
+                }
+                Ok(header)
+            });
             match header {
                 Ok(header) => {
-                    this.header_cache.borrow_mut().entry(url.clone()).or_insert(header);
+                    this.header_cache.borrow_mut().entry(url.clone()).or_insert_with(|| Rc::new(header));
                     callback(None);
                 }
                 Err(e) => callback(Some(Box::new(error(Reason::Other, format!("Error parsing PMTiles header: {e}"))))),
@@ -184,10 +204,10 @@ impl State {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url];
+                let header = this.header_cache.borrow()[&url].clone();
 
                 let parse_callback = {
-                    let (this, url, callback) = (this.clone(), url.clone(), callback.clone());
+                    let (this, url, callback, header) = (this.clone(), url.clone(), callback.clone(), header.clone());
                     move |data: &[u8]| {
                         let mut doc = if data.is_empty() { Document::default() } else { Document::parse_object(data) };
 
@@ -208,7 +228,7 @@ impl State {
                         }
 
                         // Translate tile type field to source encoding.
-                        if header.tile_type == TILETYPE_MLT {
+                        if header.tile_type == TileType::Mlt {
                             doc.add_member("encoding", Json::String("mlt".to_owned()));
                         }
 
@@ -218,10 +238,10 @@ impl State {
 
                         if !doc.get_mut("bounds").is_array() {
                             *doc.get_mut("bounds") = Json::Array(vec![
-                                json_double(f64::from(header.min_lon_e7) / 1e7),
-                                json_double(f64::from(header.min_lat_e7) / 1e7),
-                                json_double(f64::from(header.max_lon_e7) / 1e7),
-                                json_double(f64::from(header.max_lat_e7) / 1e7),
+                                json_double(header.min_longitude),
+                                json_double(header.min_latitude),
+                                json_double(header.max_longitude),
+                                json_double(header.max_latitude),
                             ]);
                         }
 
@@ -231,8 +251,8 @@ impl State {
 
                         if !doc.get_mut("center").is_array() {
                             *doc.get_mut("center") = Json::Array(vec![
-                                json_double(f64::from(header.center_lon_e7) / 1e7),
-                                json_double(f64::from(header.center_lat_e7) / 1e7),
+                                json_double(header.center_longitude),
+                                json_double(header.center_latitude),
                                 Json::from(header.center_zoom),
                             ]);
                         }
@@ -260,12 +280,12 @@ impl State {
                     }
                 };
 
-                if header.json_metadata_bytes > 0 {
+                if header.metadata_length() > 0 {
                     let mut resource = Resource::new(Kind::Source, url.clone());
                     resource.loading_method = LoadingMethod::All;
                     resource.data_range = Some((
-                        header.json_metadata_offset,
-                        header.json_metadata_offset.wrapping_add(header.json_metadata_bytes).wrapping_sub(1),
+                        header.metadata_offset(),
+                        header.metadata_offset().wrapping_add(header.metadata_length()).wrapping_sub(1),
                     ));
 
                     let callback = callback.clone();
@@ -288,11 +308,8 @@ impl State {
                                 Reason::Other,
                                 format!(
                                     "PMTiles metadata response has no data (range={}-{})",
-                                    header.json_metadata_offset,
-                                    header
-                                        .json_metadata_offset
-                                        .wrapping_add(header.json_metadata_bytes)
-                                        .wrapping_sub(1)
+                                    header.metadata_offset(),
+                                    header.metadata_offset().wrapping_add(header.metadata_length()).wrapping_sub(1)
                                 ),
                             ))));
                             return;
@@ -300,7 +317,7 @@ impl State {
 
                         let mut data: Vec<u8> = data.to_vec();
 
-                        if header.internal_compression == pmtiles::COMPRESSION_GZIP {
+                        if header.internal_compression() == Compression::Gzip {
                             match decompress(&data) {
                                 Ok(decompressed) => data = decompressed,
                                 Err(e) => {
@@ -329,10 +346,15 @@ impl State {
         url: &str,
         directory_offset: u64,
         directory_length: u64,
-        directory_data: &[u8],
+        directory_data: Vec<u8>,
     ) -> Result<(), String> {
         let directory_cache_key = format!("{url}|{directory_offset}|{directory_length}");
-        let directory = pmtiles::deserialize_directory(directory_data).map_err(|e| e.to_string())?;
+        // Unlike C++, the crate refuses a directory with an entry of length 0
+        // (C++ reads it, and the entry finds no tile), a first entry whose
+        // offset continues a previous one, or a run past the last tile ID,
+        // and it reads a directory with bytes after its entries, which C++
+        // refuses. Its errors have the crate's texts.
+        let directory = Directory::try_from(Bytes::from(directory_data)).map_err(|e| e.to_string())?;
 
         let mut cache = self.directory_cache.borrow_mut();
         let mut control = self.directory_cache_control.borrow_mut();
@@ -389,7 +411,7 @@ impl State {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url];
+                let header = this.header_cache.borrow()[&url].clone();
 
                 let mut resource = Resource::new(Kind::Source, url.clone());
                 resource.loading_method = LoadingMethod::All;
@@ -421,11 +443,11 @@ impl State {
                     let result = (|| -> Result<(), String> {
                         let mut directory_data: Vec<u8> = data.to_vec();
 
-                        if header.internal_compression == pmtiles::COMPRESSION_GZIP {
+                        if header.internal_compression() == Compression::Gzip {
                             directory_data = decompress(&directory_data)?;
                         }
 
-                        this2.store_directory(&url, directory_offset, u64::from(directory_length), &directory_data)
+                        this2.store_directory(&url, directory_offset, u64::from(directory_length), directory_data)
                     })();
                     match result {
                         Ok(()) => callback(None),
@@ -444,7 +466,7 @@ impl State {
         self: &Rc<Self>,
         url: &str,
         req: u64,
-        tile_id: u64,
+        tile_id: TileId,
         directory_offset: u64,
         directory_length: u32,
         directory_depth: u32,
@@ -475,16 +497,18 @@ impl State {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url];
-                let entry = {
+                let header = this.header_cache.borrow()[&url].clone();
+                // `find_tile`'s null entry, of length 0, is `None`: the crate
+                // refuses a directory with an entry of length 0.
+                let entry: Option<DirEntry> = {
                     let cache = this.directory_cache.borrow();
                     let directory = &cache[&url][&format!("{url}|{directory_offset}|{directory_length}")];
-                    pmtiles::find_tile(directory, tile_id)
+                    directory.find_tile_id(tile_id).copied()
                 };
 
-                if entry.length > 0 {
-                    if entry.run_length > 0 {
-                        callback((header.tile_data_offset.wrapping_add(entry.offset), entry.length), None);
+                if let Some(entry) = entry {
+                    if entry.run_length() > 0 {
+                        callback((header.data_offset().wrapping_add(entry.offset()), entry.length()), None);
                         return;
                     }
 
@@ -492,8 +516,8 @@ impl State {
                         &url,
                         req,
                         tile_id,
-                        header.leaf_dirs_offset.wrapping_add(entry.offset),
-                        entry.length,
+                        header.leaf_offset().wrapping_add(entry.offset()),
+                        entry.length(),
                         directory_depth + 1,
                         callback.clone(),
                     );
@@ -560,7 +584,7 @@ impl PMTilesFileSourceThread {
                     return;
                 }
 
-                let header = this.header_cache.borrow()[&url2];
+                let header = this.header_cache.borrow()[&url2].clone();
 
                 // `std::cmp_less(z, min_zoom) || std::cmp_greater(z, max_zoom)`.
                 let z = i32::from(tile_data.z);
@@ -571,7 +595,7 @@ impl PMTilesFileSourceThread {
                     return;
                 }
 
-                let tile_id = match pmtiles::zxy_to_tileid(tile_data.z as u8, tile_data.x as u32, tile_data.y as u32) {
+                let tile_id = match zxy_to_tileid(tile_data.z as u8, tile_data.x as u32, tile_data.y as u32) {
                     Ok(tile_id) => tile_id,
                     Err(e) => {
                         let mut response = Response::new();
@@ -587,8 +611,8 @@ impl PMTilesFileSourceThread {
                     &url2,
                     req,
                     tile_id,
-                    header.root_dir_offset,
-                    header.root_dir_bytes as u32,
+                    header.root_offset(),
+                    header.root_length() as u32,
                     0,
                     Rc::new(move |tile_address: (u64, u32), tile_error: ErrorPtr| {
                         if tile_error.is_some() {
@@ -613,7 +637,7 @@ impl PMTilesFileSourceThread {
                             tile_address.0.wrapping_add(u64::from(tile_address.1)).wrapping_sub(1),
                         ));
 
-                        let r = r.clone();
+                        let (r, header) = (r.clone(), header.clone());
                         this2.request(req, &tile_resource, move |tile_response: Response| {
                             let mut response = Response::new();
                             response.no_content = true;
@@ -646,7 +670,7 @@ impl PMTilesFileSourceThread {
                             response.expires = tile_response.expires;
                             response.etag = tile_response.etag.clone();
 
-                            if header.tile_compression == pmtiles::COMPRESSION_GZIP {
+                            if header.tile_compression == Compression::Gzip {
                                 // Support uncompressed tiles
                                 if is_compressed(data) {
                                     match decompress(data) {

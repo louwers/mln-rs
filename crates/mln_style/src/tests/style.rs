@@ -778,6 +778,29 @@ fn load_url_error() {
 }
 
 #[test]
+fn load_url_answered_without_a_style_fails() {
+    for (no_content, message) in [
+        (true, "the style request returned no content"),
+        (false, "the style request returned not modified, but no earlier response delivered the style"),
+    ] {
+        let (mut style, observer, run_loop) = stub_with_style_response(move |_| {
+            let mut response = mln_storage::Response::new();
+            response.no_content = no_content;
+            response.not_modified = !no_content;
+            Some(response)
+        });
+        style.load_url("http://some-url");
+        run_loop.run_once();
+        style.process_style_responses();
+        assert_eq!(
+            vec![crate::StyleLoadError::Load(format!("loading style failed: {message}"))],
+            *observer.errors.borrow()
+        );
+        assert!(!style.is_loaded());
+    }
+}
+
+#[test]
 fn load_json_parse_error() {
     let (mut style, observer, _run_loop) = stub_with_style_response(|_| None);
     style.load_json("[]");

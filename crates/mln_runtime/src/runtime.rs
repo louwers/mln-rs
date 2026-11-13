@@ -138,9 +138,11 @@ impl RuntimeShared {
         let run_loop = self.run_loop.clone();
         self.run_loop.invoke(move || {
             let core = CORE.with(|core| core.borrow_mut().take());
+            // Dropping the database waits for its work, whose results queue
+            // up behind this task, so they resolve before `done`.
             drop(core);
             if let Some(done) = done {
-                done.resolve(Ok(()));
+                run_loop.invoke(move || done.resolve(Ok(())));
             }
             run_loop.stop();
         });
@@ -330,14 +332,16 @@ impl RuntimeCore {
 }
 
 /// Delivers a database result on the runtime's thread, so it keeps its
-/// place among the runtime's other results and events.
+/// place among the runtime's other results and events. It needs no runtime
+/// state, so a result that arrives while the runtime shuts down, which waits
+/// for the database's work, still resolves rather than being cancelled.
 pub(crate) fn reply_on<T: Send + 'static, E: Into<Error>>(
     run_loop: RunLoopHandle,
     resolver: Resolver<T>,
 ) -> impl FnOnce(Result<T, E>) + Send + 'static {
     move |result| {
         let result = result.map_err(Into::into);
-        post(&run_loop, move |_, outbox| outbox.resolve(resolver, result));
+        run_loop.invoke(move || resolver.resolve(result));
     }
 }
 
