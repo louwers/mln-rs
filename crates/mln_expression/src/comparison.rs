@@ -57,22 +57,22 @@ fn gteq(lhs: &Value, rhs: &Value) -> bool {
 }
 
 fn eq_collate(a: &str, b: &str, c: &Collator) -> bool {
-    c.compare(a, b) == 0
+    c.compare(a, b).is_eq()
 }
 fn neq_collate(a: &str, b: &str, c: &Collator) -> bool {
     !eq_collate(a, b, c)
 }
 fn lt_collate(a: &str, b: &str, c: &Collator) -> bool {
-    c.compare(a, b) < 0
+    c.compare(a, b).is_lt()
 }
 fn gt_collate(a: &str, b: &str, c: &Collator) -> bool {
-    c.compare(a, b) > 0
+    c.compare(a, b).is_gt()
 }
 fn lteq_collate(a: &str, b: &str, c: &Collator) -> bool {
-    c.compare(a, b) <= 0
+    c.compare(a, b).is_le()
 }
 fn gteq_collate(a: &str, b: &str, c: &Collator) -> bool {
-    c.compare(a, b) >= 0
+    c.compare(a, b).is_ge()
 }
 
 fn get_basic_compare_function(op: &str) -> CompareFunctionType {
@@ -235,7 +235,6 @@ impl Expression for CollatorComparison {
         let collator_result = self.collator.evaluate(params)?;
 
         let Value::Collator(c) = &collator_result else { panic!("collator operand") };
-        // TODO(port): an error from the platform collator for a locale it lacks.
         Ok(Value::Bool((self.compare)(
             lhs_value.as_str().expect("string operand"),
             rhs_value.as_str().expect("string operand"),

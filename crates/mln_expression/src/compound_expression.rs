@@ -15,7 +15,6 @@ use mln_util::geometry::FeatureType;
 use mln_util::i18n;
 
 use crate::check_subtype::check_subtype;
-use crate::collator::Collator;
 use crate::expression::{
     Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, children_equal,
     collect_dependencies, downcast, evaluate_ref, mbgl_to_expression_value,
@@ -471,7 +470,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("resolved-locale", s.clone(), fixed(&[T::Collator]), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             let Value::Collator(collator) = &a[0] else { panic!("collator argument") };
-            Ok(Value::String(Collator::resolved_locale(collator)))
+            Ok(Value::String(collator.resolved_locale().to_owned()))
         }),
         sig("error", T::Error, fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;

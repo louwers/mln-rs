@@ -172,6 +172,17 @@ unicode-bidi = { version = "0.3.18" }
 # General_Category (mln_text's script runs, mln_util's i18n), in the Unicode
 # version of harfrust's own tables.
 unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
+# The locale-sensitive expressions (collator, resolved-locale, number-format)
+# on platforms without their own locale services (mln_expression's locale):
+# ICU4X, with the CLDR data it compiles in. icu_experimental has CLDR's
+# currency patterns and symbols; it requires its own ICU4X release (`~2.4`).
+fixed_decimal = { version = "0.7.3", features = ["ryu"] }
+icu_collator = { version = "2.4.0" }
+icu_decimal = { version = "2.4.0" }
+icu_experimental = { version = "=0.7.0" }
+icu_locale = { version = "2.4.0" }
+icu_provider = { version = "2.4.0" }
+writeable = { version = "0.6.4" }
 # WOFF and WOFF2 font faces (mln_text's woff): pure Rust, no unsafe. Only its
 # Brotli decoder: mln_text hands it the workspace's flate2 for WOFF's zlib.
 wuff = { version = "0.2.10", default-features = false, features = ["brotli"] }

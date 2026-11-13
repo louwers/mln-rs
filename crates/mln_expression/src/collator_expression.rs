@@ -5,7 +5,9 @@ use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 
 use crate::collator::Collator;
-use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+use crate::expression::{
+    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
+};
 use crate::literal::Literal;
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
@@ -80,16 +82,16 @@ impl Expression for CollatorExpression {
 
         let mut evaluated_locale = None;
         if let Some(locale) = &self.locale {
-            let locale_result = locale.evaluate(params)?;
-            evaluated_locale = Some(locale_result.as_str().expect("string locale").to_owned());
+            evaluated_locale = Some(locale.evaluate(params)?);
         }
 
-        // TODO(port): an error from the platform collator for a locale it lacks.
-        Ok(Value::Collator(Collator::new(
+        Collator::new(
             case_sensitive_result.as_bool().expect("boolean option"),
             diacritic_sensitive_result.as_bool().expect("boolean option"),
-            evaluated_locale,
-        )))
+            evaluated_locale.as_ref().map(|locale| locale.as_str().expect("string locale")),
+        )
+        .map(Value::Collator)
+        .map_err(EvaluationError::new)
     }
 
     fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {

@@ -26,10 +26,39 @@ mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
-nunicode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+# The locale services of the locale-sensitive expressions (src/locale): the
+# platform's where it has them (Foundation on Apple platforms, the browser's
+# Intl on wasm), else ICU4X with the CLDR data it compiles in.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2.workspace = true
+objc2-core-foundation = { workspace = true, features = ["CFNumberFormatter", "CFString"] }
+objc2-foundation = { workspace = true, features = [
+    "NSArray",
+    "NSFormatter",
+    "NSLocale",
+    "NSNumberFormatter",
+    "NSObjCRuntime",
+    "NSRange",
+    "NSString",
+    "NSValue",
+] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple")))'.dependencies]
+fixed_decimal.workspace = true
+icu_collator.workspace = true
+icu_decimal.workspace = true
+icu_experimental.workspace = true
+icu_locale.workspace = true
+icu_provider.workspace = true
+writeable.workspace = true
 
 [lints]
 workspace = true

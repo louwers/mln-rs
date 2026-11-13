@@ -1,10 +1,14 @@
 // Ports include/mln/style/expression/number_format.hpp and
-// src/mln/style/expression/number_format.cpp.
+// src/mln/style/expression/number_format.cpp. The platform number format is
+// the `locale` module's.
 
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 
-use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+use crate::expression::{
+    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
+};
+use crate::locale::{self, FractionDigits, currency_code};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
 use crate::value::{Value, to_string};
@@ -14,172 +18,27 @@ const CURRENCY_KEY: &str = "currency";
 const MIN_FRACTION_DIGITS_KEY: &str = "min-fraction-digits";
 const MAX_FRACTION_DIGITS_KEY: &str = "max-fraction-digits";
 
-/// `platform::formatNumber` (`platform/default/src/mln/i18n/number_format.cpp`,
-/// ICU `NumberFormatter`).
-// TODO(port): ICU number formatting. This implements ICU's behaviour for the
-// root/en locales only: the shortest round-trip decimal of the double, rounded
-// half-even to maxFractionDigits and padded to minFractionDigits, ',' grouping
-// and '.' decimal separator; with a currency, ICU's currency precision and an
-// en-US symbol for a few common currencies. The locale is ignored.
+/// `platform::formatNumber`: `number` in a BCP 47 locale, or in the
+/// platform's default locale when the locale is empty, malformed or its
+/// language unsupported, rounded half to even to at most `max` fraction
+/// digits and padded to at least `min`. Omitted limits default to 0 and 3,
+/// or to the currency's digits for currency, and an explicit maximum wins
+/// over a minimum. With an ISO 4217 currency code, it formats as an amount of
+/// that currency, with the locale's pattern and symbol.
+///
+/// # Errors
+///
+/// When the currency isn't three ASCII letters, or the platform fails to
+/// format.
 fn format_number(
     number: f64,
-    _locale_id: &str,
+    locale: &str,
     currency: &str,
-    min_fraction_digits: u8,
-    max_fraction_digits: u8,
-) -> String {
-    if number.is_nan() {
-        return "NaN".to_owned();
-    }
-    if number.is_infinite() {
-        return if number > 0.0 { "∞" } else { "-∞" }.to_owned();
-    }
-
-    let (symbol, min_fraction, max_fraction) = if currency.is_empty() {
-        (None, min_fraction_digits as usize, max_fraction_digits as usize)
-    } else {
-        let digits = match currency {
-            "JPY" | "KRW" | "VND" | "CLP" | "ISK" | "UGX" | "PYG" => 0,
-            _ => 2,
-        };
-        let symbol = match currency {
-            "USD" => "$".to_owned(),
-            "EUR" => "€".to_owned(),
-            "JPY" => "¥".to_owned(),
-            "GBP" => "£".to_owned(),
-            "CNY" => "CN¥".to_owned(),
-            "INR" => "₹".to_owned(),
-            "KRW" => "₩".to_owned(),
-            "CAD" => "CA$".to_owned(),
-            "AUD" => "A$".to_owned(),
-            other => format!("{other}\u{a0}"),
-        };
-        (Some(symbol), digits, digits)
-    };
-    let max_fraction = max_fraction.max(min_fraction);
-
-    // Shortest round-trip digits of |number| (`digits` is 0.d0d1d2... *
-    // 10^point, so the decimal point sits after index `point`).
-    let (mut digits, mut point) = shortest_digits(number.abs());
-    if digits.iter().all(|d| *d == 0) {
-        digits = vec![0];
-        point = 1;
-    }
-
-    // Round half-even at max_fraction fraction digits.
-    let keep = point + max_fraction as i64;
-    if keep < digits.len() as i64 {
-        let (head_len, round_up) = if keep < 0 {
-            (0usize, false)
-        } else {
-            let keep = keep as usize;
-            let first = digits[keep];
-            let rest_nonzero = digits[keep + 1..].iter().any(|d| *d != 0);
-            let last_kept_odd = keep > 0 && digits[keep - 1] % 2 == 1;
-            (keep, first > 5 || (first == 5 && (rest_nonzero || last_kept_odd)))
-        };
-        digits.truncate(head_len);
-        if round_up {
-            let mut i = digits.len();
-            loop {
-                if i == 0 {
-                    digits.insert(0, 1);
-                    point += 1;
-                    break;
-                }
-                i -= 1;
-                if digits[i] == 9 {
-                    digits[i] = 0;
-                } else {
-                    digits[i] += 1;
-                    break;
-                }
-            }
-        }
-    }
-
-    // Integer and fraction digit strings.
-    let digit_at = |i: i64| -> u8 { if i >= 0 && (i as usize) < digits.len() { digits[i as usize] } else { 0 } };
-    let mut int_part = String::new();
-    if point <= 0 {
-        int_part.push('0');
-    } else {
-        for i in 0..point {
-            int_part.push((b'0' + digit_at(i)) as char);
-        }
-    }
-    let mut frac_part = String::new();
-    for i in 0..max_fraction as i64 {
-        frac_part.push((b'0' + digit_at(point + i)) as char);
-    }
-    while frac_part.len() > min_fraction && frac_part.ends_with('0') {
-        frac_part.pop();
-    }
-
-    let mut grouped = String::new();
-    let int_len = int_part.len();
-    for (i, c) in int_part.chars().enumerate() {
-        if i > 0 && (int_len - i).is_multiple_of(3) {
-            grouped.push(',');
-        }
-        grouped.push(c);
-    }
-    // ICU keeps the sign of negative numbers that round to zero, and of -0.
-    let mut result = String::new();
-    if number.is_sign_negative() {
-        result.push('-');
-    }
-    if let Some(symbol) = symbol {
-        result.push_str(&symbol);
-    }
-    result.push_str(&grouped);
-    if !frac_part.is_empty() {
-        result.push('.');
-        result.push_str(&frac_part);
-    }
-    result
-}
-
-/// Digits and decimal point position of a `{:e}` formatting.
-fn sci_digits(sci: &str) -> (Vec<u8>, i64) {
-    let (mantissa, exponent) = sci.split_once('e').unwrap();
-    let exponent: i64 = exponent.parse().unwrap();
-    let digits = mantissa.bytes().filter(u8::is_ascii_digit).map(|b| b - b'0').collect();
-    (digits, exponent + 1)
-}
-
-/// The shortest round-trip decimal digits of `x`, as double-conversion's
-/// SHORTEST mode (which ICU's `DecimalQuantity` uses) produces them: when two
-/// shortest candidates are exactly equally close, the even one (Rust's
-/// formatter may pick the other).
-fn shortest_digits(x: f64) -> (Vec<u8>, i64) {
-    let (digits, point) = sci_digits(&format!("{x:e}"));
-    let (mut exact, exact_point) = sci_digits(&format!("{x:.1100e}"));
-    while exact.len() > 1 && exact.last() == Some(&0) {
-        exact.pop();
-    }
-    let l = digits.len();
-    if exact_point == point && exact.len() == l + 1 && exact[l] == 5 && l <= 17 {
-        let to_int = |d: &[u8]| d.iter().fold(0u64, |a, d| a * 10 + u64::from(*d));
-        let low = to_int(&exact[..l]);
-        let shortest = to_int(&digits);
-        if shortest == low || shortest == low + 1 {
-            let even = if low % 2 == 0 { low } else { low + 1 };
-            let mut out: Vec<u8> = even.to_string().bytes().map(|b| b - b'0').collect();
-            let mut p = point;
-            if out.len() > l {
-                p += 1;
-            }
-            while out.len() < l {
-                out.insert(0, 0);
-            }
-            while out.len() > 1 && out.last() == Some(&0) {
-                out.pop();
-            }
-            return (out, p);
-        }
-    }
-    (digits, point)
+    min: Option<u8>,
+    max: Option<u8>,
+) -> Result<String, String> {
+    let currency = currency_code(currency)?;
+    locale::format_number(number, locale, currency.as_deref(), FractionDigits::new(min, max))
 }
 
 pub struct NumberFormat {
@@ -309,23 +168,25 @@ impl Expression for NumberFormat {
             evaluated_currency = to_string(&currency.evaluate(params)?);
         }
 
-        let mut evaluated_min_fraction_digits: u8 = 0;
+        let mut evaluated_min_fraction_digits = None;
         if let Some(min) = &self.min_fraction_digits {
-            evaluated_min_fraction_digits = static_cast_u8(min.evaluate(params)?.as_number().expect("number"));
+            evaluated_min_fraction_digits = Some(static_cast_u8(min.evaluate(params)?.as_number().expect("number")));
         }
 
-        let mut evaluated_max_fraction_digits: u8 = 3;
+        let mut evaluated_max_fraction_digits = None;
         if let Some(max) = &self.max_fraction_digits {
-            evaluated_max_fraction_digits = static_cast_u8(max.evaluate(params)?.as_number().expect("number"));
+            evaluated_max_fraction_digits = Some(static_cast_u8(max.evaluate(params)?.as_number().expect("number")));
         }
 
-        Ok(Value::String(format_number(
+        format_number(
             evaluated_number,
             &evaluated_locale,
             &evaluated_currency,
             evaluated_min_fraction_digits,
             evaluated_max_fraction_digits,
-        )))
+        )
+        .map(Value::String)
+        .map_err(EvaluationError::new)
     }
 
     fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
@@ -383,15 +244,63 @@ impl Expression for NumberFormat {
 mod tests {
     use super::format_number;
 
+    fn format(number: f64, locale: &str, currency: &str, min: Option<u8>, max: Option<u8>) -> String {
+        format_number(number, locale, currency, min, max).expect("formatted number")
+    }
+
     #[test]
-    fn icu_like() {
-        assert_eq!(format_number(123_456.789, "", "", 0, 3), "123,456.789");
-        assert_eq!(format_number(123_456.789, "en-US", "JPY", 0, 3), "¥123,457");
-        assert_eq!(format_number(123_456.789, "en-US", "EUR", 0, 3), "€123,456.79");
-        assert_eq!(format_number(987_654_321.234_567, "en-US", "", 15, 20), "987,654,321.234567000000000");
-        assert_eq!(format_number(987_654_321.234_567, "en-US", "", 2, 4), "987,654,321.2346");
-        assert_eq!(format_number(0.5, "", "", 0, 0), "0");
-        assert_eq!(format_number(1.5, "", "", 0, 0), "2");
-        assert_eq!(format_number(0.0005, "", "", 0, 3), "0");
+    fn decimals_round_half_to_even_within_the_fraction_limits() {
+        assert_eq!(format(123_456.789, "en-US", "", None, None), "123,456.789");
+        assert_eq!(format(987_654_321.234_567, "en-US", "", Some(15), Some(20)), "987,654,321.234567000000000");
+        assert_eq!(format(987_654_321.234_567, "en-US", "", Some(2), Some(4)), "987,654,321.2346");
+        assert_eq!(format(12.3, "en-US", "", Some(4), None), "12.3000");
+        assert_eq!(format(12.355, "en-US", "", Some(4), Some(2)), "12.36");
+        assert_eq!(format(12.345, "en-US", "", None, Some(2)), "12.34");
+        assert_eq!(format(0.5, "en-US", "", None, Some(0)), "0");
+        assert_eq!(format(1.5, "en-US", "", None, Some(0)), "2");
+        assert_eq!(format(0.0005, "en-US", "", None, None), "0");
+        assert_eq!(format(-1234.5, "en-US", "", None, None), "-1,234.5");
+    }
+
+    #[test]
+    fn decimals_follow_the_locale() {
+        assert_eq!(format(1234.5, "de-DE", "", None, None), "1.234,5");
+        assert_eq!(format(1_234_567.5, "fr-FR", "", None, None), "1\u{202f}234\u{202f}567,5");
+        assert_eq!(format(1_234_567.5, "hi-IN", "", None, None), "12,34,567.5");
+        assert_eq!(format(1234.5, "ar-EG", "", None, None), "١٬٢٣٤٫٥");
+        assert_eq!(format(1234.5, "xx-ZZ", "", None, None), format(1234.5, "", "", None, None));
+    }
+
+    #[test]
+    fn currencies_take_their_digits_and_the_locale_pattern() {
+        assert_eq!(format(123_456.789, "en-US", "JPY", None, None), "¥123,457");
+        assert_eq!(format(123_456.789, "en-US", "EUR", None, None), "€123,456.79");
+        assert_eq!(format(1234.5, "de-DE", "EUR", None, None), "1.234,50\u{a0}€");
+        assert_eq!(format(1234.6, "ja-JP", "JPY", None, None), "￥1,235");
+        assert_eq!(format(12.3, "en-US", "USD", None, Some(0)), "$12");
+        assert_eq!(format(12.3, "en-US", "usd", Some(3), None), "$12.300");
+        assert_eq!(format(-12.3, "en-US", "USD", None, None), "-$12.30");
+        assert_eq!(format(12.0, "en-US", "XYZ", None, None), "XYZ\u{a0}12.00");
+    }
+
+    #[test]
+    fn non_finite_numbers_have_no_digits() {
+        assert_eq!(format(f64::NAN, "en-US", "", None, None), "NaN");
+        assert_eq!(format(f64::INFINITY, "en-US", "", None, None), "∞");
+        assert_eq!(format(f64::NEG_INFINITY, "en-US", "", None, None), "-∞");
+        // Foundation's currency formats may leave the symbol out of an
+        // infinity.
+        let currency = format(f64::NEG_INFINITY, "en-US", "USD", None, None);
+        if cfg!(target_vendor = "apple") {
+            assert!(currency.starts_with('-') && currency.ends_with('∞'), "{currency}");
+        } else {
+            assert_eq!(currency, "-$∞");
+        }
+    }
+
+    #[test]
+    fn a_currency_that_is_not_an_iso_4217_code_fails() {
+        assert!(format_number(1.0, "en-US", "US$", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "EURO", None, None).is_err());
     }
 }

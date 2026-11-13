@@ -83,7 +83,8 @@ check:
 # shaper), the browser build's two modules as `just web` builds them, which leave both out, and the map's module with
 # its `webgl` feature. The check fails if anything turns SQLite back on in the browser build, or brings in a C build
 # (`cc`) that would need that clang, or if the module that draws with WebGPU gets the OpenGL backend (mln_gl and its
-# GL bindings), which only the `webgl` module needs.
+# GL bindings), which only the `webgl` module needs, or if the browser build brings in ICU4X: it takes its locale
+# services from the browser's `Intl`.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:  _dev-shell
     {{dev_shell}} cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
@@ -92,6 +93,7 @@ check-wasm:  _dev-shell
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal,build --prefix none | grep -q '^cc '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^(mln-rs-gl|glow) '
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^icu_'
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))

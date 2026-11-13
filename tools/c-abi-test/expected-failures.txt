@@ -32,7 +32,4 @@ abi/style/feature_state.c:a_style_load_clears_every_source_state  # feature stat
 abi/style/feature_state.c:rendered_features_carry_state_from_the_last_frame  # feature state stays in mln_runtime's store and never reaches the renderer
 abi/style/feature_state.c:typed_ids_reach_the_features_that_carry_them  # feature state stays in mln_runtime's store and never reaches the renderer
 abi/style/loading.c:a_style_url_answered_without_a_style_fails_once  # a first style response without content is skipped, so the load never fails
-abi/style/locale_expressions_icu.c:collator_follows_locale_extensions_and_sensitivity  # locale expressions ignore the locale: there is no ICU
-abi/style/locale_expressions_icu.c:number_format_follows_locale_currency_and_fraction_limits  # locale expressions ignore the locale: there is no ICU
-abi/style/locale_expressions_icu.c:resolved_locale_reports_the_language_and_honored_extensions  # locale expressions ignore the locale: there is no ICU
 abi/style/rejected_inputs.c:style_commands_reject_invalid_inputs  # mln_c accepts a text view with a NUL inside

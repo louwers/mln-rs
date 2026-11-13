@@ -33,6 +33,7 @@ pub mod is_expression;
 pub mod length;
 pub mod let_;
 pub mod literal;
+mod locale;
 pub mod match_;
 pub mod number_format;
 pub mod parsing_context;

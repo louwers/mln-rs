@@ -29,7 +29,7 @@
 "crates/mln_expression/src/let_.rs" = 2
 "crates/mln_expression/src/literal.rs" = 3
 "crates/mln_expression/src/match_.rs" = 5
-"crates/mln_expression/src/number_format.rs" = 6
+"crates/mln_expression/src/number_format.rs" = 4
 "crates/mln_expression/src/parsing_context.rs" = 5
 "crates/mln_expression/src/semiliteral.rs" = 1
 "crates/mln_expression/src/slice.rs" = 1
@@ -165,13 +165,10 @@
 "crates/mln_actor/src/thread_pool.rs" = 1
 "crates/mln_actor/tests/gtest/thread.rs" = 1
 "crates/mln_expression/src/coercion.rs" = 1
-"crates/mln_expression/src/collator_expression.rs" = 1
-"crates/mln_expression/src/comparison.rs" = 1
 "crates/mln_expression/src/dsl.rs" = 1
 "crates/mln_expression/src/find_zoom_curve.rs" = 1
 "crates/mln_expression/src/formatted.rs" = 1
 "crates/mln_expression/src/interpolate.rs" = 1
-"crates/mln_expression/src/number_format.rs" = 1
 "crates/mln_expression/src/slice.rs" = 2
 "crates/mln_expression/src/value.rs" = 1
 "crates/mln_gfx/src/attribute.rs" = 1
