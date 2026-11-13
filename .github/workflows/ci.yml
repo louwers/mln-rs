@@ -175,11 +175,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The C compiler for `just check-32bit`'s SQLite.
+      # The C compiler and libc headers for `just check-32bit`'s C dependencies.
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-i686-linux-gnu
+          sudo apt-get install -y --no-install-recommends gcc-i686-linux-gnu libc6-dev-i386-cross
 
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-deny' }
