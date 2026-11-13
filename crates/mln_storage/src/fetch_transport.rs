@@ -1,6 +1,7 @@
 //! The browser's `fetch` as the `HttpTransport`. The browser's HTTP cache does
 //! the caching. A host can hand it responses it fetched ahead
-//! (`set_fetch_preloads`).
+//! (`set_fetch_preloads`). Dropping a request aborts its fetch, as dropping a
+//! request stops its transfer in C++.
 //!
 //! The host's headers (`TransferRequest::headers`) go with the request, which
 //! makes a cross-origin request one that the server must allow in its CORS
@@ -8,7 +9,8 @@
 //! can't drop them when the redirect leaves the origin, so a request with the
 //! host's headers doesn't follow redirects: a redirect fails it.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -25,6 +27,10 @@ extern "C" {
 
 thread_local! {
     static PRELOADS: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
+    /// What aborts each fetch in flight, by an id of the transfer: the cancel
+    /// handler, which has to be `Send`, holds the id, not the controller.
+    static ABORTS: RefCell<HashMap<u64, web_sys::AbortController>> = RefCell::new(HashMap::new());
+    static NEXT_ABORT: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Sets where this instance's fetch transport looks before it fetches a
@@ -48,17 +54,32 @@ pub(crate) struct FetchTransport;
 
 impl HttpTransport for FetchTransport {
     fn start(&self, request: TransferRequest) {
-        wasm_bindgen_futures::spawn_local(async move {
-            if request.is_cancelled() {
-                return;
+        let id = NEXT_ABORT.replace(NEXT_ABORT.get() + 1);
+        let signal = web_sys::AbortController::new().ok().map(|abort| {
+            let signal = abort.signal();
+            ABORTS.with(|aborts| aborts.borrow_mut().insert(id, abort));
+            signal
+        });
+        // A request is dropped on the thread that started it, this one.
+        request.set_cancel_handler(move || {
+            if let Some(abort) = ABORTS.with(|aborts| aborts.borrow_mut().remove(&id)) {
+                abort.abort();
             }
-            let transfer = fetch(&request).await;
-            request.finish(transfer);
+        });
+        wasm_bindgen_futures::spawn_local(async move {
+            if !request.is_cancelled() {
+                let transfer = fetch(&request, signal.as_ref()).await;
+                request.finish(transfer);
+            }
+            ABORTS.with(|aborts| aborts.borrow_mut().remove(&id));
         });
     }
 }
 
-async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<ResourceError>> {
+async fn fetch(
+    request: &TransferRequest,
+    signal: Option<&web_sys::AbortSignal>,
+) -> Result<Transfer, Box<ResourceError>> {
     let connection_error = |error: JsValue| {
         let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
         Box::new(ResourceError::new(Reason::Connection, message))
@@ -71,7 +92,7 @@ async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<ResourceError>
     };
     let response = match early {
         Some(response) => response,
-        None => send(url, range.as_deref(), request.headers()).await.map_err(connection_error)?,
+        None => send(url, range.as_deref(), request.headers(), signal).await.map_err(connection_error)?,
     };
     if response.type_() == web_sys::ResponseType::Opaqueredirect {
         return Err(Box::new(ResourceError::new(
@@ -101,8 +122,14 @@ async fn transfer(response: &web_sys::Response) -> Result<Transfer, JsValue> {
     Ok(Transfer { status, headers, body })
 }
 
-async fn send(url: &str, range: Option<&str>, extra: &[(String, String)]) -> Result<web_sys::Response, JsValue> {
+async fn send(
+    url: &str,
+    range: Option<&str>,
+    extra: &[(String, String)],
+    signal: Option<&web_sys::AbortSignal>,
+) -> Result<web_sys::Response, JsValue> {
     let init = web_sys::RequestInit::new();
+    init.set_signal(signal);
     if range.is_some() || !extra.is_empty() {
         let headers = web_sys::Headers::new()?;
         if let Some(range) = range {

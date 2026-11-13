@@ -221,14 +221,15 @@ keep lavapipe for the native runner (`VK_DRIVER_FILES`).
   shaper module. In the raster
   and raster-dem views only the raster tiles' workers can reply, so their
   replies show that those tiles decode in the Web Workers.
-- Two interaction views drag on the map through the page's input path
+- Three interaction views drag on the map through the page's input path
   (the DevTools protocol's mouse and touch events) for two seconds before
   their frame: a right-drag that turns the map back and forth, and a pinch
   that pans and zooms it back and forth, as mln-bench's `Frame/Oscillate`
-  cases move their cameras. Their fixtures come 100 ms late and fresh for
-  an hour, as over a network. The page's `fetches()` counts what the map's
-  Web Worker fetched, and the frame is of the camera the map stopped at
-  (`idle()`).
+  cases move their cameras, and a pinch that zooms out by 4 in half a
+  second. Their fixtures come 100 ms late (the zoom-out's a second) and
+  fresh for an hour, as over a network. The page's `fetches()` counts what
+  the map's Web Worker fetched, the server counts the fetches the browser
+  aborted, and the frame is of the camera the map stopped at (`idle()`).
 - A local server serves the page and every fixture from the suite's
   cache database (tools/render-test/testdata/metrics/cache-style.db), with
   the URLs that the runner's file source maps (`local://`, `mapbox://`,
@@ -250,8 +251,9 @@ It fails when more than 0.1% of a view's pixels differ (the combination
 of raster-dem and vector at z1: 1%, where SwiftShader and lavapipe
 antialias coastlines differently), when the page or a Web Worker logs an
 error or throws (a worker that panics, a tile that fails to load), or
-when a view gets no worker replies, or when an interaction view's map
-fetches more than one URL again. It also loads the first view with
+when a view gets no worker replies, when an interaction view's map
+fetches more than one URL again, or when the browser aborts none of the
+fetches of the tiles that the zoom-out passes. It also loads the first view with
 `panic=map` and with `panic=tile`, and fails unless the page stops and
 shows the panic. The page renders on SwiftShader, which
 Chromium bundles, and most views come out identical to lavapipe's;

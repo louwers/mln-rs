@@ -65,7 +65,7 @@ rustls-platform-verifier.workspace = true
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys.workspace = true
+web-sys = { workspace = true, features = ["AbortController", "AbortSignal"] }
 
 # test/storage/sync_file_source.test.cpp: needs a Map (mln_map,
 # mln_headless depend on this crate, so not in the unit tests).
