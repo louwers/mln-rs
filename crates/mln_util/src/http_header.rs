@@ -8,7 +8,7 @@
 // alternatives, `must-revalidate`/`max-age` match as prefixes of a longer
 // directive, and the list stops at the first element that fails to parse.
 
-use crate::chrono::{Timestamp, now, parse_timestamp_i32, parse_timestamp_str};
+use crate::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32};
 
 /// `http::CacheControl`
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -144,12 +144,15 @@ fn stoi(s: &str) -> Option<i32> {
     i32::try_from(value).ok()
 }
 
-/// `parseRetryHeaders(retryAfter, xRateLimitReset)`
+/// `parseRetryHeaders(retryAfter, xRateLimitReset)`: when to retry a
+/// rate-limited request, from `Retry-After` (seconds or an HTTP date) or else
+/// `X-Rate-Limit-Reset` (a Unix time). `None` when the header it reads is
+/// absent or doesn't parse.
 pub fn parse_retry_headers(retry_after: &Option<String>, x_rate_limit_reset: &Option<String>) -> Option<Timestamp> {
     if let Some(retry_after) = retry_after {
         match stoi(retry_after) {
             Some(secs) => Some(Timestamp::from_secs(now().secs_since_epoch() + i64::from(secs))),
-            None => Some(parse_timestamp_str(retry_after)),
+            None => parse_http_date(retry_after),
         }
     } else if let Some(x_rate_limit_reset) = x_rate_limit_reset {
         stoi(x_rate_limit_reset).map(parse_timestamp_i32)

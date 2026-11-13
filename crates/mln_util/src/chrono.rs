@@ -296,7 +296,9 @@ fn gmtime(secs: i64) -> (usize, i64, usize, i64, i64, i64, i64) {
     (wday, mday, (month - 1) as usize, year, hour, min, sec)
 }
 
-/// `util::rfc1123(Timestamp)`: e.g. "Sun, 06 Nov 1994 08:49:37 GMT".
+/// `util::rfc1123(Timestamp)`: e.g. "Sun, 06 Nov 1994 08:49:37 GMT". Unlike
+/// `httpdate::fmt_http_date`, which panics outside the years 1970 to 9999,
+/// it formats any timestamp, such as a cached response's modification date.
 #[must_use]
 pub fn rfc1123(timestamp: Timestamp) -> String {
     const WEEK: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -312,11 +314,14 @@ pub fn iso8601(timestamp: Timestamp) -> String {
     format!("{year:04}-{:02}-{mday:02} {hour:02}:{min:02}:{sec:02}", month + 1)
 }
 
-/// `util::parseTimestamp(const char*)`: vendor/parsedate's `parse_date`
-/// (-1 when the date does not parse).
+/// An HTTP date (`Expires`, `Last-Modified`, `Retry-After`, ...) in any of
+/// the three formats RFC 9110 §5.6.7 has recipients accept: IMF-fixdate
+/// ("Sun, 06 Nov 1994 08:49:37 GMT"), RFC 850 and asctime. `None` when it is
+/// none of them or falls outside the years 1970 to 9999.
 #[must_use]
-pub fn parse_timestamp_str(timestamp: &str) -> Timestamp {
-    Timestamp::from_secs(crate::parsedate::parse_date(timestamp))
+pub fn parse_http_date(date: &str) -> Option<Timestamp> {
+    let since_epoch = httpdate::parse_http_date(date).ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(Timestamp::from_secs(i64::try_from(since_epoch.as_secs()).ok()?))
 }
 
 /// `util::parseTimestamp(int32_t)`.
@@ -336,9 +341,22 @@ mod wall_clock_tests {
         assert_eq!(rfc1123(Timestamp::from_secs(0)), "Thu, 01 Jan 1970 00:00:00 GMT");
         assert_eq!(rfc1123(Timestamp::from_secs(951_782_400)), "Tue, 29 Feb 2000 00:00:00 GMT");
         assert_eq!(
-            parse_timestamp_str(&rfc1123(Timestamp::from_secs(1_445_412_480))),
-            Timestamp::from_secs(1_445_412_480)
+            parse_http_date(&rfc1123(Timestamp::from_secs(1_445_412_480))),
+            Some(Timestamp::from_secs(1_445_412_480))
         );
+    }
+
+    #[test]
+    fn http_dates() {
+        let date = Some(Timestamp::from_secs(784_111_777));
+        assert_eq!(parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT"), date);
+        assert_eq!(parse_http_date("Sunday, 06-Nov-94 08:49:37 GMT"), date);
+        assert_eq!(parse_http_date("Sun Nov  6 08:49:37 1994"), date);
+        assert_eq!(parse_http_date("Fri, 01 Jan 2100 00:00:00 GMT"), Some(Timestamp::from_secs(4_102_444_800)));
+        assert_eq!(parse_http_date("Thu, 01 Jan 1960 00:00:00 GMT"), None);
+        assert_eq!(parse_http_date("Sun, 06 Nov 1994 08:49:37 +0100"), None);
+        assert_eq!(parse_http_date("0"), None);
+        assert_eq!(parse_http_date(""), None);
     }
 
     #[test]

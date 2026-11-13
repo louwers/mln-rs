@@ -40,7 +40,6 @@ pub mod longest_common_subsequence;
 pub mod mat3;
 pub mod mat4;
 pub mod math;
-pub mod parsedate;
 pub mod premultiply;
 pub mod projection;
 pub mod quaternion;

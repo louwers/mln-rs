@@ -101,6 +101,8 @@ fontdb = { version = "0.24.0", default-features = false, features = ["fs", "memm
 # crates/mln_gl: OpenGL ES 3.0 and WebGL2 through one set of bindings.
 glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }
+# HTTP dates (Expires, Last-Modified, Retry-After): mln_util's parse_http_date.
+httpdate = { version = "1.0.3" }
 # The HTTP test server of the tests (tools/test-server).
 httpmock = { version = "0.9.0", default-features = false }
 # decodeWEBP (platform/default/src/mln/util/webp_reader.cpp); pure Rust.

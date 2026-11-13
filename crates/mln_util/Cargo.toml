@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license = "BSD-2-Clause AND Zlib AND curl"
+license = "BSD-2-Clause AND Zlib"
 repository.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
@@ -21,6 +21,7 @@ csscolorparser.workspace = true
 feature.workspace = true
 flate2.workspace = true
 geometry.workspace = true
+httpdate.workspace = true
 mln_math.workspace = true
 serde.workspace = true
 thiserror.workspace = true
