@@ -756,6 +756,9 @@ MLN_API mln_status mln_render_session_abandon(
  * it attaches or after it fails, or when you release or dispose its map before
  * that service, the release abandons it as mln_render_session_abandon() does.
  *
+ * The call that lets go of a session on its own core worker last waits for the
+ * worker's thread, as mln_render_session_dispose() describes.
+ *
  * Returns:
  * - MLN_STATUS_INVALID_STATE while you hold one of the session's acquired
  *   frames. Release or discard them first.
@@ -774,6 +777,13 @@ MLN_API mln_status mln_render_session_release(
  * session whose frames you hold, which ends those frames. Keep servicing a
  * session driven by MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD until
  * mln_render_session_service_driver_work() no longer accepts it.
+ *
+ * For a session on its own core worker, the call that lets go of the session
+ * last returns once the worker's thread has ended, after the session let go of
+ * its graphics objects and its map: this one, or the release or discard of the
+ * last of its frames that you held, or the end of the last view of one. Made on
+ * a library thread, such as in a callback, that call doesn't wait: the library
+ * thread waits for the worker's at its own end.
  */
 MLN_API mln_status mln_render_session_dispose(
   mln_render_session session, mln_diagnostic* out_diagnostic

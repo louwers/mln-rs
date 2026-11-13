@@ -1170,7 +1170,8 @@ MLN_API mln_status mln_runtime_set_maximum_ambient_cache_size(
 /**
  * Releases a runtime.
  *
- * Release the runtime's maps first.
+ * Release the runtime's maps first. The call that lets go of the runtime last
+ * waits for its threads, as mln_runtime_dispose() describes.
  */
 MLN_BINDING("execution=lifecycle")
 MLN_API mln_status mln_runtime_release(
@@ -1179,9 +1180,16 @@ MLN_API mln_status mln_runtime_release(
 ) MLN_NOEXCEPT;
 
 /**
- * Releases a runtime in any state, without waiting.
+ * Releases a runtime in any state, without waiting for its maps.
  *
- * The runtime finishes its teardown after its maps are released.
+ * The runtime finishes its teardown after its maps are released. The call that
+ * lets go of the runtime last returns once the runtime's threads have ended:
+ * this one, or the release or disposal of the last of its maps, or of a render
+ * session that holds that map. A thread that loads over HTTP and is stuck in a
+ * name lookup or a TCP connect is waited for up to a second, then left to end
+ * alone, without calling you. Made on a library thread, such as in a callback,
+ * that call doesn't wait: the library thread waits for the runtime's threads
+ * at its own end.
  */
 MLN_API mln_status mln_runtime_dispose(
   mln_runtime runtime, mln_diagnostic* out_diagnostic

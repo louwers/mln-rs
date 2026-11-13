@@ -178,6 +178,19 @@ impl TransferRequest {
     }
 }
 
+#[cfg(all(test, not(any(target_family = "wasm", target_vendor = "apple"))))]
+impl TransferRequest {
+    /// A request for `resource` whose response goes nowhere (tests).
+    pub(crate) fn unanswered(resource: Resource) -> TransferRequest {
+        TransferRequest {
+            resource,
+            headers: HttpHeaders::new(),
+            reply: ActorRef::new(&Mailbox::new()),
+            cancellation: Arc::default(),
+        }
+    }
+}
+
 /// How an `HTTPFileSource` performs its requests.
 pub(crate) trait HttpTransport: Send + Sync {
     /// Starts the transfer of `request` without blocking the caller, and
