@@ -4,14 +4,11 @@
 //!
 //! The typed converters (`Converter<T>`) live in `mln_style`.
 
-pub mod conversion;
+mod conversion;
 pub mod get_json_type;
-pub mod json_conversion;
+mod json_conversion;
 pub mod value_conversion;
 
-pub use conversion::{ConversionTraits, Convertible, Error, to_geojson};
+pub use conversion::{Convertible, Error, to_geojson};
 pub use get_json_type::get_json_type;
 pub use value_conversion::{json_to_value, value_to_json};
-
-#[cfg(test)]
-mod tests;

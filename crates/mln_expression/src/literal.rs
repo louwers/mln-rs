@@ -68,7 +68,7 @@ impl Literal {
     }
 
     #[must_use]
-    pub fn with_array_type(type_: type_::Array, value: Vec<Value>) -> Self {
+    pub(crate) fn with_array_type(type_: type_::Array, value: Vec<Value>) -> Self {
         Literal { base: ExpressionBase::new(Kind::Literal, type_.into(), Dependency::NONE), value: Value::Array(value) }
     }
 

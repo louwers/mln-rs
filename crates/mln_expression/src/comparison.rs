@@ -96,7 +96,7 @@ fn get_collator_comparison_function(op: &str) -> CollatorCompareFunctionType {
     }
 }
 
-pub struct BasicComparison {
+pub(crate) struct BasicComparison {
     base: ExpressionBase,
     op: String,
     compare: CompareFunctionType,
@@ -107,7 +107,7 @@ pub struct BasicComparison {
 
 impl BasicComparison {
     #[must_use]
-    pub fn new(op: String, lhs: Box<dyn Expression>, rhs: Box<dyn Expression>) -> Self {
+    pub(crate) fn new(op: String, lhs: Box<dyn Expression>, rhs: Box<dyn Expression>) -> Self {
         debug_assert!(is_comparable_type(&op, lhs.get_type()) && is_comparable_type(&op, rhs.get_type()));
         debug_assert!(
             lhs.get_type() == rhs.get_type() || *lhs.get_type() == Type::Value || *rhs.get_type() == Type::Value
@@ -176,7 +176,7 @@ impl Expression for BasicComparison {
     }
 }
 
-pub struct CollatorComparison {
+pub(crate) struct CollatorComparison {
     base: ExpressionBase,
     op: String,
     compare: CollatorCompareFunctionType,
@@ -188,7 +188,12 @@ pub struct CollatorComparison {
 
 impl CollatorComparison {
     #[must_use]
-    pub fn new(op: String, lhs: Box<dyn Expression>, rhs: Box<dyn Expression>, collator: Box<dyn Expression>) -> Self {
+    pub(crate) fn new(
+        op: String,
+        lhs: Box<dyn Expression>,
+        rhs: Box<dyn Expression>,
+        collator: Box<dyn Expression>,
+    ) -> Self {
         debug_assert!(is_comparable_type(&op, lhs.get_type()) && is_comparable_type(&op, rhs.get_type()));
         let needs_runtime_type_check =
             (op == "==" || op == "!=") && (*lhs.get_type() == Type::Value || *rhs.get_type() == Type::Value);
@@ -266,7 +271,7 @@ impl Expression for CollatorComparison {
     }
 }
 
-pub fn parse_comparison(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+pub(crate) fn parse_comparison(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
     let length = value.array_length();
 
     if length != 3 && length != 4 {

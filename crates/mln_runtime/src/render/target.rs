@@ -306,10 +306,9 @@ impl BorrowedRing {
                 == Some(mln_mtl::objc2_metal::MTLPixelFormat::Depth32Float_Stencil8))
             .then_some(DepthStencilFormat::Depth32FloatStencil8),
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            RingKind::WebGpu(textures) => textures
-                .depth_textures
-                .first()
-                .and_then(|texture| mln_webgpu::borrowed_target::depth_stencil_format(texture.format())),
+            RingKind::WebGpu(textures) => {
+                textures.depth_textures.first().and_then(|texture| mln_webgpu::depth_stencil_format(texture.format()))
+            }
             #[allow(unreachable_patterns)]
             _ => None,
         }

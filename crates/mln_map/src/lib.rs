@@ -4,20 +4,20 @@
 //! `mln_map_types` and is re-exported here.
 
 mod feature_state;
-pub mod map;
-pub mod map_event;
-pub mod map_options;
-pub mod map_snapshot;
+mod map;
+mod map_event;
+mod map_options;
+mod map_snapshot;
 // gtests-core: MapProjection (test/map/map.test.cpp).
-pub mod map_projection;
-pub mod rendering_stats_view;
+mod map_projection;
+mod rendering_stats_view;
 pub mod transform;
 
-pub use map::{Map, StillImageCallback};
+pub use map::Map;
 pub use map_event::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderFrameStatus, RenderMode};
-pub use map_options::{MapOptions, UnusedStyleImagePolicy};
+pub use map_options::MapOptions;
 pub use map_projection::MapProjection;
-pub use map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
+pub use map_snapshot::MapSnapshot;
 pub use mln_map_types::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
     CameraUpdateMode, CameraVelocity, ConstrainMode, FreeCameraOptions, GesturePhase, LogicalExtent, MapDebugOptions,
@@ -31,3 +31,6 @@ pub use mln_renderer::{
 pub use mln_style::StyleLoadError;
 pub use mln_util::event_queue::Waker;
 pub use mln_util::{Error, ErrorKind};
+
+#[cfg(test)]
+mod tests;

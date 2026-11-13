@@ -5,22 +5,22 @@ use mln_style::Style;
 use crate::runner::MapError;
 
 /// Loads the style from `json`. Errors reach the map's events, as in C++.
-pub fn load_json(style: &mut Style, json: &str) {
+pub(crate) fn load_json(style: &mut Style, json: &str) {
     style.load_json(json);
 }
 
-pub fn load_url(style: &mut Style, url: &str) {
+pub(crate) fn load_url(style: &mut Style, url: &str) {
     style.load_url(url);
 }
 
 #[must_use]
-pub fn default_camera(style: &Style) -> CameraOptions {
+pub(crate) fn default_camera(style: &Style) -> CameraOptions {
     style.get_default_camera()
 }
 
 /// Sets the paint or layout property `property_name` of the layer
 /// `layer_name`. The runner ignores an error from setting the property.
-pub fn set_layer_property(
+pub(crate) fn set_layer_property(
     style: &mut Style,
     layer_name: &str,
     property_name: &str,
@@ -34,7 +34,12 @@ pub fn set_layer_property(
 }
 
 /// Sets the zoom range of the layer `layer_name`.
-pub fn set_layer_zoom_range(style: &mut Style, layer_name: &str, min_zoom: f32, max_zoom: f32) -> Result<(), MapError> {
+pub(crate) fn set_layer_zoom_range(
+    style: &mut Style,
+    layer_name: &str,
+    min_zoom: f32,
+    max_zoom: f32,
+) -> Result<(), MapError> {
     let Some(mut layer) = style.get_layer_mut(layer_name) else {
         return Err(MapError::LayerNotFound);
     };
@@ -44,7 +49,7 @@ pub fn set_layer_zoom_range(style: &mut Style, layer_name: &str, min_zoom: f32, 
 }
 
 /// Parses a layer from `json` and adds it to the style.
-pub fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
+pub(crate) fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
@@ -59,7 +64,11 @@ pub fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
 
 /// Converts `filter` (a conversion error first) and sets it on the layer
 /// `layer_name` (`LayerNotFound` if there is none).
-pub fn set_layer_filter(style: &mut Style, layer_name: &str, filter: &serde_json::Value) -> Result<(), MapError> {
+pub(crate) fn set_layer_filter(
+    style: &mut Style,
+    layer_name: &str,
+    filter: &serde_json::Value,
+) -> Result<(), MapError> {
     let mut error = mln_conversion::Error::default();
     let Some(filter) =
         mln_style::conversion::convert::<mln_style::filter::Filter>(&Convertible::from(filter), &mut error)
@@ -75,19 +84,19 @@ pub fn set_layer_filter(style: &mut Style, layer_name: &str, filter: &serde_json
 
 /// Sets the global state property `name`. Its error (style not loaded) is
 /// a [`MapError::Exception`], as the C++ runner doesn't catch it.
-pub fn set_global_state_property(style: &mut Style, name: &str, value: &feature::Value) -> Result<(), MapError> {
+pub(crate) fn set_global_state_property(style: &mut Style, name: &str, value: &feature::Value) -> Result<(), MapError> {
     style.set_global_state_property(name, value).map_err(|e| MapError::Exception(e.to_string()))
 }
 
 /// Removes the layer `layer_name`, and returns whether there was one.
-pub fn remove_layer(style: &mut Style, layer_name: &str) -> bool {
+pub(crate) fn remove_layer(style: &mut Style, layer_name: &str) -> bool {
     style.remove_layer(layer_name).is_some()
 }
 
 /// Parses a source named `source_name` from `json` and adds it to the
 /// style. A duplicate id is a [`MapError::Exception`], as C++ throws an
 /// exception the runner doesn't catch.
-pub fn add_source(style: &mut Style, source_name: &str, json: &str) -> Result<(), MapError> {
+pub(crate) fn add_source(style: &mut Style, source_name: &str, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
@@ -103,7 +112,7 @@ pub fn add_source(style: &mut Style, source_name: &str, json: &str) -> Result<()
 
 /// Parses a light from `json` and sets it on the style (for the conformance
 /// suite).
-pub fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
+pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
@@ -118,7 +127,7 @@ pub fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
 }
 
 /// Removes the source `source_name`, and returns whether there was one.
-pub fn remove_source(style: &mut Style, source_name: &str) -> bool {
+pub(crate) fn remove_source(style: &mut Style, source_name: &str) -> bool {
     style.remove_source(source_name).is_some()
 }
 

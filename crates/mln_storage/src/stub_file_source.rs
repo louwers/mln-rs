@@ -28,7 +28,7 @@ pub enum ResponseType {
 }
 
 /// A responder: `std::function<std::optional<Response>(const Resource&)>`.
-pub type Responder = Rc<dyn Fn(&Resource) -> Option<Response>>;
+pub(crate) type Responder = Rc<dyn Fn(&Resource) -> Option<Response>>;
 
 #[derive(Default)]
 struct State {

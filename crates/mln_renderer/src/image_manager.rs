@@ -11,15 +11,16 @@ use std::sync::Arc;
 
 use mln_actor::scheduler;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
+#[cfg(test)]
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 
-pub type ImageRequestPair = (ImageDependencies, u64);
+pub(crate) type ImageRequestPair = (ImageDependencies, u64);
 
-pub trait ImageManagerObserver {
+pub(crate) trait ImageManagerObserver {
     fn on_style_image_missing(&self, _id: &str, done: Box<dyn FnOnce()>) {
         done();
     }
@@ -31,7 +32,7 @@ impl ImageManagerObserver for NullObserver {}
 
 /// The data members of the C++ `ImageRequestor` base class.
 #[derive(Default)]
-pub struct ImageRequestorBase {
+pub(crate) struct ImageRequestorBase {
     /// Pending requests are image requests that are waiting to be
     /// dispatched to the client.
     pending_requests: RefCell<VecSet<String>>,
@@ -39,7 +40,7 @@ pub struct ImageRequestorBase {
 
 /// Receives the images it requested from the `ImageManager`. Implementors
 /// call `ImageManager::remove_requestor_key` when they go away.
-pub trait ImageRequestor {
+pub(crate) trait ImageRequestor {
     fn requestor_base(&self) -> &ImageRequestorBase;
 
     /// An image this requestor asked for while it was missing has been
@@ -69,9 +70,9 @@ pub trait ImageRequestor {
 }
 
 /// A requestor's identity (`ImageRequestor*`).
-pub type RequestorKey = usize;
+pub(crate) type RequestorKey = usize;
 
-pub fn requestor_key<T: ?Sized>(requestor: &Rc<T>) -> RequestorKey {
+pub(crate) fn requestor_key<T: ?Sized>(requestor: &Rc<T>) -> RequestorKey {
     Rc::as_ptr(requestor).cast::<()>() as usize
 }
 
@@ -97,7 +98,7 @@ type Notification = (Weak<dyn ImageRequestor>, ImageMap, ImageMap, ImageVersionM
 
 /// Tracks requests for icon images from tile workers and sends responses
 /// when the requests are fulfilled.
-pub struct ImageManager {
+pub(crate) struct ImageManager {
     self_weak: Weak<ImageManager>,
     state: RefCell<State>,
     observer: RefCell<Rc<dyn ImageManagerObserver>>,
@@ -105,7 +106,7 @@ pub struct ImageManager {
 
 impl ImageManager {
     #[must_use]
-    pub fn create() -> Rc<ImageManager> {
+    pub(crate) fn create() -> Rc<ImageManager> {
         Rc::new_cyclic(|self_weak| ImageManager {
             self_weak: self_weak.clone(),
             state: RefCell::new(State {
@@ -123,11 +124,11 @@ impl ImageManager {
         })
     }
 
-    pub fn set_observer(&self, observer: Option<Rc<dyn ImageManagerObserver>>) {
+    pub(crate) fn set_observer(&self, observer: Option<Rc<dyn ImageManagerObserver>>) {
         *self.observer.borrow_mut() = observer.unwrap_or_else(|| Rc::new(NullObserver));
     }
 
-    pub fn set_loaded(&self, loaded: bool) {
+    pub(crate) fn set_loaded(&self, loaded: bool) {
         let mut notifications = Vec::new();
         let requestors = {
             let mut state = self.state.borrow_mut();
@@ -148,23 +149,23 @@ impl ImageManager {
         Self::deliver(notifications);
     }
 
-    pub fn is_loaded(&self) -> bool {
+    pub(crate) fn is_loaded(&self) -> bool {
         self.state.borrow().loaded
     }
 
-    pub fn dump_debug_logs(&self) {
+    pub(crate) fn dump_debug_logs(&self) {
         Log::info(Event::General, format!("ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" }));
     }
 
-    pub fn get_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
+    pub(crate) fn get_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
         self.get_shared_image(id)
     }
 
-    pub fn get_shared_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
+    pub(crate) fn get_shared_image(&self, id: &str) -> Option<Arc<ImageImpl>> {
         self.state.borrow().images.get(id).cloned()
     }
 
-    pub fn add_image(&self, image: Arc<ImageImpl>) {
+    pub(crate) fn add_image(&self, image: Arc<ImageImpl>) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
         debug_assert!(!state.images.contains_key(&image.id));
@@ -186,7 +187,7 @@ impl ImageManager {
     }
 
     /// Replaces an image; true when tiles need a relayout.
-    pub fn update_image(&self, image: Arc<ImageImpl>) -> bool {
+    pub(crate) fn update_image(&self, image: Arc<ImageImpl>) -> bool {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
 
@@ -218,7 +219,7 @@ impl ImageManager {
         size_changed || sdf_changed
     }
 
-    pub fn remove_image(&self, id: &str) {
+    pub(crate) fn remove_image(&self, id: &str) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
         let Some(image) = state.images.get(id) else {
@@ -237,7 +238,7 @@ impl ImageManager {
         state.updated_image_versions.remove(id);
     }
 
-    pub fn get_images(&self, requestor: &Rc<dyn ImageRequestor>, pair: ImageRequestPair) {
+    pub(crate) fn get_images(&self, requestor: &Rc<dyn ImageRequestor>, pair: ImageRequestPair) {
         // remove previous requests from this tile
         let key = requestor_key(requestor);
         self.remove_requestor_key(key);
@@ -268,7 +269,7 @@ impl ImageManager {
     }
 
     /// Removes the requestor with this identity key.
-    pub fn remove_requestor_key(&self, key: RequestorKey) {
+    pub(crate) fn remove_requestor_key(&self, key: RequestorKey) {
         let mut state = self.state.borrow_mut();
 
         state.image_requestors_to_relayout.remove(&key);
@@ -279,7 +280,7 @@ impl ImageManager {
         }
     }
 
-    pub fn notify_if_missing_image_added(&self) {
+    pub(crate) fn notify_if_missing_image_added(&self) {
         // Relayout once all of this update's images are added. A relayout
         // through a synchronous worker can change the set, so take the
         // requestors one at a time.
@@ -313,7 +314,7 @@ impl ImageManager {
         Self::deliver(notifications);
     }
 
-    pub fn reduce_memory_use(&self) {
+    pub(crate) fn reduce_memory_use(&self) {
         let unused_ids: Vec<String> = {
             let state = self.state.borrow();
             state
@@ -330,23 +331,25 @@ impl ImageManager {
         }
     }
 
-    pub fn reduce_memory_use_if_cache_size_exceeds_limit(&self) {
+    #[cfg(test)]
+    pub(crate) fn reduce_memory_use_if_cache_size_exceeds_limit(&self) {
         if self.state.borrow().requested_images_cache_size > DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE {
             self.reduce_memory_use();
         }
     }
 
-    pub fn get_available_images(&self) -> Arc<VecSet<String>> {
+    pub(crate) fn get_available_images(&self) -> Arc<VecSet<String>> {
         self.state.borrow().available_images.clone()
     }
 
     /// The versions of the updated images, by image id. Read by
     /// `GeometryTileRenderData::prepare`.
-    pub fn updated_image_versions(&self) -> ImageVersionMap {
+    #[cfg(test)]
+    pub(crate) fn updated_image_versions(&self) -> ImageVersionMap {
         self.state.borrow().updated_image_versions.clone()
     }
 
-    pub fn clear(&self) {
+    pub(crate) fn clear(&self) {
         let mut state = self.state.borrow_mut();
 
         debug_assert!(state.requestors.is_empty());

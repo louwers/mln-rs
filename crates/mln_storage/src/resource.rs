@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use mln_util::chrono::Timestamp;
@@ -31,6 +33,27 @@ pub enum Priority {
     Low,
 }
 
+/// Where a request stands among the waiting requests of its [`Priority`]:
+/// a file source that makes requests wait starts the one with the lowest
+/// value first, and those with the same value in the order they came.
+///
+/// A clone shares the value, so whoever made a request can change where it
+/// stands while it waits, through the [`Resource`] it kept. A request that
+/// has started isn't affected.
+#[derive(Clone, Debug, Default)]
+pub struct RequestOrder(Arc<AtomicU32>);
+
+impl RequestOrder {
+    #[must_use]
+    pub fn get(&self) -> u32 {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn set(&self, order: u32) {
+        self.0.store(order, Ordering::Relaxed);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Usage {
     #[default]
@@ -60,8 +83,9 @@ pub struct LoadingMethod(pub u8);
 
 #[allow(non_upper_case_globals)]
 impl LoadingMethod {
-    pub const None: LoadingMethod = LoadingMethod(0b00);
-    pub const Cache: LoadingMethod = LoadingMethod(0b01);
+    #[cfg(test)]
+    pub(crate) const None: LoadingMethod = LoadingMethod(0b00);
+    pub(crate) const Cache: LoadingMethod = LoadingMethod(0b01);
     pub const Network: LoadingMethod = LoadingMethod(0b10);
 
     pub const CacheOnly: LoadingMethod = Self::Cache;
@@ -76,6 +100,9 @@ pub struct Resource {
     pub loading_method: LoadingMethod,
     pub usage: Usage,
     pub priority: Priority,
+    /// Zero, ahead of every request that sets it, unless the requester says
+    /// otherwise.
+    pub order: RequestOrder,
     pub url: String,
 
     /// Includes auxiliary data if this is a tile request.
@@ -123,11 +150,11 @@ fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
 }
 
 impl Resource {
-    pub fn new(kind: Kind, url: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: Kind, url: impl Into<String>) -> Self {
         Self::with_tile_data(kind, url, None, LoadingMethod::All)
     }
 
-    pub fn with_tile_data(
+    pub(crate) fn with_tile_data(
         kind: Kind,
         url: impl Into<String>,
         tile_data: Option<TileData>,
@@ -138,6 +165,7 @@ impl Resource {
             loading_method,
             usage: Usage::Online,
             priority: Priority::Regular,
+            order: RequestOrder::default(),
             url: url.into(),
             tile_data,
             data_range: None,

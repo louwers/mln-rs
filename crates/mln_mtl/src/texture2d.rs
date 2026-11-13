@@ -28,7 +28,7 @@ use crate::context::Context;
 use crate::mtl_fwd::{MTLBufferPtr, MTLSamplerStatePtr, MTLTexturePtr};
 use crate::render_pass::RenderPass;
 
-pub struct Texture2D {
+pub(crate) struct Texture2D {
     context: Rc<Context>,
     metal_texture: Option<MTLTexturePtr>,
     metal_sampler_state: Option<MTLSamplerStatePtr>,
@@ -58,7 +58,7 @@ fn is_depth_or_stencil(format: MTLPixelFormat) -> bool {
 }
 
 impl Texture2D {
-    pub fn new(context: Rc<Context>) -> Self {
+    pub(crate) fn new(context: Rc<Context>) -> Self {
         Texture2D {
             context,
             metal_texture: None,
@@ -74,13 +74,13 @@ impl Texture2D {
         }
     }
 
-    pub fn set_usage(&mut self, usage: MTLTextureUsage) {
+    pub(crate) fn set_usage(&mut self, usage: MTLTextureUsage) {
         self.usage = usage;
         self.texture_dirty = true;
     }
 
     #[must_use]
-    pub fn get_metal_texture(&self) -> Option<&MTLTexturePtr> {
+    pub(crate) fn get_metal_texture(&self) -> Option<&MTLTexturePtr> {
         debug_assert!(self.metal_texture.is_some());
         self.metal_texture.as_ref()
     }
@@ -162,7 +162,7 @@ impl Texture2D {
         stats.mem_textures -= data_size;
     }
 
-    pub fn update_sampler_configuration(&mut self) {
+    pub(crate) fn update_sampler_configuration(&mut self) {
         let descriptor = MTLSamplerDescriptor::new();
         let filter = if self.sampler_state.filter == TextureFilterType::Nearest {
             MTLSamplerMinMagFilter::Nearest
@@ -188,7 +188,7 @@ impl Texture2D {
         self.sampler_state_dirty = false;
     }
 
-    pub fn bind(&mut self, render_pass: &RenderPass, location: usize) {
+    pub(crate) fn bind(&mut self, render_pass: &RenderPass, location: usize) {
         debug_assert!(!self.texture_dirty);
         // Update the sampler state if it was changed after resource creation.
         if self.sampler_state_dirty {
@@ -199,14 +199,18 @@ impl Texture2D {
         self.context.rendering_stats().num_texture_bindings += 1;
     }
 
-    pub fn unbind(&self, _render_pass: &RenderPass, _location: usize) {
+    pub(crate) fn unbind(&self, _render_pass: &RenderPass, _location: usize) {
         self.context.rendering_stats().num_texture_bindings -= 1;
     }
 
     /// Port-only: encodes a copy of the texture's pixels into `buffer`,
     /// which holds `get_data_size()` bytes, rows tightly packed. False if
     /// there is nothing to copy.
-    pub fn encode_copy_to(&self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>, buffer: &MTLBufferPtr) -> bool {
+    pub(crate) fn encode_copy_to(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        buffer: &MTLBufferPtr,
+    ) -> bool {
         let Some(texture) = self.metal_texture.as_ref() else {
             return false;
         };
@@ -216,7 +220,7 @@ impl Texture2D {
 
     /// Port-only: a shared buffer that holds the texture's pixels.
     #[must_use]
-    pub fn new_pixels_buffer(&self) -> Option<MTLBufferPtr> {
+    pub(crate) fn new_pixels_buffer(&self) -> Option<MTLBufferPtr> {
         self.context.get_backend().get_device().newBufferWithLength_options(
             texture2d::Texture2D::get_data_size(self).max(1),
             MTLResourceOptions::StorageModeShared,
@@ -227,7 +231,7 @@ impl Texture2D {
     /// `encode_copy_to` does, once the GPU work queued before is done, and
     /// waits for the copy. False if there is nothing to copy.
     #[must_use]
-    pub fn copy_to(&self, buffer: &MTLBufferPtr) -> bool {
+    pub(crate) fn copy_to(&self, buffer: &MTLBufferPtr) -> bool {
         autoreleasepool(|_| {
             let Some(command_buffer) = self.context.get_backend().get_command_queue().commandBuffer() else {
                 return false;

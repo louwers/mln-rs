@@ -160,7 +160,7 @@ fn build_layer_group(context: &dyn Context, registry: &ShaderRegistry, passes: R
     let indexes: Vec<u16> = vec![0, 1, 2, 1, 2, 3];
     let segs = [SegmentBase::with_lengths(0, 0, 4, 6)];
 
-    let mut builder = context.create_drawable_builder("background".to_owned());
+    let mut builder = context.create_drawable_builder();
     builder.set_render_pass(passes);
     builder.set_shader(Some(shader));
     builder.set_depth_type(DepthMaskType::ReadWrite);

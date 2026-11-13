@@ -12,7 +12,7 @@ use mln_util::logging::{Event, Log};
 use crate::buffer_resource::BufferResource;
 use crate::context::Context;
 
-pub struct UniformBuffer {
+pub(crate) struct UniformBuffer {
     buffer: BufferResource,
     /// Whether the buffer binds as a storage buffer: a layer's consolidated
     /// buffer, which its drawables index.
@@ -20,7 +20,7 @@ pub struct UniformBuffer {
 }
 
 impl UniformBuffer {
-    pub fn new(buffer: BufferResource, storage: bool) -> Self {
+    pub(crate) fn new(buffer: BufferResource, storage: bool) -> Self {
         if let Some(context) = buffer.context() {
             let mut stats = context.rendering_stats();
             stats.num_uniform_buffers += 1;
@@ -29,16 +29,16 @@ impl UniformBuffer {
         UniformBuffer { buffer, storage }
     }
 
-    pub fn create(context: &Context, data: &[u8], persistent: bool, ssbo: bool) -> Self {
+    pub(crate) fn create(context: &Context, data: &[u8], persistent: bool, ssbo: bool) -> Self {
         let usage = if ssbo { vk::BufferUsageFlags::STORAGE_BUFFER } else { vk::BufferUsageFlags::UNIFORM_BUFFER };
         UniformBuffer::new(context.create_buffer(Some(data), data.len(), usage, persistent), ssbo)
     }
 
-    pub fn get_buffer_resource(&self) -> &BufferResource {
+    pub(crate) fn get_buffer_resource(&self) -> &BufferResource {
         &self.buffer
     }
 
-    pub fn is_storage(&self) -> bool {
+    pub(crate) fn is_storage(&self) -> bool {
         self.storage
     }
 }

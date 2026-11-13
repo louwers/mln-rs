@@ -8,7 +8,7 @@ use crate::renderer::property_evaluator::PropertyEvaluator;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Impl {
-    pub type_: PropertyValue<ProjectionDefinition>,
+    pub(crate) type_: PropertyValue<ProjectionDefinition>,
 }
 
 impl Impl {

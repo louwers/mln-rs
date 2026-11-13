@@ -10,7 +10,7 @@ use ash::vk;
 use gpu_allocator::MemoryLocation;
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::{ConsumerSync, GpuSync, SyncKind, SyncKinds};
+use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -69,14 +69,6 @@ pub struct BorrowedDepth {
 }
 
 impl BorrowedImages {
-    /// The kinds of sync with which the host can wait for a frame (the
-    /// producer's) and the target for the host's reads (the consumer's), on
-    /// `device`.
-    #[must_use]
-    pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
-        device.sync_kinds()
-    }
-
     /// Checks what the images need of `device`.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
@@ -356,7 +348,7 @@ pub struct BorrowedTarget {
 impl BorrowedTarget {
     /// A target on `backend` that draws into `images` and hands each frame
     /// to the host with sync of the kind `producer`, which must be one of
-    /// [`BorrowedImages::sync_kinds`]'s producer kinds.
+    /// [`Device::sync_kinds`](crate::Device::sync_kinds)'s producer kinds.
     ///
     /// Fails as [`BorrowedImages::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
@@ -439,26 +431,6 @@ impl BorrowedTarget {
         Ok(this)
     }
 
-    /// How many images the ring has.
-    pub fn depth(&self) -> usize {
-        self.images.borrow().images.len()
-    }
-
-    /// The images' size, in physical pixels.
-    pub fn size(&self) -> Size {
-        self.images.borrow().size
-    }
-
-    /// The images of the ring.
-    pub fn images(&self) -> BorrowedImages {
-        self.images.borrow().clone()
-    }
-
-    /// The kind of sync that frames are handed over with.
-    pub fn producer(&self) -> SyncKind {
-        self.producer
-    }
-
     /// Has the next frame draw into the image at `slot`.
     pub fn select(&self, slot: usize) {
         self.resource.borrow().selected.set(slot);
@@ -466,7 +438,7 @@ impl BorrowedTarget {
 
     /// The host gave the image at `slot` back: the next frame drawn into it
     /// waits for `consumer`, a sync of one of
-    /// [`BorrowedImages::sync_kinds`]'s consumer kinds. The sync file of the
+    /// [`Device::sync_kinds`](crate::Device::sync_kinds)'s consumer kinds. The sync file of the
     /// slot's last frame is closed.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when the target

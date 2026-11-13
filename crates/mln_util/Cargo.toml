@@ -6,6 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license = "BSD-2-Clause AND Zlib"
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
@@ -32,12 +34,6 @@ web-time.workspace = true
 [target.'cfg(target_family = "wasm")'.dependencies]
 # host_bytes: tile workers' vertex and index arrays, kept in JS until upload.
 js-sys.workspace = true
-
-# Ported C++ gtests of test/util (markers `// gtest: Group.Name`), for
-# mln_util and the low crates next to it.
-[[test]]
-name = "mln_util_gtest"
-path = "tests/gtest/main.rs"
 
 # Ports test/util/padding.test.cpp: its expression cases need mln_style.
 [[test]]

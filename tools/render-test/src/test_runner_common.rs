@@ -34,7 +34,7 @@ fn strip_number(num: f64) -> f64 {
 
 /// Strip precision for numbers, so that we can compare evaluated results with
 /// fixtures. Copied from JS expression harness.
-pub fn strip_precision(value: &Value) -> Value {
+pub(crate) fn strip_precision(value: &Value) -> Value {
     if let Some(num) = numeric_value(value) {
         if num == 0.0 {
             return Value::Double(num);
@@ -50,7 +50,7 @@ pub fn strip_precision(value: &Value) -> Value {
 }
 
 /// `tokenize`: split at newlines.
-pub fn tokenize(s: &str) -> Vec<String> {
+pub(crate) fn tokenize(s: &str) -> Vec<String> {
     s.split('\n').map(str::to_owned).collect()
 }
 
@@ -73,7 +73,7 @@ fn stod(s: &str) -> Option<f64> {
 }
 
 #[must_use]
-pub fn deep_equal(a: &Value, b: &Value) -> bool {
+pub(crate) fn deep_equal(a: &Value, b: &Value) -> bool {
     let anum = numeric_value(a);
     let bnum = numeric_value(b);
     if let (Some(anum), Some(bnum)) = (anum, bnum) {
@@ -122,13 +122,4 @@ pub fn deep_equal(a: &Value, b: &Value) -> bool {
     }
 
     false
-}
-
-#[must_use]
-pub fn deep_equal_opt(a: &Option<Value>, b: &Option<Value>) -> bool {
-    match (a, b) {
-        (Some(a), Some(b)) => deep_equal(a, b),
-        (None, None) => true,
-        _ => false,
-    }
 }

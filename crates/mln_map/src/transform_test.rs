@@ -3596,6 +3596,36 @@ fn free_bearing_drag_keeps_the_location_under_the_cursor() {
     }
 }
 
+// Port-only: with the bearing held, the steps of a drag hold the location
+// the first of them grabbed, until something else moves the camera. The step
+// after that grabs the location then under the cursor, and doesn't bring the
+// first one back.
+#[test]
+fn bearing_held_drag_holds_its_location_until_the_camera_moves() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(30.0, 20.0), 2.0, 0.0, 0.0);
+    let slip = |transform: &Transform, location: &LatLng, cursor: &ScreenCoordinate| {
+        let point = transform.lat_lng_to_screen_coordinate(location);
+        (point.x - cursor.x).hypot(point.y - cursor.y)
+    };
+    let mut cursor = sc(300.0, 200.0);
+    let grabbed = transform.screen_coordinate_to_lat_lng(&cursor, WrapMode::Unwrapped).unwrap();
+    for _ in 0..40 {
+        cursor = sc(cursor.x + 5.0, cursor.y + 3.0);
+        transform.move_by_with_anchor(&sc(5.0, 3.0), Some(cursor), &AnimationOptions::default()).unwrap();
+        assert!(slip(&transform, &grabbed, &cursor) < 1e-6);
+    }
+
+    transform.jump_to(&CameraOptions { center: Some(ll(10.0, 60.0)), ..Default::default() });
+    let regrabbed = transform.screen_coordinate_to_lat_lng(&cursor, WrapMode::Unwrapped).unwrap();
+    for _ in 0..10 {
+        cursor = sc(cursor.x - 5.0, cursor.y);
+        transform.move_by_with_anchor(&sc(-5.0, 0.0), Some(cursor), &AnimationOptions::default()).unwrap();
+        assert!(slip(&transform, &regrabbed, &cursor) < 1e-6);
+    }
+    assert!(slip(&transform, &grabbed, &cursor) > 50.0);
+}
+
 // A zoom around a point beside the pole: with the bearing held the center's
 // longitude swings towards the point's and the planet turns about the pole,
 // as GL JS's does; with a free bearing the planet only grows around the
@@ -4266,9 +4296,9 @@ fn partial_camera_commands_finish_together_for_still_image() {
     let observer = Rc::new(EventObserver::default());
     let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
-    let push = |event: i32| {
+    let push = |event: i32| -> Option<TransitionEndFn> {
         let events = observer.events.clone();
-        Some(Arc::new(move |_: &TransitionEnd| events.lock().push(event)) as TransitionEndFn)
+        Some(Arc::new(move |_: &TransitionEnd| events.lock().push(event)))
     };
     let position = AnimationOptions { transition_end_fn: push(1), ..AnimationOptions::new(Duration::from_secs(5)) };
     let bearing = AnimationOptions { transition_end_fn: push(2), ..AnimationOptions::new(Duration::from_secs(10)) };
@@ -4962,7 +4992,7 @@ fn a_command_that_keeps_some_fields_completes_or_is_cancelled() {
     let start = start_clock(&mut transform);
     transform.ease_to(
         &CameraOptions { zoom: Some(10.0), bearing: Some(90.0), ..Default::default() },
-        &AnimationOptions { duration: Some(Duration::from_secs(1)), ..both.clone() },
+        &AnimationOptions { duration: Some(Duration::from_secs(1)), ..both },
     );
     transform.jump_to(&CameraOptions { zoom: Some(6.0), ..Default::default() });
     assert_eq!(outcome(&ended), None);

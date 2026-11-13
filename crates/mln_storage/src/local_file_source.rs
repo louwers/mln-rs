@@ -34,10 +34,11 @@ fn path_from_file_url(url: &str) -> Vec<u8> {
     path
 }
 
-pub struct LocalFileSourceThread;
+pub(crate) struct LocalFileSourceThread;
 
 impl LocalFileSourceThread {
-    pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
+    #[expect(clippy::unused_self, reason = "the file source's actor calls it on its thread's object")]
+    pub(crate) fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         if !accepts_url(&resource.url) {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Other, "Invalid file URL")));
@@ -51,14 +52,14 @@ impl LocalFileSourceThread {
 }
 
 /// The `FileSystem` file source: `file://` URLs.
-pub struct LocalFileSource {
+pub(crate) struct LocalFileSource {
     thread: Thread<LocalFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
 }
 
 impl LocalFileSource {
     #[must_use]
-    pub fn new(resource_options: &ResourceOptions) -> Self {
+    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
         LocalFileSource {
             thread: Thread::new("LocalFileSource", |_| LocalFileSourceThread),
             resource_options: Mutex::new(resource_options.clone()),

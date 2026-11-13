@@ -21,7 +21,7 @@ use serde_json::Value as JSValue;
 /// Logs and returns `None` for invalid metrics or metadata.
 #[allow(clippy::too_many_arguments)]
 #[must_use]
-pub fn create_style_image(
+pub(crate) fn create_style_image(
     id: &str,
     image: &PremultipliedImage,
     src_x: i32,
@@ -228,7 +228,7 @@ pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<A
 /// Port-only: `parseSprite` after its `decodeImage`, for an image decoded
 /// elsewhere (the `SpriteLoader` decodes through `mln_image`'s
 /// `decoder`, which may answer later).
-pub fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
+pub(crate) fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -> Result<Vec<Arc<Impl>>, Error> {
     // `doc.Parse<0>(json.c_str())`: the string ends at the first NUL.
     let json = match json.iter().position(|&b| b == 0) {
         Some(nul) => &json[..nul],

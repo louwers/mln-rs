@@ -20,7 +20,7 @@ pub struct LineDrawableUBO {
     /* 92 */ pub pad1: f32,
     /* 96 */
 }
-const _: () = assert!(std::mem::size_of::<LineDrawableUBO>() == 6 * 16);
+const _: () = assert!(size_of::<LineDrawableUBO>() == 6 * 16);
 
 //
 // Line gradient
@@ -42,7 +42,7 @@ pub struct LineGradientDrawableUBO {
     /* 92 */ pub pad2: f32,
     /* 96 */
 }
-const _: () = assert!(std::mem::size_of::<LineGradientDrawableUBO>() == 6 * 16);
+const _: () = assert!(size_of::<LineGradientDrawableUBO>() == 6 * 16);
 
 //
 // Line pattern
@@ -68,7 +68,7 @@ pub struct LinePatternDrawableUBO {
     /* 108 */ pub pad3: f32,
     /* 112 */
 }
-const _: () = assert!(std::mem::size_of::<LinePatternDrawableUBO>() == 7 * 16);
+const _: () = assert!(size_of::<LinePatternDrawableUBO>() == 7 * 16);
 
 /// The line pattern shader's per-tile uniform block (64 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -82,7 +82,7 @@ pub struct LinePatternTilePropsUBO {
     /* 60 */ pub pad1: f32,
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<LinePatternTilePropsUBO>() == 4 * 16);
+const _: () = assert!(size_of::<LinePatternTilePropsUBO>() == 4 * 16);
 
 //
 // Line SDF
@@ -110,7 +110,7 @@ pub struct LineSDFDrawableUBO {
     /* 124 */ pub pad2: f32,
     /* 128 */
 }
-const _: () = assert!(std::mem::size_of::<LineSDFDrawableUBO>() == 8 * 16);
+const _: () = assert!(size_of::<LineSDFDrawableUBO>() == 8 * 16);
 
 /// The line SDF shader's per-tile uniform block (16 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -122,7 +122,7 @@ pub struct LineSDFTilePropsUBO {
     /* 12 */ pub pad2: f32,
     /* 16 */
 }
-const _: () = assert!(std::mem::size_of::<LineSDFTilePropsUBO>() == 16);
+const _: () = assert!(size_of::<LineSDFTilePropsUBO>() == 16);
 
 /// Bit flags for the line properties that are expressions.
 pub mod line_expression_mask {
@@ -157,7 +157,7 @@ pub struct LineEvaluatedPropsUBO {
     /* 44 */ pub pad1: f32,
     /* 48 */
 }
-const _: () = assert!(std::mem::size_of::<LineEvaluatedPropsUBO>() == 3 * 16);
+const _: () = assert!(size_of::<LineEvaluatedPropsUBO>() == 3 * 16);
 
 /// Any line per-drawable uniform block, for consolidated UBOs: 128 bytes,
 /// the size of `LineSDFDrawableUBO`.
@@ -166,7 +166,7 @@ const _: () = assert!(std::mem::size_of::<LineEvaluatedPropsUBO>() == 3 * 16);
 pub struct LineDrawableUnionUBO {
     bytes: [u8; 128],
 }
-const _: () = assert!(std::mem::size_of::<LineDrawableUnionUBO>() == 8 * 16);
+const _: () = assert!(size_of::<LineDrawableUnionUBO>() == 8 * 16);
 
 impl Default for LineDrawableUnionUBO {
     fn default() -> Self {
@@ -189,7 +189,7 @@ impl LineDrawableUnionUBO {
 pub struct LineTilePropsUnionUBO {
     bytes: [u8; 64],
 }
-const _: () = assert!(std::mem::size_of::<LineTilePropsUnionUBO>() == 4 * 16);
+const _: () = assert!(size_of::<LineTilePropsUnionUBO>() == 4 * 16);
 
 impl Default for LineTilePropsUnionUBO {
     fn default() -> Self {

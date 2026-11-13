@@ -12,7 +12,7 @@ fn set_object_member(layer: &mut Box<dyn Layer>, value: &Convertible<'_>, member
     true
 }
 
-pub fn set_paint_properties(layer: &mut dyn Layer, value: &Convertible<'_>) -> Option<Error> {
+pub(crate) fn set_paint_properties(layer: &mut dyn Layer, value: &Convertible<'_>) -> Option<Error> {
     let paint_value = value.object_member("paint")?;
     if !paint_value.is_object() {
         return Some(Error::new(format!("layer '{}': paint must be an object", layer.get_id())));

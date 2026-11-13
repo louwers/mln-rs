@@ -258,7 +258,7 @@ impl RuntimeCore {
         file_sources.register_file_source_factory(
             FileSourceType::Network,
             Arc::new(move |_: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(ProviderFileSource::new(options, network_hooks.clone())) as Arc<dyn FileSource>
+                Arc::new(ProviderFileSource::new(options, network_hooks.clone()))
             }),
         );
         let network = file_sources.get_file_source(FileSourceType::Network, &resource_options);

@@ -11,26 +11,26 @@ use crate::image_manager::ImageManager;
 use crate::text::glyph_manager::GlyphManager;
 use crate::tile::tile_worker_transport::TileWorkerTransport;
 
-pub struct TileParameters<'a> {
-    pub pixel_ratio: f32,
-    pub debug_options: MapDebugOptions,
-    pub transform_state: &'a TransformState,
-    pub file_source: Option<Arc<dyn FileSource>>,
-    pub mode: MapMode,
-    pub prefetch_zoom_delta: u8,
-    pub tile_lod_min_radius: f64,
-    pub tile_lod_scale: f64,
-    pub tile_lod_pitch_threshold: f64,
-    pub tile_lod_zoom_shift: f64,
-    pub tile_lod_mode: TileLodMode,
-    pub subdivision_granularity: SubdivisionGranularitySetting,
-    pub global_state: Option<Arc<GlobalStateMap>>,
-    pub is_update_synchronous: bool,
-    pub capture_rendered_features: bool,
+pub(crate) struct TileParameters<'a> {
+    pub(crate) pixel_ratio: f32,
+    pub(crate) debug_options: MapDebugOptions,
+    pub(crate) transform_state: &'a TransformState,
+    pub(crate) file_source: Option<Arc<dyn FileSource>>,
+    pub(crate) mode: MapMode,
+    pub(crate) prefetch_zoom_delta: u8,
+    pub(crate) tile_lod_min_radius: f64,
+    pub(crate) tile_lod_scale: f64,
+    pub(crate) tile_lod_pitch_threshold: f64,
+    pub(crate) tile_lod_zoom_shift: f64,
+    pub(crate) tile_lod_mode: TileLodMode,
+    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) global_state: Option<Arc<GlobalStateMap>>,
+    pub(crate) is_update_synchronous: bool,
+    pub(crate) capture_rendered_features: bool,
     // symbols:
-    pub image_manager: Rc<ImageManager>,
-    pub glyph_manager: Rc<GlyphManager>,
-    pub dynamic_texture_atlas: DynamicTextureAtlasPtr,
+    pub(crate) image_manager: Rc<ImageManager>,
+    pub(crate) glyph_manager: Rc<GlyphManager>,
+    pub(crate) dynamic_texture_atlas: DynamicTextureAtlasPtr,
     /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).
-    pub tile_worker_transport: Rc<dyn TileWorkerTransport>,
+    pub(crate) tile_worker_transport: Rc<dyn TileWorkerTransport>,
 }

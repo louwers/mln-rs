@@ -98,15 +98,15 @@ fn database_auto_vacuum(path: &str) -> i32 {
 mod fixture {
     use super::*;
 
-    pub fn resource() -> Resource {
+    pub(crate) fn resource() -> Resource {
         Resource::new(Kind::Style, "https://example.com/test")
     }
 
-    pub fn tile() -> Resource {
+    pub(crate) fn tile() -> Resource {
         Resource::tile("https://example.com/test", 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::All)
     }
 
-    pub fn response() -> Response {
+    pub(crate) fn response() -> Response {
         let mut res = Response::new();
         res.data = Some(Arc::new(b"first".to_vec()));
         res

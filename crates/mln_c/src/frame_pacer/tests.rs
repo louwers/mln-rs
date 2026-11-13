@@ -360,7 +360,7 @@ fn requests_share_one_refresh_until_it_comes() {
     assert_eq!(display.scheduled(), 1);
     assert_eq!(pacer.state.lock().waiting, [1, 2]);
     assert!(display.refresh(now()));
-    assert_eq!(pacer.state.lock().waiting, [] as [u64; 0]);
+    assert_eq!(pacer.state.lock().waiting, Vec::<u64>::new());
     assert_eq!(display.scheduled(), 0);
 
     pacer.request(3);

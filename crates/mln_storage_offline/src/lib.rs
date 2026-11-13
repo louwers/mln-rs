@@ -3,8 +3,8 @@
 //! `DatabaseFileSource` that drives it. It parses styles and covers regions
 //! with tiles, so it sits above `mln_style` and `mln_renderer`.
 
-pub mod database_file_source;
-pub mod offline_download;
+mod database_file_source;
+mod offline_download;
 
 pub use database_file_source::DatabaseFileSourceExt;
 pub use offline_download::OfflineDownload;

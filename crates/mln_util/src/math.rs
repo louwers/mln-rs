@@ -9,7 +9,7 @@ pub fn perp(a: Point<f64>) -> Point<f64> {
 /// The squared distance between `a` and `b`. The differences and the sum are
 /// computed in `i32` (wrapping), then converted.
 #[must_use]
-pub fn dist_sqr_i16(a: Point<i16>, b: Point<i16>) -> f32 {
+pub(crate) fn dist_sqr_i16(a: Point<i16>, b: Point<i16>) -> f32 {
     let dx = i32::from(b.x) - i32::from(a.x);
     let dy = i32::from(b.y) - i32::from(a.y);
     dx.wrapping_mul(dx).wrapping_add(dy.wrapping_mul(dy)) as f32
@@ -17,7 +17,7 @@ pub fn dist_sqr_i16(a: Point<i16>, b: Point<i16>) -> f32 {
 
 /// The squared distance between `a` and `b`, in float.
 #[must_use]
-pub fn dist_sqr_i16_f32(a: Point<i16>, b: Point<f32>) -> f32 {
+pub(crate) fn dist_sqr_i16_f32(a: Point<i16>, b: Point<f32>) -> f32 {
     let dx = b.x - f32::from(a.x);
     let dy = b.y - f32::from(a.y);
     dx * dx + dy * dy
@@ -51,14 +51,15 @@ pub fn angle_between(a: Point<f64>, b: Point<f64>) -> f64 {
     (a.x * b.y - a.y * b.x).atan2(a.x * b.x + a.y * b.y)
 }
 
+#[cfg(test)]
 #[must_use]
-pub fn length_f32(a: f32, b: f32) -> f32 {
+pub(crate) fn length_f32(a: f32, b: f32) -> f32 {
     (a * a + b * b).sqrt()
 }
 
 /// The length of `a`.
 #[must_use]
-pub fn mag(a: Point<f64>) -> f64 {
+pub(crate) fn mag(a: Point<f64>) -> f64 {
     (a.x * a.x + a.y * a.y).sqrt()
 }
 
@@ -81,13 +82,6 @@ pub fn rotate_i16(a: Point<i16>, angle: f32) -> Point<i16> {
     let x = cos * f32::from(a.x) - sin * f32::from(a.y);
     let y = sin * f32::from(a.x) + cos * f32::from(a.y);
     Point::new(x as i16, y as i16)
-}
-
-#[must_use]
-pub fn rotate_f32(a: Point<f32>, angle: f32) -> Point<f32> {
-    let cos = angle.cos();
-    let sin = angle.sin();
-    Point::new(cos * a.x - sin * a.y, sin * a.x + cos * a.y)
 }
 
 #[cfg(test)]

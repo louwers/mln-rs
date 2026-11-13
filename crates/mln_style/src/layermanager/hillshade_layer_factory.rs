@@ -4,7 +4,7 @@ use super::layer_factory::{LayerFactory, get_source};
 use crate::layer::{Layer, LayerTypeInfo};
 use crate::layers::hillshade_layer::{HillshadeLayer, Impl};
 
-pub struct HillshadeLayerFactory;
+pub(crate) struct HillshadeLayerFactory;
 
 impl LayerFactory for HillshadeLayerFactory {
     fn get_type_info(&self) -> &'static LayerTypeInfo {

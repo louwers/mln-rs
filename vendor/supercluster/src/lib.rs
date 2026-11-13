@@ -16,32 +16,32 @@ use geometry::{Geometry, Point};
 use kdbush::{KDBush, Nth};
 
 /// `feature_collection<double>`
-pub type GeoJSONFeatures = Vec<Feature<f64>>;
+pub(crate) type GeoJSONFeatures = Vec<Feature<f64>>;
 /// `feature_collection<std::int16_t>`
-pub type TileFeatures = Vec<Feature<i16>>;
+pub(crate) type TileFeatures = Vec<Feature<i16>>;
 
 /// `Cluster`
 #[derive(Clone, Debug)]
-pub struct Cluster {
-    pub pos: Point<f64>,
-    pub num_points: u32,
-    pub id: u32,
-    pub parent_id: u32,
-    pub visited: bool,
-    pub properties: Option<Box<PropertyMap>>,
+pub(crate) struct Cluster {
+    pub(crate) pos: Point<f64>,
+    pub(crate) num_points: u32,
+    pub(crate) id: u32,
+    pub(crate) parent_id: u32,
+    pub(crate) visited: bool,
+    pub(crate) properties: Option<Box<PropertyMap>>,
 }
 
 impl Cluster {
     /// `Cluster(pos, num_points, id)`
     #[must_use]
-    pub fn new(pos: Point<f64>, num_points: u32, id: u32) -> Self {
+    pub(crate) fn new(pos: Point<f64>, num_points: u32, id: u32) -> Self {
         Cluster { pos, num_points, id, parent_id: 0, visited: false, properties: None }
     }
 
     /// `Cluster(pos, num_points, id, properties)`: keeps the properties only
     /// if there are any.
     #[must_use]
-    pub fn with_properties(pos: Point<f64>, num_points: u32, id: u32, properties: &PropertyMap) -> Self {
+    pub(crate) fn with_properties(pos: Point<f64>, num_points: u32, id: u32, properties: &PropertyMap) -> Self {
         let mut c = Self::new(pos, num_points, id);
         if !properties.is_empty() {
             c.properties = Some(Box::new(properties.clone()));
@@ -51,7 +51,7 @@ impl Cluster {
 
     /// `toGeoJSON()`
     #[must_use]
-    pub fn to_geojson(&self) -> Feature<f64> {
+    pub(crate) fn to_geojson(&self) -> Feature<f64> {
         let x = (self.pos.x - 0.5) * 360.0;
         let y = 360.0 * ((180.0 - self.pos.y * 360.0) * PI / 180.0).exp().atan() / PI - 90.0;
         Feature {
@@ -63,7 +63,7 @@ impl Cluster {
 
     /// `getProperties()`
     #[must_use]
-    pub fn get_properties(&self) -> PropertyMap {
+    pub(crate) fn get_properties(&self) -> PropertyMap {
         let mut result = PropertyMap::new();
         result.insert("cluster".to_owned(), Value::Bool(true));
         result.insert("cluster_id".to_owned(), Value::Uint(u64::from(self.id)));
@@ -85,7 +85,7 @@ impl Cluster {
 /// precision (6) above, then "k". (`%.1f`/`%.6f` of the exact double,
 /// glibc's round-half-even on exact ties, which Rust's formatting matches.)
 #[must_use]
-pub fn abbreviate(num_points: u32) -> String {
+pub(crate) fn abbreviate(num_points: u32) -> String {
     if num_points >= 1000 {
         let k = f64::from(num_points) / 1000.0;
         if num_points < 10000 { format!("{k:.1}k") } else { format!("{k:.6}k") }
@@ -105,9 +105,9 @@ impl Nth for Cluster {
 }
 
 /// `std::function<property_map(const property_map&)>`
-pub type MapFn = Arc<dyn Fn(&PropertyMap) -> PropertyMap + Send + Sync>;
+pub(crate) type MapFn = Arc<dyn Fn(&PropertyMap) -> PropertyMap + Send + Sync>;
 /// `std::function<void(property_map&, const property_map&)>`
-pub type ReduceFn = Arc<dyn Fn(&mut PropertyMap, &PropertyMap) + Send + Sync>;
+pub(crate) type ReduceFn = Arc<dyn Fn(&mut PropertyMap, &PropertyMap) + Send + Sync>;
 
 /// `Options`
 #[derive(Clone)]
@@ -285,8 +285,8 @@ impl Zoom {
 /// `Supercluster`
 #[derive(Debug)]
 pub struct Supercluster {
-    pub features: GeoJSONFeatures,
-    pub options: Options,
+    pub(crate) features: GeoJSONFeatures,
+    pub(crate) options: Options,
     zooms: HashMap<u8, Zoom>,
 }
 
@@ -529,7 +529,7 @@ impl Supercluster {
 
 /// `project(p)`
 #[must_use]
-pub fn project(p: &Point<f64>) -> Point<f64> {
+pub(crate) fn project(p: &Point<f64>) -> Point<f64> {
     let lng_x = p.x / 360.0 + 0.5;
     let sine = (p.y * PI / 180.0).sin();
     let y = 0.5 - 0.25 * ((1.0 + sine) / (1.0 - sine)).ln() / PI;
@@ -538,3 +538,6 @@ pub fn project(p: &Point<f64>) -> Point<f64> {
     let lat_y = if 1.0 < y { 1.0 } else { y };
     Point::new(lng_x, lat_y)
 }
+
+#[cfg(test)]
+mod tests;

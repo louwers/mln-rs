@@ -9,16 +9,16 @@ use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
 const EXTENT_STENCIL_BORDER: i32 = EXTENT / 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TileMeshOptions {
+pub(crate) struct TileMeshOptions {
     /// Quads per axis; 1 is the plain tile quad.
-    pub granularity: u32,
+    pub(crate) granularity: u32,
     /// Adds a ring of quads `EXTENT / 128` units outside the tile, for
     /// stencil masks.
-    pub generate_borders: bool,
+    pub(crate) generate_borders: bool,
     /// Replaces the north border with geometry reaching the north pole
     /// vertex.
-    pub extend_to_north_pole: bool,
-    pub extend_to_south_pole: bool,
+    pub(crate) extend_to_north_pole: bool,
+    pub(crate) extend_to_south_pole: bool,
 }
 
 impl Default for TileMeshOptions {
@@ -33,17 +33,17 @@ impl Default for TileMeshOptions {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TileMesh {
+pub(crate) struct TileMesh {
     /// Flattened `x, y` pairs in tile units.
-    pub vertices: Vec<i16>,
-    pub indices: Vec<u16>,
+    pub(crate) vertices: Vec<i16>,
+    pub(crate) indices: Vec<u16>,
 }
 
 /// A grid mesh covering one tile, optionally with borders and pole caps; port
 /// of GL JS `util/create_tile_mesh.ts`. Triangles are counter-clockwise in
 /// tile space.
 #[must_use]
-pub fn create_tile_mesh(options: &TileMeshOptions) -> TileMesh {
+pub(crate) fn create_tile_mesh(options: TileMeshOptions) -> TileMesh {
     // Capped first so the product cannot wrap; every granularity past the
     // vertex limit fails the check anyway.
     const MAX_VERTICES: u64 = 1 << 16;

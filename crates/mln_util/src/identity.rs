@@ -25,11 +25,6 @@ impl SimpleIdentity {
     }
 
     #[must_use]
-    pub fn id(&self) -> i64 {
-        self.unique_id
-    }
-
-    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.unique_id == Self::EMPTY_ID
     }

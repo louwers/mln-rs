@@ -53,7 +53,8 @@ pub trait LayerProperties: Any + Send + Sync {
 impl dyn LayerProperties {
     /// The concrete properties, if they are a `D`.
     pub fn downcast_ref<D: LayerProperties>(&self) -> Option<&D> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 

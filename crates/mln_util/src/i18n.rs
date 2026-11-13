@@ -194,7 +194,7 @@ pub fn allows_word_breaking_before(chr: u16) -> bool {
 
 /// Whether letter spacing applies to `chr` (it doesn't to Arabic).
 #[must_use]
-pub fn char_allows_letter_spacing(chr: u16) -> bool {
+pub(crate) fn char_allows_letter_spacing(chr: u16) -> bool {
     !(is_in_arabic(chr)
         || is_in_arabic_supplement(chr)
         || is_in_arabic_extended_a(chr)
@@ -321,13 +321,6 @@ pub fn glyph_range_is_entirely_locally_generated(range_start: u16) -> bool {
     true
 }
 
-/// Returns whether any substring of the given string can be drawn as
-/// vertical text with upright glyphs.
-#[must_use]
-pub fn allows_vertical_writing_mode(string: &[u16]) -> bool {
-    string.iter().any(|&c| has_upright_vertical_orientation(c))
-}
-
 // The following logic comes from
 // <http://www.unicode.org/Public/12.0.0/ucd/VerticalOrientation.txt>.
 // Keep it synchronized with
@@ -446,7 +439,7 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
 /// does not influence whether an adjacent character is drawn upright or
 /// rotated.
 #[must_use]
-pub fn has_neutral_vertical_orientation(chr: u16) -> bool {
+pub(crate) fn has_neutral_vertical_orientation(chr: u16) -> bool {
     if is_in_latin1_supplement(chr)
         && (chr == 0x00A7 /* § */
             || chr == 0x00A9 /* © */
@@ -538,7 +531,7 @@ pub fn has_neutral_vertical_orientation(chr: u16) -> bool {
 /// character causes an adjacent “neutral” character to be drawn rotated as
 /// well.
 #[must_use]
-pub fn has_rotated_vertical_orientation(chr: u16) -> bool {
+pub(crate) fn has_rotated_vertical_orientation(chr: u16) -> bool {
     !(has_upright_vertical_orientation(chr) || has_neutral_vertical_orientation(chr))
 }
 

@@ -317,20 +317,12 @@ impl Renderer {
             context,
             self.pixel_ratio,
             &*backend,
-            render_tree_parameters.map_mode,
             render_tree_parameters.debug_options,
-            render_tree_parameters.time_point,
             &render_tree_parameters.transform_params,
             static_data,
             orchestrator.get_pattern_atlas().clone(),
-            self.frame_count,
-            update_parameters.tile_lod_min_radius,
-            update_parameters.tile_lod_scale,
-            update_parameters.tile_lod_pitch_threshold,
-            update_parameters.tile_lod_mode,
             renderable_size,
             scissor_rect,
-            update_parameters.capture_rendered_features,
         );
 
         parameters.line_atlas = orchestrator.get_line_atlas().clone();

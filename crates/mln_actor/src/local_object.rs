@@ -66,7 +66,7 @@ impl<T: 'static> LocalObject<T> {
 
     /// Whether the calling thread is the one that owns the value.
     #[must_use]
-    pub fn is_home_thread(&self) -> bool {
+    pub(crate) fn is_home_thread(&self) -> bool {
         thread::current().id() == self.thread
     }
 

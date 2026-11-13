@@ -24,7 +24,7 @@ fn loads_liberty_over_https() {
     // Give up after 60 s: the timer wakes the loop then.
     let timeout = Timer::new();
     timeout.start(Duration::from_secs(60), Duration::ZERO, || {});
-    let deadline = Instant::now() + std::time::Duration::from_secs(60);
+    let deadline = Instant::now() + Duration::from_secs(60);
     let mut loaded = false;
     let mut failed = None;
     while !loaded && failed.is_none() && Instant::now() < deadline {

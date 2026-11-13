@@ -12,16 +12,16 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileData, Geom
 use mln_util::error::Error;
 use mln_util::geometry::{FeatureType, to_feature_type};
 
-pub type TileFeatureCollection = Vec<Feature<i16>>;
+pub(crate) type TileFeatureCollection = Vec<Feature<i16>>;
 
-pub struct GeoJSONTileFeature<'a> {
-    pub feature: &'a Feature<i16>,
+pub(crate) struct GeoJSONTileFeature<'a> {
+    pub(crate) feature: &'a Feature<i16>,
     geometry: OnceCell<GeometryCollection>,
 }
 
 impl<'a> GeoJSONTileFeature<'a> {
     #[must_use]
-    pub fn new(feature: &'a Feature<i16>) -> Self {
+    pub(crate) fn new(feature: &'a Feature<i16>) -> Self {
         GeoJSONTileFeature { feature, geometry: OnceCell::new() }
     }
 }
@@ -48,13 +48,13 @@ impl GeometryTileFeature for GeoJSONTileFeature<'_> {
     }
 }
 
-pub struct GeoJSONTileLayer {
+pub(crate) struct GeoJSONTileLayer {
     features: Arc<TileFeatureCollection>,
 }
 
 impl GeoJSONTileLayer {
     #[must_use]
-    pub fn new(features: Arc<TileFeatureCollection>) -> Self {
+    pub(crate) fn new(features: Arc<TileFeatureCollection>) -> Self {
         GeoJSONTileLayer { features }
     }
 }
@@ -74,24 +74,19 @@ impl GeometryTileLayer for GeoJSONTileLayer {
 }
 
 #[derive(Clone)]
-pub struct GeoJSONTileData {
+pub(crate) struct GeoJSONTileData {
     features: Arc<TileFeatureCollection>,
 }
 
 impl GeoJSONTileData {
     #[must_use]
-    pub fn new(features: TileFeatureCollection) -> Self {
+    pub(crate) fn new(features: TileFeatureCollection) -> Self {
         GeoJSONTileData { features: Arc::new(features) }
     }
 
     #[must_use]
-    pub fn from_shared(features: Arc<TileFeatureCollection>) -> Self {
+    pub(crate) fn from_shared(features: Arc<TileFeatureCollection>) -> Self {
         GeoJSONTileData { features }
-    }
-
-    #[must_use]
-    pub fn features(&self) -> &Arc<TileFeatureCollection> {
-        &self.features
     }
 }
 

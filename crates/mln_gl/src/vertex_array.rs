@@ -12,7 +12,7 @@ use crate::enums;
 use crate::types::{BufferID, VertexArrayID};
 use crate::vertex_buffer_resource::VertexBufferResource;
 
-pub struct VertexArray {
+pub(crate) struct VertexArray {
     context: Weak<Context>,
     id: VertexArrayID,
 }
@@ -23,7 +23,7 @@ impl VertexArray {
     /// into its data, and of those of `instance_bindings`, which step once an
     /// instance, from `base_instance` on. OpenGL ES 3.0 draws take neither a
     /// base vertex nor a base instance, so the offsets are the vertex array's.
-    pub fn new(
+    pub(crate) fn new(
         context: &Context,
         index_buffer: BufferID,
         bindings: &AttributeBindingArray,
@@ -79,7 +79,7 @@ impl VertexArray {
     }
 
     #[must_use]
-    pub fn get_id(&self) -> VertexArrayID {
+    pub(crate) fn get_id(&self) -> VertexArrayID {
         self.id
     }
 }

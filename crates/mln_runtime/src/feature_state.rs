@@ -120,8 +120,7 @@ mod tests {
 
     #[test]
     fn selectors_check_what_each_use_needs() {
-        let message =
-            |selector: FeatureStateSelector, needs_feature| selector.key(needs_feature).unwrap_err().message.clone();
+        let message = |selector: FeatureStateSelector, needs_feature| selector.key(needs_feature).unwrap_err().message;
         let feature = FeatureStateSelector::feature("points", text("a"));
         assert_eq!(
             "feature state source_id must not be empty",
@@ -130,7 +129,7 @@ mod tests {
         let source = FeatureStateSelector { feature_id: None, ..feature.clone() };
         assert_eq!("feature state selector requires feature_id", message(source.clone(), true));
         assert_eq!("feature state selector state_key requires feature_id", message(source.with_state_key("k"), false));
-        assert!(FeatureStateSelector { feature_id: None, ..feature.clone() }.with_state_key("").key(false).is_ok());
+        assert!(FeatureStateSelector { feature_id: None, ..feature }.with_state_key("").key(false).is_ok());
         assert_eq!(
             "feature_id double_value must be finite",
             message(FeatureStateSelector::feature("points", Identifier::Double(f64::NAN)), true)

@@ -48,14 +48,16 @@ use super::glsl_sources;
 /// or `PRELUDE_FRAGMENT`), `prelude` and the stage's source
 /// (`compiler::compose`).
 #[derive(Debug)]
-pub struct GlslShaderSource {
+pub(crate) struct GlslShaderSource {
     /// The `BuiltIn` enumerator name.
-    pub built_in: &'static str,
-    pub name: &'static str,
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests name the shaders they check by them"))]
+    pub(crate) built_in: &'static str,
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests name the shaders they check by them"))]
+    pub(crate) name: &'static str,
     /// The shader's own prelude constant (its buffer bindings), "" if none.
-    pub prelude: &'static str,
-    pub vertex: &'static str,
-    pub fragment: &'static str,
+    pub(crate) prelude: &'static str,
+    pub(crate) vertex: &'static str,
+    pub(crate) fragment: &'static str,
 }
 
 /// The vertex or instance attribute `id` is the input at
@@ -63,30 +65,30 @@ pub struct GlslShaderSource {
 /// attribute is also read through, has no counterpart: every attribute is a
 /// vertex input.
 #[derive(Clone, Copy, Debug)]
-pub struct AttributeInfo {
-    pub index: usize,
-    pub data_type: AttributeDataType,
-    pub id: usize,
+pub(crate) struct AttributeInfo {
+    pub(crate) index: usize,
+    pub(crate) data_type: AttributeDataType,
+    pub(crate) id: usize,
 }
 
 /// Texture `id` binds in the image set at
 /// `layout::image_texture_binding(index)`, and its sampler at
 /// `layout::image_sampler_binding(index)`.
 #[derive(Clone, Copy, Debug)]
-pub struct TextureInfo {
-    pub index: usize,
-    pub id: usize,
+pub(crate) struct TextureInfo {
+    pub(crate) index: usize,
+    pub(crate) id: usize,
 }
 
 /// A complete specialisation: GLSL plus the `attributes`,
 /// `instanceAttributes` and `textures` tables.
 #[derive(Debug)]
-pub struct ShaderSource {
-    pub glsl: &'static GlslShaderSource,
-    pub name: &'static str,
-    pub attributes: &'static [AttributeInfo],
-    pub instance_attributes: &'static [AttributeInfo],
-    pub textures: &'static [TextureInfo],
+pub(crate) struct ShaderSource {
+    pub(crate) glsl: &'static GlslShaderSource,
+    pub(crate) name: &'static str,
+    pub(crate) attributes: &'static [AttributeInfo],
+    pub(crate) instance_attributes: &'static [AttributeInfo],
+    pub(crate) textures: &'static [TextureInfo],
 }
 
 const fn attr(index: usize, data_type: AttributeDataType, id: usize) -> AttributeInfo {
@@ -463,7 +465,7 @@ shader_source!(
 /// The Vulkan source of `shader_id`, or `None` for the shaders the renderer
 /// doesn't draw with: the wide vector.
 #[must_use]
-pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
+pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
         BuiltIn::BackgroundShader => Some(&BACKGROUND_SHADER),
         BuiltIn::BackgroundPatternShader => Some(&BACKGROUND_PATTERN_SHADER),

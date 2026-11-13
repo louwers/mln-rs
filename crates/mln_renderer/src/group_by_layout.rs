@@ -12,20 +12,20 @@ use mln_style::layer::LayerTypeInfo;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
 
-pub struct LayoutGroupKey {
+pub(crate) struct LayoutGroupKey {
     // Direct comparable fields (fast path)
-    pub type_info: &'static LayerTypeInfo,
-    pub source: String,
-    pub source_layer: String,
-    pub min_zoom: f32,
-    pub max_zoom: f32,
-    pub visibility: VisibilityType,
+    pub(crate) type_info: &'static LayerTypeInfo,
+    pub(crate) source: String,
+    pub(crate) source_layer: String,
+    pub(crate) min_zoom: f32,
+    pub(crate) max_zoom: f32,
+    pub(crate) visibility: VisibilityType,
 
     // Filter - use the shared pointer for identity comparison
-    pub filter_expression: Option<Arc<dyn Expression>>,
+    pub(crate) filter_expression: Option<Arc<dyn Expression>>,
 
     // Reference to impl for layout comparison
-    pub impl_: Arc<dyn layer::Impl>,
+    pub(crate) impl_: Arc<dyn layer::Impl>,
 }
 
 impl PartialEq for LayoutGroupKey {
@@ -88,9 +88,9 @@ fn create_group_key(impl_: &Arc<dyn layer::Impl>) -> LayoutGroupKey {
 }
 
 /// The groups with their keys, in first-appearance order.
-pub type GroupMap = Vec<(LayoutGroupKey, Vec<Arc<dyn LayerProperties>>)>;
+pub(crate) type GroupMap = Vec<(LayoutGroupKey, Vec<Arc<dyn LayerProperties>>)>;
 
-pub fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
+pub(crate) fn group_layers(layers: &[Arc<dyn LayerProperties>]) -> GroupMap {
     let mut group_map: GroupMap = Vec::with_capacity(layers.len());
 
     for layer in layers {

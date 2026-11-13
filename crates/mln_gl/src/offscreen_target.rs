@@ -98,10 +98,6 @@ impl OffscreenTarget {
         OffscreenTarget { backend, size: Cell::new(size), image: RefCell::new(None) }
     }
 
-    pub fn size(&self) -> Size {
-        self.size.get()
-    }
-
     /// Draws the next frame at `size`, and drops the framebuffer of the last
     /// one.
     pub fn resize(&self, size: Size) {
@@ -130,7 +126,7 @@ impl FrameTarget for OffscreenTarget {
             let resource = OffscreenResource::new(&*self.backend.gl_context()?, size)?;
             *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
-        image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
+        image.clone().map(|image| -> Rc<dyn frame::DrawTarget> { image })
     }
 
     /// The frame is read back when it is read: GL runs the commands in the

@@ -177,7 +177,7 @@ pub(crate) fn from_map_view(view: &MapView) -> mln_map_view {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_create(
+pub(crate) unsafe extern "C" fn mln_map_projection_create(
     view: *const mln_map_view,
     out_projection: *mut mln_map_projection,
     out_diagnostic: *mut mln_diagnostic,
@@ -195,7 +195,7 @@ pub unsafe extern "C" fn mln_map_projection_create(
 
 /// `mln_map_projection_release()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mln_map_projection_release(projection: mln_map_projection) {
+pub(crate) extern "C" fn mln_map_projection_release(projection: mln_map_projection) {
     let _ = release(projection);
 }
 
@@ -211,7 +211,7 @@ pub(crate) fn release(projection: mln_map_projection) -> Result<(), Error> {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_get_camera(
+pub(crate) unsafe extern "C" fn mln_map_projection_get_camera(
     projection: mln_map_projection,
     out_result: *mut mln_map_projection_camera_result,
     out_diagnostic: *mut mln_diagnostic,
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn mln_map_projection_get_camera(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_set_camera(
+pub(crate) unsafe extern "C" fn mln_map_projection_set_camera(
     projection: mln_map_projection,
     camera: *const mln_camera_options,
     out_diagnostic: *mut mln_diagnostic,
@@ -248,7 +248,7 @@ pub unsafe extern "C" fn mln_map_projection_set_camera(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_pixel_for_lat_lng(
+pub(crate) unsafe extern "C" fn mln_map_projection_pixel_for_lat_lng(
     projection: mln_map_projection,
     coordinate: mln_lat_lng,
     out_point: *mut mln_screen_point,
@@ -269,7 +269,7 @@ pub unsafe extern "C" fn mln_map_projection_pixel_for_lat_lng(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_is_location_occluded(
+pub(crate) unsafe extern "C" fn mln_map_projection_is_location_occluded(
     projection: mln_map_projection,
     coordinate: mln_lat_lng,
     out_occluded: *mut bool,
@@ -311,7 +311,7 @@ unsafe fn lat_lng_for_pixel(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_lat_lng_for_pixel(
+pub(crate) unsafe extern "C" fn mln_map_projection_lat_lng_for_pixel(
     projection: mln_map_projection,
     point: mln_screen_point,
     out_coordinate: *mut mln_lat_lng,
@@ -329,7 +329,7 @@ pub unsafe extern "C" fn mln_map_projection_lat_lng_for_pixel(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_lat_lng_for_pixel_unwrapped(
+pub(crate) unsafe extern "C" fn mln_map_projection_lat_lng_for_pixel_unwrapped(
     projection: mln_map_projection,
     point: mln_screen_point,
     out_coordinate: *mut mln_lat_lng,
@@ -362,7 +362,7 @@ unsafe fn write_all<T: Copy>(items: &[T], out: *mut T) {
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_pixels_for_lat_lngs(
+pub(crate) unsafe extern "C" fn mln_map_projection_pixels_for_lat_lngs(
     projection: mln_map_projection,
     coordinates: *const mln_lat_lng,
     coordinate_count: usize,
@@ -423,7 +423,7 @@ unsafe fn lat_lngs_for_pixels(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_lat_lngs_for_pixels(
+pub(crate) unsafe extern "C" fn mln_map_projection_lat_lngs_for_pixels(
     projection: mln_map_projection,
     points: *const mln_screen_point,
     point_count: usize,
@@ -442,7 +442,7 @@ pub unsafe extern "C" fn mln_map_projection_lat_lngs_for_pixels(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_lat_lngs_for_pixels_unwrapped(
+pub(crate) unsafe extern "C" fn mln_map_projection_lat_lngs_for_pixels_unwrapped(
     projection: mln_map_projection,
     points: *const mln_screen_point,
     point_count: usize,
@@ -461,7 +461,7 @@ pub unsafe extern "C" fn mln_map_projection_lat_lngs_for_pixels_unwrapped(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_projection_meters_per_pixel_at_latitude(
+pub(crate) unsafe extern "C" fn mln_map_projection_meters_per_pixel_at_latitude(
     projection: mln_map_projection,
     latitude: f64,
     out_meters_per_pixel: *mut f64,
@@ -484,7 +484,7 @@ pub unsafe extern "C" fn mln_map_projection_meters_per_pixel_at_latitude(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_projected_meters_for_lat_lng(
+pub(crate) unsafe extern "C" fn mln_projected_meters_for_lat_lng(
     coordinate: mln_lat_lng,
     out_meters: *mut mln_projected_meters,
     out_diagnostic: *mut mln_diagnostic,
@@ -504,7 +504,7 @@ pub unsafe extern "C" fn mln_projected_meters_for_lat_lng(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_lat_lng_for_projected_meters(
+pub(crate) unsafe extern "C" fn mln_lat_lng_for_projected_meters(
     meters: mln_projected_meters,
     out_coordinate: *mut mln_lat_lng,
     out_diagnostic: *mut mln_diagnostic,

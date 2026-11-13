@@ -152,7 +152,7 @@ impl TargetInit {
 /// any: the browser's WebGPU makes one asynchronously. The future resolves
 /// once it is in the session's [`Init`], or its failure is.
 #[cfg(target_family = "wasm")]
-pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl std::future::Future<Output = ()> + 'static {
+pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl Future<Output = ()> + 'static {
     let needs_device = shared
         .state
         .lock()

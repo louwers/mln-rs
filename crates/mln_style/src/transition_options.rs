@@ -23,12 +23,12 @@ impl TransitionOptions {
     }
 
     #[must_use]
-    pub fn with_duration(duration: Duration) -> Self {
+    pub(crate) fn with_duration(duration: Duration) -> Self {
         TransitionOptions::new(Some(duration), None, true)
     }
 
     #[must_use]
-    pub fn reverse_merge(&self, defaults: &TransitionOptions) -> TransitionOptions {
+    pub(crate) fn reverse_merge(&self, defaults: &TransitionOptions) -> TransitionOptions {
         TransitionOptions::new(
             if self.duration.is_some() { self.duration } else { defaults.duration },
             if self.delay.is_some() { self.delay } else { defaults.delay },
@@ -37,12 +37,12 @@ impl TransitionOptions {
     }
 
     #[must_use]
-    pub fn is_defined(&self) -> bool {
+    pub(crate) fn is_defined(&self) -> bool {
         self.duration.is_some() || self.delay.is_some()
     }
 
     #[must_use]
-    pub fn serialize(&self) -> Value {
+    pub(crate) fn serialize(&self) -> Value {
         let mut result = ValueObject::new();
         // Whole milliseconds, as integers.
         let millis = |duration: Duration| Value::Int(i64::try_from(duration.as_millis()).unwrap_or(i64::MAX));

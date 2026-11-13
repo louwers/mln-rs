@@ -58,7 +58,7 @@ unsafe fn path(view: crate::generated::types::mln_buffer_view, name: &str) -> Re
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_create(
+pub(crate) unsafe extern "C" fn mln_runtime_create(
     options: *const mln_runtime_options,
     out_runtime: *mut mln_runtime,
     out_diagnostic: *mut mln_diagnostic,
@@ -96,7 +96,7 @@ pub unsafe extern "C" fn mln_runtime_create(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_release(
+pub(crate) unsafe extern "C" fn mln_runtime_release(
     runtime: mln_runtime,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -122,7 +122,10 @@ pub unsafe extern "C" fn mln_runtime_release(
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_dispose(runtime: mln_runtime, out_diagnostic: *mut mln_diagnostic) -> mln_status {
+pub(crate) unsafe extern "C" fn mln_runtime_dispose(
+    runtime: mln_runtime,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
     export!(out_diagnostic, { dispose(runtime) })
 }
 
@@ -150,7 +153,7 @@ pub(crate) fn complete_command(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_set_event_handler(
+pub(crate) unsafe extern "C" fn mln_runtime_set_event_handler(
     runtime: mln_runtime,
     handler: *const mln_runtime_event_handler,
     completion: *const mln_completion,
@@ -204,7 +207,7 @@ pub unsafe extern "C" fn mln_runtime_set_event_handler(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_clear_event_handler(
+pub(crate) unsafe extern "C" fn mln_runtime_clear_event_handler(
     runtime: mln_runtime,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
@@ -223,7 +226,7 @@ pub unsafe extern "C" fn mln_runtime_clear_event_handler(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_run_cache_database_operation(
+pub(crate) unsafe extern "C" fn mln_runtime_run_cache_database_operation(
     runtime: mln_runtime,
     operation: mln_cache_database_operation,
     completion: *const mln_completion,
@@ -253,7 +256,7 @@ pub unsafe extern "C" fn mln_runtime_run_cache_database_operation(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_runtime_set_maximum_ambient_cache_size(
+pub(crate) unsafe extern "C" fn mln_runtime_set_maximum_ambient_cache_size(
     runtime: mln_runtime,
     size: u64,
     completion: *const mln_completion,
@@ -273,7 +276,7 @@ pub unsafe extern "C" fn mln_runtime_set_maximum_ambient_cache_size(
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_network_get_status(
+pub(crate) unsafe extern "C" fn mln_network_get_status(
     out_status: *mut mln_network_status,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
@@ -294,7 +297,7 @@ pub unsafe extern "C" fn mln_network_get_status(
 ///
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_network_set_status(
+pub(crate) unsafe extern "C" fn mln_network_set_status(
     status: mln_network_status,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {

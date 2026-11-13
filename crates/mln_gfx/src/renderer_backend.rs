@@ -11,7 +11,7 @@ use crate::shaders::program_parameters::ProgramParameters;
 
 /// The data members of `gfx::RendererBackend`.
 pub struct RendererBackendBase {
-    pub unique_id: SimpleIdentity,
+    pub(crate) unique_id: SimpleIdentity,
     context: OnceCell<Rc<dyn Context>>,
 }
 
@@ -76,6 +76,7 @@ pub trait RendererBackend: Any {
 impl dyn RendererBackend {
     /// The concrete type behind this trait object, if it is a `T`.
     pub fn downcast_ref<T: RendererBackend>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }

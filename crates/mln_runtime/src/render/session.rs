@@ -335,7 +335,7 @@ impl SessionShared {
     /// The state is locked, and the session usable or failed.
     fn start_detach(&self, state: &mut SessionState) {
         state.lifecycle = RenderSessionState::Detaching;
-        worker::post(&self.run_loop, worker::Worker::detach);
+        worker::post(&self.run_loop, Worker::detach);
     }
 
     /// Releases the session without waiting: it detaches, unless it is
@@ -514,10 +514,10 @@ impl SessionShared {
         match &map {
             // The map unbinds the session before another can attach.
             Some(map) => {
-                map.unbind_session_then(self.id, self.run_loop.clone(), super::worker::Worker::finish);
+                map.unbind_session_then(self.id, self.run_loop.clone(), Worker::finish);
                 map.release_session_claim(self.id);
             }
-            None => worker::post(&self.run_loop, worker::Worker::finish),
+            None => worker::post(&self.run_loop, Worker::finish),
         }
         // A core worker lets go of its graphics objects at its next task,
         // which runs before this returns: the host may destroy what they were
@@ -1416,7 +1416,7 @@ impl RenderSession {
     /// Clears what the renderer holds, such as loaded tiles, so that the
     /// next frame loads and draws the map again.
     pub fn clear_data(&self) -> Result<Completion<()>, Error> {
-        self.operation(worker::Worker::clear_data)
+        self.operation(Worker::clear_data)
     }
 
     /// Logs the renderer's sources and tiles.

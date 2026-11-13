@@ -45,7 +45,7 @@ impl QueryTest {
         test
     }
 
-    fn map(&self) -> crate::support::MapGuard<'_> {
+    fn map(&self) -> MapGuard<'_> {
         self.0.map()
     }
 
@@ -82,7 +82,7 @@ fn filter(expression: Box<dyn mln_style::expression::Expression>) -> Filter {
 }
 
 fn layers(ids: &[&str]) -> Vec<String> {
-    ids.iter().map(std::string::ToString::to_string).collect()
+    ids.iter().map(ToString::to_string).collect()
 }
 
 fn rendered(ids: Option<Vec<String>>, filter: Option<Filter>) -> RenderedQueryOptions {
@@ -137,7 +137,7 @@ fn query_rendered_features_layer() {
     assert_eq!(layers, ["layer1", "layer2", "layer3", "layer4"]);
 
     let source_features = test.query_source_features("source3", &SourceQueryOptions::default());
-    assert_ne!(source_features, [] as [mln_util::feature::Feature; 0]);
+    assert_ne!(source_features, Vec::<Feature>::new());
     assert_eq!(source_features[0].layer, "");
 }
 
@@ -180,7 +180,7 @@ fn global_state_change_relayouts_source_filter() {
 
     test.set_global_state_property("filterValue", "other");
     test.render();
-    assert_eq!(test.query_rendered_features(&point, &options), [] as [mln_util::feature::Feature; 0]);
+    assert_eq!(test.query_rendered_features(&point, &options), Vec::<Feature>::new());
 
     test.set_global_state_property("filterValue", "value1");
     test.render();
@@ -203,8 +203,8 @@ fn query_filters_use_global_state() {
 
     test.set_global_state_property("queryValue", "other");
     test.render();
-    assert_eq!(test.query_rendered_features(&point, &rendered_options), [] as [mln_util::feature::Feature; 0]);
-    assert_eq!(test.query_source_features("source4", &source_options), [] as [mln_util::feature::Feature; 0]);
+    assert_eq!(test.query_rendered_features(&point, &rendered_options), Vec::<Feature>::new());
+    assert_eq!(test.query_source_features("source4", &source_options), Vec::<Feature>::new());
 }
 
 // gtest: Query.QueryRenderedFeaturesLineOffsetEndpoint

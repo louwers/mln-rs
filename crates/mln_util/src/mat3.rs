@@ -37,7 +37,7 @@ pub const fn vec3_dot(a: &Vec3, b: &Vec3) -> f64 {
 }
 
 #[must_use]
-pub const fn vec3_length_sq(a: &Vec3) -> f64 {
+pub(crate) const fn vec3_length_sq(a: &Vec3) -> f64 {
     vec3_dot(a, a)
 }
 
@@ -69,7 +69,7 @@ pub const fn vec3_sub(a: &Vec3, b: &Vec3) -> Vec3 {
 
 /// `vec3Add`.
 #[must_use]
-pub const fn vec3_add(a: &Vec3, b: &Vec3) -> Vec3 {
+pub(crate) const fn vec3_add(a: &Vec3, b: &Vec3) -> Vec3 {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
@@ -91,30 +91,6 @@ pub mod matrix {
         out[6] = 0.0;
         out[7] = 0.0;
         out[8] = 1.0;
-    }
-
-    pub fn translate(out: &mut Mat3, a: &Mat3, x: f64, y: f64) {
-        let a00 = a[0];
-        let a01 = a[1];
-        let a02 = a[2];
-        let a10 = a[3];
-        let a11 = a[4];
-        let a12 = a[5];
-        let a20 = a[6];
-        let a21 = a[7];
-        let a22 = a[8];
-
-        out[0] = a00;
-        out[1] = a01;
-        out[2] = a02;
-
-        out[3] = a10;
-        out[4] = a11;
-        out[5] = a12;
-
-        out[6] = x * a00 + y * a10 + a20;
-        out[7] = x * a01 + y * a11 + a21;
-        out[8] = x * a02 + y * a12 + a22;
     }
 
     pub fn rotate(out: &mut Mat3, a: &Mat3, rad: f64) {
@@ -141,18 +117,6 @@ pub mod matrix {
         out[6] = a20;
         out[7] = a21;
         out[8] = a22;
-    }
-
-    pub fn scale(out: &mut Mat3, a: &Mat3, x: f64, y: f64) {
-        out[0] = x * a[0];
-        out[1] = x * a[1];
-        out[2] = x * a[2];
-        out[3] = y * a[3];
-        out[4] = y * a[4];
-        out[5] = y * a[5];
-        out[6] = a[6];
-        out[7] = a[7];
-        out[8] = a[8];
     }
 
     /// Transforms `a` by `m` in float arithmetic, on the matrix entries cast

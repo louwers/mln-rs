@@ -18,7 +18,7 @@ fn static_cast_int(f: f64) -> i32 {
     if f > -2_147_483_649.0 && f < 2_147_483_648.0 { f as i32 } else { i32::MIN }
 }
 
-pub struct Slice {
+pub(crate) struct Slice {
     base: ExpressionBase,
     input: Box<dyn Expression>,
     from_index: Box<dyn Expression>,
@@ -27,7 +27,7 @@ pub struct Slice {
 
 impl Slice {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         input: Box<dyn Expression>,
         from_index: Box<dyn Expression>,
         to_index: Option<Box<dyn Expression>>,
@@ -82,7 +82,7 @@ impl Slice {
         Value::String(string[from_index_value_bytes..to_index_value_bytes].to_owned())
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
         let length = value.array_length();

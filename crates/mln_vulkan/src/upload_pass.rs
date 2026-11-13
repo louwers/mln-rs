@@ -20,7 +20,7 @@ use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
-pub struct UploadPass {
+pub(crate) struct UploadPass {
     context: Rc<Context>,
     command_buffer: vk::CommandBuffer,
 }
@@ -34,7 +34,7 @@ impl VertexBufferBase for VertexBuffer {}
 
 impl UploadPass {
     #[must_use]
-    pub fn new(command_encoder: &CommandEncoder, name: &str) -> Self {
+    pub(crate) fn new(command_encoder: &CommandEncoder, name: &str) -> Self {
         let pass = UploadPass {
             context: command_encoder.get_context().clone(),
             command_buffer: command_encoder.get_command_buffer(),
@@ -45,7 +45,7 @@ impl UploadPass {
     }
 
     #[must_use]
-    pub fn vulkan_context(&self) -> &Rc<Context> {
+    pub(crate) fn vulkan_context(&self) -> &Rc<Context> {
         &self.context
     }
 
@@ -60,7 +60,10 @@ impl UploadPass {
 
     /// An index buffer of `indexes`.
     #[must_use]
-    pub fn create_index_buffer_of(&self, indexes: &IndexVectorBase) -> Box<dyn vertex_buffer::IndexBufferResource> {
+    pub(crate) fn create_index_buffer_of(
+        &self,
+        indexes: &IndexVectorBase,
+    ) -> Box<dyn vertex_buffer::IndexBufferResource> {
         upload_pass::UploadPass::create_index_buffer_resource(
             self,
             bytemuck::cast_slice(indexes.data()),
@@ -72,7 +75,7 @@ impl UploadPass {
     /// The buffer of a shared vertex vector. A vector that changed gets a new
     /// buffer: the frames in flight may still read the old one.
     #[must_use]
-    pub fn get_buffer(&self, vec: Option<&VertexVectorBasePtr>) -> Option<UniqueVertexBufferResource> {
+    pub(crate) fn get_buffer(&self, vec: Option<&VertexVectorBasePtr>) -> Option<UniqueVertexBufferResource> {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();
         let existing =
@@ -101,7 +104,7 @@ impl UploadPass {
         None
     }
 
-    pub fn get_attribute_buffer(&self, attrib: &mut VertexAttribute) -> Option<UniqueVertexBufferResource> {
+    pub(crate) fn get_attribute_buffer(&self, attrib: &mut VertexAttribute) -> Option<UniqueVertexBufferResource> {
         if attrib.get_buffer().is_none() {
             if let Some(shared) = attrib.get_shared_raw_data().cloned() {
                 return self.get_buffer(Some(&shared));

@@ -25,7 +25,7 @@ fn is_searchable_runtime_type(t: &Type) -> bool {
     *t == Type::String || t.is_array() || *t == Type::Null
 }
 
-pub struct In {
+pub(crate) struct In {
     base: ExpressionBase,
     needle: Box<dyn Expression>,
     haystack: Box<dyn Expression>,
@@ -33,7 +33,7 @@ pub struct In {
 
 impl In {
     #[must_use]
-    pub fn new(needle: Box<dyn Expression>, haystack: Box<dyn Expression>) -> Self {
+    pub(crate) fn new(needle: Box<dyn Expression>, haystack: Box<dyn Expression>) -> Self {
         debug_assert!(is_comparable_type(needle.get_type()));
         debug_assert!(is_searchable_type(haystack.get_type()));
         In {
@@ -43,7 +43,7 @@ impl In {
         }
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
         let length = value.array_length();

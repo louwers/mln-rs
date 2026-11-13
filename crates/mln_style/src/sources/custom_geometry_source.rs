@@ -146,12 +146,12 @@ impl CustomGeometrySourceHandle {
 
     /// Drops the tile's data, and asks the host for it again if a tile needs
     /// it.
-    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
+    pub(crate) fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.loader.invoke(move |loader| loader.invalidate_tile(&tile_id));
     }
 
     /// Invalidates every tile that `bounds` intersect.
-    pub fn invalidate_region(&self, bounds: LatLngBounds) {
+    pub(crate) fn invalidate_region(&self, bounds: LatLngBounds) {
         self.loader.invoke(move |loader| loader.invalidate_region(&bounds));
     }
 }
@@ -261,7 +261,7 @@ impl CustomGeometrySource {
     }
 
     #[must_use]
-    pub fn impl_(&self) -> Arc<Impl> {
+    pub(crate) fn impl_(&self) -> Arc<Impl> {
         downcast_arc::<Impl>(&self.inner.base.base_impl())
     }
 
@@ -284,12 +284,12 @@ impl CustomGeometrySource {
         self.handle().set_tile_error(tile_id, error);
     }
 
-    /// See [`CustomGeometrySourceHandle::invalidate_tile`].
+    /// See `CustomGeometrySourceHandle::invalidate_tile`.
     pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.handle().invalidate_tile(tile_id);
     }
 
-    /// See [`CustomGeometrySourceHandle::invalidate_region`].
+    /// See `CustomGeometrySourceHandle::invalidate_region`.
     pub fn invalidate_region(&self, bounds: LatLngBounds) {
         self.handle().invalidate_region(bounds);
     }

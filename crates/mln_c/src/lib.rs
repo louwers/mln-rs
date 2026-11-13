@@ -27,6 +27,9 @@
 
 // Every export takes raw pointers from C callers.
 #![allow(unsafe_code)]
+// A cast between C's types can be to the same type on one platform only:
+// `c_char` is signed on some and unsigned on others, `c_ulong` 32 or 64 bits.
+#![allow(trivial_numeric_casts)]
 
 #[macro_use]
 mod export;
@@ -70,11 +73,11 @@ mod web;
 mod wgl_tests;
 
 #[rustfmt::skip]
-#[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unused_variables, clippy::all, clippy::pedantic)]
+#[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unreachable_pub, unused_variables, clippy::all, clippy::pedantic)]
 mod generated {
-    pub mod types;
+    pub(crate) mod types;
     mod stubs;
     mod signatures;
     #[cfg(target_family = "wasm")]
-    pub mod trampolines;
+    pub(crate) mod trampolines;
 }

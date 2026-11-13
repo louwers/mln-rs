@@ -25,53 +25,53 @@ use crate::renderer_backend::BackendImpl;
 
 /// Dynamic values (not part of the pipeline/ignored in hash).
 #[derive(Clone, Copy, Debug)]
-pub struct DynamicValues {
-    pub blend_constants: Option<[f32; 4]>,
-    pub stencil_write_mask: u32,
-    pub stencil_compare_mask: u32,
-    pub stencil_ref: u32,
-    pub line_width: f32,
+pub(crate) struct DynamicValues {
+    pub(crate) blend_constants: Option<[f32; 4]>,
+    pub(crate) stencil_write_mask: u32,
+    pub(crate) stencil_compare_mask: u32,
+    pub(crate) stencil_ref: u32,
+    pub(crate) line_width: f32,
     /// The viewport's depth range.
-    pub depth_range: (f32, f32),
+    pub(crate) depth_range: (f32, f32),
 }
 
 #[derive(Clone, Debug)]
-pub struct PipelineInfo {
+pub(crate) struct PipelineInfo {
     /// Used to select the pipeline layout.
-    pub use_push_constants: bool,
+    pub(crate) use_push_constants: bool,
 
-    pub topology: vk::PrimitiveTopology,
-    pub cull_mode: vk::CullModeFlags,
-    pub front_face: vk::FrontFace,
-    pub polygon_mode: vk::PolygonMode,
+    pub(crate) topology: vk::PrimitiveTopology,
+    pub(crate) cull_mode: vk::CullModeFlags,
+    pub(crate) front_face: vk::FrontFace,
+    pub(crate) polygon_mode: vk::PolygonMode,
 
-    pub color_blend: bool,
-    pub color_blend_function: vk::BlendOp,
-    pub src_blend_factor: vk::BlendFactor,
-    pub dst_blend_factor: vk::BlendFactor,
-    pub color_mask: vk::ColorComponentFlags,
+    pub(crate) color_blend: bool,
+    pub(crate) color_blend_function: vk::BlendOp,
+    pub(crate) src_blend_factor: vk::BlendFactor,
+    pub(crate) dst_blend_factor: vk::BlendFactor,
+    pub(crate) color_mask: vk::ColorComponentFlags,
 
-    pub depth_test: bool,
-    pub depth_write: bool,
-    pub depth_function: vk::CompareOp,
+    pub(crate) depth_test: bool,
+    pub(crate) depth_write: bool,
+    pub(crate) depth_function: vk::CompareOp,
 
-    pub stencil_test: bool,
-    pub stencil_function: vk::CompareOp,
-    pub stencil_pass: vk::StencilOp,
-    pub stencil_fail: vk::StencilOp,
-    pub stencil_depth_fail: vk::StencilOp,
+    pub(crate) stencil_test: bool,
+    pub(crate) stencil_function: vk::CompareOp,
+    pub(crate) stencil_pass: vk::StencilOp,
+    pub(crate) stencil_fail: vk::StencilOp,
+    pub(crate) stencil_depth_fail: vk::StencilOp,
 
-    pub wide_lines: bool,
+    pub(crate) wide_lines: bool,
 
     // external values (used in hash)
-    pub render_pass: vk::RenderPass,
-    pub view_extent: vk::Extent2D,
-    pub scissor_rect: vk::Rect2D,
+    pub(crate) render_pass: vk::RenderPass,
+    pub(crate) view_extent: vk::Extent2D,
+    pub(crate) scissor_rect: vk::Rect2D,
 
-    pub dynamic_values: DynamicValues,
+    pub(crate) dynamic_values: DynamicValues,
 
-    pub input_bindings: Vec<vk::VertexInputBindingDescription>,
-    pub input_attributes: Vec<vk::VertexInputAttributeDescription>,
+    pub(crate) input_bindings: Vec<vk::VertexInputBindingDescription>,
+    pub(crate) input_attributes: Vec<vk::VertexInputAttributeDescription>,
 
     vertex_input_hash: u64,
 }
@@ -118,7 +118,7 @@ impl Default for PipelineInfo {
 
 impl PipelineInfo {
     #[must_use]
-    pub fn vulkan_format(value: AttributeDataType) -> vk::Format {
+    pub(crate) fn vulkan_format(value: AttributeDataType) -> vk::Format {
         use AttributeDataType as A;
         match value {
             A::Byte => vk::Format::R8_SINT,
@@ -155,7 +155,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_primitive_topology(value: DrawModeType) -> vk::PrimitiveTopology {
+    pub(crate) fn vulkan_primitive_topology(value: DrawModeType) -> vk::PrimitiveTopology {
         match value {
             DrawModeType::Points => vk::PrimitiveTopology::POINT_LIST,
             DrawModeType::Lines => vk::PrimitiveTopology::LINE_LIST,
@@ -167,7 +167,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_cull_mode(value: CullFaceSideType) -> vk::CullModeFlags {
+    pub(crate) fn vulkan_cull_mode(value: CullFaceSideType) -> vk::CullModeFlags {
         match value {
             CullFaceSideType::Back => vk::CullModeFlags::BACK,
             CullFaceSideType::Front => vk::CullModeFlags::FRONT,
@@ -176,7 +176,7 @@ impl PipelineInfo {
     }
 
     /// The rectangle, with what lies outside `extent` cut off.
-    pub fn vulkan_scissor_rect(value: &ScissorRect, extent: vk::Extent2D) -> vk::Rect2D {
+    pub(crate) fn vulkan_scissor_rect(value: &ScissorRect, extent: vk::Extent2D) -> vk::Rect2D {
         let x = value.x.clamp(0, extent.width as i32);
         let y = value.y.clamp(0, extent.height as i32);
         vk::Rect2D {
@@ -189,7 +189,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_front_face(value: CullFaceWindingType) -> vk::FrontFace {
+    pub(crate) fn vulkan_front_face(value: CullFaceWindingType) -> vk::FrontFace {
         match value {
             CullFaceWindingType::Clockwise => vk::FrontFace::CLOCKWISE,
             CullFaceWindingType::CounterClockwise => vk::FrontFace::COUNTER_CLOCKWISE,
@@ -197,7 +197,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_blend_op(value: ColorBlendEquationType) -> vk::BlendOp {
+    pub(crate) fn vulkan_blend_op(value: ColorBlendEquationType) -> vk::BlendOp {
         match value {
             ColorBlendEquationType::Add => vk::BlendOp::ADD,
             ColorBlendEquationType::Subtract => vk::BlendOp::SUBTRACT,
@@ -206,7 +206,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_blend_factor(value: ColorBlendFactorType) -> vk::BlendFactor {
+    pub(crate) fn vulkan_blend_factor(value: ColorBlendFactorType) -> vk::BlendFactor {
         use ColorBlendFactorType as F;
         match value {
             F::Zero => vk::BlendFactor::ZERO,
@@ -228,7 +228,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_depth_compare_op(value: DepthFunctionType) -> vk::CompareOp {
+    pub(crate) fn vulkan_depth_compare_op(value: DepthFunctionType) -> vk::CompareOp {
         match value {
             DepthFunctionType::Never => vk::CompareOp::NEVER,
             DepthFunctionType::Less => vk::CompareOp::LESS,
@@ -242,7 +242,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_stencil_compare_op(value: StencilFunctionType) -> vk::CompareOp {
+    pub(crate) fn vulkan_stencil_compare_op(value: StencilFunctionType) -> vk::CompareOp {
         match value {
             StencilFunctionType::Never => vk::CompareOp::NEVER,
             StencilFunctionType::Less => vk::CompareOp::LESS,
@@ -256,7 +256,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn vulkan_stencil_op(value: StencilOpType) -> vk::StencilOp {
+    pub(crate) fn vulkan_stencil_op(value: StencilOpType) -> vk::StencilOp {
         match value {
             StencilOpType::Zero => vk::StencilOp::ZERO,
             StencilOpType::Keep => vk::StencilOp::KEEP,
@@ -269,18 +269,18 @@ impl PipelineInfo {
         }
     }
 
-    pub fn set_cull_mode(&mut self, value: &CullFaceMode) {
+    pub(crate) fn set_cull_mode(&mut self, value: CullFaceMode) {
         self.cull_mode = if value.enabled { Self::vulkan_cull_mode(value.side) } else { vk::CullModeFlags::NONE };
         self.front_face = Self::vulkan_front_face(value.winding);
     }
 
     /// Sets the scissor rectangle. Call it after `set_render_target`, whose
     /// extent it is clipped to.
-    pub fn set_scissor_rect(&mut self, value: &ScissorRect) {
+    pub(crate) fn set_scissor_rect(&mut self, value: &ScissorRect) {
         self.scissor_rect = Self::vulkan_scissor_rect(value, self.view_extent);
     }
 
-    pub fn set_draw_mode(&mut self, value: &DrawMode) {
+    pub(crate) fn set_draw_mode(&mut self, value: DrawMode) {
         self.topology = Self::vulkan_primitive_topology(value.type_);
         if matches!(value.type_, DrawModeType::Lines | DrawModeType::LineStrip | DrawModeType::LineLoop) {
             self.set_line_width(value.size);
@@ -289,8 +289,8 @@ impl PipelineInfo {
         }
     }
 
-    pub fn set_color_blend(&mut self, value: &ColorMode) {
-        self.set_color_blend_function(&value.blend_function);
+    pub(crate) fn set_color_blend(&mut self, value: &ColorMode) {
+        self.set_color_blend_function(value.blend_function);
         self.dynamic_values.blend_constants = self.uses_blend_constants().then(|| {
             let color = value.blend_color;
             [color.r, color.g, color.b, color.a]
@@ -309,24 +309,24 @@ impl PipelineInfo {
         }
     }
 
-    pub fn set_color_blend_function(&mut self, value: &BlendFunction) {
+    pub(crate) fn set_color_blend_function(&mut self, value: BlendFunction) {
         self.color_blend = !matches!(value, BlendFunction::Replace);
         self.color_blend_function = Self::vulkan_blend_op(value.equation());
         self.src_blend_factor = Self::vulkan_blend_factor(value.src_factor());
         self.dst_blend_factor = Self::vulkan_blend_factor(value.dst_factor());
     }
 
-    pub fn set_depth_write(&mut self, value: DepthMaskType) {
+    pub(crate) fn set_depth_write(&mut self, value: DepthMaskType) {
         self.depth_write = value == DepthMaskType::ReadWrite;
     }
 
-    pub fn set_depth_mode(&mut self, value: &DepthMode) {
+    pub(crate) fn set_depth_mode(&mut self, value: &DepthMode) {
         self.depth_function = Self::vulkan_depth_compare_op(value.func);
         self.set_depth_write(value.mask);
         self.dynamic_values.depth_range = (value.range.min, value.range.max);
     }
 
-    pub fn set_stencil_mode(&mut self, value: &StencilMode) {
+    pub(crate) fn set_stencil_mode(&mut self, value: &StencilMode) {
         if value.test == Test::Always {
             self.stencil_test = false;
             self.stencil_function = vk::CompareOp::NEVER;
@@ -350,18 +350,18 @@ impl PipelineInfo {
 
     /// Sets the render pass the pipeline draws in, and the extent of its
     /// attachments.
-    pub fn set_render_target(&mut self, render_pass: vk::RenderPass, extent: vk::Extent2D) {
+    pub(crate) fn set_render_target(&mut self, render_pass: vk::RenderPass, extent: vk::Extent2D) {
         self.render_pass = render_pass;
         self.view_extent = extent;
     }
 
-    pub fn set_line_width(&mut self, value: f32) {
+    pub(crate) fn set_line_width(&mut self, value: f32) {
         self.wide_lines = value != 1.0;
         self.dynamic_values.line_width = value;
     }
 
     #[must_use]
-    pub fn uses_blend_constants(&self) -> bool {
+    pub(crate) fn uses_blend_constants(&self) -> bool {
         let constant = |factor| {
             matches!(
                 factor,
@@ -374,7 +374,7 @@ impl PipelineInfo {
         constant(self.src_blend_factor) || constant(self.dst_blend_factor)
     }
 
-    pub fn update_vertex_input_hash(&mut self) {
+    pub(crate) fn update_vertex_input_hash(&mut self) {
         let mut seed = 0;
         for value in &self.input_attributes {
             hash_combine(&mut seed, u64::from(value.binding));
@@ -391,7 +391,7 @@ impl PipelineInfo {
     }
 
     #[must_use]
-    pub fn hash(&self) -> u64 {
+    pub(crate) fn hash(&self) -> u64 {
         use ash::vk::Handle;
         hash(&[
             u64::from(self.use_push_constants),
@@ -423,7 +423,7 @@ impl PipelineInfo {
         backend.get_device_features().wide_lines == vk::TRUE && self.wide_lines
     }
 
-    pub fn set_dynamic_values(&self, backend: &BackendImpl, buffer: vk::CommandBuffer) {
+    pub(crate) fn set_dynamic_values(&self, backend: &BackendImpl, buffer: vk::CommandBuffer) {
         let device = backend.get_device();
         // SAFETY: `buffer` is recording, and each value set is a dynamic
         // state of the pipelines made from this info.
@@ -453,7 +453,7 @@ impl PipelineInfo {
         }
     }
 
-    pub fn get_dynamic_states(&self, backend: &BackendImpl) -> Vec<vk::DynamicState> {
+    pub(crate) fn get_dynamic_states(&self, backend: &BackendImpl) -> Vec<vk::DynamicState> {
         let mut dynamic_states = Vec::new();
         if self.uses_blend_constants() {
             dynamic_states.push(vk::DynamicState::BLEND_CONSTANTS);

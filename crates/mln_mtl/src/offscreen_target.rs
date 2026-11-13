@@ -31,10 +31,6 @@ impl OffscreenTarget {
         OffscreenTarget { backend, size: Cell::new(size), image: RefCell::new(None) }
     }
 
-    pub fn size(&self) -> Size {
-        self.size.get()
-    }
-
     /// Draws the next frame at `size`, and drops the image of the last one.
     pub fn resize(&self, size: Size) {
         if self.size.replace(size) != size {
@@ -68,15 +64,15 @@ impl FrameTarget for OffscreenTarget {
             );
             *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
-        image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
+        image.clone().map(|image| -> Rc<dyn frame::DrawTarget> { image })
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
         let image = self.image.borrow();
-        match image
-            .as_deref()
-            .and_then(|image| (image.resource() as &dyn Any).downcast_ref::<OffscreenTextureResource>())
-        {
+        match image.as_deref().and_then(|image| {
+            let resource: &dyn Any = image.resource();
+            resource.downcast_ref::<OffscreenTextureResource>()
+        }) {
             Some(resource) => {
                 // Nothing presents the frame, so waiting for it here is what
                 // paces continuous rendering.

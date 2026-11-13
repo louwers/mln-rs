@@ -299,9 +299,6 @@ impl SurfaceState {
     fn reconfigure_surface(&self) {
         // Wait for any in-progress frame: never in progress (file comment).
 
-        // Clear all texture state
-        self.current.borrow_mut().take();
-
         let surface = self.surface.borrow();
         let Some(surface) = surface.as_ref() else {
             return;
@@ -310,7 +307,10 @@ impl SurfaceState {
         // Get current size
         let size = self.framebuffer_size.get();
 
-        // Skip if size hasn't changed and we're already configured
+        // Skip if size hasn't changed and we're already configured. The
+        // current texture stays for the frame to present, since Vulkan never
+        // gets back an acquired image that is dropped unpresented, and a
+        // swapchain that lost each of its images that way has none left.
         if self.surface_configured.get() && self.last_configured_size.get() == size {
             self.surface_needs_reconfigure.set(false);
             return;
@@ -321,6 +321,9 @@ impl SurfaceState {
         if size.width == 0 || size.height == 0 {
             return;
         }
+
+        // Clear all texture state
+        self.current.borrow_mut().take();
 
         surface.configure(&self.device, &self.configuration(size));
 
@@ -491,6 +494,10 @@ impl Default for SurfaceOptions {
 /// `GLFWWebGPUBackend`'s surface without the window: frames presented to a
 /// `wgpu::Surface`.
 pub struct SurfaceTarget {
+    #[expect(
+        dead_code,
+        reason = "keeps the backend that the surface's frames render with alive as long as the target"
+    )]
     backend: Rc<RendererBackend>,
     state: Rc<SurfaceState>,
     image: Rc<DrawTarget>,
@@ -600,12 +607,6 @@ impl SurfaceTarget {
         Ok(SurfaceTarget { backend, state, image })
     }
 
-    /// The backend the target draws on.
-    #[must_use]
-    pub fn backend(&self) -> &Rc<RendererBackend> {
-        &self.backend
-    }
-
     /// The format the surface is configured with.
     #[must_use]
     pub fn format(&self) -> wgpu::TextureFormat {
@@ -624,10 +625,6 @@ impl SurfaceTarget {
             self.image.set_size(size);
             self.state.surface_needs_reconfigure.set(true);
         }
-    }
-
-    pub fn process_events(&self) {
-        self.state.process_events();
     }
 
     /// Port-only: copy the next presented frame (see `take_readback`).

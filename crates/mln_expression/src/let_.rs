@@ -9,7 +9,7 @@ use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Express
 use crate::parsing_context::{Bindings, ParseResult, ParsingContext};
 use crate::value::Value;
 
-pub struct Let {
+pub(crate) struct Let {
     base: ExpressionBase,
     bindings: Bindings,
     result: Box<dyn Expression>,
@@ -17,7 +17,7 @@ pub struct Let {
 
 impl Let {
     #[must_use]
-    pub fn new(bindings: Bindings, result: Box<dyn Expression>) -> Self {
+    pub(crate) fn new(bindings: Bindings, result: Box<dyn Expression>) -> Self {
         let deps = bindings.values().fold(Dependency::NONE, |a, e| a | e.dependencies())
             | result.dependencies()
             | Dependency::BIND;
@@ -25,11 +25,11 @@ impl Let {
     }
 
     #[must_use]
-    pub fn get_result(&self) -> &dyn Expression {
+    pub(crate) fn get_result(&self) -> &dyn Expression {
         &*self.result
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
         let length = value.array_length();
@@ -113,14 +113,14 @@ impl Expression for Let {
     }
 }
 
-pub struct Var {
+pub(crate) struct Var {
     base: ExpressionBase,
     name: String,
     value: Arc<dyn Expression>,
 }
 
 impl Var {
-    pub fn new(name: String, value: Arc<dyn Expression>) -> Self {
+    pub(crate) fn new(name: String, value: Arc<dyn Expression>) -> Self {
         Var {
             base: ExpressionBase::new(Kind::Var, value.get_type().clone(), value.dependencies() | Dependency::VAR),
             name,
@@ -129,11 +129,11 @@ impl Var {
     }
 
     #[must_use]
-    pub fn get_bound_expression(&self) -> &Arc<dyn Expression> {
+    pub(crate) fn get_bound_expression(&self) -> &Arc<dyn Expression> {
         &self.value
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
         let name = if value.array_length() == 2 { value.array_member(1).to_string() } else { None };

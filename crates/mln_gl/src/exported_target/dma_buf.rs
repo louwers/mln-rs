@@ -280,6 +280,7 @@ fn udmabuf_allocate(device: &OwnedFd, size: Size) -> Result<Memory, Error> {
     }
     let create = Create { memfd: memory.as_raw_fd() as u32, flags: UDMABUF_FLAGS_CLOEXEC, offset: 0, size: bytes };
     // SAFETY: the ioctl reads a udmabuf_create, and returns a new descriptor.
+    #[allow(trivial_numeric_casts, reason = "the type of an ioctl request differs between C libraries")]
     let fd = unsafe { libc::ioctl(device.as_raw_fd(), UDMABUF_CREATE as _, &create) };
     if fd < 0 {
         return Err(Error::native("udmabuf can't share the dmabuf's memory"));

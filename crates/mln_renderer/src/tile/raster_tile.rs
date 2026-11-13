@@ -4,7 +4,6 @@
 // `RasterTileMessage`s, and the worker is created by the
 // `TileWorkerTransport` of the TileParameters (tile_worker_transport.rs).
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -23,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::bucket::BucketPtr;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::tile::ordered_replies::OrderedReplies;
-use crate::tile::tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, TileUpdateParameters};
+use crate::tile::tile::{Kind, Tile, TileBase, TileLoadOrder, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_loader::{LoaderTile, TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile::tile_worker_transport::{TileEndpoint, WorkerEndpoint};
@@ -52,7 +51,7 @@ pub enum RasterTileMessage {
     Error { error: Error, correlation_id: u64 },
 }
 
-pub struct RasterTileWorker {
+pub(crate) struct RasterTileWorker {
     /// The tile, which gets the replies in the order of their parses
     /// although images may decode asynchronously (`ordered_replies.rs`).
     parent: OrderedReplies<RasterTileMessage>,
@@ -60,12 +59,12 @@ pub struct RasterTileWorker {
 
 impl RasterTileWorker {
     #[must_use]
-    pub fn new(parent: Box<dyn TileEndpoint<RasterTileMessage>>) -> Self {
+    pub(crate) fn new(parent: Box<dyn TileEndpoint<RasterTileMessage>>) -> Self {
         RasterTileWorker { parent: OrderedReplies::new(parent) }
     }
 
     /// Runs the member function a tile's message stands for.
-    pub fn handle(&mut self, message: RasterWorkerMessage) {
+    pub(crate) fn handle(&mut self, message: RasterWorkerMessage) {
         match message {
             RasterWorkerMessage::Parse { data, correlation_id } => self.parse(data, correlation_id),
         }
@@ -73,7 +72,7 @@ impl RasterTileWorker {
 
     /// Decodes `data` on the worker. The reply goes once the image has
     /// decoded, which may be after this returns (decoder.rs in `mln_image`).
-    pub fn parse(&mut self, data: Option<Data>, correlation_id: u64) {
+    pub(crate) fn parse(&mut self, data: Option<Data>, correlation_id: u64) {
         let parent = self.parent.slot();
         let Some(data) = data else {
             // No data; empty tile.
@@ -94,8 +93,8 @@ impl RasterTileWorker {
 }
 
 /// The render-thread state of a `RasterTile`.
-pub struct RasterTileInner {
-    pub base: TileBase,
+pub(crate) struct RasterTileInner {
+    pub(crate) base: TileBase,
     obsolete: Cell<bool>,
     correlation_id: Cell<u64>,
     /// The tileset has no tile here (`LoaderTile::set_missing`): a parse without data leaves
@@ -109,14 +108,14 @@ pub struct RasterTileInner {
 
 impl RasterTileInner {
     /// Runs the member function a worker's message stands for.
-    pub fn handle_worker_message(&self, message: RasterTileMessage) {
+    pub(crate) fn handle_worker_message(&self, message: RasterTileMessage) {
         match message {
             RasterTileMessage::Parsed { bucket, correlation_id } => self.on_parsed(bucket, correlation_id),
             RasterTileMessage::Error { error, correlation_id } => self.on_error(error, correlation_id),
         }
     }
 
-    pub fn on_parsed(&self, result: Option<Arc<RasterBucket>>, result_correlation_id: u64) {
+    pub(crate) fn on_parsed(&self, result: Option<Arc<RasterBucket>>, result_correlation_id: u64) {
         if !self.obsolete.get() {
             let renderable = result.is_some() || !self.missing.get();
             *self.bucket.borrow_mut() = result;
@@ -130,7 +129,7 @@ impl RasterTileInner {
         }
     }
 
-    pub fn on_error(&self, err: Error, result_correlation_id: u64) {
+    pub(crate) fn on_error(&self, err: Error, result_correlation_id: u64) {
         self.base.loaded.set(true);
         if result_correlation_id == self.correlation_id.get() {
             self.base.pending.set(false);
@@ -198,14 +197,14 @@ impl RasterTileInner {
     }
 }
 
-pub struct RasterTile {
+pub(crate) struct RasterTile {
     inner: Rc<RasterTileInner>,
     loader: Option<TileLoader>,
 }
 
 impl RasterTile {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         id: OverscaledTileID,
         source_id: String,
         parameters: &TileParameters<'_>,
@@ -224,14 +223,15 @@ impl RasterTile {
             worker,
             mailbox: mailbox.clone(),
         });
-        mailbox.open(&scheduler::get_current(), inner.clone() as Rc<dyn Any>);
+        mailbox.open(&scheduler::get_current(), inner.clone());
         let weak: std::rc::Weak<RasterTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
         RasterTile { inner, loader: Some(loader) }
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn inner(&self) -> &Rc<RasterTileInner> {
+    pub(crate) fn inner(&self) -> &Rc<RasterTileInner> {
         &self.inner
     }
 }
@@ -254,13 +254,19 @@ impl Tile for RasterTile {
     }
 
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
-        let bucket: Option<BucketPtr> = self.inner.bucket.borrow().clone().map(|b| b as BucketPtr);
+        let bucket = self.inner.bucket.borrow().clone().map(|b| -> BucketPtr { b });
         Box::new(SharedBucketTileRenderData::new(bucket))
     }
 
     fn set_necessity(&self, necessity: TileNecessity) {
         if let Some(loader) = &self.loader {
             loader.set_necessity(necessity);
+        }
+    }
+
+    fn set_load_order(&self, order: TileLoadOrder) {
+        if let Some(loader) = &self.loader {
+            loader.set_load_order(order);
         }
     }
 

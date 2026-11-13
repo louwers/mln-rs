@@ -26,18 +26,7 @@ impl Step {
     }
 
     #[must_use]
-    pub fn get_stop_count(&self) -> usize {
-        self.stops.len()
-    }
-
-    pub fn each_stop(&self, mut visit: impl FnMut(f64, &dyn Expression)) {
-        for (k, v) in self.stops.iter() {
-            visit(k, v);
-        }
-    }
-
-    #[must_use]
-    pub fn get_input(&self) -> &dyn Expression {
+    pub(crate) fn get_input(&self) -> &dyn Expression {
         &*self.input
     }
 
@@ -46,7 +35,7 @@ impl Step {
         get_covering_stops(&self.stops, lower, upper)
     }
 
-    pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         debug_assert!(value.is_array());
 
         let length = value.array_length();

@@ -401,7 +401,7 @@ fn an_offline_region_downloads_and_reports_its_progress() {
 
     wait(offline.invalidate_region(id));
     wait(offline.delete_region(id));
-    assert_eq!(wait(offline.regions()), [] as [mln_storage::offline::OfflineRegion; 0]);
+    assert_eq!(wait(offline.regions()), Vec::<mln_storage::offline::OfflineRegion>::new());
     assert_eq!(ErrorKind::NotFound, wait_err(offline.region_status(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.delete_region(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.set_region_observed(id, EventMask::NONE)).kind);

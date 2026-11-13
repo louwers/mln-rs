@@ -13,33 +13,36 @@
 //! (`shaders::wgsl_sources`).
 
 mod bind_groups;
-pub mod borrowed_target;
-pub mod buffer_resource;
-pub mod command_encoder;
-pub mod context;
-pub mod custom_layer;
-pub mod device;
-pub mod draw_target;
-pub mod drawable;
-pub mod drawable_builder;
-pub mod layer_group;
-pub mod offscreen_target;
-pub mod offscreen_texture;
-pub mod render_pass;
-pub mod renderer_backend;
-pub mod shaders;
-pub mod surface_target;
-pub mod texture2d;
-pub mod tile_layer_group;
-pub mod uniform_buffer;
-pub mod upload_pass;
-pub mod vertex_buffer_resource;
+mod borrowed_target;
+mod buffer_resource;
+mod command_encoder;
+mod context;
+mod custom_layer;
+mod device;
+mod draw_target;
+mod drawable;
+mod drawable_builder;
+mod layer_group;
+mod offscreen_target;
+mod offscreen_texture;
+mod render_pass;
+mod renderer_backend;
+mod shaders;
+mod surface_target;
+mod texture2d;
+mod tile_layer_group;
+mod uniform_buffer;
+mod upload_pass;
+mod vertex_buffer_resource;
 mod writes;
 
-pub use borrowed_target::{BorrowedTarget, BorrowedTextures};
-pub use context::Context;
+pub use borrowed_target::{BorrowedTarget, BorrowedTextures, depth_stencil_format};
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
-pub use surface_target::{SurfaceOptions, SurfaceTarget};
+pub use surface_target::{Overlay, OverlayTarget, SurfaceOptions, SurfaceTarget};
+pub use upload_pass::UploadPass;
+
+#[cfg(test)]
+mod tests;

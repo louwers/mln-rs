@@ -269,14 +269,14 @@ fn cache_control_parsing() {
 }
 
 /// The shared state of the `Load` tests: `reqs[concurrency]` and `number`.
-pub struct LoadState {
-    pub reqs: Vec<Req>,
-    pub number: Cell<i32>,
+pub(crate) struct LoadState {
+    pub(crate) reqs: Vec<Req>,
+    pub(crate) number: Cell<i32>,
 }
 
 /// The `req(i)` lambda of the `Load` tests (also used by
 /// OnlineFileSource.Load).
-pub fn load_request(
+pub(crate) fn load_request(
     fs: &Rc<dyn FileSource>,
     state: &Rc<LoadState>,
     url: &Rc<dyn Fn(i32) -> String>,
