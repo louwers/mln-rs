@@ -81,6 +81,9 @@ pub type mln_frame_pacer = u64;
 pub type mln_delivery_queue = u64;
 /** A range of bytes, such as UTF-8 text.
 
+ Text that you pass can't contain a NUL. A function rejects it with
+ MLN_STATUS_INVALID_ARGUMENT.
+
  Lifetimes:
  `data` can be null when `size` is 0. Text ends at `size` and needs no NUL
  terminator.*/
