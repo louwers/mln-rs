@@ -37,7 +37,6 @@ include = ["/src", "/tests", "/LICENSE*"]
 
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
-cheap_ruler = { package = "mln-rs-cheap-ruler", path = "vendor/cheap-ruler", version = "=0.0.11" }
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.11" }
 geojson = { package = "mln-rs-geojson", path = "vendor/geojson", version = "=0.0.11" }
 geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.11" }
@@ -143,6 +142,11 @@ fast-mvt = { version = "0.7.3", default-features = false, features = ["reader"] 
 # Glyph PBFs: fast-mvt's protobuf runtime, whose wire format functions read
 # them instead of a port of protozero.
 buffa = { version = "0.9.2", default-features = false }
+# The `distance` expression's distances (mln_expression), in place of a port
+# of the C++ core's vendored cheap-ruler-cpp: the same WGS84 formulas, with
+# its arithmetic in a different order, so a distance can differ from the C++
+# one in the last bits.
+cheap-ruler = { version = "0.4.0" }
 # PMTiles archives (mln_storage's PMTilesFileSource): their header,
 # directories and tile IDs, in place of a port of the C++ core's vendored
 # pmtiles.hpp. The archive reading stays the port's.
@@ -375,7 +379,6 @@ keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
 [dependencies]
-cheap_ruler.workspace = true
 feature.workspace = true
 geojson.workspace = true
 geojson_vt.workspace = true

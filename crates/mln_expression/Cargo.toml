@@ -14,7 +14,7 @@ name = "mln_expression"
 doctest = false
 
 [dependencies]
-cheap_ruler.workspace = true
+cheap-ruler.workspace = true
 feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true

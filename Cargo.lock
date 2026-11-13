@@ -479,6 +479,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cheap-ruler"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "038d6b7abd3a709310d655cbf336f42fd0f0237c84ed0b37caf3e66e0cee5067"
+dependencies = [
+ "geo-types",
+ "num-traits",
+]
+
+[[package]]
 name = "clang-sys"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2293,7 +2303,6 @@ name = "mln-rs"
 version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
- "mln-rs-cheap-ruler",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
@@ -2416,13 +2425,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-cheap-ruler"
-version = "0.0.11"
-dependencies = [
- "mln-rs-geometry",
-]
-
-[[package]]
 name = "mln-rs-conversion"
 version = "0.0.11"
 dependencies = [
@@ -2476,6 +2478,7 @@ dependencies = [
 name = "mln-rs-expression"
 version = "0.0.11"
 dependencies = [
+ "cheap-ruler",
  "fixed_decimal",
  "icu_collator",
  "icu_decimal",
@@ -2483,7 +2486,6 @@ dependencies = [
  "icu_locale",
  "icu_provider",
  "js-sys",
- "mln-rs-cheap-ruler",
  "mln-rs-conversion",
  "mln-rs-feature",
  "mln-rs-geojson",

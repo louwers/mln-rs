@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use cheap_ruler::{CheapRuler, Unit};
+use cheap_ruler::{CheapRuler, DistanceUnit};
 use feature::{Value as MbglValue, ValueObject};
 use geometry::{Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
 use mln_conversion::{Convertible, Error};
@@ -20,6 +20,19 @@ use crate::expression::{
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::Value;
+
+/// A cheap ruler in meters, over the port's points.
+struct Ruler(CheapRuler<f64>);
+
+impl Ruler {
+    fn new(latitude: f64) -> Self {
+        Ruler(CheapRuler::new(latitude, DistanceUnit::Meters))
+    }
+
+    fn distance(&self, a: Point<f64>, b: Point<f64>) -> f64 {
+        self.0.distance(&(a.x, a.y).into(), &(b.x, b.y).into())
+    }
+}
 
 // --- util/geometry_util ---
 
@@ -214,7 +227,7 @@ fn is_polygon_valid(polygon: &Polygon<f64>) -> bool {
 /// The distance between two bounding boxes: the ruler's distance from
 /// `{0, 0}` to `{dx, dy}`, the gaps between them on each axis. Zero when
 /// they overlap.
-fn bbox_to_bbox_distance(bbox1: &DistanceBBox, bbox2: &DistanceBBox, ruler: &CheapRuler) -> f64 {
+fn bbox_to_bbox_distance(bbox1: &DistanceBBox, bbox2: &DistanceBBox, ruler: &Ruler) -> f64 {
     if *bbox1 == DEFAULT_DISTANCE_BBOX || *bbox2 == DEFAULT_DISTANCE_BBOX {
         return INVALID_DISTANCE;
     }
@@ -239,9 +252,16 @@ fn bbox_to_bbox_distance(bbox1: &DistanceBBox, bbox2: &DistanceBBox, ruler: &Che
     ruler.distance(Point::new(0.0, 0.0), Point::new(dx, dy))
 }
 
-fn point_to_line_distance(point: &Point<f64>, line: &LineString<f64>, ruler: &CheapRuler) -> f64 {
-    let nearest_point = ruler.point_on_line(line, *point).0;
-    ruler.distance(*point, nearest_point)
+/// The distance from `point` to the nearest point of `line`, which has at
+/// least two points.
+fn point_to_line_distance(point: &Point<f64>, line: &[Point<f64>], ruler: &Ruler) -> f64 {
+    // The nearest of the segments' nearest points is the one that
+    // CheapRuler::point_on_line finds, and the minimum of their distances is
+    // the distance to it, without building a geo_types line.
+    let p = (point.x, point.y).into();
+    line.windows(2)
+        .map(|s| ruler.0.point_to_segment_distance(&p, &(s[0].x, s[0].y).into(), &(s[1].x, s[1].y).into()))
+        .fold(INFINITE_DISTANCE, f64::min)
 }
 
 /// Precondition: the two segments don't intersect.
@@ -250,10 +270,10 @@ fn segment_to_segment_distance(
     p2: &Point<f64>,
     q1: &Point<f64>,
     q2: &Point<f64>,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
 ) -> f64 {
-    let q = vec![*q1, *q2];
-    let p = vec![*p1, *p2];
+    let q = [*q1, *q2];
+    let p = [*p1, *p2];
     let dist1 = point_to_line_distance(p1, &q, ruler).min(point_to_line_distance(p2, &q, ruler));
     let dist2 = point_to_line_distance(q1, &p, ruler).min(point_to_line_distance(q2, &p, ruler));
     dist1.min(dist2)
@@ -264,7 +284,7 @@ fn line_to_line_range_distance(
     range1: &IndexRange,
     line2: &LineString<f64>,
     range2: &IndexRange,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
 ) -> f64 {
     let range_safe = is_range_safe(range1, line1.len()) && is_range_safe(range2, line2.len());
     if !range_safe {
@@ -288,7 +308,7 @@ fn points_to_points_range_distance(
     range1: &IndexRange,
     points2: &MultiPoint<f64>,
     range2: &IndexRange,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
 ) -> f64 {
     let range_safe = is_range_safe(range1, points1.len()) && is_range_safe(range2, points2.len());
     if !range_safe {
@@ -307,7 +327,7 @@ fn points_to_points_range_distance(
     dist
 }
 
-fn point_to_polygon_distance(point: &Point<f64>, polygon: &Polygon<f64>, ruler: &CheapRuler) -> f64 {
+fn point_to_polygon_distance(point: &Point<f64>, polygon: &Polygon<f64>, ruler: &Ruler) -> f64 {
     if point_within_polygon(point, polygon, true) {
         return 0.0;
     }
@@ -316,13 +336,12 @@ fn point_to_polygon_distance(point: &Point<f64>, polygon: &Polygon<f64>, ruler: 
         if let (Some(front), Some(back)) = (ring.first(), ring.last())
             && front != back
         {
-            dist = dist.min(point_to_line_distance(point, &vec![*back, *front], ruler));
+            dist = dist.min(point_to_line_distance(point, &[*back, *front], ruler));
             if dist == 0.0 {
                 return dist;
             }
         }
-        let nearest_point = ruler.point_on_line(ring, *point).0;
-        dist = dist.min(ruler.distance(*point, nearest_point));
+        dist = dist.min(point_to_line_distance(point, ring, ruler));
         if dist == 0.0 {
             return dist;
         }
@@ -339,7 +358,7 @@ fn line_to_polygon_range_distance(
     line: &LineString<f64>,
     range: &IndexRange,
     polygon: &Polygon<f64>,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
 ) -> f64 {
     if !is_range_safe(range, line.len()) {
         return INVALID_DISTANCE;
@@ -367,7 +386,7 @@ fn line_to_polygon_range_distance(
 fn polygon_to_polygon_distance(
     polygon1: &Polygon<f64>,
     polygon2: &Polygon<f64>,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
     current_mini_dist: f64,
 ) -> f64 {
     let bbox1 = get_polygon_bbox(polygon1);
@@ -439,7 +458,7 @@ fn dist_queue() -> BinaryHeap<DistPair> {
 fn points_to_polygon_distance(
     points: &MultiPoint<f64>,
     polygon: &Polygon<f64>,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
     current_mini_dist: f64,
 ) -> f64 {
     let mut mini_dist = ruler.distance(points[0], polygon[0][0]).min(current_mini_dist);
@@ -490,7 +509,7 @@ fn points_to_polygon_distance(
 fn line_to_polygon_distance(
     line: &LineString<f64>,
     polygon: &Polygon<f64>,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
     current_mini_dist: f64,
 ) -> f64 {
     let mut mini_dist = ruler.distance(line[0], polygon[0][0]).min(current_mini_dist);
@@ -540,7 +559,7 @@ fn split_pairs(
 fn line_to_line_distance(
     line1: &LineString<f64>,
     line2: &LineString<f64>,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
     current_mini_dist: f64,
 ) -> f64 {
     let mut mini_dist = ruler.distance(line1[0], line2[0]).min(current_mini_dist);
@@ -579,7 +598,7 @@ fn line_to_line_distance(
 }
 
 /// Precondition: both point sets are valid.
-fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoint<f64>, ruler: &CheapRuler) -> f64 {
+fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoint<f64>, ruler: &Ruler) -> f64 {
     let mut mini_dist = ruler.distance(point_set1[0], point_set2[0]);
     if mini_dist == 0.0 {
         return mini_dist;
@@ -622,7 +641,7 @@ fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoi
 fn points_to_line_distance(
     points: &MultiPoint<f64>,
     line: &LineString<f64>,
-    ruler: &CheapRuler,
+    ruler: &Ruler,
     current_mini_dist: f64,
 ) -> f64 {
     let mut mini_dist = current_mini_dist.min(ruler.distance(points[0], line[0]));
@@ -666,7 +685,7 @@ fn points_to_line_distance(
     mini_dist
 }
 
-fn points_to_lines_distance(points: &MultiPoint<f64>, lines: &MultiLineString<f64>, ruler: &CheapRuler) -> f64 {
+fn points_to_lines_distance(points: &MultiPoint<f64>, lines: &MultiLineString<f64>, ruler: &Ruler) -> f64 {
     let mut dist = INFINITE_DISTANCE;
     for line in lines {
         dist = dist.min(points_to_line_distance(points, line, ruler, dist));
@@ -677,7 +696,7 @@ fn points_to_lines_distance(points: &MultiPoint<f64>, lines: &MultiLineString<f6
     dist
 }
 
-fn line_to_lines_distance(line: &LineString<f64>, lines: &MultiLineString<f64>, ruler: &CheapRuler) -> f64 {
+fn line_to_lines_distance(line: &LineString<f64>, lines: &MultiLineString<f64>, ruler: &Ruler) -> f64 {
     let mut dist = INFINITE_DISTANCE;
     for l in lines {
         dist = dist.min(line_to_line_distance(line, l, ruler, dist));
@@ -695,7 +714,7 @@ fn points_to_geometry_distance(points: &MultiPoint<f64>, geo_set: &Geometry<f64>
     let Some(first) = points.first() else {
         return INVALID_DISTANCE;
     };
-    let ruler = CheapRuler::new(first.y, Unit::Meters);
+    let ruler = Ruler::new(first.y);
     match geo_set {
         Geometry::Point(p) => points_to_points_distance(&vec![*p], points, &ruler),
         Geometry::MultiPoint(points1) => {
@@ -750,7 +769,7 @@ fn line_to_geometry_distance(line: &LineString<f64>, geo_set: &Geometry<f64>) ->
     let Some(first) = line.first() else {
         return INVALID_DISTANCE;
     };
-    let ruler = CheapRuler::new(first.y, Unit::Meters);
+    let ruler = Ruler::new(first.y);
     match geo_set {
         Geometry::Point(p) => points_to_line_distance(&vec![*p], line, &ruler, INFINITE_DISTANCE),
         Geometry::MultiPoint(points) => {
@@ -805,7 +824,7 @@ fn polygon_to_geometry_distance(polygon: &Polygon<f64>, geo_set: &Geometry<f64>)
     let Some(first) = polygon.first().and_then(|ring| ring.first()) else {
         return INVALID_DISTANCE;
     };
-    let ruler = CheapRuler::new(first.y, Unit::Meters);
+    let ruler = Ruler::new(first.y);
     match geo_set {
         Geometry::Point(p) => point_to_polygon_distance(p, polygon, &ruler),
         Geometry::MultiPoint(points) => {
@@ -1219,7 +1238,7 @@ mod tests {
     /// The divide-and-conquer searches find the brute-force minimum.
     #[test]
     fn divide_and_conquer_matches_brute_force() {
-        let ruler = CheapRuler::new(60.16, Unit::Meters);
+        let ruler = Ruler::new(60.16);
         let polygon: Polygon<f64> = vec![vec![
             Point::new(24.95, 60.162),
             Point::new(24.96, 60.162),
