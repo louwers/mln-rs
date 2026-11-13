@@ -2365,6 +2365,7 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vulkan",
+ "mlt-core",
  "serde",
  "serde_json",
  "wgpu",

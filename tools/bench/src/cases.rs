@@ -15,7 +15,8 @@ use crate::latency::{set_tile_latency, take_tile_requests};
 use crate::meter::{Meter, live_heap_mib, ms};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
-    basemap_center, basemap_north_west, basemap_point, basemap_south_east, basemap_style, cjk_center, write_frame,
+    basemap_center, basemap_mlt_style, basemap_north_west, basemap_point, basemap_south_east, basemap_style, cjk_center,
+    prepare_basemap_mlt, write_frame,
 };
 use crate::stats::{median, percentile};
 use crate::{Context, Metrics};
@@ -51,6 +52,9 @@ enum Style {
     Url(String),
     Json(&'static str),
     Basemap,
+    /// The basemap over its tiles as MLT that carry their polygons'
+    /// triangles.
+    BasemapMlt,
 }
 
 impl View {
@@ -67,6 +71,14 @@ impl View {
             Style::Url(url) => scene.load_url(url),
             Style::Json(json) => scene.load_json(json),
             Style::Basemap => scene.load_json(&basemap_style(&cx.fixtures)),
+            Style::BasemapMlt => scene.load_json(&basemap_mlt_style(&cx.fixtures)),
+        }
+    }
+
+    /// Prepares what loading the style reads, untimed.
+    fn prepare(&self, cx: &Context) {
+        if matches!(self.style, Style::BasemapMlt) {
+            prepare_basemap_mlt(&cx.fixtures);
         }
     }
 }
@@ -82,14 +94,12 @@ fn views() -> Vec<View> {
             style: Style::Url(scene.style_url()),
         })
         .collect();
-    views.push(View {
-        name: "basemap",
-        size: BASEMAP_SIZE,
-        center: basemap_center(),
-        zoom: BASEMAP_ZOOM,
-        style: Style::Basemap,
-    });
+    views.push(basemap_view());
     views
+}
+
+fn basemap_view() -> View {
+    View { name: "basemap", size: BASEMAP_SIZE, center: basemap_center(), zoom: BASEMAP_ZOOM, style: Style::Basemap }
 }
 
 /// Every case, in the order they run.
@@ -116,7 +126,8 @@ pub fn all() -> Vec<Case> {
     for (name, data_driven) in [("Frame/Extrusions", false), ("Frame/Extrusions/DataDriven", true)] {
         cases.push(Case::new(name, move |cx| frame_extrusions(cx, name, data_driven)));
     }
-    for view in views() {
+    let basemap_mlt = View { name: "basemap-mlt", style: Style::BasemapMlt, ..basemap_view() };
+    for view in views().into_iter().chain([basemap_mlt]) {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
@@ -198,6 +209,7 @@ fn still_colliding_icons(cx: &Context, name: &str, icons: usize, overlap: bool) 
 /// style, sprite and glyph requests, tile parsing and layout, pipeline
 /// creation and the frame. The GPU device is set up before.
 fn load_style(cx: &Context, view: &View) -> Metrics {
+    view.prepare(cx);
     let mut meter = Meter::new();
     let mut last = None;
     for _ in 0..cx.iterations(10) {

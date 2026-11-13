@@ -124,6 +124,61 @@ pub(crate) fn basemap_style(fixtures: &Path) -> String {
     style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
 }
 
+/// Where `prepare_basemap_mlt` writes the basemap's tiles as MLT, under
+/// the fixtures.
+const BASEMAP_MLT_DIR: &str = "basemap/mlt-tessellated";
+
+/// The basemap's style over its tiles as MLT that carry their polygons'
+/// triangles, which `prepare_basemap_mlt` wrote.
+#[must_use]
+pub(crate) fn basemap_mlt_style(fixtures: &Path) -> String {
+    let tiles = r#""tiles": ["mln-bench-fixtures:/basemap/tiles/{z}/{x}/{y}.pbf"],"#;
+    let style = include_str!("../style.json");
+    assert!(style.contains(tiles), "the basemap style's tile URL");
+    let style = style.replace(
+        tiles,
+        &format!(r#""tiles": ["mln-bench-fixtures:/{BASEMAP_MLT_DIR}/{{z}}/{{x}}/{{y}}.mlt"], "encoding": "mlt","#),
+    );
+    style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
+}
+
+/// Writes the basemap's tiles as MLT, every polygon with its triangles, as
+/// mlt-core encodes them for MapLibre Native; once per process.
+pub(crate) fn prepare_basemap_mlt(fixtures: &Path) {
+    static PREPARED: OnceLock<()> = OnceLock::new();
+    PREPARED.get_or_init(|| {
+        use mlt_core::encoder::{EncoderConfig, Network, Profile, Tessellation};
+
+        // The tiles' decoder reads no FastPFOR streams.
+        let config = EncoderConfig::from_profile(Profile::Native(Network::default()))
+            .with_tessellation(Tessellation::Always)
+            .with_fastpfor(false);
+        let tiles = fixtures.join("basemap/tiles");
+        let walk = |dir: &Path| -> Vec<PathBuf> {
+            let mut entries: Vec<PathBuf> =
+                std::fs::read_dir(dir).expect("a basemap tile directory").map(|e| e.expect("entry").path()).collect();
+            entries.sort();
+            entries
+        };
+        for z in walk(&tiles) {
+            for x in walk(&z) {
+                for mvt in walk(&x) {
+                    let relative = mvt.strip_prefix(&tiles).expect("under the tiles").with_extension("mlt");
+                    let out = fixtures.join(BASEMAP_MLT_DIR).join(relative);
+                    let layers = mlt_core::mvt::mvt_to_tile_layers(std::fs::read(&mvt).expect("a basemap tile"))
+                        .expect("an MVT tile");
+                    let mut mlt = Vec::new();
+                    for layer in layers {
+                        mlt.extend(layer.encode(config).expect("an MLT layer"));
+                    }
+                    std::fs::create_dir_all(out.parent().expect("a directory")).expect("the MLT tile directory");
+                    std::fs::write(&out, mlt).expect("an MLT tile");
+                }
+            }
+        }
+    });
+}
+
 /// When the map draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
