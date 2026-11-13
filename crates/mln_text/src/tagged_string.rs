@@ -409,7 +409,7 @@ mod tests {
 
         let mut max_sections = TaggedString::default();
         for i in 0..6401 {
-            max_sections.add_image_section(&mln_util::string::to_string_i32(i));
+            max_sections.add_image_section(&i.to_string());
         }
 
         assert_eq!(max_sections.get_sections().len(), 6400);

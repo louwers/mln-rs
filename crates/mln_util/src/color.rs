@@ -5,6 +5,9 @@
 // `stringify` un-premultiply back to 0..255 channels (with alpha rounded to
 // two decimals).
 
+use std::f32::consts::{PI, TAU};
+
+use csscolorparser::Color as CssColor;
 use feature::{Value, ValueObject};
 use serde::{Deserialize, Serialize};
 
@@ -12,12 +15,14 @@ use crate::interpolate::interpolate as util_interpolate;
 use crate::string::to_string_double;
 
 /// The space a color interpolation runs in: RGB blends the premultiplied
-/// channels, LAB and HCL the straight color.
+/// channels, LAB and HCL the straight color, OKLCH the premultiplied lightness
+/// and chroma.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorSpace {
     Rgb,
     Lab,
     Hcl,
+    Oklch,
 }
 
 /// Stores a premultiplied color, with all four channels ranging from 0..1.
@@ -29,129 +34,101 @@ pub struct Color {
     pub a: f32,
 }
 
-// --- The D50 Lab conversions GL JS uses (color_spaces.ts, after
-// https://observablehq.com/@mbostock/lab-and-rgb). Anonymous namespace in the
-// C++ file. ---
+// Below these chromas a hue is missing: GL JS's for HCL, which rounds the
+// chroma to four decimals, and CSS Color 4's for OKLCH
+// (https://drafts.csswg.org/css-color-4/#powerless). The conversions give
+// grays a tiny chroma and some hue.
+const HCL_POWERLESS_CHROMA: f32 = 0.000_05;
+const OKLCH_POWERLESS_CHROMA: f32 = 0.000_004;
 
-const XN: f64 = 0.96422;
-const YN: f64 = 1.0;
-const ZN: f64 = 0.82521;
-const T0: f64 = 4.0 / 29.0;
-const T1: f64 = 6.0 / 29.0;
-const T2: f64 = 3.0 * T1 * T1;
-const T3: f64 = T1 * T1 * T1;
-
-#[derive(Clone, Copy)]
-struct Rgb {
-    r: f64,
-    g: f64,
-    b: f64,
-    a: f64,
-}
-
-#[derive(Clone, Copy)]
-struct Lab {
-    l: f64,
-    a: f64,
-    b: f64,
-    alpha: f64,
-}
-
-#[derive(Clone, Copy)]
-struct Hcl {
-    h: f64,
-    c: f64,
-    l: f64,
-    alpha: f64,
-}
-
-fn rgb2xyz(x: f64) -> f64 {
-    if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
-}
-
-fn xyz2lab(t: f64) -> f64 {
-    if t > T3 { t.powf(1.0 / 3.0) } else { t / T2 + T0 }
-}
-
-fn lab2xyz(t: f64) -> f64 {
-    if t > T1 { t * t * t } else { T2 * (t - T0) }
-}
-
-fn xyz2rgb(x: f64) -> f64 {
-    let x = if x <= 0.00304 { 12.92 * x } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
-    // std::clamp(x, 0.0, 1.0); both pass NaN and -0.0 through.
-    x.clamp(0.0, 1.0)
-}
-
-fn constrain_angle(angle: f64) -> f64 {
-    let angle = angle % 360.0;
-    if angle < 0.0 { angle + 360.0 } else { angle }
-}
-
-fn rgb_to_lab(c: Rgb) -> Lab {
-    let r = rgb2xyz(c.r);
-    let g = rgb2xyz(c.g);
-    let b = rgb2xyz(c.b);
-    let y = xyz2lab((0.222_504_5 * r + 0.716_878_6 * g + 0.060_616_9 * b) / YN);
-    let mut x = y;
-    let mut z = y;
-    if r != g || g != b {
-        x = xyz2lab((0.436_074_7 * r + 0.385_064_9 * g + 0.143_080_4 * b) / XN);
-        z = xyz2lab((0.013_932_2 * r + 0.097_104_5 * g + 0.714_173_3 * b) / ZN);
-    }
-    let l = 116.0 * y - 16.0;
-    Lab { l: if l < 0.0 { 0.0 } else { l }, a: 500.0 * (x - y), b: 200.0 * (y - z), alpha: c.a }
-}
-
-fn lab_to_rgb(c: Lab) -> Rgb {
-    let mut y = (c.l + 16.0) / 116.0;
-    let mut x = if c.a.is_nan() { y } else { y + c.a / 500.0 };
-    let mut z = if c.b.is_nan() { y } else { y - c.b / 200.0 };
-    y = YN * lab2xyz(y);
-    x = XN * lab2xyz(x);
-    z = ZN * lab2xyz(z);
-    Rgb {
-        r: xyz2rgb(3.133_856_1 * x - 1.616_866_7 * y - 0.490_614_6 * z),
-        g: xyz2rgb(-0.978_768_4 * x + 1.916_141_5 * y + 0.033_454 * z),
-        b: xyz2rgb(0.071_945_3 * x - 0.228_991_4 * y + 1.405_242_7 * z),
-        a: c.alpha,
-    }
-}
-
-fn rgb_to_hcl(rgb: Rgb) -> Hcl {
-    let lab = rgb_to_lab(rgb);
-    let c = (lab.a * lab.a + lab.b * lab.b).sqrt();
-    let h = if (c * 10000.0).round() == 0.0 {
-        f64::NAN
-    } else {
-        constrain_angle(lab.b.atan2(lab.a) * 180.0 / std::f64::consts::PI)
-    };
-    Hcl { h, c, l: lab.l, alpha: lab.alpha }
-}
-
-fn hcl_to_rgb(c: Hcl) -> Rgb {
-    let h = if c.h.is_nan() { 0.0 } else { c.h * std::f64::consts::PI / 180.0 };
-    lab_to_rgb(Lab { l: c.l, a: h.cos() * c.c, b: h.sin() * c.c, alpha: c.alpha })
-}
-
-fn straight(color: &Color) -> Rgb {
+fn straight(color: &Color) -> CssColor {
     if color.a == 0.0 {
-        return Rgb { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+        return CssColor::new(0.0, 0.0, 0.0, 0.0);
     }
-    Rgb {
-        r: f64::from(color.r / color.a),
-        g: f64::from(color.g / color.a),
-        b: f64::from(color.b / color.a),
-        a: f64::from(color.a),
-    }
+    CssColor::new(color.r / color.a, color.g / color.a, color.b / color.a, color.a)
 }
 
-fn premultiplied(c: Rgb) -> Color {
-    Color::new((c.r * c.a) as f32, (c.g * c.a) as f32, (c.b * c.a) as f32, c.a as f32)
+/// Clips each channel to 0..1, as browsers draw a color outside sRGB, and
+/// premultiplies.
+fn premultiplied(color: &CssColor) -> Color {
+    let CssColor { r, g, b, a } = color.clamp();
+    Color::new(r * a, g * a, b * a, a)
 }
 
-fn lerp(a: f64, b: f64, t: f64) -> f64 {
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a * (1.0 - t) + b * t
+}
+
+/// How far `to` is from `from` the shorter way around, in radians.
+fn hue_difference(from: f32, to: f32) -> f32 {
+    let difference = to - from;
+    if difference > PI {
+        difference - TAU
+    } else if difference < -PI {
+        difference + TAU
+    } else {
+        difference
+    }
+}
+
+/// A missing hue converts as 0.
+fn hue_or_zero(hue: f32) -> f32 {
+    if hue.is_nan() { 0.0 } else { hue }
+}
+
+/// `[l, c, h, alpha]` in the polar form of CIE Lab, with a NaN hue when it's
+/// missing.
+fn to_hcl(color: &Color) -> [f32; 4] {
+    let [l, c, h, alpha] = straight(color).to_lcha();
+    [l.max(0.0), c, if c < HCL_POWERLESS_CHROMA { f32::NAN } else { h }, alpha]
+}
+
+/// `[l, c, h, alpha]` in Oklch, with a NaN hue and no chroma when the hue is
+/// missing.
+fn to_oklch(color: &Color) -> [f32; 4] {
+    let [l, c, h, alpha] = straight(color).to_oklcha();
+    if c <= OKLCH_POWERLESS_CHROMA { [l, 0.0, f32::NAN, alpha] } else { [l, c, h, alpha] }
+}
+
+// GL JS's interpolateHcl: a missing hue takes the other's, and so does the
+// chroma when the other is black or white.
+fn interpolate_hcl(from: &Color, to: &Color, t: f32) -> Color {
+    let [l1, c1, h1, alpha1] = to_hcl(from);
+    let [l2, c2, h2, alpha2] = to_hcl(to);
+    let mut chroma = lerp(c1, c2, t);
+    let hue = match (h1.is_nan(), h2.is_nan()) {
+        (false, false) => h1 + t * hue_difference(h1, h2),
+        (false, true) => {
+            if l2 == 1.0 || l2 == 0.0 {
+                chroma = c1;
+            }
+            h1
+        }
+        (true, false) => {
+            if l1 == 1.0 || l1 == 0.0 {
+                chroma = c2;
+            }
+            h2
+        }
+        (true, true) => f32::NAN,
+    };
+    premultiplied(&CssColor::from_lcha(lerp(l1, l2, t), chroma, hue_or_zero(hue), lerp(alpha1, alpha2, t)))
+}
+
+// https://drafts.csswg.org/css-color-4/#interpolation: a missing hue takes the
+// other's, and lightness and chroma are premultiplied.
+fn interpolate_oklch(from: &Color, to: &Color, t: f32) -> Color {
+    let [l1, c1, h1, alpha1] = to_oklch(from);
+    let [l2, c2, h2, alpha2] = to_oklch(to);
+    let (h1, h2) = (if h1.is_nan() { h2 } else { h1 }, if h2.is_nan() { h1 } else { h2 });
+    let alpha = lerp(alpha1, alpha2, t);
+    let divisor = if alpha == 0.0 { 1.0 } else { alpha };
+    premultiplied(&CssColor::from_oklcha(
+        lerp(l1 * alpha1, l2 * alpha2, t) / divisor,
+        lerp(c1 * alpha1, c2 * alpha2, t) / divisor,
+        hue_or_zero(h1 + t * hue_difference(h1, h2)),
+        alpha,
+    ))
 }
 
 impl Color {
@@ -192,70 +169,44 @@ impl Color {
         Color::new_unchecked(0.0, 0.0, 1.0, 1.0)
     }
 
-    /// Parse a CSS color string (vendor/csscolorparser), returning a
-    /// premultiplied Color. Like the C++ constructor, this asserts (in debug
-    /// builds) that the alpha is in 0..1, which a NaN alpha (`rgba(0,0,0,nan)`)
-    /// is not.
+    /// Parse a CSS color string, returning a premultiplied Color.
     #[must_use]
     pub fn parse(s: &str) -> Option<Color> {
-        let css_color = csscolorparser::parse(s)?;
+        // Deviation: C++ parses with its vendored csscolorparser. The crate
+        // gives the same bytes on every color string of the expression and
+        // render tests, and also reads CSS Color 4's rgb() and hsl() forms, as
+        // GL JS does. It reads more than the style spec's colors, though: hex
+        // without its '#', and functions like hwb() and lab(), so those are
+        // turned away here.
+        let text = s.trim();
+        if let Some(open) = text.find('(') {
+            let name = text[..open].trim_end();
+            // oklch() keeps its float channels, clipped to sRGB.
+            if name.eq_ignore_ascii_case("oklch") {
+                return csscolorparser::parse(text).ok().map(|color| premultiplied(&color));
+            }
+            if !["rgb", "rgba", "hsl", "hsla"].iter().any(|function| name.eq_ignore_ascii_case(function)) {
+                return None;
+            }
+        } else if text.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        let css_color = csscolorparser::parse(text).ok()?;
+        let [r, g, b, _] = css_color.to_rgba8();
 
         // Premultiply the color.
         // `css_color->a / 255` is float / int; `r * factor` is int * float.
         let factor: f32 = css_color.a / 255.0f32;
-        Some(Color::new(
-            f32::from(css_color.r) * factor,
-            f32::from(css_color.g) * factor,
-            f32::from(css_color.b) * factor,
-            css_color.a,
-        ))
+        Some(Color::new(f32::from(r) * factor, f32::from(g) * factor, f32::from(b) * factor, css_color.a))
     }
 
     #[must_use]
     pub fn interpolate(from: &Color, to: &Color, t: f64, space: ColorSpace) -> Color {
         match space {
             ColorSpace::Rgb => util_interpolate(from, to, t),
-            ColorSpace::Lab => {
-                let a = rgb_to_lab(straight(from));
-                let b = rgb_to_lab(straight(to));
-                premultiplied(lab_to_rgb(Lab {
-                    l: lerp(a.l, b.l, t),
-                    a: lerp(a.a, b.a, t),
-                    b: lerp(a.b, b.b, t),
-                    alpha: lerp(a.alpha, b.alpha, t),
-                }))
-            }
-            ColorSpace::Hcl => {
-                let a = rgb_to_hcl(straight(from));
-                let b = rgb_to_hcl(straight(to));
-                let mut hue = f64::NAN;
-                let mut chroma = f64::NAN;
-                if !a.h.is_nan() && !b.h.is_nan() {
-                    let mut dh = b.h - a.h;
-                    if b.h > a.h && dh > 180.0 {
-                        dh -= 360.0;
-                    } else if b.h < a.h && a.h - b.h > 180.0 {
-                        dh += 360.0;
-                    }
-                    hue = a.h + t * dh;
-                } else if !a.h.is_nan() {
-                    hue = a.h;
-                    if b.l == 1.0 || b.l == 0.0 {
-                        chroma = a.c;
-                    }
-                } else if !b.h.is_nan() {
-                    hue = b.h;
-                    if a.l == 1.0 || a.l == 0.0 {
-                        chroma = b.c;
-                    }
-                }
-                premultiplied(hcl_to_rgb(Hcl {
-                    h: hue,
-                    c: if chroma.is_nan() { lerp(a.c, b.c, t) } else { chroma },
-                    l: lerp(a.l, b.l, t),
-                    alpha: lerp(a.alpha, b.alpha, t),
-                }))
-            }
+            ColorSpace::Lab => premultiplied(&straight(from).interpolate_lab(&straight(to), t as f32)),
+            ColorSpace::Hcl => interpolate_hcl(from, to, t as f32),
+            ColorSpace::Oklch => interpolate_oklch(from, to, t as f32),
         }
     }
 

@@ -11,9 +11,9 @@
 //
 // C++ wraps each message handler in `try { ... } catch (...)` and reports
 // the exception to the tile (`GeometryTile::onError`). The port returns the
-// exceptions as `Err` (malformed tiles, a failing wagyu fixup, a too long
-// geometry) and reports those; a panic is a bug and is not caught
-// (`catch_unwind` can't catch it with `panic = "abort"` or on wasm).
+// exceptions as `Err` (malformed tiles, a too long geometry) and reports
+// those; a panic is a bug and is not caught (`catch_unwind` can't catch it
+// with `panic = "abort"` or on wasm).
 //
 // Port-only: the messages between the tile and its worker are data
 // (`WorkerMessage`, `TileMessage`) instead of member function calls bound

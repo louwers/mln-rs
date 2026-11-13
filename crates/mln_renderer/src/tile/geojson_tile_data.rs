@@ -8,7 +8,7 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
-use mln_tile::{fixup_polygons, to_geometry_collection};
+use mln_tile::to_geometry_collection;
 use mln_tile_id::EncodedTileData;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer};
 use mln_util::error::Error;
@@ -22,16 +22,12 @@ pub struct GeoJSONTileFeature<'a> {
     pub feature: &'a Feature<i16>,
     /// `mutable std::optional<GeometryCollection> geometry`.
     geometry: OnceCell<GeometryCollection>,
-    /// The wagyu exception of `getGeometries` (`GeometryTileFeature::error`).
-    error: OnceCell<Error>,
 }
-
-static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
 impl<'a> GeoJSONTileFeature<'a> {
     #[must_use]
     pub fn new(feature: &'a Feature<i16>) -> Self {
-        GeoJSONTileFeature { feature, geometry: OnceCell::new(), error: OnceCell::new() }
+        GeoJSONTileFeature { feature, geometry: OnceCell::new() }
     }
 }
 
@@ -49,28 +45,7 @@ impl GeometryTileFeature for GeoJSONTileFeature<'_> {
     }
 
     fn get_geometries(&self) -> &GeometryCollection {
-        if let Some(geometry) = self.geometry.get() {
-            return geometry;
-        }
-        let mut geometry = to_geometry_collection(&self.feature.geometry);
-
-        // https://github.com/mapbox/geojson-vt-cpp/issues/44
-        if self.get_type() == FeatureType::Polygon {
-            // C++ lets a wagyu exception propagate (the worker reports a
-            // tile error) and retries on the next call.
-            match fixup_polygons(&geometry) {
-                Ok(fixed) => geometry = fixed,
-                Err(e) => {
-                    let _ = self.error.set(Error::native(e.to_string()));
-                    return &EMPTY_GEOMETRIES;
-                }
-            }
-        }
-        self.geometry.get_or_init(|| geometry)
-    }
-
-    fn error(&self) -> Option<Error> {
-        self.error.get().cloned()
+        self.geometry.get_or_init(|| to_geometry_collection(&self.feature.geometry))
     }
 
     fn get_value(&self, key: &str) -> Option<Value> {

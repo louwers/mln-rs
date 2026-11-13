@@ -2,18 +2,12 @@
 // src/mln/style/expression/util.cpp.
 
 use mln_util::Color;
+use mln_util::string::to_string_double;
 
 use crate::expression::{EvalResult, EvaluationError};
-use crate::value::{Value, stringify};
 
 fn stringify_color(r: f64, g: f64, b: f64, a: f64) -> String {
-    format!(
-        "{}, {}, {}, {}",
-        stringify(&Value::Number(r)),
-        stringify(&Value::Number(g)),
-        stringify(&Value::Number(b)),
-        stringify(&Value::Number(a))
-    )
+    [r, g, b, a].map(to_string_double).join(", ")
 }
 
 pub fn rgba(r: f64, g: f64, b: f64, a: f64) -> EvalResult<Color> {

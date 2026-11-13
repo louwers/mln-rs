@@ -40,7 +40,6 @@ use std::sync::{Arc, Mutex};
 use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_util::chrono::{Timestamp, parse_timestamp_str};
 use mln_util::http_header::{CacheControl, parse_retry_headers};
-use mln_util::string::to_string_i64;
 use mln_util::sync::MutexExt;
 
 use crate::async_request::AsyncRequest;
@@ -294,15 +293,10 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
             parse_retry_headers(&retry_after, &x_rate_limit_reset),
         )));
     } else if (500..600).contains(&response_code) {
-        response.error = Some(Box::new(ResourceError::new(
-            Reason::Server,
-            format!("HTTP status code {}", to_string_i64(response_code)),
-        )));
+        response.error =
+            Some(Box::new(ResourceError::new(Reason::Server, format!("HTTP status code {response_code}"))));
     } else {
-        response.error = Some(Box::new(ResourceError::new(
-            Reason::Other,
-            format!("HTTP status code {}", to_string_i64(response_code)),
-        )));
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, format!("HTTP status code {response_code}"))));
     }
     response
 }

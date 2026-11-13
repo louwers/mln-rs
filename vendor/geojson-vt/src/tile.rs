@@ -193,9 +193,11 @@ impl InternalTile {
 
     fn transform_polygon(&mut self, rings: &VtPolygon) -> Polygon<i16> {
         let mut result = Polygon::with_capacity(rings.len());
-        for ring in rings {
+        for (i, ring) in rings.iter().enumerate() {
             if ring.area > self.sq_tolerance {
-                result.push(self.transform_linear_ring(ring));
+                let mut ring = self.transform_linear_ring(ring);
+                rewind(&mut ring, i == 0);
+                result.push(ring);
             }
         }
         result
@@ -210,5 +212,23 @@ impl InternalTile {
             }
         }
         result
+    }
+}
+
+/// Winds an outer ring clockwise and a hole counterclockwise, with y down,
+/// as the vector tile spec wants, so that a fill layer can tell a polygon's
+/// rings apart by their winding. geojson-vt JS's `rewind` does the same
+/// before rounding; this works on the rounded coordinates, so that the
+/// winding holds for the coordinates the tile carries.
+fn rewind(ring: &mut LinearRing<i16>, outer: bool) {
+    let mut area = 0i64;
+    let mut j = ring.len().wrapping_sub(1);
+    for (i, p) in ring.iter().enumerate() {
+        let q = ring[j];
+        area += (i64::from(p.x) - i64::from(q.x)) * (i64::from(p.y) + i64::from(q.y));
+        j = i;
+    }
+    if (area > 0) == outer {
+        ring.reverse();
     }
 }

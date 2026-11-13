@@ -1247,6 +1247,15 @@ mod driver_tests {
         unsafe { mln_render_session_service_driver_work(session, NO_DIAGNOSTIC) }
     }
 
+    /// Waits until `done` holds.
+    fn until(mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !done() {
+            assert!(Instant::now() < deadline, "it never happened");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     /// Services `session` until `done` holds.
     fn service_until(session: mln_render_session, mut done: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -1305,9 +1314,12 @@ mod driver_tests {
         let runtime = create();
         let map = create_map(runtime, &options(1.0));
         let (session, attached) = attach_caller_driven(map, &WAKES);
-        // The attach waits for a service, and woke the host for it.
+        // The attach waits for a service, and the host hears of it once: from
+        // the attach, or from the runtime's thread if the map's first update
+        // reached the session first, which can be just after the attach
+        // returns.
         assert_eq!(snapshot(session).unwrap().state, MLN_RENDER_SESSION_STATE_ATTACHING);
-        assert_eq!(WAKES.load(Ordering::SeqCst), 1);
+        until(|| WAKES.load(Ordering::SeqCst) == 1);
         service_until(session, || attached.is_complete());
         assert_eq!(snapshot(session).unwrap().state, MLN_RENDER_SESSION_STATE_ATTACHED);
         let mut capabilities = sized::<mln_render_session_capabilities>();

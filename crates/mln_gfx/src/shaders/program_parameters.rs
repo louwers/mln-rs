@@ -14,10 +14,8 @@ pub struct ProgramParameters {
     defines_str: OnceCell<String>,
 }
 
-/// `util::toString(float, /*decimal=*/true)` for the define value: rapidjson's
-/// shortest double formatting, keeping the trailing ".0".
-// TODO(port): use the rapidjson dtoa port once available; the value is only
-// used inside the defines string (cache key), never in shader output.
+/// The define value: the shortest digits, with a trailing ".0" for a whole
+/// number. Only the defines string (a cache key) holds it.
 fn to_string_decimal(value: f32) -> String {
     let v = f64::from(value);
     if v.is_finite() && v == v.trunc() { format!("{v:.1}") } else { format!("{v}") }

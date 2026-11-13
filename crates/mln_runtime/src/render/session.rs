@@ -871,7 +871,8 @@ fn attach_unlocked<R>(
     }
     if options.driver == Driver::CallerThread {
         // The first service builds the renderer, which is work that is ready
-        // now: the host hears of it before the attach returns.
+        // now: this wakes the host, unless the map's first update, posted
+        // from the runtime's thread, woke it already.
         session.shared().run_loop.invoke(|| {});
     }
     Ok(then(&session, completion))
@@ -1318,12 +1319,13 @@ impl RenderSession {
     }
 
     /// Ends the frame demands on their way, including those that wait for a
-    /// map update, which finish as
+    /// map update and the demand of a still image, which finish as
     /// [`FrameDisposition::NoUpdate`](super::FrameDisposition), and completes
-    /// once the work sent before it has run.
+    /// once the work sent before it has run. A still image that still waits
+    /// gets a new demand once the barrier ran.
     pub fn barrier(&self) -> Result<Completion<()>, Error> {
         self.operation(|worker, outbox| {
-            worker.end_demands(super::FrameDisposition::NoUpdate, outbox);
+            worker.barrier(outbox);
             Ok(())
         })
     }

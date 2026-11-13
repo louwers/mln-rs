@@ -33,20 +33,39 @@ fn to_boolean(v: &Value) -> Value {
     })
 }
 
-/// [`mln_util::string::stof`]: the number at the start of the string, or
-/// `None` when there is none or it is out of the `f32` range.
-fn stof(s: &str) -> Option<f32> {
-    mln_util::string::stof(s).ok()
+/// A string as a number: what ECMAScript's `ToNumber` reads gives the same
+/// value, except `0x`, `0o` and `0b` literals above `u64::MAX`, and the extras
+/// Rust's `str::parse` reads, such as `inf`, are accepted too. Anything else
+/// is NaN.
+fn string_to_number(s: &str) -> f64 {
+    let s = s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let radix = match s.get(..2) {
+        _ if s.is_empty() => return 0.0,
+        Some("0x" | "0X") => 16,
+        Some("0o" | "0O") => 8,
+        Some("0b" | "0B") => 2,
+        _ => return s.parse().unwrap_or(f64::NAN),
+    };
+    u64::from_str_radix(&s[2..], radix).map_or(f64::NAN, |n| n as f64)
 }
 
+/// JS `Number(value)`, as GL JS's `to-number` applies it: null and booleans
+/// convert, and a value that gives NaN, or isn't a string, number, boolean or
+/// null, fails.
+///
+/// The style spec defines `to-number` on a string as ECMAScript's `ToNumber`
+/// (<https://maplibre.org/maplibre-style-spec/expressions/#to-number>,
+/// <https://tc39.es/ecma262/#sec-tonumber-applied-to-the-string-type>). As a
+/// consumer of styles rather than a validator, this reads a superset of it.
 fn to_number(v: &Value) -> EvaluationResult {
     let result = match v {
         Value::Null => Some(0.0),
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
         Value::Number(f) => Some(*f),
-        Value::String(s) => stof(s).map(f64::from),
+        Value::String(s) => Some(string_to_number(s)),
         _ => None,
     };
-    match result {
+    match result.filter(|r| !r.is_nan()) {
         Some(r) => Ok(Value::Number(r)),
         None => Err(EvaluationError::new(format!("Could not convert {} to number.", stringify(v)))),
     }
@@ -376,5 +395,71 @@ impl Expression for Coercion {
             }
         }
         .to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Strings `ToNumber` reads, with the values JS gives.
+    #[test]
+    fn strings_convert_as_to_number() {
+        let cases = [
+            ("12", 12.0),
+            (" \t\n\u{a0}\u{feff}\u{3000}-1.5e3\u{2028} ", -1500.0),
+            ("", 0.0),
+            ("  ", 0.0),
+            ("+.5", 0.5),
+            ("5.", 5.0),
+            ("1e400", f64::INFINITY),
+            ("-1e-400", -0.0),
+            ("Infinity", f64::INFINITY),
+            ("-Infinity", f64::NEG_INFINITY),
+            ("0x1F", 31.0),
+            ("0o17", 15.0),
+            ("0B101", 5.0),
+            ("0xFFFFFFFFFFFFFFFF", 2f64.powi(64)),
+        ];
+        for (s, expected) in cases {
+            let n = string_to_number(s);
+            assert!(n == expected && n.is_sign_negative() == expected.is_sign_negative(), "{s:?}: {n}");
+        }
+        for nan in ["12px", "50 mph", "1e", ".", "+", "-0x10", "0x", "0xg", "0b2", "NaN", "1_000"] {
+            assert!(string_to_number(nan).is_nan(), "{nan:?}");
+        }
+    }
+
+    /// The strings `ToNumber` reads that `s.trim().parse::<f64>()` doesn't,
+    /// which `string_to_number` handles itself.
+    #[test]
+    fn strings_to_number_reads_and_str_parse_does_not() {
+        let cases = [("", 0.0), ("0x10", 16.0), ("0o17", 15.0), ("0b101", 5.0), ("\u{feff}1", 1.0)];
+        for (s, expected) in cases {
+            assert_eq!(string_to_number(s), expected, "{s:?}");
+            assert!(s.trim().parse::<f64>().is_err(), "{s:?}");
+        }
+    }
+
+    /// Strings JS rejects but `str::parse` reads, which are accepted.
+    #[test]
+    fn strings_beyond_to_number_are_accepted() {
+        let cases = [("inf", f64::INFINITY), ("-INFINITY", f64::NEG_INFINITY), ("\u{85}1", 1.0)];
+        for (s, expected) in cases {
+            assert_eq!(string_to_number(s), expected, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn values_convert_as_gl_js_to_number() {
+        let number = |v: Value| to_number(&v).ok().and_then(|n| n.as_number());
+        assert_eq!(number(Value::Null), Some(0.0));
+        assert_eq!(number(Value::Bool(true)), Some(1.0));
+        assert_eq!(number(Value::Bool(false)), Some(0.0));
+        assert_eq!(number(Value::String("0x10".into())), Some(16.0));
+        assert_eq!(number(Value::String("12px".into())), None);
+        assert_eq!(number(Value::String("nan".into())), None);
+        assert_eq!(number(Value::Number(f64::NAN)), None);
+        assert_eq!(number(Value::Array(vec![Value::Number(1.0)])), None);
     }
 }

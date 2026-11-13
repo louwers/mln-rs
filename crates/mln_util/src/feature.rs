@@ -3,7 +3,7 @@
 
 use feature::{Identifier, Value};
 
-use crate::string::{to_string_double, to_string_i64, to_string_u64};
+use crate::string::to_string_double;
 
 /// `numericValue<double>(const Value&)`.
 #[must_use]
@@ -16,15 +16,17 @@ pub fn numeric_value_f64(value: &Value) -> Option<f64> {
     }
 }
 
-/// `featureIDtoString(const FeatureIdentifier&)`.
+/// The text that names the feature with this ID, or `None` for no ID. A
+/// number's text is its shortest decimal form, with no `+` in an exponent
+/// (`1e21`), as the C API's feature IDs are compared.
 #[must_use]
 pub fn feature_id_to_string(id: &Identifier) -> Option<String> {
     match id {
         Identifier::Null => None,
         Identifier::String(value) => Some(value.clone()),
-        Identifier::Uint(value) => Some(to_string_u64(*value)),
-        Identifier::Int(value) => Some(to_string_i64(*value)),
-        Identifier::Double(value) => Some(to_string_double(*value)),
+        Identifier::Uint(value) => Some(value.to_string()),
+        Identifier::Int(value) => Some(value.to_string()),
+        Identifier::Double(value) => Some(to_string_double(*value).replacen("e+", "e", 1)),
     }
 }
 

@@ -22,7 +22,6 @@ feature.workspace = true
 flate2.workspace = true
 geometry.workspace = true
 mln_math.workspace = true
-rapidjson.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 unicode-properties.workspace = true

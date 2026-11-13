@@ -177,12 +177,148 @@ pub struct HostDevice {
     pub enabled_extensions: Vec<CString>,
 }
 
-/// `VK_EXT_debug_utils`, loaded when the validation layer is on.
-struct DebugUtils {
-    instance: ash::ext::debug_utils::Instance,
-    device: ash::ext::debug_utils::Device,
-    /// The library's messenger, which goes with its instance.
-    messenger: vk::DebugUtilsMessengerEXT,
+/// The library's instance, with the extensions its devices use and, when the
+/// validation layer is on, its messenger.
+//
+// Deviation: C++'s renderer backend makes an instance of its own
+// (`RendererBackend::initInstance`). The library's devices share one, made
+// with the first of them and kept for the life of the process: the Vulkan
+// loader crashes when one thread names an object (`vkSetDebugUtilsObjectNameEXT`,
+// which renderers call with the validation layer on) while another destroys
+// an instance, which renderers on many threads did whenever a device's last
+// renderer let go.
+struct LibraryInstance {
+    entry: ash::Entry,
+    instance: ash::Instance,
+    extensions: Vec<&'static CStr>,
+    api_version: u32,
+    /// Never destroyed, like the instance it reports for.
+    messenger: Option<vk::DebugUtilsMessengerEXT>,
+}
+
+// SAFETY: Vulkan handles and the loader's function tables may be used from
+// any thread, and nothing here changes once made.
+unsafe impl Send for LibraryInstance {}
+// SAFETY: as above.
+unsafe impl Sync for LibraryInstance {}
+
+impl LibraryInstance {
+    /// The instance, with the platforms' surface extensions that the loader
+    /// has, and the validation layer and its messenger as
+    /// `MLN_VULKAN_VALIDATION` asks.
+    fn create() -> Result<LibraryInstance, Error> {
+        let entry = load_entry()?;
+
+        // SAFETY: plain queries of the loader.
+        let (available_layers, available_extensions, loader_version) = unsafe {
+            (
+                entry
+                    .enumerate_instance_layer_properties()
+                    .map_err(|e| Error::native(format!("Vulkan layers: {e}")))?,
+                entry
+                    .enumerate_instance_extension_properties(None)
+                    .map_err(|e| Error::native(format!("Vulkan instance extensions: {e}")))?,
+                entry.try_enumerate_instance_version().ok().flatten().unwrap_or(vk::API_VERSION_1_0),
+            )
+        };
+        // The IDs and the external semaphore queries need Vulkan 1.1.
+        if loader_version < vk::API_VERSION_1_1 {
+            return Err(Error::unsupported("The Vulkan loader is older than 1.1"));
+        }
+        let available_extensions = extension_names(&available_extensions);
+
+        let (mut validation, validation_required) = Validation::requested();
+        if validation != Validation::Off {
+            let has_layer = available_layers.iter().any(|l| l.layer_name_as_c_str() == Ok(VALIDATION_LAYER));
+            let has_debug_utils = available_extensions.contains(&ash::ext::debug_utils::NAME);
+            if !has_layer || !has_debug_utils {
+                if validation == Validation::Abort {
+                    return Err(Error::unsupported("Vulkan layers not found"));
+                }
+                if validation_required {
+                    Log::error(Event::Render, "Vulkan layers not found");
+                }
+                validation = Validation::Off;
+            }
+        }
+        let layers: Vec<&CStr> = if validation == Validation::Off { Vec::new() } else { vec![VALIDATION_LAYER] };
+
+        let mut extensions: Vec<&'static CStr> = Vec::new();
+        if available_extensions.contains(&ash::khr::surface::NAME) {
+            extensions.push(ash::khr::surface::NAME);
+            extensions.extend(SURFACE_EXTENSIONS.iter().filter(|name| available_extensions.contains(name)));
+        }
+        if validation != Validation::Off {
+            extensions.push(ash::ext::debug_utils::NAME);
+        }
+
+        // Vulkan 1.2 has timeline semaphores in its core; a GPU of an older
+        // version renders without them.
+        let api_version = loader_version.min(vk::API_VERSION_1_2);
+        let app_info = vk::ApplicationInfo::default()
+            .application_name(c"maplibre-native")
+            .application_version(1)
+            .engine_name(c"maplibre-native")
+            .engine_version(1)
+            .api_version(api_version);
+        let layer_pointers = pointers(&layers);
+        let extension_pointers = pointers(&extensions);
+        let create_info = vk::InstanceCreateInfo::default()
+            .application_info(&app_info)
+            .enabled_layer_names(&layer_pointers)
+            .enabled_extension_names(&extension_pointers);
+        // SAFETY: the create info points at live names, and the layers and
+        // extensions are available.
+        let instance = unsafe { entry.create_instance(&create_info, None) }.map_err(|e| {
+            let message = format!("Failed to create a Vulkan instance: {e}");
+            // A loader that finds no driver offers no Vulkan, as a missing
+            // loader doesn't, so the next backend may take its place.
+            if e == vk::Result::ERROR_INCOMPATIBLE_DRIVER {
+                Error::unsupported(message)
+            } else {
+                Error::native(message)
+            }
+        })?;
+
+        let mut messenger = None;
+        if validation != Validation::Off {
+            let loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
+            let abort = usize::from(validation == Validation::Abort);
+            let create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                )
+                .pfn_user_callback(Some(debug_utils_callback))
+                .user_data(abort as *mut c_void);
+            // SAFETY: the callback is a function for the life of the
+            // program, and reads its user data only as a flag.
+            match unsafe { loader.create_debug_utils_messenger(&create_info, None) } {
+                Ok(handle) => messenger = Some(handle),
+                Err(_) => Log::error(Event::Render, "Failed to register Vulkan debug utils callback"),
+            }
+        }
+        Ok(LibraryInstance { entry, instance, extensions, api_version, messenger })
+    }
+}
+
+/// The library's instance, once a device has made it.
+static LIBRARY_INSTANCE: Mutex<Option<Arc<LibraryInstance>>> = Mutex::new(None);
+
+/// The library's instance: the one made before, or a new one. A failure
+/// isn't kept, so the next device tries again.
+fn library_instance() -> Result<Arc<LibraryInstance>, Error> {
+    let mut slot = LIBRARY_INSTANCE.lock_unpoisoned();
+    if let Some(instance) = slot.as_ref() {
+        return Ok(Arc::clone(instance));
+    }
+    let instance = Arc::new(LibraryInstance::create()?);
+    *slot = Some(Arc::clone(&instance));
+    Ok(instance)
 }
 
 /// The mutex of each queue that devices submit to, by its handle, which
@@ -237,7 +373,8 @@ pub struct Features {
 pub(crate) struct Shared {
     entry: ash::Entry,
     instance: ash::Instance,
-    debug_utils: Option<DebugUtils>,
+    /// `VK_EXT_debug_utils`, loaded when the validation layer is on.
+    debug_utils: Option<ash::ext::debug_utils::Device>,
     surface: Option<ash::khr::surface::Instance>,
     swapchain: Option<ash::khr::swapchain::Device>,
     semaphore_fd: Option<ash::khr::external_semaphore_fd::Device>,
@@ -278,7 +415,8 @@ pub(crate) struct Shared {
     /// The extensions enabled on the device: the library's, or those the
     /// host listed.
     device_extensions: Vec<CString>,
-    /// Whether the library made the instance and device, and destroys them.
+    /// Whether the library made the device, and destroys it. The library's
+    /// instance outlives every device.
     owned: bool,
 }
 
@@ -297,13 +435,7 @@ impl Drop for Shared {
         // SAFETY: every renderer held the device, so nothing uses it or its
         // objects any more, and each renderer drained its work from the
         // queue before it let go.
-        unsafe {
-            self.device.destroy_device(None);
-            if let Some(debug_utils) = self.debug_utils.take() {
-                debug_utils.instance.destroy_debug_utils_messenger(debug_utils.messenger, None);
-            }
-            self.instance.destroy_instance(None);
-        }
+        unsafe { self.device.destroy_device(None) };
     }
 }
 
@@ -400,122 +532,13 @@ impl Device {
     }
 
     fn create(selector: Selector) -> Result<Device, Error> {
-        let entry = load_entry()?;
-
-        // SAFETY: plain queries of the loader.
-        let (available_layers, available_extensions, loader_version) = unsafe {
-            (
-                entry
-                    .enumerate_instance_layer_properties()
-                    .map_err(|e| Error::native(format!("Vulkan layers: {e}")))?,
-                entry
-                    .enumerate_instance_extension_properties(None)
-                    .map_err(|e| Error::native(format!("Vulkan instance extensions: {e}")))?,
-                entry.try_enumerate_instance_version().ok().flatten().unwrap_or(vk::API_VERSION_1_0),
-            )
-        };
-        // The IDs and the external semaphore queries need Vulkan 1.1.
-        if loader_version < vk::API_VERSION_1_1 {
-            return Err(Error::unsupported("The Vulkan loader is older than 1.1"));
-        }
-        let available_extensions = extension_names(&available_extensions);
-
-        let (mut validation, validation_required) = Validation::requested();
-        if validation != Validation::Off {
-            let has_layer = available_layers.iter().any(|l| l.layer_name_as_c_str() == Ok(VALIDATION_LAYER));
-            let has_debug_utils = available_extensions.contains(&ash::ext::debug_utils::NAME);
-            if !has_layer || !has_debug_utils {
-                if validation == Validation::Abort {
-                    return Err(Error::unsupported("Vulkan layers not found"));
-                }
-                if validation_required {
-                    Log::error(Event::Render, "Vulkan layers not found");
-                }
-                validation = Validation::Off;
-            }
-        }
-        let layers: Vec<&CStr> = if validation == Validation::Off { Vec::new() } else { vec![VALIDATION_LAYER] };
-
-        let mut extensions: Vec<&'static CStr> = Vec::new();
-        if available_extensions.contains(&ash::khr::surface::NAME) {
-            extensions.push(ash::khr::surface::NAME);
-            extensions.extend(SURFACE_EXTENSIONS.iter().filter(|name| available_extensions.contains(name)));
-        }
-        if validation != Validation::Off {
-            extensions.push(ash::ext::debug_utils::NAME);
-        }
-
-        // Vulkan 1.2 has timeline semaphores in its core; a GPU of an older
-        // version renders without them.
-        let api_version = loader_version.min(vk::API_VERSION_1_2);
-        let app_info = vk::ApplicationInfo::default()
-            .application_name(c"maplibre-native")
-            .application_version(1)
-            .engine_name(c"maplibre-native")
-            .engine_version(1)
-            .api_version(api_version);
-        let layer_pointers = pointers(&layers);
-        let extension_pointers = pointers(&extensions);
-        let create_info = vk::InstanceCreateInfo::default()
-            .application_info(&app_info)
-            .enabled_layer_names(&layer_pointers)
-            .enabled_extension_names(&extension_pointers);
-        // SAFETY: the create info points at live names, and the layers and
-        // extensions are available.
-        let instance = unsafe { entry.create_instance(&create_info, None) }.map_err(|e| {
-            let message = format!("Failed to create a Vulkan instance: {e}");
-            // A loader that finds no driver offers no Vulkan, as a missing
-            // loader doesn't, so the next backend may take its place.
-            if e == vk::Result::ERROR_INCOMPATIBLE_DRIVER {
-                Error::unsupported(message)
-            } else {
-                Error::native(message)
-            }
-        })?;
-
-        // From here on, an error destroys what was made.
-        let mut messenger = None;
-        if validation != Validation::Off {
-            let loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
-            let abort = usize::from(validation == Validation::Abort);
-            let create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
-                .message_severity(
-                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-                )
-                .message_type(
-                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                )
-                .pfn_user_callback(Some(debug_utils_callback))
-                .user_data(abort as *mut c_void);
-            // SAFETY: the callback is a function for the life of the
-            // program, and reads its user data only as a flag.
-            match unsafe { loader.create_debug_utils_messenger(&create_info, None) } {
-                Ok(handle) => messenger = Some((loader, handle)),
-                Err(_) => Log::error(Event::Render, "Failed to register Vulkan debug utils callback"),
-            }
-        }
-        let made = Self::create_device(&instance, selector, api_version);
-        let (physical_device, queue_family_index, device, enabled_features, features, device_extensions) = match made {
-            Ok(made) => made,
-            Err(error) => {
-                // SAFETY: nothing else refers to these objects, and they are
-                // destroyed children first.
-                unsafe {
-                    if let Some((loader, messenger)) = messenger {
-                        loader.destroy_debug_utils_messenger(messenger, None);
-                    }
-                    instance.destroy_instance(None);
-                }
-                return Err(error);
-            }
-        };
-        let debug_utils = messenger.map(|(loader, messenger)| DebugUtils {
-            instance: loader,
-            device: ash::ext::debug_utils::Device::new(&instance, &device),
-            messenger,
-        });
+        let library = library_instance()?;
+        let entry = library.entry.clone();
+        let instance = library.instance.clone();
+        let extensions = library.extensions.clone();
+        let (physical_device, queue_family_index, device, enabled_features, features, device_extensions) =
+            Self::create_device(&instance, selector, library.api_version)?;
+        let debug_utils = library.messenger.is_some().then(|| ash::ext::debug_utils::Device::new(&instance, &device));
         let surface =
             extensions.contains(&ash::khr::surface::NAME).then(|| ash::khr::surface::Instance::new(&entry, &instance));
         let swapchain = device_extensions
@@ -1225,7 +1248,7 @@ impl Shared {
     }
 
     pub(crate) fn debug_utils(&self) -> Option<&ash::ext::debug_utils::Device> {
-        self.debug_utils.as_ref().map(|debug_utils| &debug_utils.device)
+        self.debug_utils.as_ref()
     }
 
     /// Runs `f` with the queue, holding the queue's mutex and the host's

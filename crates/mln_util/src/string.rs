@@ -1,77 +1,28 @@
-// Ports include/mln/util/string.hpp + src/mln/util/string.cpp (the number
-// formatting through rapidjson's Writer, and util::stof).
+// Number formatting, and the longest number prefix of a string.
 
-use rapidjson::Writer;
-
-/// `util::toString(int32_t)`.
-#[must_use]
-pub fn to_string_i32(t: i32) -> String {
-    let mut writer = Writer::new();
-    writer.int(t);
-    writer.into_string()
-}
-
-/// `util::toString(uint32_t)`.
-#[must_use]
-pub fn to_string_u32(t: u32) -> String {
-    let mut writer = Writer::new();
-    writer.uint(t);
-    writer.into_string()
-}
-
-/// `util::toString(int64_t)`.
-#[must_use]
-pub fn to_string_i64(t: i64) -> String {
-    let mut writer = Writer::new();
-    writer.int64(t);
-    writer.into_string()
-}
-
-/// `util::toString(uint64_t)`.
-#[must_use]
-pub fn to_string_u64(t: u64) -> String {
-    let mut writer = Writer::new();
-    writer.uint64(t);
-    writer.into_string()
-}
-
-/// `util::toString(double, decimal)`: rapidjson's `Writer::Double` (Grisu2,
-/// shortest round trip, `Prettify` layout), so NaN and infinities give `""`
-/// and -0.0 gives `"-0"`. Unless `decimal`, a trailing `.0` is removed.
-#[must_use]
-pub fn to_string_double_decimal(t: f64, decimal: bool) -> String {
-    let mut writer = Writer::new();
-    writer.double(t);
-    let mut data = writer.into_string();
-    let bytes = data.as_bytes();
-    if !decimal && bytes.len() >= 3 && bytes[bytes.len() - 1] == b'0' && bytes[bytes.len() - 2] == b'.' {
-        // Remove trailing ".0" for integers
-        data.truncate(data.len() - 2);
-    }
-    data
-}
-
-/// `util::toString(double)` (`decimal = false`).
+/// `value` as JavaScript's `Number.prototype.toString()` writes it: the
+/// shortest digits that read back as `value`, positional from `1e-6` up to
+/// `1e21` and with an exponent outside that range (`1e+21`, `1.5e-7`). `-0`
+/// is `"0"`; NaN and infinities are `"NaN"`, `"Infinity"` and `"-Infinity"`.
+/// When two shortest forms are equally close to `value`, the last digit can
+/// differ from JavaScript's, which picks the even one.
 #[must_use]
 pub fn to_string_double(value: f64) -> String {
-    to_string_double_decimal(value, false)
-}
-
-/// The exceptions `std::stof` throws (libstdc++: `what()` is `"stof"`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("stof")]
-pub enum StofError {
-    /// `std::invalid_argument`: nothing could be converted.
-    InvalidArgument,
-    /// `std::out_of_range`: a finite number outside the normal `f32` range.
-    OutOfRange,
-}
-
-impl StofError {
-    /// `what()`.
-    #[must_use]
-    pub fn what(&self) -> &'static str {
-        "stof"
+    if value == 0.0 {
+        "0".into()
+    } else if (1e-6..1e21).contains(&value.abs()) {
+        // `Display` writes the shortest round-trip digits without an exponent.
+        value.to_string()
+    } else if value.is_finite() {
+        // `LowerExp` writes the same digits as "1.5e-7" or "1e21".
+        let s = format!("{value:e}");
+        if s.contains("e-") { s } else { s.replacen('e', "e+", 1) }
+    } else if value.is_nan() {
+        "NaN".into()
+    } else if value > 0.0 {
+        "Infinity".into()
+    } else {
+        "-Infinity".into()
     }
 }
 
@@ -111,22 +62,6 @@ pub fn float_prefix(s: &str) -> &str {
     &s[..end]
 }
 
-/// `util::stof`: the number at the start of `s` ([`float_prefix`]) as `f32`.
-/// An error when there is none, or when a finite number overflows to infinity
-/// or is nonzero and below the normal range once rounded to `f32` precision
-/// with an unbounded exponent.
-pub fn stof(s: &str) -> Result<f32, StofError> {
-    let number = float_prefix(s);
-    let value: f32 = number.parse().map_err(|_| StofError::InvalidArgument)?;
-    let finite = number.bytes().any(|c| c.is_ascii_digit());
-    let mantissa = number.split(['e', 'E']).next().unwrap_or_default();
-    let nonzero = mantissa.bytes().any(|c| (b'1'..=b'9').contains(&c));
-    // Halfway between `f32::MIN_POSITIVE` and the 24-bit value below it.
-    let tiny = f64::from(f32::MIN_POSITIVE) * (1.0 - 2f64.powi(-25));
-    let underflow = nonzero && number.parse::<f64>().is_ok_and(|v| v.abs() < tiny);
-    if (finite && value.is_infinite()) || underflow { Err(StofError::OutOfRange) } else { Ok(value) }
-}
-
 /// `util::toHex(uint32_t)`.
 #[must_use]
 pub fn to_hex_u32(value: u32) -> String {
@@ -146,30 +81,20 @@ mod tests {
     #[test]
     fn doubles() {
         assert_eq!(to_string_double(0.0), "0");
-        assert_eq!(to_string_double(-0.0), "-0");
+        assert_eq!(to_string_double(-0.0), "0");
         assert_eq!(to_string_double(1.5), "1.5");
-        assert_eq!(to_string_double(1e21), "1e21");
-        assert_eq!(to_string_double(f64::NAN), "");
-        assert_eq!(to_string_double(f64::NEG_INFINITY), "");
-        assert_eq!(to_string_double_decimal(2.0, true), "2.0");
+        assert_eq!(to_string_double(-2.5), "-2.5");
         assert_eq!(to_string_double(255.0), "255");
-    }
-
-    #[test]
-    fn stof_errors() {
-        assert_eq!(stof("1.5x"), Ok(1.5));
-        assert_eq!(stof(" x"), Err(StofError::InvalidArgument));
-        assert_eq!(stof("1e39"), Err(StofError::OutOfRange));
-        assert_eq!(stof("1e-50"), Err(StofError::OutOfRange));
-        assert_eq!(stof("0"), Ok(0.0));
-        assert_eq!(stof("1e-40"), Err(StofError::OutOfRange));
-        assert_eq!(stof("1.1754943e-38"), Err(StofError::OutOfRange));
-        assert_eq!(stof("-1.1754943e-38"), Err(StofError::OutOfRange));
-        assert_eq!(stof("1.17549434e-38"), Ok(f32::MIN_POSITIVE));
-        assert_eq!(stof("1.17549435e-38"), Ok(f32::MIN_POSITIVE));
-        assert_eq!(stof("0e-999"), Ok(0.0));
-        assert_eq!(stof("-Infinity"), Ok(f32::NEG_INFINITY));
-        assert!(stof("nan").is_ok_and(f32::is_nan));
+        assert_eq!(to_string_double(0.1), "0.1");
+        assert_eq!(to_string_double(1e20), "100000000000000000000");
+        assert_eq!(to_string_double(1e21), "1e+21");
+        assert_eq!(to_string_double(0.000_001), "0.000001");
+        assert_eq!(to_string_double(1e-7), "1e-7");
+        assert_eq!(to_string_double(123.456e-10), "1.23456e-8");
+        assert_eq!(to_string_double(-1.5e300), "-1.5e+300");
+        assert_eq!(to_string_double(5e-324), "5e-324");
+        assert_eq!(to_string_double(f64::NAN), "NaN");
+        assert_eq!(to_string_double(f64::NEG_INFINITY), "-Infinity");
     }
 
     #[test]

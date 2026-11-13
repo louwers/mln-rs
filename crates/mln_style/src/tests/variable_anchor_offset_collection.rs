@@ -52,7 +52,7 @@ fn style_conversion() {
 
     // valid value
     {
-        let json_value = r#"["left",[1.0,2.0],"top",[0.0,0.0]]"#;
+        let json_value = r#"["left",[1,2],"top",[0,0]]"#;
         let variable_anchor_offset = parse(json_value, &mut error).expect("valid");
         assert_eq!(variable_anchor_offset.len(), 2);
         assert_eq!(variable_anchor_offset[0].anchor_type, SymbolAnchorType::Left);

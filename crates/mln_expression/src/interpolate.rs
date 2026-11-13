@@ -301,6 +301,7 @@ impl Expression for Interpolate {
         match self.color_space {
             ColorSpace::Lab => "interpolate-lab",
             ColorSpace::Hcl => "interpolate-hcl",
+            ColorSpace::Oklch => "interpolate-oklch",
             ColorSpace::Rgb => "interpolate",
         }
         .to_owned()
@@ -343,6 +344,7 @@ pub fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContext) -> P
     let color_space = match op.as_deref() {
         Some("interpolate-lab") => ColorSpace::Lab,
         Some("interpolate-hcl") => ColorSpace::Hcl,
+        Some("interpolate-oklch") => ColorSpace::Oklch,
         _ => ColorSpace::Rgb,
     };
 

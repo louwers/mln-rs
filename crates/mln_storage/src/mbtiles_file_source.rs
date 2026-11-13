@@ -3,8 +3,8 @@
 //
 // The database work runs on the "MBTilesFileSource" thread (`util::Thread`)
 // as in C++. The TileJSON is built as a rapidjson document would be (members
-// in insertion order, duplicates kept; json_document.rs) and written with
-// //vendor/rapidjson's `Writer`. Needs the `sqlite` feature.
+// in insertion order, duplicates kept; json_document.rs). Needs the `sqlite`
+// feature.
 //
 // A database that doesn't open or query, metadata whose zooms or scale don't
 // parse (`std::stoi`/`std::stod` throw), and data that doesn't decompress

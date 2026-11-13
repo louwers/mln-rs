@@ -267,6 +267,47 @@ release:
 test *args:  _dev-shell (cargo-install 'cargo-nextest')
     {{dev_shell}} cargo nextest run --workspace "$@"
 
+# AddressSanitizer stops a test at the first read or write of freed or out-of-bounds memory. rustc's sanitizers are unstable,
+# so the pinned nightly (fmt_toolchain) builds the tests, and std with them (-Zbuild-std). Each test binary of mln-rs-runtime,
+# mln-rs-vulkan and mln-rs-c runs as `cargo test` runs it, its tests in parallel, then the next, and rounds of them start
+# until `minutes` have passed: a race between threads can fail one run in a hundred. The first failure stops it. The tests
+# render with the backend MLN_RENDER_BACKEND names; CI's sanitizers workflow runs them on the Vulkan backend on lavapipe,
+# under Vulkan's validation layer. Leaks aren't checked, since an abandoned render session keeps its graphics objects
+# until the process exits, on purpose. The nightly warns where the pinned Rust doesn't, so warnings aren't errors here;
+# CI's lint job checks them.
+[doc("Run the runtime's, the Vulkan backend's and the C library's tests under AddressSanitizer, round after round, for `minutes`")]
+test-asan minutes='20':  _dev-shell (assert-cmd 'jq')
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! rustup component list --toolchain {{fmt_toolchain}} --installed 2> /dev/null | grep -q '^rust-src'; then
+        rustup toolchain install {{fmt_toolchain}} --profile minimal --component rust-src --no-self-update
+    fi
+    host="$(rustc +{{fmt_toolchain}} -vV | sed -n 's/^host: //p')"
+    export RUSTFLAGS=-Zsanitizer=address CARGO_BUILD_WARNINGS=warn CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/asan"
+    export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+    built="$({{dev_shell}} cargo +{{fmt_toolchain}} test -Zbuild-std --target "$host" -p mln-rs-runtime -p mln-rs-vulkan -p mln-rs-c --lib --tests --no-run --message-format=json \
+        | jq -r 'select(.profile.test and .executable) | [(.manifest_path | rtrimstr("/Cargo.toml")), .executable] | @tsv')"
+    dirs=()
+    executables=()
+    while IFS=$'\t' read -r dir executable; do
+        dirs+=("$dir")
+        executables+=("$executable")
+    done <<< "$built"
+    end=$((SECONDS + {{minutes}} * 60))
+    round=1
+    while true; do
+        for i in "${!executables[@]}"; do
+            if ! output="$(cd "${dirs[$i]}" && {{dev_shell}} "${executables[$i]}" -q 2>&1)"; then
+                printf '%s\n' "$output"
+                echo "${executables[$i]##*/} failed in round $round" >&2
+                exit 1
+            fi
+        done
+        echo "Round $round of ${#executables[@]} test binaries passed, $SECONDS s in"
+        [ "$SECONDS" -lt "$end" ] || break
+        round=$((round + 1))
+    done
+
 # Test documentation generation
 test-doc:  (docs '')
 

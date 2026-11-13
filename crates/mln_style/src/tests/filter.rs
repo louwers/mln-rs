@@ -45,42 +45,6 @@ fn invalid_filter(json: &str) {
     assert_ne!(error.message, "", "{json}");
 }
 
-fn write_json(writer: &mut rapidjson::Writer, value: &Value) {
-    match value {
-        Value::Null => {
-            writer.null();
-        }
-        Value::Bool(b) => {
-            writer.bool_(*b);
-        }
-        Value::Uint(t) => {
-            writer.uint64(*t);
-        }
-        Value::Int(t) => {
-            writer.int64(*t);
-        }
-        Value::Double(f) => {
-            // make sure integer values are stringified without trailing ".0".
-            if *f == f.floor() {
-                writer.int(*f as i32);
-            } else {
-                writer.double(*f);
-            }
-        }
-        Value::String(s) => {
-            writer.string(s);
-        }
-        Value::Array(arr) => {
-            writer.start_array();
-            for item in arr {
-                write_json(writer, item);
-            }
-            writer.end_array();
-        }
-        Value::Object(_) => {}
-    }
-}
-
 fn stringify_filter(json: &str) -> String {
     let mut error = Error::default();
     let filter = convert_json(json, &mut error);
@@ -88,10 +52,7 @@ fn stringify_filter(json: &str) -> String {
     assert_eq!(error.message, "");
 
     let value = filter.unwrap().serialize();
-
-    let mut writer = rapidjson::Writer::new();
-    write_json(&mut writer, &value);
-    writer.into_string()
+    mln_expression::value::stringify(&mln_expression::value::from_mbgl_value(&value))
 }
 
 fn s(v: &str) -> Value {

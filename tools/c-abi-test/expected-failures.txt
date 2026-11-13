@@ -8,20 +8,7 @@
 #
 # Implementing a function makes cases pass, and the command with `--update`
 # then shrinks this list, keeping the reasons of the cases that stay.
-abi/map/still_image.c:a_barrier_ends_a_still_image_demand_until_the_next  # a still image is one attempt per update, not a demand that waits, parks and ends
-abi/map/still_image.c:a_still_image_waits_for_the_next_session  # a still image is one attempt per update, not a demand that waits, parks and ends
-abi/map/still_image.c:host_demands_and_a_still_image_demand_never_replace_each_other  # a still image is one attempt per update, not a demand that waits, parks and ends
-abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default  # likely: a still map loads the tiles that come back into view again
-abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them  # likely: a still map loads the tiles that come back into view again
 abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api  # plugins are stubs: mln_plugin_get_register_function_v1 returns NULL
-abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features  # feature state stays in mln_runtime's store and never reaches the renderer
-abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_changes  # a feature-state change publishes no render update
-abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host  # feature state stays in mln_runtime's store and never reaches the renderer
-abi/render/invalidation.c:feature_state_stays_with_the_update_held_by_a_command_group  # feature state stays in mln_runtime's store and never reaches the renderer
-abi/style/feature_state.c:a_removed_source_takes_its_state_with_it  # feature state stays in mln_runtime's store and never reaches the renderer
-abi/style/feature_state.c:a_style_load_clears_every_source_state  # feature state stays in mln_runtime's store and never reaches the renderer
-abi/style/feature_state.c:rendered_features_carry_state_from_the_last_frame  # feature state stays in mln_runtime's store and never reaches the renderer
-abi/style/feature_state.c:typed_ids_reach_the_features_that_carry_them  # feature state stays in mln_runtime's store and never reaches the renderer
 abi/style/locale_expressions_icu.c:collator_follows_locale_extensions_and_sensitivity  # locale expressions ignore the locale: there is no ICU
 abi/style/locale_expressions_icu.c:number_format_follows_locale_currency_and_fraction_limits  # locale expressions ignore the locale: there is no ICU
 abi/style/locale_expressions_icu.c:resolved_locale_reports_the_language_and_honored_extensions  # locale expressions ignore the locale: there is no ICU

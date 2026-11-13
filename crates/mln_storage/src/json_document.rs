@@ -1,9 +1,8 @@
-// rapidjson's `Document` and C's `strtol` as the MBTiles and PMTiles file
-// sources use them to build TileJSON (platform/default/src/mln/storage/
+// The JSON object and C's `strtol` as the MBTiles and PMTiles file sources
+// use them to build TileJSON (platform/default/src/mln/storage/
 // mbtiles_file_source.cpp, pmtiles_file_source.cpp). Not in
 // mbtiles_file_source.rs, which needs the `sqlite` feature.
 
-use rapidjson::Writer;
 use serde_json::Value as Json;
 
 /// A rapidjson `Document` object: members in insertion order, duplicate
@@ -37,54 +36,10 @@ impl Document {
         &mut self.members.iter_mut().find(|(n, _)| n == name).expect("member").1
     }
 
-    /// `serialize(doc)`: `doc.Accept(Writer<StringBuffer>)`.
+    /// The object as JSON. A name that appears more than once is written
+    /// once, where it first appears, with the value added last.
     pub fn serialize(&self) -> String {
-        let mut w = Writer::new();
-        w.start_object();
-        for (name, value) in &self.members {
-            w.key(name);
-            write_json(&mut w, value);
-        }
-        w.end_object();
-        w.into_string()
-    }
-}
-
-fn write_json(w: &mut Writer, value: &Json) {
-    match value {
-        Json::Null => {
-            w.null();
-        }
-        Json::Bool(b) => {
-            w.bool_(*b);
-        }
-        Json::Number(n) => {
-            if let Some(u) = n.as_u64() {
-                w.uint64(u);
-            } else if let Some(i) = n.as_i64() {
-                w.int64(i);
-            } else {
-                w.double(n.as_f64().unwrap_or_default());
-            }
-        }
-        Json::String(s) => {
-            w.string(s);
-        }
-        Json::Array(values) => {
-            w.start_array();
-            for v in values {
-                write_json(w, v);
-            }
-            w.end_array();
-        }
-        Json::Object(map) => {
-            w.start_object();
-            for (k, v) in map {
-                w.key(k);
-                write_json(w, v);
-            }
-            w.end_object();
-        }
+        Json::Object(self.members.iter().cloned().collect()).to_string()
     }
 }
 

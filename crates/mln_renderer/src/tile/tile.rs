@@ -93,6 +93,11 @@ pub struct TileBase {
     pub pending: Cell<bool>,
     pub loaded: Cell<bool>,
 
+    /// Port-only: the necessity that the tile's pyramid last retained the
+    /// tile with. A tile retained as optional only looks in the cache, so
+    /// one that isn't renderable then loads nothing.
+    pub retained_necessity: Cell<TileNecessity>,
+
     /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
     /// version this tile's buckets hold; 0 for buckets that have none.
     pub feature_state_version: Cell<u64>,
@@ -115,6 +120,7 @@ impl TileBase {
             renderable: Cell::new(false),
             pending: Cell::new(false),
             loaded: Cell::new(false),
+            retained_necessity: Cell::new(TileNecessity::Optional),
             feature_state_version: Cell::new(0),
             observer: RefCell::new(observer.unwrap_or_else(|| Rc::new(NullTileObserver))),
         }

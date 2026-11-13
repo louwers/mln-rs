@@ -31,7 +31,6 @@ use crate::Error;
 use crate::geometry_tile_data::fixup_polygons;
 
 static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
-static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
 /// The MVT geometry types, as fast-mvt reads a feature's type.
 const POINT: i32 = 1;
@@ -92,40 +91,6 @@ impl<'l> VectorMVTTileFeature<'l> {
         }
         Ok(self.properties.get_or_init(|| properties))
     }
-
-    /// `getGeometries`: scaled to `util::EXTENT`. A malformed geometry is
-    /// logged and gives an empty collection. Version 1 polygons go through
-    /// `fixupPolygons`; if that fails, the unfixed lines are kept for the
-    /// next call, as in C++.
-    pub fn try_get_geometries(&self) -> Result<&GeometryCollection, Error> {
-        if let Some(lines) = self.lines.get() {
-            return Ok(lines);
-        }
-
-        let scale = EXTENT as f32 / self.layer.extent() as f32;
-
-        let mut lines = match decode_geometry(self.feature.geometry_commands(), scale) {
-            Ok(rings) => GeometryCollection::from(rings),
-            Err(what) => {
-                Log::error(Event::ParseTile, format!("Could not get geometries: {what}"));
-                GeometryCollection::new()
-            }
-        };
-
-        if self.layer.version() < 2 && self.feature.geom_type_value() == Some(POLYGON) {
-            match fixup_polygons(&lines) {
-                Ok(fixed) => lines = fixed,
-                Err(e) => {
-                    // C++ has already stored the decoded lines when
-                    // fixupPolygons throws: the next call returns them.
-                    let _ = self.lines.set(lines);
-                    return Err(e);
-                }
-            }
-        }
-
-        Ok(self.lines.get_or_init(|| lines))
-    }
 }
 
 impl GeometryTileFeature for VectorMVTTileFeature<'_> {
@@ -159,14 +124,25 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
         self.feature.id().map_or(Identifier::Null, Identifier::Uint)
     }
 
+    /// Scaled to `util::EXTENT`. A malformed geometry is logged and gives
+    /// an empty collection. Version 1 polygons go through
+    /// [`fixup_polygons`].
     fn get_geometries(&self) -> &GeometryCollection {
-        match self.try_get_geometries() {
-            Ok(lines) => lines,
-            Err(e) => {
-                self.keep_error(&e);
-                &EMPTY_GEOMETRIES
+        self.lines.get_or_init(|| {
+            let scale = EXTENT as f32 / self.layer.extent() as f32;
+            let lines = match decode_geometry(self.feature.geometry_commands(), scale) {
+                Ok(rings) => GeometryCollection::from(rings),
+                Err(what) => {
+                    Log::error(Event::ParseTile, format!("Could not get geometries: {what}"));
+                    return GeometryCollection::new();
+                }
+            };
+            if self.layer.version() < 2 && self.feature.geom_type_value() == Some(POLYGON) {
+                fixup_polygons(&lines)
+            } else {
+                lines
             }
-        }
+        })
     }
 
     fn error(&self) -> Option<MlnError> {

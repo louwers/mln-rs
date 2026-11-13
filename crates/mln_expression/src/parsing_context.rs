@@ -181,7 +181,7 @@ fn expression_registry(name: &str) -> Option<ParseFunction> {
         "distance" => Distance::parse,
         "format" => FormatExpression::parse,
         "image" => ImageExpression::parse,
-        "interpolate" | "interpolate-hcl" | "interpolate-lab" => parse_interpolate,
+        "interpolate" | "interpolate-hcl" | "interpolate-lab" | "interpolate-oklch" => parse_interpolate,
         "length" => Length::parse,
         "let" => Let::parse,
         "literal" => Literal::parse,

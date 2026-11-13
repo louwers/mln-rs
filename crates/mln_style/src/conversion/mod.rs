@@ -27,7 +27,6 @@ pub mod rotation;
 pub mod sky;
 pub mod source;
 pub mod sprite;
-pub mod stringify;
 pub mod tileset;
 pub mod transition_options;
 

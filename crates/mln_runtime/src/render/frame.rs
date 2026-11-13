@@ -50,9 +50,10 @@ pub enum FrameDisposition {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameResult {
     pub disposition: FrameDisposition,
-    /// The token of the demand that the result finishes, or `None` for a
-    /// frame that the session rendered for
-    /// [`Map::request_still_image`](crate::Map::request_still_image).
+    /// The token of the demand that the result finishes, or `None` for the
+    /// session's demand of a still image that
+    /// [`Map::request_still_image`](crate::Map::request_still_image) asked
+    /// for.
     pub token: Option<u64>,
     /// The map update that a rendered frame shows, or the latest one for a
     /// demand that rendered nothing. The frame includes a command's change

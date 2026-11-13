@@ -1,0 +1,43 @@
+name: sanitizers
+
+# The runtime's, the Vulkan backend's and the C library's tests under
+# AddressSanitizer (`just test-asan`), nightly and on demand. They run round
+# after round for a while: a race between threads can fail one run in a
+# hundred, which the ci workflow's one run per push rarely shows.
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: How long to keep starting rounds of the tests, in minutes
+        default: '20'
+
+permissions:
+  contents: read
+
+jobs:
+  # On the Vulkan backend on lavapipe, under Vulkan's validation layer, as
+  # the ci workflow's vulkan leg runs them. No Rust cache: the build is a
+  # nightly one with its own std, and the cache stays the ci workflow's.
+  asan:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    env:
+      MLN_RENDER_BACKEND: vulkan
+      MLN_VULKAN_VALIDATION: abort
+      MINUTES: ${{ inputs.minutes || '20' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install lavapipe
+        uses: ./.github/actions/lavapipe
+        with:
+          validation-layer: true
+
+      - uses: taiki-e/install-action@v2
+        with: { tool: just }
+
+      - name: Test
+        run: just test-asan "$MINUTES"

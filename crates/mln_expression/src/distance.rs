@@ -912,7 +912,7 @@ fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<geoj
         if length != 2 {
             ctx.error(format!(
                 "'distance' expression requires one argument, but found {} instead.",
-                mln_util::string::to_string_u64(length.wrapping_sub(1) as u64)
+                length.wrapping_sub(1)
             ));
             return None;
         }

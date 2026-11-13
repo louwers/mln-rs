@@ -5,15 +5,12 @@
 //
 // rapidjson parsing is serde_json (as everywhere in the port); `IsDouble()`
 // is `is_f64()` (a number written with a fraction or exponent, or an integer
-// too large for 64 bits). Encoding writes through //vendor/rapidjson's
-// `Writer`, so the stored definitions are byte-identical to C++'s.
+// too large for 64 bits).
 
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::geometry::Geometry;
-use rapidjson::Writer;
-use rapidjson::writer::Type;
-use serde_json::Value as Json;
+use serde_json::{Map, Value as Json};
 
 use crate::response::ResourceError;
 
@@ -253,45 +250,29 @@ pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDe
 /// `encodeOfflineRegionDefinition(const OfflineRegionDefinition&)`.
 #[must_use]
 pub fn encode_offline_region_definition(region: &OfflineRegionDefinition) -> String {
-    let mut w = Writer::new();
-    w.start_object();
+    let mut json = Map::new();
 
     // Encode common properties
-    w.key("style_url");
-    w.string(region.style_url());
-    w.key("min_zoom");
-    w.double(region.min_zoom());
+    json.insert("style_url".into(), region.style_url().into());
+    json.insert("min_zoom".into(), region.min_zoom().into());
     if region.max_zoom().is_finite() {
-        w.key("max_zoom");
-        w.double(region.max_zoom());
+        json.insert("max_zoom".into(), region.max_zoom().into());
     }
-
-    w.key("pixel_ratio");
-    w.double(f64::from(region.pixel_ratio()));
-    w.key("include_ideographs");
-    w.bool_(region.include_ideographs());
+    json.insert("pixel_ratio".into(), f64::from(region.pixel_ratio()).into());
+    json.insert("include_ideographs".into(), region.include_ideographs().into());
 
     // Encode specific properties
     match region {
         OfflineRegionDefinition::TilePyramid(region) => {
-            w.key("bounds");
-            w.start_array();
-            w.double(region.bounds.south());
-            w.double(region.bounds.west());
-            w.double(region.bounds.north());
-            w.double(region.bounds.east());
-            w.end_array();
+            let bounds = &region.bounds;
+            json.insert("bounds".into(), [bounds.south(), bounds.west(), bounds.north(), bounds.east()].into());
         }
         OfflineRegionDefinition::Geometry(region) => {
-            w.key("geometry");
-            let geometry = geojson::stringify_geometry(&region.geometry);
-            let type_ = if matches!(region.geometry, Geometry::Empty) { Type::Null } else { Type::Object };
-            w.raw_value(&geometry, type_);
+            json.insert("geometry".into(), geojson::to_json_geometry(&region.geometry));
         }
     }
 
-    w.end_object();
-    w.into_string()
+    Json::Object(json).to_string()
 }
 
 /// Arbitrary binary region metadata. The contents are opaque to the mbgl

@@ -3,7 +3,7 @@
 use mln_util::chrono::{Duration, Timestamp};
 use mln_util::constants::{EARTH_RADIUS_M, M2PI};
 use mln_util::font_stack::{FontStack, font_stack_to_string};
-use mln_util::string::{to_string_double, to_string_i32};
+use mln_util::string::to_string_double;
 use mln_util::tileset::Scheme;
 use mln_util::token::replace_tokens;
 use mln_util::url::{URL, percent_encode, substr};
@@ -248,9 +248,9 @@ impl Resource {
         let hex = b"0123456789abcdef";
         let url = replace_tokens(url_template, |token: &str| -> Option<String> {
             match token {
-                "z" => Some(to_string_i32(i32::from(z))),
-                "x" => Some(to_string_i32(x)),
-                "y" => Some(to_string_i32(y)),
+                "z" => Some(z.to_string()),
+                "x" => Some(x.to_string()),
+                "y" => Some(y.to_string()),
                 "quadkey" => Some(get_quad_key(x, y, z)),
                 // The spec defines `{bbox}` as `{bbox-epsg-3857}` under every
                 // projection mln-rs has: mercator, globe and vertical-perspective.
