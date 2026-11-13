@@ -84,10 +84,6 @@ fn marker(sdf: bool) -> Arc<mln_style::image::Impl> {
     )
 }
 
-fn camera() -> CameraOptions {
-    CameraOptions::default()
-}
-
 fn lat_lng(latitude: f64, longitude: f64) -> LatLng {
     LatLng::new(latitude, longitude).expect("a coordinate")
 }
@@ -186,13 +182,15 @@ impl<F: Frontend> SymbolRenderingTest<F> {
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         let observer = Rc::new(StubMapObserver::default());
-        let mut map =
-            Map::with_file_source(file_source, MapOptions::new().with_map_mode(mode).with_size(Size::new(256, 256)))
-                .unwrap();
+        let mut map = Map::with_file_source(
+            file_source,
+            MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
+        )
+        .unwrap();
         frontend.attach(&map);
         map.style_mut().load_json(&colliding_symbols_style(count, spacing, kind));
         map.style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
-        map.jump_to(&camera().with_center(Some(lat_lng(5.0, 5.0))).with_zoom(Some(4.0)));
+        map.jump_to(&CameraOptions { center: Some(lat_lng(5.0, 5.0)), zoom: Some(4.0), ..Default::default() });
         let map = Rc::new(RefCell::new(map));
         let events = observer.observe(&map);
         SymbolRenderingTest { _events: events, run_loop, frontend, observer, map }
@@ -225,15 +223,15 @@ fn collision_rejected_symbols_do_not_draw() {
 #[test]
 fn collision_visibility_updates_existing_drawables() {
     let test = SymbolRenderingTest::new(2, 0.5, SymbolKind::Icon, MapMode::Static);
-    test.jump_to(camera().with_center(Some(lat_lng(5.0, 5.25))).with_zoom(Some(4.1)));
+    test.jump_to(CameraOptions { center: Some(lat_lng(5.0, 5.25)), zoom: Some(4.1), ..Default::default() });
     let overlapping = test.render();
     assert_eq!(overlapping.stats.num_draw_calls, 1);
 
-    test.jump_to(camera().with_zoom(Some(4.9)));
+    test.jump_to(CameraOptions { zoom: Some(4.9), ..Default::default() });
     let separated = test.render();
     assert_eq!(separated.stats.num_draw_calls, 2);
 
-    test.jump_to(camera().with_zoom(Some(4.1)));
+    test.jump_to(CameraOptions { zoom: Some(4.1), ..Default::default() });
     let overlapping_again = test.render();
     assert_eq!(overlapping_again.stats.num_draw_calls, 1);
     assert_eq!(overlapping.image, overlapping_again.image);
@@ -263,7 +261,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
     }
 
     let test = SymbolRenderingTest::new(2, 0.5, SymbolKind::Icon, MapMode::Continuous);
-    test.jump_to(camera().with_center(Some(lat_lng(5.0, 5.25))).with_zoom(Some(4.9)));
+    test.jump_to(CameraOptions { center: Some(lat_lng(5.0, 5.25)), zoom: Some(4.9), ..Default::default() });
 
     let phase = Rc::new(Cell::new(Phase::Initial));
     let failures = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -292,7 +290,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
                     }
                     *initial_image.borrow_mut() = Some(frontend.read_still_image());
                     phase.set(Phase::Colliding);
-                    map.borrow_mut().jump_to(&camera().with_zoom(Some(4.1)));
+                    map.borrow_mut().jump_to(&CameraOptions { zoom: Some(4.1), ..Default::default() });
                 }
                 Phase::Colliding => {
                     // A committed collision keeps the fading symbol's
@@ -307,7 +305,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
                         failures.borrow_mut().push("the colliding symbol didn't fade out".to_owned());
                     }
                     phase.set(Phase::Reappearing);
-                    map.borrow_mut().jump_to(&camera().with_zoom(Some(4.9)));
+                    map.borrow_mut().jump_to(&CameraOptions { zoom: Some(4.9), ..Default::default() });
                 }
                 Phase::Reappearing => {
                     if status.needs_repaint {
@@ -337,7 +335,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
 fn collision_fade_intermediate_frames() {
     let test =
         SymbolRenderingTest::with_frontend(TimedHeadlessFrontend::new, 2, 0.5, SymbolKind::Icon, MapMode::Continuous);
-    test.jump_to(camera().with_center(Some(lat_lng(5.0, 5.25))).with_zoom(Some(4.9)));
+    test.jump_to(CameraOptions { center: Some(lat_lng(5.0, 5.25)), zoom: Some(4.9), ..Default::default() });
 
     let fully_loaded = Rc::new(Cell::new(false));
     {
@@ -373,7 +371,7 @@ fn collision_fade_intermediate_frames() {
 
     // Rotation makes the icon collision boxes overlap without zoom's fade
     // adjustment.
-    test.jump_to(camera().with_bearing(Some(45.0)));
+    test.jump_to(CameraOptions { bearing: Some(45.0), ..Default::default() });
     let fade_out_start = frame(2000);
     let fade_out_middle = frame(2150);
     let fade_out_end = frame(2400);
@@ -387,7 +385,7 @@ fn collision_fade_intermediate_frames() {
     assert_eq!(hidden.stats.num_draw_calls, 1);
     assert_eq!(hidden.image, fade_out_end.image);
 
-    test.jump_to(camera().with_bearing(Some(0.0)));
+    test.jump_to(CameraOptions { bearing: Some(0.0), ..Default::default() });
     let fade_in_start = frame(3000);
     let fade_in_middle = frame(3150);
     let fade_in_end = frame(3400);

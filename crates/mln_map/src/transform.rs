@@ -626,7 +626,7 @@ impl Transform {
                     self.get_lat_lng(WrapMode::Wrapped).latitude(),
                     center.latitude(),
                 );
-            self.ease_to(&camera.with_zoom(Some(zoom)), &AnimationOptions::default());
+            self.ease_to(&CameraOptions { zoom: Some(zoom), ..*camera }, &AnimationOptions::default());
             return;
         }
         self.ease_to(camera, &AnimationOptions::default());
@@ -817,19 +817,17 @@ impl Transform {
                     interpolate(&start_zoom, &zoom, t),
                 )
             };
-            CameraOptions::default()
-                .with_center(frame_lat_lng)
-                .with_zoom(Some(frame_zoom))
-                .with_center_altitude(Some(interpolate(&start_center_alt, &center_alt, t)))
-                .with_bearing(Some(-mln_math::rad2deg(mln_math::wrap(
-                    interpolate(&start_bearing, &bearing, t),
-                    -PI,
-                    PI,
-                ))))
-                .with_padding(interpolate_edge_insets(&start_edge_insets, &padding, t))
-                .with_pitch(Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, t))))
-                .with_roll(Some(mln_math::rad2deg(interpolate(&start_roll, &roll, t))))
-                .with_fov(Some(mln_math::rad2deg(interpolate(&start_fov, &fov, t))))
+            CameraOptions {
+                center: frame_lat_lng,
+                zoom: Some(frame_zoom),
+                center_altitude: Some(interpolate(&start_center_alt, &center_alt, t)),
+                bearing: Some(-mln_math::rad2deg(mln_math::wrap(interpolate(&start_bearing, &bearing, t), -PI, PI))),
+                padding: interpolate_edge_insets(&start_edge_insets, &padding, t),
+                pitch: Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, t))),
+                roll: Some(mln_math::rad2deg(interpolate(&start_roll, &roll, t))),
+                fov: Some(mln_math::rad2deg(interpolate(&start_fov, &fov, t))),
+                ..Default::default()
+            }
         });
 
         // On the globe the zoom keeps the planet's size as the center's
@@ -838,9 +836,9 @@ impl Transform {
         // (an anchored one gets its center from the anchor).
         let moves_center = input_camera.center.is_some() || lat_lng_end.wrapped() != start_lat_lng.wrapped();
         let fields = if globe && moves_around_anchor {
-            input_camera.with_zoom(Some(zoom))
+            CameraOptions { zoom: Some(zoom), ..*input_camera }
         } else if globe && moves_center {
-            input_camera.with_center(Some(lat_lng_end)).with_zoom(Some(zoom))
+            CameraOptions { center: Some(lat_lng_end), zoom: Some(zoom), ..*input_camera }
         } else {
             *input_camera
         };
@@ -1157,19 +1155,17 @@ impl Transform {
                 // Convert to geographic coordinates and set the new viewpoint.
                 (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), frame_zoom)
             };
-            CameraOptions::default()
-                .with_center(frame_lat_lng)
-                .with_zoom(Some(frame_zoom))
-                .with_center_altitude(Some(interpolate(&start_center_alt, &center_alt, us)))
-                .with_bearing(Some(-mln_math::rad2deg(mln_math::wrap(
-                    interpolate(&start_bearing, &bearing, k),
-                    -PI,
-                    PI,
-                ))))
-                .with_padding(interpolate_edge_insets(&start_edge_insets, &padding, k))
-                .with_pitch(Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, k))))
-                .with_roll(Some(mln_math::rad2deg(interpolate(&start_roll, &roll, k))))
-                .with_fov(Some(mln_math::rad2deg(interpolate(&start_fov, &fov, k))))
+            CameraOptions {
+                center: frame_lat_lng,
+                zoom: Some(frame_zoom),
+                center_altitude: Some(interpolate(&start_center_alt, &center_alt, us)),
+                bearing: Some(-mln_math::rad2deg(mln_math::wrap(interpolate(&start_bearing, &bearing, k), -PI, PI))),
+                padding: interpolate_edge_insets(&start_edge_insets, &padding, k),
+                pitch: Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, k))),
+                roll: Some(mln_math::rad2deg(interpolate(&start_roll, &roll, k))),
+                fov: Some(mln_math::rad2deg(interpolate(&start_fov, &fov, k))),
+                ..Default::default()
+            }
         });
 
         self.start_transition(input_camera, animation, frame, duration, !linear_zoom_interpolation);
@@ -1232,23 +1228,27 @@ impl Transform {
             let frame: FrameFn = Rc::new(move |state: &TransformState, t: f64| {
                 let camera = VerticalPerspectiveProjection::interpolate_camera(&start, &end, t);
                 let center = state.constrained_center(&camera.center, state.get_zoom());
-                CameraOptions::default()
-                    .with_center(Some(center))
-                    .with_zoom(Some(
+                CameraOptions {
+                    center: Some(center),
+                    zoom: Some(
                         start_zoom
                             + VerticalPerspectiveProjection::zoom_adjustment(
                                 start.center.latitude(),
                                 center.latitude(),
                             ),
-                    ))
-                    .with_bearing(Some(camera.bearing))
+                    ),
+                    bearing: Some(camera.bearing),
+                    ..Default::default()
+                }
             });
             // The fling sets the center, the zoom that keeps the planet's
             // size and the bearing.
-            let fields = CameraOptions::default()
-                .with_center(Some(end.center))
-                .with_zoom(Some(start_zoom))
-                .with_bearing(Some(end.bearing));
+            let fields = CameraOptions {
+                center: Some(end.center),
+                zoom: Some(start_zoom),
+                bearing: Some(end.bearing),
+                ..Default::default()
+            };
             self.start_transition(&fields, animation, frame, duration, false);
             return Ok(());
         }
@@ -1265,7 +1265,7 @@ impl Transform {
             if (center.longitude() - longitude).abs() > 180.0 {
                 center = lat_lng(center.latitude(), longitude + 179.5f64.copysign(center.longitude() - longitude));
             }
-            self.ease_to(&CameraOptions::default().with_center(Some(center)), animation);
+            self.ease_to(&CameraOptions { center: Some(center), ..Default::default() }, animation);
             return Ok(());
         }
 
@@ -1291,7 +1291,7 @@ impl Transform {
             let mut center = if self.globe_free_bearing {
                 let drag =
                     VerticalPerspectiveProjection::drag_camera(&self.state, &flipped(&self.state, &grab), &pan_delta);
-                camera = camera.with_bearing(Some(drag.bearing));
+                camera = CameraOptions { bearing: Some(drag.bearing), ..camera };
                 drag.center
             } else {
                 VerticalPerspectiveProjection::drag_center(&self.state, &flipped(&self.state, &grab), &pan_delta)
@@ -1302,7 +1302,7 @@ impl Transform {
                     self.get_lat_lng(WrapMode::Wrapped).latitude(),
                     center.latitude(),
                 );
-            self.ease_to(&camera.with_center(Some(center)).with_zoom(Some(zoom)), animation);
+            self.ease_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..camera }, animation);
             return Ok(());
         }
 
@@ -1330,7 +1330,7 @@ impl Transform {
         let point_on_screen = ScreenCoordinate::new(center.x - center_offset.x, center.y - center_offset.y);
         // Use unwrapped LatLng to carry information about moveBy direction.
         let center = self.screen_coordinate_to_lat_lng(&point_on_screen, WrapMode::Unwrapped)?;
-        self.ease_to(&CameraOptions::default().with_center(Some(center)), animation);
+        self.ease_to(&CameraOptions { center: Some(center), ..Default::default() }, animation);
         Ok(())
     }
 
@@ -1434,7 +1434,7 @@ impl Transform {
                     &Point::new(second.x - center.x, second.y - center.y),
                 ),
         );
-        self.ease_to(&CameraOptions::default().with_bearing(Some(bearing)), animation);
+        self.ease_to(&CameraOptions { bearing: Some(bearing), ..Default::default() }, animation);
     }
 
     pub fn get_bearing(&self) -> f64 {
@@ -2093,8 +2093,10 @@ impl Transform {
                     break;
                 }
             };
-            let mut camera =
-                CameraOptions::default().with_center(Some(if bounded { unwrapped } else { unwrapped.wrapped() }));
+            let mut camera = CameraOptions {
+                center: Some(if bounded { unwrapped } else { unwrapped.wrapped() }),
+                ..Default::default()
+            };
             let mut zoom = self.state.get_zoom();
             self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
             self.state.set_lat_lng_zoom(&camera.center.unwrap_or(unwrapped), zoom);
@@ -2140,7 +2142,7 @@ impl Transform {
             self.state.get_min_zoom_at_latitude(center.latitude()),
             self.state.get_max_zoom(),
         );
-        let mut camera = CameraOptions::default().with_center(Some(center));
+        let mut camera = CameraOptions { center: Some(center), ..Default::default() };
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut target);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or(center), target);
         // The altitude in meters holds before the anchor correction, which

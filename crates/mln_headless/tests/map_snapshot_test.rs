@@ -10,7 +10,7 @@ fn a_rendered_still_shows_in_the_snapshot() {
     let _run_loop = RunLoop::new();
     let size = Size::new(64, 64);
     let mut frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
-    let mut map = Map::new(MapOptions::new().with_map_mode(MapMode::Static).with_size(size)).unwrap();
+    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }).unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(
         r#"{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"red"}}]}"#,

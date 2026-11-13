@@ -1026,7 +1026,7 @@ impl GestureRecognizer {
         let target = clamp_zoom(camera, zoom_of(camera) + zoom);
         let update = CameraUpdate {
             mode: CameraUpdateMode::Ease,
-            camera: CameraOptions::default().with_center(Some(center)).with_zoom(Some(target)),
+            camera: CameraOptions { center: Some(center), zoom: Some(target), ..Default::default() },
             animation: self.animation(BOX_EASE_MS, EASE),
             phase: GesturePhase::None,
         };

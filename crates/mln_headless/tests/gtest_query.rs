@@ -224,7 +224,7 @@ fn query_rendered_features_line_offset_endpoint() {
             }}}}}},"layers":[{{"id":"layer","type":"line","source":"source","paint":{{
                 "line-width":6,"line-offset":{offset:.6}}}}}]}}"#
         ));
-        test.map().jump_to(&CameraOptions::default().with_center(Some(ll(1.0, 1.003))).with_zoom(Some(16.5)));
+        test.map().jump_to(&CameraOptions { center: Some(ll(1.0, 1.003)), zoom: Some(16.5), ..Default::default() });
         let rendered_result = test.render();
         let endpoint = test.map().pixel_for_lat_lng(&ll(1.0, 1.0035));
         // Stay inside the butt cap, away from antialiased edges.
@@ -288,7 +288,7 @@ fn query_rendered_features_composite_paint_zoom() {
                     "{property}":["interpolate",["linear"],["zoom"],{lower_zoom},["get","small"],
                     {upper_zoom},["get","large"]]}}}}]}}"#
             ));
-            test.map().jump_to(&CameraOptions::default().with_center(Some(ll(1.0, 1.003))).with_zoom(Some(zoom)));
+            test.map().jump_to(&CameraOptions { center: Some(ll(1.0, 1.003)), zoom: Some(zoom), ..Default::default() });
             let rendered_result = test.render();
             let center = test.map().pixel_for_lat_lng(&ll(1.0, 1.003));
             let inside = ScreenCoordinate::new(center.x, center.y + inside_offset);
@@ -342,7 +342,11 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
             let style = map.style_mut();
             style.get_layer_mut(layer_id).expect("layer").set_filter(&equal_zoom);
         }
-        test.map().jump_to(&CameraOptions::default().with_center(Some(ll(1.003, 1.003))).with_zoom(Some(camera_zoom)));
+        test.map().jump_to(&CameraOptions {
+            center: Some(ll(1.003, 1.003)),
+            zoom: Some(camera_zoom),
+            ..Default::default()
+        });
         test.render();
         let point = test.map().pixel_for_lat_lng(&ll(1.003, 1.003));
         for layer_id in ["layer1", "circle_layer"] {
@@ -573,7 +577,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     cluster_layer.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("test-icon")));
     cluster_layer.set_icon_size(&PropertyValue::Constant(12.0));
 
-    test.map().jump_to(&CameraOptions::default().with_center(Some(coordinate)).with_zoom(Some(0.0)));
+    test.map().jump_to(&CameraOptions { center: Some(coordinate), zoom: Some(0.0), ..Default::default() });
     test.map().style_mut().add_source(Box::new(source)).unwrap();
     test.map().style_mut().add_layer(Box::new(cluster_layer), None).unwrap();
     test.0.run_loop.run_once();

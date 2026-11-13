@@ -18,31 +18,3 @@ pub struct BoundOptions {
     /// Sets the minimum pitch.
     pub min_pitch: Option<f64>,
 }
-
-impl BoundOptions {
-    #[must_use]
-    pub fn with_lat_lng_bounds(mut self, b: LatLngBounds) -> Self {
-        self.bounds = Some(b);
-        self
-    }
-    #[must_use]
-    pub fn with_min_zoom(mut self, z: f64) -> Self {
-        self.min_zoom = Some(z);
-        self
-    }
-    #[must_use]
-    pub fn with_max_zoom(mut self, z: f64) -> Self {
-        self.max_zoom = Some(z);
-        self
-    }
-    #[must_use]
-    pub fn with_min_pitch(mut self, p: f64) -> Self {
-        self.min_pitch = Some(p);
-        self
-    }
-    #[must_use]
-    pub fn with_max_pitch(mut self, p: f64) -> Self {
-        self.max_pitch = Some(p);
-        self
-    }
-}

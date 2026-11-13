@@ -158,11 +158,13 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         Some(faces.to_owned())
     };
     let options = MapOptions {
-        map: ::mln_map::MapOptions::new()
-            .with_map_mode(mode)
-            .with_size(Size::new(extent.width, extent.height))
-            .with_pixel_ratio(extent.scale_factor as f32)
-            .with_fast_pfor_enabled(options.fast_pfor_enabled),
+        map: ::mln_map::MapOptions {
+            map_mode: mode,
+            size: Size::new(extent.width, extent.height),
+            pixel_ratio: extent.scale_factor as f32,
+            fast_pfor_enabled: options.fast_pfor_enabled,
+            ..Default::default()
+        },
         event_mask,
         fallback_font_faces,
         tile_cache_enabled: fields.get(MLN_MAP_OPTION_TILE_CACHE_ENABLED, options.tile_cache_enabled).unwrap_or(true),

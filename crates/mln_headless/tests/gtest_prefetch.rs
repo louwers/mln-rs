@@ -42,7 +42,7 @@ fn prefetch_tiles() {
     let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
     let map = Map::with_file_source(
         file_source.clone(),
-        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
+        MapOptions { map_mode: MapMode::Continuous, size: frontend.get_size(), ..Default::default() },
     )
     .unwrap();
     frontend.attach(&map);
@@ -72,11 +72,11 @@ fn prefetch_tiles() {
             // Force tile reloading.
             map.style_mut().load_json(&read_file("test/fixtures/map/prefetch/empty.json"));
             map.style_mut().load_json(&read_file("test/fixtures/map/prefetch/style.json"));
-            map.jump_to(
-                &CameraOptions::default()
-                    .with_center(Some(LatLng::new(40.726_989, -73.992_857).unwrap()))
-                    .with_zoom(Some(f64::from(zoom))),
-            ); // Manhattan
+            map.jump_to(&CameraOptions {
+                center: Some(LatLng::new(40.726_989, -73.992_857).unwrap()),
+                zoom: Some(f64::from(zoom)),
+                ..Default::default()
+            }); // Manhattan
         }
         run_with_timeout(&run_loop, 10);
 

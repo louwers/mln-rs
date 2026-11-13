@@ -28,8 +28,10 @@ const STYLE: &str =
     r##"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#00ff00"}}]}"##;
 
 fn map(runtime: &Runtime) -> Map {
-    let options =
-        MapOptions::new(mln_map::MapOptions::new().with_size(Size::new(256, 256)).with_map_mode(MapMode::Continuous));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: MapMode::Continuous, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     wait(map.set_style_json(STYLE));

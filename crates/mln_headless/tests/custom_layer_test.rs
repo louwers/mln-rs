@@ -85,7 +85,7 @@ fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&
     };
     let mut frontend = HeadlessFrontend::with_device(device, size, 1.0, true, Arc::default()).expect("a frontend");
     let mut map =
-        Map::new(MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(1.0)).unwrap();
+        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }).unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(STYLE);
     map.style_mut().add_custom_layer("quad", host, before).expect("the custom layer");

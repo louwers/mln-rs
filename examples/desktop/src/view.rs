@@ -131,7 +131,7 @@ pub(crate) fn run(launch: Launch) {
     let map_size = logical_size(size, pixel_ratio);
 
     let mut map = match Map::with_resource_options(
-        MapOptions::new().with_size(map_size).with_pixel_ratio(pixel_ratio as f32),
+        MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
         &file_sources,
         &resource_options,
     ) {
@@ -144,19 +144,19 @@ pub(crate) fn run(launch: Launch) {
     renderer.set_event_queue(Some(map.renderer_events()));
     let updates = map.update_reader();
 
-    if let Err(e) = map.set_bounds(&BoundOptions::default().with_max_pitch(settings.max_pitch)) {
+    if let Err(e) = map.set_bounds(&BoundOptions { max_pitch: Some(settings.max_pitch), ..Default::default() }) {
         Log::warning(Event::Setup, e.message);
     }
-    map.jump_to(
-        &CameraOptions::default()
-            .with_center(LatLng::new(settings.latitude, settings.longitude).ok())
-            .with_center_altitude(Some(settings.altitude))
-            .with_zoom(Some(settings.zoom))
-            .with_bearing(Some(settings.bearing))
-            .with_pitch(Some(settings.pitch))
-            .with_roll(Some(settings.roll))
-            .with_fov(Some(settings.fov)),
-    );
+    map.jump_to(&CameraOptions {
+        center: LatLng::new(settings.latitude, settings.longitude).ok(),
+        center_altitude: Some(settings.altitude),
+        zoom: Some(settings.zoom),
+        bearing: Some(settings.bearing),
+        pitch: Some(settings.pitch),
+        roll: Some(settings.roll),
+        fov: Some(settings.fov),
+        ..Default::default()
+    });
     map.set_debug(MapDebugOptions(settings.debug));
     map.set_globe_free_bearing(settings.free_bearing);
 
@@ -632,7 +632,7 @@ impl View {
             Action::ResetNorth => {
                 let north = CameraUpdate {
                     mode: CameraUpdateMode::Ease,
-                    camera: CameraOptions::default().with_bearing(Some(0.0)).with_pitch(Some(0.0)),
+                    camera: CameraOptions { bearing: Some(0.0), pitch: Some(0.0), ..Default::default() },
                     animation: AnimationOptions::new(Duration::from_millis(500)),
                     phase: GesturePhase::None,
                 };

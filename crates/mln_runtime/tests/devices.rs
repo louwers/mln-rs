@@ -23,7 +23,10 @@ fn style(color: &str) -> String {
 }
 
 fn map_of(runtime: &Runtime, color: &str) -> Map {
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     wait(map.set_style_json(style(color)));

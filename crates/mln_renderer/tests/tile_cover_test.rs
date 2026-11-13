@@ -134,13 +134,13 @@ mod tile_cover {
         let mut transform = transform(512, 512);
         // slightly offset center so that tile order is better defined
 
-        transform.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(ll(0.1, -0.1)))
-                .with_zoom(Some(2.0))
-                .with_bearing(Some(5.0))
-                .with_pitch(Some(40.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(0.1, -0.1)),
+            zoom: Some(2.0),
+            bearing: Some(5.0),
+            pitch: Some(40.0),
+            ..Default::default()
+        });
 
         assert_eq!(
             vec![os(2, 1, 1), os(2, 2, 1), os(2, 1, 2), os(2, 2, 2)],
@@ -157,13 +157,13 @@ mod tile_cover {
     fn pitch_issue15442() {
         let mut transform = transform(412, 691);
 
-        transform.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(ll(59.116_898_740_996_106, 91.565_660_781_803_62)))
-                .with_zoom(Some(2.055_112_674_841_721_4))
-                .with_bearing(Some(mln_math::rad2deg(0.749_639_382_565_672_6)))
-                .with_pitch(Some(mln_math::rad2deg(1.047_197_551_196_597_6))),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(59.116_898_740_996_106, 91.565_660_781_803_62)),
+            zoom: Some(2.055_112_674_841_721_4),
+            bearing: Some(mln_math::rad2deg(0.749_639_382_565_672_6)),
+            pitch: Some(mln_math::rad2deg(1.047_197_551_196_597_6)),
+            ..Default::default()
+        });
 
         assert_eq!(
             vec![os(2, 3, 1), os(2, 2, 1), os(2, 3, 0), os(2, 2, 0), osw(2, 1, 2, 0, 0), osw(2, 1, 2, 1, 0)],
@@ -184,13 +184,13 @@ mod tile_cover {
         let mut transform = transform(512, 512);
         // slightly offset center so that tile order is better defined
 
-        transform.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(ll(0.1, -0.1)))
-                .with_zoom(Some(2.0))
-                .with_bearing(Some(5.0))
-                .with_pitch(Some(60.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(0.1, -0.1)),
+            zoom: Some(2.0),
+            bearing: Some(5.0),
+            pitch: Some(60.0),
+            ..Default::default()
+        });
 
         let mut params = params(&transform);
         params.tile_lod_pitch_threshold = 0.0;
@@ -222,14 +222,14 @@ mod tile_cover {
     fn pitch_over_allowed_by_content_insets() {
         let mut transform = transform(512, 512);
 
-        transform.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(ll(0.1, -0.1)))
-                .with_padding(Some(EdgeInsets::new(376.0, 0.0, 0.0, 0.0).unwrap()))
-                .with_zoom(Some(8.0))
-                .with_bearing(Some(45.0))
-                .with_pitch(Some(60.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(0.1, -0.1)),
+            padding: Some(EdgeInsets::new(376.0, 0.0, 0.0, 0.0).unwrap()),
+            zoom: Some(8.0),
+            bearing: Some(45.0),
+            pitch: Some(60.0),
+            ..Default::default()
+        });
         // Top padding of 376 leads to capped pitch. See Transform::getMaxPitchForEdgeInsets.
         assert!(transform.get_pitch() + 0.001 <= mln_math::deg2rad(60.0));
 
@@ -250,14 +250,14 @@ mod tile_cover {
 
         // The values used here triggered the regression with left and right edge
         // selection in tile_cover.cpp scanSpans.
-        transform.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(ll(0.1, -0.1)))
-                .with_padding(Some(EdgeInsets::new(400.0, 0.0, 0.0, 0.0).unwrap()))
-                .with_zoom(Some(5.0))
-                .with_bearing(Some(-142.263_000_000_352_92))
-                .with_pitch(Some(60.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(0.1, -0.1)),
+            padding: Some(EdgeInsets::new(400.0, 0.0, 0.0, 0.0).unwrap()),
+            zoom: Some(5.0),
+            bearing: Some(-142.263_000_000_352_92),
+            pitch: Some(60.0),
+            ..Default::default()
+        });
 
         let cover = tile_cover(&params(&transform), 5, ZOOM_RANGE, None);
         // Returned vector has above 100 elements, we check first 16 as there is a
@@ -310,7 +310,7 @@ mod tile_cover {
     #[test]
     fn coordinates_are_unwrapped() {
         let mut transform = transform(512, 512);
-        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.1, -180.1))).with_zoom(Some(1.0)));
+        transform.jump_to(&CameraOptions { center: Some(ll(0.1, -180.1)), zoom: Some(1.0), ..Default::default() });
 
         assert_eq!(
             vec![osw(1, 0, 1, 1, 0), osw(1, 1, 1, 0, 0), osw(1, 0, 1, 1, 1), osw(1, 1, 1, 0, 1)],
@@ -331,7 +331,7 @@ mod tile_cover {
         let mut transform = transform(512, 512);
         // slightly offset center so that tile order is better defined
 
-        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.1, -0.1))).with_zoom(Some(2.0)));
+        transform.jump_to(&CameraOptions { center: Some(ll(0.1, -0.1)), zoom: Some(2.0), ..Default::default() });
 
         assert_eq!(
             vec![osw(3, 0, 2, 1, 1), osw(3, 0, 2, 2, 1), osw(3, 0, 2, 1, 2), osw(3, 0, 2, 2, 2)],
@@ -350,9 +350,12 @@ mod tile_cover {
     #[test]
     fn different_overscaled_z_with_pitch() {
         let mut transform = transform(512, 512);
-        transform.jump_to(
-            &CameraOptions::default().with_center(Some(ll(30.0, -10.0))).with_zoom(Some(3.5)).with_pitch(Some(61.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(30.0, -10.0)),
+            zoom: Some(3.5),
+            pitch: Some(61.0),
+            ..Default::default()
+        });
 
         let expected = vec![
             osw(5, 0, 3, 3, 3),
@@ -374,7 +377,7 @@ mod tile_cover {
     #[test]
     fn different_overscaled_z_wrapped() {
         let mut transform = transform(512, 512);
-        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.1, -180.1))).with_zoom(Some(1.0)));
+        transform.jump_to(&CameraOptions { center: Some(ll(0.1, -180.1)), zoom: Some(1.0), ..Default::default() });
 
         assert_eq!(
             vec![osw(2, 0, 1, 1, 0), osw(2, 1, 1, 0, 0), osw(2, 0, 1, 1, 1), osw(2, 1, 1, 0, 1)],
@@ -394,7 +397,7 @@ mod tile_cover {
     fn flipped_y() {
         let mut transform = transform(512, 512);
         transform.set_viewport_mode(ViewportMode::FlippedY);
-        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.2, -0.1))).with_zoom(Some(1.0)));
+        transform.jump_to(&CameraOptions { center: Some(ll(0.2, -0.1)), zoom: Some(1.0), ..Default::default() });
 
         assert_eq!(
             vec![os(1, 0, 0), os(1, 1, 0), os(1, 0, 1), os(1, 1, 1)],
@@ -411,13 +414,13 @@ mod tile_cover {
     fn flipped_y_pitch() {
         let mut transform = transform(512, 512);
         transform.set_viewport_mode(ViewportMode::FlippedY);
-        transform.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(ll(0.1, -0.1)))
-                .with_zoom(Some(2.0))
-                .with_bearing(Some(5.0))
-                .with_pitch(Some(40.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(0.1, -0.1)),
+            zoom: Some(2.0),
+            bearing: Some(5.0),
+            pitch: Some(40.0),
+            ..Default::default()
+        });
 
         assert_eq!(
             vec![os(2, 1, 1), os(2, 2, 1), os(2, 1, 2), os(2, 2, 2)],
@@ -434,9 +437,11 @@ mod tile_cover {
     fn flipped_y_helsinki() {
         let mut transform = transform(512, 512);
         transform.set_viewport_mode(ViewportMode::FlippedY);
-        transform.jump_to(
-            &CameraOptions::default().with_center(Some(ll(60.167_231, 24.942_063))).with_zoom(Some(11.447_425)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(60.167_231, 24.942_063)),
+            zoom: Some(11.447_425),
+            ..Default::default()
+        });
 
         assert_eq!(
             vec![os(11, 1165, 592), os(11, 1166, 592), os(11, 1165, 593), os(11, 1166, 593)],
@@ -770,13 +775,13 @@ mod tile_cover {
         transform.resize(size).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
         transform.set_max_pitch(80.0);
-        transform.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(center))
-                .with_zoom(Some(zoom))
-                .with_pitch(Some(pitch))
-                .with_bearing(Some(bearing)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(center),
+            zoom: Some(zoom),
+            pitch: Some(pitch),
+            bearing: Some(bearing),
+            ..Default::default()
+        });
         assert!(transform.get_state().is_globe_rendering());
     }
 
@@ -1099,7 +1104,7 @@ mod tile_cover {
     fn globe_zoom_zero_is_the_whole_planet() {
         let mut transform = transform(512, 512);
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-        transform.jump_to(&CameraOptions::default().with_center(Some(ll(40.0, 10.0))).with_zoom(Some(0.0)));
+        transform.jump_to(&CameraOptions { center: Some(ll(40.0, 10.0)), zoom: Some(0.0), ..Default::default() });
         assert_eq!(vec![os(0, 0, 0)], tile_cover(&params(&transform), 0, ZOOM_RANGE, None));
     }
 
@@ -1108,9 +1113,9 @@ mod tile_cover {
     fn globe_cover_survives_the_antimeridian() {
         let mut transform = transform(512, 512);
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(1.0)));
+        transform.jump_to(&CameraOptions { center: Some(ll(0.0, 179.0)), zoom: Some(1.0), ..Default::default() });
         let mut before = tile_cover(&params(&transform), 1, Range::new(0, 14), None);
-        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.0, -179.0))).with_zoom(Some(1.0)));
+        transform.jump_to(&CameraOptions { center: Some(ll(0.0, -179.0)), zoom: Some(1.0), ..Default::default() });
         let mut after = tile_cover(&params(&transform), 1, Range::new(0, 14), None);
         before.sort();
         after.sort();
@@ -1124,12 +1129,18 @@ mod tile_cover {
     fn globe_cover_follows_the_center_into_other_world_copies() {
         let mut transform = transform(512, 512);
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-        transform.jump_to(
-            &CameraOptions::default().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(6.0)).with_pitch(Some(50.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(10.0, 20.0)),
+            zoom: Some(6.0),
+            pitch: Some(50.0),
+            ..Default::default()
+        });
         let home = tile_cover(&params(&transform), 6, Range::new(0, 14), None);
         for step in 1..=6 {
-            transform.jump_to(&CameraOptions::default().with_center(Some(ll(10.0, 20.0 + 120.0 * f64::from(step)))));
+            transform.jump_to(&CameraOptions {
+                center: Some(ll(10.0, 20.0 + 120.0 * f64::from(step))),
+                ..Default::default()
+            });
         }
         assert_near(740.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
         let spun = tile_cover(&params(&transform), 6, Range::new(0, 14), None);

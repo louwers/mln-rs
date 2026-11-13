@@ -68,7 +68,7 @@ impl WebMap {
         let transport = SerializingTransport::new(|_| Box::new(WebWorkers { count, post }));
         renderer.set_tile_worker_transport(transport.clone());
         let mut map =
-            Map::new(MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32)).map_err(js_error)?;
+            Map::new(MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() }).map_err(js_error)?;
         map.set_waker(Some(Arc::new(wake_host)));
         renderer.set_event_queue(Some(map.renderer_events()));
         let frontend =

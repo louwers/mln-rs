@@ -444,8 +444,8 @@ impl Runtime {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
     /// empty size or a pixel ratio that isn't finite and positive.
     pub fn create_map(&self, options: MapOptions) -> Result<(Map, Completion<Applied>), Error> {
-        let size = options.map.size();
-        let pixel_ratio = options.map.pixel_ratio();
+        let size = options.map.size;
+        let pixel_ratio = options.map.pixel_ratio;
         if size.is_empty() {
             return Err(Error::invalid_argument("the map's size must not be empty"));
         }
