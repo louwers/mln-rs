@@ -5,16 +5,15 @@ version:
 
 - **mln-rs**, the package in the repository root. It depends on every
   library and re-exports each under its crate name: `mln_rs::mln_map`,
-  `mln_rs::mln_util`, `mln_rs::earcut`, and so on. Users depend on this one.
+  `mln_rs::mln_util`, `mln_rs::geojson_vt`, and so on. Users depend on this one.
 - **`mln-rs-<name>`**, one package per library under `crates/` and
-  `vendor/` (for example `mln-rs-util` for `mln_util`, `mln-rs-earcut` for
-  `earcut`). Their library names are unchanged, so the code still says
+  `vendor/` (for example `mln-rs-util` for `mln_util`, `mln-rs-geojson-vt` for
+  `geojson_vt`). Their library names are unchanged, so the code still says
   `mln_util::`. They exist for mln-rs only.
 - The test tooling the differential tests
   ([mln-rs-difftests](https://github.com/louwers/mln-rs-difftests)) use:
-  `mln-rs-render-test`, `mln-rs-style-codegen`, `mln-rs-pixelmatch` and
-  `mln-rs-earcut-test-fixtures`. mln-rs does not
-  depend on them.
+  `mln-rs-render-test`, `mln-rs-style-codegen` and `mln-rs-pixelmatch`.
+  mln-rs does not depend on them.
 
 The other `publish = false` packages (the desktop app, the browser build in
 examples/web and crates/mln_web_shaper, the expression test runner) are not

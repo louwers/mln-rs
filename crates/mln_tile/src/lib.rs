@@ -8,8 +8,8 @@
 //!   [`mlt`], the C++ MLT decoder's output model filled by the mlt-core crate,
 //! - the free functions of `geometry_tile_data.cpp` →
 //!   [`geometry_tile_data`] (`classify_rings`, `limit_holes`,
-//!   `fixup_polygons` on `//vendor/wagyu`, `convert_geometry`,
-//!   `convert_feature`, `to_geometry_collection`, `round_polygon_corners`);
+//!   `fixup_polygons` on `i_overlay`, `convert_geometry`, `convert_feature`,
+//!   `to_geometry_collection`, `round_polygon_corners`);
 //!   the interfaces are in `mln_tile_id`.
 //!
 //! This crate is deliberately low in the crate graph (no style, renderer or

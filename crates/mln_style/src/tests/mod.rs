@@ -10,7 +10,6 @@ mod conversion_padding;
 mod conversion_projection;
 mod conversion_property_value;
 mod conversion_source_options;
-mod conversion_stringify;
 mod conversion_tileset;
 mod expression_global_state;
 mod filter;

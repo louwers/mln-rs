@@ -18,7 +18,6 @@ doctest = false
 [dependencies]
 feature.workspace = true
 geometry.workspace = true
-rapidjson.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 

@@ -314,3 +314,35 @@ fn geojsonvt_clip_vertex_on_tile_border() {
     assert!((0.660_622 - clip_start1).abs() <= k_epsilon);
     assert!((1.0 - clip_end1).abs() <= k_epsilon);
 }
+
+/// Twice the signed area of a ring, positive for clockwise with y down.
+fn shoelace(ring: &[Point<i16>]) -> i64 {
+    let mut sum = 0;
+    for (p, q) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+        sum += i64::from(p.x) * i64::from(q.y) - i64::from(q.x) * i64::from(p.y);
+    }
+    sum
+}
+
+#[test]
+fn polygon_rings_are_closed_and_rewound() {
+    // The first polygon is wound as RFC 7946 wants, the second the other
+    // way round, both with a hole. The second one's outer ring is open.
+    let data = r#"{
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]], [[10, 10], [10, 30], [30, 30], [30, 10], [10, 10]]],
+            [[[-40, 0], [-40, 40], [-80, 40], [-80, 0]], [[-50, 10], [-70, 10], [-70, 30], [-50, 30], [-50, 10]]]
+        ]
+    }"#;
+    let mut index = GeoJSONVT::from_geojson(&geojson::parse(data).unwrap(), Options::default());
+    let tile = index.get_tile(0, 0, 0).unwrap();
+    let Geometry::MultiPolygon(polygons) = &tile.features[0].geometry else { panic!("{:?}", tile.features) };
+    assert_eq!(polygons.len(), 2);
+    for polygon in polygons {
+        assert_eq!(polygon.len(), 2);
+        assert!(polygon.iter().all(|ring| ring.first() == ring.last()), "{polygon:?}");
+        assert!(shoelace(&polygon[0]) > 0, "outer ring {:?}", polygon[0]);
+        assert!(shoelace(&polygon[1]) < 0, "hole {:?}", polygon[1]);
+    }
+}

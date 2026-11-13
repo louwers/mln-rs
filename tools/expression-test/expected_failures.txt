@@ -2,4 +2,19 @@
 # Rust port today and pass in the C++ runner. The corpus_test (`cargo test -p
 # mln-rs-expression-test`) fails only on tests that fail and are not listed
 # here. Reasons:
-# (none)
+# - All four: the csscolorparser crate converts colors in f32, so a channel is
+#   up to 1e-6 off, which changes the 6th significant digit the harness
+#   compares.
+# - to-color/oklch: the crate reads oklch(), unlike CSS Color 4 and the fixture:
+#   - oklch(1.2 0.1 30), oklch(120% 0.1 30): clamps the lightness only to 0,
+#     so these clip to white.
+#   - oklch(0.6 1e110 90), oklch(0.6 1e104 30): the chroma overflows f32, so
+#     they don't parse.
+#   - oklch(0.6, 0.1, 90): reads commas.
+#   - oklch(0.6 0.1 90 0.5): reads an alpha without its slash.
+#   - oklch (0.6 0.1 90): reads a space before the parenthesis.
+#   - oklch(1. 0.1 90): reads a number that ends in a dot.
+interpolate-lab/linear-color
+interpolate-oklch/missing-hue
+interpolate-oklch/outside-srgb
+to-color/oklch

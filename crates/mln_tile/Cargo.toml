@@ -17,12 +17,12 @@ doctest = false
 fast-mvt.workspace = true
 feature.workspace = true
 geometry.workspace = true
+i_overlay.workspace = true
 mln_math.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mlt-core.workspace = true
 thiserror.workspace = true
-wagyu.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

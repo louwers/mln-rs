@@ -63,10 +63,9 @@ fn offline_geometry_region_definition_encode_decode() {
     assert_eq!(decoded.include_ideographs, region.include_ideographs);
 }
 
-// The encoding is rapidjson's (member order, number format); C++ output for
-// these definitions.
+// The members are in C++'s order.
 #[test]
-fn encoding_matches_rapidjson() {
+fn encoding() {
     let region = OfflineTilePyramidRegionDefinition::new(
         "https://example.com/style",
         LatLngBounds::hull(LatLng::new(37.6609, -122.5744).unwrap(), LatLng::new(37.8271, -122.3204).unwrap()),

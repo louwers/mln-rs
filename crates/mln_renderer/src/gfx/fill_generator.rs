@@ -20,6 +20,7 @@ use crate::buckets::fill_bucket::{FillBucket, FillLayoutVertex};
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::gfx::fill_large_mesh_arrays::{MeshLines, fill_large_mesh_arrays};
 use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
+use crate::util::triangulate::triangulate;
 
 fn add_ring_vertices(vertices: &mut Vec<FillLayoutVertex>, ring: &GeometryCoordinates) -> usize {
     for point in ring {
@@ -230,7 +231,7 @@ pub fn generate_fill_and_outline_buffers(
         }
 
         // tessellate, if no triangles are provided
-        let indices: Vec<u32> = earcut::earcut::<u32, _, _>(&polygon[..]);
+        let indices: Vec<u32> = triangulate(&polygon[..]);
 
         add_fill_indices(fill_segments, fill_indexes, &indices, start_vertices, total_vertices);
     }

@@ -1,8 +1,8 @@
 // Ports include/mln/style/expression/value.hpp and
-// src/mln/style/expression/value.cpp, plus the parts of
-// src/mln/style/conversion/stringify.hpp that `stringify` uses.
+// src/mln/style/expression/value.cpp.
 
 use feature::{Value as MbglValue, ValueObject};
+use mln_conversion::value_to_json;
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
     LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType, ResamplingType,
@@ -10,12 +10,13 @@ use mln_style_types::{
     TextTransformType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::enum_::Enum;
+use mln_util::string::to_string_double;
 use mln_util::{Color, Padding};
+use serde::Serialize;
 
 use crate::collator::Collator;
 use crate::formatted::Formatted;
 use crate::image::Image;
-use crate::json_writer::Writer;
 use crate::type_::{self, Type};
 
 /// The object alternative of `expression::Value`.
@@ -214,11 +215,14 @@ pub fn type_of(value: &Value) -> Type {
     }
 }
 
-/// `expression::toString(const Value&)`.
+/// `toString(value)` in GL JS: strings, numbers and booleans as
+/// `String(value)`, colors as `rgba(...)`, `null` as `""`, and every other
+/// value as [`stringify()`] writes it.
 #[must_use]
 pub fn to_string(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
+        Value::Number(n) => to_string_double(*n),
         Value::Color(c) => c.stringify(),                          // avoid quoting
         Value::VariableAnchorOffsetCollection(v) => v.to_string(), // avoid quoting
         Value::Formatted(f) => f.to_string(),
@@ -228,118 +232,56 @@ pub fn to_string(value: &Value) -> String {
     }
 }
 
-fn write_json(writer: &mut Writer, value: &Value) {
+/// A JSON number, or `null` for NaN and infinities, as `JSON.stringify`
+/// writes them.
+fn json_number(n: f64) -> serde_json::Value {
+    serde_json::Number::from_f64(n).map_or(serde_json::Value::Null, serde_json::Value::Number)
+}
+
+fn to_json(value: &Value) -> serde_json::Value {
+    use serde_json::Value as Json;
     match value {
-        Value::Null => writer.null(),
-        Value::Bool(b) => writer.bool_(*b),
-        Value::Number(f) => {
-            // make sure integer values are stringified without trailing ".0".
-            if *f == f.floor() {
-                writer.int(static_cast_int(*f));
-            } else {
-                writer.double(*f);
-            }
-        }
-        Value::String(s) => writer.string(s),
-        Value::Color(c) => writer.string(&c.stringify()),
-        Value::Padding(p) => stringify_padding(writer, p),
-        // `conversion::stringify(writer, const ProjectionDefinition&)`: its
-        // serialized mln::Value.
-        Value::ProjectionDefinition(p) => stringify_mbgl(writer, &p.serialize()),
-        Value::VariableAnchorOffsetCollection(v) => stringify_variable_anchor_offset_collection(writer, v),
+        Value::Null => Json::Null,
+        Value::Bool(b) => Json::Bool(*b),
+        Value::Number(n) => json_number(*n),
+        Value::String(s) => Json::String(s.clone()),
+        Value::Color(c) => Json::String(c.stringify()),
+        // `toArray()`: top, right, bottom, left.
+        Value::Padding(p) => Json::Array([p.top, p.right, p.bottom, p.left].map(|v| json_number(v.into())).into()),
+        Value::ProjectionDefinition(p) => value_to_json(&p.serialize()),
+        Value::VariableAnchorOffsetCollection(v) => value_to_json(&v.serialize()),
         Value::Collator(_) => {
             // Collators are excluded from constant folding and there's no
             // Literal parser for them so there shouldn't be any way to
             // serialize this value.
             debug_assert!(false, "stringify of a Collator");
+            Json::Null
         }
-        // `stringify` in turns calls ValueConverter::fromExpressionValue
-        // below. Serialization strategy for Formatted objects is to return
-        // the constant expression that would generate them.
-        Value::Formatted(f) => stringify_mbgl(writer, &to_mbgl_value(&Value::Formatted(f.clone()))),
-        Value::Image(i) => stringify_mbgl(writer, &to_mbgl_value(&Value::Image(i.clone()))),
-        Value::Array(arr) => {
-            writer.start_array();
-            for item in arr {
-                write_json(writer, item);
-            }
-            writer.end_array();
-        }
-        Value::Object(obj) => {
-            writer.start_object();
-            for (k, v) in obj {
-                writer.key(k);
-                write_json(writer, v);
-            }
-            writer.end_object();
-        }
+        // Serialization strategy for Formatted objects is to return the
+        // constant expression that would generate them.
+        Value::Formatted(_) | Value::Image(_) => value_to_json(&to_mbgl_value(value)),
+        Value::Array(arr) => Json::Array(arr.iter().map(to_json).collect()),
+        Value::Object(obj) => Json::Object(obj.iter().map(|(k, v)| (k.clone(), to_json(v))).collect()),
     }
 }
 
-/// `static_cast<int>(double)` for an integral double as clang compiles it on
-/// x86-64 (`cvttsd2si`): out-of-range values become `INT_MIN`.
-fn static_cast_int(f: f64) -> i32 {
-    if (-2_147_483_648.0..2_147_483_648.0).contains(&f) { f as i32 } else { i32::MIN }
-}
+/// Writes numbers as JavaScript does (see [`to_string_double`]).
+struct JsNumbers;
 
-/// `conversion::stringify(writer, const Padding&)` (via `toArray()`).
-fn stringify_padding(writer: &mut Writer, p: &Padding) {
-    writer.start_array();
-    writer.double(f64::from(p.top));
-    writer.double(f64::from(p.right));
-    writer.double(f64::from(p.bottom));
-    writer.double(f64::from(p.left));
-    writer.end_array();
-}
-
-/// `conversion::stringify(writer, const VariableAnchorOffsetCollection&)`.
-fn stringify_variable_anchor_offset_collection(writer: &mut Writer, v: &VariableAnchorOffsetCollection) {
-    writer.start_array();
-    for pair in v {
-        writer.string(pair.anchor_type.to_string());
-        writer.start_array();
-        writer.double(f64::from(pair.offset[0]));
-        writer.double(f64::from(pair.offset[1]));
-        writer.end_array();
-    }
-    writer.end_array();
-}
-
-/// `conversion::stringify(writer, const mln::Value&)`.
-pub(crate) fn stringify_mbgl(writer: &mut Writer, v: &MbglValue) {
-    match v {
-        MbglValue::Null => writer.null(),
-        MbglValue::Bool(b) => writer.bool_(*b),
-        MbglValue::Uint(u) => writer.uint64(*u),
-        MbglValue::Int(i) => writer.int64(*i),
-        MbglValue::Double(d) => {
-            writer.double(*d);
-        }
-        MbglValue::String(s) => writer.string(s),
-        MbglValue::Array(a) => {
-            writer.start_array();
-            for e in a {
-                stringify_mbgl(writer, e);
-            }
-            writer.end_array();
-        }
-        MbglValue::Object(m) => {
-            writer.start_object();
-            for (k, v) in m {
-                writer.key(k);
-                stringify_mbgl(writer, v);
-            }
-            writer.end_object();
-        }
+impl serde_json::ser::Formatter for JsNumbers {
+    fn write_f64<W: ?Sized + std::io::Write>(&mut self, writer: &mut W, value: f64) -> std::io::Result<()> {
+        writer.write_all(to_string_double(value).as_bytes())
     }
 }
 
-/// `expression::stringify(const Value&)`.
+/// `value` as GL JS's `JSON.stringify(value)` writes it: compact, with
+/// JavaScript's number formatting, and `null` for NaN and infinities.
 #[must_use]
 pub fn stringify(value: &Value) -> String {
-    let mut writer = Writer::new();
-    write_json(&mut writer, value);
-    writer.into_string()
+    let mut json = Vec::new();
+    // Writing to a Vec doesn't fail, and serde_json writes UTF-8.
+    let _ = to_json(value).serialize(&mut serde_json::Serializer::with_formatter(&mut json, JsNumbers));
+    String::from_utf8(json).unwrap_or_default()
 }
 
 /// `ValueConverter<mln::Value>::toExpressionValue` (`FromMBGLValue`).
@@ -691,5 +633,19 @@ mod tests {
         assert!(Value::is_safe_integer_f64(9_007_199_254_740_991.0));
         assert!(!Value::is_safe_integer_f64(9_007_199_254_740_992.0));
         assert!(!Value::is_safe_integer_i64(i64::MIN));
+    }
+
+    /// `to-string` follows GL JS: `String(n)` for a number, and
+    /// `JSON.stringify` for an array or object.
+    #[test]
+    fn to_string_formats_numbers_as_javascript() {
+        let n = Value::Number;
+        assert_eq!(to_string(&n(1.0)), "1");
+        assert_eq!(to_string(&n(1e21)), "1e+21");
+        assert_eq!(to_string(&n(f64::NAN)), "NaN");
+        let array = Value::Array(vec![n(1.0), n(0.5), n(1e10), n(f64::INFINITY)]);
+        assert_eq!(to_string(&array), "[1,0.5,10000000000,null]");
+        let object = Value::Object([("a\n".to_owned(), n(-0.0))].into_iter().collect());
+        assert_eq!(to_string(&object), r#"{"a\n":0}"#);
     }
 }

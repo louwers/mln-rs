@@ -151,15 +151,10 @@
 "crates/mln_webgpu/src/shaders/shader_group.rs" = 2
 "crates/mln_webgpu/src/shaders/shader_source.rs" = 1
 "crates/mln_webgpu/src/upload_pass.rs" = 1
-"vendor/csscolorparser/src/lib.rs" = 3
 "vendor/geojson-vt/src/lib.rs" = 2
-"vendor/geojson/src/geojson_impl.rs" = 5
+"vendor/geojson/src/geojson_impl.rs" = 4
 "vendor/pmtiles/src/lib.rs" = 2
-"vendor/rapidjson/src/internal/dtoa.rs" = 1
-"vendor/rapidjson/src/writer.rs" = 3
 "vendor/supercluster/src/lib.rs" = 1
-"vendor/wagyu/src/build_result.rs" = 1
-"vendor/wagyu/src/topology_correction.rs" = 1
 
 [todo-port]
 "crates/mln_actor/src/established_actor.rs" = 1
@@ -186,7 +181,6 @@
 "crates/mln_gfx/src/drawable_builder.rs" = 4
 "crates/mln_gfx/src/renderer_backend.rs" = 1
 "crates/mln_gfx/src/rendering_stats.rs" = 1
-"crates/mln_gfx/src/shaders/program_parameters.rs" = 1
 "crates/mln_gfx/src/shaders/segment.rs" = 1
 "crates/mln_gfx/src/shaders/shader_defines.rs" = 1
 "crates/mln_gfx/src/upload_pass.rs" = 1
@@ -267,9 +261,8 @@
 "tools/render-test/src/render_test.rs" = 2
 "tools/render-test/src/runner.rs" = 10
 "tools/render-test/src/tests.rs" = 1
-"vendor/geojson/src/geojson_impl.rs" = 5
+"vendor/geojson/src/geojson_impl.rs" = 4
 "vendor/geojson/src/lib.rs" = 1
 "vendor/geojson/tests/geojson.rs" = 1
 "vendor/geometry/src/lib.rs" = 1
 "vendor/pmtiles/src/lib.rs" = 1
-"vendor/wagyu/src/wagyu.rs" = 1

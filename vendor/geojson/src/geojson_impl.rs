@@ -19,7 +19,6 @@ use feature::{Feature, Identifier, PropertyMap, Value};
 use geometry::{
     Geometry, GeometryCollection, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
-use rapidjson::Writer;
 use serde_json::Value as Json;
 
 use crate::{Error, FeatureCollection, GeoJSON};
@@ -346,14 +345,7 @@ pub fn parse_feature_collection(json: &str) -> Result<FeatureCollection<f64>> {
     convert_feature_collection(&parse_document(json)?)
 }
 
-// --- convert to JSON / stringify ---
-//
-// The C++ builds a rapidjson value (`convert(const T&, allocator)`) and
-// stringify `Accept`s a `Writer` on it. `Accept` stops at the first handler
-// call that fails (a NaN or infinite double), leaving the output truncated;
-// the writers below return `false` at the same points. Object members come
-// in the order the C++ adds them; property maps in key order (C++:
-// `std::unordered_map` order).
+// --- stringify ---
 
 /// `to_type`
 fn geometry_type(geometry: &Geometry<f64>) -> &'static str {
@@ -369,165 +361,34 @@ fn geometry_type(geometry: &Geometry<f64>) -> &'static str {
     }
 }
 
-fn write_point(w: &mut Writer, p: &Point<f64>) -> bool {
-    w.start_array() && w.double(p.x) && w.double(p.y) && w.end_array()
-}
-
-fn write_array<T>(w: &mut Writer, items: &[T], mut write: impl FnMut(&mut Writer, &T) -> bool) -> bool {
-    if !w.start_array() {
-        return false;
-    }
-    for item in items {
-        if !write(w, item) {
-            return false;
-        }
-    }
-    w.end_array()
-}
-
-fn write_points(w: &mut Writer, points: &[Point<f64>]) -> bool {
-    write_array(w, points, write_point)
-}
-
-fn write_polygon(w: &mut Writer, polygon: &[LinearRing<f64>]) -> bool {
-    write_array(w, polygon, |w, r| write_points(w, r))
-}
-
-/// `to_coordinates_or_geometries`
-fn write_coordinates_or_geometries(w: &mut Writer, geometry: &Geometry<f64>) -> bool {
-    match geometry {
-        Geometry::Empty => unreachable!("to_coordinates_or_geometries(empty) aborts"),
-        Geometry::Point(p) => write_point(w, p),
-        Geometry::LineString(points) | Geometry::MultiPoint(points) => write_points(w, points),
-        Geometry::Polygon(polygon) => write_polygon(w, polygon),
-        Geometry::MultiLineString(lines) => write_array(w, lines, |w, l| write_points(w, l)),
-        Geometry::MultiPolygon(polygons) => write_array(w, polygons, |w, p| write_polygon(w, p)),
-        Geometry::GeometryCollection(geometries) => write_array(w, geometries, write_geometry),
-    }
-}
-
-/// `convert<geometry>(element, allocator)` + `Accept`
-fn write_geometry(w: &mut Writer, geometry: &Geometry<f64>) -> bool {
-    if let Geometry::Empty = geometry {
-        return w.null();
-    }
-
-    w.start_object()
-        && w.key("type")
-        && w.string(geometry_type(geometry))
-        && w.key(if matches!(geometry, Geometry::GeometryCollection(_)) { "geometries" } else { "coordinates" })
-        && write_coordinates_or_geometries(w, geometry)
-        && w.end_object()
-}
-
-/// `to_value`
-fn write_value(w: &mut Writer, value: &Value) -> bool {
-    match value {
-        Value::Null => w.null(),
-        Value::Bool(b) => w.bool_(*b),
-        Value::Int(i) => w.int64(*i),
-        Value::Uint(u) => w.uint64(*u),
-        Value::Double(d) => w.double(*d),
-        Value::String(s) => w.string(s),
-        Value::Array(values) => write_array(w, values, write_value),
-        Value::Object(map) => write_property_map(w, map),
-    }
-}
-
-fn write_property_map(w: &mut Writer, map: &PropertyMap) -> bool {
-    if !w.start_object() {
-        return false;
-    }
-    for (key, value) in map {
-        if !(w.key(key) && write_value(w, value)) {
-            return false;
-        }
-    }
-    w.end_object()
-}
-
-fn write_identifier(w: &mut Writer, id: &Identifier) -> bool {
-    match id {
-        Identifier::Null => w.null(),
-        Identifier::Uint(u) => w.uint64(*u),
-        Identifier::Int(i) => w.int64(*i),
-        Identifier::Double(d) => w.double(*d),
-        Identifier::String(s) => w.string(s),
-    }
-}
-
-/// `convert<feature>(element, allocator)` + `Accept`
-fn write_feature(w: &mut Writer, feature: &Feature<f64>) -> bool {
-    if !(w.start_object() && w.key("type") && w.string("Feature")) {
-        return false;
-    }
-
-    let id_written = matches!(feature.id, Identifier::Null) || (w.key("id") && write_identifier(w, &feature.id));
-    if !id_written {
-        return false;
-    }
-
-    w.key("geometry")
-        && write_geometry(w, &feature.geometry)
-        && w.key("properties")
-        && write_property_map(w, &feature.properties)
-        && w.end_object()
-}
-
-/// `convert<feature_collection>(collection, allocator)` + `Accept`
-fn write_feature_collection(w: &mut Writer, collection: &[Feature<f64>]) -> bool {
-    w.start_object()
-        && w.key("type")
-        && w.string("FeatureCollection")
-        && w.key("features")
-        && write_array(w, collection, write_feature)
-        && w.end_object()
-}
-
-fn write_geojson(w: &mut Writer, geojson: &GeoJSON) -> bool {
-    match geojson {
-        GeoJSON::Geometry(g) => write_geometry(w, g),
-        GeoJSON::Feature(f) => write_feature(w, f),
-        GeoJSON::FeatureCollection(c) => write_feature_collection(w, c),
-    }
-}
-
 /// `stringify(const geojson&)`
 #[must_use]
 pub fn stringify(geojson: &GeoJSON) -> String {
-    let mut w = Writer::new();
-    write_geojson(&mut w, geojson);
-    w.into_string()
+    to_json(geojson).to_string()
 }
 
 /// `stringify<geometry>`
 #[must_use]
 pub fn stringify_geometry(geometry: &Geometry<f64>) -> String {
-    let mut w = Writer::new();
-    write_geometry(&mut w, geometry);
-    w.into_string()
+    to_json_geometry(geometry).to_string()
 }
 
 /// `stringify<feature>`
 #[must_use]
 pub fn stringify_feature(feature: &Feature<f64>) -> String {
-    let mut w = Writer::new();
-    write_feature(&mut w, feature);
-    w.into_string()
+    to_json_feature(feature).to_string()
 }
 
 /// `stringify<feature_collection>`
 #[must_use]
 pub fn stringify_feature_collection(collection: &[Feature<f64>]) -> String {
-    let mut w = Writer::new();
-    write_feature_collection(&mut w, collection);
-    w.into_string()
+    to_json_feature_collection(collection).to_string()
 }
 
 // --- convert to a JSON value ---
 
-/// A double as a JSON number. TODO(port): rapidjson values hold NaN and
-/// infinities; `serde_json::Value` cannot, so they become `null`.
+/// A double as a JSON number, or `null` for NaN and infinities, which JSON
+/// can't hold.
 fn json_double(d: f64) -> Json {
     serde_json::Number::from_f64(d).map_or(Json::Null, Json::Number)
 }

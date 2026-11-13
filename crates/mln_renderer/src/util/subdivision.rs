@@ -12,6 +12,8 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 
+use crate::util::triangulate::triangulate;
+
 /// Pole vertices carry these Y coordinates; the globe vertex shader maps them
 /// to the poles.
 pub const NORTH_POLE_Y: i16 = -32768;
@@ -55,7 +57,7 @@ impl Subdivider {
             }
         }
 
-        let mut triangles = self.convert_indices(&flattened, &earcut::earcut::<u32, _, _>(&polygon[..]));
+        let mut triangles = self.convert_indices(&flattened, &triangulate(&polygon[..]));
         triangles = self.subdivide_triangles_scanline(&triangles);
 
         let mut lines: Vec<Vec<u32>> = Vec::new();

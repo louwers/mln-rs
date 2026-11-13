@@ -1,7 +1,7 @@
 // Ports the free functions of src/mln/tile/geometry_tile_data.cpp
-// (signedArea, toWagyuPath, toGeometryCollection, fixupPolygons,
-// classifyRings, limitHoles, both convertGeometry overloads, convertFeature,
-// roundPolygonCorners) and `ToGeometryCollection` from
+// (signedArea, toGeometryCollection, classifyRings, limitHoles, both
+// convertGeometry overloads, convertFeature, roundPolygonCorners), and
+// fixupPolygons on i_overlay instead of wagyu. and `ToGeometryCollection` from
 // geometry_tile_data.hpp. The interfaces (GeometryTileFeature & co.) are in
 // mln_tile_id::geometry_tile_data.
 
@@ -9,6 +9,10 @@ use std::f64::consts::PI;
 
 use feature::Feature;
 use geometry::{Geometry, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use i_overlay::core::fill_rule::FillRule;
+use i_overlay::core::overlay::{Overlay, ShapeType};
+use i_overlay::core::overlay_rule::OverlayRule;
+use i_overlay::i_float::int::point::IntPoint;
 use mln_tile_id::{CanonicalTileID, GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
@@ -36,43 +40,31 @@ fn signed_area(ring: &GeometryCoordinates) -> f64 {
     sum
 }
 
-/// `toWagyuPath`.
-fn to_wagyu_path(ring: &GeometryCoordinates) -> LinearRing<i32> {
-    let mut result = LinearRing::with_capacity(ring.len());
-    for p in ring {
-        result.push(Point::new(i32::from(p.x), i32::from(p.y)));
+/// Repairs the rings of a polygon from a version 1 vector tile, whose spec
+/// doesn't require them to be wound or simple: unions them with an even-odd
+/// fill. Gives each polygon's outer ring, wound clockwise with y down as
+/// version 2 wants, followed by its holes, wound the other way; every ring
+/// is closed.
+#[must_use]
+pub fn fixup_polygons(rings: &GeometryCollection) -> GeometryCollection {
+    let mut overlay = Overlay::new(rings.iter().map(Vec::len).sum());
+    for ring in rings.iter() {
+        overlay.add_path_iter(ring.iter().map(|p| IntPoint::new(i32::from(p.x), i32::from(p.y))), ShapeType::Subject);
     }
-    result
-}
 
-/// `toGeometryCollection(MultiPolygon<int16_t>&&)`.
-fn multipolygon_to_geometry_collection(multipolygon: MultiPolygon<i16>) -> GeometryCollection {
     let mut result = GeometryCollection::new();
-    for polygon in multipolygon {
-        for ring in polygon {
+    for shape in overlay.overlay(OverlayRule::Subject, FillRule::EvenOdd) {
+        for contour in shape {
+            // The union's vertices lie within the input's bounding box, so
+            // they fit an i16.
+            let mut ring: GeometryCoordinates = contour.iter().map(|p| Point::new(p.x as i16, p.y as i16)).collect();
+            if let Some(&first) = ring.first() {
+                ring.push(first);
+            }
             result.push(ring);
         }
     }
     result
-}
-
-/// `fixupPolygons`: fix up possibly-non-V2-compliant polygon geometry using
-/// angus clipper. The result is guaranteed to have correctly wound, strictly
-/// simple rings. wagyu throws `std::runtime_error` in a few degenerate
-/// cases; those propagate as in C++.
-pub fn fixup_polygons(rings: &GeometryCollection) -> Result<GeometryCollection, Error> {
-    let mut clipper = wagyu::Wagyu::new();
-
-    for ring in rings.iter() {
-        clipper.add_ring(&to_wagyu_path(ring), wagyu::PolygonType::Subject).map_err(Error::Runtime)?;
-    }
-
-    let mut multipolygon: MultiPolygon<i16> = MultiPolygon::new();
-    clipper
-        .execute(wagyu::ClipType::Union, &mut multipolygon, wagyu::FillType::EvenOdd, wagyu::FillType::EvenOdd)
-        .map_err(Error::Runtime)?;
-
-    Ok(multipolygon_to_geometry_collection(multipolygon))
 }
 
 /// `classifyRings`: classifies an array of rings into polygons with outer
@@ -418,6 +410,47 @@ mod tests {
         assert_eq!(polygons.len(), 1);
         // output: polygon 1 has 1 exterior, 1 interior
         assert_eq!(polygons[0].len(), 2);
+    }
+
+    /// The (outer ring, hole count) of each polygon, with every ring
+    /// closed and wound as `fixup_polygons` promises.
+    fn fixed_polygons(rings: &[&[(i16, i16)]]) -> Vec<(GeometryCoordinates, usize)> {
+        let fixed = fixup_polygons(&collection(rings));
+        let polygons = classify_rings(&fixed);
+        for polygon in &polygons {
+            for (i, ring) in polygon.iter().enumerate() {
+                assert_eq!(ring.first(), ring.last(), "{ring:?}");
+                assert_eq!(signed_area(ring) > 0.0, i == 0, "{ring:?}");
+            }
+        }
+        polygons.iter().map(|polygon| (polygon[0].clone(), polygon.len() - 1)).collect()
+    }
+
+    #[test]
+    fn fixup_polygons_rewinds_rings() {
+        // Two outer rings wound opposite ways, and a hole wound as its
+        // outer ring is.
+        let polygons = fixed_polygons(&[
+            &[(0, 0), (0, 40), (40, 40), (40, 0), (0, 0)],
+            &[(10, 10), (10, 20), (20, 20), (20, 10), (10, 10)],
+            &[(50, 0), (90, 0), (90, 40), (50, 40), (50, 0)],
+        ]);
+        assert_eq!(polygons.len(), 2);
+        let mut holes: Vec<usize> = polygons.iter().map(|(_, holes)| *holes).collect();
+        holes.sort_unstable();
+        assert_eq!(holes, [0, 1]);
+    }
+
+    #[test]
+    fn fixup_polygons_splits_a_self_intersecting_ring() {
+        let polygons = fixed_polygons(&[&[(0, 0), (20, 20), (20, 0), (0, 20), (0, 0)]]);
+        assert_eq!(polygons.len(), 2);
+        for (outer, holes) in &polygons {
+            assert_eq!(*holes, 0);
+            assert_eq!(outer.len(), 4, "a closed triangle: {outer:?}");
+            // Twice the triangle's area.
+            assert_eq!(signed_area(outer), 200.0);
+        }
     }
 
     // gtest: GeometryTileData.limitHoles1

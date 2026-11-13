@@ -5,9 +5,6 @@ pub enum Error {
     /// malformed tags.
     #[error(transparent)]
     Mvt(#[from] fast_mvt::MvtError),
-    /// A C++ `std::runtime_error`.
-    #[error("{0}")]
-    Runtime(String),
     /// A C++ `std::out_of_range`, with libstdc++'s message.
     #[error("{0}")]
     OutOfRange(String),

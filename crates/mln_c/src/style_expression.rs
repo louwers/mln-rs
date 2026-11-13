@@ -292,17 +292,6 @@ fn parse_object(text: Option<&str>, name: &str) -> Result<Option<ValueObject>, E
     }
 }
 
-/// JSON has no number that isn't finite, so such a number becomes null, as
-/// `JSON.stringify()` writes it.
-fn replace_non_finite_numbers(value: &mut JsonValue) {
-    match value {
-        JsonValue::Double(number) if !number.is_finite() => *value = JsonValue::Null,
-        JsonValue::Array(items) => items.iter_mut().for_each(replace_non_finite_numbers),
-        JsonValue::Object(members) => members.values_mut().for_each(replace_non_finite_numbers),
-        _ => {}
-    }
-}
-
 /// Evaluates `expression` and writes its result as JSON.
 fn evaluate(expression: &dyn Expression, inputs: &Inputs) -> Result<String, Error> {
     let feature = inputs.feature.as_deref().map(parse_feature).transpose()?;
@@ -322,11 +311,8 @@ fn evaluate(expression: &dyn Expression, inputs: &Inputs) -> Result<String, Erro
         None => expression.evaluate(&context),
     };
     let result = result.map_err(|error| Error::invalid_argument(format!("expression: {}", error.message)))?;
-    let mut value = mln_expression::value::to_mbgl_value(&result);
-    replace_non_finite_numbers(&mut value);
-    let mut writer = rapidjson::Writer::new();
-    mln_style::conversion::stringify::stringify(&mut writer, &value);
-    Ok(writer.into_string())
+    // A NaN or infinite number becomes null, as `JSON.stringify()` writes it.
+    Ok(mln_conversion::value_to_json(&mln_expression::value::to_mbgl_value(&result)).to_string())
 }
 
 /// `mln_style_expression_evaluate()`.

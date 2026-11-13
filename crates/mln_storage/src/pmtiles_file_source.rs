@@ -8,7 +8,7 @@
 // as in C++, a sub-request replaces the previous one of the same caller and
 // nothing removes them when the caller cancels. The TileJSON document is
 // built as a rapidjson document would be (members in insertion order,
-// duplicates kept) and written with //vendor/rapidjson's `Writer`.
+// duplicates kept; json_document.rs).
 //
 // The resource options are shared with the thread behind a mutex
 // (C++: in the thread object, read back with a blocking `ask`).

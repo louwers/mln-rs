@@ -363,7 +363,7 @@ impl Within {
             if value.array_length() != 2 {
                 ctx.error(format!(
                     "'within' expression requires exactly one argument, but found {} instead.",
-                    mln_util::string::to_string_u64(value.array_length().wrapping_sub(1) as u64)
+                    value.array_length().wrapping_sub(1)
                 ));
                 return None;
             }

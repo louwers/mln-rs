@@ -6,6 +6,7 @@
 
 use feature::Value;
 use mln_util::enum_::Enum;
+use mln_util::string::to_string_double;
 use serde::{Deserialize, Serialize};
 
 use crate::types::SymbolAnchorType;
@@ -99,21 +100,16 @@ impl VariableAnchorOffsetCollection {
 }
 
 /// The collection as JSON, an array of anchor names each followed by its
-/// offset.
+/// offset, with JavaScript's number formatting (GL JS's `toString()`).
 impl std::fmt::Display for VariableAnchorOffsetCollection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut writer = rapidjson::Writer::new();
-        writer.start_array();
-        for entry in &self.anchor_offsets {
-            writer.string(entry.anchor_type.to_string());
-            writer.start_array();
-            writer.double(f64::from(entry.offset[0]));
-            writer.double(f64::from(entry.offset[1]));
-            writer.end_array();
+        f.write_str("[")?;
+        for (i, entry) in self.anchor_offsets.iter().enumerate() {
+            let separator = if i == 0 { "" } else { "," };
+            let [x, y] = entry.offset.map(|v| to_string_double(v.into()));
+            write!(f, "{separator}\"{}\",[{x},{y}]", entry.anchor_type.to_string())?;
         }
-
-        writer.end_array();
-        f.write_str(&writer.into_string())
+        f.write_str("]")
     }
 }
 
@@ -144,6 +140,6 @@ mod tests {
         ]);
         assert_eq!(c.get_offset_by_anchor(&SymbolAnchorType::Left), [3.0, 4.0]);
         assert_eq!(c.get_offset_by_anchor(&SymbolAnchorType::Bottom), [0.0, 0.0]);
-        assert_eq!(c.to_string(), r#"["top",[1.0,2.0],"left",[3.0,4.0]]"#);
+        assert_eq!(c.to_string(), r#"["top",[1,2],"left",[3,4]]"#);
     }
 }

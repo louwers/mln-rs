@@ -871,7 +871,8 @@ fn attach_unlocked<R>(
     }
     if options.driver == Driver::CallerThread {
         // The first service builds the renderer, which is work that is ready
-        // now: the host hears of it before the attach returns.
+        // now: this wakes the host, unless the map's first update, posted
+        // from the runtime's thread, woke it already.
         session.shared().run_loop.invoke(|| {});
     }
     Ok(then(&session, completion))

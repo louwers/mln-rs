@@ -164,15 +164,6 @@ macro_rules! layout_properties {
                     })+
                 }
 
-                /// `stringify(writer)` (conversion/stringify.hpp; only
-                /// stringifyLayout calls it, and nothing in the C++ core calls
-                /// that). gtests-data: ported for Stringify.Layout.
-                pub fn stringify(&self, writer: &mut $crate::conversion::stringify::Writer) {
-                    writer.start_object();
-                    $($crate::conversion::stringify::stringify_property(writer, <$prop>::name(), &self.$field);)+
-                    writer.end_object();
-                }
-
                 // TODO(port): updateGPUExpressions (gfx::GPUExpression).
             }
 

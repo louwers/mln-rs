@@ -58,17 +58,21 @@ impl Project {
     #[must_use]
     pub fn linear_ring(&self, ring: &LinearRing<f64>) -> VtLinearRing {
         let mut result = VtLinearRing::default();
-        let len = ring.len();
-
-        if len == 0 {
+        let (Some(first), Some(last)) = (ring.first(), ring.last()) else {
             return result;
-        }
+        };
 
-        result.reserve(len);
+        result.reserve(ring.len() + 1);
 
         for p in ring {
             result.push(self.point(p));
         }
+        // GeoJSON requires rings to be closed. One that isn't is closed
+        // here, so that an outline draws its last edge.
+        if first != last {
+            result.push(self.point(first));
+        }
+        let len = result.len();
 
         let mut area = 0.0;
 

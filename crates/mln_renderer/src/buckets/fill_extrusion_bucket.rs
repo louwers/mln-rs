@@ -47,6 +47,7 @@ use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_layer::RenderLayer;
 use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
+use crate::util::triangulate::triangulate;
 
 crate::paint_property_binders!(
     /// `FillExtrusionBinders = PaintPropertyBinders<FillExtrusionPaintProperties::DataDrivenProperties>`.
@@ -232,7 +233,7 @@ impl FillExtrusionBucket {
 
         self.add_outline(polygon);
 
-        let indices: Vec<u32> = earcut::earcut::<u32, _, _>(polygon);
+        let indices: Vec<u32> = triangulate(polygon);
         debug_assert!(indices.len().is_multiple_of(3));
         let index = |i: u32| (first_index + i as usize) as u16;
         for triangle in indices.as_chunks::<3>().0 {

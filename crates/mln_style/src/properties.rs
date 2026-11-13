@@ -483,8 +483,7 @@ macro_rules! paint_properties {
                     })+
                 }
 
-                // TODO(port): updateGPUExpressions (gfx::GPUExpression) and
-                // stringify (rapidjson writer).
+                // TODO(port): updateGPUExpressions (gfx::GPUExpression).
             }
 
             impl PossiblyEvaluated {

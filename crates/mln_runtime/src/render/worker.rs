@@ -224,6 +224,16 @@ struct StillDemand {
     tried: Option<u64>,
 }
 
+/// A frame that the worker rendered, or tried to, and has yet to publish.
+struct RenderedFrame {
+    result: FrameResult,
+    /// The renderer's events of the frame.
+    events: Vec<RendererEvent>,
+    /// The ring slot that the frame rendered into, with what the host may
+    /// acquire of it.
+    slot: Option<(usize, Option<Published>)>,
+}
+
 /// Work that waits for the work sent before it: resizes that haven't
 /// landed, and demands that wait for the map's commands.
 struct Behind {
@@ -717,8 +727,8 @@ impl Worker {
                     RingPick::None => None,
                     RingPick::Slot(slot) => Some(slot),
                 };
-                let (result, events) = self.render(token, &update, slot);
-                self.publish_frame(&result, events, outbox);
+                let frame = self.render(token, &update, slot);
+                self.publish_rendered(frame, outbox);
             }
             _ if pending.demand.mode == DemandMode::WaitForUpdate => self.waiting.push((pending, latest_generation)),
             _ => self.publish(&FrameResult::unrendered(token, FrameDisposition::NoUpdate, latest_generation), outbox),
@@ -785,12 +795,12 @@ impl Worker {
             RingPick::None => None,
             RingPick::Slot(slot) => Some(slot),
         };
-        let (result, events) = self.render(None, &update, slot);
-        match result.disposition {
+        let frame = self.render(None, &update, slot);
+        match frame.result.disposition {
             FrameDisposition::Rendered => {
                 self.still = None;
                 self.still_rendered = pending;
-                self.publish_frame(&result, events, outbox);
+                self.publish_rendered(frame, outbox);
             }
             disposition => {
                 // A frame that a surface dropped is tried again.
@@ -799,7 +809,10 @@ impl Worker {
                 {
                     still.tried = Some(update.generation);
                 }
-                self.forward(events);
+                if let Some((slot, published)) = frame.slot {
+                    self.end_slot(slot, published);
+                }
+                self.forward(frame.events);
             }
         }
     }
@@ -823,33 +836,27 @@ impl Worker {
     /// Renders `update` for the demand `token`, or for the still image's
     /// demand when it has none, into the ring's `slot`, which
     /// [`pick_slot`](Self::pick_slot) marked, or into a target without a
-    /// ring. Returns the frame's result, and the renderer's events, which
-    /// [`publish_frame`](Self::publish_frame) passes on to the map after
-    /// the result. A still map draws no frame until everything that it shows
+    /// ring. Returns the frame, which
+    /// [`publish_rendered`](Self::publish_rendered) publishes. A still map draws no frame until everything that it shows
     /// has loaded, and a surface without a texture to render into takes no
     /// frame. A frame that a surface drops, having had no image for it after
     /// all, finishes as not ready, and the next demand draws the map again.
     /// Only the still image's own frame completes the image.
-    fn render(
-        &mut self,
-        token: Option<u64>,
-        update: &Update,
-        slot: Option<usize>,
-    ) -> (FrameResult, Vec<RendererEvent>) {
+    fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>) -> RenderedFrame {
         let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
             if let Some(slot) = slot {
                 self.end_slot(slot, None);
             }
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return (result, Vec::new());
+            return RenderedFrame { result, events: Vec::new(), slot: None };
         };
         if let Some(slot) = slot
             && gfx.target.select_slot(slot).is_err()
         {
             self.end_slot(slot, None);
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return (result, Vec::new());
+            return RenderedFrame { result, events: Vec::new(), slot: None };
         }
         let handoff = {
             let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
@@ -869,7 +876,7 @@ impl Worker {
         }
         if gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped)) {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return (result, events);
+            return RenderedFrame { result, events, slot: None };
         }
         let projection = gfx.renderer.frame_projection();
         self.rendered_update = update.generation;
@@ -888,10 +895,11 @@ impl Worker {
         let result = match report {
             Some(report) => {
                 self.has_frame = true;
+                // The session takes the frame's generation in
+                // `publish_frame`.
                 let (generation, frame_generation) = {
-                    let mut state = self.shared.state.lock_unpoisoned();
-                    state.frame_generation += 1;
-                    (state.generation, state.frame_generation)
+                    let state = self.shared.state.lock_unpoisoned();
+                    (state.generation, state.frame_generation + 1)
                 };
                 FrameResult {
                     disposition: FrameDisposition::Rendered,
@@ -907,7 +915,7 @@ impl Worker {
             }
             None => FrameResult::unrendered(token, FrameDisposition::NoUpdate, update.generation),
         };
-        if let Some(slot) = slot {
+        let slot = slot.map(|slot| {
             let published = match handoff {
                 Some(Handoff::GivenBack { slot: given, sync }) if given == slot && result.view.is_some() => {
                     let device = self.gfx.as_ref().map(|gfx| gfx.target.device().clone());
@@ -920,25 +928,41 @@ impl Worker {
                 }
                 _ => None,
             };
-            self.end_slot(slot, published);
-        }
-        (result, events)
+            (slot, published)
+        });
+        RenderedFrame { result, events, slot }
     }
 
-    /// Publishes a frame's result, then passes the renderer's events of the
-    /// frame on to the map, so that a still image completes with its frame's
-    /// result queued.
-    fn publish_frame(&self, result: &FrameResult, events: Vec<RendererEvent>, outbox: &mut Outbox) {
-        self.publish(result, outbox);
-        self.forward(events);
+    /// Publishes a frame: its result and ring slot, then the renderer's
+    /// events of the frame, which go to the map after the result, so that a
+    /// still image completes with its frame's result queued.
+    fn publish_rendered(&self, frame: RenderedFrame, outbox: &mut Outbox) {
+        self.publish_frame(frame.slot, &frame.result, outbox);
+        self.forward(frame.events);
     }
 
     /// Queues a frame result for the host, and wakes it unless it was woken
     /// since its last drain.
     fn publish(&self, result: &FrameResult, outbox: &mut Outbox) {
+        self.publish_frame(None, result, outbox);
+    }
+
+    /// Publishes a frame: ends the ring `slot` it rendered into, with what
+    /// the host may acquire of it, and queues its result as `publish` does.
+    /// The slot, the result and the session's frame generation change under
+    /// one lock, so a snapshot shows a frame only once its result can be
+    /// drained and, in a ring, its slot acquired.
+    fn publish_frame(&self, slot: Option<(usize, Option<Published>)>, result: &FrameResult, outbox: &mut Outbox) {
         let wake = {
             let mut state = self.shared.state.lock_unpoisoned();
+            if let Some((slot, published)) = slot
+                && let Some(entry) = state.ring.get_mut(slot)
+            {
+                entry.rendering = false;
+                entry.frame = published;
+            }
             state.results.push(*result);
+            state.frame_generation = state.frame_generation.max(result.frame_generation);
             let wake = !state.frame_woken;
             state.frame_woken = true;
             wake.then(|| self.shared.frame_wake.clone()).flatten()
