@@ -185,10 +185,12 @@ mod native {
             return Some((crate::generated::types::MLN_RENDER_BACKEND_METAL, data));
         }
         #[cfg(any(backend_gl, all(target_family = "wasm", feature = "gl")))]
+        #[cfg_attr(
+            target_family = "wasm",
+            expect(unused_variables, reason = "a browser session draws into its canvas: the default framebuffer")
+        )]
         if let Some(pass) = pass.downcast_ref::<mln_gl::CustomLayerPass>() {
             data.open_gl = crate::generated::types::mln_open_gl_custom_layer_pass {
-                // A browser session draws into its canvas: the default
-                // framebuffer.
                 #[cfg(not(target_family = "wasm"))]
                 framebuffer: pass.framebuffer.map_or(0, |framebuffer| framebuffer.0.get()),
                 #[cfg(target_family = "wasm")]
