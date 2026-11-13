@@ -50,6 +50,11 @@
 //   shaders draw the roofs, and the instanced ones, which C++ has no GLSL
 //   for, the walls: an instance of a quad per outline vertex, as the port's
 //   WGSL does (C++'s GLSL draws both from one vertex buffer with normals).
+// - The fill, fill outline, fill extrusion and line pattern fragment shaders
+//   set `precision highp float` on GL ES, as GL JS's do: overzoomed past a
+//   source's maxzoom, their pattern positions outgrow a 16-bit mediump
+//   float (maplibre/maplibre-native#4951). The background pattern draws at
+//   the current zoom, so its positions stay small.
 // - ClippingMaskProgram has a globe variant, which projects through the
 //   projection block as the other shaders do.
 // - Fragment shaders declare the uniform blocks they share with their vertex
@@ -1262,7 +1267,11 @@ mediump vec4 pattern_to = u_pattern_to;
     v_lighting *= u_opacity;
 }
 ",
-    fragment: r"in vec2 v_pos_a;
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
 
@@ -1494,7 +1503,11 @@ mediump vec4 pattern_to = u_pattern_to;
     v_lighting *= u_opacity;
 }
 ",
-    fragment: r"in vec2 v_pos_a;
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
 
@@ -1825,7 +1838,11 @@ mediump vec4 pattern_to = u_pattern_to;
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
 }
 ",
-    fragment: r"layout (std140) uniform FillOutlinePatternTilePropsUBO {
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+layout (std140) uniform FillOutlinePatternTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
@@ -2242,7 +2259,11 @@ mediump vec4 pattern_to = u_pattern_to;
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileZoomRatio, a_pos);
 }
 ",
-    fragment: r"layout (std140) uniform FillPatternTilePropsUBO {
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+layout (std140) uniform FillPatternTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
@@ -3642,7 +3663,11 @@ mediump vec4 pattern_to = u_pattern_to;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r"layout (std140) uniform LinePatternTilePropsUBO {
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+layout (std140) uniform LinePatternTilePropsUBO {
     lowp vec4 u_pattern_from;
     lowp vec4 u_pattern_to;
     mediump vec4 u_scale;
