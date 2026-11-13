@@ -26,20 +26,40 @@ import type { WebMap } from './pkg/mln_web.js';
 import type { Bindings, Box, Camera, DebugFeature, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
 
 // Every URL this worker fetched, and how many times, and how many fetches
-// wait for their response: the map's fetches look the global `fetch` up at
-// each call, and so do the preloads below.
+// are still transferring: the map's fetches look the global `fetch` up at
+// each call, and so do the preloads below. A fetch is pending until it fails
+// or its body is read (mln_storage reads each with `arrayBuffer()`); a
+// preload, which the map may never claim, until a copy of its body is
+// (`settle`).
 const fetches = new Map<string, number>();
 let requests = 0;
 let pending = 0;
+const settle = new WeakMap<Response, () => void>();
 const globalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = input instanceof Request ? input.url : String(input);
   fetches.set(url, (fetches.get(url) ?? 0) + 1);
   requests++;
   pending++;
-  const response = globalFetch(input, init);
-  response.finally(() => pending--).catch(() => {});
-  return response;
+  let settled = false;
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    pending--;
+  };
+  return globalFetch(input, init).then((response) => {
+    if (response.type === 'opaqueredirect') {
+      done(); // mln_storage reads no body from it
+      return response;
+    }
+    const read = response.arrayBuffer.bind(response);
+    response.arrayBuffer = () => read().finally(done);
+    settle.set(response, done);
+    return response;
+  }, (error: unknown) => {
+    done();
+    throw error;
+  });
 };
 
 const webgl2 = self.name === 'webgl2';
@@ -123,6 +143,7 @@ function preload(url: unknown): Promise<Response> | undefined {
   const response = fetch(url);
   // Unclaimed, a failure is quiet; claimed, the map fetches again.
   response.catch(() => {});
+  response.then((r) => r.clone().arrayBuffer().finally(() => settle.get(r)?.())).catch(() => {});
   const expiry = setTimeout(() => preloads.delete(url), 60_000);
   preloads.set(url, { response, expiry });
   return response;
