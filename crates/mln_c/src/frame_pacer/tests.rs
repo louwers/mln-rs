@@ -203,6 +203,15 @@ impl FakeDisplay {
     fn scheduled(&self) -> u32 {
         *lock(&self.scheduled)
     }
+
+    /// Sends each refresh that the pacer schedules, as a display does, until
+    /// `session` has a frame that the pacer demanded and that shows the map
+    /// update `generation`.
+    fn refresh_until_paced_frame(&self, session: mln_render_session, generation: u64) {
+        poll_for_paced_frame(session, generation, || {
+            self.refresh(now());
+        });
+    }
 }
 
 /// The time of a refresh now, on the monotonic clock that the tests' fake
@@ -477,8 +486,15 @@ pub(crate) fn paint(map: mln_map, color: &str) -> u64 {
 /// Waits for a frame that the pacer demanded and that shows the map update
 /// `generation`, skipping the pacer's frames before it.
 pub(crate) fn wait_for_paced_frame(session: mln_render_session, generation: u64) {
+    poll_for_paced_frame(session, generation, || {});
+}
+
+/// Runs `poll` until `session` has a frame that the pacer demanded and that
+/// shows the map update `generation`, skipping the pacer's frames before it.
+fn poll_for_paced_frame(session: mln_render_session, generation: u64, mut poll: impl FnMut()) {
     let deadline = Instant::now() + TIMEOUT;
     loop {
+        poll();
         for result in drain(session) {
             assert_eq!(result.token, 0, "only the pacer demands frames");
             if result.disposition == MLN_RENDER_RESULT_RENDERED && result.map_update_generation >= generation {
@@ -656,8 +672,10 @@ fn one_pacer_serves_many_sessions_and_a_null_pacer_stops_one() {
     drain(stopped);
     paint(stopped_map, "blue");
     let generation = paint(paced_map, "blue");
-    display.refresh_when_scheduled();
-    wait_for_paced_frame(paced, generation);
+    // The first frames' transitions leave a refresh scheduled for both
+    // sessions, which can go out before the paced session's next redraw wake
+    // reaches the pacer. That wake then schedules a refresh of its own.
+    display.refresh_until_paced_frame(paced, generation);
     barrier(stopped);
     assert!(drain(stopped).is_empty());
     for (runtime, map, session) in sessions {
