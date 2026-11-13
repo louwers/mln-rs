@@ -16,7 +16,8 @@
 // them from a start it knows.
 
 use std::cell::{Cell, RefCell};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use mln_map_types::util_camera::Camera as UtilCamera;
 use mln_map_types::{TileProjector, TransitionEndFn};
@@ -28,7 +29,6 @@ use mln_util::chrono::{Clock, TimePoint, milliseconds, seconds};
 use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::quaternion::Quaternion;
-use mln_util::sync::SyncCell;
 use mln_util::vectors::{Vec3, Vec4};
 
 use super::*;
@@ -141,20 +141,22 @@ fn start_clock(transform: &mut Transform) -> TimePoint {
 
 /// Records the `AnimationOptions` end callback (see the file comment).
 struct CallbackLog {
-    finishes: Arc<SyncCell<u32>>,
+    finishes: Arc<AtomicU32>,
 }
 
 impl CallbackLog {
     fn install(options: &mut AnimationOptions) -> CallbackLog {
         let log = CallbackLog { finishes: Arc::default() };
         let finishes = log.finishes.clone();
-        options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| finishes.set(finishes.get() + 1)));
+        options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| {
+            finishes.fetch_add(1, Ordering::Relaxed);
+        }));
         log
     }
 
     /// Whether the finish callback ran since the last call.
     fn take_finish(&self) -> bool {
-        self.finishes.replace(0) > 0
+        self.finishes.swap(0, Ordering::Relaxed) > 0
     }
 }
 
@@ -4057,10 +4059,12 @@ fn unsized_globe_moves_as_mercator() {
 const LINEAR: UnitBezier = UnitBezier::new(1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
 
 /// An end function that counts its calls.
-fn counting_end(options: &mut AnimationOptions) -> Arc<SyncCell<u32>> {
-    let count = Arc::new(SyncCell::new(0));
+fn counting_end(options: &mut AnimationOptions) -> Arc<AtomicU32> {
+    let count = Arc::new(AtomicU32::new(0));
     let finished = count.clone();
-    options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| finished.set(finished.get() + 1)));
+    options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| {
+        finished.fetch_add(1, Ordering::Relaxed);
+    }));
     count
 }
 
@@ -4085,14 +4089,14 @@ fn independent_camera_tracks() {
     let center_finished = counting_end(&mut center);
     let center_start = start_clock(&mut transform);
     transform.ease_to(&CameraOptions { center: Some(ll(20.0, 30.0)), ..Default::default() }, &center);
-    assert_eq!(zoom_finished.get(), 0);
+    assert_eq!(zoom_finished.load(Ordering::Relaxed), 0);
     transform.update_transitions(zoom_start + seconds(2));
     assert_near(transform.get_zoom(), 12.0, 1e-5);
     assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() > 0.0);
     assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() < 30.0);
     assert_near(transform.get_state().get_center_altitude(), 120.0, 1e-5);
-    assert_eq!(zoom_finished.get(), 1);
-    assert_eq!(center_finished.get(), 0);
+    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
+    assert_eq!(center_finished.load(Ordering::Relaxed), 0);
     assert!(transform.is_panning());
     assert!(!transform.is_scaling());
     assert!(transform.in_transition());
@@ -4100,7 +4104,7 @@ fn independent_camera_tracks() {
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 20.0, 1e-5);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 30.0, 1e-5);
     assert_near(transform.get_zoom(), 12.0, 1e-5);
-    assert_eq!(center_finished.get(), 1);
+    assert_eq!(center_finished.load(Ordering::Relaxed), 1);
     assert!(!transform.in_transition());
 }
 
@@ -4118,17 +4122,17 @@ fn partial_replacement_keeps_command_and_timing() {
     assert_near(transform.get_zoom(), 9.0, 1e-5);
     assert_near(bearing_degrees(&transform), 20.0, 1e-5);
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
-    assert_eq!(finished.get(), 0);
+    assert_eq!(finished.load(Ordering::Relaxed), 0);
     assert!(transform.is_rotating());
     assert!(!transform.is_scaling());
     transform.update_transitions(start + seconds(2));
     assert_near(transform.get_zoom(), 10.0, 1e-5);
     assert_near(bearing_degrees(&transform), 40.0, 1e-5);
     transform.update_transitions(start + seconds(4));
-    assert_eq!(finished.get(), 1);
+    assert_eq!(finished.load(Ordering::Relaxed), 1);
     assert_near(bearing_degrees(&transform), 80.0, 1e-5);
     transform.cancel_transitions();
-    assert_eq!(finished.get(), 1);
+    assert_eq!(finished.load(Ordering::Relaxed), 1);
 }
 
 // gtest: Transform.FlightAndAnchorCoupleCenterWithTheirProperties
@@ -4149,13 +4153,13 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     assert_near(mln_math::rad2deg(transform.get_roll()), 5.0, 1e-5);
     let center = transform.get_lat_lng(WrapMode::Wrapped);
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
-    assert_eq!(flight_finished.get(), 0); // Roll remains after the coupled flight ends.
+    assert_eq!(flight_finished.load(Ordering::Relaxed), 0); // Roll remains after the coupled flight ends.
     transform.update_transitions(start + seconds(4));
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), center.latitude(), 1e-5);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), center.longitude(), 1e-5);
     assert_near(transform.get_zoom(), 10.0, 1e-5);
     assert_near(mln_math::rad2deg(transform.get_roll()), 20.0, 1e-5);
-    assert_eq!(flight_finished.get(), 1);
+    assert_eq!(flight_finished.load(Ordering::Relaxed), 1);
 
     let mut anchor_animation = AnimationOptions::new(seconds(4));
     let anchor_finished = counting_end(&mut anchor_animation);
@@ -4172,9 +4176,9 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     let rotated_pixel = transform.lat_lng_to_screen_coordinate(&fixed);
     assert_near(rotated_pixel.x, anchor.x, 1e-5);
     assert_near(rotated_pixel.y, anchor.y, 1e-5);
-    assert_eq!(anchor_finished.get(), 0);
+    assert_eq!(anchor_finished.load(Ordering::Relaxed), 0);
     transform.jump_to(&CameraOptions { center: Some(ll(10.0, 15.0)), ..Default::default() });
-    assert_eq!(anchor_finished.get(), 1);
+    assert_eq!(anchor_finished.load(Ordering::Relaxed), 1);
     assert!(!transform.in_transition());
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 10.0, 1e-5);
 
@@ -4183,9 +4187,9 @@ fn flight_and_anchor_couple_center_with_their_properties() {
         &anchor_animation,
     );
     transform.ease_to(&CameraOptions { zoom: Some(14.0), ..Default::default() }, &AnimationOptions::new(seconds(2)));
-    assert_eq!(anchor_finished.get(), 1); // Explicit center ignores the anchor.
+    assert_eq!(anchor_finished.load(Ordering::Relaxed), 1); // Explicit center ignores the anchor.
     transform.cancel_transitions();
-    assert_eq!(anchor_finished.get(), 2);
+    assert_eq!(anchor_finished.load(Ordering::Relaxed), 2);
 }
 
 // gtest: Transform.ComposePaddingPitchAndFieldOfView
@@ -4283,8 +4287,8 @@ fn cancel_transitions_by_id_leaves_others_running() {
     // Only the command with the identity finishes, once, and the other keeps
     // animating.
     assert!(transform.cancel_transitions_with_id(1));
-    assert_eq!(zoom_finished.get(), 1);
-    assert_eq!(bearing_finished.get(), 0);
+    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
+    assert_eq!(bearing_finished.load(Ordering::Relaxed), 0);
     assert_eq!(observer.changes.get(), 1);
     assert!(transform.in_transition());
     assert!(!transform.is_scaling());
@@ -4294,15 +4298,15 @@ fn cancel_transitions_by_id_leaves_others_running() {
     // reports no change.
     assert!(!transform.cancel_transitions_with_id(1));
     assert!(!transform.cancel_transitions_with_id(3));
-    assert_eq!(zoom_finished.get(), 1);
+    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
     assert_eq!(observer.changes.get(), 1);
     assert!(transform.in_transition());
 
     transform.update_transitions(start + seconds(4));
     assert_near(transform.get_zoom(), zoom_at_cancel, 1e-5);
     assert_near(bearing_degrees(&transform), 80.0, 1e-5);
-    assert_eq!(zoom_finished.get(), 1);
-    assert_eq!(bearing_finished.get(), 1);
+    assert_eq!(zoom_finished.load(Ordering::Relaxed), 1);
+    assert_eq!(bearing_finished.load(Ordering::Relaxed), 1);
     assert!(!transform.in_transition());
 }
 
@@ -4445,12 +4449,12 @@ fn duration_of(command: impl Fn(&mut Transform)) -> Duration {
     high
 }
 
-fn record_end() -> (AnimationOptions, Arc<SyncCell<Option<TransitionEnd>>>) {
-    let ended = Arc::new(SyncCell::new(None));
+fn record_end() -> (AnimationOptions, Arc<OnceLock<TransitionEnd>>) {
+    let ended = Arc::new(OnceLock::new());
     let record = ended.clone();
     let animation = AnimationOptions {
         transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {
-            assert!(record.replace(Some(*end)).is_none(), "a command ends once");
+            assert!(record.set(*end).is_ok(), "a command ends once");
         })),
         ..AnimationOptions::default()
     };
@@ -4732,11 +4736,11 @@ fn momentum_settles_on_targets() {
     transform.start_momentum(&momentum, &animation);
     transform.update_transitions(start + seconds(1));
     assert_near(bearing_degrees(&transform), 88.0, 1e-9);
-    assert_eq!(finished.get(), 0);
+    assert_eq!(finished.load(Ordering::Relaxed), 0);
     assert!(transform.is_rotating());
     transform.update_transitions(start + milliseconds(1200));
     assert_near(bearing_degrees(&transform), 90.0, 1e-9);
-    assert_eq!(finished.get(), 1);
+    assert_eq!(finished.load(Ordering::Relaxed), 1);
 
     // Without motion, instant snaps settle at once: the bearing around the
     // circle, and the zoom on the nearest whole level. A value outside the
@@ -4754,7 +4758,7 @@ fn momentum_settles_on_targets() {
         ..Default::default()
     });
     transform.start_momentum(&snap_only, &animation);
-    assert_eq!(finished.get(), 2);
+    assert_eq!(finished.load(Ordering::Relaxed), 2);
     assert_near(bearing_degrees(&transform), 0.0, 1e-9);
     assert_near(transform.get_zoom(), 7.0, 1e-9);
     assert_near(pitch_degrees(&transform), 30.0, 1e-9);
@@ -4855,7 +4859,7 @@ fn outcome_transform() -> Transform {
     transform
 }
 
-fn outcome(ended: &Arc<SyncCell<Option<TransitionEnd>>>) -> Option<TransitionOutcome> {
+fn outcome(ended: &OnceLock<TransitionEnd>) -> Option<TransitionOutcome> {
     ended.get().map(|end| end.outcome)
 }
 
