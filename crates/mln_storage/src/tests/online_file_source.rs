@@ -5,13 +5,16 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{RunLoop, Timer};
 use mln_test_server::{HttpServer, closed_port_url};
-use mln_util::chrono::{Clock, Duration, Timestamp, now};
+use mln_util::chrono::{Timestamp, now};
+use mln_util::time::Instant;
+use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
@@ -21,7 +24,7 @@ use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::resource_transform::{FinishedCallback, ResourceTransform};
+use crate::resource_transform::FinishedCallback;
 use crate::response::{Reason, ResourceError, Response};
 
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
@@ -40,9 +43,9 @@ fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
 }
 
-/// `std::chrono::duration<const double>(Clock::now() - start).count()`.
-fn seconds_since(start: mln_util::chrono::TimePoint) -> f64 {
-    (Clock::now() - start).count() as f64 / 1e9
+/// The seconds since `start`.
+fn seconds_since(start: mln_util::time::Instant) -> f64 {
+    start.elapsed().as_secs_f64()
 }
 
 // gtest: OnlineFileSource.Cancel
@@ -98,7 +101,7 @@ fn temporary_error() {
     let run_loop = RunLoop::new();
     let fs = online_file_source();
 
-    let start = Clock::now();
+    let start = Instant::now();
     let counter = Cell::new(0);
 
     let stop = run_loop.clone();
@@ -147,7 +150,7 @@ fn connection_error() {
     let run_loop = RunLoop::new();
     let fs = online_file_source();
 
-    let start = Clock::now();
+    let start = Instant::now();
     let counter = Cell::new(0);
     let wait = Cell::new(CONNECTION_TIMEOUT);
 
@@ -335,7 +338,7 @@ fn respect_minimum_update_interval() {
     let _req = fs.request(
         &resource,
         Box::new(move |_: Response| {
-            let wait = Duration::from_secs(now().secs_since_epoch() - start.secs_since_epoch());
+            let wait = Duration::from_secs((now().secs_since_epoch() - start.secs_since_epoch()) as u64);
             assert!(wait >= minimum_update_interval);
             stop.stop();
         }),
@@ -402,7 +405,7 @@ fn network_status_change() {
 
     // After 50 milliseconds, we're going to trigger a NetworkStatus change.
     let reachable_timer = Timer::new();
-    reachable_timer.start(Duration::from_millis(50), Duration::zero(), NetworkStatus::reachable);
+    reachable_timer.start(Duration::from_millis(50), Duration::ZERO, NetworkStatus::reachable);
 
     run_loop.run();
 }
@@ -418,7 +421,7 @@ fn network_status_change_preempt() {
     let fs = online_file_source();
     let paused = fs.pause();
 
-    let start = Clock::now();
+    let start = Instant::now();
     let counter = Cell::new(0);
 
     let resource = Resource::new(Kind::Unknown, closed_port_url("/test"));
@@ -461,8 +464,8 @@ fn network_status_change_preempt() {
     // NetworkStatus change.
     let reachable_timer = Timer::new();
     reachable_timer.start(
-        Duration::from_millis((CONNECTION_TIMEOUT * 1000.0) as i64 + 400),
-        Duration::zero(),
+        Duration::from_millis((CONNECTION_TIMEOUT * 1000.0) as u64 + 400),
+        Duration::ZERO,
         NetworkStatus::reachable,
     );
 
@@ -484,7 +487,7 @@ fn network_status_online_offline() {
     NetworkStatus::set(Status::Offline);
 
     let online_timer = Timer::new();
-    online_timer.start(Duration::from_millis(100), Duration::zero(), || NetworkStatus::set(Status::Online));
+    online_timer.start(Duration::from_millis(100), Duration::ZERO, || NetworkStatus::set(Status::Online));
 
     let req = req();
     let (r, stop) = (req.clone(), run_loop.clone());
@@ -736,11 +739,9 @@ fn request_same_url_multiple_times() {
 fn failed_resource_transform() {
     let run_loop = RunLoop::new();
     let fs = online_file_source();
-    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        |_kind: Kind, _url: &str, finished: FinishedCallback| {
-            finished(Err(ResourceError::new(Reason::Other, "No credential")));
-        },
-    ))));
+    fs.set_resource_transform(Some(Arc::new(|_kind: Kind, _url: &str, finished: FinishedCallback| {
+        finished(Err(ResourceError::new(Reason::Other, "No credential")));
+    })));
 
     let stop = run_loop.clone();
     let _req = fs.request(
@@ -770,16 +771,14 @@ fn retry_failed_resource_transform() {
     let transforms = Arc::new(AtomicU32::new(0));
     let (delayed, test) = (server.url("/delayed"), server.url("/test"));
     let counter = transforms.clone();
-    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        move |_kind: Kind, url: &str, finished: FinishedCallback| {
-            assert_eq!(delayed, url);
-            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                finished(Err(ResourceError::new(Reason::Connection, "Offline")));
-            } else {
-                finished(Ok(test.clone()));
-            }
-        },
-    ))));
+    fs.set_resource_transform(Some(Arc::new(move |_kind: Kind, url: &str, finished: FinishedCallback| {
+        assert_eq!(delayed, url);
+        if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+            finished(Err(ResourceError::new(Reason::Connection, "Offline")));
+        } else {
+            finished(Ok(test.clone()));
+        }
+    })));
 
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
@@ -820,13 +819,13 @@ fn a_header_transform_runs_for_every_attempt() {
 
     let target = server.url("/temporary-error");
     let rewritten = target.clone();
-    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        move |_kind: Kind, _url: &str, finished: FinishedCallback| finished(Ok(rewritten.clone())),
-    ))));
+    fs.set_resource_transform(Some(Arc::new(move |_kind: Kind, _url: &str, finished: FinishedCallback| {
+        finished(Ok(rewritten.clone()));
+    })));
     let urls = Arc::new(Mutex::new(Vec::new()));
     let seen = urls.clone();
     fs.set_http_header_transform(HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {
-        seen.lock().unwrap().push((kind, url.to_owned()));
+        seen.lock().push((kind, url.to_owned()));
         vec![("X-Test-Token".to_owned(), "secret-token".to_owned())]
     }))));
 
@@ -845,5 +844,5 @@ fn a_header_transform_runs_for_every_attempt() {
     );
 
     run_loop.run();
-    assert_eq!(vec![(Kind::Source, target.clone()), (Kind::Source, target)], *urls.lock().unwrap());
+    assert_eq!(vec![(Kind::Source, target.clone()), (Kind::Source, target)], *urls.lock());
 }

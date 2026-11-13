@@ -46,7 +46,7 @@ impl drawable_builder::DrawableBuilder for DrawableBuilder {
             eprintln!("DrawableBuilder::init called with no current drawable");
             return;
         };
-        let drawable = current.as_any_mut().downcast_mut::<Drawable>().expect("webgpu::Drawable");
+        let drawable = current.downcast_mut::<Drawable>().expect("webgpu::Drawable");
         let impl_ = &mut base.impl_;
 
         // Set the vertex attribute ID so the drawable knows which shared vertex buffer to use

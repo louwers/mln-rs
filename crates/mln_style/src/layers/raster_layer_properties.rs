@@ -9,8 +9,8 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style_types::{RasterResamplingType, ResamplingType};
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::paint_property!(
     /// `struct RasterBrightnessMax : PaintProperty<float>`:
@@ -92,7 +92,7 @@ pub struct RasterLayerProperties {
 
 impl RasterLayerProperties {
     /// `explicit RasterLayerProperties(Immutable<RasterLayer::Impl>)`.
-    pub fn new(impl_: Immutable<RasterLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<RasterLayerImpl>) -> Self {
         RasterLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             evaluated: RasterPaintProperties::PossiblyEvaluated::default(),
@@ -101,7 +101,7 @@ impl RasterLayerProperties {
 
     /// `RasterLayerProperties(Immutable<RasterLayer::Impl>, RasterPaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<RasterLayerImpl>,
+        impl_: Arc<RasterLayerImpl>,
         evaluated: RasterPaintProperties::PossiblyEvaluated,
     ) -> Self {
         RasterLayerProperties {

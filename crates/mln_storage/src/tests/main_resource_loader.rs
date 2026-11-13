@@ -5,11 +5,12 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{ActorRef, Mailbox, RunLoop, Timer, scheduler};
 use mln_test_server::HttpServer;
-use mln_util::chrono::{Duration, Timestamp, now};
+use mln_util::chrono::{Timestamp, now};
 
 use super::{local_callback, req, serial, temp_path};
 use crate::database_file_source::DatabaseFileSource;
@@ -19,7 +20,7 @@ use crate::main_resource_loader::MainResourceLoader;
 use crate::network_status::{NetworkStatus, Status};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
-use crate::resource_transform::{FinishedCallback, ResourceTransform};
+use crate::resource_transform::FinishedCallback;
 use crate::response::{Reason, Response};
 
 fn main_resource_loader(file_sources: &FileSourceManager) -> Rc<MainResourceLoader> {
@@ -562,7 +563,7 @@ fn no_cache_refresh_modified_modified() {
     });
 }
 
-/// The target of the test's `Actor<ResourceTransform::TransformCallback>`.
+/// The actor the test's resource transform forwards to.
 struct TransformActor {
     test_url: String,
 }
@@ -594,12 +595,10 @@ fn set_resource_transform() {
         Mailbox::with_target(&scheduler::get_current(), Rc::new(TransformActor { test_url: server.url("/test") }));
 
     let actor_ref = ActorRef::<TransformActor>::new(&transform);
-    onlinefs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
-        move |_kind: Kind, url: &str, cb: FinishedCallback| {
-            let url = url.to_owned();
-            actor_ref.invoke(move |transform: &TransformActor| transform.call(&url, cb));
-        },
-    ))));
+    onlinefs.set_resource_transform(Some(Arc::new(move |_kind: Kind, url: &str, cb: FinishedCallback| {
+        let url = url.to_owned();
+        actor_ref.invoke(move |transform: &TransformActor| transform.call(&url, cb));
+    })));
     let resource1 = Resource::new(Kind::Unknown, "localhost://test");
 
     let req = req();
@@ -623,7 +622,7 @@ fn set_resource_transform() {
 
     run_loop.run();
 
-    onlinefs.set_resource_transform(ResourceTransform::default());
+    onlinefs.set_resource_transform(None);
     let resource2 = Resource::new(Kind::Unknown, server.url("/test"));
 
     let (r, stop) = (req.clone(), run_loop.clone());
@@ -649,7 +648,7 @@ fn set_resource_cache_path() {
     let _resource_loader = main_resource_loader(&file_sources);
     let fs = database_file_source(&file_sources);
     // `std::static_pointer_cast<DatabaseFileSource>(fs)`.
-    let dbfs = fs.as_any().and_then(|fs| fs.downcast_ref::<DatabaseFileSource>()).expect("DatabaseFileSource");
+    let dbfs = fs.downcast_ref::<DatabaseFileSource>().expect("DatabaseFileSource");
     let stop = run_loop.handle();
     // C++: "./new_offline.db".
     let path = temp_path("new_offline.db");
@@ -888,8 +887,12 @@ fn no_double_dispatch() {
 
     let req = req();
     let response_count = Rc::new(Cell::new(0u32));
+    // A second dispatch would answer within moments of the first, so the
+    // check waits that long after the first answer, however long it took.
+    let timer = Rc::new(Timer::new());
     let dbfs = database_file_source(&file_sources);
     let (r, fs2, resource2, count) = (req.clone(), fs.clone(), resource.clone(), response_count.clone());
+    let (stop, check) = (run_loop.clone(), timer.clone());
     dbfs.forward(
         &resource,
         &response,
@@ -904,20 +907,21 @@ fn no_double_dispatch() {
                     if !res.not_modified {
                         assert_eq!(b"data", data(&res));
                         count.set(count.get() + 1);
+                        if count.get() == 1 {
+                            let (stop, count) = (stop.clone(), count.clone());
+                            check.start(Duration::from_millis(100), Duration::ZERO, move || {
+                                assert_eq!(1, count.get());
+                                stop.stop();
+                            });
+                        }
                     }
                 }),
             ));
         })),
     );
 
-    let timer = Timer::new();
-    let (stop, count) = (run_loop.clone(), response_count.clone());
-    timer.start(Duration::from_millis(100), Duration::zero(), move || {
-        assert_eq!(1, count.get());
-        stop.stop();
-    });
-
     run_loop.run();
+    assert_eq!(1, response_count.get());
 }
 
 // gtest: MainResourceLoader.ResourceOptions
@@ -926,15 +930,23 @@ fn resource_options() {
     let _serial = serial();
     let fs = MainResourceLoader::new(
         &FileSourceManager::new(),
-        &ResourceOptions::default().with_asset_path("originalAssetPath").with_maximum_cache_size(1),
+        &ResourceOptions {
+            asset_path: "originalAssetPath".to_owned(),
+            maximum_cache_size: 1,
+            ..ResourceOptions::default()
+        },
     );
 
-    fs.set_resource_options(ResourceOptions::default().with_asset_path("updatedAssetPath").with_maximum_cache_size(2));
+    fs.set_resource_options(ResourceOptions {
+        asset_path: "updatedAssetPath".to_owned(),
+        maximum_cache_size: 2,
+        ..ResourceOptions::default()
+    });
 
     let updated_options = fs.get_resource_options();
 
-    assert_eq!(updated_options.asset_path(), "updatedAssetPath");
-    assert_eq!(updated_options.maximum_cache_size(), 2);
+    assert_eq!(updated_options.asset_path, "updatedAssetPath");
+    assert_eq!(updated_options.maximum_cache_size, 2);
 }
 
 // Not a C++ test: the "Unsupported resource request." branch (a request

@@ -9,7 +9,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::{AttributeDataType, ColorMode, Context, DepthMaskType, DrawMode, ShaderProgramBasePtr, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use mln_style::layers::{
@@ -17,7 +17,6 @@ use mln_style::layers::{
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -34,7 +33,7 @@ use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
-fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &BackgroundLayerImpl {
+fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &BackgroundLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), BackgroundLayerImpl::static_type_info()));
     impl_.downcast_ref::<BackgroundLayerImpl>().expect("RenderBackgroundLayer: not a background layer impl")
 }
@@ -59,9 +58,9 @@ pub struct RenderBackgroundLayer {
 }
 
 impl RenderBackgroundLayer {
-    pub fn new(impl_: Immutable<BackgroundLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<BackgroundLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(BackgroundLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(BackgroundLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderBackgroundLayer { base, unevaluated, plain_shader: None, pattern_shader: None }
@@ -103,7 +102,7 @@ impl RenderLayer for RenderBackgroundLayer {
         let previous_evaluated = background_layer_properties(&self.base.evaluated_properties).clone();
         let evaluated = self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated);
         let mut properties = BackgroundLayerProperties::with_evaluated(
-            static_immutable_cast::<BackgroundLayerImpl>(&self.base.base_impl),
+            downcast_arc::<BackgroundLayerImpl>(&self.base.base_impl),
             parameters.get_crossfade_parameters(),
             evaluated,
         );

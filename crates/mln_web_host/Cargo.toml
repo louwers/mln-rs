@@ -1,0 +1,29 @@
+[package]
+name = "mln-rs-web-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_web_host"
+# The doc comments have no examples to run.
+doctest = false
+
+# Only the browser target has anything to build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+mln_actor.workspace = true
+mln_renderer.workspace = true
+mln_text.workspace = true
+mln_util.workspace = true
+parking_lot.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = ["MessageChannel", "MessageEvent", "MessagePort", "Worker", "WorkerOptions", "WorkerType"] }
+
+[lints]
+workspace = true

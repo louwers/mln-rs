@@ -5,14 +5,11 @@
 // that loop's `run_once` (timers run first, as in `uv_run`). Like the C++
 // timer, the durations are truncated to milliseconds, and a timer does not
 // keep `RunLoop::run()` alive on its own.
-//
-// Quirk ported: C++ casts the millisecond count to `uint64_t`, so a negative
-// timeout or repeat becomes a huge value and the timer never fires.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
-use mln_util::chrono::Duration;
 use mln_util::time::Instant;
 
 use crate::run_loop::RunLoop;
@@ -35,13 +32,13 @@ thread_local! {
     static NEXT_START_ID: Cell<u64> = const { Cell::new(0) };
 }
 
-/// `std::chrono::duration_cast<Milliseconds>(d).count()` cast to `uint64_t`.
+/// Whole milliseconds, as libuv counts them.
 fn to_uv_millis(d: Duration) -> u64 {
-    d.as_millis() as u64
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn add_millis(now: Instant, ms: u64) -> Option<Instant> {
-    now.checked_add(std::time::Duration::from_millis(ms))
+    now.checked_add(Duration::from_millis(ms))
 }
 
 impl TimerHandle {
@@ -125,14 +122,14 @@ mod tests {
         let timer = Timer::new();
         let c = count.clone();
         let handle = run_loop.handle();
-        timer.start(Duration::from_millis(20), Duration::zero(), move || {
+        timer.start(Duration::from_millis(20), Duration::ZERO, move || {
             c.set(c.get() + 1);
             handle.stop();
         });
         let started = Instant::now();
         run_loop.run();
         assert_eq!(count.get(), 1);
-        assert!(started.elapsed() >= std::time::Duration::from_millis(20));
+        assert!(started.elapsed() >= Duration::from_millis(20));
         run_loop.run_once();
         assert_eq!(count.get(), 1);
     }
@@ -159,23 +156,12 @@ mod tests {
     }
 
     #[test]
-    fn negative_timeout_never_fires() {
-        let run_loop = RunLoop::new();
-        let fired = Rc::new(Cell::new(false));
-        let timer = Timer::new();
-        let f = fired.clone();
-        timer.start(Duration::from_millis(-1), Duration::zero(), move || f.set(true));
-        run_loop.run_once();
-        assert!(!fired.get());
-    }
-
-    #[test]
     fn dropped_timer_does_not_fire() {
         let run_loop = RunLoop::new();
         let fired = Rc::new(Cell::new(false));
         let timer = Timer::new();
         let f = fired.clone();
-        timer.start(Duration::zero(), Duration::zero(), move || f.set(true));
+        timer.start(Duration::ZERO, Duration::ZERO, move || f.set(true));
         drop(timer);
         run_loop.run_once();
         assert!(!fired.get());
@@ -187,7 +173,7 @@ mod tests {
         let fired = Rc::new(Cell::new(0));
         let timer = Timer::new();
         let f = fired.clone();
-        timer.start(Duration::zero(), Duration::zero(), move || f.set(f.get() + 1));
+        timer.start(Duration::ZERO, Duration::ZERO, move || f.set(f.get() + 1));
         run_loop.run_once();
         assert_eq!(fired.get(), 1);
         run_loop.run_once();

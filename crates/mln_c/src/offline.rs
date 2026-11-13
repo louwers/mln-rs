@@ -47,7 +47,7 @@ struct LentRegion {
 
 impl LentRegion {
     fn new(region: &OfflineRegion) -> Self {
-        Self::from_parts(region.get_id(), region.get_definition(), region.get_metadata())
+        Self::from_parts(region.id, &region.definition, &region.metadata)
     }
 
     fn from_parts(id: mln_offline_region_id, definition: &OfflineRegionDefinition, metadata: &[u8]) -> Self {

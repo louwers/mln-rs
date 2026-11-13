@@ -11,8 +11,8 @@ use crate::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_style_types::TranslateAnchorType;
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::layout_property!(
     /// `struct FillExtrusionRoundedCornerDistance : LayoutProperty<float>`:
@@ -103,7 +103,7 @@ pub struct FillExtrusionLayerProperties {
 
 impl FillExtrusionLayerProperties {
     /// `explicit FillExtrusionLayerProperties(Immutable<FillExtrusionLayer::Impl>)`.
-    pub fn new(impl_: Immutable<FillExtrusionLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<FillExtrusionLayerImpl>) -> Self {
         FillExtrusionLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             crossfade: CrossfadeParameters::default(),
@@ -113,7 +113,7 @@ impl FillExtrusionLayerProperties {
 
     /// `FillExtrusionLayerProperties(Immutable<FillExtrusionLayer::Impl>, CrossfadeParameters, FillExtrusionPaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<FillExtrusionLayerImpl>,
+        impl_: Arc<FillExtrusionLayerImpl>,
         crossfade: CrossfadeParameters,
         evaluated: FillExtrusionPaintProperties::PossiblyEvaluated,
     ) -> Self {

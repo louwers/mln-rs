@@ -17,11 +17,11 @@
 // Unicode 18.0 instead of 15.0 properties.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use harfrust::font::{Blob, Font, TableFunction};
 use harfrust::{Buffer, Direction, Feature, Language, Script, ShapeOptions, ShapePlan, ShaperFont, Tag};
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
 use crate::freetype::{FreeTypeFace, FreeTypeLibrary};
@@ -145,7 +145,7 @@ impl Impl {
         language: &Language,
         features: &[Feature],
     ) -> Arc<ShapePlan> {
-        let mut plans = self.plans.lock_unpoisoned();
+        let mut plans = self.plans.lock();
         plans
             .entry((script, rtl))
             .or_insert_with(|| {

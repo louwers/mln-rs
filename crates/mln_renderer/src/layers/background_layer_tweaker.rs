@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/background_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
 // branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
@@ -18,7 +20,6 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::{BackgroundColor, BackgroundOpacity, BackgroundPattern};
 use mln_style_types::TranslateAnchorType;
 use mln_util::constants::TILE_SIZE_D;
-use mln_util::immutable::Immutable;
 
 use super::{background_crossfade, background_layer_properties};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -30,7 +31,7 @@ pub struct BackgroundLayerTweaker {
 }
 
 impl BackgroundLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         BackgroundLayerTweaker { base: LayerTweakerBase::new(id, properties), drawable_uniform_buffer: None }
     }
 }

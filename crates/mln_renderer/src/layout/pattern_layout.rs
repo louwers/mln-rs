@@ -27,7 +27,6 @@ use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::{VecMap, VecSet};
 
@@ -76,11 +75,11 @@ pub trait PatternLayoutSpec: 'static {
 
     /// `leaderLayerProperties->layerImpl().layout.evaluate(parameters)`.
     fn evaluate_layout(
-        properties: &Immutable<dyn LayerProperties>,
+        properties: &Arc<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout;
     /// `getEvaluated<LayerPropertiesType>(p).get<PatternPropertyType>()`.
-    fn pattern_property(properties: &Immutable<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image>;
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image>;
     /// `PatternPropertyType::defaultValue()`.
     fn pattern_default() -> Image;
     /// `layout.get<SortKeyPropertyType>().evaluate(feature, zoom, canonical, default)`.
@@ -95,7 +94,7 @@ pub trait PatternLayoutSpec: 'static {
     /// `std::make_shared<BucketType>(layout, layerPropertiesMap, zoom, overscaling)`.
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self::Bucket;
@@ -106,7 +105,7 @@ pub trait PatternLayoutSpec: 'static {
 
 /// `PatternLayout<...>`.
 pub struct PatternLayout<S: PatternLayoutSpec> {
-    pub layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
     pub bucket_leader_id: String,
 
     pub features: Vec<PatternFeature>,
@@ -134,7 +133,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// `sorted` selects the `SortKeyPropertyType` instantiation.
     pub fn new(
         parameters: &BucketParameters,
-        group: &[Immutable<dyn LayerProperties>],
+        group: &[Arc<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
         image_dependencies: &mut ImageDependencies,
         available_images: &VecSet<String>,
@@ -153,7 +152,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let bucket_leader_id = leader_impl.id.clone();
 
         let mut has_pattern = false;
-        let mut layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>> = VecMap::new();
+        let mut layer_properties_map: VecMap<String, Arc<dyn LayerProperties>> = VecMap::new();
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
             let pattern_property = S::pattern_property(layer_properties);
@@ -227,9 +226,13 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                                 S::pattern_default(),
                             );
 
-                            image_dependencies.entry(min.to.id().to_owned()).or_insert(ImageType::Pattern);
-                            image_dependencies.entry(mid.to.id().to_owned()).or_insert(ImageType::Pattern);
-                            image_dependencies.entry(max.to.id().to_owned()).or_insert(ImageType::Pattern);
+                            // An empty pattern name means no pattern, so it is not an
+                            // image dependency.
+                            for pattern in [&min, &mid, &max] {
+                                if !pattern.to.empty() {
+                                    image_dependencies.entry(pattern.to.id().to_owned()).or_insert(ImageType::Pattern);
+                                }
+                            }
                             pattern_dependency_map.entry(layer_id.clone()).or_insert(PatternDependency {
                                 min: min.to.id().to_owned(),
                                 mid: mid.to.id().to_owned(),
@@ -282,7 +285,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
     /// layoutParameters)` as the factories call it.
     pub fn with_source_layer(
         parameters: &mut LayoutParameters<'_>,
-        group: &[Immutable<dyn LayerProperties>],
+        group: &[Arc<dyn LayerProperties>],
         source_layer: SourceLayer,
         sorted: bool,
     ) -> Result<Self, Error> {
@@ -374,13 +377,13 @@ impl PatternLayoutSpec for FillLayoutSpec {
     type Layout = FillLayoutProperties::PossiblyEvaluated;
 
     fn evaluate_layout(
-        properties: &Immutable<dyn LayerProperties>,
+        properties: &Arc<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties).as_any().downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
+        let properties = (**properties).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
-    fn pattern_property(properties: &Immutable<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
         get_evaluated::<FillLayerProperties>(properties).get::<FillPattern>()
     }
     fn pattern_default() -> Image {
@@ -399,7 +402,7 @@ impl PatternLayoutSpec for FillLayoutSpec {
     }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> FillBucket {
@@ -419,13 +422,13 @@ impl PatternLayoutSpec for LineLayoutSpec {
     type Layout = LineLayoutProperties::PossiblyEvaluated;
 
     fn evaluate_layout(
-        properties: &Immutable<dyn LayerProperties>,
+        properties: &Arc<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties).as_any().downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
+        let properties = (**properties).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
-    fn pattern_property(properties: &Immutable<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
         get_evaluated::<LineLayerProperties>(properties).get::<LinePattern>()
     }
     fn pattern_default() -> Image {
@@ -444,7 +447,7 @@ impl PatternLayoutSpec for LineLayoutSpec {
     }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> LineBucket {
@@ -458,13 +461,13 @@ impl PatternLayoutSpec for LineLayoutSpec {
 /// `FillLayout*` / `LineLayout*`: whether the factory picks the sorted
 /// instantiation (`layout.get<SortKey>().isUndefined()` on the leader's
 /// unevaluated layout).
-pub fn fill_layout_is_sorted(leader: &Immutable<dyn LayerProperties>) -> bool {
-    let properties = (**leader).as_any().downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
+pub fn fill_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
+    let properties = (**leader).downcast_ref::<FillLayerProperties>().expect("FillLayerProperties");
     !properties.layer_impl().layout.get::<FillSortKey>().is_undefined()
 }
 
-pub fn line_layout_is_sorted(leader: &Immutable<dyn LayerProperties>) -> bool {
-    let properties = (**leader).as_any().downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
+pub fn line_layout_is_sorted(leader: &Arc<dyn LayerProperties>) -> bool {
+    let properties = (**leader).downcast_ref::<LineLayerProperties>().expect("LineLayerProperties");
     !properties.layer_impl().layout.get::<LineSortKey>().is_undefined()
 }
 

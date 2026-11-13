@@ -1,6 +1,8 @@
 // Ports include/mln/storage/resource.hpp and src/mln/storage/resource.cpp.
 
-use mln_util::chrono::{Duration, Timestamp};
+use std::time::Duration;
+
+use mln_util::chrono::Timestamp;
 use mln_util::constants::{EARTH_RADIUS_M, M2PI};
 use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::string::to_string_double;
@@ -150,7 +152,7 @@ impl Resource {
             prior_expires: None,
             prior_etag: None,
             prior_data: None,
-            minimum_update_interval: Duration::zero(),
+            minimum_update_interval: Duration::ZERO,
             storage_policy: StoragePolicy::Permanent,
         }
     }

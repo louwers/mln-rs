@@ -6,10 +6,10 @@
 // `background_layer::Impl` holds an `ImplBase` and implements the trait.
 // `dyn Impl` derefs to its `ImplBase`, so `impl_.id` reads as in C++.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use mln_style_types::VisibilityType;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,6 @@ use crate::expression::{Dependency, Expression};
 use crate::filter::Filter;
 use crate::layer::LayerTypeInfo;
 use crate::serialization::shared_expression;
-use crate::util::AsAny;
 
 /// `mln::FontStack` (`include/mln/util/font_stack.hpp`).
 pub type FontStack = Vec<String>;
@@ -74,7 +73,7 @@ impl ImplBase {
 }
 
 /// The virtual interface of `Layer::Impl`.
-pub trait Impl: AsAny {
+pub trait Impl: Any + Send + Sync {
     fn base(&self) -> &ImplBase;
     fn base_mut(&mut self) -> &mut ImplBase;
 
@@ -116,15 +115,19 @@ impl std::ops::Deref for dyn Impl {
 impl dyn Impl {
     /// `static_cast<const FooLayer::Impl&>(impl)`, checked.
     pub fn downcast_ref<T: Impl>(&self) -> Option<&T> {
-        self.as_any().downcast_ref::<T>()
+        (self as &dyn Any).downcast_ref()
     }
 }
 
-/// `staticImmutableCast<FooLayer::Impl>(impl)`. C++ asserts the type info;
-/// this panics on a type mismatch.
-pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Immutable<T> {
-    let Ok(typed) = impl_.clone().into_any_arc().downcast::<T>() else {
-        panic!("static_immutable_cast: layer impl type mismatch");
+/// Returns a new handle to `impl_` as its concrete layer impl type.
+///
+/// # Panics
+///
+/// If `impl_` is not a `T`.
+pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
+    let any: Arc<dyn Any + Send + Sync> = impl_.clone();
+    let Ok(typed) = any.downcast::<T>() else {
+        panic!("downcast_arc: layer impl type mismatch");
     };
     typed
 }

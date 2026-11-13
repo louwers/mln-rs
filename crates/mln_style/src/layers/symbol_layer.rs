@@ -30,7 +30,6 @@ use mln_style_types::{
     TextTransformType, TextVariableAnchorType, TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection,
 };
 use mln_util::{Color, Padding};
-use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
 pub use crate::layers::symbol_layer_impl::Impl;
@@ -56,7 +55,7 @@ impl Impl {
 #[derive(Debug)]
 pub struct SymbolLayer {
     /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
-    base_impl: Immutable<Impl>,
+    base_impl: Arc<Impl>,
 }
 
 impl SymbolLayer {
@@ -70,7 +69,7 @@ impl SymbolLayer {
 
     /// `SymbolLayer(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(impl_: Immutable<Impl>) -> Self {
+    pub fn from_impl(impl_: Arc<Impl>) -> Self {
         SymbolLayer { base_impl: impl_ }
     }
 
@@ -1285,7 +1284,7 @@ fn get_layer_property(layer: &SymbolLayer, property: Property) -> StyleProperty 
 }
 
 impl Layer for SymbolLayer {
-    fn base_impl(&self) -> Immutable<dyn layer::Impl> {
+    fn base_impl(&self) -> Arc<dyn layer::Impl> {
         self.base_impl.clone()
     }
 

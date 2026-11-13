@@ -5,13 +5,14 @@
 
 mod support;
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
 
 use mln_map::{CameraOptions, CameraUpdate};
 use mln_runtime::{ErrorKind, LogicalExtent, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 use support::{EMPTY_STYLE, TIMEOUT, TempDir, eventually, map, map_options, runtime, wait, wait_err};
 
 /// `width` by `height` logical pixels at a scale factor of 1.
@@ -35,10 +36,10 @@ fn commands_run_in_the_order_each_thread_sent_them() {
             std::thread::spawn(move || {
                 for i in 0..50 {
                     let ran = ran.clone();
-                    drop(map.with_core(move |_| ran.lock().unwrap().push((thread, i))).unwrap());
+                    drop(map.with_core(move |_| ran.lock().push((thread, i))).unwrap());
                     let applied = applied.clone();
                     map.request_repaint().unwrap().on_complete(move |result| {
-                        applied.lock().unwrap().push((thread, result.unwrap().sequence));
+                        applied.lock().push((thread, result.unwrap().sequence));
                     });
                 }
             })
@@ -50,10 +51,10 @@ fn commands_run_in_the_order_each_thread_sent_them() {
     open.send(()).unwrap();
     wait(map.request_repaint());
 
-    let applied = applied.lock().unwrap();
+    let applied = applied.lock();
     assert_eq!(200, applied.len());
     assert!(applied.windows(2).all(|pair| pair[0].1 < pair[1].1), "{applied:?}");
-    let ran = ran.lock().unwrap();
+    let ran = ran.lock();
     assert_eq!(200, ran.len());
     for thread in 0..4 {
         let order: Vec<_> = ran.iter().filter(|(t, _)| *t == thread).map(|(_, i)| *i).collect();
@@ -71,7 +72,7 @@ fn completions_arrive_in_send_order_across_maps_and_the_runtime() {
         let order = order.clone();
         move |ok: bool| {
             assert!(ok);
-            order.lock().unwrap().push(name);
+            order.lock().push(name);
         }
     };
     let (repainted, cleared) = (record("first"), record("runtime"));
@@ -81,7 +82,7 @@ fn completions_arrive_in_send_order_across_maps_and_the_runtime() {
     second.resize(extent(100, 100)).unwrap().on_complete(move |result| resized(result.is_ok()));
     first.resize(extent(100, 100)).unwrap().on_complete(move |result| resized_again(result.is_ok()));
     wait(runtime.clear_resource_transform());
-    assert_eq!(["first", "runtime", "second", "first again"], order.lock().unwrap().as_slice());
+    assert_eq!(["first", "runtime", "second", "first again"], order.lock().as_slice());
 }
 
 #[test]
@@ -151,7 +152,8 @@ fn commands_sent_before_the_map_is_built_wait_for_it() {
 #[test]
 fn a_map_that_fails_to_build_fails_its_commands() {
     let runtime = runtime();
-    let (map, created) = runtime.create_map(map_options().with_fallback_font_faces("not JSON")).unwrap();
+    let (map, created) =
+        runtime.create_map(MapOptions { fallback_font_faces: Some("not JSON".to_owned()), ..map_options() }).unwrap();
     let repaint = map.request_repaint().unwrap();
     assert_eq!(ErrorKind::InvalidArgument, created.wait().unwrap_err().kind);
     assert_eq!(ErrorKind::InvalidState, repaint.wait().unwrap_err().kind);
@@ -162,9 +164,13 @@ fn a_map_that_fails_to_build_fails_its_commands() {
 #[test]
 fn creation_rejects_options_that_no_map_can_have() {
     let runtime = runtime();
-    let empty = MapOptions::new(mln_map::MapOptions::new().with_size(Size::new(0, 10)));
+    let empty =
+        MapOptions { map: mln_map::MapOptions { size: Size::new(0, 10), ..Default::default() }, ..Default::default() };
     assert_eq!(ErrorKind::InvalidArgument, runtime.create_map(empty).unwrap_err().kind);
-    let scale = MapOptions::new(mln_map::MapOptions::new().with_pixel_ratio(f32::INFINITY));
+    let scale = MapOptions {
+        map: mln_map::MapOptions { pixel_ratio: f32::INFINITY, ..Default::default() },
+        ..Default::default()
+    };
     assert_eq!(ErrorKind::InvalidArgument, runtime.create_map(scale).unwrap_err().kind);
 }
 
@@ -277,7 +283,7 @@ fn a_command_group_holds_updates_back_until_it_ends() {
     let group = map.command_group().unwrap();
     let nested = map.command_group().unwrap();
     let held = wait(map.update_camera(CameraUpdate {
-        camera: CameraOptions::default().with_zoom(Some(3.0)),
+        camera: CameraOptions { zoom: Some(3.0), ..Default::default() },
         ..CameraUpdate::default()
     }));
     // The held change names the update that the outermost end shows.
@@ -296,7 +302,7 @@ fn the_camera_query_sees_the_commands_before_it() {
     let runtime = runtime();
     let map = map(&runtime);
     let moved = map.update_camera(CameraUpdate {
-        camera: CameraOptions::default().with_zoom(Some(5.0)).with_bearing(Some(30.0)),
+        camera: CameraOptions { zoom: Some(5.0), bearing: Some(30.0), ..Default::default() },
         ..CameraUpdate::default()
     });
     let camera = wait(map.camera());
@@ -343,7 +349,8 @@ fn a_resize_sets_the_scale_factor_and_rejects_one_that_isnt_positive() {
 fn only_a_continuous_map_repaints() {
     let runtime = runtime();
     let options = map_options();
-    let still = MapOptions { map: options.map.with_map_mode(mln_map::MapMode::Static), ..options };
+    let still =
+        MapOptions { map: mln_map::MapOptions { map_mode: mln_map::MapMode::Static, ..options.map }, ..options };
     let (map, created) = runtime.create_map(still).unwrap();
     created.wait().unwrap();
     assert_eq!(ErrorKind::InvalidState, map.request_repaint().unwrap_err().kind);

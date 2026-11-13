@@ -1,9 +1,8 @@
 // Ports test/gl/bucket.test.cpp (the Buckets.* tests; the OpenGL headless
 // backend is the WebGPU one here) and test/renderer/fill_bucket.test.cpp.
 
-use std::any::Any;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
@@ -23,7 +22,7 @@ use mln_renderer::layout::pattern_layout::PatternLayerMap;
 use mln_renderer::tile_mask::TileMask;
 use mln_style::CrossfadeParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::FillLayer;
 use mln_style::layers::fill_extrusion_layer_properties::{
@@ -41,12 +40,12 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::FeatureType;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
 use mln_webgpu::upload_pass::UploadPass as WebGpuUploadPass;
 use mln_webgpu::{Device, OffscreenTarget};
+use parking_lot::Mutex;
 
 /// `StubGeometryTileFeature(id, type, geometry, properties)`.
 struct StubGeometryTileFeature {
@@ -184,16 +183,12 @@ fn fill_extrusion_bucket_rounds_corners() {
 /// `StubIndexBuffer`: an index buffer that stands in for an upload.
 struct StubIndexBuffer;
 
-impl IndexBufferBase for StubIndexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl IndexBufferBase for StubIndexBuffer {}
 
 /// Runs `f` with the WebGPU upload pass of a headless backend.
 fn with_webgpu_upload_pass(f: impl FnOnce(&WebGpuUploadPass)) {
     with_upload_pass(|upload_pass| {
-        f(upload_pass.as_any().downcast_ref::<WebGpuUploadPass>().expect("WebGPU upload pass"));
+        f(upload_pass.downcast_ref::<WebGpuUploadPass>().expect("WebGPU upload pass"));
     });
 }
 
@@ -207,8 +202,8 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     *evaluated.get_mut::<FillColor>() = PossiblyEvaluatedPropertyValue::Expression(
         layer.downcast_ref::<FillLayer>().expect("fill layer").get_fill_color().as_expression().clone(),
     );
-    let properties: Immutable<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
-        static_immutable_cast(&layer.base_impl()),
+    let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
+        downcast_arc(&layer.base_impl()),
         CrossfadeParameters::default(),
         evaluated,
     ));
@@ -279,7 +274,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert!(Rc::ptr_eq(&buffer, &reused));
 
         // Data-driven paint values are freed too when nothing can rewrite them.
-        let binders = bucket.paint_property_binders.get("fill").unwrap().read().unwrap();
+        let binders = bucket.paint_property_binders.get("fill").unwrap().read();
         assert!(!binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(Some(&geometry), &bucket, buffer, false);
@@ -301,7 +296,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
     with_webgpu_upload_pass(|upload_pass| {
         bucket.upload(upload_pass);
         let geometry = BucketGeometry::default();
-        let binders = bucket.paint_property_binders.get("fill").unwrap().read().unwrap();
+        let binders = bucket.paint_property_binders.get("fill").unwrap().read();
         assert!(binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(Some(&geometry), &bucket, buffer, binders.depends_on_feature_state());
@@ -644,7 +639,7 @@ struct Recorder(Records);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push((severity, event, code, msg.to_owned()));
+        self.0.lock().push((severity, event, code, msg.to_owned()));
         true
     }
 }
@@ -659,10 +654,10 @@ impl FixtureLog {
         FixtureLog(records)
     }
     fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
-        self.0.lock().unwrap().iter().filter(|m| m.0 == severity && m.1 == event && m.2 == -1 && m.3 == msg).count()
+        self.0.lock().iter().filter(|m| m.0 == severity && m.1 == event && m.2 == -1 && m.3 == msg).count()
     }
     fn is_empty(&self) -> bool {
-        self.0.lock().unwrap().is_empty()
+        self.0.lock().is_empty()
     }
 }
 

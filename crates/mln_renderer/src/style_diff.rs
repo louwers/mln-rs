@@ -9,20 +9,19 @@ use std::sync::Arc;
 
 use mln_style::collection::ImmutableVector;
 use mln_style::{image, layer, source};
-use mln_util::immutable::Immutable;
 use mln_util::longest_common_subsequence::longest_common_subsequence;
 use mln_vec_map::VecMap;
 
 #[derive(Clone, Debug)]
 pub struct StyleChange<T: ?Sized> {
-    pub before: Immutable<T>,
-    pub after: Immutable<T>,
+    pub before: Arc<T>,
+    pub after: Arc<T>,
 }
 
 #[derive(Clone, Debug)]
 pub struct StyleDifference<T: ?Sized> {
-    pub added: VecMap<String, Immutable<T>>,
-    pub removed: VecMap<String, Immutable<T>>,
+    pub added: VecMap<String, Arc<T>>,
+    pub removed: VecMap<String, Arc<T>>,
     pub changed: VecMap<String, StyleChange<T>>,
 }
 
@@ -33,10 +32,10 @@ impl<T: ?Sized> Default for StyleDifference<T> {
 }
 
 fn diff<T: ?Sized>(
-    a: &Immutable<Vec<Immutable<T>>>,
-    b: &Immutable<Vec<Immutable<T>>>,
-    id: impl Fn(&Immutable<T>) -> String,
-    eq: impl Fn(&Immutable<T>, &Immutable<T>) -> bool,
+    a: &Arc<Vec<Arc<T>>>,
+    b: &Arc<Vec<Arc<T>>>,
+    id: impl Fn(&Arc<T>) -> String,
+    eq: impl Fn(&Arc<T>, &Arc<T>) -> bool,
 ) -> StyleDifference<T> {
     let mut result = StyleDifference::default();
 
@@ -79,10 +78,7 @@ pub type SourceDifference = StyleDifference<dyn source::Impl>;
 pub type LayerDifference = StyleDifference<dyn layer::Impl>;
 
 #[must_use]
-pub fn diff_images(
-    a: &Immutable<Vec<Immutable<image::Impl>>>,
-    b: &Immutable<Vec<Immutable<image::Impl>>>,
-) -> ImageDifference {
+pub fn diff_images(a: &Arc<Vec<Arc<image::Impl>>>, b: &Arc<Vec<Arc<image::Impl>>>) -> ImageDifference {
     diff(a, b, |i| i.id.clone(), |lhs, rhs| lhs.id == rhs.id)
 }
 

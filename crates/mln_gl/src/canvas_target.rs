@@ -1,12 +1,11 @@
 // The target of a browser canvas: a WebGL2 context, which is OpenGL ES 3.0,
-// on an OffscreenCanvas. After the GLFW app's backend
+// on an OffscreenCanvas or an HTMLCanvasElement. After the GLFW app's backend
 // (platform/glfw/glfw_gl_backend.cpp), whose window is the canvas here.
 //
 // The context belongs to the canvas and is always current, and the browser
 // presents the canvas after the task that drew into it, so there is nothing
 // to activate or swap.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -15,7 +14,7 @@ use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_util::error::Error;
 use mln_util::size::Size;
 use wasm_bindgen::JsCast;
-use web_sys::{OffscreenCanvas, WebGl2RenderingContext, WebGlContextAttributes};
+use web_sys::{HtmlCanvasElement, OffscreenCanvas, WebGl2RenderingContext, WebGlContextAttributes};
 
 use crate::context::Context;
 use crate::draw_target::{DrawTarget, TargetResource};
@@ -41,16 +40,56 @@ impl TargetResource for CanvasResource {
             context.bind_framebuffer(None, self.size.get(), true);
         }
     }
+}
 
-    fn as_any(&self) -> &dyn Any {
-        self
+/// A canvas that a [`CanvasTarget`] draws into.
+#[derive(Clone, Debug)]
+pub enum WebCanvas {
+    /// A canvas off the page, such as one that the page transferred to a Web
+    /// Worker.
+    Offscreen(OffscreenCanvas),
+    /// A canvas element of the page.
+    Element(HtmlCanvasElement),
+}
+
+impl From<OffscreenCanvas> for WebCanvas {
+    fn from(canvas: OffscreenCanvas) -> WebCanvas {
+        WebCanvas::Offscreen(canvas)
+    }
+}
+
+impl From<HtmlCanvasElement> for WebCanvas {
+    fn from(canvas: HtmlCanvasElement) -> WebCanvas {
+        WebCanvas::Element(canvas)
+    }
+}
+
+impl WebCanvas {
+    fn set_size(&self, size: Size) {
+        match self {
+            WebCanvas::Offscreen(canvas) => {
+                canvas.set_width(size.width);
+                canvas.set_height(size.height);
+            }
+            WebCanvas::Element(canvas) => {
+                canvas.set_width(size.width);
+                canvas.set_height(size.height);
+            }
+        }
+    }
+
+    fn context(&self, attributes: &WebGlContextAttributes) -> Result<Option<js_sys::Object>, wasm_bindgen::JsValue> {
+        match self {
+            WebCanvas::Offscreen(canvas) => canvas.get_context_with_context_options("webgl2", attributes),
+            WebCanvas::Element(canvas) => canvas.get_context_with_context_options("webgl2", attributes),
+        }
     }
 }
 
 /// Frames drawn into a canvas, which the browser presents.
 pub struct CanvasTarget {
     backend: Rc<RendererBackend>,
-    canvas: OffscreenCanvas,
+    canvas: WebCanvas,
     size: Rc<Cell<Size>>,
     /// Made with the first frame.
     image: RefCell<Option<Rc<DrawTarget>>>,
@@ -66,9 +105,12 @@ impl CanvasTarget {
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
     /// browser makes no WebGL2 context, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when it throws.
-    pub fn with_backend(canvas: OffscreenCanvas, size: Size) -> Result<(Rc<RendererBackend>, CanvasTarget), Error> {
-        canvas.set_width(size.width);
-        canvas.set_height(size.height);
+    pub fn with_backend(
+        canvas: impl Into<WebCanvas>,
+        size: Size,
+    ) -> Result<(Rc<RendererBackend>, CanvasTarget), Error> {
+        let canvas = canvas.into();
+        canvas.set_size(size);
         let attributes = WebGlContextAttributes::new();
         attributes.set_alpha(true);
         attributes.set_premultiplied_alpha(true);
@@ -76,7 +118,7 @@ impl CanvasTarget {
         attributes.set_depth(true);
         attributes.set_stencil(true);
         let webgl2 = canvas
-            .get_context_with_context_options("webgl2", &attributes)
+            .context(&attributes)
             .map_err(|error| Error::native(format!("{error:?}")))?
             .and_then(|context| context.dyn_into::<WebGl2RenderingContext>().ok())
             .ok_or_else(|| Error::unsupported("the canvas has no WebGL2 context"))?;
@@ -103,8 +145,7 @@ impl CanvasTarget {
         if size == self.size.replace(size) {
             return;
         }
-        self.canvas.set_width(size.width);
-        self.canvas.set_height(size.height);
+        self.canvas.set_size(size);
     }
 }
 
@@ -113,7 +154,7 @@ impl FrameTarget for CanvasTarget {
         let mut image = self.image.borrow_mut();
         if image.is_none() {
             let resource = CanvasResource { context: self.backend.gl_context()?.weak(), size: self.size.clone() };
-            *image = Some(Rc::new(DrawTarget::new(self.size.get(), resource)));
+            *image = Some(Rc::new(DrawTarget::new(self.size.get(), Rc::new(resource))));
         }
         let image = image.clone()?;
         image.set_size(self.size.get());

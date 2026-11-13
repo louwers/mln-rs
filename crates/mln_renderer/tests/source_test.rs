@@ -3,7 +3,8 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::Duration;
 
 use geojson::GeoJSON;
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
@@ -17,7 +18,7 @@ use mln_renderer::tile_parameters::TileParameters;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
-use mln_style::layer::{Layer, static_immutable_cast};
+use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::layers::hillshade_layer::Impl as HillshadeLayerImpl;
@@ -38,15 +39,14 @@ use mln_style::sources::geojson_source_impl;
 use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 use mln_style_types::SourceType;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::chrono::{Duration, milliseconds};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{Tileset, VectorEncoding};
+use parking_lot::Mutex;
 
 /// `SourceTest`.
 struct SourceTest {
@@ -178,20 +178,20 @@ enum Tiled {
 impl Tiled {
     /// `RasterLayer` / `HillshadeLayer` / `LineLayer` (source-layer "water")
     /// "id" on "source", as layer properties.
-    fn layers(self) -> Vec<Immutable<dyn LayerProperties>> {
-        let properties: Immutable<dyn LayerProperties> = match self {
+    fn layers(self) -> Vec<Arc<dyn LayerProperties>> {
+        let properties: Arc<dyn LayerProperties> = match self {
             Tiled::Raster => {
                 let layer = RasterLayer::new("id", "source");
-                Arc::new(RasterLayerProperties::new(static_immutable_cast::<RasterLayerImpl>(&layer.base_impl())))
+                Arc::new(RasterLayerProperties::new(downcast_arc::<RasterLayerImpl>(&layer.base_impl())))
             }
             Tiled::RasterDEM => {
                 let layer = HillshadeLayer::new("id", "source");
-                Arc::new(HillshadeLayerProperties::new(static_immutable_cast::<HillshadeLayerImpl>(&layer.base_impl())))
+                Arc::new(HillshadeLayerProperties::new(downcast_arc::<HillshadeLayerImpl>(&layer.base_impl())))
             }
             Tiled::Vector => {
                 let mut layer = LineLayer::new("id", "source");
                 layer.set_source_layer("water");
-                Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())))
+                Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())))
             }
         };
         vec![properties]
@@ -378,7 +378,7 @@ impl AsyncRequest for PendingTileRequest {}
 
 impl Drop for PendingTileRequest {
     fn drop(&mut self) {
-        self.cancelled.lock().unwrap().push(self.tile);
+        self.cancelled.lock().push(self.tile);
     }
 }
 
@@ -386,7 +386,7 @@ impl FileSource for PendingTileSource {
     fn request(&self, resource: &Resource, _callback: Callback) -> Box<dyn AsyncRequest> {
         let data = resource.tile_data.as_ref().expect("only tiles are requested");
         let tile = (data.z, data.x, data.y);
-        self.requested.lock().unwrap().push(tile);
+        self.requested.lock().push(tile);
         Box::new(PendingTileRequest { tile, cancelled: self.cancelled.clone() })
     }
 
@@ -426,7 +426,7 @@ fn tile_out_of_view_keeps_loading() {
         });
         let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs.clone()));
         render_source.update(source.base_impl(), &layers, true, needs_relayout, &parameters);
-        requested.lock().unwrap().clone()
+        requested.lock().clone()
     };
 
     let unturned = turn(&mut test, 0.0, true);
@@ -434,7 +434,7 @@ fn tile_out_of_view_keeps_loading() {
     assert!(turned.len() > unturned.len(), "turning shows other tiles");
     let back = turn(&mut test, 0.0, false);
     assert_eq!(turned, back, "no tile is requested again");
-    assert!(cancelled.lock().unwrap().is_empty(), "no request is cancelled");
+    assert!(cancelled.lock().is_empty(), "no request is cancelled");
 }
 
 // gtest: Source.RasterTileEmpty
@@ -587,8 +587,8 @@ fn custom_geometry_case(
 
     let mut layer = LineLayer::new("id", "source");
     layer.set_source_layer("water");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
     let layers = vec![layer_properties];
 
     let mut render_source = render_source::create(&source.base_impl()).unwrap();
@@ -668,8 +668,8 @@ fn custom_vector_source_set_tile_data() {
 
     let mut layer = LineLayer::new("id", "source");
     layer.set_source_layer("water");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(downcast_arc::<LineLayerImpl>(&layer.base_impl())));
 
     let mut render_source = render_source::create(&source.base_impl()).unwrap();
     render_source.set_observer(observer);
@@ -765,11 +765,11 @@ fn geojson_source_tiles_after_data_reset() {
         create_geojson_data(&geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
     source.set_geojson_data(Some(geojson_data.clone()));
     let mut render_source =
-        RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
+        RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
 
     let layer = CircleLayer::new("id", "source");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
@@ -798,28 +798,28 @@ fn run_until_work(run_loop: &RunLoop) {
 }
 
 /// A circle layer "id" on "source", as layer properties.
-fn circle_layers() -> Vec<Immutable<dyn LayerProperties>> {
+fn circle_layers() -> Vec<Arc<dyn LayerProperties>> {
     let layer = CircleLayer::new("id", "source");
-    vec![Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())))]
+    vec![Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())))]
 }
 
 /// A GeoJSON source rendered with a circle layer. Its data is clustered,
 /// which slices a tile within the call in either mode, so whether the tiles
 /// complete within an update shows only how they lay out.
 struct SynchronousUpdateSource {
-    options: Immutable<GeoJSONOptions>,
+    options: Arc<GeoJSONOptions>,
     source: GeoJSONSource,
     render_source: RenderGeoJSONSource,
-    layers: Vec<Immutable<dyn LayerProperties>>,
+    layers: Vec<Arc<dyn LayerProperties>>,
 }
 
 impl SynchronousUpdateSource {
     fn new(synchronous_update: bool) -> Self {
-        let options: Immutable<GeoJSONOptions> =
+        let options: Arc<GeoJSONOptions> =
             Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
         let source = GeoJSONSource::new("source", options.clone());
         let render_source =
-            RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
+            RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
         SynchronousUpdateSource { options, source, render_source, layers: circle_layers() }
     }
 
@@ -869,7 +869,7 @@ struct HeldScheduler {
 
 impl scheduler::Scheduler for HeldScheduler {
     fn schedule(&self, task: scheduler::Task) {
-        self.tasks.lock().unwrap().push(task);
+        self.tasks.lock().push(task);
     }
 
     fn wait_for_empty(&self) {}
@@ -893,7 +893,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
         create_geojson_data(&geojson, slicer.clone(), &GeoJSONOptions::default_options()).unwrap(),
     ));
     let mut render_source =
-        RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
+        RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
     let layers = circle_layers();
     let update = |render_source: &mut RenderGeoJSONSource| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);
@@ -902,13 +902,13 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     };
 
     update(&mut render_source);
-    assert!(!slicer.tasks.lock().unwrap().is_empty());
+    assert!(!slicer.tasks.lock().is_empty());
     assert!(!render_source.is_loaded());
 
     // The queued slices run in the background while the source turns
     // synchronous and recreates its tiles, which slice the same index inline.
     source.set_override_synchronous_update(true);
-    let tasks = std::mem::take(&mut *slicer.tasks.lock().unwrap());
+    let tasks = std::mem::take(&mut *slicer.tasks.lock());
     let background = std::thread::spawn(move || {
         for task in tasks {
             task();
@@ -929,7 +929,7 @@ struct Recorder(Records);
 
 impl LogObserver for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push(((severity, event, msg.to_owned()), false));
+        self.0.lock().push(((severity, event, msg.to_owned()), false));
         true
     }
 }
@@ -950,7 +950,7 @@ impl FixtureLog {
     /// `count({severity, event, -1, msg})`.
     fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
         let mut count = 0;
-        for (m, checked) in self.messages.lock().unwrap().iter_mut() {
+        for (m, checked) in self.messages.lock().iter_mut() {
             if m.0 == severity && m.1 == event && m.2 == msg {
                 *checked = true;
                 count += 1;
@@ -960,7 +960,7 @@ impl FixtureLog {
     }
 
     fn unchecked_count(&self) -> usize {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).count()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).count()
     }
 }
 
@@ -986,7 +986,7 @@ fn set_max_parent_overscale_factor() {
             let z = res.tile_data.as_ref().unwrap().z;
             if z == 5 {
                 let end = end.clone();
-                timer.start(milliseconds(10), Duration::zero(), end);
+                timer.start(Duration::from_millis(10), Duration::ZERO, end);
             }
             // No tiles above zoom level 5 should be requested.
             assert!(5 <= i32::from(z), "requested z{z}");

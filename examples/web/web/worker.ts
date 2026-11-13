@@ -1,7 +1,7 @@
 // A tile workers' Web Worker (tile-worker.ts) on the module that draws with
 // WebGPU.
 
-import init, { TileWorker, panic_for_check } from './pkg/mln_web.js';
+import init, { mlnWebServeTileWorker, panic_for_check } from './pkg/mln_web.js';
 import { serve } from './tile-worker.ts';
 
-serve({ default: init, TileWorker, panic_for_check });
+serve({ default: init, mlnWebServeTileWorker, panic_for_check });

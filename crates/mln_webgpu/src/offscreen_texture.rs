@@ -12,7 +12,6 @@
 // that resizes the textures when someone calls `setSize` on the color
 // texture; nothing on the M1 path resizes them.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -169,10 +168,8 @@ impl OffscreenTextureResource {
     /// back reads the next one too, and the copy then costs no submission
     /// of its own.
     pub(crate) fn encode_requested_copy(&self, encoder: &mut wgpu::CommandEncoder) {
-        let Some(device) = self.context.get_backend().get_device() else {
-            return;
-        };
-        if self.read_back.replace(false) && self.encode_copy(&device, encoder) {
+        let device = self.context.get_backend().device();
+        if self.read_back.replace(false) && self.encode_copy(device, encoder) {
             self.copied_at.set(Some(self.context.submissions()));
         }
     }
@@ -186,15 +183,12 @@ impl OffscreenTextureResource {
         self.read_back.set(true);
 
         let backend = self.context.get_backend();
-        let (Some(device), Some(queue)) = (backend.get_device(), backend.get_queue()) else {
-            eprintln!("WebGPU: No device or queue available for readback");
-            return PremultipliedImage::from_vec(size, data);
-        };
+        let (device, queue) = (backend.device(), backend.queue());
 
         // Any later submission may have drawn the texture again.
         if self.copied_at.take() != Some(self.context.submissions()) {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            if !self.encode_copy(&device, &mut encoder) {
+            if !self.encode_copy(device, &mut encoder) {
                 eprintln!("WebGPU: Color texture is null");
                 return PremultipliedImage::from_vec(size, data);
             }
@@ -293,10 +287,6 @@ impl TargetResource for OffscreenTextureResource {
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
         self.depth_texture.as_ref()?.borrow().get_native_format()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// `webgpu::OffscreenTexture`
@@ -335,12 +325,8 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     }
 
     fn submit(&self, encoder: &dyn GfxCommandEncoder) {
-        if let Some(encoder) = encoder.as_any().downcast_ref::<CommandEncoder>() {
+        if let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() {
             encoder.submit_frame(Some(self.target.resource()));
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

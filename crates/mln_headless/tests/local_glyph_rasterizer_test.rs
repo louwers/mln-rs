@@ -95,7 +95,7 @@ impl LocalGlyphRasterizerTest {
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
         let map = Map::with_file_source(
             file_source,
-            MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+            MapOptions { map_mode: MapMode::Static, size: frontend.get_size(), ..Default::default() },
         )
         .unwrap();
         frontend.attach(&map);
@@ -141,12 +141,10 @@ fn no_local_with_content_insets() {
     // content insets, with no pitch defined, should produce the same output.
     // test.map.moveBy({ viewSize.width * 0.25, 0 });
 
-    test.map.jump_to(&CameraOptions::default().with_padding(Some(EdgeInsets {
-        top: 0.0,
-        left: f64::from(view_size.width) * 0.25 * 2.0,
-        bottom: 0.0,
-        right: 0.0,
-    })));
+    test.map.jump_to(&CameraOptions {
+        padding: Some(EdgeInsets { top: 0.0, left: f64::from(view_size.width) * 0.25 * 2.0, bottom: 0.0, right: 0.0 }),
+        ..Default::default()
+    });
     test.check_rendering("no_local_with_content_insets", 0.001, 0.1);
 }
 
@@ -163,11 +161,10 @@ fn no_local_with_content_insets_and_pitch() {
     // Expected image was verified using no-padding render, offsetted to right
     // using bitmap editor.
 
-    test.map.jump_to(&CameraOptions::default().with_pitch(Some(45.0)).with_padding(Some(EdgeInsets {
-        top: 0.0,
-        left: f64::from(view_size.width) * 0.4,
-        bottom: 0.0,
-        right: 0.0,
-    })));
+    test.map.jump_to(&CameraOptions {
+        pitch: Some(45.0),
+        padding: Some(EdgeInsets { top: 0.0, left: f64::from(view_size.width) * 0.4, bottom: 0.0, right: 0.0 }),
+        ..Default::default()
+    });
     test.check_rendering("no_local_with_content_insets_and_pitch", 0.001, 0.1);
 }

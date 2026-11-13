@@ -1,7 +1,8 @@
 // Ports include/mln/style/transition_options.hpp.
 
+use std::time::Duration;
+
 use feature::{Value, ValueObject};
-use mln_util::chrono::Duration;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -46,12 +47,13 @@ impl TransitionOptions {
     #[must_use]
     pub fn serialize(&self) -> Value {
         let mut result = ValueObject::new();
+        // Whole milliseconds, as integers.
+        let millis = |duration: Duration| Value::Int(i64::try_from(duration.as_millis()).unwrap_or(i64::MAX));
         if let Some(duration) = self.duration {
-            // duration_cast<milliseconds>(*duration).count() is an int64.
-            result.insert("duration".to_owned(), Value::Int(duration.as_millis()));
+            result.insert("duration".to_owned(), millis(duration));
         }
         if let Some(delay) = self.delay {
-            result.insert("delay".to_owned(), Value::Int(delay.as_millis()));
+            result.insert("delay".to_owned(), millis(delay));
         }
         Value::Object(result)
     }

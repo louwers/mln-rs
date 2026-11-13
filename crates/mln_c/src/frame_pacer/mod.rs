@@ -30,8 +30,10 @@ pub(crate) mod android;
 pub(crate) mod apple;
 pub(crate) mod ohos;
 
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
+
+use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
 use crate::error::Error;
@@ -40,7 +42,7 @@ use crate::generated::types::{
     mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options, mln_render_session, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
-use crate::{lock, render_session};
+use crate::render_session;
 
 abi::versioned!(mln_frame_pacer_options);
 
@@ -354,8 +356,8 @@ impl Pacer {
     /// Takes `limit` from the next refresh on, including one that is on its
     /// way already.
     pub(crate) fn set_limit(&self, limit: Option<Limit>) {
-        let _changing = lock(&self.limit_lock);
-        lock(&self.state).throttle.set_limit(limit);
+        let _changing = self.limit_lock.lock();
+        self.state.lock().throttle.set_limit(limit);
         self.source.set_limit(limit);
     }
 
@@ -363,7 +365,7 @@ impl Pacer {
     /// limit allows.
     fn request(&self, session: mln_render_session) {
         {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock();
             if !state.waiting.contains(&session) {
                 state.waiting.push(session);
             }
@@ -376,7 +378,7 @@ impl Pacer {
 
     fn on_vsync(&self, time: Duration) {
         let due = {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock();
             if state.waiting.is_empty() {
                 state.scheduled = false;
                 return;
@@ -423,7 +425,7 @@ impl SessionPacing {
     /// The map has something new to draw.
     fn redraw(&self) {
         let request = {
-            let mut state = lock(&self.0);
+            let mut state = self.0.lock();
             state.redraw = true;
             state.pacer.clone().map(|pacer| (pacer, state.session))
         };
@@ -436,7 +438,7 @@ impl SessionPacing {
     /// at its next refresh what the map had to draw.
     pub(crate) fn set(&self, session: mln_render_session, pacer: Option<Arc<Pacer>>) {
         let (previous, request) = {
-            let mut state = lock(&self.0);
+            let mut state = self.0.lock();
             state.session = session;
             let previous = std::mem::replace(&mut state.pacer, pacer);
             let request = state.pacer.clone().filter(|_| state.redraw);
@@ -454,13 +456,13 @@ impl SessionPacing {
     /// before the demand, so that a redraw that comes after the demand asks
     /// for another.
     pub(crate) fn demanded(&self) {
-        lock(&self.0).redraw = false;
+        self.0.lock().redraw = false;
     }
 
     /// Whether `pacer` paces the session and the map has something new to
     /// draw, which the pacer's demand then answers.
     pub(crate) fn take_redraw(&self, pacer: &Pacer) -> bool {
-        let mut state = lock(&self.0);
+        let mut state = self.0.lock();
         let paced = state.pacer.as_deref().is_some_and(|own| core::ptr::eq(own, pacer));
         let take = paced && state.redraw;
         state.redraw &= !take;

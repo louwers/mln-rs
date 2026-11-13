@@ -17,16 +17,16 @@ use raw_window_handle::{
 use crate::completion::{self, Generations, PendingCompletion};
 use crate::error::Error;
 use crate::generated::types::{
-    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_EXPORTED_RING, MLN_RENDER_TARGET_KIND_HTML_CANVAS,
+    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_EXPORTED_RING,
     MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_METAL_LAYER,
     MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_RENDER_TARGET_KIND_OHOS_WINDOW,
     MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE,
     MLN_RENDER_TARGET_KIND_VULKAN_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_VULKAN_SURFACE,
-    MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE, MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES,
-    MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE, MLN_RENDER_TARGET_KIND_WIN32_WINDOW, MLN_RENDER_TARGET_KIND_XLIB_WINDOW,
-    mln_completion, mln_diagnostic, mln_gpu_device, mln_logical_extent, mln_logical_size, mln_map,
-    mln_open_gl_context_provider_flags, mln_render_session, mln_render_session_attach_options, mln_render_target,
-    mln_status,
+    MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE, MLN_RENDER_TARGET_KIND_WEB_CANVAS,
+    MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_WIN32_WINDOW,
+    MLN_RENDER_TARGET_KIND_XLIB_WINDOW, mln_completion, mln_diagnostic, mln_gpu_device, mln_logical_extent,
+    mln_logical_size, mln_map, mln_open_gl_context_provider_flags, mln_render_session,
+    mln_render_session_attach_options, mln_render_target, mln_status,
 };
 use crate::{abi, gpu_device, handles, map, render_session};
 
@@ -69,7 +69,8 @@ enum Target {
         size: Size,
         surface: Surface,
     },
-    /// A ring of the host's textures.
+    /// A ring of the host's textures. The browser build takes none.
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
     Borrowed {
         size: Size,
         ring: BorrowedRing,
@@ -78,6 +79,12 @@ enum Target {
     Exported {
         size: Size,
         ring: ExportedRing,
+    },
+    /// A canvas of the browser build's.
+    #[cfg(target_family = "wasm")]
+    WebCanvas {
+        size: Size,
+        surface: Surface,
     },
     /// A target that this library doesn't render to.
     Unsupported(&'static str),
@@ -91,6 +98,8 @@ impl Target {
             | Target::HostSurface { size, .. }
             | Target::Borrowed { size, .. }
             | Target::Exported { size, .. } => Some(*size),
+            #[cfg(target_family = "wasm")]
+            Target::WebCanvas { size, .. } => Some(*size),
             Target::Unsupported(_) => None,
         }
     }
@@ -224,6 +233,35 @@ fn vulkan_ring(
     {
         let _ = (owner, size);
         Ok(Target::Unsupported("Vulkan targets are not supported by this build"))
+    }
+}
+
+/// A caller's canvas: one of the browser build's, which presents to it.
+fn web_canvas(
+    size: Size,
+    target: &crate::generated::types::mln_web_canvas_target,
+    name: &str,
+) -> Result<Target, Error> {
+    // SAFETY: the header's contract for the view.
+    let format = unsafe { crate::buffer::text(target.format, &format!("{name}.format")) }?;
+    let format = match format {
+        "" => None,
+        format => Some(::mln_runtime::CanvasFormat::from_name(format).ok_or_else(|| {
+            Error::invalid_argument(format!("{name}.format {format:?} isn't a format that a canvas takes"))
+        })?),
+    };
+    if target.canvas == 0 {
+        return Err(Error::invalid_argument(format!("{name}.canvas must not be 0")));
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        let canvas = crate::web::required(target.canvas, &format!("{name}.canvas"))?;
+        Ok(Target::WebCanvas { size, surface: Surface::web_canvas(canvas, format)? })
+    }
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let _ = (size, format);
+        Ok(Target::Unsupported("only the browser build presents to a canvas"))
     }
 }
 
@@ -372,10 +410,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 (target.data.android_window.logical_size, "mln_android_window_target")
             }
             MLN_RENDER_TARGET_KIND_OHOS_WINDOW => (target.data.ohos_window.logical_size, "mln_ohos_window_target"),
-            MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE => {
-                (target.data.web_gpu_surface.logical_size, "mln_web_gpu_surface_target")
-            }
-            MLN_RENDER_TARGET_KIND_HTML_CANVAS => (target.data.html_canvas.logical_size, "mln_html_canvas_target"),
+            MLN_RENDER_TARGET_KIND_WEB_CANVAS => (target.data.web_canvas.logical_size, "mln_web_canvas_target"),
             MLN_RENDER_TARGET_KIND_VULKAN_SURFACE => {
                 (target.data.vulkan_surface.logical_size, "mln_vulkan_surface_target")
             }
@@ -470,14 +505,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
             MLN_RENDER_TARGET_KIND_OHOS_WINDOW => {
                 ohos_window(size, required(target.data.ohos_window.window, &field("window"))?)?
             }
-            MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE => {
-                let surface = target.data.web_gpu_surface;
-                required(surface.surface, &field("surface"))?;
-                if surface.format == 0 {
-                    return Err(Error::invalid_argument(format!("{} must not be zero", field("format"))));
-                }
-                Target::Unsupported("this library wraps no WebGPU device to present to a WebGPU surface with")
-            }
+            MLN_RENDER_TARGET_KIND_WEB_CANVAS => web_canvas(size, &target.data.web_canvas, name)?,
             MLN_RENDER_TARGET_KIND_VULKAN_SURFACE => {
                 let surface = target.data.vulkan_surface.surface;
                 if surface == 0 {
@@ -591,21 +619,19 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     name,
                     |t| t.texture,
                 )?;
-                if textures.iter().any(|texture| texture.texture.is_null() || texture.texture_view.is_null()) {
-                    return Err(Error::invalid_argument(format!("{name} textures need a texture and a view")));
+                if textures.iter().any(|texture| texture.texture == 0) {
+                    return Err(Error::invalid_argument(format!("{name} textures must not be 0")));
                 }
-                if ring.format == 0 {
-                    return Err(Error::invalid_argument(format!("{} must not be zero", field("format"))));
+                if crate::buffer::text(ring.format, &field("format"))?.is_empty() {
+                    return Err(Error::invalid_argument(format!("{} must not be empty", field("format"))));
                 }
-                Target::Unsupported("WebGPU textures are not supported by this build")
+                Target::Unsupported(
+                    "WebGPU rings render on a wrapped GPUDevice, which this library's WebGPU can't wrap yet \
+                     (https://github.com/louwers/mln-rs/issues/263)",
+                )
             }
             MLN_RENDER_TARGET_KIND_EXPORTED_RING => exported_ring(size, &target.data.exported_ring, name)?,
-            _ => {
-                if target.data.html_canvas.selector.size == 0 {
-                    return Err(Error::invalid_argument(format!("{} must not be empty", field("selector"))));
-                }
-                Target::Unsupported("this library presents to no HTML canvas")
-            }
+            _ => return Err(Error::invalid_argument("mln_render_target.kind is invalid")),
         }
     };
     Ok(target)
@@ -787,6 +813,9 @@ pub unsafe extern "C" fn mln_map_attach(
                 ring.keep_depth = options.keep_depth;
                 RenderTarget::Exported { size, ring, device }
             }
+            // Either driver runs on the instance's one thread.
+            #[cfg(target_family = "wasm")]
+            Target::WebCanvas { size, surface } => RenderTarget::Surface { size, surface, device },
             Target::Unsupported(message) => return Err(unsupported(message)),
         };
         render_session::attach(&map, target, options, |handle, attached| {
@@ -842,6 +871,8 @@ pub unsafe extern "C" fn mln_render_session_set_target(
                 Box::new(move |session| session.set_surface(size, surface))
             }
             Target::HostSurface { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
+            #[cfg(target_family = "wasm")]
+            Target::WebCanvas { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
             Target::Borrowed { size, ring } => Box::new(move |session| session.set_ring(size, ring)),
             Target::Exported { .. } => {
                 return Err(unsupported("an exported ring is no replacement target: resize the session instead"));
@@ -881,10 +912,13 @@ pub unsafe extern "C" fn mln_logical_extent_physical_size(
 }
 
 /// `mln_open_gl_supported_context_provider_mask()`: EGL on Linux, FreeBSD,
-/// Android and `OpenHarmony`, and WGL on Windows.
+/// Android and `OpenHarmony`, WGL on Windows, and WebGL in a browser build that
+/// draws with OpenGL.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_open_gl_supported_context_provider_mask() -> mln_open_gl_context_provider_flags {
-    if cfg!(windows) {
+    if cfg!(all(target_family = "wasm", feature = "gl", not(feature = "webgpu"))) {
+        crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WEB_GL
+    } else if cfg!(windows) {
         crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WGL
     } else if cfg!(all(unix, not(target_vendor = "apple"))) {
         crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL

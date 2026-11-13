@@ -8,7 +8,6 @@
 // C++ makes no blit encoder (it notes it isn't used yet) and debug groups
 // on an upload pass push onto that encoder, so they are no-ops here.
 
-use std::any::Any;
 use std::rc::Rc;
 
 use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
@@ -38,11 +37,7 @@ struct VertexBuffer {
     resource: Rc<VertexBufferResource>,
 }
 
-impl VertexBufferBase for VertexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl VertexBufferBase for VertexBuffer {}
 
 impl UploadPass {
     pub fn new(target: &dyn DrawTarget, command_encoder: &CommandEncoder, _name: &str) -> Self {
@@ -82,11 +77,8 @@ impl UploadPass {
     ) -> Option<UniqueVertexBufferResource> {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();
-        let existing = vec
-            .get_buffer()
-            .as_ref()
-            .and_then(|b| b.as_any().downcast_ref::<VertexBuffer>())
-            .map(|b| b.resource.clone());
+        let existing =
+            vec.get_buffer().as_ref().and_then(|b| b.downcast_ref::<VertexBuffer>()).map(|b| b.resource.clone());
         // If the already-allocated buffer is large enough, we can re-use it.
         if let Some(resource) = existing
             && raw_size <= resource.get_size_in_bytes()
@@ -241,9 +233,5 @@ impl upload_pass::UploadPass for UploadPass {
         persistent: bool,
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
         Box::new(IndexBufferResource::new(self.context.create_buffer(Some(data), data.len(), true, persistent)))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

@@ -13,7 +13,6 @@ use std::sync::Arc;
 
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::serialization::shared;
 use mln_util::size::Size;
 use serde::{Deserialize, Serialize};
@@ -158,7 +157,7 @@ impl Impl {
 /// `style::Image`.
 #[derive(Clone, Debug)]
 pub struct Image {
-    pub base_impl: Immutable<Impl>,
+    pub base_impl: Arc<Impl>,
 }
 
 impl Image {
@@ -193,7 +192,7 @@ impl Image {
 
     /// `explicit Image(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(base_impl: Immutable<Impl>) -> Self {
+    pub fn from_impl(base_impl: Arc<Impl>) -> Self {
         Image { base_impl }
     }
 
@@ -256,7 +255,7 @@ pub enum ImageType {
 /// atlas space in iteration order, and a `HashMap`'s order changes from
 /// process to process, which moved icons in the atlas and changed rendered
 /// pixels between runs (sargunv/mln-rs#2).
-pub type ImageMap = mln_vec_map::VecMap<String, Immutable<Impl>>;
+pub type ImageMap = mln_vec_map::VecMap<String, Arc<Impl>>;
 /// `ImageDependencies = mln::unordered_map<std::string, ImageType>`.
 pub type ImageDependencies = std::collections::HashMap<String, ImageType>;
 
@@ -355,8 +354,8 @@ impl shared::Kind for SharedImage {
         image.serialize(serializer)
     }
 
-    fn read<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Immutable<Impl>, D::Error> {
-        Impl::deserialize(deserializer).map(Immutable::new)
+    fn read<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Arc<Impl>, D::Error> {
+        Impl::deserialize(deserializer).map(Arc::new)
     }
 }
 
@@ -365,13 +364,13 @@ impl shared::Kind for SharedImage {
 pub mod shared_image_map {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use super::{ImageMap, Immutable, Impl, SharedImage, shared};
+    use super::{Arc, ImageMap, Impl, SharedImage, shared};
 
     #[derive(Serialize, Deserialize)]
     struct Image(
         #[serde(serialize_with = "shared::serialize::<SharedImage, _>")]
         #[serde(deserialize_with = "shared::deserialize::<SharedImage, _>")]
-        Immutable<Impl>,
+        Arc<Impl>,
     );
 
     pub fn serialize<S: Serializer>(images: &ImageMap, serializer: S) -> Result<S::Ok, S::Error> {

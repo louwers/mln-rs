@@ -14,7 +14,6 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::envelope::{self, Action, MessageKind, Request};
@@ -126,7 +125,7 @@ impl Test {
         self.wait();
     }
 
-    fn set_layers(&self, layer: &Immutable<dyn LayerProperties>) {
+    fn set_layers(&self, layer: &Arc<dyn LayerProperties>) {
         self.tile.set_layers(std::slice::from_ref(layer), None);
         self.wait();
     }
@@ -136,7 +135,7 @@ impl Test {
     }
 
     /// Whether the tile's layout has `layer`.
-    fn laid_out(&self, layer: &Immutable<dyn LayerProperties>) -> bool {
+    fn laid_out(&self, layer: &Arc<dyn LayerProperties>) -> bool {
         self.tile.create_render_data().get_layer_render_data(&*layer.base_impl).is_some()
     }
 }
@@ -153,7 +152,7 @@ fn garbage() -> SharedTileData {
 
 /// A layer of the fixture's "water" source layer, evaluated as the
 /// `RenderOrchestrator` evaluates it.
-fn layer(id: &str, type_: &str) -> Immutable<dyn LayerProperties> {
+fn layer(id: &str, type_: &str) -> Arc<dyn LayerProperties> {
     let json = serde_json::json!({"id": id, "type": type_, "source": "s", "source-layer": "water"});
     let mut error = ConversionError::default();
     let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
@@ -163,7 +162,7 @@ fn layer(id: &str, type_: &str) -> Immutable<dyn LayerProperties> {
 }
 
 /// A tile laid out with the fixture and the layer "fill".
-fn loaded(mode: MapMode) -> (Test, Immutable<dyn LayerProperties>) {
+fn loaded(mode: MapMode) -> (Test, Arc<dyn LayerProperties>) {
     let test = Test::new(mode);
     let fill = layer("fill", "fill");
     test.tile.set_data(Some(tile_data()));

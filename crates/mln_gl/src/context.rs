@@ -24,7 +24,6 @@
 // TODO(port): `createDynamicTexture`, `createRenderTarget` and the render
 // jobs of the backend thread pool, as in the WebGPU backend.
 
-use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -592,7 +591,7 @@ impl Context {
                 .get(block.id)
                 .or_else(|| layer_buffers.get(block.id))
                 .or_else(|| global_buffers.get(block.id))
-                .and_then(|buffer| buffer.as_any().downcast_ref::<UniformBuffer>())
+                .and_then(|buffer| buffer.downcast_ref::<UniformBuffer>())
                 .and_then(|buffer| buffer.range(self, ubo_index, block.element_size, block.size));
             match buffer {
                 Some((buffer, offset, size)) => {
@@ -827,10 +826,6 @@ impl Context {
 impl GfxContext for Context {
     fn context_base(&self) -> &ContextBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn backend_type(&self) -> BackendType {

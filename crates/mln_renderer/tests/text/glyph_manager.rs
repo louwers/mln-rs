@@ -2,8 +2,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mln_actor::{RunLoop, Timer};
 use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
@@ -20,13 +21,13 @@ use mln_text::glyph::{
 use mln_text::glyph_cache::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
 use mln_text::tagged_string::font_stack_hash;
-use mln_util::chrono::{Duration, milliseconds};
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
 use mln_util::image::AlphaImage;
 use mln_util::size::Size;
 use mln_vec_map::{VecMap, VecSet};
+use parking_lot::Mutex;
 
 use super::glyph_manager_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
@@ -352,7 +353,7 @@ fn loading_fail_requests_the_range_again() {
             // processed.
             let (glyph_manager, requestor, file_source) =
                 (glyph_manager.clone(), requestor.clone(), file_source.clone());
-            retry_timer.start(Duration::zero(), Duration::zero(), move || {
+            retry_timer.start(Duration::ZERO, Duration::ZERO, move || {
                 let requestor: Rc<dyn GlyphRequestor> = requestor.upgrade().unwrap();
                 glyph_manager.upgrade().unwrap().get_glyphs(&requestor, dependencies(&['a']), Some(&file_source));
             });
@@ -364,7 +365,7 @@ fn loading_fail_requests_the_range_again() {
 
     let timeout = Timer::new();
     let run_loop = test.run_loop.clone();
-    timeout.start(milliseconds(1000), Duration::zero(), move || run_loop.stop());
+    timeout.start(Duration::from_millis(1000), Duration::ZERO, move || run_loop.stop());
 
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
 
@@ -445,7 +446,7 @@ fn loading_fail_still_answers_with_the_other_ranges() {
 
     let timeout = Timer::new();
     let run_loop = test.run_loop.clone();
-    timeout.start(milliseconds(1000), Duration::zero(), move || run_loop.stop());
+    timeout.start(Duration::from_millis(1000), Duration::ZERO, move || run_loop.stop());
 
     test.run("test/fixtures/resources/glyphs-{range}.pbf", dependencies(&['a', 'ở']));
 
@@ -805,7 +806,7 @@ struct DeferredEngine {
 
 impl DeferredEngine {
     fn report(&self, result: &Result<(), String>) {
-        let ready = std::mem::take(&mut *self.ready.lock().unwrap());
+        let ready = std::mem::take(&mut *self.ready.lock());
         for ready in ready {
             ready(result.clone());
         }
@@ -815,7 +816,7 @@ impl DeferredEngine {
 impl FontFaceEngine for DeferredEngine {
     fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
         self.prepares.fetch_add(1, Ordering::SeqCst);
-        self.ready.lock().unwrap().push(ready);
+        self.ready.lock().push(ready);
     }
 
     fn load(&self, _type: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {

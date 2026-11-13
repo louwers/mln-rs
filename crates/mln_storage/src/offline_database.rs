@@ -1103,7 +1103,7 @@ impl OfflineDatabase {
             let mut result = OfflineRegions::new();
             for (id, definition, description) in rows {
                 match decode_offline_region_definition(&definition) {
-                    Ok(definition) => result.push(OfflineRegion::new(id, definition, description)),
+                    Ok(definition) => result.push(OfflineRegion { id, definition, metadata: description }),
                     Err(ex) => {
                         // Catch errors from malformed offline region
                         // definitions and skip them.
@@ -1132,7 +1132,11 @@ impl OfflineDatabase {
                 return Err(DatabaseError::Runtime(format!("Region {region_id} not found in database")));
             }
 
-            Ok(Some(OfflineRegion::new(region_id, decode_offline_region_definition(&definition)?, description)))
+            Ok(Some(OfflineRegion {
+                id: region_id,
+                definition: decode_offline_region_definition(&definition)?,
+                metadata: description,
+            }))
         })();
         self.expected(result, "get region")
     }
@@ -1151,7 +1155,11 @@ impl OfflineDatabase {
                  VALUES              (?1,         ?2) ",
                 params![encode_offline_region_definition(definition), metadata_blob(metadata)],
             )?;
-            Ok(OfflineRegion::new(self.last_insert_row_id()?, definition.clone(), metadata.clone()))
+            Ok(OfflineRegion {
+                id: self.last_insert_row_id()?,
+                definition: definition.clone(),
+                metadata: metadata.clone(),
+            })
         })();
         self.expected(result, "create region")
     }
@@ -1205,7 +1213,11 @@ impl OfflineDatabase {
             };
             let mut result = OfflineRegions::new();
             for (id, definition, description) in rows {
-                result.push(OfflineRegion::new(id, decode_offline_region_definition(&definition)?, description));
+                result.push(OfflineRegion {
+                    id,
+                    definition: decode_offline_region_definition(&definition)?,
+                    metadata: description,
+                });
             }
             self.get_db()?.exec("DETACH DATABASE side")?;
             Ok(result)
@@ -1250,7 +1262,7 @@ impl OfflineDatabase {
             // Eviction uses the stored timestamps if this fails.
             self.flush_accessed();
 
-            self.execute("DELETE FROM regions WHERE id = ?", params![region.get_id()])?;
+            self.execute("DELETE FROM regions WHERE id = ?", params![region.id])?;
 
             let stats = DatabaseSizeChangeStats::new(self)?;
             self.evict(0, &stats, false)?;

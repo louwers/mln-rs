@@ -22,6 +22,7 @@ mln_math.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mlt-core.workspace = true
+parking_lot.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

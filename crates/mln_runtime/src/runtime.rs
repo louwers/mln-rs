@@ -4,18 +4,22 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+#[cfg(not(target_family = "wasm"))]
+use std::sync::mpsc;
 use std::thread::ThreadId;
 
 use mln_actor::{RunLoop, RunLoopHandle};
+#[cfg(not(target_family = "wasm"))]
+use mln_storage::DatabaseFileSource;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
-use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventHandler, RuntimeEvent};
@@ -96,7 +100,7 @@ impl RuntimeShared {
         instead: impl FnOnce(V),
     ) {
         // Posting with the lock held orders the task before a shutdown.
-        let lifecycle = self.lifecycle.lock_unpoisoned();
+        let lifecycle = self.lifecycle.lock();
         if lifecycle.shut_down {
             drop(lifecycle);
             instead(value);
@@ -115,14 +119,14 @@ impl RuntimeShared {
     }
 
     fn check_live(&self) -> Result<(), Error> {
-        if self.lifecycle.lock_unpoisoned().released { Err(released()) } else { Ok(()) }
+        if self.lifecycle.lock().released { Err(released()) } else { Ok(()) }
     }
 
     /// A map of the runtime was released or dropped. A disposed runtime shuts
     /// down with its last map.
     pub(crate) fn map_released(&self) {
         let shut_down = {
-            let mut lifecycle = self.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.lifecycle.lock();
             lifecycle.live_maps -= 1;
             let shut_down = lifecycle.released && lifecycle.live_maps == 0 && !lifecycle.shut_down;
             lifecycle.shut_down |= shut_down;
@@ -151,10 +155,15 @@ impl RuntimeShared {
 
 impl Drop for RuntimeShared {
     fn drop(&mut self) {
-        if !self.lifecycle.get_mut_unpoisoned().shut_down {
+        if !self.lifecycle.get_mut().shut_down {
             self.shut_down(None);
         }
     }
+}
+
+#[cfg(target_family = "wasm")]
+fn no_database() -> Error {
+    Error::unsupported("the browser build has no cache database: the browser caches the requests")
 }
 
 fn released() -> Error {
@@ -229,6 +238,7 @@ pub(crate) struct RuntimeCore {
     /// The runtime's file sources, held for its life so that each map, and
     /// each transform, finds the same ones.
     _loader: Option<Arc<dyn FileSource>>,
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
     database: Option<Arc<dyn FileSource>>,
     network: Option<Arc<dyn FileSource>>,
     pub(crate) run_loop: RunLoopHandle,
@@ -317,11 +327,11 @@ impl RuntimeCore {
         }
     }
 
-    /// The cache database, which every runtime has.
+    /// The cache database, which every runtime but the browser build's has.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn database(&self) -> Result<&DatabaseFileSource, Error> {
         self.database
             .as_ref()
-            .and_then(|database| database.as_any())
             .and_then(|database| database.downcast_ref::<DatabaseFileSource>())
             .ok_or_else(|| Error::unsupported("the runtime has no cache database"))
     }
@@ -335,6 +345,7 @@ impl RuntimeCore {
 /// place among the runtime's other results and events. It needs no runtime
 /// state, so a result that arrives while the runtime shuts down, which waits
 /// for the database's work, still resolves rather than being cancelled.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn reply_on<T: Send + 'static, E: Into<Error>>(
     run_loop: RunLoopHandle,
     resolver: Resolver<T>,
@@ -350,11 +361,14 @@ pub(crate) fn reply_on<T: Send + 'static, E: Into<Error>>(
 fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> {
     let mut resource_options = ResourceOptions::default();
     if let Some(asset_path) = &options.asset_path {
-        resource_options = resource_options.with_asset_path(utf8(asset_path, "asset path")?);
+        resource_options.asset_path = utf8(asset_path, "asset path")?.to_owned();
     }
     #[cfg(target_os = "android")]
     if options.asset_path.is_none() {
-        resource_options = resource_options.with_asset_path(mln_storage::android::APP_ASSETS);
+        resource_options.asset_path = mln_storage::android::APP_ASSETS.to_owned();
+    }
+    if options.cache_path.is_some() && cfg!(target_family = "wasm") {
+        return Err(Error::unsupported("the browser build has no cache database: the browser caches the requests"));
     }
     if let Some(cache_path) = &options.cache_path {
         let path = utf8(cache_path, "cache path")?;
@@ -365,7 +379,7 @@ fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> 
             .truncate(false)
             .open(cache_path)
             .map_err(|error| Error::invalid_argument(format!("can't open the cache database {path}: {error}")))?;
-        resource_options = resource_options.with_cache_path(path);
+        resource_options.cache_path = path.to_owned();
     }
     Ok(resource_options)
 }
@@ -377,13 +391,36 @@ fn utf8<'a>(path: &'a Path, what: &str) -> Result<&'a str, Error> {
 impl Runtime {
     /// Starts a runtime and its thread.
     ///
+    /// In the browser, the runtime's thread is the one that calls this, which
+    /// a wasm instance has only one of, and the runtime never blocks it: its
+    /// commands run in tasks of their own on the browser's event loop
+    /// (`mln_web_host::pump`), never inside the call that sends them.
+    ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when the
-    /// cache database file can't be opened or created.
+    /// cache database file can't be opened or created, and in the browser
+    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a cache path.
     pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
-        let (started, start) = mpsc::channel();
         let queued = Arc::new(AtomicUsize::new(0));
-        let core_queued = Arc::clone(&queued);
+        let (run_loop, thread) = Self::start(resource_options, queued.clone())?;
+        Ok(Runtime {
+            shared: Arc::new(RuntimeShared {
+                run_loop,
+                queued,
+                thread,
+                lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
+                next_map_id: AtomicU64::new(1),
+                glyph_cache: Arc::default(),
+            }),
+        })
+    }
+
+    /// Builds the runtime's state on a thread of its own, which runs its loop
+    /// until the runtime shuts down.
+    #[cfg(not(target_family = "wasm"))]
+    fn start(resource_options: ResourceOptions, queued: Arc<AtomicUsize>) -> Result<(RunLoopHandle, ThreadId), Error> {
+        let (started, start) = mpsc::channel();
+        let core_queued = queued;
         let thread = mln_util::thread::builder("Runtime")
             .spawn(move || {
                 let run_loop = RunLoop::new();
@@ -400,16 +437,28 @@ impl Runtime {
         // joins it: a runtime may shut down from its own thread.
         drop(thread);
         let run_loop = start.recv().map_err(|_| Error::native("the runtime's thread stopped as it started"))?;
-        Ok(Runtime {
-            shared: Arc::new(RuntimeShared {
-                run_loop,
-                queued,
-                thread: thread_id,
-                lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
-                next_map_id: AtomicU64::new(1),
-                glyph_cache: Arc::default(),
-            }),
-        })
+        Ok((run_loop, thread_id))
+    }
+
+    /// Builds the runtime's state on this thread, under a loop of its own
+    /// that the instance's pump runs until the runtime shuts down.
+    #[cfg(target_family = "wasm")]
+    fn start(resource_options: ResourceOptions, queued: Arc<AtomicUsize>) -> Result<(RunLoopHandle, ThreadId), Error> {
+        crate::web::install();
+        let handle = RunLoopHandle::new();
+        let run_loop = RunLoop::adopt(&handle).ok_or_else(|| Error::native("the runtime's loop runs already"))?;
+        let core = {
+            let _current = run_loop.enter();
+            RuntimeCore::new(resource_options, handle.clone(), queued)
+        };
+        let mut core = Some(core);
+        crate::web::drive(run_loop, move |run| {
+            // The core is the thread's while its loop runs.
+            CORE.with(|cell| std::mem::swap(&mut *cell.borrow_mut(), &mut core));
+            run();
+            CORE.with(|cell| std::mem::swap(&mut *cell.borrow_mut(), &mut core));
+        });
+        Ok((handle, std::thread::current().id()))
     }
 
     /// Sends a command to the runtime's thread.
@@ -444,8 +493,8 @@ impl Runtime {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
     /// empty size or a pixel ratio that isn't finite and positive.
     pub fn create_map(&self, options: MapOptions) -> Result<(Map, Completion<Applied>), Error> {
-        let size = options.map.size();
-        let pixel_ratio = options.map.pixel_ratio();
+        let size = options.map.size;
+        let pixel_ratio = options.map.pixel_ratio;
         if size.is_empty() {
             return Err(Error::invalid_argument("the map's size must not be empty"));
         }
@@ -453,7 +502,7 @@ impl Runtime {
             return Err(Error::invalid_argument("the map's pixel ratio must be finite and positive"));
         }
         {
-            let mut lifecycle = self.shared.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.shared.lifecycle.lock();
             if lifecycle.released {
                 return Err(released());
             }
@@ -518,9 +567,9 @@ impl Runtime {
         &self,
         transform: impl Fn(Kind, &str, FinishedCallback) + Send + Sync + 'static,
     ) -> Result<Completion<()>, Error> {
-        let transform = ResourceTransform::new(Some(Arc::new(transform)));
+        let transform: ResourceTransform = Arc::new(transform);
         self.apply(move |core| {
-            core.network()?.set_resource_transform(transform);
+            core.network()?.set_resource_transform(Some(transform));
             core.hooks.set_transform_set(true);
             Ok(())
         })
@@ -529,7 +578,7 @@ impl Runtime {
     /// Stops rewriting request URLs.
     pub fn clear_resource_transform(&self) -> Result<Completion<()>, Error> {
         self.apply(move |core| {
-            core.network()?.set_resource_transform(ResourceTransform::default());
+            core.network()?.set_resource_transform(None);
             core.hooks.set_transform_set(false);
             Ok(())
         })
@@ -569,6 +618,17 @@ impl Runtime {
     }
 
     /// Runs a maintenance action on the cache database.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) in the
+    /// browser, which has no cache database.
+    #[cfg(target_family = "wasm")]
+    pub fn run_cache_database_operation(&self, operation: CacheDatabaseOperation) -> Result<Completion<()>, Error> {
+        let _ = operation;
+        Err(no_database())
+    }
+
+    /// Runs a maintenance action on the cache database.
+    #[cfg(not(target_family = "wasm"))]
     pub fn run_cache_database_operation(&self, operation: CacheDatabaseOperation) -> Result<Completion<()>, Error> {
         self.command(move |core, outbox, resolver| {
             let database = match core.database() {
@@ -587,6 +647,18 @@ impl Runtime {
 
     /// Limits the ambient cache to `size` bytes. Offline regions don't count
     /// toward it.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) in the
+    /// browser, which has no cache database.
+    #[cfg(target_family = "wasm")]
+    pub fn set_maximum_ambient_cache_size(&self, size: u64) -> Result<Completion<()>, Error> {
+        let _ = size;
+        Err(no_database())
+    }
+
+    /// Limits the ambient cache to `size` bytes. Offline regions don't count
+    /// toward it.
+    #[cfg(not(target_family = "wasm"))]
     pub fn set_maximum_ambient_cache_size(&self, size: u64) -> Result<Completion<()>, Error> {
         self.command(move |core, outbox, resolver| match core.database() {
             Ok(database) => database.set_maximum_ambient_cache_size(size, reply_on(core.run_loop.clone(), resolver)),
@@ -608,7 +680,7 @@ impl Runtime {
     /// released already. Every call on the runtime fails the same way after.
     pub fn release(&self) -> Result<Completion<()>, Error> {
         {
-            let mut lifecycle = self.shared.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.shared.lifecycle.lock();
             if lifecycle.released {
                 return Err(released());
             }
@@ -628,7 +700,7 @@ impl Runtime {
     /// with [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
     pub fn dispose(&self) -> Result<(), Error> {
         let shut_down = {
-            let mut lifecycle = self.shared.lifecycle.lock_unpoisoned();
+            let mut lifecycle = self.shared.lifecycle.lock();
             if lifecycle.released {
                 return Err(released());
             }
@@ -644,6 +716,7 @@ impl Runtime {
     }
 
     /// Sends a command for the offline API.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn offline_command<T: Send + 'static>(
         &self,
         command: impl FnOnce(&DatabaseFileSource, &RuntimeCore, Resolver<T>) + Send + 'static,

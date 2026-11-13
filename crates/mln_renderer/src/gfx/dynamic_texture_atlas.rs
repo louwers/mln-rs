@@ -8,17 +8,16 @@
 // dynamic_texture.rs).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::types::TexturePixelType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{Glyph, GlyphMap, GlyphPosition, GlyphPositions};
 use mln_util::image::{AlphaImage, PremultipliedImage};
-use mln_util::immutable::Immutable;
 use mln_util::serialization::sorted;
 use mln_util::size::Size;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
@@ -100,7 +99,7 @@ struct ImageAllocationKey {
 struct ImageAllocation {
     // Keeps the revision alive so its address can't be reused by another
     // image while the bin exists.
-    _image: Immutable<ImageImpl>,
+    _image: Arc<ImageImpl>,
     bin_id: i32,
 }
 
@@ -118,7 +117,7 @@ struct GlyphAllocationKey {
 struct GlyphAllocation {
     // Keeps the glyph alive so its address can't be reused by another glyph
     // while the bin exists.
-    _glyph: Immutable<Glyph>,
+    _glyph: Arc<Glyph>,
     bin_id: i32,
 }
 
@@ -148,7 +147,7 @@ impl Drop for DynamicTextureAtlas {
     /// Frees the GPU textures with the atlas (render thread): textures still
     /// referenced elsewhere must not keep the map's device alive.
     fn drop(&mut self) {
-        let state = self.state.get_mut_unpoisoned();
+        let state = self.state.get_mut();
         for texture in state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()) {
             texture.release_gpu_texture();
         }
@@ -167,7 +166,7 @@ impl DynamicTextureAtlas {
 
     /// `uploadGlyphs(const GlyphMap&)`.
     pub fn upload_glyphs(&self, glyphs: &GlyphMap) -> GlyphAtlas {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         let mut glyph_atlas = GlyphAtlas::default();
         if glyphs.is_empty() {
@@ -188,7 +187,7 @@ impl DynamicTextureAtlas {
 
         let mut dyn_tex_index = 0usize;
         let mut dyn_tex_size = START_SIZE;
-        let mut glyphs_to_upload: Vec<(TextureHandle, Immutable<Glyph>, u64)> = Vec::new();
+        let mut glyphs_to_upload: Vec<(TextureHandle, Arc<Glyph>, u64)> = Vec::new();
 
         while glyph_atlas.dynamic_texture.is_none() {
             let texture = if dyn_tex_index < state.dynamic_textures.len() {
@@ -269,7 +268,7 @@ impl DynamicTextureAtlas {
         patterns: &ImageMap,
         version_map: &ImageVersionMap,
     ) -> ImageAtlas {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         let mut image_atlas = ImageAtlas::default();
         if icons.is_empty() && patterns.is_empty() {
@@ -290,8 +289,8 @@ impl DynamicTextureAtlas {
 
         let mut dyn_tex_index = 0usize;
         let mut dyn_tex_size = START_SIZE;
-        let mut icons_to_upload: Vec<(TextureHandle, Immutable<ImageImpl>)> = Vec::with_capacity(icons.len());
-        let mut patterns_to_upload: Vec<(TextureHandle, Immutable<ImageImpl>)> = Vec::with_capacity(patterns.len());
+        let mut icons_to_upload: Vec<(TextureHandle, Arc<ImageImpl>)> = Vec::with_capacity(icons.len());
+        let mut patterns_to_upload: Vec<(TextureHandle, Arc<ImageImpl>)> = Vec::with_capacity(patterns.len());
 
         while image_atlas.dynamic_texture.is_none() {
             let texture = if dyn_tex_index < state.dynamic_textures.len() {
@@ -438,7 +437,7 @@ impl DynamicTextureAtlas {
     fn reserve_image(
         state: &mut State,
         dynamic_texture: &DynamicTexturePtr,
-        image: &Immutable<ImageImpl>,
+        image: &Arc<ImageImpl>,
         type_: ImageType,
     ) -> Option<TextureHandle> {
         let size = Size::new(
@@ -467,7 +466,7 @@ impl DynamicTextureAtlas {
     fn reserve_glyph(
         state: &mut State,
         dynamic_texture: &DynamicTexturePtr,
-        glyph: &Immutable<Glyph>,
+        glyph: &Arc<Glyph>,
     ) -> Option<TextureHandle> {
         let size = Size::new(
             glyph.bitmap.size.width + 2 * u32::from(PADDING),
@@ -513,7 +512,7 @@ impl DynamicTextureAtlas {
             return;
         };
 
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         for tex_handle in texture_handles {
             Self::release_texture(&mut state, dynamic_texture, tex_handle);
@@ -524,13 +523,13 @@ impl DynamicTextureAtlas {
     /// the map side's mirror of a tile worker's atlas in another wasm
     /// instance (`tile/worker_codec`).
     pub fn textures(&self) -> Vec<DynamicTexturePtr> {
-        let state = self.state.lock_unpoisoned();
+        let state = self.state.lock();
         state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()).cloned().collect()
     }
 
     /// `removeUnusedDynamicTextures()` (render thread).
     pub fn remove_unused_dynamic_textures(&self) {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
 
         // release textures not referenced elsewhere (by an atlas still alive
         // on a worker thread), so the last reference is always dropped on

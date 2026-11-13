@@ -34,7 +34,7 @@ use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, Interpolate, downcast, from_expression_value,
     global_state_refs_intersect,
 };
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::ColorReliefLayer;
 use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
@@ -46,7 +46,6 @@ use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::time::Instant;
@@ -64,7 +63,7 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &ColorReliefLayerImpl {
+fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &ColorReliefLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), ColorReliefLayerImpl::static_type_info()));
     impl_.downcast_ref::<ColorReliefLayerImpl>().expect("RenderColorReliefLayer: not a color-relief layer impl")
 }
@@ -104,9 +103,9 @@ pub struct RenderColorReliefLayer {
 }
 
 impl RenderColorReliefLayer {
-    pub fn new(impl_: Immutable<ColorReliefLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<ColorReliefLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(ColorReliefLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(ColorReliefLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
 
@@ -297,7 +296,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         let previous_evaluated = get_evaluated::<ColorReliefLayerProperties>(&self.base.evaluated_properties).clone();
         let mut properties = ColorReliefLayerProperties::with_evaluated(
-            static_immutable_cast::<ColorReliefLayerImpl>(&self.base.base_impl),
+            downcast_arc::<ColorReliefLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 

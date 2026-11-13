@@ -3,7 +3,7 @@
 // GeoJSONVTData, SuperclusterData and GeoJSONData::create).
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJSON;
@@ -15,10 +15,9 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use super::geojson_source::{Features, GeoJSONData, GeoJSONOptions, TileFeatures};
 use crate::expression::{Expression, from_expression_value};
@@ -28,7 +27,7 @@ use crate::source_impl::{self, ImplBase};
 /// `std::runtime_error` for a zoom above maxZoom or a missing parent tile;
 /// the port logs it and hands out an empty tile.
 fn geojsonvt_tile_features(vt: &Mutex<geojson_vt::GeoJSONVT>, id: &CanonicalTileID) -> TileFeatures {
-    match vt.lock_unpoisoned().get_tile(id.z, id.x, id.y) {
+    match vt.lock().get_tile(id.z, id.x, id.y) {
         Ok(tile) => tile.features.clone(),
         Err(e) => {
             // TODO(port): C++ lets the exception propagate.
@@ -123,7 +122,7 @@ fn evaluate_feature(f: &Feature<f64>, expression: &Arc<dyn Expression>, accumula
 pub(super) fn create(
     geojson: &GeoJSON,
     sequenced_scheduler: SchedulerPtr,
-    options: &Immutable<GeoJSONOptions>,
+    options: &Arc<GeoJSONOptions>,
 ) -> Result<Arc<dyn GeoJSONData>, Error> {
     let scale: f64 = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
     if options.cluster
@@ -192,7 +191,7 @@ pub(super) fn create(
 #[derive(Debug)]
 pub struct Impl {
     base: ImplBase,
-    options: Immutable<GeoJSONOptions>,
+    options: Arc<GeoJSONOptions>,
     data: Option<Arc<dyn GeoJSONData>>,
     /// Replaces `options.synchronous_update` once set: `OVERRIDE_UNSET`,
     /// `OVERRIDE_OFF` or `OVERRIDE_ON`.
@@ -219,7 +218,7 @@ impl Clone for Impl {
 impl Impl {
     /// `Impl(std::string id, Immutable<GeoJSONOptions>)`.
     #[must_use]
-    pub fn new(id: String, options: Immutable<GeoJSONOptions>) -> Self {
+    pub fn new(id: String, options: Arc<GeoJSONOptions>) -> Self {
         Impl {
             base: ImplBase::new(SourceType::GeoJSON, id),
             options,
@@ -247,7 +246,7 @@ impl Impl {
         self.data.as_ref().map(Arc::downgrade)
     }
 
-    pub fn get_options(&self) -> &Immutable<GeoJSONOptions> {
+    pub fn get_options(&self) -> &Arc<GeoJSONOptions> {
         &self.options
     }
 

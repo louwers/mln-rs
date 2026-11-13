@@ -7,8 +7,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use feature::Feature;
 use geometry::{Geometry, Point};
@@ -19,14 +19,14 @@ use mln_renderer::tile::custom_tile::CustomGeometryTile;
 use mln_renderer::tile::tile::{Tile, TileBase, TileNecessity};
 use mln_renderer::tile::tile_observer::TileObserver;
 use mln_style::custom_tile_loader::{CustomTileLoader, TileFunction};
-use mln_style::layer::{Layer, static_immutable_cast};
+use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::layers::{CircleLayer, CircleLayerProperties};
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
+use parking_lot::Mutex;
 
 use super::RasterTileTest;
 
@@ -51,7 +51,7 @@ fn counter() -> (Arc<AtomicUsize>, TileFunction) {
 fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
     let ids = Arc::new(Mutex::new(Vec::new()));
     let recorded = ids.clone();
-    (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().unwrap().push(*id)))
+    (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
 }
 
 fn tile(
@@ -107,7 +107,7 @@ fn invoke_fetch_tile() {
     tile.set_necessity(TileNecessity::Required);
     test.run_loop.wait_for_empty();
 
-    assert_eq!(*fetched.lock().unwrap(), vec![CanonicalTileID::new(0, 0, 0)]);
+    assert_eq!(*fetched.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
 }
 
 // gtest: CustomGeometryTile.InvokeCancelTile
@@ -122,7 +122,7 @@ fn invoke_cancel_tile() {
     tile.set_necessity(TileNecessity::Optional);
     test.run_loop.wait_for_empty();
 
-    assert_eq!(*cancelled.lock().unwrap(), vec![CanonicalTileID::new(0, 0, 0)]);
+    assert_eq!(*cancelled.lock(), vec![CanonicalTileID::new(0, 0, 0)]);
 }
 
 // gtest: CustomGeometryTile.FetchCancelledTileAgain
@@ -182,8 +182,8 @@ fn invoke_tile_changed() {
     let tile = Rc::new(tile(&test, OverscaledTileID::from_zxy(0, 0, 0), loader.self_ref(), None));
 
     let layer = CircleLayer::new("circle", "source");
-    let layer_properties: Immutable<dyn LayerProperties> =
-        Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())));
+    let layer_properties: Arc<dyn LayerProperties> =
+        Arc::new(CircleLayerProperties::new(downcast_arc::<CircleLayerImpl>(&layer.base_impl())));
 
     let observer = Rc::new(StubTileObserver::default());
     let weak_tile = Rc::downgrade(&tile);

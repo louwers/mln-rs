@@ -41,7 +41,6 @@ use mln_sprite::{SpriteLoader, SpriteLoaderObserver};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
 use crate::collection::{Collection, CollectionWithPersistentOrder, ImmutableVector};
@@ -59,11 +58,11 @@ use crate::sprite::Sprite;
 use crate::style::StyleLoadError;
 use crate::transition_options::TransitionOptions;
 
-pub type ImageImpls = Vec<Immutable<image::Impl>>;
+pub type ImageImpls = Vec<Arc<image::Impl>>;
 
 /// The members of `Style::Impl` that its `SpriteLoaderObserver` half changes.
 struct SpriteShared {
-    images: Immutable<ImageImpls>,
+    images: Arc<ImageImpls>,
     sprites_loading_status: HashMap<String, bool>,
     last_error: Option<Error>,
     observer: Option<Rc<dyn Observer>>,
@@ -83,7 +82,7 @@ fn shared_observer(shared: &RefCell<SpriteShared>) -> Rc<dyn Observer> {
 }
 
 /// `Style::Impl::onSpriteLoaded`.
-fn on_sprite_loaded(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, images: Vec<Immutable<image::Impl>>) {
+fn on_sprite_loaded(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, images: Vec<Arc<image::Impl>>) {
     {
         let mut shared = shared.borrow_mut();
         let mut new_images = (*shared.images).clone();
@@ -137,7 +136,7 @@ struct StyleSpriteObserver {
 }
 
 impl SpriteLoaderObserver for StyleSpriteObserver {
-    fn on_sprite_loaded(&self, sprite: Option<Sprite>, images: Vec<Immutable<image::Impl>>) {
+    fn on_sprite_loaded(&self, sprite: Option<Sprite>, images: Vec<Arc<image::Impl>>) {
         if let Some(shared) = self.shared.upgrade() {
             on_sprite_loaded(&shared, sprite.as_ref(), images);
         }
@@ -791,12 +790,12 @@ impl Impl {
 
     // Images
 
-    pub fn get_image(&self, id: &str) -> Option<Immutable<image::Impl>> {
+    pub fn get_image(&self, id: &str) -> Option<Arc<image::Impl>> {
         self.shared.borrow().images.iter().find(|image| image.id == id).cloned()
     }
 
     /// `addImage(std::unique_ptr<style::Image>)` (by impl).
-    pub fn add_image(&mut self, image: Immutable<image::Impl>) {
+    pub fn add_image(&mut self, image: Arc<image::Impl>) {
         let mut new_images = (*self.shared.borrow().images).clone();
         let it = new_images.partition_point(|a| a.id < image.id);
         if it < new_images.len() && new_images[it].id == image.id {
@@ -834,7 +833,7 @@ impl Impl {
         &self.glyph_url
     }
 
-    pub fn get_image_impls(&self) -> Immutable<ImageImpls> {
+    pub fn get_image_impls(&self) -> Arc<ImageImpls> {
         self.shared.borrow().images.clone()
     }
 
@@ -844,7 +843,7 @@ impl Impl {
     /// change, as C++ makes one per update).
     pub fn get_source_impls(&self) -> ImmutableVector<dyn source::Impl> {
         let impls = self.sources.get_impls();
-        let current = |impl_: &Immutable<dyn source::Impl>| -> Immutable<dyn source::Impl> {
+        let current = |impl_: &Arc<dyn source::Impl>| -> Arc<dyn source::Impl> {
             match self.sources.get(&impl_.id) {
                 Some(source) => source.base_impl(),
                 None => impl_.clone(),
@@ -870,13 +869,13 @@ impl Impl {
     }
 
     /// The light's impl, for the renderer's `UpdateParameters`.
-    pub fn get_light_impl(&self) -> Immutable<light::Impl> {
+    pub fn get_light_impl(&self) -> Arc<light::Impl> {
         self.light.impl_.clone()
     }
 
     /// The sky's impl, if the style has a sky, for the renderer's
     /// `UpdateParameters`.
-    pub fn get_sky_impl(&self) -> Option<Immutable<sky::Impl>> {
+    pub fn get_sky_impl(&self) -> Option<Arc<sky::Impl>> {
         self.sky.as_ref().map(|sky| sky.impl_.clone())
     }
 
@@ -930,7 +929,7 @@ impl Impl {
 
     // SpriteLoaderObserver implementation.
 
-    pub fn on_sprite_loaded(&mut self, sprite: Option<&Sprite>, images: Vec<Immutable<image::Impl>>) {
+    pub fn on_sprite_loaded(&mut self, sprite: Option<&Sprite>, images: Vec<Arc<image::Impl>>) {
         on_sprite_loaded(&self.shared, sprite, images);
     }
 
@@ -1015,7 +1014,7 @@ fn state_values_equal(a: &Value, b: &Value) -> bool {
 pub struct LayerRefMut<'a> {
     style: &'a mut Impl,
     id: String,
-    before: Immutable<dyn layer::Impl>,
+    before: Arc<dyn layer::Impl>,
 }
 
 impl std::ops::Deref for LayerRefMut<'_> {
@@ -1047,7 +1046,7 @@ impl Drop for LayerRefMut<'_> {
 /// `Impl::get_light_mut`).
 pub struct LightRefMut<'a> {
     style: &'a mut Impl,
-    before: Immutable<light::Impl>,
+    before: Arc<light::Impl>,
 }
 
 impl std::ops::Deref for LightRefMut<'_> {
@@ -1075,7 +1074,7 @@ impl Drop for LightRefMut<'_> {
 /// `Impl::get_sky_mut`).
 pub struct SkyRefMut<'a> {
     sky: &'a mut Sky,
-    before: Immutable<sky::Impl>,
+    before: Arc<sky::Impl>,
     /// The style's observer, which `Impl::on_sky_changed` notifies.
     observer: Rc<dyn Observer>,
 }
@@ -1105,7 +1104,7 @@ impl Drop for SkyRefMut<'_> {
 /// `Impl::get_projection_mut`).
 pub struct ProjectionRefMut<'a> {
     style: &'a mut Impl,
-    before: Immutable<projection::Impl>,
+    before: Arc<projection::Impl>,
 }
 
 impl std::ops::Deref for ProjectionRefMut<'_> {

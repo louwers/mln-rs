@@ -13,7 +13,6 @@
 // and drains it when deactivated, around each frame's explicit
 // `BackendScope`.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
@@ -136,7 +135,7 @@ impl RendererBackend {
     /// `BackendScope`.
     pub fn mtl_context(&self) -> Option<Rc<Context>> {
         let context = renderer_backend::RendererBackend::get_context(self);
-        context.as_any().downcast_ref::<Context>().map(Context::rc)
+        context.downcast_ref::<Context>().map(Context::rc)
     }
 
     pub fn backend_impl(&self) -> &Rc<BackendImpl> {
@@ -155,7 +154,7 @@ impl RendererBackend {
     /// (`Context::release_cached_resources`).
     pub(crate) fn reset_context(&mut self) {
         if let Some(context) = self.base.reset_context()
-            && let Some(context) = context.as_any().downcast_ref::<Context>()
+            && let Some(context) = context.downcast_ref::<Context>()
         {
             context.release_cached_resources();
         }
@@ -204,10 +203,6 @@ impl RendererBackend {
 impl renderer_backend::RendererBackend for RendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {

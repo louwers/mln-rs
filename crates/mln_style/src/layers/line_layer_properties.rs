@@ -11,8 +11,8 @@ use crate::layers::line_layer_impl::Impl as LineLayerImpl;
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::layout_property!(
     /// `struct LineCap : LayoutProperty<LineCapType>`:
@@ -162,7 +162,7 @@ pub struct LineLayerProperties {
 
 impl LineLayerProperties {
     /// `explicit LineLayerProperties(Immutable<LineLayer::Impl>)`.
-    pub fn new(impl_: Immutable<LineLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<LineLayerImpl>) -> Self {
         LineLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             crossfade: CrossfadeParameters::default(),
@@ -172,7 +172,7 @@ impl LineLayerProperties {
 
     /// `LineLayerProperties(Immutable<LineLayer::Impl>, CrossfadeParameters, LinePaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<LineLayerImpl>,
+        impl_: Arc<LineLayerImpl>,
         crossfade: CrossfadeParameters,
         evaluated: LinePaintProperties::PossiblyEvaluated,
     ) -> Self {

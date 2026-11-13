@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 
-use mln_util::enum_::Enum;
 use mln_util::logging::{Event, EventSeverity, Log};
 use mln_vec_map::VecSet;
 
@@ -46,8 +45,8 @@ fn parse_style_fixture(name: &str) -> Result<(), String> {
             for js_entry in js_log.as_array().unwrap() {
                 let js_entry = js_entry.as_array().unwrap();
                 let count = js_entry[0].as_u64().unwrap() as usize;
-                let severity = EventSeverity::to_enum(js_entry[1].as_str().unwrap()).unwrap();
-                let event = Event::to_enum(js_entry[2].as_str().unwrap()).unwrap();
+                let severity = js_entry[1].as_str().unwrap().parse::<EventSeverity>().unwrap();
+                let event = js_entry[2].as_str().unwrap().parse::<Event>().unwrap();
                 let msg = js_entry[3].as_str().unwrap();
                 let observed = log.count(severity, event, msg);
                 if count != observed {

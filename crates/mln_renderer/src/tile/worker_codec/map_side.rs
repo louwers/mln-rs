@@ -3,15 +3,15 @@
 // decodes what the workers send back.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_style_types::image::SharedImage;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::{payload, shared};
+use parking_lot::Mutex;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -58,7 +58,7 @@ pub struct MapCodec {
 /// need keep them (the render layers evaluate their layers again, say).
 struct TileState {
     worker_type: WorkerType,
-    layers: Vec<(u64, Vec<Immutable<dyn LayerProperties>>)>,
+    layers: Vec<(u64, Vec<Arc<dyn LayerProperties>>)>,
     data: Vec<(u64, Option<SharedTileData>)>,
 }
 
@@ -282,11 +282,11 @@ pub struct AtlasMirror {
 
 impl AtlasMirror {
     fn has_releases(&self) -> bool {
-        !self.released.lock().unwrap_or_else(PoisonError::into_inner).is_empty()
+        !self.released.lock().is_empty()
     }
 
     fn take_releases(&self) -> Vec<TextureRelease> {
-        let released = std::mem::take(&mut *self.released.lock().unwrap_or_else(PoisonError::into_inner));
+        let released = std::mem::take(&mut *self.released.lock());
         released.into_iter().map(|(texture, handles)| TextureRelease { texture: Some(texture), handles }).collect()
     }
 }
@@ -297,10 +297,7 @@ impl TextureAtlas for AtlasMirror {
         if let Some(texture) = dynamic_texture
             && !texture_handles.is_empty()
         {
-            self.released
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push((texture.clone(), texture_handles.to_vec()));
+            self.released.lock().push((texture.clone(), texture_handles.to_vec()));
         }
     }
 

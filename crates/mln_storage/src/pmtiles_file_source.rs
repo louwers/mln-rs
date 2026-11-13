@@ -18,15 +18,15 @@
 use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use mln_actor::{ActorRef, Thread};
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
-use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
+use parking_lot::Mutex;
 use pmtiles::{Compression, DirEntry, Directory, Header, PmtError, TileCoord, TileId, TileType};
 use serde_json::Value as Json;
 
@@ -115,7 +115,7 @@ impl State {
         let mut file_source = self.file_source.borrow_mut();
         file_source
             .get_or_insert_with(|| {
-                let resource_options = self.resource_options.lock_unpoisoned().clone();
+                let resource_options = self.resource_options.lock().clone();
                 self.file_sources
                     .get_file_source(FileSourceType::ResourceLoader, &resource_options)
                     .expect("ResourceLoader file source")
@@ -763,10 +763,10 @@ impl FileSource for PMTilesFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock().clone()
     }
 }

@@ -148,7 +148,7 @@ fn a_ratio_that_picks_the_same_sprite_loads_nothing() {
     assert_eq!(image.size, Size::new(768, 768));
     assert_eq!(requests.tiles.get(), 1);
     assert_eq!(requests.sprites.borrow().len(), 2);
-    assert_eq!(test.map().get_map_options().pixel_ratio(), 3.0);
+    assert_eq!(test.map().get_map_options().pixel_ratio, 3.0);
 }
 
 #[test]

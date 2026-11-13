@@ -7,12 +7,12 @@
 
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use mln_util::identity::SimpleIdentity;
-use mln_util::sync::{CondvarExt, MutexExt};
+use parking_lot::{Condvar, Mutex};
 
 use crate::scheduler::{Scheduler, Task};
 
@@ -70,9 +70,9 @@ fn make_scheduler_thread(shared: Arc<Shared>, index: usize) -> JoinHandle<()> {
             OWNING_THREAD_POOL.with(|p| p.set(Arc::as_ptr(&shared) as usize));
             loop {
                 {
-                    let mut terminated = shared.worker_mutex.lock_unpoisoned();
+                    let mut terminated = shared.worker_mutex.lock();
                     if !*terminated && shared.task_count.load(Ordering::SeqCst) == 0 {
-                        terminated = shared.cv_available.wait_unpoisoned(terminated);
+                        shared.cv_available.wait(&mut terminated);
                     }
                     if *terminated {
                         break;
@@ -81,12 +81,12 @@ fn make_scheduler_thread(shared: Arc<Shared>, index: usize) -> JoinHandle<()> {
                 }
 
                 // 1. Gather buckets for us to visit this iteration
-                let pending: Vec<Arc<Queue>> = shared.tagged_queue.lock_unpoisoned().values().cloned().collect();
+                let pending: Vec<Arc<Queue>> = shared.tagged_queue.lock().values().cloned().collect();
 
                 // 2. Visit a task from each
                 for q in pending {
                     let tasklet = {
-                        let mut queue = q.queue.lock_unpoisoned();
+                        let mut queue = q.queue.lock();
                         let tasklet = queue.pop_front();
                         if tasklet.is_some() {
                             q.running_count.fetch_add(1, Ordering::SeqCst);
@@ -107,7 +107,7 @@ fn make_scheduler_thread(shared: Arc<Shared>, index: usize) -> JoinHandle<()> {
                     // The function and its captures are gone before
                     // unblocking `waitForEmpty`.
                     if q.running_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-                        let queue = q.queue.lock_unpoisoned();
+                        let queue = q.queue.lock();
                         if queue.is_empty() {
                             q.cv.notify_all();
                         }
@@ -128,20 +128,20 @@ impl Scheduler for ThreadedScheduler {
 
     fn schedule_tagged(&self, tag: SimpleIdentity, task: Task) {
         let q = {
-            let mut tagged_queue = self.shared.tagged_queue.lock_unpoisoned();
+            let mut tagged_queue = self.shared.tagged_queue.lock();
             // find or insert
             tagged_queue.entry(tag).or_default().clone()
         };
 
         {
-            let mut queue = q.queue.lock_unpoisoned();
+            let mut queue = q.queue.lock();
             queue.push_back(task);
             self.shared.task_count.fetch_add(1, Ordering::SeqCst);
         }
 
         // Take the worker lock before notifying to prevent threads from
         // waiting while we try to wake them
-        let _worker_lock = self.shared.worker_mutex.lock_unpoisoned();
+        let _worker_lock = self.shared.worker_mutex.lock();
         self.shared.cv_available.notify_one();
     }
 
@@ -157,21 +157,21 @@ impl Scheduler for ThreadedScheduler {
         }
         let tag_to_find = if tag.is_empty() { self.shared.unique_id } else { tag };
         let q = {
-            let tagged_queue = self.shared.tagged_queue.lock_unpoisoned();
+            let tagged_queue = self.shared.tagged_queue.lock();
             match tagged_queue.get(&tag_to_find) {
                 Some(q) => q.clone(),
                 None => return,
             }
         };
 
-        let mut queue = q.queue.lock_unpoisoned();
+        let mut queue = q.queue.lock();
         while queue.len() + q.running_count.load(Ordering::SeqCst) != 0 {
-            queue = q.cv.wait_unpoisoned(queue);
+            q.cv.wait(&mut queue);
         }
         drop(queue);
 
         // After waiting for the queue to empty, go ahead and erase it from the map.
-        self.shared.tagged_queue.lock_unpoisoned().remove(&tag_to_find);
+        self.shared.tagged_queue.lock().remove(&tag_to_find);
     }
 }
 
@@ -179,7 +179,7 @@ impl Drop for ThreadedScheduler {
     fn drop(&mut self) {
         assert!(!self.this_thread_is_owned());
         // terminate(): wake up all threads so that they shut down
-        *self.shared.worker_mutex.lock_unpoisoned() = true;
+        *self.shared.worker_mutex.lock() = true;
         self.shared.cv_available.notify_all();
         for thread in self.threads.drain(..) {
             let _ = thread.join();

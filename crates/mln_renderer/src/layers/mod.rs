@@ -27,6 +27,7 @@ pub mod symbol_layer_tweaker;
 
 use std::any::Any;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub use background_layer_tweaker::BackgroundLayerTweaker;
 pub use circle_layer_tweaker::CircleLayerTweaker;
@@ -37,7 +38,6 @@ use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_style::CrossfadeParameters;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::{BackgroundLayerProperties, BackgroundPaintProperties};
-use mln_util::immutable::Immutable;
 pub use render_background_layer::RenderBackgroundLayer;
 pub use render_circle_layer::RenderCircleLayer;
 pub use render_fill_extrusion_layer::RenderFillExtrusionLayer;
@@ -52,13 +52,13 @@ use crate::render_tile::RenderTile;
 
 /// `getEvaluated<BackgroundLayerProperties>(properties)`.
 pub(crate) fn background_layer_properties(
-    properties: &Immutable<dyn LayerProperties>,
+    properties: &Arc<dyn LayerProperties>,
 ) -> &BackgroundPaintProperties::PossiblyEvaluated {
     get_evaluated::<BackgroundLayerProperties>(properties)
 }
 
 /// `getCrossfade<BackgroundLayerProperties>(properties)`.
-pub(crate) fn background_crossfade(properties: &Immutable<dyn LayerProperties>) -> &CrossfadeParameters {
+pub(crate) fn background_crossfade(properties: &Arc<dyn LayerProperties>) -> &CrossfadeParameters {
     get_crossfade::<BackgroundLayerProperties>(properties)
 }
 

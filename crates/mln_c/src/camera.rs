@@ -4,8 +4,9 @@
 mod momentum;
 
 use core::ffi::c_void;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use ::mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
@@ -14,11 +15,11 @@ use ::mln_map::{
 };
 use mln_runtime::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use mln_util::UnitBezier;
-use mln_util::chrono::Duration;
 use mln_util::constants::{MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D, TILE_SIZE_I};
 use mln_util::geo::{EdgeInsets, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::for_each_point;
 use mln_util::projection::Projection;
+use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
 use crate::callback::Registration;
@@ -55,7 +56,7 @@ use crate::generated::types::{
     mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point, mln_status,
 };
 use crate::map::{command, query};
-use crate::{buffer, geo, handles, lock};
+use crate::{buffer, geo, handles};
 
 abi::versioned!(
     mln_bound_options,
@@ -171,15 +172,16 @@ unsafe fn read_struct<T: abi::Versioned>(pointer: *const T, message: &'static st
 
 // MARK: - Animations
 
-/// Whether `milliseconds` converts to a [`Duration`]: finite, not negative,
-/// and below its largest count, which the nearest double rounds up past.
+/// Whether `milliseconds` converts to a [`Duration`] of whole nanoseconds:
+/// finite, not negative, and below `u64::MAX` nanoseconds, which the nearest
+/// double rounds up past.
 fn is_duration_ms(milliseconds: f64) -> bool {
-    milliseconds.is_finite() && milliseconds >= 0.0 && milliseconds < Duration::max().count() as f64 / 1e6
+    milliseconds.is_finite() && milliseconds >= 0.0 && milliseconds * 1e6 < u64::MAX as f64
 }
 
 /// `milliseconds`, which [`is_duration_ms`] accepts, in whole nanoseconds.
 fn duration(milliseconds: f64) -> Duration {
-    Duration::from_nanos((milliseconds * 1e6) as i64)
+    Duration::from_nanos((milliseconds * 1e6) as u64)
 }
 
 type EndCallback = unsafe extern "C" fn(*mut c_void, *const mln_camera_transition_end);
@@ -230,7 +232,7 @@ impl EndHandler {
 
     fn set_accepted(&self, accepted: bool) {
         self.accepted.store(accepted, Ordering::Release);
-        if let Some(registration) = &*lock(&self.registration) {
+        if let Some(registration) = &*self.registration.lock() {
             if accepted {
                 registration.accept();
             } else {
@@ -240,7 +242,7 @@ impl EndHandler {
     }
 
     fn end(&self, end: &TransitionEnd) {
-        let Some(registration) = lock(&self.registration).take() else { return };
+        let Some(registration) = self.registration.lock().take() else { return };
         let callback = self.callback;
         let end = from_transition_end(end);
         // SAFETY: the host's end callback with its user data, and an end that
@@ -1243,8 +1245,8 @@ mod tests {
     fn durations_stay_within_the_native_range() {
         assert!(is_duration_ms(0.0) && is_duration_ms(300.0));
         assert!(!is_duration_ms(-1.0) && !is_duration_ms(f64::NAN) && !is_duration_ms(1e300));
-        assert!(!is_duration_ms(Duration::max().count() as f64 / 1e6));
-        assert_eq!(duration(1.5), Duration::from_nanos(1_500_000));
+        assert!(!is_duration_ms(u64::MAX as f64 / 1e6));
+        assert_eq!(duration(1.5), Duration::from_micros(1_500));
     }
 
     fn animation(fields: u32) -> mln_animation_options {

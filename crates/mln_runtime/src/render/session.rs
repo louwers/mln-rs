@@ -5,7 +5,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use mln_actor::{RunLoop, RunLoopHandle};
@@ -16,7 +16,7 @@ use mln_util::feature::Feature;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use super::driver::DriverWork;
 use super::frame::{FrameDemand, FrameResult};
@@ -125,18 +125,13 @@ impl RingSlot {
 
 /// Work sent to a session's thread, whose completion an abandon can fail at
 /// once instead of waiting for the thread to run it.
-pub(crate) trait PendingWork: Send {
+pub(crate) trait PendingWork: Any + Send {
     fn fail(self: Box<Self>, error: Error);
-    fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 }
 
 impl<T: Send + 'static> PendingWork for Resolver<T> {
     fn fail(self: Box<Self>, error: Error) {
         (*self).resolve(Err(error));
-    }
-
-    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
-        self
     }
 }
 
@@ -311,19 +306,19 @@ impl SessionShared {
     /// The completion of the work `id`, unless an end of the session
     /// completed it first.
     pub(crate) fn take_work<T: Send + 'static>(&self, id: WorkId) -> Option<Resolver<T>> {
-        let work = self.state.lock_unpoisoned().pending.remove(&id)?;
-        work.into_any().downcast::<Resolver<T>>().ok().map(|resolver| *resolver)
+        let work: Box<dyn Any + Send> = self.state.lock().pending.remove(&id)?;
+        work.downcast::<Resolver<T>>().ok().map(|resolver| *resolver)
     }
 
     pub(crate) fn is_released(&self) -> bool {
-        self.state.lock_unpoisoned().released
+        self.state.lock().released
     }
 
     /// The redraw wake that tells the host the map has something new to
     /// draw, unless the host was told since its last demand, or the session
     /// has no target. The host isn't told again until its next demand.
     pub(crate) fn take_redraw_wake(&self) -> Option<Wake> {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
         let wake = state.redraw_armed && state.has_target && state.lifecycle == RenderSessionState::Attached;
         state.redraw_armed &= !wake;
         wake.then(|| self.redraw_wake.clone()).flatten()
@@ -351,7 +346,7 @@ impl SessionShared {
     fn dispose_keeping_graphics(&self) -> Result<(), Error> {
         with_unlocked_wakes(|| {
             {
-                let mut state = self.state.lock_unpoisoned();
+                let mut state = self.state.lock();
                 if state.released {
                     return Err(released());
                 }
@@ -364,7 +359,7 @@ impl SessionShared {
             if self.abandon_locked(Abandoner::Library, true).is_err() {
                 // Only the session's own work could hold the gate here: the
                 // session detaches after it, keeping its graphics objects.
-                let mut state = self.state.lock_unpoisoned();
+                let mut state = self.state.lock();
                 if !matches!(
                     state.lifecycle,
                     RenderSessionState::Detaching | RenderSessionState::Detached | RenderSessionState::Abandoned
@@ -377,7 +372,7 @@ impl SessionShared {
     }
 
     fn dispose_locked(&self, done: Option<Resolver<()>>) -> Result<(), Error> {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
         if state.released {
             return Err(released());
         }
@@ -417,7 +412,7 @@ impl SessionShared {
     /// holds the gate, which only it could here.
     fn abandon_or_detach(&self) {
         if self.abandon(Abandoner::Library).is_err() {
-            let mut state = self.state.lock_unpoisoned();
+            let mut state = self.state.lock();
             if state.lifecycle != RenderSessionState::Abandoned {
                 self.start_detach(&mut state);
             }
@@ -436,7 +431,7 @@ impl SessionShared {
     /// sent the host, so that a command's result reaches the callback there,
     /// inside the driver call.
     pub(crate) fn wait_for_senders(&self) {
-        drop(self.sending.lock_unpoisoned());
+        drop(self.sending.lock());
     }
 
     /// Takes the sending lock, which the session's thread waits for before
@@ -447,7 +442,7 @@ impl SessionShared {
         if SENDING.with(|sending| sending.borrow().contains(&self.id)) {
             return None;
         }
-        let guard = self.sending.lock_unpoisoned();
+        let guard = self.sending.lock();
         SENDING.with(|sending| sending.borrow_mut().push(self.id));
         Some(Sending { id: self.id, _guard: guard })
     }
@@ -480,12 +475,12 @@ impl SessionShared {
         }
         let off_thread = self.driver == Driver::CallerThread && !on_driver;
         let gate = if on_driver {
-            self.gate.try_lock().map_err(|_| Error::busy("the render session is rendering on this thread"))?
+            self.gate.try_lock().ok_or_else(|| Error::busy("the render session is rendering on this thread"))?
         } else {
-            self.gate.lock_unpoisoned()
+            self.gate.lock()
         };
         let (waiters, map, kept) = {
-            let mut state = self.state.lock_unpoisoned();
+            let mut state = self.state.lock();
             if by == Abandoner::Host && state.released {
                 return Err(released());
             }
@@ -520,6 +515,12 @@ impl SessionShared {
         // A core worker lets go of its graphics objects at its next task,
         // which runs before this returns: the host may destroy what they were
         // made on once it does.
+        // In the browser the session's loop runs on this thread, which runs
+        // that task here instead, unless it is inside the session's work.
+        #[cfg(target_family = "wasm")]
+        let run_now = self.driver == Driver::CoreWorker
+            && !self.in_call.load(Ordering::SeqCst)
+            && !SENDING.with(|sending| sending.borrow().contains(&self.id));
         let torn_down = (self.driver == Driver::CoreWorker && !on_driver).then(|| {
             let (sender, receiver) = std::sync::mpsc::sync_channel::<()>(1);
             worker::post(&self.run_loop, move |_, _| {
@@ -531,6 +532,11 @@ impl SessionShared {
         if let Some(receiver) = torn_down {
             // A worker that ended drops the task, and the sender with it.
             let _ = receiver.recv();
+        }
+        #[cfg(target_family = "wasm")]
+        if run_now {
+            worker::post(&self.run_loop, |_, _| {});
+            crate::web::run_session_now(self.id);
         }
         if kept != 0 {
             let reason = if keep_graphics {
@@ -597,7 +603,7 @@ thread_local! {
 /// A session's sending lock, which [`SessionShared::hold_sending`] took.
 struct Sending<'a> {
     id: SessionId,
-    _guard: std::sync::MutexGuard<'a, ()>,
+    _guard: parking_lot::MutexGuard<'a, ()>,
 }
 
 impl Drop for Sending<'_> {
@@ -815,6 +821,7 @@ fn attach_unlocked<R>(
                 scale_factor,
                 glyph_cache: map.glyph_cache(),
                 tile_cache_enabled: map.tile_cache_enabled(),
+                failure: None,
             })),
             resizes_sent: 0,
             graphics_objects: 0,
@@ -846,7 +853,7 @@ fn attach_unlocked<R>(
         sending: Mutex::new(()),
     });
     let (completion, resolver) = shared.completion();
-    shared.state.lock_unpoisoned().attach = Some(resolver);
+    shared.state.lock().attach = Some(resolver);
     // Held until `then` returns: the session's thread delivers the attach's
     // result after, inside its driver call.
     let sending = shared.clone();
@@ -880,6 +887,7 @@ fn attach_unlocked<R>(
 
 /// Starts a core worker's thread, which builds the session's renderer, then
 /// runs the session's loop until the session ends.
+#[cfg(not(target_family = "wasm"))]
 fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
     let thread = mln_util::thread::builder("RenderSession")
         .spawn(move || {
@@ -900,6 +908,40 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
     // The thread ends by itself once the session ends, so nothing joins it.
     drop(thread);
     Ok(thread_id)
+}
+
+/// Runs a core worker on this thread, the browser's one, in the instance's
+/// pump: it builds the session's renderer once its device is ready, which
+/// may take the browser's WebGPU a while, then runs the session's loop until
+/// the session ends.
+#[cfg(target_family = "wasm")]
+#[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
+fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
+    let prepared = worker::prepare(&shared);
+    wasm_bindgen_futures::spawn_local(async move {
+        prepared.await;
+        let Some(run_loop) = RunLoop::adopt(&shared.run_loop) else { return };
+        let slot = worker::Slot::default();
+        {
+            let _current = run_loop.enter();
+            let _worker = worker::enter(&slot);
+            worker::build(&shared, &slot);
+        }
+        let id = shared.id;
+        // The worker holds the session from here on.
+        drop(shared);
+        let driven = run_loop.clone();
+        crate::web::drive_session(id, run_loop, move || {
+            let _current = driven.enter();
+            let _worker = worker::enter(&slot);
+            driven.run_once();
+            if driven.is_stopped() {
+                let worker = slot.borrow_mut().take();
+                drop(worker);
+            }
+        });
+    });
+    Ok(std::thread::current().id())
 }
 
 impl RenderSession {
@@ -955,7 +997,7 @@ impl RenderSession {
     ) -> Result<Completion<T>, Error> {
         let shared = self.shared();
         with_unlocked_wakes(|| {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             check_usable(&state)?;
             let (completion, resolver) = shared.completion();
             let work = state.register(resolver);
@@ -1007,7 +1049,7 @@ impl RenderSession {
     /// What the session can do. Fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once it is released.
     pub fn capabilities(&self) -> Result<RenderSessionCapabilities, Error> {
-        let state = self.shared().state.lock_unpoisoned();
+        let state = self.shared().state.lock();
         if state.released {
             return Err(released());
         }
@@ -1017,7 +1059,7 @@ impl RenderSession {
     /// The session's state now. Fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once it is released.
     pub fn snapshot(&self) -> Result<RenderSessionSnapshot, Error> {
-        let state = self.shared().state.lock_unpoisoned();
+        let state = self.shared().state.lock();
         if state.released {
             return Err(released());
         }
@@ -1042,7 +1084,7 @@ impl RenderSession {
     /// session no longer takes work.
     pub fn acquire_frame(&self) -> Result<Option<AcquiredFrame>, Error> {
         let shared = self.shared();
-        let mut state = shared.state.lock_unpoisoned();
+        let mut state = shared.state.lock();
         check_usable(&state)?;
         if !shared.capabilities.frame_acquisition {
             return Err(Error::unsupported("render session does not expose acquired texture frames"));
@@ -1088,7 +1130,7 @@ impl RenderSession {
     pub fn set_ring(&self, size: Size, ring: BorrowedRing) -> Result<Completion<Applied>, Error> {
         let shared = self.shared().clone();
         {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             check_usable(&state)?;
             if shared.capabilities.readback {
                 return Err(Error::unsupported("an offscreen session keeps its target"));
@@ -1132,7 +1174,7 @@ impl RenderSession {
     pub fn demand_frame(&self, demand: FrameDemand) -> Result<(), Error> {
         let shared = self.shared();
         with_unlocked_wakes(|| {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             check_usable(&state)?;
             if !state.ring.is_empty() && state.ring.iter().all(|slot| slot.quarantined) {
                 return Err(Error::invalid_state(
@@ -1150,7 +1192,7 @@ impl RenderSession {
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the session is
     /// released.
     pub fn drain_frame_results(&self) -> Result<Vec<FrameResult>, Error> {
-        let mut state = self.shared().state.lock_unpoisoned();
+        let mut state = self.shared().state.lock();
         if state.released {
             return Err(released());
         }
@@ -1173,7 +1215,7 @@ impl RenderSession {
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size,
     /// or a scale factor that isn't finite and positive.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
-        check_usable(&self.shared().state.lock_unpoisoned())?;
+        check_usable(&self.shared().state.lock())?;
         let capabilities = self.shared().capabilities;
         if capabilities.frame_acquisition && capabilities.export_kind.is_none() {
             return Err(Error::unsupported("a borrowed ring is sized by its owner: give it new textures instead"));
@@ -1202,7 +1244,7 @@ impl RenderSession {
         }
         let shared = self.shared();
         with_unlocked_wakes(|| {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             check_usable(&state)?;
             let map = state.map.clone().ok_or_else(|| Error::invalid_state("the render session has no map"))?;
             let scale_factor = scale_factor.unwrap_or(state.sent_scale_factor);
@@ -1260,11 +1302,11 @@ impl RenderSession {
         let shared = self.shared().clone();
         let capabilities = shared.capabilities;
         if !capabilities.presentation && !capabilities.frame_acquisition {
-            check_usable(&shared.state.lock_unpoisoned())?;
+            check_usable(&shared.state.lock())?;
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
         let guard = {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             check_usable(&state)?;
             if state.acquired_frames != 0 {
                 return Err(Error::invalid_state("release every acquired frame before the target"));
@@ -1304,7 +1346,7 @@ impl RenderSession {
     /// area to present to by then. The session then keeps the surface it had,
     /// at the new size.
     pub fn set_surface(&self, size: Size, surface: Surface) -> Result<Completion<Applied>, Error> {
-        check_usable(&self.shared().state.lock_unpoisoned())?;
+        check_usable(&self.shared().state.lock())?;
         let capabilities = self.shared().capabilities;
         if capabilities.frame_acquisition {
             return Err(Error::unsupported("a borrowed texture session takes no native surface"));
@@ -1355,7 +1397,7 @@ impl RenderSession {
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the session
     /// hasn't rendered a frame since it attached or resized.
     pub fn read_texture(&self) -> Result<Completion<PremultipliedImage>, Error> {
-        check_usable(&self.shared().state.lock_unpoisoned())?;
+        check_usable(&self.shared().state.lock())?;
         if !self.shared().capabilities.readback {
             return Err(Error::unsupported("a surface session can't read its frames back"));
         }
@@ -1454,7 +1496,7 @@ impl RenderSession {
     pub fn detach(&self) -> Result<Completion<()>, Error> {
         let shared = self.shared();
         with_unlocked_wakes(|| {
-            let mut state = shared.state.lock_unpoisoned();
+            let mut state = shared.state.lock();
             if !matches!(state.lifecycle, RenderSessionState::Failed) {
                 check_usable(&state)?;
             } else if state.released {
@@ -1516,7 +1558,7 @@ impl RenderSession {
     /// and so is one whose map is released before that service.
     pub fn release(&self) -> Result<Completion<()>, Error> {
         {
-            let state = self.shared().state.lock_unpoisoned();
+            let state = self.shared().state.lock();
             let live = matches!(state.lifecycle, RenderSessionState::Attaching | RenderSessionState::Attached);
             if live && !state.released && state.acquired_frames != 0 {
                 return Err(Error::invalid_state("release every acquired frame before the session is released"));
@@ -1548,7 +1590,7 @@ struct RetargetGuard(Arc<SessionShared>);
 
 impl Drop for RetargetGuard {
     fn drop(&mut self) {
-        let mut state = self.0.state.lock_unpoisoned();
+        let mut state = self.0.state.lock();
         state.pending_retargets = state.pending_retargets.saturating_sub(1);
     }
 }
@@ -1611,7 +1653,7 @@ impl AcquiredFrame {
     /// Fails with [`ErrorKind::TargetLost`](mln_util::ErrorKind) once the
     /// session can no longer render.
     pub fn view(&self) -> Result<FrameView, Error> {
-        let mut state = self.shared.state.lock_unpoisoned();
+        let mut state = self.shared.state.lock();
         if !matches!(
             state.lifecycle,
             RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Detaching
@@ -1627,7 +1669,7 @@ impl AcquiredFrame {
     #[must_use]
     pub fn session_live(&self) -> bool {
         matches!(
-            self.shared.state.lock_unpoisoned().lifecycle,
+            self.shared.state.lock().lifecycle,
             RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Detaching
         )
     }
@@ -1676,7 +1718,7 @@ impl std::fmt::Debug for FrameView {
 impl Drop for FrameView {
     fn drop(&mut self) {
         let release = {
-            let mut state = self.shared.state.lock_unpoisoned();
+            let mut state = self.shared.state.lock();
             state.views = state.views.saturating_sub(1);
             state.views == 0 && std::mem::take(&mut state.viewed_teardown)
         };
@@ -1698,7 +1740,7 @@ impl Drop for AcquiredFrame {
 /// sync, or discarded without one.
 fn give_back(shared: &Arc<SessionShared>, slot: usize, consumer: Option<ConsumerSync>) {
     with_unlocked_wakes(|| {
-        let mut state = shared.state.lock_unpoisoned();
+        let mut state = shared.state.lock();
         state.acquired_frames = state.acquired_frames.saturating_sub(1);
         let live = matches!(
             state.lifecycle,

@@ -22,8 +22,10 @@ mod run_loop;
 mod thread;
 mod timer;
 
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
+
+use parking_lot::Mutex;
 
 /// gtest `EXPECT_*` from other threads: failures are recorded and the test
 /// thread checks them with `assert_none`.
@@ -35,13 +37,13 @@ impl Failures {
     pub fn expect(&self, condition: bool, what: &str) {
         if !condition {
             let location = std::panic::Location::caller();
-            self.0.lock().unwrap().push(format!("{location}: {what}"));
+            self.0.lock().push(format!("{location}: {what}"));
         }
     }
 
     #[track_caller]
     pub fn assert_none(&self) {
-        let failures = self.0.lock().unwrap();
+        let failures = self.0.lock();
         assert!(failures.is_empty(), "failures on other threads:\n{}", failures.join("\n"));
     }
 }

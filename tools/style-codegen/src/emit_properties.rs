@@ -150,7 +150,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     if crossfade {
         imports.push("crate::renderer::property_evaluation_parameters::CrossfadeParameters".into());
     }
-    imports.push("mln_util::immutable::Immutable".into());
+    imports.push("std::sync::Arc".into());
     imports.push("mln_vec_map::VecSet".into());
     w.imports(imports);
     w.blank();
@@ -182,7 +182,7 @@ pub fn emit(layer: &LayerSpec) -> String {
 
     w.line(&format!("impl {t}LayerProperties {{"));
     w.line(&format!("    /// `explicit {t}LayerProperties(Immutable<{t}Layer::Impl>)`."));
-    w.line(&format!("    pub fn new(impl_: Immutable<{t}LayerImpl>) -> Self {{"));
+    w.line(&format!("    pub fn new(impl_: Arc<{t}LayerImpl>) -> Self {{"));
     w.line(&format!("        {t}LayerProperties {{"));
     w.line("            base: LayerPropertiesBase::new(impl_),");
     if crossfade {
@@ -197,7 +197,7 @@ pub fn emit(layer: &LayerSpec) -> String {
             "    /// `{t}LayerProperties(Immutable<{t}Layer::Impl>, CrossfadeParameters, {t}PaintProperties::PossiblyEvaluated)`."
         ));
         w.line("    pub fn with_evaluated(");
-        w.line(&format!("        impl_: Immutable<{t}LayerImpl>,"));
+        w.line(&format!("        impl_: Arc<{t}LayerImpl>,"));
         w.line("        crossfade: CrossfadeParameters,");
         w.line(&format!("        evaluated: {pe},"));
         w.line("    ) -> Self {");
@@ -212,7 +212,7 @@ pub fn emit(layer: &LayerSpec) -> String {
             "    /// `{t}LayerProperties(Immutable<{t}Layer::Impl>, {t}PaintProperties::PossiblyEvaluated)`."
         ));
         w.line("    pub fn with_evaluated(");
-        w.line(&format!("        impl_: Immutable<{t}LayerImpl>,"));
+        w.line(&format!("        impl_: Arc<{t}LayerImpl>,"));
         w.line(&format!("        evaluated: {pe},"));
         w.line("    ) -> Self {");
         w.line(&format!("        {t}LayerProperties {{"));

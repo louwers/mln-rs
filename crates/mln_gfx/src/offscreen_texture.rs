@@ -18,5 +18,4 @@ pub trait OffscreenTexture: Any {
     /// Submits what `encoder` recorded so far, after the passes that drew
     /// into the texture, so that what samples it later sees them.
     fn submit(&self, encoder: &dyn CommandEncoder);
-    fn as_any(&self) -> &dyn Any;
 }

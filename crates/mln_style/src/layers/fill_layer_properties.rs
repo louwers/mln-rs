@@ -11,8 +11,8 @@ use crate::layers::fill_layer_impl::Impl as FillLayerImpl;
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_style_types::TranslateAnchorType;
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::data_driven_layout_property!(
     /// `struct FillSortKey : DataDrivenLayoutProperty<float>`:
@@ -96,7 +96,7 @@ pub struct FillLayerProperties {
 
 impl FillLayerProperties {
     /// `explicit FillLayerProperties(Immutable<FillLayer::Impl>)`.
-    pub fn new(impl_: Immutable<FillLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<FillLayerImpl>) -> Self {
         FillLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             crossfade: CrossfadeParameters::default(),
@@ -106,7 +106,7 @@ impl FillLayerProperties {
 
     /// `FillLayerProperties(Immutable<FillLayer::Impl>, CrossfadeParameters, FillPaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<FillLayerImpl>,
+        impl_: Arc<FillLayerImpl>,
         crossfade: CrossfadeParameters,
         evaluated: FillPaintProperties::PossiblyEvaluated,
     ) -> Self {

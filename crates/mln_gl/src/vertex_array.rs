@@ -52,7 +52,7 @@ impl VertexArray {
                 let Some(buffer) = binding
                     .vertex_buffer_resource
                     .as_ref()
-                    .and_then(|resource| resource.as_any().downcast_ref::<VertexBufferResource>())
+                    .and_then(|resource| resource.downcast_ref::<VertexBufferResource>())
                     .and_then(VertexBufferResource::get_buffer)
                 else {
                     // The attribute's value comes from a uniform.

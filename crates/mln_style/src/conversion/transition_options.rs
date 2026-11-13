@@ -1,10 +1,17 @@
 // Ports include/mln/style/conversion/transition_options.hpp +
 // src/mln/style/conversion/transition_options.cpp.
 
-use mln_util::chrono::Duration;
+use std::time::Duration;
 
 use super::{Converter, Convertible, Error};
 use crate::transition_options::TransitionOptions;
+
+/// `std::chrono::milliseconds(int64_t(number))`: truncated to whole
+/// milliseconds; a negative number, below the style spec's minimum of 0,
+/// gives zero, as does NaN.
+fn whole_milliseconds(number: f32) -> Duration {
+    Duration::from_millis(number as u64)
+}
 
 impl Converter for TransitionOptions {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<TransitionOptions> {
@@ -20,9 +27,7 @@ impl Converter for TransitionOptions {
                 error.message = "duration must be a number".to_owned();
                 return None;
             };
-            // std::chrono::milliseconds(int64_t(*number)): float -> int64
-            // truncates (`as` saturates where C++ is undefined).
-            result.duration = Some(Duration::from_millis(number as i64));
+            result.duration = Some(whole_milliseconds(number));
         }
 
         if let Some(delay) = value.object_member("delay") {
@@ -30,7 +35,7 @@ impl Converter for TransitionOptions {
                 error.message = "delay must be a number".to_owned();
                 return None;
             };
-            result.delay = Some(Duration::from_millis(number as i64));
+            result.delay = Some(whole_milliseconds(number));
         }
 
         Some(result)

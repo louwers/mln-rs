@@ -28,9 +28,9 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::Mutex;
 
 use mln_util::size::Size;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::file_source::ProxyFileSource;
@@ -156,7 +156,7 @@ fn supervise(program: &Path, dir: &Path, jobs: usize) -> BTreeMap<usize, String>
                         log::error(Event::General, &format!("A render-test worker exited ({status})"));
                         return;
                     }
-                    let mut crashes = crashes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut crashes = crashes.lock();
                     for index in running {
                         crashes.insert(index, format!("The worker running this test exited ({status})"));
                     }
@@ -164,7 +164,7 @@ fn supervise(program: &Path, dir: &Path, jobs: usize) -> BTreeMap<usize, String>
             });
         }
     });
-    crashes.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner)
+    crashes.into_inner()
 }
 
 /// Runs one worker to its end, relaying its standard output and error.

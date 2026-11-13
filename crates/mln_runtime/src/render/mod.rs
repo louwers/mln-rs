@@ -16,10 +16,12 @@ pub(crate) use session::{Abandoner, SessionId, SessionShared, attach};
 pub use session::{
     AcquiredFrame, FrameView, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState,
 };
+#[cfg(all(feature = "gl", target_family = "wasm"))]
+pub use target::WebGlContext;
 pub use target::{
-    Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DepthStencilFormat, DepthStencilFormats, Device,
-    DeviceOptions, DmaBufFormat, DmaBufPlane, Driver, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDepth,
-    FrameTexture, FrameTextureKind, GlApi, GpuSync, NativeTexture, RenderTarget, Surface, SurfaceType, SyncKind,
-    SyncKinds, Wake,
+    Adapter, AttachOptions, BackendType, BorrowedRing, CanvasFormat, ConsumerSync, DepthStencilFormat,
+    DepthStencilFormats, Device, DeviceOptions, DmaBufFormat, DmaBufPlane, Driver, ExportKind, ExportKinds,
+    ExportedImage, ExportedRing, FrameDepth, FrameTexture, FrameTextureKind, GlApi, GpuSync, NativeTexture,
+    RenderTarget, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
 };
 pub(crate) use worker::{Worker, post as worker_post};

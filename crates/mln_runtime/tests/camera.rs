@@ -5,7 +5,8 @@
 
 mod support;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::Duration;
 
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, NorthOrientation, TileLodMode, TransitionEnd,
@@ -14,8 +15,8 @@ use mln_map::{
 use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };
-use mln_util::chrono::Duration;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
+use parking_lot::Mutex;
 use support::{map, runtime, wait, wait_err};
 
 /// An animation whose ends `ends` records.
@@ -23,7 +24,7 @@ fn recorded(ends: &Arc<Mutex<Vec<TransitionEnd>>>, duration: Duration) -> Animat
     let ends = ends.clone();
     AnimationOptions {
         duration: Some(duration),
-        transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| ends.lock().unwrap().push(*end))),
+        transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| ends.lock().push(*end))),
         ..AnimationOptions::default()
     }
 }
@@ -31,7 +32,7 @@ fn recorded(ends: &Arc<Mutex<Vec<TransitionEnd>>>, duration: Duration) -> Animat
 fn zoom_to(zoom: f64, animation: AnimationOptions) -> CameraUpdate {
     CameraUpdate {
         mode: CameraUpdateMode::Ease,
-        camera: CameraOptions::default().with_zoom(Some(zoom)),
+        camera: CameraOptions { zoom: Some(zoom), ..Default::default() },
         animation,
         ..CameraUpdate::default()
     }
@@ -43,19 +44,19 @@ fn an_end_reports_the_snapshot_that_shows_it_before_its_completion() {
     let map = map(&runtime);
     let ends = Arc::new(Mutex::new(Vec::new()));
 
-    let jumped = wait(map.update_camera(zoom_to(3.0, recorded(&ends, Duration::zero()))));
-    let end = ends.lock().unwrap().pop().unwrap();
+    let jumped = wait(map.update_camera(zoom_to(3.0, recorded(&ends, Duration::ZERO))));
+    let end = ends.lock().pop().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Completed, jumped.generation));
     assert_eq!(jumped.generation, map.snapshot().unwrap().generation);
 
     drop(map.update_camera(zoom_to(9.0, recorded(&ends, Duration::from_secs(60)))).unwrap());
     let cancelled = wait(map.cancel_camera_transitions());
-    let end = ends.lock().unwrap().pop().unwrap();
+    let end = ends.lock().pop().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Cancelled, cancelled.generation));
 
     drop(map.update_camera(zoom_to(9.0, recorded(&ends, Duration::from_secs(60)))).unwrap());
     wait(map.release());
-    let end = ends.lock().unwrap().pop().unwrap();
+    let end = ends.lock().pop().unwrap();
     assert_eq!((end.outcome, end.generation), (TransitionOutcome::Closed, 0));
     wait(runtime.release());
 }
@@ -86,7 +87,7 @@ fn a_fit_moves_the_camera_where_the_query_fits() {
     let error = wait_err(map.fit_camera(area.clone(), refused));
     assert_eq!(error.kind, ErrorKind::InvalidArgument);
     assert!(error.message.contains("padding"), "{}", error.message);
-    assert_eq!(ends.lock().unwrap()[0].outcome, TransitionOutcome::Cancelled);
+    assert_eq!(ends.lock()[0].outcome, TransitionOutcome::Cancelled);
     assert_eq!(wait(map.camera()).camera, moved);
 
     assert_eq!(ErrorKind::InvalidArgument, wait_err(map.camera_for(CameraFitArea::Coordinates(Vec::new()), fit)).kind);
@@ -101,7 +102,8 @@ fn the_visible_bounds_unwrap_across_the_antimeridian() {
     let runtime = runtime();
     let map = map(&runtime);
     // 256 pixels at zoom 1 span 90 degrees.
-    let camera = CameraOptions::default().with_center(Some(LatLng::new(0.0, 170.0).unwrap())).with_zoom(Some(1.0));
+    let camera =
+        CameraOptions { center: Some(LatLng::new(0.0, 170.0).unwrap()), zoom: Some(1.0), ..Default::default() };
     let bounds = wait(map.lat_lng_bounds_for_camera(camera));
     assert!((bounds.west() - 125.0).abs() < 1e-6, "{bounds:?}");
     assert!((bounds.east() - 215.0).abs() < 1e-6, "{bounds:?}");

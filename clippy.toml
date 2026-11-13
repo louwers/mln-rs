@@ -20,3 +20,11 @@ doc-valid-idents = [
     "TinySDF",
     "ZigZag",
 ]
+
+# parking_lot's locks don't poison: a panic while a lock is held doesn't make
+# every later lock panic or need unwrapping.
+disallowed-types = [
+    { path = "std::sync::Condvar", reason = "use parking_lot::Condvar" },
+    { path = "std::sync::Mutex", reason = "use parking_lot::Mutex, which doesn't poison" },
+    { path = "std::sync::RwLock", reason = "use parking_lot::RwLock, which doesn't poison" },
+]

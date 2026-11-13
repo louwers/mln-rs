@@ -73,7 +73,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
             additional_defines.push('\n');
         }
 
-        let context = gfx_context.as_any().downcast_ref::<Context>()?;
+        let context = gfx_context.downcast_ref::<Context>()?;
         let shader: ShaderProgramBasePtr = Rc::new(ShaderProgram::create(
             context,
             &shader_name,

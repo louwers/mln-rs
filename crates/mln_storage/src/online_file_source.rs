@@ -21,18 +21,19 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use feature::Value;
 use mln_actor::{ActorRef, AsyncTask, Mailbox, Thread, Timer, scheduler};
-use mln_util::chrono::{Duration, Timestamp, now};
+use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{
     ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
 };
 use mln_util::logging::{Event, Log};
-use mln_util::sync::MutexExt;
 use mln_vec_map::{VecMap, VecSet};
+use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
@@ -52,7 +53,7 @@ pub const ONLINE_STATUS_KEY: &str = "online-status";
 /// `OnlineFileRequest`
 struct OnlineFileRequest {
     id: u64,
-    impl_: Weak<ThreadState>,
+    state: Weak<ThreadState>,
     resource: RefCell<Resource>,
     request: RefCell<Option<Box<dyn AsyncRequest>>>,
     timer: Timer,
@@ -82,15 +83,15 @@ struct OnlineFileRequest {
 
 /// The target of an `OnlineFileRequest`'s mailbox.
 struct OnlineFileRequestRef {
-    impl_: Weak<ThreadState>,
+    state: Weak<ThreadState>,
     id: u64,
 }
 
 impl OnlineFileRequestRef {
     /// `OnlineFileRequest::setTransformResult(ResourceTransform::Result)`.
     fn set_transform_result(&self, result: TransformResult) {
-        if let Some(impl_) = self.impl_.upgrade()
-            && let Some(req) = impl_.get(self.id)
+        if let Some(state) = self.state.upgrade()
+            && let Some(req) = state.get(self.id)
         {
             req.set_transform_result(result);
         }
@@ -156,7 +157,7 @@ struct ThreadState {
     online: Cell<bool>,
     maximum_concurrent_requests: Cell<u32>,
     http_file_source: HTTPFileSource,
-    resource_transform: RefCell<ResourceTransform>,
+    resource_transform: RefCell<Option<ResourceTransform>>,
     tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
 }
 
@@ -197,7 +198,7 @@ fn interpolate_expiration(current: Timestamp, prior: Option<Timestamp>, expired:
     // Assume that either the client or server clock is wrong and try to
     // interpolate a valid expiration date (from the client POV) observing a
     // minimum timeout.
-    let minimum = CLOCK_SKEW_RETRY_TIMEOUT.count() / 1_000_000_000;
+    let minimum = CLOCK_SKEW_RETRY_TIMEOUT.as_secs() as i64;
     Timestamp::from_secs(now.secs_since_epoch() + delta.max(minimum))
 }
 
@@ -224,7 +225,7 @@ impl ThreadState {
     fn transform(&self, req: &OnlineFileRequest) {
         req.transform_failed.set(false);
         let transform = self.resource_transform.borrow().clone();
-        if transform.is_set() {
+        if let Some(transform) = transform {
             // Request the ResourceTransform actor a new url and replace the
             // resource url with the transformed one before proceeding to
             // schedule the request.
@@ -234,7 +235,7 @@ impl ThreadState {
                 let resource = req.resource.borrow();
                 (resource.kind, resource.url.clone())
             };
-            transform.transform(
+            transform(
                 kind,
                 &url,
                 Box::new(move |result: TransformResult| {
@@ -362,7 +363,7 @@ impl OnlineFileRequest {
         // Lazy constructed because this can be costly and the
         // ResourceTransform is not used by many apps.
         let mailbox = mailbox.get_or_insert_with(|| {
-            let target = Rc::new(OnlineFileRequestRef { impl_: self.impl_.clone(), id: self.id });
+            let target = Rc::new(OnlineFileRequestRef { state: self.state.clone(), id: self.id });
             Mailbox::with_target(&scheduler::get_current(), target)
         });
         ActorRef::new(mailbox)
@@ -374,57 +375,62 @@ impl OnlineFileRequest {
         let prior_expires = self.resource.borrow().prior_expires;
         let timeout = match prior_expires {
             Some(_) => self.get_update_interval(prior_expires),
-            None => Duration::zero(),
+            None => Some(Duration::ZERO),
         };
         self.schedule(timeout);
     }
 
-    /// `schedule(Duration timeout)`
-    fn schedule(&self, mut timeout: Duration) {
-        let Some(impl_) = self.impl_.upgrade() else {
+    /// `schedule(Duration timeout)`: requests the resource again after
+    /// `timeout`, or never for `None`.
+    fn schedule(&self, timeout: Option<Duration>) {
+        let Some(state) = self.state.upgrade() else {
             return;
         };
-        if self.transforming.get() || impl_.is_pending(self.id) || impl_.is_active(self.id) {
+        if self.transforming.get() || state.is_pending(self.id) || state.is_active(self.id) {
             // There's already a request in progress; don't start another one.
             return;
         }
 
-        if timeout == Duration::max() {
+        let Some(timeout) = timeout else {
             return;
-        }
+        };
 
-        // Emulate a Connection error when the Offline mode is forced with a
-        // really long timeout. The request will get re-triggered when the
+        // Emulate a Connection error when the Offline mode is forced, and
+        // don't retry: the request will get re-triggered when the
         // NetworkStatus is set back to Online.
         if NetworkStatus::get() == Status::Offline {
             self.failed_request_reason.set(Reason::Connection);
             self.failed_requests.set(1);
-            timeout = Duration::max();
+            self.timer.stop();
+            return;
         }
 
-        let weak = self.impl_.clone();
+        let weak = self.state.clone();
         let id = self.id;
-        self.timer.start(timeout, Duration::zero(), move || {
-            let Some(impl_) = weak.upgrade() else {
+        self.timer.start(timeout, Duration::ZERO, move || {
+            let Some(state) = weak.upgrade() else {
                 return;
             };
-            match impl_.get(id) {
-                Some(req) if req.transform_failed.get() => impl_.transform(&req),
-                _ => impl_.activate_or_queue_request(id),
+            match state.get(id) {
+                Some(req) if req.transform_failed.get() => state.transform(&req),
+                _ => state.activate_or_queue_request(id),
             }
         });
     }
 
-    /// `getUpdateInterval(std::optional<Timestamp> expires)`
-    fn get_update_interval(&self, expires: Option<Timestamp>) -> Duration {
+    /// `getUpdateInterval(std::optional<Timestamp> expires)`: when to request
+    /// the resource again, or `None` for never.
+    fn get_update_interval(&self, expires: Option<Timestamp>) -> Option<Duration> {
         // Calculate a timeout that depends on how many consecutive errors
         // we've encountered, and on the expiration time, if present.
         let error_retry =
             error_retry_timeout(self.failed_request_reason.get(), self.failed_requests.get(), self.retry_after.get());
-        let expiration = expiration_timeout(expires, self.expired_requests.get());
         let minimum = self.resource.borrow().minimum_update_interval;
-        let expiration = if expiration < minimum { minimum } else { expiration };
-        if expiration < error_retry { expiration } else { error_retry }
+        let expiration = expiration_timeout(expires, self.expired_requests.get()).map(|e| e.max(minimum));
+        match (expiration, error_retry) {
+            (Some(expiration), Some(error_retry)) => Some(expiration.min(error_retry)),
+            (expiration, error_retry) => expiration.or(error_retry),
+        }
     }
 
     /// `completed(Response)`
@@ -500,7 +506,7 @@ impl OnlineFileRequest {
         // start retrying them, and we only immediately restart request that
         // failed due to connection issues.
         if self.failed_request_reason.get() == Reason::Connection {
-            self.schedule(Duration::zero());
+            self.schedule(Some(Duration::ZERO));
         }
     }
 }
@@ -516,7 +522,7 @@ impl OnlineFileSourceThread {
             online: Cell::new(true),
             maximum_concurrent_requests: Cell::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             http_file_source,
-            resource_transform: RefCell::new(ResourceTransform::default()),
+            resource_transform: RefCell::new(None),
             tasks: RefCell::new(VecMap::new()),
         });
         let weak = Rc::downgrade(&state);
@@ -537,7 +543,7 @@ impl OnlineFileSourceThread {
         };
         let request = Rc::new(OnlineFileRequest {
             id: req,
-            impl_: Rc::downgrade(&self.state),
+            state: Rc::downgrade(&self.state),
             resource: RefCell::new(resource),
             request: RefCell::new(None),
             timer: Timer::new(),
@@ -562,7 +568,7 @@ impl OnlineFileSourceThread {
     }
 
     /// `setResourceTransform(ResourceTransform)`
-    fn set_resource_transform(&self, transform: ResourceTransform) {
+    fn set_resource_transform(&self, transform: Option<ResourceTransform>) {
         *self.state.resource_transform.borrow_mut() = transform;
     }
 
@@ -595,9 +601,8 @@ impl Drop for OnlineFileSourceThread {
     }
 }
 
-/// `OnlineFileSource::Impl`. `thread` is declared last, as in C++, but
-/// dropped explicitly first (see `Drop`).
-struct Impl {
+/// `OnlineFileSource`: the `Network` file source.
+pub struct OnlineFileSource {
     cached_resource_options: Mutex<ResourceOptions>,
     cached_maximum_concurrent_requests: Mutex<u32>,
     thread: Thread<OnlineFileSourceThread>,
@@ -605,19 +610,28 @@ struct Impl {
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
-impl Impl {
-    fn new(resource_options: &ResourceOptions) -> Self {
+impl OnlineFileSource {
+    #[must_use]
+    pub fn new(resource_options: &ResourceOptions) -> Self {
         let ro = resource_options.clone();
         // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_NETWORK).
         let thread = Thread::new("OnlineFileSource", move |_| OnlineFileSourceThread::new(ro));
-        Impl {
+        OnlineFileSource {
             cached_resource_options: Mutex::new(resource_options.clone()),
             cached_maximum_concurrent_requests: Mutex::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             thread,
         }
     }
 
-    fn request(&self, callback: Callback, res: Resource) -> Box<dyn AsyncRequest> {
+    /// Holds the online thread until the guard drops (`crate::tests::pause`).
+    #[cfg(test)]
+    pub(crate) fn pause(&self) -> crate::tests::Paused {
+        crate::tests::pause(&self.thread.actor())
+    }
+}
+
+impl FileSource for OnlineFileSource {
+    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let mut req = FileSourceRequest::new(callback);
         let req_id = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         let actor_ref = self.thread.actor();
@@ -625,32 +639,9 @@ impl Impl {
             actor_ref.invoke(move |t: &OnlineFileSourceThread| t.cancel(req_id));
         }));
         let req_ref = req.actor();
-        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.request(req_id, res, &req_ref));
+        let resource = resource.clone();
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.request(req_id, resource, &req_ref));
         Box::new(req)
-    }
-}
-
-/// `OnlineFileSource`: the `Network` file source.
-pub struct OnlineFileSource {
-    impl_: Impl,
-}
-
-impl OnlineFileSource {
-    #[must_use]
-    pub fn new(resource_options: &ResourceOptions) -> Self {
-        OnlineFileSource { impl_: Impl::new(resource_options) }
-    }
-
-    /// Holds the online thread until the guard drops (`crate::tests::pause`).
-    #[cfg(test)]
-    pub(crate) fn pause(&self) -> crate::tests::Paused {
-        crate::tests::pause(&self.impl_.thread.actor())
-    }
-}
-
-impl FileSource for OnlineFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        self.impl_.request(callback, resource.clone())
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
@@ -664,11 +655,10 @@ impl FileSource for OnlineFileSource {
             if let Value::Uint(maximum) = value {
                 debug_assert!(*maximum < u64::from(u32::MAX));
                 let maximum = *maximum as u32;
-                self.impl_
-                    .thread
+                self.thread
                     .actor()
                     .invoke(move |t: &OnlineFileSourceThread| t.set_maximum_concurrent_requests(maximum));
-                *self.impl_.cached_maximum_concurrent_requests.lock_unpoisoned() = maximum;
+                *self.cached_maximum_concurrent_requests.lock() = maximum;
             } else {
                 Log::error(Event::General, "Invalid max-concurrent-requests property value type.");
             }
@@ -676,7 +666,7 @@ impl FileSource for OnlineFileSource {
             // For testing only
             if let Value::Bool(status) = value {
                 let status = *status;
-                self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_online_status(status));
+                self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_online_status(status));
             }
         } else {
             Log::error(Event::General, format!("Resource provider does not support property {key}"));
@@ -685,28 +675,28 @@ impl FileSource for OnlineFileSource {
 
     fn get_property(&self, key: &str) -> Value {
         if key == MAX_CONCURRENT_REQUESTS_KEY {
-            Value::Uint(u64::from(*self.impl_.cached_maximum_concurrent_requests.lock_unpoisoned()))
+            Value::Uint(u64::from(*self.cached_maximum_concurrent_requests.lock()))
         } else {
             Log::error(Event::General, format!("Resource provider does not support property {key}"));
             Value::Null
         }
     }
 
-    fn set_resource_transform(&self, transform: ResourceTransform) {
-        self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_transform(transform));
+    fn set_resource_transform(&self, transform: Option<ResourceTransform>) {
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_transform(transform));
     }
 
     fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_http_header_transform(transform));
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_http_header_transform(transform));
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
         let o = options.clone();
-        self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_options(o));
-        *self.impl_.cached_resource_options.lock_unpoisoned() = options;
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_options(o));
+        *self.cached_resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.cached_resource_options.lock_unpoisoned().clone()
+        self.cached_resource_options.lock().clone()
     }
 }

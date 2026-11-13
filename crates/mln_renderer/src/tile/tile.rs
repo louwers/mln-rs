@@ -13,12 +13,12 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
-use mln_util::chrono::{Duration, Timestamp};
-use mln_util::immutable::Immutable;
+use mln_util::chrono::Timestamp;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -204,10 +204,8 @@ impl TileBase {
 }
 
 /// The virtual interface of `Tile`.
-pub trait Tile {
+pub trait Tile: Any {
     fn base(&self) -> &TileBase;
-
-    fn as_any(&self) -> &dyn Any;
 
     fn create_render_data(&self) -> Box<dyn TileRenderData>;
 
@@ -233,7 +231,7 @@ pub trait Tile {
     /// Returns `true` if the corresponding render layer data is present in
     /// this tile (and i.e. it was successfully updated); returns `false`
     /// otherwise.
-    fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool;
+    fn layer_properties_updated(&self, layer_properties: &Arc<dyn LayerProperties>) -> bool;
 
     fn set_show_collision_boxes(&self, _show: bool) {}
 
@@ -248,7 +246,7 @@ pub trait Tile {
         false
     }
 
-    fn set_layers(&self, _layers: &[Immutable<dyn LayerProperties>], _global_state: Option<Arc<GlobalStateMap>>) {}
+    fn set_layers(&self, _layers: &[Arc<dyn LayerProperties>], _global_state: Option<Arc<GlobalStateMap>>) {}
 
     fn set_mask(&self, _mask: TileMask) {}
 
@@ -336,5 +334,12 @@ pub trait Tile {
 
     fn dump_debug_logs(&self) {
         self.base().dump_debug_logs();
+    }
+}
+
+impl dyn Tile {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: Tile>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
     }
 }

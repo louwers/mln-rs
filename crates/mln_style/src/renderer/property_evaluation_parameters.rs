@@ -2,8 +2,9 @@
 // mln_style because style/properties.hpp needs it (a cut point of the C++ include cycle).
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use mln_util::chrono::{Duration, TimePoint};
+use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +21,8 @@ pub struct CrossfadeParameters {
 #[derive(Clone, Debug)]
 pub struct PropertyEvaluationParameters {
     pub z: f32,
-    pub now: TimePoint,
+    /// The time to evaluate transitions at; `None` evaluates them as ended.
+    pub now: Option<Instant>,
     pub zoom_history: ZoomHistory,
     pub default_fade_duration: Duration,
 
@@ -43,9 +45,9 @@ impl PropertyEvaluationParameters {
     pub fn new(z: f32) -> Self {
         PropertyEvaluationParameters {
             z,
-            now: TimePoint::max(),
+            now: None,
             zoom_history: ZoomHistory::default(),
-            default_fade_duration: Duration::zero(),
+            default_fade_duration: Duration::ZERO,
             global_state: None,
             changed_global_state_keys: None,
             zoom_changed: true,
@@ -57,7 +59,7 @@ impl PropertyEvaluationParameters {
 
     /// `PropertyEvaluationParameters(ZoomHistory, TimePoint, Duration)`.
     #[must_use]
-    pub fn with_zoom_history(zoom_history: ZoomHistory, now: TimePoint, default_fade_duration: Duration) -> Self {
+    pub fn with_zoom_history(zoom_history: ZoomHistory, now: Option<Instant>, default_fade_duration: Duration) -> Self {
         PropertyEvaluationParameters {
             z: zoom_history.last_zoom,
             now,
@@ -70,17 +72,13 @@ impl PropertyEvaluationParameters {
     #[must_use]
     pub fn get_crossfade_parameters(&self) -> CrossfadeParameters {
         let fraction = self.z - self.z.floor();
-        // std::chrono::duration<float> d = defaultFadeDuration;
-        let d = self.default_fade_duration.as_secs_f32();
-        let t = if d == 0.0 {
-            1.0_f32
-        } else {
-            // std::min((now - lastIntegerZoomTime) / d, 1.0f): both operands
-            // go to the common type duration<float, nano>, so the nanosecond
-            // count becomes a float and the float seconds are scaled by 1e9.
-            let elapsed = (self.now - self.zoom_history.last_integer_zoom_time).count() as f32;
-            let ratio = elapsed / (d * 1_000_000_000.0_f32);
-            if 1.0_f32 < ratio { 1.0_f32 } else { ratio }
+        // The share of the fade since the zoom last crossed an integer.
+        let t = match (self.now, self.zoom_history.last_integer_zoom_time) {
+            _ if self.default_fade_duration.is_zero() => 1.0,
+            (Some(now), Some(last)) => {
+                now.saturating_duration_since(last).div_duration_f32(self.default_fade_duration).min(1.0)
+            }
+            _ => 1.0,
         };
 
         if self.z > self.zoom_history.last_integer_zoom {

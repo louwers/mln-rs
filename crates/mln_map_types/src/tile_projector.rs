@@ -3,7 +3,7 @@
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 
-use crate::projection_base::{ProjectedTilePoint, ProjectionData};
+use crate::projection::{ProjectedTilePoint, ProjectionData};
 use crate::transform_state::TransformState;
 
 /// Projects the points of one tile through the current projection, the way

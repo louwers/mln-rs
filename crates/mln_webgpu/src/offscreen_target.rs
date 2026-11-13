@@ -70,14 +70,14 @@ impl FrameTarget for OffscreenTarget {
                 true,
                 true,
             );
-            *image = Some(Rc::new(DrawTarget::new(size, resource)));
+            *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
         image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {
         let image = self.image.borrow();
-        if let Some(encoder) = encoder.as_any().downcast_ref::<CommandEncoder>() {
+        if let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() {
             encoder.submit_frame(image.as_deref().map(DrawTarget::resource));
         }
         if image.is_some() { Handoff::ReadBack } else { Handoff::Dropped }

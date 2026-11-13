@@ -12,7 +12,6 @@
 // (`render_target_generation`) so the layer can tell when to prepare again.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -20,9 +19,9 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
-use mln_util::sync::{MutexExt, RwLockExt};
 use mln_util::tileset::RasterEncoding;
 use mln_util::time::Instant;
+use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -111,17 +110,17 @@ impl HillshadeBucket {
 
     /// The masked geometry (C++ reads the members directly).
     pub fn geometry(&self) -> MutexGuard<'_, HillshadeBucketGeometry> {
-        self.geometry.lock_unpoisoned()
+        self.geometry.lock()
     }
 
     /// `getDEMData() const`.
     pub fn get_dem_data(&self) -> RwLockReadGuard<'_, DEMData> {
-        self.demdata.read_unpoisoned()
+        self.demdata.read()
     }
 
     /// `getDEMData()`.
     pub fn get_dem_data_mut(&self) -> RwLockWriteGuard<'_, DEMData> {
-        self.demdata.write_unpoisoned()
+        self.demdata.write()
     }
 
     pub fn is_prepared(&self) -> bool {

@@ -4,11 +4,10 @@
 // `Style::loadURL`, the Map's style-response event and the parser. Needs
 // network access.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mln_actor::{RunLoop, Timer};
 use mln_map::{Map, MapEvent, MapOptions};
-use mln_util::chrono::Duration;
 use mln_util::size::Size;
 
 const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
@@ -17,14 +16,14 @@ const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 #[ignore = "needs network access"]
 fn loads_liberty_over_https() {
     let run_loop = RunLoop::new();
-    let mut map = Map::new(MapOptions::new().with_size(Size::new(256, 256)).with_pixel_ratio(1.0)).unwrap();
+    let mut map = Map::new(MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() }).unwrap();
 
     map.style_mut().load_url(LIBERTY);
     assert!(!map.style().is_loaded());
 
     // Give up after 60 s: the timer wakes the loop then.
     let timeout = Timer::new();
-    timeout.start(Duration::from_secs(60), Duration::zero(), || {});
+    timeout.start(Duration::from_secs(60), Duration::ZERO, || {});
     let deadline = Instant::now() + std::time::Duration::from_secs(60);
     let mut loaded = false;
     let mut failed = None;

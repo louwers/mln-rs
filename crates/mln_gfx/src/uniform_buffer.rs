@@ -12,7 +12,13 @@ use crate::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
 pub trait UniformBuffer: Any {
     fn update(&self, data: &[u8]);
     fn get_size(&self) -> usize;
-    fn as_any(&self) -> &dyn Any;
+}
+
+impl dyn UniformBuffer {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: UniformBuffer>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }
 
 pub type UniformBufferPtr = Rc<dyn UniformBuffer>;

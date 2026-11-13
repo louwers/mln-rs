@@ -17,7 +17,7 @@
 // headers from the `HttpHeaderTransform`, which a redirect to another origin
 // drops, as maplibre-native-ffi's HTTP file sources do. Response headers are
 // read in order with curl's header callback rules (case-insensitive names;
-// `Last-Modified`/`Expires` through vendor parsedate, `Cache-Control`,
+// `Last-Modified`/`Expires` as HTTP dates, `Cache-Control`,
 // `ETag`, `Retry-After`, `X-Rate-Limit-Reset`). Status codes map to the same
 // Response fields and errors.
 //
@@ -27,20 +27,20 @@
 //
 // Differences (ureq): ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
-// ureq's text instead of curl's `curl_easy_strerror: errorbuffer`; dates use
-// the vendored parsedate instead of libcurl's `curl_getdate` (they differ
-// only after 2037).
+// ureq's text instead of curl's `curl_easy_strerror: errorbuffer`; dates are
+// read in the three formats of RFC 9110 only, where libcurl's `curl_getdate`
+// also takes other zones and free-form dates.
 
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
-use mln_util::chrono::{Timestamp, parse_timestamp_str};
+use mln_util::chrono::parse_http_date;
 use mln_util::http_header::{CacheControl, parse_retry_headers};
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
@@ -88,7 +88,7 @@ struct Cancellation {
 impl Cancellation {
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
-        let handler = self.handler.lock_unpoisoned().take();
+        let handler = self.handler.lock().take();
         if let Some(handler) = handler {
             handler();
         }
@@ -99,10 +99,10 @@ impl Cancellation {
     }
 
     fn set_handler(&self, handler: Box<dyn FnOnce() + Send>) {
-        *self.handler.lock_unpoisoned() = Some(handler);
+        *self.handler.lock() = Some(handler);
         // `cancel` may have run before the handler was there.
         if self.is_cancelled() {
-            let handler = self.handler.lock_unpoisoned().take();
+            let handler = self.handler.lock().take();
             if let Some(handler) = handler {
                 handler();
             }
@@ -110,25 +110,13 @@ impl Cancellation {
     }
 
     fn clear_handler(&self) {
-        drop(self.handler.lock_unpoisoned().take());
+        drop(self.handler.lock().take());
     }
-}
-
-/// `HTTPFileSource::Impl`
-struct Impl {
-    transport: Arc<dyn HttpTransport>,
-    header_transform: Mutex<HttpHeaderTransform>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 /// `headerMatches(header, buffer, length)`: ASCII-case-insensitive prefix.
 fn header_value<'a>(name: &str, header: &str, line: &'a str) -> Option<&'a str> {
     (name.eq_ignore_ascii_case(header)).then_some(line)
-}
-
-/// `curl_getdate` (vendor parsedate, -1 when unparsable).
-fn getdate(value: &str) -> Timestamp {
-    parse_timestamp_str(value)
 }
 
 /// What a transport hands back: the status code, the response headers in
@@ -208,12 +196,12 @@ static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
 /// the default (`NSURLSession` on Apple platforms, fetch on wasm, ureq
 /// elsewhere): for a host with its own HTTP stack.
 pub fn set_transport(transport: Arc<dyn HttpTransport>) {
-    *TRANSPORT.lock_unpoisoned() = Some(transport);
+    *TRANSPORT.lock() = Some(transport);
 }
 
 /// The transport `set_transport` set, else the default.
 fn current_transport() -> Arc<dyn HttpTransport> {
-    if let Some(transport) = TRANSPORT.lock_unpoisoned().clone() {
+    if let Some(transport) = TRANSPORT.lock().clone() {
         return transport;
     }
     default_transport()
@@ -254,7 +242,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
         if let Some(value) = header_value(name, "last-modified", value) {
             // Always overwrite the modification date; We might already have
             // a value here from the Date header, but this one is more accurate.
-            response.modified = Some(getdate(value));
+            response.modified = parse_http_date(value);
         } else if let Some(value) = header_value(name, "etag", value) {
             response.etag = Some(value.to_owned());
         } else if let Some(value) = header_value(name, "cache-control", value) {
@@ -262,7 +250,8 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
             response.expires = cc.to_time_point();
             response.must_revalidate = cc.must_revalidate;
         } else if let Some(value) = header_value(name, "expires", value) {
-            response.expires = Some(getdate(value));
+            // An invalid date, such as "0", means already expired (RFC 9111 §5.3).
+            response.expires = Some(parse_http_date(value).unwrap_or_default());
         } else if let Some(value) = header_value(name, "retry-after", value) {
             retry_after = Some(value.to_owned());
         } else if let Some(value) = header_value(name, "x-rate-limit-reset", value) {
@@ -348,7 +337,9 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
 
 /// `HTTPFileSource`: plain HTTP(S) requests, used by the `OnlineFileSource`.
 pub struct HTTPFileSource {
-    impl_: Impl,
+    transport: Arc<dyn HttpTransport>,
+    header_transform: Mutex<HttpHeaderTransform>,
+    resource_options: Mutex<ResourceOptions>,
 }
 
 impl HTTPFileSource {
@@ -357,11 +348,9 @@ impl HTTPFileSource {
     #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         HTTPFileSource {
-            impl_: Impl {
-                transport: current_transport(),
-                header_transform: Mutex::new(HttpHeaderTransform::default()),
-                resource_options: Mutex::new(resource_options.clone()),
-            },
+            transport: current_transport(),
+            header_transform: Mutex::new(HttpHeaderTransform::default()),
+            resource_options: Mutex::new(resource_options.clone()),
         }
     }
 
@@ -371,9 +360,9 @@ impl HTTPFileSource {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         let cancellation = Arc::new(Cancellation::default());
-        let header_transform = self.impl_.header_transform.lock_unpoisoned().clone();
+        let header_transform = self.header_transform.lock().clone();
         let headers = header_transform.headers(resource.kind, &resource.url);
-        self.impl_.transport.start(TransferRequest {
+        self.transport.start(TransferRequest {
             resource: resource.clone(),
             headers,
             reply: ActorRef::new(&mailbox),
@@ -393,14 +382,14 @@ impl FileSource for HTTPFileSource {
     }
 
     fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        *self.impl_.header_transform.lock_unpoisoned() = transform;
+        *self.header_transform.lock() = transform;
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.impl_.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock().clone()
     }
 }

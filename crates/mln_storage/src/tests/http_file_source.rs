@@ -3,12 +3,13 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use httpmock::MockServer;
 use mln_actor::RunLoop;
 use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
+use parking_lot::Mutex;
 
 use super::{Req, req};
 use crate::file_source::FileSource;
@@ -338,7 +339,7 @@ const TOKEN_VALUE: &str = "secret-token";
 /// each.
 fn token_transform(seen: Arc<Mutex<Vec<(Kind, String)>>>) -> HttpHeaderTransform {
     HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {
-        seen.lock().unwrap().push((kind, url.to_owned()));
+        seen.lock().push((kind, url.to_owned()));
         vec![(TOKEN_HEADER.to_owned(), TOKEN_VALUE.to_owned())]
     })))
 }
@@ -377,13 +378,13 @@ fn a_header_transform_adds_headers_until_cleared() {
     let res = load_once(&fs, Kind::Style, server.url("/with-token.json"));
     assert_eq!(None, res.error);
     assert_eq!(b"with token", data(&res));
-    assert_eq!(vec![(Kind::Style, server.url("/with-token.json"))], *seen.lock().unwrap());
+    assert_eq!(vec![(Kind::Style, server.url("/with-token.json"))], *seen.lock());
 
     fs.set_http_header_transform(HttpHeaderTransform::default());
     let res = load_once(&fs, Kind::Style, server.url("/after-clear.json"));
     assert_eq!(None, res.error);
     assert_eq!(b"after clear", data(&res));
-    assert_eq!(1, seen.lock().unwrap().len());
+    assert_eq!(1, seen.lock().len());
     with_token.assert_calls(1);
     after_clear.assert_calls(1);
 }

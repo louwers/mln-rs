@@ -5,8 +5,8 @@
 
 use core::ffi::c_void;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_storage::ResourceError;
 use mln_storage::http_header_transform::HttpHeaders;
@@ -14,6 +14,7 @@ use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, TransformResult};
 use mln_storage::response::Reason;
 use mln_util::chrono::Timestamp;
+use parking_lot::Mutex;
 
 use crate::buffer::LentText;
 use crate::callback::{Registration, UserData};
@@ -26,7 +27,7 @@ use crate::generated::types::{
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::url_rules::{self, HeaderRules, QueryRules, abi_kind};
-use crate::{abi, lock, resources, runtime};
+use crate::{abi, resources, runtime};
 
 abi::versioned!(
     mln_resource_transform,
@@ -40,7 +41,7 @@ struct TransformRequest(Mutex<Option<FinishedCallback>>);
 
 impl Drop for TransformRequest {
     fn drop(&mut self) {
-        if let Some(finished) = self.0.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+        if let Some(finished) = self.0.get_mut().take() {
             finished(Err(ResourceError::new(
                 Reason::Other,
                 "the resource transform released the request without an answer",
@@ -182,7 +183,7 @@ pub unsafe extern "C" fn mln_runtime_clear_resource_transform(
 /// Ends `request` with `result`.
 fn answer(request: mln_resource_transform_request, result: TransformResult) -> Result<(), Error> {
     let object = TRANSFORM_REQUESTS.remove(request)?;
-    let finished = lock(&object.0).take();
+    let finished = object.0.lock().take();
     let finished = finished.ok_or_else(|| Error::invalid_state("the resource transform request was answered"))?;
     finished(result);
     Ok(())
@@ -271,18 +272,18 @@ struct Collection(usize);
 impl Collection {
     fn start() -> Self {
         let id = NEXT_COLLECTION.fetch_add(1, Ordering::Relaxed);
-        lock(&COLLECTING).get_or_insert_with(HashMap::new).insert(id, HttpHeaders::new());
+        COLLECTING.lock().get_or_insert_with(HashMap::new).insert(id, HttpHeaders::new());
         Self(id)
     }
 
     fn finish(self) -> HttpHeaders {
-        lock(&COLLECTING).as_mut().and_then(|collecting| collecting.remove(&self.0)).unwrap_or_default()
+        COLLECTING.lock().as_mut().and_then(|collecting| collecting.remove(&self.0)).unwrap_or_default()
     }
 }
 
 impl Drop for Collection {
     fn drop(&mut self) {
-        if let Some(collecting) = lock(&COLLECTING).as_mut() {
+        if let Some(collecting) = COLLECTING.lock().as_mut() {
             collecting.remove(&self.0);
         }
     }
@@ -418,7 +419,7 @@ pub unsafe extern "C" fn mln_http_header_transform_response_set_header(
         let response = unsafe { abi::read_sized(response.cast_const()) }?;
         // SAFETY: the caller's contract.
         let (name, value) = unsafe { url_rules::http_header(name, value) }?;
-        let mut collecting = lock(&COLLECTING);
+        let mut collecting = COLLECTING.lock();
         let headers = collecting.as_mut().and_then(|collecting| collecting.get_mut(&(response.context as usize)));
         let Some(headers) = headers else {
             return Err(Error::invalid_state("HTTP headers can only be set during an HTTP header transform callback"));

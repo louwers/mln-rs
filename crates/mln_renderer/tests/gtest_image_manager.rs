@@ -7,7 +7,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_renderer::gfx::dynamic_texture_atlas::ImageVersionMap;
@@ -15,9 +15,9 @@ use mln_renderer::image_manager::{ImageManager, ImageManagerObserver, ImageReque
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 /// `util::read_file("test/fixtures/...")`, from the copy of the C++ files
 /// (testdata/).
@@ -32,7 +32,7 @@ struct Recorder(Messages);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push((severity, event, code, msg.to_owned()));
+        self.0.lock().push((severity, event, code, msg.to_owned()));
         true
     }
 }
@@ -51,7 +51,7 @@ impl FixtureLog {
     }
 
     fn empty(&self) -> bool {
-        self.messages.lock().unwrap().is_empty()
+        self.messages.lock().is_empty()
     }
 }
 
@@ -62,7 +62,7 @@ impl Drop for FixtureLog {
 }
 
 /// `makeMutable<style::Image::Impl>(id, PremultipliedImage(size), pixelRatio, sdf)`.
-fn make_image(id: &str, size: Size, pixel_ratio: f32, sdf: bool) -> Immutable<ImageImpl> {
+fn make_image(id: &str, size: Size, pixel_ratio: f32, sdf: bool) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
             id.to_owned(),

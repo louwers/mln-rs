@@ -8,14 +8,13 @@
 use std::sync::Arc;
 
 use mln_renderer::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphAtlas, ImageAtlas, ImageVersionMap};
-use mln_style_types::image::{ImageMap, Impl as ImageImpl};
+use mln_style_types::image::{ImageMap, ImagePosition, Impl as ImageImpl};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
 
 /// `makeGlyph(code)`.
-fn make_glyph(code: char) -> Immutable<Glyph> {
+fn make_glyph(code: char) -> Arc<Glyph> {
     Arc::new(Glyph {
         id: GlyphID::new(code as u32),
         bitmap: AlphaImage::new(Size::new(8, 8)),
@@ -24,13 +23,17 @@ fn make_glyph(code: char) -> Immutable<Glyph> {
 }
 
 /// `{{glyph->id, glyph}}`.
-fn glyphs(glyph: &Immutable<Glyph>) -> Glyphs {
+fn glyphs(glyph: &Arc<Glyph>) -> Glyphs {
     Glyphs::from([(glyph.id, Some(glyph.clone()))])
 }
 
-/// `makeImage(id, sdf, size = {16, 16})`.
-fn make_image(id: &str, sdf: bool) -> Immutable<ImageImpl> {
-    let size = Size::new(16, 16);
+/// `makeImage(id, sdf)`, of the default size {16, 16}.
+fn make_image(id: &str, sdf: bool) -> Arc<ImageImpl> {
+    make_sized_image(id, sdf, Size::new(16, 16))
+}
+
+/// `makeImage(id, sdf, size)`.
+fn make_sized_image(id: &str, sdf: bool, size: Size) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
             id.to_owned(),
@@ -48,7 +51,7 @@ fn make_image(id: &str, sdf: bool) -> Immutable<ImageImpl> {
 }
 
 /// `{{image->id, image}}`.
-fn image_map(image: &Immutable<ImageImpl>) -> ImageMap {
+fn image_map(image: &Arc<ImageImpl>) -> ImageMap {
     ImageMap::from([(image.id.clone(), image.clone())])
 }
 
@@ -70,7 +73,7 @@ impl DynamicTextureAtlasTest {
         self.glyph_atlases.last().unwrap()
     }
 
-    fn upload_pattern(&mut self, image: &Immutable<ImageImpl>) -> &ImageAtlas {
+    fn upload_pattern(&mut self, image: &Arc<ImageImpl>) -> &ImageAtlas {
         let image_atlas =
             self.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(image), &ImageVersionMap::new());
         self.atlases.push(image_atlas);
@@ -132,6 +135,22 @@ fn icon_and_pattern_usage_do_not_share_allocation() {
     assert_ne!(image_atlas.texture_handles[0].get_rectangle(), image_atlas.texture_handles[1].get_rectangle());
 }
 
+// gtest: DynamicTextureAtlasTest.ResizedImageWithSameAreaGetsItsOwnShape
+#[test]
+fn resized_image_with_same_area_gets_its_own_shape() {
+    let mut test = DynamicTextureAtlasTest::new();
+    let tall = make_sized_image("image", false, Size::new(10, 20));
+    let wide = make_sized_image("image", false, Size::new(20, 10));
+
+    // The layout of the tall image still holds its allocation while the wide one is laid out.
+    test.upload_icon(&tall, 0);
+    let position = &test.upload_icon(&wide, 0).icon_positions["image"];
+
+    let padding = 2 * ImagePosition::PADDING;
+    assert_eq!(u32::from(position.padded_rect.w - padding), wide.image.size.width);
+    assert_eq!(u32::from(position.padded_rect.h - padding), wide.image.size.height);
+}
+
 // gtest: DynamicTextureAtlasTest.ReleasedRevisionGetsFreshAllocation
 #[test]
 fn released_revision_gets_fresh_allocation() {
@@ -174,7 +193,7 @@ fn font_stacks_share_the_allocation_of_the_same_glyph() {
 
 impl DynamicTextureAtlasTest {
     /// Uploads `image` as an icon at `version`, keeping its atlas alive.
-    fn upload_icon(&mut self, image: &Immutable<ImageImpl>, version: u32) -> &ImageAtlas {
+    fn upload_icon(&mut self, image: &Arc<ImageImpl>, version: u32) -> &ImageAtlas {
         let version_map = ImageVersionMap::from([(image.id.clone(), version)]);
         let image_atlas = self.atlas.upload_icons_and_patterns(&image_map(image), &ImageMap::new(), &version_map);
         self.atlases.push(image_atlas);

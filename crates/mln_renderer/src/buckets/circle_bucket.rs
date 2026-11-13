@@ -4,7 +4,7 @@
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
 
-use std::sync::RwLock;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use mln_gfx::UploadPass;
@@ -18,9 +18,8 @@ use mln_style::layers::circle_layer_properties::{
 use mln_style::properties::Property;
 use mln_style_types::image::ImagePositions;
 use mln_util::Color;
-use mln_util::immutable::Immutable;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -64,11 +63,7 @@ pub struct CircleBucket {
 impl CircleBucket {
     /// `CircleBucket(layerPaintProperties, mode, zoom)`.
     #[must_use]
-    pub fn new(
-        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
-        mode: MapMode,
-        zoom: f32,
-    ) -> Self {
+    pub fn new(layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>, mode: MapMode, zoom: f32) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {
@@ -129,12 +124,12 @@ impl Bucket for CircleBucket {
         let radius = get_radius_or_width(
             evaluated.get::<CircleRadius>().constant(),
             CircleRadius::default_value(),
-            binders.and_then(|b| b.read_unpoisoned().circle_radius.statistics.max()),
+            binders.and_then(|b| b.read().circle_radius.statistics.max()),
         );
         let stroke = get_radius_or_width(
             evaluated.get::<CircleStrokeWidth>().constant(),
             CircleStrokeWidth::default_value(),
-            binders.and_then(|b| b.read_unpoisoned().circle_stroke_width.statistics.max()),
+            binders.and_then(|b| b.read().circle_stroke_width.statistics.max()),
         );
         let translate = evaluated.get::<CircleTranslate>();
         // util::length(a, b) = std::sqrt(a * a + b * b), in float
@@ -149,7 +144,7 @@ impl Bucket for CircleBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
+            binders.write().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

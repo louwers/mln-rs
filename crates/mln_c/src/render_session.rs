@@ -5,7 +5,7 @@ use core::ffi::c_char;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::ThreadId;
 
 use ::mln_runtime::{
@@ -14,6 +14,7 @@ use ::mln_runtime::{
 };
 use mln_util::ErrorKind;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
 use crate::callback::Wake;
@@ -40,7 +41,7 @@ use crate::generated::types::{
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::map::{self, MapObject};
-use crate::{buffer, events, lock, projection, render_target};
+use crate::{buffer, events, projection, render_target};
 
 abi::versioned!(
     mln_render_session_attach_options,
@@ -750,12 +751,12 @@ fn check_servicing_thread(
 
 /// Takes `session`'s driver work for this thread, at its first service.
 fn take_driver_work(session: mln_render_session) -> Result<Rc<DriverWork>, Error> {
-    check_servicing_thread(&lock(&SERVICING), session)?;
+    check_servicing_thread(&SERVICING.lock(), session)?;
     let object = resolve(session)?;
     if object.session.capabilities()?.driver == Driver::CoreWorker {
         return Err(Error::invalid_state("render session is driven by its own core worker"));
     }
-    let mut servicing = lock(&SERVICING);
+    let mut servicing = SERVICING.lock();
     // Another thread may have taken it meanwhile.
     check_servicing_thread(&servicing, session)?;
     let work = Rc::new(object.session.take_driver_work()?);
@@ -790,7 +791,7 @@ fn service(session: mln_render_session) -> Result<(), Error> {
     let serviced = work.service();
     if work.is_finished() {
         DRIVERS.with(|drivers| drivers.0.borrow_mut().remove(&session));
-        lock(&SERVICING).remove(&session);
+        SERVICING.lock().remove(&session);
     }
     Ok(serviced?)
 }

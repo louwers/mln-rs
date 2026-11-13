@@ -18,6 +18,5 @@ allow = [
     "MIT-Modern-Variant",
     "Unicode-3.0",
     "Zlib",
-    "curl",
 ]
 confidence-threshold = 0.93

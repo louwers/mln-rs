@@ -21,9 +21,7 @@ impl BufferResource {
             return res;
         }
         let backend = res.context.get_backend();
-        let Some(device) = backend.get_device() else {
-            return res;
-        };
+        let device = backend.device();
         let padded_size = (size + 3) & !3usize;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Buffer Resource"),

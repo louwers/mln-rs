@@ -10,12 +10,13 @@
 #[cfg(target_env = "ohos")]
 pub(super) mod native_vsync {
     use core::ffi::{c_char, c_int, c_longlong, c_uint, c_void};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time::Duration;
+
+    use parking_lot::Mutex;
 
     use crate::error::Error;
     use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
-    use crate::lock;
 
     #[repr(C)]
     struct OH_NativeVSync {
@@ -60,7 +61,7 @@ pub(super) mod native_vsync {
         // SAFETY: the request hold keeps the side until this takes it.
         let side = unsafe { &*data.cast::<VsyncSide>() };
         // Declared first, so that it lets go of the side last.
-        let _hold = lock(&side.request_hold).take();
+        let _hold = side.request_hold.lock().take();
         side.vsyncs.vsync(Duration::from_nanos(timestamp.max(0) as u64));
     }
 
@@ -83,7 +84,7 @@ pub(super) mod native_vsync {
 
     impl VsyncSource for NativeVsyncSource {
         fn schedule(&self) {
-            *lock(&self.side.request_hold) = Some(Arc::clone(&self.side));
+            *self.side.request_hold.lock() = Some(Arc::clone(&self.side));
             let data = Arc::as_ptr(&self.side).cast_mut().cast();
             // The callback can run before this returns. A request fails only
             // when the process loses its connection to the render service,
@@ -91,7 +92,7 @@ pub(super) mod native_vsync {
             // SAFETY: the side's native VSync, and a callback whose data the
             // request hold keeps.
             if unsafe { OH_NativeVSync_RequestFrame(self.side.vsync, on_frame, data) } != 0 {
-                lock(&self.side.request_hold).take();
+                self.side.request_hold.lock().take();
             }
         }
     }

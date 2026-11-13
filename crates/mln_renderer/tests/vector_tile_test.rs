@@ -2,7 +2,7 @@
 // VectorTileData ones are mln_tile's).
 
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
@@ -24,6 +24,7 @@ use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
+use parking_lot::Mutex;
 
 /// `VectorTileTest`.
 struct VectorTileTest {
@@ -141,7 +142,7 @@ struct RecordingTile {
 
 impl TileWorkerTransport for RecordingTransport {
     fn create(&self, parameters: WorkerParameters, tile: Box<dyn TileEndpoint>) -> Box<dyn WorkerEndpoint> {
-        self.log.lock().unwrap().push("create");
+        self.log.lock().push("create");
         let tile = Box::new(RecordingTile { inner: tile, log: self.log.clone() });
         Box::new(RecordingWorker { inner: self.inner.create(parameters, tile), log: self.log.clone() })
     }
@@ -163,7 +164,7 @@ impl TileWorkerTransport for RecordingTransport {
 
 impl WorkerEndpoint for RecordingWorker {
     fn send(&self, message: WorkerMessage) {
-        self.log.lock().unwrap().push(match &message {
+        self.log.lock().push(match &message {
             WorkerMessage::SetData { .. } => "setData",
             WorkerMessage::SetLayers { .. } => "setLayers",
             _ => "other",
@@ -174,7 +175,7 @@ impl WorkerEndpoint for RecordingWorker {
 
 impl TileEndpoint for RecordingTile {
     fn send(&self, message: TileMessage) {
-        self.log.lock().unwrap().push(match &message {
+        self.log.lock().push(match &message {
             TileMessage::Layout { .. } => "onLayout",
             _ => "other",
         });
@@ -200,5 +201,5 @@ fn tile_and_worker_talk_through_the_transport() {
         std::thread::yield_now();
     }
     assert!(tile.is_renderable());
-    assert_eq!(*log.lock().unwrap(), ["create", "setData", "setLayers", "onLayout"]);
+    assert_eq!(*log.lock(), ["create", "setData", "setLayers", "onLayout"]);
 }

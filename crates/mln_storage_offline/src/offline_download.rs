@@ -377,27 +377,27 @@ impl Inner {
 
             match type_ {
                 SourceType::Vector => {
-                    if let Some(vector_source) = source.as_any().downcast_ref::<VectorSource>() {
+                    if let Some(vector_source) = source.downcast_ref::<VectorSource>() {
                         handle_tiled_source(vector_source.tile_source().get_url_or_tileset(), TILE_SIZE_I);
                     }
                 }
 
                 SourceType::Raster => {
-                    if let Some(raster_source) = source.as_any().downcast_ref::<RasterSource>() {
+                    if let Some(raster_source) = source.downcast_ref::<RasterSource>() {
                         let tile_source = raster_source.tile_source();
                         handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
                     }
                 }
 
                 SourceType::RasterDEM => {
-                    if let Some(raster_dem_source) = source.as_any().downcast_ref::<RasterDEMSource>() {
+                    if let Some(raster_dem_source) = source.downcast_ref::<RasterDEMSource>() {
                         let tile_source = raster_dem_source.tile_source();
                         handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
                     }
                 }
 
                 SourceType::GeoJSON => {
-                    if let Some(geojson_source) = source.as_any().downcast_ref::<GeoJSONSource>()
+                    if let Some(geojson_source) = source.downcast_ref::<GeoJSONSource>()
                         && geojson_source.get_url().is_some()
                     {
                         result.required_resource_count += 1;
@@ -405,7 +405,7 @@ impl Inner {
                 }
 
                 SourceType::Image => {
-                    if let Some(image_source) = source.as_any().downcast_ref::<ImageSource>()
+                    if let Some(image_source) = source.downcast_ref::<ImageSource>()
                         && image_source.get_url().is_some()
                     {
                         result.required_resource_count += 1;
@@ -515,27 +515,27 @@ impl Inner {
 
             match type_ {
                 SourceType::Vector => {
-                    if let Some(vector_source) = source.as_any().downcast_ref::<VectorSource>() {
+                    if let Some(vector_source) = source.downcast_ref::<VectorSource>() {
                         handle_tiled_source(vector_source.tile_source().get_url_or_tileset(), TILE_SIZE_I);
                     }
                 }
 
                 SourceType::Raster => {
-                    if let Some(raster_source) = source.as_any().downcast_ref::<RasterSource>() {
+                    if let Some(raster_source) = source.downcast_ref::<RasterSource>() {
                         let tile_source = raster_source.tile_source();
                         handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
                     }
                 }
 
                 SourceType::RasterDEM => {
-                    if let Some(raster_dem_source) = source.as_any().downcast_ref::<RasterDEMSource>() {
+                    if let Some(raster_dem_source) = source.downcast_ref::<RasterDEMSource>() {
                         let tile_source = raster_dem_source.tile_source();
                         handle_tiled_source(tile_source.get_url_or_tileset(), tile_source.get_tile_size());
                     }
                 }
 
                 SourceType::GeoJSON => {
-                    if let Some(geojson_source) = source.as_any().downcast_ref::<GeoJSONSource>()
+                    if let Some(geojson_source) = source.downcast_ref::<GeoJSONSource>()
                         && let Some(url) = geojson_source.get_url()
                     {
                         self.queue_resource(Resource::source(&url));
@@ -543,7 +543,7 @@ impl Inner {
                 }
 
                 SourceType::Image => {
-                    if let Some(image_source) = source.as_any().downcast_ref::<ImageSource>()
+                    if let Some(image_source) = source.downcast_ref::<ImageSource>()
                         && let Some(image_url) = image_source.get_url()
                         && !image_url.is_empty()
                     {

@@ -2,9 +2,10 @@
 //! (an `OffscreenCanvas`), its tile workers in other Web Workers, moved by the
 //! page's input through a gesture recognizer (`mln_gestures`).
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
@@ -16,56 +17,17 @@ use mln_map::{
 };
 use mln_renderer::Renderer;
 use mln_renderer::text::font_face_engine;
-use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
 use mln_util::LatLng;
-use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
-use mln_util::host_bytes::HostBytes;
-use mln_util::serialization::payload::Payload;
 use mln_util::size::Size;
+use mln_web_host::shaper::{self, ShaperModuleEngine};
+use mln_web_host::{install_cooperative_scheduler, pump, tile_workers};
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "webgl")]
 use self::backend::Readback;
 use self::backend::Target;
-use crate::shaper::{self, ShaperModuleEngine};
-use crate::{cooperative_scheduler, deadline, js_error};
-
-/// The Web Workers that run the map's tile workers, reached through a
-/// JavaScript function `post(instance, bytes)`. Their replies come back
-/// through `WebMap::receive`, with their payloads beside them.
-struct WebWorkers {
-    count: usize,
-    post: js_sys::Function,
-}
-
-impl WorkerInstances for WebWorkers {
-    fn count(&self) -> usize {
-        self.count
-    }
-
-    fn post(&self, instance: usize, request: Vec<u8>) {
-        let bytes = js_sys::Uint8Array::from(&request[..]);
-        if let Err(error) = self.post.call2(&JsValue::NULL, &JsValue::from(instance as u32), &bytes) {
-            web_sys::console::error_2(&JsValue::from_str("posting to a tile worker failed:"), &error);
-        }
-    }
-}
-
-thread_local! {
-    /// The worker's `wake` (see `WebMap::create`).
-    static WAKE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
-}
-
-/// The `RunLoop`'s and the scheduler's waker: tells the worker to `tick`. An
-/// instance has one thread, so this runs on the worker's.
-fn wake_host() {
-    WAKE.with(|wake| {
-        if let Some(wake) = wake.borrow().as_ref() {
-            let _ = wake.call0(&JsValue::NULL);
-        }
-    });
-}
+use crate::{deadline, js_error};
 
 /// Draws the map's updates on the canvas.
 struct Frontend {
@@ -127,9 +89,10 @@ pub struct WebMap {
     loaded: bool,
     run_loop: RunLoop,
     scheduler: Arc<CooperativeScheduler>,
-    transport: Rc<SerializingTransport>,
+    /// Runs the `RunLoop` between frames.
+    _between_frames: pump::Step,
     pixel_ratio: f64,
-    received: Cell<u32>,
+    received: Rc<Cell<u32>>,
     /// The page's pointer, wheel and key input, turned into camera moves.
     gestures: GestureRecognizer,
 }
@@ -138,16 +101,16 @@ pub struct WebMap {
 impl WebMap {
     /// Creates the WebGPU device, a surface on `canvas` (the page's canvas,
     /// transferred to this worker) and the map, at `width` x `height` CSS
-    /// pixels. The tiles' workers run in `workers` Web Workers (at least
-    /// one), reached through `post(instance, bytes)`, whose replies go to
-    /// `receive`. `wake()` is called whenever the map gets work between
-    /// frames (a fetch finished, a reply arrived, a task was queued); the
-    /// worker then calls `tick` soon. `load_shaper()` returns a promise of
-    /// the shaper module (`web/pkg/mln_web_shaper.js`), initialized; the map
-    /// calls it the first time a style declares font faces. With
-    /// `local_ideograph_font_family` (a CSS font-family list), the map draws
-    /// CJK glyphs in it rather than downloading them, as GL JS's
-    /// `localIdeographFontFamily`. (`map_webgl.rs` has the `webgl` build's.)
+    /// pixels. The tiles' workers run in the Web Workers at the other end of
+    /// `ports` (at least one), and `on_fatal(instance, message)` is called if
+    /// one of them panics. Between frames, `mln_web_host::pump` runs the
+    /// map's work (a fetch finished, a reply arrived, a task was queued) as
+    /// it arrives. `load_shaper()` returns a promise of the shaper module
+    /// (`web/pkg/mln_web_shaper.js`), initialized; the map calls it the first
+    /// time a style declares font faces. With `local_ideograph_font_family`
+    /// (a CSS font-family list), the map draws CJK glyphs in it rather than
+    /// downloading them, as GL JS's `localIdeographFontFamily`.
+    /// (`map_webgl.rs` has the `webgl` build's.)
     #[cfg(not(feature = "webgl"))]
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
@@ -155,18 +118,14 @@ impl WebMap {
         width: u32,
         height: u32,
         pixel_ratio: f64,
-        workers: u32,
-        post: js_sys::Function,
-        wake: js_sys::Function,
+        ports: js_sys::Array,
+        on_fatal: js_sys::Function,
         load_shaper: js_sys::Function,
         local_ideograph_font_family: Option<String>,
     ) -> Result<WebMap, JsValue> {
-        if workers == 0 {
+        if ports.length() == 0 {
             return Err(js_error("the map needs at least one tile worker"));
         }
-        let scheduler = cooperative_scheduler();
-        shaper::set_loader(load_shaper);
-        font_face_engine::set_font_face_engine(Arc::new(ShaperModuleEngine));
 
         let size = Size::new(width.max(1), height.max(1));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -204,38 +163,22 @@ impl WebMap {
         let options = mln_webgpu::SurfaceOptions {
             cap_frame_rate: true,
             usages: Some(capabilities.usages | wgpu::TextureUsages::COPY_SRC),
+            format: None,
         };
         let device = mln_webgpu::Device::from_wgpu(Some(instance), device, queue, Some(format));
         let webgpu_backend = Rc::new(mln_webgpu::RendererBackend::new(&device));
         let target = Target::new(webgpu_backend.clone(), surface, physical(size, pixel_ratio), options)
             .map_err(|e| js_error(format!("WebGPU surface: {e}")))?;
-        let backend: Rc<dyn RendererBackend> = webgpu_backend;
-
-        let run_loop = RunLoop::get();
-        WAKE.with(|w| *w.borrow_mut() = Some(wake));
-        run_loop.set_waker(Some(Arc::new(wake_host)));
-        scheduler.set_waker(Some(Arc::new(wake_host)));
-        let mut renderer = Renderer::new(backend.clone(), pixel_ratio as f32, local_ideograph_font_family);
-        let count = workers as usize;
-        let transport = SerializingTransport::new(|_| Box::new(WebWorkers { count, post }));
-        renderer.set_tile_worker_transport(transport.clone());
-        let mut map =
-            Map::new(MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32)).map_err(js_error)?;
-        map.set_waker(Some(Arc::new(wake_host)));
-        renderer.set_event_queue(Some(map.renderer_events()));
-        let frontend =
-            Frontend { renderer, target, backend, updates: map.update_reader(), drawn_update: 0, redraw: false };
-        Ok(WebMap {
-            frontend,
-            map,
-            loaded: false,
-            run_loop,
-            scheduler,
-            transport,
+        WebMap::build(
+            webgpu_backend,
+            target,
+            size,
             pixel_ratio,
-            received: Cell::new(0),
-            gestures: GestureRecognizer::default(),
-        })
+            &ports,
+            on_fatal,
+            load_shaper,
+            local_ideograph_font_family,
+        )
     }
 
     /// Sets the font faces that every font stack of the styles loaded from
@@ -254,13 +197,13 @@ impl WebMap {
     /// Moves the camera.
     pub fn jump_to(&mut self, latitude: f64, longitude: f64, zoom: f64, bearing: f64, pitch: f64) {
         let center = LatLng::new(latitude, longitude).ok();
-        self.map.jump_to(
-            &CameraOptions::default()
-                .with_center(center)
-                .with_zoom(Some(zoom))
-                .with_bearing(Some(bearing))
-                .with_pitch(Some(pitch)),
-        );
+        self.map.jump_to(&CameraOptions {
+            center,
+            zoom: Some(zoom),
+            bearing: Some(bearing),
+            pitch: Some(pitch),
+            ..Default::default()
+        });
     }
 
     /// The camera as `[latitude, longitude, zoom, bearing, pitch]`, in
@@ -282,7 +225,7 @@ impl WebMap {
     pub fn reset_north(&mut self) {
         let update = CameraUpdate {
             mode: CameraUpdateMode::Ease,
-            camera: CameraOptions::default().with_bearing(Some(0.0)).with_pitch(Some(0.0)),
+            camera: CameraOptions { bearing: Some(0.0), pitch: Some(0.0), ..Default::default() },
             animation: AnimationOptions::new(Duration::from_millis(500)),
             phase: GesturePhase::None,
         };
@@ -303,11 +246,13 @@ impl WebMap {
         self.map.cancel_transitions();
         let update = CameraUpdate {
             mode: CameraUpdateMode::Jump,
-            camera: CameraOptions::default()
-                .with_center(LatLng::new(latitude, longitude).ok())
-                .with_zoom(Some(zoom))
-                .with_bearing(Some(bearing))
-                .with_pitch(Some(pitch)),
+            camera: CameraOptions {
+                center: LatLng::new(latitude, longitude).ok(),
+                zoom: Some(zoom),
+                bearing: Some(bearing),
+                pitch: Some(pitch),
+                ..Default::default()
+            },
             animation: AnimationOptions::default(),
             phase: GesturePhase::None,
         };
@@ -340,22 +285,9 @@ impl WebMap {
         self.map.set_pixel_ratio(pixel_ratio as f32).map_err(js_error)?;
         self.pixel_ratio = pixel_ratio;
         self.frontend.renderer.set_pixel_ratio(pixel_ratio as f32);
-        let size = self.map.get_map_options().size();
+        let size = self.map.get_map_options().size;
         self.frontend.target.resize(physical(size, pixel_ratio));
         Ok(())
-    }
-
-    /// A reply from the tile worker in Web Worker `instance`, as
-    /// `TileWorker::run` returns it: its bytes, then its payloads. The bytes
-    /// are copied into wasm memory; the payloads stay JS arrays, which a
-    /// bucket's vertices and indices stay in until they're uploaded
-    /// (`mln_util::host_bytes`).
-    pub fn receive(&self, instance: u32, reply: &js_sys::Array) {
-        self.received.set(self.received.get() + 1);
-        let mut parts = reply.iter().map(js_sys::Uint8Array::from);
-        let bytes = parts.next().map(|bytes| bytes.to_vec()).unwrap_or_default();
-        let payloads = parts.map(|part| Payload::Host(HostBytes::new(part))).collect();
-        self.transport.receive(instance as usize, Encoded { bytes, payloads });
     }
 
     /// How many worker replies arrived so far.
@@ -371,7 +303,7 @@ impl WebMap {
     /// to `budget_ms` and delivers their results. Returns whether it drew.
     pub fn frame(&mut self, budget_ms: f64, now: f64) -> bool {
         // The map samples its animations at this frame's time.
-        self.map.set_frame_time(Some(mln_util::chrono::Clock::now()));
+        self.map.set_frame_time(Some(mln_util::time::Instant::now()));
         self.gestures.frame(&mut self.map, now);
         self.run_loop.run_once();
         self.handle_map_events();
@@ -379,18 +311,6 @@ impl WebMap {
         self.run_tasks(budget_ms);
         self.handle_map_events();
         drew
-    }
-
-    /// Runs the map's work between frames: the `RunLoop`'s tasks (fetches that
-    /// finished, worker replies), then the cooperative scheduler's for up to
-    /// `budget_ms`, and the `RunLoop` again for what they delivered. Returns
-    /// whether tasks remain, for another `tick`. Drawing waits for `frame`.
-    pub fn tick(&mut self, budget_ms: f64) -> bool {
-        self.run_loop.run_once();
-        self.handle_map_events();
-        let more = self.run_tasks(budget_ms);
-        self.handle_map_events();
-        more
     }
 
     /// A pointer went down on the canvas, at `x`, `y` CSS pixels from its
@@ -514,6 +434,63 @@ fn modifiers_from_bits(bits: u32) -> Modifiers {
 }
 
 impl WebMap {
+    /// The map on `backend`, drawing into `target`: what both builds'
+    /// `create` share (see there).
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        backend: Rc<dyn RendererBackend>,
+        target: Target,
+        size: Size,
+        pixel_ratio: f64,
+        ports: &js_sys::Array,
+        on_fatal: js_sys::Function,
+        load_shaper: js_sys::Function,
+        local_ideograph_font_family: Option<String>,
+    ) -> Result<WebMap, JsValue> {
+        let scheduler = install_cooperative_scheduler();
+        shaper::set_loader(load_shaper);
+        font_face_engine::set_font_face_engine(Arc::new(ShaperModuleEngine));
+
+        let run_loop = RunLoop::get();
+        run_loop.set_waker(Some(pump::waker()));
+        scheduler.set_waker(Some(pump::waker()));
+        let between_frames = {
+            let run_loop = run_loop.clone();
+            pump::add(move || {
+                run_loop.run_once();
+                true
+            })
+        };
+        let mut renderer = Renderer::new(backend.clone(), pixel_ratio as f32, local_ideograph_font_family);
+        let received = Rc::new(Cell::new(0));
+        let count = received.clone();
+        let transport = tile_workers::transport(
+            ports.iter().map(JsCast::unchecked_into).collect(),
+            move |_| count.set(count.get() + 1),
+            move |instance, message| {
+                let _ = on_fatal.call2(&JsValue::NULL, &JsValue::from(instance as u32), &message);
+            },
+        );
+        renderer.set_tile_worker_transport(transport);
+        let mut map =
+            Map::new(MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() }).map_err(js_error)?;
+        map.set_waker(Some(pump::waker()));
+        renderer.set_event_queue(Some(map.renderer_events()));
+        let frontend =
+            Frontend { renderer, target, backend, updates: map.update_reader(), drawn_update: 0, redraw: false };
+        Ok(WebMap {
+            frontend,
+            map,
+            loaded: false,
+            run_loop,
+            scheduler,
+            _between_frames: between_frames,
+            pixel_ratio,
+            received,
+            gestures: GestureRecognizer::default(),
+        })
+    }
+
     /// Lets the map handle what its renderer and its style reported, and
     /// notes what the page asks about.
     fn handle_map_events(&mut self) {

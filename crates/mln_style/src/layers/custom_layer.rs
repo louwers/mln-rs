@@ -20,7 +20,6 @@ use std::sync::{Arc, Weak};
 use feature::Value;
 use mln_conversion::{Convertible, Error};
 use mln_map_types::{FrameProjection, MapView};
-use mln_util::immutable::Immutable;
 
 use crate::expression::Dependency;
 use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serialize_base};
@@ -156,7 +155,7 @@ impl layer::Impl for Impl {
 
 /// `CustomLayer`: a layer that the host draws.
 pub struct CustomLayer {
-    base_impl: Immutable<Impl>,
+    base_impl: Arc<Impl>,
     host: Arc<dyn CustomLayerHost>,
 }
 
@@ -179,7 +178,7 @@ impl CustomLayer {
 }
 
 impl Layer for CustomLayer {
-    fn base_impl(&self) -> Immutable<dyn layer::Impl> {
+    fn base_impl(&self) -> Arc<dyn layer::Impl> {
         self.base_impl.clone()
     }
 
@@ -217,7 +216,7 @@ pub struct CustomLayerProperties {
 
 impl CustomLayerProperties {
     #[must_use]
-    pub fn new(impl_: Immutable<Impl>) -> Self {
+    pub fn new(impl_: Arc<Impl>) -> Self {
         CustomLayerProperties { base: LayerPropertiesBase::new(impl_) }
     }
 }

@@ -15,8 +15,19 @@ publish = false
 # The name of maplibre-native-ffi's CMake target, so its ABI suite links this
 # library as it links that one (tools/c-abi-test).
 name = "maplibre_native_c"
-crate-type = ["cdylib", "staticlib"]
+# And an rlib for a Rust app in the browser that links the library into its
+# own wasm module.
+crate-type = ["cdylib", "staticlib", "rlib"]
 doctest = false
+
+# The runtime's backends (crates/mln_runtime/Cargo.toml). A browser build
+# turns on one of `webgpu` and `gl` (`just c-web`).
+[features]
+default = ["webgpu", "metal", "vulkan", "gl"]
+webgpu = ["mln_runtime/webgpu"]
+metal = ["mln_runtime/metal"]
+vulkan = ["mln_runtime/vulkan"]
+gl = ["mln_runtime/gl", "dep:mln_gl"]
 
 [dependencies]
 feature.workspace = true
@@ -33,6 +44,7 @@ mln_text.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
+parking_lot.workspace = true
 # The windows that window targets name, as the runtime takes them.
 raw-window-handle.workspace = true
 serde_json.workspace = true
@@ -51,9 +63,16 @@ objc2-quartz-core = { workspace = true, features = ["CADisplayLink", "CAFrameRat
 [target.'cfg(target_os = "android")'.dependencies]
 libc.workspace = true
 
-# The host's EGL and WGL contexts, textures and surfaces.
-[target.'cfg(any(windows, all(unix, not(target_vendor = "apple"))))'.dependencies]
-mln_gl.workspace = true
+# The host's EGL, WGL and WebGL2 contexts, textures and surfaces.
+[target.'cfg(any(windows, all(unix, not(target_vendor = "apple")), target_family = "wasm"))'.dependencies]
+mln_gl = { workspace = true, optional = true }
+
+# The browser build: JavaScript objects, the instance's tile workers and the
+# shaper module.
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+mln_web_host.workspace = true
+wasm-bindgen.workspace = true
 
 # The host's Vulkan devices, images and surfaces.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]

@@ -3,6 +3,8 @@
 // (MLN_UBO_CONSOLIDATION branches: the port's backend is WebGPU) and
 // src/mln/gfx/color_relief_drawable_data.hpp.
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
@@ -14,7 +16,6 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefOpacity};
-use mln_util::immutable::Immutable;
 
 use super::cast_matrix;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, to_projection_ubo};
@@ -35,7 +36,7 @@ pub struct ColorReliefLayerTweaker {
 }
 
 impl ColorReliefLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         ColorReliefLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

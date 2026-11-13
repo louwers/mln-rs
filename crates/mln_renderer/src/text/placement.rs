@@ -26,6 +26,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use geometry::Point;
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, TransformState};
@@ -43,10 +44,10 @@ use mln_style_types::{
 use mln_text::glyph::WritingModeType;
 use mln_text::{AnchorAlignment, get_anchor_justification};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::grid_index::BBox;
 use mln_util::mat4::Mat4;
+use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
 use crate::bucket::Bucket;
@@ -506,7 +507,7 @@ impl PlacementController {
 
     /// `placementIsRecent(now, zoom, periodOverride)`.
     #[must_use]
-    pub fn placement_is_recent(&self, now: TimePoint, zoom: f32, period_override: Option<Duration>) -> bool {
+    pub fn placement_is_recent(&self, now: Option<Instant>, zoom: f32, period_override: Option<Duration>) -> bool {
         if !self.placement.transitions_enabled() {
             return false;
         }
@@ -516,12 +517,12 @@ impl PlacementController {
             None => self.placement.get_update_period(zoom),
         };
 
-        self.placement.get_commit_time() + update_period > now
+        elapsed(now, self.placement.get_commit_time()) < update_period
     }
 
     /// `hasTransitions(now)`.
     #[must_use]
-    pub fn has_transitions(&self, now: TimePoint) -> bool {
+    pub fn has_transitions(&self, now: Option<Instant>) -> bool {
         if !self.placement.transitions_enabled() {
             return false;
         }
@@ -571,6 +572,15 @@ enum PlacementKind {
 /// Key of `collisionCircles` (C++: the `CollisionFeature*`).
 type CollisionFeatureKey = (u32, usize, bool);
 
+/// How long after `since` `now` is: zero if it is before, and
+/// `Duration::MAX` without either time, as for a time long ago.
+fn elapsed(now: Option<Instant>, since: Option<Instant>) -> Duration {
+    match (now, since) {
+        (Some(now), Some(since)) => now.saturating_duration_since(since),
+        _ => Duration::MAX,
+    }
+}
+
 /// `Placement`.
 pub struct Placement {
     kind: PlacementKind,
@@ -580,8 +590,10 @@ pub struct Placement {
 
     transition_options: TransitionOptions,
 
-    fade_start_time: TimePoint,
-    commit_time: TimePoint,
+    /// When the symbols last began to fade; `None` for long ago.
+    fade_start_time: Option<Instant>,
+    /// The time of the update that placed the symbols; `None` for long ago.
+    commit_time: Option<Instant>,
     placement_zoom: f32,
     prev_zoom_adjustment: f32,
 
@@ -844,8 +856,8 @@ impl Placement {
             update_parameters: None,
             collision_index: CollisionIndex::new(&TransformState::default(), MapMode::Static),
             transition_options: TransitionOptions::default(),
-            fade_start_time: TimePoint::default(),
-            commit_time: TimePoint::default(),
+            fade_start_time: None,
+            commit_time: None,
             placement_zoom: 0.0,
             prev_zoom_adjustment: 0.0,
             placements: HashMap::new(),
@@ -876,7 +888,7 @@ impl Placement {
             kind,
             collision_index: CollisionIndex::new(&update_parameters.transform_state, update_parameters.mode),
             transition_options: update_parameters.transition_options,
-            fade_start_time: TimePoint::default(),
+            fade_start_time: None,
             commit_time: update_parameters.time_point,
             placement_zoom: update_parameters.transform_state.get_zoom() as f32,
             prev_zoom_adjustment: 0.0,
@@ -922,7 +934,7 @@ impl Placement {
         &self.collision_index
     }
 
-    pub fn get_commit_time(&self) -> TimePoint {
+    pub fn get_commit_time(&self) -> Option<Instant> {
         self.commit_time
     }
 
@@ -2211,12 +2223,12 @@ impl Placement {
     }
 
     /// The virtual `symbolFadeChange(now)`.
-    pub fn symbol_fade_change(&self, now: TimePoint) -> f32 {
+    pub fn symbol_fade_change(&self, now: Option<Instant>) -> f32 {
         match self.kind {
             PlacementKind::Continuous => {
                 let duration = self.transition_options.duration.unwrap_or(DEFAULT_TRANSITION_DURATION);
-                if self.transitions_enabled() && duration > Duration::zero() {
-                    return Duration::float_seconds_div(now - self.commit_time, duration) + self.prev_zoom_adjustment;
+                if self.transitions_enabled() && duration > Duration::ZERO {
+                    return elapsed(now, self.commit_time).div_duration_f32(duration) + self.prev_zoom_adjustment;
                 }
                 1.0
             }
@@ -2249,8 +2261,9 @@ impl Placement {
         let duration = self.transition_options.duration.unwrap_or(DEFAULT_TRANSITION_DURATION);
         // `std::max(a, b)`: `(a < b) ? b : a`.
         let fade_duration = if DEFAULT_TRANSITION_DURATION < duration { duration } else { DEFAULT_TRANSITION_DURATION };
-        // `duration_cast<Duration>(fadeDuration * (1.0 - zoomAdjustment(zoom)))`.
-        Duration::from_nanos((fade_duration.count() as f64 * (1.0 - f64::from(self.zoom_adjustment(zoom)))) as i64)
+        // `duration_cast<Duration>(fadeDuration * (1.0 - zoomAdjustment(zoom)))`;
+        // zero once the adjustment passes 1.
+        Duration::from_nanos((fade_duration.as_nanos() as f64 * (1.0 - f64::from(self.zoom_adjustment(zoom)))) as u64)
     }
 
     /// The virtual `transitionsEnabled()`.
@@ -2262,14 +2275,12 @@ impl Placement {
     }
 
     /// The virtual `hasTransitions(now)`.
-    pub fn has_transitions(&self, now: TimePoint) -> bool {
+    pub fn has_transitions(&self, now: Option<Instant>) -> bool {
         match self.kind {
             PlacementKind::Continuous => {
                 debug_assert!(self.transitions_enabled());
-                // `std::chrono::duration<float>(now - fadeStartTime) < duration`:
-                // compared as `duration<float, std::nano>`.
                 let duration = self.transition_options.duration.unwrap_or(DEFAULT_TRANSITION_DURATION);
-                (now - self.fade_start_time).as_secs_f32() * 1_000_000_000.0_f32 < duration.count() as f32
+                elapsed(now, self.fade_start_time) < duration
             }
             PlacementKind::Static | PlacementKind::Tile(_) => false,
         }

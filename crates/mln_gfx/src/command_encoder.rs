@@ -23,10 +23,14 @@ pub trait CommandEncoder: DebugGroupTarget + Any {
     fn lend_to_custom_layer(&self, _target: &dyn DrawTarget, _f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         false
     }
-    fn as_any(&self) -> &dyn Any;
 }
 
 impl dyn CommandEncoder {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: CommandEncoder>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+
     pub fn create_debug_group(&self, name: &str) -> DebugGroup<'_> {
         DebugGroup::new(self, name)
     }

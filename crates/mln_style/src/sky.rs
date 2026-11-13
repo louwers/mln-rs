@@ -16,7 +16,6 @@ use crate::style_property::StyleProperty;
 use crate::transition_options::TransitionOptions;
 use mln_conversion::{Convertible, Error};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
 pub use crate::sky_impl::{
@@ -26,7 +25,7 @@ pub use crate::sky_impl::{
 
 #[derive(Clone, Debug)]
 pub struct Sky {
-    pub impl_: Immutable<Impl>,
+    pub impl_: Arc<Impl>,
 }
 
 impl Default for Sky {
@@ -85,7 +84,7 @@ impl Sky {
 
     /// `explicit Sky(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(impl_: Immutable<Impl>) -> Self {
+    pub fn from_impl(impl_: Arc<Impl>) -> Self {
         Sky { impl_ }
     }
 

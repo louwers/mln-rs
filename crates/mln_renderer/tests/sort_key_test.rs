@@ -17,7 +17,7 @@ use mln_renderer::layout::layout::{LayoutParameters, SourceLayer};
 use mln_renderer::render_layer::LayerRenderData;
 use mln_renderer::tile::geojson_tile_data::GeoJSONTileData;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::{CircleLayerProperties, FillLayerProperties, LineLayerProperties, SymbolLayerProperties};
 use mln_style_types::image::{ImageDependencies, ImageMap, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
@@ -25,7 +25,6 @@ use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileData;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
@@ -69,7 +68,7 @@ enum Shape {
 
 /// The properties of a layer of the given style JSON, with `sort_key_name`
 /// set to the sort key of `type_`.
-fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -> Immutable<dyn LayerProperties> {
+fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -> Arc<dyn LayerProperties> {
     if let Some(sort_key) = sort_key(type_) {
         json["layout"][sort_key_name] = sort_key;
     }
@@ -77,17 +76,17 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
     let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
-        "fill" => Arc::new(FillLayerProperties::new(static_immutable_cast(&base_impl))),
-        "line" => Arc::new(LineLayerProperties::new(static_immutable_cast(&base_impl))),
-        "circle" => Arc::new(CircleLayerProperties::new(static_immutable_cast(&base_impl))),
-        "symbol" => Arc::new(SymbolLayerProperties::new(static_immutable_cast(&base_impl))),
+        "fill" => Arc::new(FillLayerProperties::new(downcast_arc(&base_impl))),
+        "line" => Arc::new(LineLayerProperties::new(downcast_arc(&base_impl))),
+        "circle" => Arc::new(CircleLayerProperties::new(downcast_arc(&base_impl))),
+        "symbol" => Arc::new(SymbolLayerProperties::new(downcast_arc(&base_impl))),
         other => panic!("no properties for {other}"),
     }
 }
 
 /// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and
 /// returns the layer's bucket.
-fn create_bucket(properties: Immutable<dyn LayerProperties>, shape: Shape) -> BucketPtr {
+fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPtr {
     let ranks = [2.0, 0.0, 1.0];
     let features = ranks
         .iter()
@@ -234,7 +233,7 @@ fn circle_order() {
     }
 }
 
-fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Immutable<dyn LayerProperties> {
+fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<dyn LayerProperties> {
     let mut json = json!({
         "id": "symbol", "type": "symbol", "source": "source",
         "layout": { "icon-image": "marker", "icon-allow-overlap": true }

@@ -14,12 +14,12 @@
 //! second object.
 
 use std::fmt::Write as _;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_util::ErrorKind;
+use parking_lot::Mutex;
 
 use crate::error::Error;
-use crate::lock;
 
 /// `MLN_HANDLE_NULL`: the handle that names no object.
 pub(crate) const NULL: u64 = 0;
@@ -127,7 +127,7 @@ impl<T> HandleTable<T> {
 
     /// Stores `object` and returns its new handle.
     pub(crate) fn insert(&self, object: Arc<T>) -> Result<u64, Error> {
-        let mut table = lock(&self.slots);
+        let mut table = self.slots.lock();
         if let Some(index) = table.free.pop() {
             let slot = &mut table.slots[index as usize];
             slot.object = Some(object);
@@ -144,7 +144,7 @@ impl<T> HandleTable<T> {
 
     /// The object that `handle` names.
     pub(crate) fn get(&self, handle: u64) -> Result<Arc<T>, Error> {
-        let table = lock(&self.slots);
+        let table = self.slots.lock();
         match table.live(self.kind, handle) {
             Some(object) => Ok(Arc::clone(object)),
             None => Err(self.fault(&table, handle)),
@@ -154,7 +154,7 @@ impl<T> HandleTable<T> {
     /// Retires `handle` and returns the object it named. Every copy of the
     /// handle is stale from here on.
     pub(crate) fn remove(&self, handle: u64) -> Result<Arc<T>, Error> {
-        let mut table = lock(&self.slots);
+        let mut table = self.slots.lock();
         let index = index_of(handle);
         let object = match table.live_mut(self.kind, handle) {
             Some(slot) => {
@@ -297,10 +297,10 @@ mod tests {
     fn an_exhausted_slot_is_retired() {
         let table = HandleTable::new(HandleKind::Map);
         let handle = table.insert(Arc::new(())).unwrap();
-        lock(&table.slots).slots[0].generation = MAX_GENERATION;
+        table.slots.lock().slots[0].generation = MAX_GENERATION;
         let last = encode(HandleKind::Map, 0, MAX_GENERATION);
         table.remove(last).unwrap();
-        assert_eq!(lock(&table.slots).free, Vec::<u32>::new());
+        assert_eq!(table.slots.lock().free, Vec::<u32>::new());
         let next = table.insert(Arc::new(())).unwrap();
         assert_eq!(index_of(next), 1);
         assert_eq!(table.get(last).unwrap_err().status(), MLN_STATUS_INVALID_STATE);

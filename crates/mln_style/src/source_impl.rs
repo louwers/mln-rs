@@ -4,15 +4,13 @@
 // `ImplBase` and the virtual interface is the `Impl` trait (as for
 // `Layer::Impl`). `dyn Impl` derefs to its `ImplBase`.
 
+use std::any::Any;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_style_types::SourceType;
-use mln_util::chrono::Duration;
 use mln_util::constants;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-
-use crate::util::AsAny;
 
 /// `WarnIfOverscaleFactorCapsPrefetchDelta`.
 fn warn_if_overscale_factor_caps_prefetch_delta(overscale: Option<u8>, prefetch: Option<u8>) {
@@ -47,7 +45,7 @@ impl ImplBase {
             id,
             prefetch_zoom_delta: None,
             max_overscale_factor: None,
-            minimum_tile_update_interval: Duration::zero(),
+            minimum_tile_update_interval: Duration::ZERO,
             volatile_flag: false,
         }
     }
@@ -92,7 +90,7 @@ impl ImplBase {
 }
 
 /// The virtual interface of `Source::Impl`.
-pub trait Impl: AsAny {
+pub trait Impl: Any + Send + Sync {
     fn base(&self) -> &ImplBase;
     fn base_mut(&mut self) -> &mut ImplBase;
 
@@ -103,6 +101,13 @@ pub trait Impl: AsAny {
     }
 }
 
+impl dyn Impl {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: Impl>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+}
+
 impl std::ops::Deref for dyn Impl {
     type Target = ImplBase;
     fn deref(&self) -> &ImplBase {
@@ -110,10 +115,14 @@ impl std::ops::Deref for dyn Impl {
     }
 }
 
-/// `staticImmutableCast<T>(impl)` for source impls. C++ uses `static_cast`; this
-/// panics on a type mismatch.
-pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Arc<T> {
-    impl_.clone().into_any_arc().downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
+/// Returns a new handle to `impl_` as its concrete source impl type.
+///
+/// # Panics
+///
+/// If `impl_` is not a `T`.
+pub fn downcast_arc<T: Impl>(impl_: &Arc<dyn Impl>) -> Arc<T> {
+    let any: Arc<dyn Any + Send + Sync> = impl_.clone();
+    any.downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
 }
 
 // Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`

@@ -4,9 +4,9 @@
 //! the order they were pushed, when it's ready to handle them. An optional
 //! waker tells the owner that the queue has events again.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use crate::sync::MutexExt;
+use parking_lot::Mutex;
 
 /// Tells the owner of a queue that the queue has events to take. It runs on
 /// the thread that pushed the event, so it must not take the events itself
@@ -45,12 +45,12 @@ impl<T> EventQueue<T> {
     /// was empty, after the queue is unlocked.
     pub fn push(&self, event: T) {
         let was_empty = {
-            let mut events = self.shared.events.lock_unpoisoned();
+            let mut events = self.shared.events.lock();
             events.push(event);
             events.len() == 1
         };
         if was_empty {
-            let waker = self.shared.waker.lock_unpoisoned().clone();
+            let waker = self.shared.waker.lock().clone();
             if let Some(waker) = waker {
                 waker();
             }
@@ -60,18 +60,18 @@ impl<T> EventQueue<T> {
     /// Takes every event in the queue, oldest first.
     #[must_use]
     pub fn take(&self) -> Vec<T> {
-        std::mem::take(&mut *self.shared.events.lock_unpoisoned())
+        std::mem::take(&mut *self.shared.events.lock())
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.shared.events.lock_unpoisoned().is_empty()
+        self.shared.events.lock().is_empty()
     }
 
     /// Sets the waker that the queue runs when it gets an event while empty.
     /// A queue that already has events runs the new waker at once.
     pub fn set_waker(&self, waker: Option<Waker>) {
-        *self.shared.waker.lock_unpoisoned() = waker.clone();
+        *self.shared.waker.lock() = waker.clone();
         if let Some(waker) = waker
             && !self.is_empty()
         {

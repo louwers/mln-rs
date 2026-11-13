@@ -14,13 +14,13 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::io::Write as _;
-use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
+use std::sync::{Arc, LazyLock, OnceLock, Weak};
 
 use ash::vk;
 use mln_gfx::{DepthStencilFormat, DepthStencilFormats, ExportKinds, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::logging::{Event, EventSeverity, Log};
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
@@ -312,7 +312,7 @@ static LIBRARY_INSTANCE: Mutex<Option<Arc<LibraryInstance>>> = Mutex::new(None);
 /// The library's instance: the one made before, or a new one. A failure
 /// isn't kept, so the next device tries again.
 fn library_instance() -> Result<Arc<LibraryInstance>, Error> {
-    let mut slot = LIBRARY_INSTANCE.lock_unpoisoned();
+    let mut slot = LIBRARY_INSTANCE.lock();
     if let Some(instance) = slot.as_ref() {
         return Ok(Arc::clone(instance));
     }
@@ -327,7 +327,7 @@ static QUEUE_MUTEXES: LazyLock<Mutex<HashMap<u64, Weak<Mutex<()>>>>> = LazyLock:
 
 fn queue_mutex(queue: vk::Queue) -> Arc<Mutex<()>> {
     use ash::vk::Handle as _;
-    let mut mutexes = QUEUE_MUTEXES.lock_unpoisoned();
+    let mut mutexes = QUEUE_MUTEXES.lock();
     mutexes.retain(|_, mutex| mutex.strong_count() > 0);
     let key = queue.as_raw();
     if let Some(mutex) = mutexes.get(&key).and_then(Weak::upgrade) {
@@ -1254,7 +1254,7 @@ impl Shared {
     /// Runs `f` with the queue, holding the queue's mutex and the host's
     /// lock.
     pub(crate) fn with_queue<R>(&self, f: impl FnOnce(vk::Queue) -> R) -> R {
-        let _guard = self.queue_mutex.lock_unpoisoned();
+        let _guard = self.queue_mutex.lock();
         if let Some(lock) = &self.host_lock {
             lock.lock();
         }

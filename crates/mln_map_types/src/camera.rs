@@ -2,8 +2,9 @@
 // FreeCameraOptions; the FreeCameraOptions methods are in util/camera.cpp,
 // see util_camera.rs).
 
+use std::time::Duration;
+
 use mln_util::UnitBezier;
-use mln_util::chrono::Duration;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate};
 use mln_util::vectors::{Vec3, Vec4};
 
@@ -39,54 +40,6 @@ pub struct CameraOptions {
     pub roll: Option<f64>,
     /// Field of view, measured in degrees.
     pub fov: Option<f64>,
-}
-
-impl CameraOptions {
-    #[must_use]
-    pub fn with_center(mut self, o: Option<LatLng>) -> Self {
-        self.center = o;
-        self
-    }
-    #[must_use]
-    pub fn with_center_altitude(mut self, o: Option<f64>) -> Self {
-        self.center_altitude = o;
-        self
-    }
-    #[must_use]
-    pub fn with_padding(mut self, p: Option<EdgeInsets>) -> Self {
-        self.padding = p;
-        self
-    }
-    #[must_use]
-    pub fn with_anchor(mut self, o: Option<ScreenCoordinate>) -> Self {
-        self.anchor = o;
-        self
-    }
-    #[must_use]
-    pub fn with_zoom(mut self, o: Option<f64>) -> Self {
-        self.zoom = o;
-        self
-    }
-    #[must_use]
-    pub fn with_bearing(mut self, o: Option<f64>) -> Self {
-        self.bearing = o;
-        self
-    }
-    #[must_use]
-    pub fn with_pitch(mut self, o: Option<f64>) -> Self {
-        self.pitch = o;
-        self
-    }
-    #[must_use]
-    pub fn with_roll(mut self, o: Option<f64>) -> Self {
-        self.roll = o;
-        self
-    }
-    #[must_use]
-    pub fn with_fov(mut self, o: Option<f64>) -> Self {
-        self.fov = o;
-        self
-    }
 }
 
 /// [`AnimationOptions::transition_end_fn`].
@@ -348,7 +301,7 @@ impl CameraDelta {
         if self.offset.is_some()
             && self.anchor.is_some()
             && anchored
-            && self.animation.duration.is_some_and(|duration| duration > Duration::zero())
+            && self.animation.duration.is_some_and(|duration| duration > Duration::ZERO)
         {
             return Err(CameraError::AnimatedAnchoredOffset);
         }

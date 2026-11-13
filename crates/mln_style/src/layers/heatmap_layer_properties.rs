@@ -8,8 +8,8 @@
 use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
-use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
+use std::sync::Arc;
 
 crate::color_ramp_property!(
     /// `struct HeatmapColor : ColorRampProperty {};`
@@ -62,7 +62,7 @@ pub struct HeatmapLayerProperties {
 
 impl HeatmapLayerProperties {
     /// `explicit HeatmapLayerProperties(Immutable<HeatmapLayer::Impl>)`.
-    pub fn new(impl_: Immutable<HeatmapLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
         HeatmapLayerProperties {
             base: LayerPropertiesBase::new(impl_),
             evaluated: HeatmapPaintProperties::PossiblyEvaluated::default(),
@@ -71,7 +71,7 @@ impl HeatmapLayerProperties {
 
     /// `HeatmapLayerProperties(Immutable<HeatmapLayer::Impl>, HeatmapPaintProperties::PossiblyEvaluated)`.
     pub fn with_evaluated(
-        impl_: Immutable<HeatmapLayerImpl>,
+        impl_: Arc<HeatmapLayerImpl>,
         evaluated: HeatmapPaintProperties::PossiblyEvaluated,
     ) -> Self {
         HeatmapLayerProperties {

@@ -10,12 +10,13 @@
 // around the test turns that into an errored test and drops the map. A
 // test that hangs without running the loop is not caught.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use mln_actor::{RunLoop, RunLoopHandle};
+use parking_lot::{Condvar, Mutex};
 
 /// The panic payload of a test that ran out of time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +80,7 @@ impl Watchdog {
     #[must_use]
     pub fn arm(&self) -> WatchdogGuard<'_> {
         let generation = self.shared.current.fetch_add(1, Ordering::SeqCst) + 1;
-        let mut state = self.shared.state.lock().unwrap();
+        let mut state = self.shared.state.lock();
         state.armed = Some(Armed {
             deadline: Instant::now() + self.limit,
             generation,
@@ -93,7 +94,7 @@ impl Watchdog {
     fn disarm(&self) {
         // A task already posted for this test sees a newer generation.
         self.shared.current.fetch_add(1, Ordering::SeqCst);
-        let mut state = self.shared.state.lock().unwrap();
+        let mut state = self.shared.state.lock();
         state.armed = None;
         self.shared.wakeup.notify_all();
     }
@@ -102,7 +103,7 @@ impl Watchdog {
 impl Drop for Watchdog {
     fn drop(&mut self) {
         {
-            let mut state = self.shared.state.lock().unwrap();
+            let mut state = self.shared.state.lock();
             state.shutdown = true;
             self.shared.wakeup.notify_all();
         }
@@ -124,19 +125,19 @@ impl Drop for WatchdogGuard<'_> {
 }
 
 fn watch(shared: &Shared) {
-    let mut state = shared.state.lock().unwrap();
+    let mut state = shared.state.lock();
     loop {
         if state.shutdown {
             return;
         }
         let Some(armed) = &state.armed else {
-            state = shared.wakeup.wait(state).unwrap();
+            shared.wakeup.wait(&mut state);
             continue;
         };
         let now = Instant::now();
         if now < armed.deadline {
             let timeout = armed.deadline - now;
-            state = shared.wakeup.wait_timeout(state, timeout).unwrap().0;
+            shared.wakeup.wait_for(&mut state, timeout);
             continue;
         }
         // Expired: interrupt the test thread at its next RunLoop turn, once.

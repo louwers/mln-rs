@@ -198,3 +198,45 @@ fn non_existent_file_tile() {
     assert_eq!(Reason::Other, error.reason);
     assert!(res.data.is_none());
 }
+
+fn geography_class_tile() -> Resource {
+    Resource::tile(
+        &to_absolute_url("geography-class-png.mbtiles?file={z}/{x}/{y}.png"),
+        1.0,
+        0,
+        0,
+        0,
+        Scheme::XYZ,
+        LoadingMethod::All,
+    )
+}
+
+// Tiles requested again with their etag are not modified
+// gtest: MBTilesFileSource.TileNotModified
+#[test]
+fn tile_not_modified() {
+    let mbtiles = mbtiles_file_source();
+    let mut resource = geography_class_tile();
+    let res = request(&mbtiles, &resource);
+    assert!(res.data.is_some());
+    assert!(res.etag.is_some());
+
+    resource.prior_etag = res.etag;
+    let again = request(&mbtiles, &resource);
+    assert_eq!(None, again.error);
+    assert!(again.not_modified);
+    assert!(again.data.is_none());
+}
+
+// Tiles requested with a different etag return tile data
+// gtest: MBTilesFileSource.TileOtherEtag
+#[test]
+fn tile_other_etag() {
+    let mbtiles = mbtiles_file_source();
+    let mut resource = geography_class_tile();
+    resource.prior_etag = Some("another etag".to_owned());
+    let res = request(&mbtiles, &resource);
+    assert_eq!(None, res.error);
+    assert!(!res.not_modified);
+    assert!(res.data.is_some());
+}

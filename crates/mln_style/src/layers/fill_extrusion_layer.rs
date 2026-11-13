@@ -21,7 +21,6 @@ use feature::Value;
 use mln_conversion::{Convertible, Error};
 use mln_style_types::TranslateAnchorType;
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
 pub use crate::layers::fill_extrusion_layer_impl::Impl;
@@ -47,7 +46,7 @@ impl Impl {
 #[derive(Debug)]
 pub struct FillExtrusionLayer {
     /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
-    base_impl: Immutable<Impl>,
+    base_impl: Arc<Impl>,
 }
 
 impl FillExtrusionLayer {
@@ -61,7 +60,7 @@ impl FillExtrusionLayer {
 
     /// `FillExtrusionLayer(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(impl_: Immutable<Impl>) -> Self {
+    pub fn from_impl(impl_: Arc<Impl>) -> Self {
         FillExtrusionLayer { base_impl: impl_ }
     }
 
@@ -378,7 +377,7 @@ fn get_layer_property(layer: &FillExtrusionLayer, property: Property) -> StylePr
 }
 
 impl Layer for FillExtrusionLayer {
-    fn base_impl(&self) -> Immutable<dyn layer::Impl> {
+    fn base_impl(&self) -> Arc<dyn layer::Impl> {
         self.base_impl.clone()
     }
 

@@ -4,10 +4,11 @@
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 
 use mln_actor::actor::Actor;
 use mln_actor::{CooperativeScheduler, RunLoop, Thread, scheduler};
+use parking_lot::Mutex;
 
 /// The scheduler, installed by whichever test runs first.
 fn cooperative() -> &'static Arc<CooperativeScheduler> {
@@ -28,6 +29,12 @@ fn background_and_sequenced_are_the_cooperative_scheduler() {
 fn installs_once() {
     cooperative();
     scheduler::install_cooperative(Arc::new(CooperativeScheduler::new()));
+}
+
+#[test]
+fn installing_once_keeps_the_installed_scheduler() {
+    let installed = cooperative();
+    assert!(Arc::ptr_eq(scheduler::install_cooperative_once(), installed));
 }
 
 struct Counter {
@@ -55,12 +62,12 @@ fn a_thread_keeps_its_object_on_the_creating_threads_loop() {
         thread.actor().invoke(move |counter: &Counter| {
             assert_eq!(std::thread::current().id(), main);
             counter.count.set(counter.count.get() + 1);
-            seen.lock().unwrap().push(i);
+            seen.lock().push(i);
         });
     }
-    assert!(seen.lock().unwrap().is_empty());
+    assert!(seen.lock().is_empty());
     run_loop.wait_for_empty();
-    assert_eq!(*seen.lock().unwrap(), (0..10).collect::<Vec<_>>());
+    assert_eq!(*seen.lock(), (0..10).collect::<Vec<_>>());
     drop(thread);
     assert_eq!(total.load(Ordering::SeqCst), 10);
 }

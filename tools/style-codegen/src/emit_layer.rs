@@ -223,7 +223,6 @@ pub fn emit(layer: &LayerSpec) -> String {
     imports.push("crate::transition_options::TransitionOptions".into());
     imports.push("feature::Value".into());
     imports.push("mln_conversion::{Convertible, Error}".into());
-    imports.push("mln_util::immutable::Immutable".into());
     imports.push("std::sync::Arc".into());
     w.imports(imports);
     w.blank();
@@ -260,7 +259,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.line("#[derive(Debug)]");
     w.line(&format!("pub struct {layer_name} {{"));
     w.line("    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).");
-    w.line("    base_impl: Immutable<Impl>,");
+    w.line("    base_impl: Arc<Impl>,");
     w.line("}");
     w.blank();
     w.line(&format!("impl {layer_name} {{"));
@@ -284,7 +283,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.blank();
     w.line(&format!("    /// `{layer_name}(Immutable<Impl>)`."));
     w.line("    #[must_use]");
-    w.line("    pub fn from_impl(impl_: Immutable<Impl>) -> Self {");
+    w.line("    pub fn from_impl(impl_: Arc<Impl>) -> Self {");
     w.line(&format!("        {layer_name} {{ base_impl: impl_ }}"));
     w.line("    }");
     w.blank();
@@ -401,7 +400,7 @@ pub fn emit(layer: &LayerSpec) -> String {
 
     // Layer trait.
     w.line(&format!("impl Layer for {layer_name} {{"));
-    w.line("    fn base_impl(&self) -> Immutable<dyn layer::Impl> {");
+    w.line("    fn base_impl(&self) -> Arc<dyn layer::Impl> {");
     w.line("        self.base_impl.clone()");
     w.line("    }");
     w.blank();

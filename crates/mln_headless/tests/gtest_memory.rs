@@ -69,7 +69,12 @@ impl MemoryTest {
     fn map(&self, frontend: &HeadlessFrontend, ratio: f32) -> Map {
         let map = Map::with_file_source(
             self.file_source.clone(),
-            MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()).with_pixel_ratio(ratio),
+            MapOptions {
+                map_mode: MapMode::Static,
+                size: frontend.get_size(),
+                pixel_ratio: ratio,
+                ..Default::default()
+            },
         )
         .unwrap();
         frontend.attach(&map);
@@ -85,7 +90,7 @@ fn vector() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio).expect("a headless frontend");
     let mut map = test.map(&frontend, ratio);
-    map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
+    map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     map.style_mut().load_url("https://example.com/maps/streets");
 
     frontend.render(&mut map).expect("render");
@@ -140,7 +145,7 @@ fn footprint() {
         fn new(test: &MemoryTest, style: &str) -> Self {
             let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 2.0).expect("a headless frontend");
             let mut map = test.map(&frontend, 2.0);
-            map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
+            map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
             map.style_mut().load_url(style);
             frontend.render(&mut map).expect("render");
             FrontendAndMap { _map: map, _frontend: frontend }
@@ -219,7 +224,7 @@ fn rendering_stats_count_live_resources() {
     let test = MemoryTest::new();
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend");
     let mut map = test.map(&frontend, 1.0);
-    map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
+    map.jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
 
     map.style_mut().load_url("https://example.com/maps/streets");
     frontend.render(&mut map).expect("render");

@@ -3,7 +3,6 @@
 // The texture has no depth or stencil buffer, as in C++: without them every
 // depth and stencil test passes.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -109,10 +108,6 @@ impl TargetResource for OffscreenTextureResource {
         }
         context.bind_framebuffer(self.framebuffer.get(), self.size, false);
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// `gl::OffscreenTexture`
@@ -156,8 +151,4 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
 
     /// GL runs the commands in the order they come.
     fn submit(&self, _encoder: &dyn CommandEncoder) {}
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

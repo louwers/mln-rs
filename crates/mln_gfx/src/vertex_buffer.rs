@@ -7,16 +7,19 @@ use std::rc::Rc;
 ///
 /// Shared as `Rc` (C++ `unique_ptr` plus raw pointers in `AttributeBinding`):
 /// the binding keeps a clone and compares by pointer.
-pub trait VertexBufferResource: Any {
-    fn as_any(&self) -> &dyn Any;
+pub trait VertexBufferResource: Any {}
+
+impl dyn VertexBufferResource {
+    /// The concrete type behind this trait object, if it is a `T`.
+    pub fn downcast_ref<T: VertexBufferResource>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
 }
 
 pub type UniqueVertexBufferResource = Rc<dyn VertexBufferResource>;
 
 /// `gfx::IndexBufferResource`: backend-specific GPU index buffer.
-pub trait IndexBufferResource: Any {
-    fn as_any(&self) -> &dyn Any;
-}
+pub trait IndexBufferResource: Any {}
 
 /// `gfx::IndexBuffer`
 pub struct IndexBuffer {
@@ -33,6 +36,7 @@ impl IndexBuffer {
     /// `getResource<T>()`: the C++ `static_cast` becomes a checked downcast.
     #[must_use]
     pub fn get_resource<T: 'static>(&self) -> Option<&T> {
-        self.resource.as_any().downcast_ref::<T>()
+        let resource: &dyn Any = &*self.resource;
+        resource.downcast_ref()
     }
 }

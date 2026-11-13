@@ -28,7 +28,6 @@
 // - Port-only: `set_overlay` draws over each frame before it is presented,
 //   such as an app's controls over the map.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -474,10 +473,6 @@ impl TargetResource for SurfaceResource {
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
         Some(self.state.depth_stencil_format)
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// How a [`SurfaceTarget`] presents.
@@ -491,11 +486,14 @@ pub struct SurfaceOptions {
     /// the device has no adapter. Frames can be read back when they have
     /// `COPY_SRC`.
     pub usages: Option<wgpu::TextureUsages>,
+    /// The format to configure the surface with, in place of the device's
+    /// surface format.
+    pub format: Option<wgpu::TextureFormat>,
 }
 
 impl Default for SurfaceOptions {
     fn default() -> Self {
-        SurfaceOptions { cap_frame_rate: true, usages: None }
+        SurfaceOptions { cap_frame_rate: true, usages: None, format: None }
     }
 }
 
@@ -510,8 +508,9 @@ pub struct SurfaceTarget {
 impl SurfaceTarget {
     /// A target on `backend` that presents to `surface`, made with the
     /// instance of the backend's device, at `framebuffer_size` physical
-    /// pixels. The surface is configured with the device's surface format,
-    /// or with the first of BGRA8 and RGBA8 that the surface supports.
+    /// pixels. The surface is configured with the options' format, or the
+    /// device's surface format, or else the first of BGRA8 and RGBA8 that
+    /// the surface supports.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
     /// device's adapter can't present to the surface or the surface supports
@@ -530,7 +529,7 @@ impl SurfaceTarget {
             if capabilities.formats.is_empty() {
                 return Err(Error::unsupported("The WebGPU adapter can't present to the surface"));
             }
-            let format = match device.surface_format() {
+            let format = match options.format.or(device.surface_format()) {
                 Some(format) if capabilities.formats.contains(&format) => format,
                 Some(format) => {
                     return Err(Error::unsupported(format!("The surface does not take the {format:?} format")));
@@ -548,7 +547,7 @@ impl SurfaceTarget {
             let (usage, present_mode) = surface_options(&capabilities);
             (format, usage, present_mode)
         } else {
-            let format = device.surface_format().ok_or_else(|| {
+            let format = options.format.or(device.surface_format()).ok_or_else(|| {
                 Error::invalid_argument("A surface on a device without an adapter needs the device's surface format")
             })?;
             (format, wgpu::TextureUsages::RENDER_ATTACHMENT, wgpu::PresentMode::Fifo)
@@ -596,7 +595,7 @@ impl SurfaceTarget {
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
-        let image = Rc::new(DrawTarget::new(framebuffer_size, SurfaceResource { state: state.clone() }));
+        let image = Rc::new(DrawTarget::new(framebuffer_size, Rc::new(SurfaceResource { state: state.clone() })));
         Ok(SurfaceTarget { backend, state, image })
     }
 
@@ -664,7 +663,7 @@ impl FrameTarget for SurfaceTarget {
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {
-        if let Some(encoder) = encoder.as_any().downcast_ref::<CommandEncoder>() {
+        if let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() {
             encoder.submit_frame(Some(self.image.resource()));
         }
         if self.state.swap() { Handoff::Presented } else { Handoff::Dropped }

@@ -1,6 +1,7 @@
 // Ports include/mln/util/constants.hpp + src/mln/util/constants.cpp.
 
-use crate::chrono::Duration;
+use std::time::Duration;
+
 use crate::unitbezier::UnitBezier;
 
 /// `tileSize_D`.
@@ -53,15 +54,12 @@ pub const DEFAULT_MAX_CACHE_SIZE: u64 = 50 * 1024 * 1024;
 /// ~2kB, 8kB for pixel ratio of 2.0.
 pub const DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE: usize = 100 * 8192;
 
-/// `Milliseconds(300)` as a `Duration`.
 pub const DEFAULT_TRANSITION_DURATION: Duration = Duration::from_millis(300);
-/// `Seconds{30}` (the C++ type is `Seconds`; this is the same span as a
-/// `Duration`).
 pub const CLOCK_SKEW_RETRY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const DEFAULT_TRANSITION_EASE: UnitBezier = UnitBezier::new(0.0, 0.0, 0.25, 1.0);
 
-pub const DEFAULT_RATE_LIMIT_TIMEOUT: i32 = 5;
+pub const DEFAULT_RATE_LIMIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const ASSET_PROTOCOL: &str = "asset://";
 pub const FILE_PROTOCOL: &str = "file://";

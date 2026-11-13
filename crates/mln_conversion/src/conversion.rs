@@ -167,67 +167,6 @@ impl<'a, T: ConversionTraits> From<&'a T> for Convertible<'a> {
     }
 }
 
-// The C++ free (friend) functions, for code ported call-for-call.
-
-#[must_use]
-pub fn is_undefined(v: &Convertible<'_>) -> bool {
-    v.is_undefined()
-}
-
-#[must_use]
-pub fn is_array(v: &Convertible<'_>) -> bool {
-    v.is_array()
-}
-
-#[must_use]
-pub fn array_length(v: &Convertible<'_>) -> usize {
-    v.array_length()
-}
-
-#[must_use]
-pub fn array_member<'b>(v: &'b Convertible<'_>, i: usize) -> Convertible<'b> {
-    v.array_member(i)
-}
-
-#[must_use]
-pub fn is_object(v: &Convertible<'_>) -> bool {
-    v.is_object()
-}
-
-#[must_use]
-pub fn object_member<'b>(v: &'b Convertible<'_>, name: &str) -> Option<Convertible<'b>> {
-    v.object_member(name)
-}
-
-pub fn each_member(v: &Convertible<'_>, f: impl FnMut(&str, &Convertible<'_>) -> Option<Error>) -> Option<Error> {
-    v.each_member(f)
-}
-
-#[must_use]
-pub fn to_bool(v: &Convertible<'_>) -> Option<bool> {
-    v.to_bool()
-}
-
-#[must_use]
-pub fn to_number(v: &Convertible<'_>) -> Option<f32> {
-    v.to_number()
-}
-
-#[must_use]
-pub fn to_double(v: &Convertible<'_>) -> Option<f64> {
-    v.to_double()
-}
-
-#[must_use]
-pub fn to_string(v: &Convertible<'_>) -> Option<String> {
-    v.to_string()
-}
-
-#[must_use]
-pub fn to_value(v: &Convertible<'_>) -> Option<Value> {
-    v.to_value()
-}
-
 /// `toGeoJSON(value, error)`.
 pub fn to_geojson(v: &Convertible<'_>, error: &mut Error) -> Option<geojson::GeoJSON> {
     v.to_geojson(error)

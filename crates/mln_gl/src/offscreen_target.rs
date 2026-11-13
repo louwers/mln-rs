@@ -2,7 +2,6 @@
 // platform/default/src/mln/gl/headless_backend.cpp: frames drawn into a
 // framebuffer of the library's and read back.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -86,10 +85,6 @@ impl TargetResource for OffscreenResource {
             context.bind_framebuffer(Some(self.framebuffer), self.size, true);
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Frames drawn into a framebuffer of a color renderbuffer and a depth and
@@ -137,7 +132,7 @@ impl FrameTarget for OffscreenTarget {
         let mut image = self.image.borrow_mut();
         if image.is_none() {
             let resource = OffscreenResource::new(&*self.backend.gl_context()?, size)?;
-            *image = Some(Rc::new(DrawTarget::new(size, resource)));
+            *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
         image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
     }

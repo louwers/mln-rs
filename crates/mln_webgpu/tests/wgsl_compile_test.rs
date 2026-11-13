@@ -37,7 +37,7 @@ fn assemble(source: &WgslShaderSource, stage: &str) -> String {
 fn all_extracted_wgsl_compiles() {
     let backend = mln_webgpu::RendererBackend::new(&Device::new(None).expect("device"));
     let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let context = backend.get_context().as_any().downcast_ref::<mln_webgpu::Context>().unwrap();
+    let context = backend.get_context().downcast_ref::<mln_webgpu::Context>().unwrap();
 
     for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
         // ProgramParameters(pixelRatio, overdraw=false): only DEVICE_PIXEL_RATIO.
@@ -95,7 +95,7 @@ fn conditional_symbols(source: &str) -> Vec<String> {
 fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {
     let backend = mln_webgpu::RendererBackend::new(&Device::new(None).expect("device"));
     let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let context = backend.get_context().as_any().downcast_ref::<mln_webgpu::Context>().unwrap();
+    let context = backend.get_context().downcast_ref::<mln_webgpu::Context>().unwrap();
     let mut failed = Vec::new();
     let mut compiled = 0;
     for source in ALL {

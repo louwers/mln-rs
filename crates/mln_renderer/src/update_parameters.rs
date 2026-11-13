@@ -7,9 +7,8 @@ use mln_style::collection::ImmutableVector;
 use mln_style::expression::GlobalStateMap;
 use mln_style::transition_options::TransitionOptions;
 use mln_style::{image, layer, light, sky, source};
-use mln_util::chrono::TimePoint;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::time::Instant;
 
 #[derive(Clone)]
 pub struct UpdateParameters {
@@ -17,7 +16,9 @@ pub struct UpdateParameters {
     pub mode: MapMode,
     pub pixel_ratio: f32,
     pub debug_options: MapDebugOptions,
-    pub time_point: TimePoint,
+    /// The frame's time; `None` in still modes, which have no clock and show
+    /// every transition and fade as ended.
+    pub time_point: Option<Instant>,
     pub transform_state: TransformState,
 
     pub glyph_url: String,
@@ -25,9 +26,9 @@ pub struct UpdateParameters {
     pub font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
     pub sprite_loaded: bool,
     pub transition_options: TransitionOptions,
-    pub light: Immutable<light::Impl>,
-    pub sky: Option<Immutable<sky::Impl>>,
-    pub images: Immutable<Vec<Immutable<image::Impl>>>,
+    pub light: Arc<light::Impl>,
+    pub sky: Option<Arc<sky::Impl>>,
+    pub images: Arc<Vec<Arc<image::Impl>>>,
     pub sources: ImmutableVector<dyn source::Impl>,
     pub layers: ImmutableVector<dyn layer::Impl>,
     /// The style's global state, used by "global-state" expressions.

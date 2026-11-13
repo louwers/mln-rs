@@ -5,9 +5,10 @@ mod sprite_loader;
 mod sprite_parser;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
+use parking_lot::Mutex;
 
 /// A path of the C++ repository, in the copy of its files these tests read
 /// (testdata/).
@@ -26,7 +27,7 @@ struct Recorder(Records);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push(((severity, event, code, msg.to_owned()), false));
+        self.0.lock().push(((severity, event, code, msg.to_owned()), false));
         true
     }
 }
@@ -45,7 +46,7 @@ impl FixtureLog {
 
     pub fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
         let mut count = 0;
-        for (m, checked) in self.messages.lock().unwrap().iter_mut() {
+        for (m, checked) in self.messages.lock().iter_mut() {
             if !*checked && m.0 == severity && m.1 == event && m.2 == code && m.3 == msg {
                 *checked = true;
                 count += 1;
@@ -55,7 +56,7 @@ impl FixtureLog {
     }
 
     pub fn unchecked_count(&self) -> usize {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).count()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).count()
     }
 }
 

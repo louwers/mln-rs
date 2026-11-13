@@ -9,10 +9,10 @@
 // render and query suites.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use feature::Value;
 use mln_conversion::{Convertible, Error};
-use mln_util::immutable::Immutable;
 use serde::{Deserialize, Serialize};
 
 use super::util::parse_json;
@@ -27,7 +27,7 @@ fn parse(json: &serde_json::Value) -> Box<dyn Layer> {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Crossing(#[serde(with = "crate::serialization::shared_layer")] Immutable<dyn Impl>);
+struct Crossing(#[serde(with = "crate::serialization::shared_layer")] Arc<dyn Impl>);
 
 /// The layer's serialized value, after checking that its `Impl` crosses
 /// through serde to one that encodes the same.

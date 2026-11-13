@@ -18,8 +18,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr};
@@ -39,7 +37,7 @@ pub struct CircleFeature {
 
 /// `CircleLayout`.
 pub struct CircleLayout {
-    pub layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_properties_map: VecMap<String, Arc<dyn LayerProperties>>,
     pub bucket_leader_id: String,
 
     /// `std::list<CircleFeature> features`.
@@ -61,16 +59,14 @@ impl CircleLayout {
     /// `CircleLayout(parameters, group, sourceLayer)`.
     pub fn new(
         parameters: &BucketParameters,
-        group: &[Immutable<dyn LayerProperties>],
+        group: &[Arc<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
         filter_groups: &mut FilterGroups,
     ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
         let zoom = f32::from(parameters.tile_id.overscaled_z);
-        let leader_layer_properties = (*group[0])
-            .as_any()
-            .downcast_ref::<CircleLayerProperties>()
-            .expect("CircleLayout: not circle layer properties");
+        let leader_layer_properties =
+            (*group[0]).downcast_ref::<CircleLayerProperties>().expect("CircleLayout: not circle layer properties");
         let leader_impl = leader_layer_properties.layer_impl();
         let unevaluated_layout = &leader_impl.layout;
         let sort_features_by_key = !unevaluated_layout.get::<CircleSortKey>().is_undefined();
@@ -82,7 +78,7 @@ impl CircleLayout {
         let source_layer_id = leader_impl.source_layer.clone();
         let bucket_leader_id = leader_impl.id.clone();
 
-        let mut layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>> = VecMap::new();
+        let mut layer_properties_map: VecMap<String, Arc<dyn LayerProperties>> = VecMap::new();
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
             layer_properties_map.entry(layer_id).or_insert_with(|| layer_properties.clone());
@@ -150,7 +146,7 @@ impl CircleLayout {
     /// factory calls it.
     pub fn with_source_layer(
         parameters: &BucketParameters,
-        group: &[Immutable<dyn LayerProperties>],
+        group: &[Arc<dyn LayerProperties>],
         source_layer: SourceLayer,
         filter_groups: &mut FilterGroups,
     ) -> Result<Self, Error> {
@@ -288,7 +284,7 @@ impl CircleLayout {
 
         let length = bucket.vertices.len();
         for binders in bucket.paint_property_binders.values_mut() {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 feature_index,

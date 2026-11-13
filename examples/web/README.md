@@ -22,12 +22,13 @@ the other's backend or shaders.
   instance has no threads, so it installs a `CooperativeScheduler`. Each
   animation frame runs the RunLoop, draws, and runs the scheduler's tasks
   until the frame's budget is spent. Between frames the RunLoop and the
-  scheduler wake the worker (`set_waker`), which runs what arrived in a
-  task of its own (`WebMap::tick`): a finished fetch or a worker's reply
-  is handled at once, rather than at the next frame, so that a load's
-  steps don't each wait for a frame.
-- in each tile worker's Web Worker (web/tile-worker.ts), `TileWorker`
-  (src/worker.rs): a `TileWorkerHost` on the instance's own
+  scheduler wake the instance's pump
+  ([crates/mln_web_host](../../crates/mln_web_host)), which runs what
+  arrived in a task of its own: a finished fetch or a worker's reply is
+  handled at once, rather than at the next frame, so that a load's steps
+  don't each wait for a frame.
+- in each tile worker's Web Worker (web/tile-worker.ts), mln_web_host's
+  tile worker side: a `TileWorkerHost` on the instance's own
   `CooperativeScheduler`. The map's `SerializingTransport` gives each
   tile's worker to one of the Web Workers and sends every message between
   the two as bytes (mln_renderer's `tile::worker_codec`), over a
@@ -55,7 +56,7 @@ and right-to-left runs) as natively, with HarfRust, and rasterizes their
 glyphs with skrifa and the FreeType port. That code is a large share of
 the module, and most styles have no font faces, so it is in a module of its
 own: the main module is built without mln_renderer's `font-face-shaper`
-feature, and its map's `FontFaceEngine` (src/shaper.rs) imports
+feature, and its map's `FontFaceEngine` (mln_web_host's `shaper`) imports
 web/pkg/mln_web_shaper.js the first time a style declares font faces
 (`GlyphManager::set_font_faces`), while their files download. A font file
 that arrives first waits in the `GlyphManager` until the module is ready,
@@ -115,7 +116,7 @@ and the other jumps to its camera.
 Every instance decodes images with the browser's decoders (mln_image's
 default on wasm), so the module carries no PNG, WebP or JPEG decoder. The
 decoder answers later, from the event loop, so a tile worker's reply can come
-outside `TileWorker::run`; it then wakes web/tile-worker.ts for a run.
+outside a run of the tile workers; it then wakes the instance's pump.
 
 ## CJK glyphs are drawn locally
 

@@ -171,13 +171,12 @@ impl Drop for TileCache {
 // mock; vector tiles are not ported yet (M4), so the mock is a plain tile.
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::sync::Arc;
 
     use mln_style::layer_properties::LayerProperties;
     use mln_util::identity::SimpleIdentity;
-    use mln_util::immutable::Immutable;
 
     use super::*;
     use crate::tile::tile::{Kind, TileBase};
@@ -201,9 +200,6 @@ mod tests {
         fn base(&self) -> &TileBase {
             &self.base
         }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
         fn create_render_data(&self) -> Box<dyn TileRenderData> {
             unreachable!()
         }
@@ -211,7 +207,7 @@ mod tests {
         fn set_necessity(&self, necessity: TileNecessity) {
             self.necessity.set(Some(necessity));
         }
-        fn layer_properties_updated(&self, _layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+        fn layer_properties_updated(&self, _layer_properties: &Arc<dyn LayerProperties>) -> bool {
             false
         }
     }
@@ -265,7 +261,7 @@ mod tests {
 
         // adding a key already present doesn't replace the existing item
         cache.add(id0, Box::new(tile2));
-        let cached = cache.get(&id0).unwrap().as_any().downcast_ref::<VectorTileMock>().unwrap();
+        let cached = cache.get(&id0).unwrap().downcast_ref::<VectorTileMock>().unwrap();
         assert_eq!(tile1_id, cached.unique_id);
 
         // Evict on add

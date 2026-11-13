@@ -18,7 +18,6 @@ use crate::transition_options::TransitionOptions;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
 use mln_style_types::ResamplingType;
-use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
 pub use crate::layers::color_relief_layer_impl::Impl;
@@ -44,7 +43,7 @@ impl Impl {
 #[derive(Debug)]
 pub struct ColorReliefLayer {
     /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
-    base_impl: Immutable<Impl>,
+    base_impl: Arc<Impl>,
 }
 
 impl ColorReliefLayer {
@@ -58,7 +57,7 @@ impl ColorReliefLayer {
 
     /// `ColorReliefLayer(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(impl_: Immutable<Impl>) -> Self {
+    pub fn from_impl(impl_: Arc<Impl>) -> Self {
         ColorReliefLayer { base_impl: impl_ }
     }
 
@@ -204,7 +203,7 @@ fn get_layer_property(layer: &ColorReliefLayer, property: Property) -> StyleProp
 }
 
 impl Layer for ColorReliefLayer {
-    fn base_impl(&self) -> Immutable<dyn layer::Impl> {
+    fn base_impl(&self) -> Arc<dyn layer::Impl> {
         self.base_impl.clone()
     }
 

@@ -3,7 +3,7 @@
 // outlines are generated both as triangulated lines and as line primitives).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::RwLock;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use mln_gfx::UploadPass;
@@ -19,12 +19,11 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -89,7 +88,7 @@ impl FillBucket {
     #[must_use]
     pub fn new(
         _layout: &FillLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         _overscaling: u32,
     ) -> Self {
@@ -152,7 +151,7 @@ impl FillBucket {
     ) {
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -240,7 +239,7 @@ impl Bucket for FillBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
+            binders.write().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

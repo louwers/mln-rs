@@ -95,10 +95,9 @@ jobs:
 
   # maplibre-native-ffi's C ABI suite against crates/mln_c (`just c-abi-test`,
   # tools/c-abi-test), under its Vulkan preset on lavapipe and its OpenGL one on
-  # llvmpipe: each fails when a case fails that the preset's list
-  # (tools/c-abi-test/expected-failures*.txt) doesn't name, or a listed case
-  # passes. Also that crates/mln_c's generated declarations are what its
-  # headers generate (`just generate-c-abi`, which needs libclang).
+  # llvmpipe: each fails when any case fails. Also that crates/mln_c's generated
+  # declarations are what its headers generate (`just generate-c-abi`, which
+  # needs libclang).
   c-abi:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -132,11 +131,11 @@ jobs:
           just assert-git-is-clean
 
       - name: Test
-        run: just c-abi-test -v
+        run: just c-abi-test
 
       - name: Test the OpenGL preset
         if: ${{ !cancelled() }}
-        run: MLN_C_TEST_BACKEND=opengl just c-abi-test -v
+        run: MLN_C_TEST_BACKEND=opengl just c-abi-test
 
   # The Cargo manifests: build each crates.io package from its packaged
   # sources, as the release does (RELEASING.md), and every test target, so a
@@ -216,11 +215,12 @@ jobs:
   # its cache database to the page with its tile workers in Web Workers, each
   # frame compared with the native runner's render of the same view
   # (lavapipe). Twice: the module that draws with WebGPU, and the one that
-  # draws with WebGL2 for browsers without it. The Chromium is Playwright's
-  # build, pinned, and runs both on the SwiftShader it bundles.
+  # draws with WebGL2 for browsers without it. Then the C library's browser
+  # packages. The Chromium is Playwright's build, pinned, and runs them all on
+  # the SwiftShader it bundles.
   web:
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
 
@@ -273,6 +273,12 @@ jobs:
       # The build and the native runner are the ones the step above made.
       - name: Check the WebGL2 module
         run: node examples/web/check/check.mjs --backend webgl2 --out "$RUNNER_TEMP/web-check-webgl2"
+
+      # The C library's browser package, one per backend, driven through its
+      # raw C ABI from a Web Worker (crates/mln_c/web-check). The dev profile:
+      # the check needs no release build, and two more would outlast the job.
+      - name: Check the C library's packages
+        run: just c-web-check webgpu && just c-web-check gl
 
       # The page's TypeScript, against the modules' wasm-bindgen typings that
       # the check's build wrote.

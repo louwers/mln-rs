@@ -41,7 +41,6 @@ pub fn emit(class_name: &str, object_name: &str, properties: &[Property]) -> Str
     imports.push("crate::style_property::StyleProperty".into());
     imports.push("crate::transition_options::TransitionOptions".into());
     imports.push("mln_conversion::{Convertible, Error}".into());
-    imports.push("mln_util::immutable::Immutable".into());
     imports.push("std::sync::Arc".into());
     w.imports(imports);
     w.blank();
@@ -58,7 +57,7 @@ pub fn emit(class_name: &str, object_name: &str, properties: &[Property]) -> Str
 
     w.line("#[derive(Clone, Debug)]");
     w.line(&format!("pub struct {class_name} {{"));
-    w.line("    pub impl_: Immutable<Impl>,");
+    w.line("    pub impl_: Arc<Impl>,");
     w.line("}");
     w.blank();
     w.line(&format!("impl Default for {class_name} {{"));
@@ -103,7 +102,7 @@ pub fn emit(class_name: &str, object_name: &str, properties: &[Property]) -> Str
     w.blank();
     w.line(&format!("    /// `explicit {class_name}(Immutable<Impl>)`."));
     w.line("    #[must_use]");
-    w.line("    pub fn from_impl(impl_: Immutable<Impl>) -> Self {");
+    w.line("    pub fn from_impl(impl_: Arc<Impl>) -> Self {");
     w.line(&format!("        {class_name} {{ impl_ }}"));
     w.line("    }");
     w.blank();

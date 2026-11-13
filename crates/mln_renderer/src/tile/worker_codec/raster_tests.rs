@@ -2,12 +2,13 @@
 // codec makes the bucket a worker reached directly makes, and it crosses
 // without loss, DEM border included.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_storage::Data;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
+use parking_lot::Mutex;
 use serde::Serialize;
 
 use super::envelope::{self, ReplyHead};
@@ -41,7 +42,7 @@ impl<M> Sink<M> {
 
     /// The one message the worker sent.
     fn take(&self) -> M {
-        let mut messages = std::mem::take(&mut *self.0.lock().unwrap());
+        let mut messages = std::mem::take(&mut *self.0.lock());
         assert_eq!(messages.len(), 1);
         messages.remove(0)
     }
@@ -49,7 +50,7 @@ impl<M> Sink<M> {
 
 impl<M: Send> TileEndpoint<M> for Sink<M> {
     fn send(&self, message: M) {
-        self.0.lock().unwrap().push(message);
+        self.0.lock().push(message);
     }
 }
 

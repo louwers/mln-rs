@@ -5,7 +5,6 @@
 // because C++ throws on mismatched inputs).
 
 use feature::Value;
-use mln_util::enum_::Enum;
 use mln_util::string::to_string_double;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +49,7 @@ impl VariableAnchorOffsetCollection {
     pub fn serialize(&self) -> Value {
         let mut serialized = Vec::new();
         for entry in &self.anchor_offsets {
-            serialized.push(Value::String(entry.anchor_type.to_string().to_owned()));
+            serialized.push(Value::String(entry.anchor_type.as_str().to_owned()));
             let offset = vec![Value::Double(f64::from(entry.offset[0])), Value::Double(f64::from(entry.offset[1]))];
             serialized.push(Value::Array(offset));
         }
@@ -86,8 +85,8 @@ impl VariableAnchorOffsetCollection {
                 return Err(format!(
                     "Cannot interpolate values containing mismatched anchors. index: {}from: {}, to: {}",
                     index,
-                    a_pair.anchor_type.to_string(),
-                    b_pair.anchor_type.to_string()
+                    a_pair.anchor_type.as_str(),
+                    b_pair.anchor_type.as_str()
                 ));
             }
             let lerp = |x: f32, y: f32| x * (1.0_f32 - t) + y * t;
@@ -107,7 +106,7 @@ impl std::fmt::Display for VariableAnchorOffsetCollection {
         for (i, entry) in self.anchor_offsets.iter().enumerate() {
             let separator = if i == 0 { "" } else { "," };
             let [x, y] = entry.offset.map(|v| to_string_double(v.into()));
-            write!(f, "{separator}\"{}\",[{x},{y}]", entry.anchor_type.to_string())?;
+            write!(f, "{separator}\"{}\",[{x},{y}]", entry.anchor_type.as_str())?;
         }
         f.write_str("]")
     }

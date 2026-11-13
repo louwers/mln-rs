@@ -13,7 +13,7 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -32,11 +32,10 @@ use mln_style_types::{TextWritingModeType, VariableAnchorOffsetCollection};
 use mln_text::glyph::WritingModeType;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature, GeometryTileLayer};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
-use mln_util::sync::{MutexExt, RwLockExt};
 use mln_vec_map::VecMap;
+use parking_lot::{Mutex, MutexGuard, RwLock};
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
@@ -473,7 +472,7 @@ fn next_bucket_instance_id() -> u32 {
 #[derive(Serialize, Deserialize)]
 pub struct SymbolBucket {
     pub base: BucketBase,
-    pub layout: Immutable<SymbolLayoutProperties::PossiblyEvaluated>,
+    pub layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
     pub bucket_leader_id: String,
 
     // Flags
@@ -528,8 +527,8 @@ impl SymbolBucket {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
-        layout: Immutable<SymbolLayoutProperties::PossiblyEvaluated>,
-        paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
+        paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         text_size: &PropertyValue<f32>,
         icon_size: &PropertyValue<f32>,
         zoom: f32,
@@ -582,12 +581,12 @@ impl SymbolBucket {
 
     /// The mutable state (render thread, after sharing).
     pub fn state(&self) -> MutexGuard<'_, SymbolBucketState> {
-        self.state.lock_unpoisoned()
+        self.state.lock()
     }
 
     /// The mutable state while the bucket is still owned (worker thread).
     pub fn state_mut(&mut self) -> &mut SymbolBucketState {
-        self.state.get_mut_unpoisoned()
+        self.state.get_mut()
     }
 
     pub fn bump_version(&self) {
@@ -863,7 +862,7 @@ impl Bucket for SymbolBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_properties.get(layer_id) {
-            let mut binders = binders.write_unpoisoned();
+            let mut binders = binders.write();
             binders.icon_binders.update_vertex_vectors(states, layer, image_positions);
             binders.text_binders.update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);

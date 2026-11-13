@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/fill_extrusion_layer_tweaker.cpp
 // (MLN_UBO_CONSOLIDATION branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
@@ -21,9 +23,7 @@ use mln_style::layers::fill_extrusion_layer_properties::{
 use mln_style::properties::Property;
 use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_util::constants::TILE_SIZE_D;
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
-use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
@@ -39,7 +39,7 @@ pub struct FillExtrusionLayerTweaker {
 }
 
 impl FillExtrusionLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         FillExtrusionLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             drawable_uniform_buffer: None,
@@ -138,7 +138,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 debug_assert!(false);
                 return;
             };
-            let binders_guard = binders_lock.read_unpoisoned();
+            let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
             let tile = get_drawable_render_tile(drawable);
             if tile.is_none() {

@@ -22,7 +22,6 @@ use feature::Value;
 use mln_conversion::{Convertible, Error};
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 use std::sync::Arc;
 
 pub use crate::layers::line_layer_impl::Impl;
@@ -48,7 +47,7 @@ impl Impl {
 #[derive(Debug)]
 pub struct LineLayer {
     /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
-    base_impl: Immutable<Impl>,
+    base_impl: Arc<Impl>,
 }
 
 impl LineLayer {
@@ -62,7 +61,7 @@ impl LineLayer {
 
     /// `LineLayer(Immutable<Impl>)`.
     #[must_use]
-    pub fn from_impl(impl_: Immutable<Impl>) -> Self {
+    pub fn from_impl(impl_: Arc<Impl>) -> Self {
         LineLayer { base_impl: impl_ }
     }
 
@@ -537,7 +536,7 @@ fn get_layer_property(layer: &LineLayer, property: Property) -> StyleProperty {
 }
 
 impl Layer for LineLayer {
-    fn base_impl(&self) -> Immutable<dyn layer::Impl> {
+    fn base_impl(&self) -> Arc<dyn layer::Impl> {
         self.base_impl.clone()
     }
 

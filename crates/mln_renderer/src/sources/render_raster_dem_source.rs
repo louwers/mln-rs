@@ -17,12 +17,11 @@ use std::sync::Arc;
 
 use mln_map_types::MapMode;
 use mln_style::layer_properties::LayerProperties;
-use mln_style::source::{self, static_immutable_cast};
+use mln_style::source::{self, downcast_arc};
 use mln_style::source_impl::Impl as _;
 use mln_style::sources::tile_source;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
-use mln_util::immutable::Immutable;
 use mln_util::tileset::Tileset;
 
 use crate::algorithm::update_tile_masks::update_tile_masks;
@@ -60,12 +59,12 @@ fn opposite(mask: DEMTileNeighbors) -> DEMTileNeighbors {
 impl RenderRasterDEMSource {
     #[must_use]
     pub fn new(impl_: Arc<tile_source::Impl>) -> Self {
-        let impl_: Immutable<dyn source::Impl> = impl_;
+        let impl_: Arc<dyn source::Impl> = impl_;
         RenderRasterDEMSource { tile_source: RenderTileSource::new(impl_), cached_tileset: None }
     }
 
     fn impl_(&self) -> Arc<tile_source::Impl> {
-        static_immutable_cast::<tile_source::Impl>(&self.tile_source.base.base_impl)
+        downcast_arc::<tile_source::Impl>(&self.tile_source.base.base_impl)
     }
 
     /// `updateInternal(tileset, layers, needsRendering, needsRelayout,
@@ -73,7 +72,7 @@ impl RenderRasterDEMSource {
     fn update_internal(
         &mut self,
         tileset: &Tileset,
-        layers: &[Immutable<dyn LayerProperties>],
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
@@ -105,7 +104,7 @@ impl RenderRasterDEMSource {
     fn backfill_tiles(&self) {
         let pyramid = &self.tile_source.tile_pyramid;
         for tile in pyramid.get_tiles().values() {
-            let Some(demtile) = tile.as_any().downcast_ref::<RasterDEMTile>() else {
+            let Some(demtile) = tile.downcast_ref::<RasterDEMTile>() else {
                 continue;
             };
             self.on_tile_changed(demtile);
@@ -153,7 +152,7 @@ impl RenderRasterDEMSource {
                 if !renderable_neighbor.is_renderable() {
                     continue;
                 }
-                let Some(border_tile) = renderable_neighbor.as_any().downcast_ref::<RasterDEMTile>() else {
+                let Some(border_tile) = renderable_neighbor.downcast_ref::<RasterDEMTile>() else {
                     continue;
                 };
                 demtile.backfill_border(border_tile, mask);
@@ -186,8 +185,8 @@ impl RenderSource for RenderRasterDEMSource {
     /// `RenderTileSetSource::update`.
     fn update(
         &mut self,
-        base_impl: Immutable<dyn source::Impl>,
-        layers: &[Immutable<dyn LayerProperties>],
+        base_impl: Arc<dyn source::Impl>,
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,

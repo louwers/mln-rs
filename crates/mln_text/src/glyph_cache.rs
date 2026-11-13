@@ -1,21 +1,20 @@
 // Ports include/mln/text/glyph_cache.hpp, src/mln/text/glyph_cache.cpp and
 // src/mln/util/weak_immutable.hpp.
 //
-// `WeakImmutable<T>` is `std::sync::Weak<T>` here, since `Immutable<T>` is an
+// `WeakImmutable<T>` is `std::sync::Weak<T>` here, since `Immutable<T>` is
 // `Arc<T>`. C++'s `std::unordered_multimap` is a map from hash to a bucket of
 // weak references.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
-use mln_util::immutable::Immutable;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::glyph::{Glyph, GlyphID};
 
 /// `GlyphCache::Range`: the glyphs parsed from one glyph range.
-pub type GlyphCacheRange = BTreeMap<GlyphID, Immutable<Glyph>>;
+pub type GlyphCacheRange = BTreeMap<GlyphID, Arc<Glyph>>;
 
 /// The table sizes below which expired entries are left in place.
 const MIN_SWEEP: usize = 4096;
@@ -109,9 +108,9 @@ impl GlyphCache {
 
     /// `intern(Glyph&&)`: the cached glyph equal to `glyph`, or `glyph`
     /// cached.
-    pub fn intern_glyph(&self, glyph: Glyph) -> Immutable<Glyph> {
+    pub fn intern_glyph(&self, glyph: Glyph) -> Arc<Glyph> {
         let hash = hash_glyph(&glyph);
-        self.inner.lock_unpoisoned().glyphs.intern(hash, glyph, |a, b| a == b)
+        self.inner.lock().glyphs.intern(hash, glyph, |a, b| a == b)
     }
 
     /// `intern(Range&&)`: the cached range that points to the same glyphs as
@@ -124,13 +123,13 @@ impl GlyphCache {
             Arc::as_ptr(glyph).hash(&mut hasher);
         }
         let hash = hasher.finish();
-        self.inner.lock_unpoisoned().ranges.intern(hash, range, same_range)
+        self.inner.lock().ranges.intern(hash, range, same_range)
     }
 
     /// `size()`: the glyphs alive, not counting ranges. Walks the whole
     /// table.
     pub fn size(&self) -> usize {
-        let inner = self.inner.lock_unpoisoned();
+        let inner = self.inner.lock();
         inner.glyphs.buckets.values().flatten().filter(|weak| weak.strong_count() > 0).count()
     }
 }

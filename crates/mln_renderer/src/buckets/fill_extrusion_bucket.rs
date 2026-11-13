@@ -7,7 +7,7 @@
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
 
-use std::sync::RwLock;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use geometry::Point;
@@ -32,12 +32,11 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::mat3::{Mat3, matrix as mat3};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::sync::RwLockExt;
 use mln_util::vectors::Vec3f;
 use mln_vec_map::VecMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -108,7 +107,7 @@ impl FillExtrusionBucket {
     #[must_use]
     pub fn new(
         layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         _overscaling: u32,
     ) -> Self {
@@ -326,7 +325,7 @@ impl Bucket for FillExtrusionBucket {
 
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut_unpoisoned().populate_vertex_vectors(
+            binders.get_mut().populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -368,7 +367,7 @@ impl Bucket for FillExtrusionBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
+            binders.write().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()
@@ -386,17 +385,15 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
     type Layout = FillExtrusionLayoutProperties::PossiblyEvaluated;
 
     fn evaluate_layout(
-        properties: &Immutable<dyn LayerProperties>,
+        properties: &Arc<dyn LayerProperties>,
         parameters: &PropertyEvaluationParameters,
     ) -> Self::Layout {
-        let properties = (**properties)
-            .as_any()
-            .downcast_ref::<FillExtrusionLayerProperties>()
-            .expect("FillExtrusionLayerProperties");
+        let properties =
+            (**properties).downcast_ref::<FillExtrusionLayerProperties>().expect("FillExtrusionLayerProperties");
         properties.layer_impl().layout.evaluate(parameters)
     }
 
-    fn pattern_property(properties: &Immutable<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
+    fn pattern_property(properties: &Arc<dyn LayerProperties>) -> &PossiblyEvaluatedFadedPropertyValue<Image> {
         get_evaluated::<FillExtrusionLayerProperties>(properties).get::<FillExtrusionPattern>()
     }
 
@@ -420,7 +417,7 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
 
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Arc<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> FillExtrusionBucket {

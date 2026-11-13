@@ -1,6 +1,5 @@
 // Ports include/mln/mtl/tile_layer_group.hpp and src/mln/mtl/tile_layer_group.cpp
 
-use std::any::Any;
 use std::cell::OnceCell;
 
 use mln_gfx::depth_mode::DepthMode;
@@ -46,12 +45,6 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
     fn base_mut(&mut self) -> &mut LayerGroupBaseData {
         &mut self.inner.base
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn as_tile_layer_group(&self) -> Option<&layer_group::TileLayerGroup> {
         Some(&self.inner)
     }
@@ -71,12 +64,12 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         if !self.inner.base.enabled || self.inner.get_drawable_count() == 0 {
             return;
         }
-        let Some(upload_pass) = upload_pass.as_any().downcast_ref::<UploadPass>() else {
+        let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() else {
             return;
         };
         self.inner.visit_drawables(|drawable| {
             if drawable.get_enabled()
-                && let Some(drawable) = drawable.as_any_mut().downcast_mut::<Drawable>()
+                && let Some(drawable) = drawable.downcast_mut::<Drawable>()
             {
                 drawable.upload(upload_pass);
             }
@@ -130,9 +123,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
             depth_mode_3d = parameters.depth_mode_for_3d(DepthMaskType::ReadWrite);
             if stencil_3d && has_stencil_tiles {
                 stencil_mode_3d = parameters.stencil_mode_for_3d();
-                if let Some(render_pass) =
-                    parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>())
-                {
+                if let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) {
                     render_pass.set_stencil_reference(stencil_mode_3d.ref_);
                 }
             }
@@ -151,9 +142,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
                 return;
             }
             if !bind_ubos {
-                if let Some(render_pass) =
-                    parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>())
-                {
+                if let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) {
                     bind_uniform_buffer_array(uniform_buffers, render_pass);
                 }
                 bind_ubos = true;
@@ -176,7 +165,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
                         own_stencil_modes[slot] = parameters.stencil_mode_for_3d();
                         if parameters.context().rendering_stats().stencil_clears != clears
                             && let Some(render_pass) =
-                                parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>())
+                                parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>())
                         {
                             bind_uniform_buffer_array(uniform_buffers, render_pass);
                         }
@@ -184,15 +173,12 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
                     stencil_mode_3d = own_stencil_modes[slot];
                     // The stencil states are made with the first one's mode,
                     // which differs from the others only in its reference.
-                    if let Some(render_pass) =
-                        parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>())
-                    {
+                    if let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) {
                         render_pass.set_stencil_reference(stencil_mode_3d.ref_);
                     }
                 }
-                if let Some(render_pass) =
-                    parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>())
-                    && let Some(context) = parameters.context().as_any().downcast_ref::<Context>()
+                if let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>())
+                    && let Some(context) = parameters.context().downcast_ref::<Context>()
                 {
                     let (depth, stencil) = (drawable.get_enable_depth(), drawable.get_enable_stencil());
                     let state = states_3d.states[usize::from(depth)][usize::from(stencil)].get_or_init(|| {

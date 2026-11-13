@@ -9,7 +9,7 @@ use mln_gfx::frame;
 use mln_util::size::Size;
 
 /// What a WebGPU draw target is made of.
-pub trait TargetResource {
+pub trait TargetResource: Any {
     /// Makes the attachments before a pass draws into them.
     fn bind(&self) {}
 
@@ -27,44 +27,17 @@ pub trait TargetResource {
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
         None
     }
-
-    fn as_any(&self) -> &dyn Any;
-}
-
-/// A resource that something else keeps a hold of too.
-impl<T: TargetResource + ?Sized> TargetResource for Rc<T> {
-    fn bind(&self) {
-        (**self).bind();
-    }
-    fn finish_frame(&self, encoder: &mut wgpu::CommandEncoder) {
-        (**self).finish_frame(encoder);
-    }
-    fn get_color_texture_view(&self) -> Option<wgpu::TextureView> {
-        (**self).get_color_texture_view()
-    }
-    fn get_color_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        (**self).get_color_texture_format()
-    }
-    fn get_depth_stencil_texture_view(&self) -> Option<wgpu::TextureView> {
-        (**self).get_depth_stencil_texture_view()
-    }
-    fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        (**self).get_depth_stencil_texture_format()
-    }
-    fn as_any(&self) -> &dyn Any {
-        (**self).as_any()
-    }
 }
 
 /// The `gfx::DrawTarget` of every WebGPU target.
 pub struct DrawTarget {
     size: Cell<Size>,
-    resource: Box<dyn TargetResource>,
+    resource: Rc<dyn TargetResource>,
 }
 
 impl DrawTarget {
-    pub fn new(size: Size, resource: impl TargetResource + 'static) -> Self {
-        DrawTarget { size: Cell::new(size), resource: Box::new(resource) }
+    pub fn new(size: Size, resource: Rc<dyn TargetResource>) -> Self {
+        DrawTarget { size: Cell::new(size), resource }
     }
 
     pub fn resource(&self) -> &dyn TargetResource {
@@ -80,18 +53,15 @@ impl frame::DrawTarget for DrawTarget {
     fn size(&self) -> Size {
         self.size.get()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// `target` as a WebGPU draw target.
 pub fn as_webgpu(target: &dyn frame::DrawTarget) -> Option<&DrawTarget> {
-    target.as_any().downcast_ref::<DrawTarget>()
+    target.downcast_ref::<DrawTarget>()
 }
 
 /// The resource of `target`, if it is a `T`.
 pub fn downcast_resource<T: 'static>(target: &dyn frame::DrawTarget) -> Option<&T> {
-    as_webgpu(target)?.resource().as_any().downcast_ref::<T>()
+    let resource: &dyn Any = as_webgpu(target)?.resource();
+    resource.downcast_ref()
 }

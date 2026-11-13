@@ -58,7 +58,9 @@ mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.11"
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
 mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.11", default-features = false }
-mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.11" }
+# Without its backends (its default features) unless a package asks for
+# them, so that a browser build of mln_c carries one.
+mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.11", default-features = false }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.11" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
@@ -72,6 +74,7 @@ mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version
 mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.11" }
 mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.11" }
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.11" }
+mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.11" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.11" }
 nunicode = { package = "mln-rs-nunicode", path = "vendor/nunicode", version = "=0.0.11" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
@@ -101,6 +104,8 @@ fontdb = { version = "0.24.0", default-features = false, features = ["fs", "memm
 # crates/mln_gl: OpenGL ES 3.0 and WebGL2 through one set of bindings.
 glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }
+# HTTP dates (Expires, Last-Modified, Retry-After): mln_util's parse_http_date.
+httpdate = { version = "1.0.3" }
 # The HTTP test server of the tests (tools/test-server).
 httpmock = { version = "0.9.0", default-features = false }
 # decodeWEBP (platform/default/src/mln/util/webp_reader.cpp); pure Rust.
@@ -143,6 +148,9 @@ buffa = { version = "0.9.2", default-features = false }
 # directories and tile IDs, in place of a port of the C++ core's vendored
 # pmtiles.hpp. The archive reading stays the port's.
 pmtiles = { version = "0.28.1", default-features = false }
+# Locks without poisoning: a panic while a lock is held doesn't make every
+# later lock panic. wgpu already depends on it.
+parking_lot = { version = "0.12.5", features = ["serde"] }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
 # The messages between a tile and its worker in another wasm instance
@@ -387,7 +395,7 @@ mln_map_types.workspace = true
 mln_math.workspace = true
 mln_mtl.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
-mln_runtime.workspace = true
+mln_runtime = { workspace = true, features = ["default"] }
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.
 mln_storage = { workspace = true, features = ["sqlite"] }
@@ -400,6 +408,7 @@ mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 mln_vulkan.workspace = true
+mln_web_host.workspace = true
 mln_webgpu.workspace = true
 nunicode.workspace = true
 polylabel.workspace = true

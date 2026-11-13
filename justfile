@@ -50,12 +50,12 @@ bench-fixtures:
     python3 -I tools/bench/fixtures.py target/bench-fixtures
 
 # Configures and builds tools/c-abi-test in target/c-abi-test-<backend>, against crates/mln_c's shared library, then runs it
-# with tools/c-abi-test/run.py, whose arguments follow: `--update` rewrites the backend's list, `-v` prints each failure. The
-# backend is MLN_C_TEST_BACKEND's: vulkan by default, whose list is expected-failures.txt, or opengl, on EGL, whose list is
-# expected-failures-opengl.txt and which runs on llvmpipe as CI does with LIBGL_ALWAYS_SOFTWARE=1. Needs CMake, a C23 and
-# C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as lavapipe (VK_DRIVER_FILES), libwayland-server and
-# libwayland-client, which the Wayland cases load, and for opengl the EGL and OpenGL ES headers and libraries.
-[doc("Run maplibre-native-ffi's ABI suite against crates/mln_c, and compare its failures with the backend's list in tools/c-abi-test")]
+# with tools/c-abi-test/run.py, whose arguments follow, such as `--jobs`. It fails when any case fails. The backend is
+# MLN_C_TEST_BACKEND's: vulkan by default, or opengl, on EGL, which runs on llvmpipe as CI does with
+# LIBGL_ALWAYS_SOFTWARE=1. Needs CMake, a C23 and C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as
+# lavapipe (VK_DRIVER_FILES), libwayland-server and libwayland-client, which the Wayland cases load, and for opengl the
+# EGL and OpenGL ES headers and libraries.
+[doc("Run maplibre-native-ffi's ABI suite against crates/mln_c")]
 [positional-arguments]
 c-abi-test *args:  _dev-shell
     #!/usr/bin/env bash
@@ -68,7 +68,7 @@ c-abi-test *args:  _dev-shell
     cargo tree -p mln-rs-c -e features --prefix none | grep -q '^mln-rs-renderer feature "font-face-shaper"'
     {{dev_shell}} cmake -S tools/c-abi-test -B "$build" -DMLN_C_LIBRARY="$PWD/$target/debug/libmaplibre_native_c.so" -DMLN_C_TEST_BACKEND="$backend"
     {{dev_shell}} cmake --build "$build" --parallel
-    {{dev_shell}} python3 -I tools/c-abi-test/run.py --backend "$backend" "$build/mln_native_abi_tests" "$@"
+    {{dev_shell}} python3 -I tools/c-abi-test/run.py "$build/mln_native_abi_tests" "$@"
 
 # Build every package and test target
 build:  _dev-shell
@@ -82,20 +82,29 @@ check:
 # needs the target, which rust-toolchain.toml installs. Clippy, so that examples/web, which only builds there, is linted
 # too. Three runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
 # on, its SQLite built through sqlite-wasm-rs, which needs a clang that targets wasm32, and the in-process font-face
-# shaper), the browser build's two modules as `just web` builds them, which leave both out, and the map's module with
-# its `webgl` feature. The check fails if anything turns SQLite back on in the browser build, or brings in a C build
-# (`cc`) that would need that clang, or if the module that draws with WebGPU gets the OpenGL backend (mln_gl and its
-# GL bindings), which only the `webgl` module needs, or if the browser build brings in ICU4X: it takes its locale
-# services from the browser's `Intl`.
+# shaper), the browser build's two modules as `just web` builds them, which leave both out, with mln_web_host, the glue
+# they share, and the map's module with its `webgl` feature. The check fails if anything turns SQLite back on in the
+# browser build, or brings in a C build (`cc`) that would need that clang, or if the module that draws with WebGPU gets
+# the OpenGL backend (mln_gl and its GL bindings), which only the `webgl` module needs, or if the browser build brings
+# in ICU4X: it takes its locale services from the browser's `Intl`. Then the C library (crates/mln_c, with mln_runtime) as
+# its browser package builds it, once per backend, with the same checks on what it brings in, and neither backend's
+# package may carry the other's.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:  _dev-shell
     {{dev_shell}} cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
-    cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+    cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper -p mln-rs-web-host
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --features webgl
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal,build --prefix none | grep -q '^cc '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^(mln-rs-gl|glow) '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^icu_'
+    for backend in webgpu gl; do \
+      cargo clippy --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features "$backend" && \
+      ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features "$backend" --edges normal --prefix none | grep -Eq '^(rusqlite|icu_) ' && \
+      ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features "$backend" --edges normal,build --prefix none | grep -q '^cc ' || exit 1; \
+    done
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features webgpu --edges normal --prefix none | grep -Eq '^(mln-rs-gl|glow) '
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-c --no-default-features --features gl --edges normal --prefix none | grep -Eq '^(mln-rs-webgpu|wgpu) '
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))
@@ -230,6 +239,41 @@ web:
     pnpm -C examples/web install --frozen-lockfile
     pnpm -C examples/web build
 
+# maplibre-native-ffi's C ABI (crates/mln_c) as a browser package for a JavaScript host, one per backend: `webgpu` or `gl`
+# (WebGL2), each with that backend only. Into target/c-web/<backend>: wasm-bindgen's bindings of the module
+# (maplibre_native_c.js, whose instance's exports are the raw `mln_*` functions and its memory, beside the JavaScript
+# contract in crates/mln_c/src/web.rs), the tile worker script and shaper loader under snippets/, and the font-face
+# shaper module (mln_web_shaper.js). Built with the Cargo profile in `profile`, as `web` builds.
+[doc("Build crates/mln_c's browser package for one backend (webgpu or gl) into target/c-web/<backend>")]
+c-web backend="webgpu":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ {{quote(profile)}} == release ]]; then
+      export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+    fi
+    target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
+    pkg="${CARGO_TARGET_DIR:-target}/c-web/{{backend}}"
+    # The tile worker script imports the bindings beside it, so it stays a file (`--split-linked-modules`).
+    bind() {
+      wasm-bindgen --target web --split-linked-modules --out-dir "$pkg" "$target/$1.wasm"
+      if [[ {{quote(profile)}} != dev ]]; then
+        wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
+          --strip-debug --strip-producers --strip-target-features "$pkg/$1_bg.wasm" -o "$pkg/$1_bg.wasm"
+      fi
+    }
+    rm -rf "$pkg"
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-c -p mln-rs-web-shaper \
+      --no-default-features --features mln-rs-c/{{backend}}
+    bind maplibre_native_c
+    bind mln_web_shaper
+
+# Loads the package in headless Chromium and drives its raw C ABI from a Web Worker, as a JavaScript host does, until a
+# map with a GeoJSON layer that the tile workers lay out shows on an OffscreenCanvas (crates/mln_c/web-check). Needs Node
+# 24 and Playwright's Chromium (`npx playwright@1.61.1 install chromium`), as `web-check` does.
+[doc("Check crates/mln_c's browser package for one backend in headless Chromium")]
+c-web-check backend="webgpu":  (c-web backend)
+    node crates/mln_c/web-check/check.mjs "${CARGO_TARGET_DIR:-target}/c-web/{{backend}}" {{backend}}
+
 # Vite's dev server, which reloads the page's scripts as they change; `just web` again rebuilds the modules.
 [doc("Serve the browser build's page from its sources (examples/web/web) at http://localhost:5173/")]
 web-dev:  web
@@ -360,18 +404,17 @@ update-testdata checkout=cpp:
     done
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
-# The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
-# builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then the declarations are
-# regenerated. The copies are from maplibre/maplibre-native-ffi's t3/gpu-device-targets branch at 4b07678a7978, which
-# reshapes the API around mln-rs ahead of its merge (maplibre/maplibre-native-ffi#1799).
+# The headers go to crates/mln_c/include and the ABI suite, with the support files, fixtures and GPU fixtures it builds
+# with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then the declarations are
+# regenerated. The copies are from maplibre/maplibre-native-ffi's t3/build-on-mln-rs branch at 385c24b2bb56, which
+# reshapes the API around mln-rs and builds the C library from it, ahead of its merge (maplibre/maplibre-native-ffi#1801).
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash
     set -euo pipefail
     rsync -a --delete {{quote(checkout)}}/include/maplibre_native_c/ crates/mln_c/include/maplibre_native_c/
-    rsync -a --delete {{quote(checkout)}}/include/mln/ crates/mln_c/include/mln/
     cp {{quote(checkout)}}/include/maplibre_native_c.h {{quote(checkout)}}/LICENSE crates/mln_c/include/
-    for dir in tests/native/abi tests/native/support tests/native/plugin tests/native/fixtures tests/graphics; do
+    for dir in tests/native/abi tests/native/support tests/native/fixtures tests/graphics; do
         mkdir -p "tools/c-abi-test/testdata/$dir"
         rsync -a --delete {{quote(checkout)}}/"$dir"/ "tools/c-abi-test/testdata/$dir"/
     done

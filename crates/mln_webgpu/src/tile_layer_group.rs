@@ -1,7 +1,5 @@
 // Ports include/mln/webgpu/tile_layer_group.hpp and src/mln/webgpu/tile_layer_group.cpp
 
-use std::any::Any;
-
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable::Drawable as _;
 use mln_gfx::paint_parameters::PaintParameters;
@@ -35,12 +33,6 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
     fn base_mut(&mut self) -> &mut LayerGroupBaseData {
         &mut self.inner.base
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn as_tile_layer_group(&self) -> Option<&layer_group::TileLayerGroup> {
         Some(&self.inner)
     }
@@ -60,12 +52,12 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         if !self.inner.base.enabled || self.inner.get_drawable_count() == 0 {
             return;
         }
-        let Some(upload_pass) = upload_pass.as_any().downcast_ref::<UploadPass>() else {
+        let Some(upload_pass) = upload_pass.downcast_ref::<UploadPass>() else {
             return;
         };
         self.inner.visit_drawables(|drawable| {
             if drawable.get_enabled()
-                && let Some(drawable) = drawable.as_any_mut().downcast_mut::<Drawable>()
+                && let Some(drawable) = drawable.downcast_mut::<Drawable>()
             {
                 drawable.upload(upload_pass);
             }
@@ -160,7 +152,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
                 tweaker.execute(drawable, parameters);
             }
 
-            if features_3d && let Some(webgpu_drawable) = drawable.as_any_mut().downcast_mut::<Drawable>() {
+            if features_3d && let Some(webgpu_drawable) = drawable.downcast_mut::<Drawable>() {
                 let depth = match (webgpu_drawable.get_enable_depth(), depth_mode_3d) {
                     (true, Some(d)) => d,
                     _ => DepthMode::disabled(),

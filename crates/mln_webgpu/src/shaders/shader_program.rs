@@ -10,7 +10,6 @@
 // TODO(port): the `ShaderProgram(name, backend, vertexModule, fragmentModule)`
 // constructor for precompiled modules (unused on the M1 path).
 
-use std::any::Any;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -77,19 +76,17 @@ fn validated<T>(device: &wgpu::Device, create: impl FnOnce() -> T) -> Result<T, 
 /// doesn't parse goes as WGSL, for wgpu to report its error.
 #[cfg(not(target_family = "wasm"))]
 fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
-    use std::sync::Mutex;
-
-    use mln_util::sync::MutexExt;
+    use parking_lot::Mutex;
 
     static PARSED: Mutex<Option<HashMap<String, wgpu::naga::Module>>> = Mutex::new(None);
-    let cached = PARSED.lock_unpoisoned().get_or_insert_default().get(source).cloned();
+    let cached = PARSED.lock().get_or_insert_default().get(source).cloned();
     let module = if let Some(module) = cached {
         module
     } else {
         let Ok(module) = wgpu::naga::front::wgsl::parse_str(source) else {
             return wgpu::ShaderSource::Wgsl(Cow::Borrowed(source));
         };
-        PARSED.lock_unpoisoned().get_or_insert_default().insert(source.to_owned(), module.clone());
+        PARSED.lock().get_or_insert_default().insert(source.to_owned(), module.clone());
         module
     };
     wgpu::ShaderSource::Naga(Cow::Owned(module))
@@ -277,15 +274,13 @@ impl ShaderProgram {
             has_fragment_entry_point: true,
             logged_missing_entry_point: Cell::new(false),
         };
-        let Some(device) = context.get_backend().get_device() else {
-            return program;
-        };
+        let device = context.get_backend().device();
 
         program.has_vertex_entry_point = !trim_string(vertex_source).is_empty();
         program.has_fragment_entry_point = !trim_string(fragment_source).is_empty();
 
         let create_module = |label: &str, source: &str| -> Option<wgpu::ShaderModule> {
-            let module = validated(&device, || {
+            let module = validated(device, || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some(label),
                     source: shader_source(source),
@@ -410,9 +405,7 @@ impl ShaderProgram {
     }
 
     fn create_pipeline_layout(&mut self, vertex_source: &str, fragment_source: &str) {
-        let Some(device) = self.context.get_backend().get_device() else {
-            return;
-        };
+        let device = self.context.get_backend().device().clone();
         if !vertex_source.is_empty() || !fragment_source.is_empty() {
             self.binding_infos.clear();
             if !vertex_source.is_empty() {
@@ -563,12 +556,10 @@ impl ShaderProgram {
 
         for (group, mut infos) in grouped {
             infos.sort_by_key(|info| info.binding);
-            if Some(group) == self.index_group
-                && let Some(layout) = self.context.index_bind_group_layout()
-            {
+            if Some(group) == self.index_group {
                 self.bind_group_order.push(group);
                 self.bindings_per_group.push(infos);
-                self.bind_group_layouts.push(layout);
+                self.bind_group_layouts.push(self.context.index_bind_group_layout());
                 continue;
             }
             let layout_entries: Vec<wgpu::BindGroupLayoutEntry> = infos
@@ -627,7 +618,7 @@ impl ShaderProgram {
         draw_mode_type: DrawModeType,
         cull_mode: CullFaceMode,
     ) -> Option<wgpu::RenderPipeline> {
-        let device = self.context.get_backend().get_device();
+        let device = self.context.get_backend().device();
         if !self.has_vertex_entry_point || !self.has_fragment_entry_point {
             if !self.logged_missing_entry_point.get() {
                 eprintln!(
@@ -638,12 +629,9 @@ impl ShaderProgram {
             }
             return None;
         }
-        let (Some(device), Some(vertex_module), Some(fragment_module), Some(pipeline_layout)) = (
-            device,
-            self.vertex_shader_module.as_ref(),
-            self.fragment_shader_module.as_ref(),
-            self.pipeline_layout.as_ref(),
-        ) else {
+        let (Some(vertex_module), Some(fragment_module), Some(pipeline_layout)) =
+            (self.vertex_shader_module.as_ref(), self.fragment_shader_module.as_ref(), self.pipeline_layout.as_ref())
+        else {
             eprintln!(
                 "createPipeline missing requirement: vertexModule={}, fragmentModule={}, pipelineLayout={}",
                 self.vertex_shader_module.is_some(),
@@ -777,7 +765,7 @@ impl ShaderProgram {
 
         // Create render pipeline (inside an error scope: a failure is the C++
         // null pipeline)
-        let pipeline = validated(&device, || {
+        let pipeline = validated(device, || {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(&self.shader_name),
                 layout: Some(pipeline_layout),
@@ -808,9 +796,6 @@ impl Shader for ShaderProgram {
     fn type_name(&self) -> &'static str {
         Self::NAME
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 impl ShaderProgramBase for ShaderProgram {
@@ -830,7 +815,7 @@ impl ShaderProgramBase for ShaderProgram {
 
 /// Downcast a shader handle to the WebGPU program (C++ `static_cast`).
 pub fn as_webgpu_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
-    shader.as_any().downcast_ref::<ShaderProgram>()
+    shader.downcast_ref::<ShaderProgram>()
 }
 
 /// How the vendored sources declare `globalIndex`.

@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/raster_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
 // branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
@@ -13,7 +15,6 @@ use mln_style::layers::raster_layer_properties::{
     RasterSaturation,
 };
 use mln_style_types::TranslateAnchorType;
-use mln_util::immutable::Immutable;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -26,7 +27,7 @@ pub struct RasterLayerTweaker {
 }
 
 impl RasterLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         RasterLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,

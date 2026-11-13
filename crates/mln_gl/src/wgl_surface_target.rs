@@ -4,7 +4,6 @@
 // keeps the library's after the target is gone, and takes a target of the
 // library's again.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -94,10 +93,6 @@ impl TargetResource for WindowResource {
             context.bind_framebuffer(None, self.size.get(), true);
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Frames presented to a Win32 window, from a WGL context of the window's
@@ -164,7 +159,7 @@ impl FrameTarget for SurfaceTarget {
         let mut image = self.image.borrow_mut();
         if image.is_none() {
             let resource = WindowResource { context: self.backend.gl_context()?.weak(), size: self.size.clone() };
-            *image = Some(Rc::new(DrawTarget::new(size, resource)));
+            *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
         let image = image.clone()?;
         image.set_size(size);

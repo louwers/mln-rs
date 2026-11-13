@@ -3,6 +3,7 @@
 
 use core::ffi::c_void;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
 use mln_style::TransitionOptions;
@@ -10,11 +11,9 @@ use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
 use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_tile_id::CanonicalTileID;
-use mln_util::chrono::Duration;
 use mln_util::constants;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
@@ -661,7 +660,7 @@ impl CompletionValue for LentLayers {
 /// A style image, whose pixels and intervals its `mln_style_image_info`
 /// lends.
 struct LentImage {
-    image: Immutable<StyleImage>,
+    image: Arc<StyleImage>,
     stretch_x: Vec<mln_image_stretch>,
     stretch_y: Vec<mln_image_stretch>,
 }
@@ -671,7 +670,7 @@ fn lend_stretches(stretches: &[mln_image_stretch]) -> *const mln_image_stretch {
 }
 
 impl LentImage {
-    fn new(image: Immutable<StyleImage>) -> Self {
+    fn new(image: Arc<StyleImage>) -> Self {
         let intervals = |stretches: &[(f32, f32)]| {
             stretches.iter().map(|&(from, to)| mln_image_stretch { from, to }).collect::<Vec<_>>()
         };
@@ -1867,8 +1866,8 @@ pub unsafe extern "C" fn mln_map_get_style_light_property(
 /// within the duration's range.
 fn transition_duration(milliseconds: f64, name: &str) -> Result<Duration, Error> {
     let nanos = milliseconds * 1e6;
-    if milliseconds.is_finite() && milliseconds >= 0.0 && nanos < i64::MAX as f64 {
-        Ok(Duration::from_nanos(nanos.round() as i64))
+    if milliseconds.is_finite() && milliseconds >= 0.0 && nanos < u64::MAX as f64 {
+        Ok(Duration::from_nanos(nanos.round() as u64))
     } else {
         Err(Error::invalid_argument(format!(
             "transition {name} must be finite, not negative, and fit the native duration range"
@@ -1896,7 +1895,7 @@ fn transition_options(options: &mln_style_transition_options) -> Result<Transiti
 }
 
 fn from_transition_options(options: TransitionOptions) -> mln_style_transition_options {
-    let milliseconds = |duration: Duration| duration.count() as f64 / 1e6;
+    let milliseconds = |duration: Duration| duration.as_nanos() as f64 / 1e6;
     mln_style_transition_options {
         size: size_of::<mln_style_transition_options>() as u32,
         // The style always holds whether placements fade.

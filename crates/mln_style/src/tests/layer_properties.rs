@@ -1,18 +1,17 @@
 //! `getEvaluated` / `getCrossfade` (`include/mln/style/layer_properties.hpp`)
-//! on a real `BackgroundLayerProperties` behind `Immutable<LayerProperties>`.
+//! on a real `BackgroundLayerProperties` behind `Arc<dyn LayerProperties>`.
 //! No C++ gtest; the renderer reads evaluated properties this way.
 
 use std::sync::Arc;
 
 use mln_util::Color;
-use mln_util::immutable::Immutable;
 
 use crate::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use crate::layers::background_layer::Impl as BackgroundLayerImpl;
 use crate::layers::{BackgroundLayerProperties, BackgroundPaintProperties};
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 
-fn background_properties() -> Immutable<dyn LayerProperties> {
+fn background_properties() -> Arc<dyn LayerProperties> {
     let evaluated = BackgroundPaintProperties::PossiblyEvaluated {
         background_color: Color::new(0.25, 0.5, 0.75, 1.0),
         background_opacity: 0.5,

@@ -9,18 +9,19 @@
 //! `release_abandoned_user_data`.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use mln_util::ErrorKind;
+use parking_lot::Mutex;
 
+use crate::abi;
 use crate::callback::{UserData, Wake};
 use crate::error::Error;
 use crate::generated::types::{
     mln_delivery_queue, mln_delivery_queue_options, mln_diagnostic, mln_status, mln_user_data_release, mln_wake,
 };
 use crate::handles::{self, HandleKind, HandleTable};
-use crate::{abi, lock};
 
 /// One queued call. Dropping it without running it drops what it owns.
 pub(crate) struct Call {
@@ -48,7 +49,7 @@ pub(crate) struct Hold {
 impl Drop for Hold {
     fn drop(&mut self) {
         if let Some(id) = self.id.take() {
-            lock(&self.queue.state).held.remove(&id);
+            self.queue.state.lock().held.remove(&id);
         }
     }
 }
@@ -88,7 +89,7 @@ impl Queue {
     /// when the queue was released, which then can't report the user data,
     /// so the call that names the queue fails and leaves it with the caller.
     pub(crate) fn hold(self: &Arc<Self>, user_data: UserData) -> Result<Option<Hold>, Error> {
-        let mut state = lock(&self.state);
+        let mut state = self.state.lock();
         if state.closed {
             return Err(Error::invalid_state("the delivery queue was released"));
         }
@@ -119,7 +120,7 @@ impl Queue {
 
     fn append(&self, mut call: Call, settled: Option<u64>) -> Result<(), Call> {
         let wake = {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock();
             // A released queue already reported the settled hold.
             if state.closed {
                 return Err(call);
@@ -161,7 +162,7 @@ impl Queue {
 
     fn run_calls(&self) {
         {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock();
             if state.closed {
                 return;
             }
@@ -170,7 +171,7 @@ impl Queue {
         }
         loop {
             let call = {
-                let mut state = lock(&self.state);
+                let mut state = self.state.lock();
                 if state.closed {
                     return;
                 }
@@ -188,7 +189,7 @@ impl Queue {
     /// last calls.
     fn close(&self) {
         let (running, pending, held, wake) = {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock();
             state.closed = true;
             (
                 core::mem::take(&mut state.running),
@@ -340,13 +341,13 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn take(&self) -> String {
-            core::mem::take(&mut *lock(&self.0))
+            core::mem::take(&mut *self.0.lock())
         }
 
         pub(crate) fn record(user_data: UserData, kind: char) {
             // SAFETY: every test's user data is an `Entry` from `pointer`.
             let entry = unsafe { &*user_data.get().cast::<Entry>() };
-            let mut log = lock(&entry.log.0);
+            let mut log = entry.log.0.lock();
             log.push(entry.tag);
             log.push(kind);
         }
@@ -516,11 +517,11 @@ pub(crate) mod tests {
             Log::record(tag, 'c');
             let nested = dispatch(queue);
             let concurrent = std::thread::spawn(move || dispatch(queue)).join().unwrap();
-            lock(&seen).extend([nested, concurrent]);
+            seen.lock().extend([nested, concurrent]);
             push(queue, move || Log::record(later, 'c'));
         });
         assert_eq!(dispatch(queue), MLN_STATUS_OK);
-        assert_eq!(*lock(&statuses), [MLN_STATUS_BUSY, MLN_STATUS_BUSY]);
+        assert_eq!(*statuses.lock(), [MLN_STATUS_BUSY, MLN_STATUS_BUSY]);
         assert_eq!(log.take(), "AcLc");
         mln_delivery_queue_release(queue);
     }

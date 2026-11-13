@@ -1,11 +1,12 @@
-// Ports include/mln/style/types.hpp + src/mln/style/types.cpp (the enum
-// names, MBGL_DEFINE_ENUM -> mln_util::define_enum!).
+// Ports include/mln/style/types.hpp + src/mln/style/types.cpp.
 //
 // Variant order and discriminants follow the C++ enums, except that
 // `SourceType` has no `Video` or `Annotations`: mln-rs has neither source.
 // `TextVariableAnchorType` is an alias of `SymbolAnchorType` as in C++.
 
-use mln_util::define_enum;
+use std::str::FromStr;
+
+use mln_util::ParseEnumError;
 use serde::{Deserialize, Serialize};
 
 // TODO: should be in public source.hpp header
@@ -198,143 +199,149 @@ pub enum LightAnchorType {
     Viewport,
 }
 
-// --- src/mln/style/types.cpp ---
-// Quirk kept: SourceType has no names for RasterDEM and CustomMVTVector
-// (the C++ table omits them; toString asserts on them).
+/// Implements `as_str` and `FromStr` for a style enum from each value's name
+/// in a style. The `match`es are exhaustive, so every value has a name.
+macro_rules! style_spec_names {
+    ($t:ident { $($variant:ident => $name:literal),* $(,)? }) => {
+        impl $t {
+            /// The value's name in a style.
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $name,)*
+                }
+            }
+        }
 
-define_enum!(
-    SourceType,
-    [
-        (SourceType::Vector, "vector"),
-        (SourceType::Raster, "raster"),
-        (SourceType::GeoJSON, "geojson"),
-        (SourceType::Image, "image"),
-        (SourceType::CustomVector, "customvector"),
-    ]
-);
+        impl FromStr for $t {
+            type Err = ParseEnumError;
 
-define_enum!(VisibilityType, [(VisibilityType::Visible, "visible"), (VisibilityType::None, "none"),]);
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match s {
+                    $($name => Ok(Self::$variant),)*
+                    _ => Err(ParseEnumError),
+                }
+            }
+        }
+    };
+}
 
-define_enum!(TranslateAnchorType, [(TranslateAnchorType::Map, "map"), (TranslateAnchorType::Viewport, "viewport"),]);
+style_spec_names!(VisibilityType {
+    Visible => "visible",
+    None => "none",
+});
 
-define_enum!(
-    RasterResamplingType,
-    [(RasterResamplingType::Linear, "linear"), (RasterResamplingType::Nearest, "nearest"),]
-);
+style_spec_names!(TranslateAnchorType {
+    Map => "map",
+    Viewport => "viewport",
+});
 
-define_enum!(ResamplingType, [(ResamplingType::Linear, "linear"), (ResamplingType::Nearest, "nearest"),]);
+style_spec_names!(RasterResamplingType {
+    Linear => "linear",
+    Nearest => "nearest",
+});
 
-define_enum!(
-    HillshadeIlluminationAnchorType,
-    [(HillshadeIlluminationAnchorType::Map, "map"), (HillshadeIlluminationAnchorType::Viewport, "viewport"),]
-);
+style_spec_names!(ResamplingType {
+    Linear => "linear",
+    Nearest => "nearest",
+});
 
-define_enum!(RotateAnchorType, [(RotateAnchorType::Map, "map"), (RotateAnchorType::Viewport, "viewport"),]);
+style_spec_names!(HillshadeIlluminationAnchorType {
+    Map => "map",
+    Viewport => "viewport",
+});
 
-define_enum!(CirclePitchScaleType, [(CirclePitchScaleType::Map, "map"), (CirclePitchScaleType::Viewport, "viewport"),]);
+style_spec_names!(RotateAnchorType {
+    Map => "map",
+    Viewport => "viewport",
+});
 
-define_enum!(
-    LineCapType,
-    [(LineCapType::Round, "round"), (LineCapType::Butt, "butt"), (LineCapType::Square, "square"),]
-);
+style_spec_names!(CirclePitchScaleType {
+    Map => "map",
+    Viewport => "viewport",
+});
 
-define_enum!(
-    LineJoinType,
-    [
-        (LineJoinType::Miter, "miter"),
-        (LineJoinType::Bevel, "bevel"),
-        (LineJoinType::Round, "round"),
-        (LineJoinType::FakeRound, "fakeround"),
-        (LineJoinType::FlipBevel, "flipbevel"),
-    ]
-);
+style_spec_names!(LineCapType {
+    Round => "round",
+    Butt => "butt",
+    Square => "square",
+});
 
-define_enum!(
-    SymbolPlacementType,
-    [
-        (SymbolPlacementType::Point, "point"),
-        (SymbolPlacementType::Line, "line"),
-        (SymbolPlacementType::LineCenter, "line-center"),
-    ]
-);
+style_spec_names!(LineJoinType {
+    Miter => "miter",
+    Bevel => "bevel",
+    Round => "round",
+    FakeRound => "fakeround",
+    FlipBevel => "flipbevel",
+});
 
-define_enum!(
-    SymbolAnchorType,
-    [
-        (SymbolAnchorType::Center, "center"),
-        (SymbolAnchorType::Left, "left"),
-        (SymbolAnchorType::Right, "right"),
-        (SymbolAnchorType::Top, "top"),
-        (SymbolAnchorType::Bottom, "bottom"),
-        (SymbolAnchorType::TopLeft, "top-left"),
-        (SymbolAnchorType::TopRight, "top-right"),
-        (SymbolAnchorType::BottomLeft, "bottom-left"),
-        (SymbolAnchorType::BottomRight, "bottom-right"),
-    ]
-);
+style_spec_names!(SymbolPlacementType {
+    Point => "point",
+    Line => "line",
+    LineCenter => "line-center",
+});
 
-define_enum!(
-    SymbolZOrderType,
-    [
-        (SymbolZOrderType::Auto, "auto"),
-        (SymbolZOrderType::ViewportY, "viewport-y"),
-        (SymbolZOrderType::Source, "source"),
-    ]
-);
+style_spec_names!(SymbolAnchorType {
+    Center => "center",
+    Left => "left",
+    Right => "right",
+    Top => "top",
+    Bottom => "bottom",
+    TopLeft => "top-left",
+    TopRight => "top-right",
+    BottomLeft => "bottom-left",
+    BottomRight => "bottom-right",
+});
 
-define_enum!(
-    TextJustifyType,
-    [
-        (TextJustifyType::Auto, "auto"),
-        (TextJustifyType::Center, "center"),
-        (TextJustifyType::Left, "left"),
-        (TextJustifyType::Right, "right"),
-    ]
-);
+style_spec_names!(SymbolZOrderType {
+    Auto => "auto",
+    ViewportY => "viewport-y",
+    Source => "source",
+});
 
-define_enum!(
-    TextTransformType,
-    [
-        (TextTransformType::None, "none"),
-        (TextTransformType::Uppercase, "uppercase"),
-        (TextTransformType::Lowercase, "lowercase"),
-    ]
-);
+style_spec_names!(TextJustifyType {
+    Auto => "auto",
+    Center => "center",
+    Left => "left",
+    Right => "right",
+});
 
-define_enum!(
-    TextWritingModeType,
-    [(TextWritingModeType::Horizontal, "horizontal"), (TextWritingModeType::Vertical, "vertical"),]
-);
+style_spec_names!(TextTransformType {
+    None => "none",
+    Uppercase => "uppercase",
+    Lowercase => "lowercase",
+});
 
-define_enum!(
-    AlignmentType,
-    [(AlignmentType::Map, "map"), (AlignmentType::Viewport, "viewport"), (AlignmentType::Auto, "auto"),]
-);
+style_spec_names!(TextWritingModeType {
+    Horizontal => "horizontal",
+    Vertical => "vertical",
+});
 
-define_enum!(
-    IconTextFitType,
-    [
-        (IconTextFitType::None, "none"),
-        (IconTextFitType::Both, "both"),
-        (IconTextFitType::Width, "width"),
-        (IconTextFitType::Height, "height"),
-    ]
-);
+style_spec_names!(AlignmentType {
+    Map => "map",
+    Viewport => "viewport",
+    Auto => "auto",
+});
 
-define_enum!(LightAnchorType, [(LightAnchorType::Map, "map"), (LightAnchorType::Viewport, "viewport"),]);
+style_spec_names!(IconTextFitType {
+    None => "none",
+    Both => "both",
+    Width => "width",
+    Height => "height",
+});
 
-// `Enum<HillshadeMethodType>` is defined next to the hillshade layer in C++
-// (src/mln/style/conversion/hillshade_conversions.cpp), with these names.
-define_enum!(
-    HillshadeMethodType,
-    [
-        (HillshadeMethodType::Standard, "standard"),
-        (HillshadeMethodType::Basic, "basic"),
-        (HillshadeMethodType::Combined, "combined"),
-        (HillshadeMethodType::Igor, "igor"),
-        (HillshadeMethodType::Multidirectional, "multidirectional"),
-    ]
-);
+style_spec_names!(LightAnchorType {
+    Map => "map",
+    Viewport => "viewport",
+});
+
+style_spec_names!(HillshadeMethodType {
+    Standard => "standard",
+    Basic => "basic",
+    Combined => "combined",
+    Igor => "igor",
+    Multidirectional => "multidirectional",
+});
 
 /// `template <class T> struct Interpolator<T, enable_if_t<is_enum_v<T>>> :
 /// Uninterpolated` (include/mln/util/interpolate.hpp): returns the first
@@ -374,21 +381,19 @@ uninterpolated_enums!(
 
 #[cfg(test)]
 mod tests {
-    use mln_util::enum_::Enum;
-
     use super::*;
 
     #[test]
     fn visibility_names() {
-        assert_eq!(VisibilityType::to_enum("visible"), Some(VisibilityType::Visible));
-        assert_eq!(VisibilityType::to_enum("none"), Some(VisibilityType::None));
-        assert_eq!(VisibilityType::to_enum("hidden"), None);
-        assert_eq!(VisibilityType::None.to_string(), "none");
+        assert_eq!("visible".parse(), Ok(VisibilityType::Visible));
+        assert_eq!("none".parse(), Ok(VisibilityType::None));
+        assert_eq!("hidden".parse::<VisibilityType>(), Err(ParseEnumError));
+        assert_eq!(VisibilityType::None.as_str(), "none");
     }
 
     #[test]
     fn symbol_anchor_names() {
-        assert_eq!(SymbolAnchorType::to_enum("bottom-right"), Some(SymbolAnchorType::BottomRight));
-        assert_eq!(TextVariableAnchorType::TopLeft.to_string(), "top-left");
+        assert_eq!("bottom-right".parse(), Ok(SymbolAnchorType::BottomRight));
+        assert_eq!(TextVariableAnchorType::TopLeft.as_str(), "top-left");
     }
 }

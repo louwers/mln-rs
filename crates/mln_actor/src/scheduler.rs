@@ -13,10 +13,10 @@
 // TODO(port): `runOnRenderThread`/`runRenderJobs`.
 
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use mln_util::identity::SimpleIdentity;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::cooperative_scheduler::CooperativeScheduler;
 use crate::local_object::LocalObject;
@@ -91,6 +91,15 @@ pub fn install_cooperative(scheduler: Arc<CooperativeScheduler>) {
     }
 }
 
+/// Port-only: the installed cooperative scheduler, after installing a new
+/// one if none is: `install_cooperative` for hosts that may each try to
+/// install it, such as libraries that share a wasm instance. The first
+/// install must still come before anything gets a scheduler or starts a
+/// `Thread`.
+pub fn install_cooperative_once() -> &'static Arc<CooperativeScheduler> {
+    COOPERATIVE.get_or_init(|| Arc::new(CooperativeScheduler::new()))
+}
+
 /// Port-only: the scheduler `install_cooperative` installed, if any.
 pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
     COOPERATIVE.get()
@@ -104,7 +113,7 @@ pub fn get_background() -> SchedulerPtr {
     if let Some(cooperative) = cooperative() {
         return cooperative.clone();
     }
-    let mut weak = WEAK.lock_unpoisoned();
+    let mut weak = WEAK.lock();
     if let Some(scheduler) = weak.as_ref().and_then(Weak::upgrade) {
         return scheduler;
     }
@@ -126,7 +135,7 @@ pub fn get_sequenced() -> SchedulerPtr {
     if let Some(cooperative) = cooperative() {
         return cooperative.clone();
     }
-    let mut state = STATE.lock_unpoisoned();
+    let mut state = STATE.lock();
     if state.weaks.is_empty() {
         state.weaks.resize(SCHEDULERS_COUNT, None);
     }

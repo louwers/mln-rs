@@ -1,11 +1,12 @@
 // Ports test/actor/actor.test.cpp.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler::{self, Scheduler, SchedulerPtr, Task};
+use parking_lot::Mutex;
 
 use crate::{get, wait, wait_for};
 
@@ -98,8 +99,8 @@ fn destruction_blocks_on_send() {
             unreachable!();
         }
         fn schedule(&self, _task: Task) {
-            self.promise.lock().unwrap().send(()).unwrap();
-            wait(&self.future.lock().unwrap());
+            self.promise.lock().send(()).unwrap();
+            wait(&self.future.lock());
             std::thread::sleep(Duration::from_millis(1));
             self.waited.store(true, Ordering::SeqCst);
         }
@@ -151,11 +152,11 @@ fn destruction_allowed_in_receive_on_same_thread() {
 
     // Callback (triggered while mutex is locked in Mailbox::receive())
     let slot = test.clone();
-    let self_ref = test.lock().unwrap().as_ref().unwrap().self_ref();
+    let self_ref = test.lock().as_ref().unwrap().self_ref();
     self_ref.invoke(move |_: &mut TestActor| {
         TestActor::call_me_back(|| {
             // Destroy the Actor/Mailbox in the same thread
-            let actor = slot.lock().unwrap().take();
+            let actor = slot.lock().take();
             drop(actor);
             callback_fired_promise.send(()).unwrap();
         });
@@ -185,7 +186,7 @@ fn self_destruction_doesnt_crash_waiting_receiving_threads() {
 
     let waiting_message_processed = Arc::new(AtomicBool::new(false));
 
-    let closing_ref = closing_actor.lock().unwrap().as_ref().unwrap().self_ref();
+    let closing_ref = closing_actor.lock().as_ref().unwrap().self_ref();
     let waiting_ref = waiting_actor.self_ref();
     let slot = closing_actor.clone();
     let processed = waiting_message_processed.clone();
@@ -213,7 +214,7 @@ fn self_destruction_doesnt_crash_waiting_receiving_threads() {
             queued_ok_in.store(wait_for(&message_queued_future, Duration::from_secs(1)).is_some(), Ordering::SeqCst);
 
             // Destroy the Actor/Mailbox in the same thread
-            let actor = slot.lock().unwrap().take();
+            let actor = slot.lock().take();
             drop(actor);
             actor_closed_promise.send(()).unwrap();
         });

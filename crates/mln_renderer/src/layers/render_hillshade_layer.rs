@@ -32,7 +32,7 @@ use mln_gfx::{
     ShaderRegistry,
 };
 use mln_map_types::TransformState;
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
 use mln_style::layers::hillshade_layer_properties::{
@@ -42,7 +42,6 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::constants;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
@@ -62,7 +61,7 @@ use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &HillshadeLayerImpl {
+fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HillshadeLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), HillshadeLayerImpl::static_type_info()));
     impl_.downcast_ref::<HillshadeLayerImpl>().expect("RenderHillshadeLayer: not a hillshade layer impl")
 }
@@ -95,9 +94,9 @@ pub struct RenderHillshadeLayer {
 }
 
 impl RenderHillshadeLayer {
-    pub fn new(impl_: Immutable<HillshadeLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<HillshadeLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(HillshadeLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(HillshadeLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHillshadeLayer {
@@ -176,7 +175,7 @@ impl RenderLayer for RenderHillshadeLayer {
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        _new_layer: &Immutable<dyn layer::Impl>,
+        _new_layer: &Arc<dyn layer::Impl>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
         // RenderLayer::layerChanged
@@ -187,7 +186,7 @@ impl RenderLayer for RenderHillshadeLayer {
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = get_evaluated::<HillshadeLayerProperties>(&self.base.evaluated_properties).clone();
         let mut properties = HillshadeLayerProperties::with_evaluated(
-            static_immutable_cast::<HillshadeLayerImpl>(&self.base.base_impl),
+            downcast_arc::<HillshadeLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 

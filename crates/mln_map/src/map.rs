@@ -25,7 +25,6 @@ use mln_style::source::Source;
 use mln_style::sprite::Sprite;
 use mln_style::{Style, StyleLoadError};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
-use mln_util::chrono::{Clock, TimePoint};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -34,7 +33,8 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::Mat4;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::vectors::{Vec3, Vec4};
+use mln_util::time::Instant;
+use mln_util::vectors::Vec3;
 
 use crate::feature_state::FeatureStateStore;
 use crate::map_event::{CameraChange, MapEvent, RenderFrameStatus, RenderMode};
@@ -179,7 +179,7 @@ impl Map {
     /// A map with a `ResourceLoader` of its own for the default
     /// `ResourceOptions`.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size()`.
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
     pub fn new(map_options: MapOptions) -> Result<Map, Error> {
         Self::with_resource_options(map_options, &FileSourceManager::new(), &ResourceOptions::default())
     }
@@ -207,7 +207,7 @@ impl Map {
         let events = EventQueue::new();
         let style_events = EventQueue::new();
         let renderer_events = RendererEvents::new();
-        let pixel_ratio = map_options.pixel_ratio();
+        let pixel_ratio = map_options.pixel_ratio;
         // The style's sources work on the background pool, under a tag of
         // their own.
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
@@ -215,19 +215,19 @@ impl Map {
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
         let mut transform = Transform::new(
             Rc::new(CameraEvents(events.clone())),
-            map_options.constrain_mode(),
-            map_options.viewport_mode(),
+            map_options.constrain_mode,
+            map_options.viewport_mode,
         );
-        transform.set_north_orientation(map_options.north_orientation());
+        transform.set_north_orientation(map_options.north_orientation);
         let mut map = Map {
             updates: UpdateSlot::new(),
             transform,
-            mode: map_options.map_mode(),
+            mode: map_options.map_mode,
             pixel_ratio,
-            cross_source_collisions: map_options.cross_source_collisions(),
-            fast_pfor_enabled: map_options.fast_pfor_enabled(),
-            capture_rendered_features: map_options.rendered_feature_info(),
-            unused_style_image_policy: map_options.unused_style_image_policy(),
+            cross_source_collisions: map_options.cross_source_collisions,
+            fast_pfor_enabled: map_options.fast_pfor_enabled,
+            capture_rendered_features: map_options.capture_rendered_features,
+            unused_style_image_policy: map_options.unused_style_image_policy,
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
             last_frame_stats: None,
@@ -251,7 +251,7 @@ impl Map {
             events,
             file_source,
         };
-        map.transform.resize(map_options.size())?;
+        map.transform.resize(map_options.size)?;
         Ok(map)
     }
 
@@ -521,11 +521,9 @@ impl Map {
             return;
         }
 
-        let time_point = if self.mode == MapMode::Continuous {
-            self.transform.frame_time().unwrap_or_else(Clock::now)
-        } else {
-            TimePoint::max()
-        };
+        // Still modes have no clock: they show every transition as ended.
+        let time_point =
+            (self.mode == MapMode::Continuous).then(|| self.transform.frame_time().unwrap_or_else(Instant::now));
 
         self.transform.update_transitions(time_point);
         let projection = self.projection_at(self.transform.get_zoom());
@@ -804,14 +802,14 @@ impl Map {
 
     /// Samples the camera's animations at the host's frame time, from now on,
     /// and starts new ones from it: call it at the start of each frame with
-    /// `Clock::now()`, before rendering. One older than
+    /// `Instant::now()`, before rendering. One older than
     /// [`STALE_FRAME_TIME`](crate::transform::STALE_FRAME_TIME) counts as
     /// unset, so commands made while the host isn't drawing start now. If an
     /// animation runs, the map updates for this frame at once. `None` goes
-    /// back to sampling at `Clock::now()` whenever the map updates. Still
+    /// back to sampling at `Instant::now()` whenever the map updates. Still
     /// images ignore it. See
     /// [`Transform::set_frame_time`](crate::transform::Transform::set_frame_time).
-    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+    pub fn set_frame_time(&mut self, time: Option<Instant>) {
         self.process_events();
         self.transform.set_frame_time(time);
         if self.transform.in_transition() {
@@ -903,11 +901,13 @@ impl Map {
 
         let mut transform = crate::transform::Transform::from_state(self.transform.get_state().clone());
 
-        transform.jump_to(&CameraOptions::default().with_bearing(bearing).with_pitch(pitch));
+        transform.jump_to(&CameraOptions { bearing, pitch, ..Default::default() });
 
-        Ok(camera_for_lat_lngs(lat_lngs, &transform, padding)?
-            .with_bearing(Some(mln_math::rad2deg(-transform.get_bearing())))
-            .with_pitch(Some(mln_math::rad2deg(transform.get_pitch()))))
+        Ok(CameraOptions {
+            bearing: Some(mln_math::rad2deg(-transform.get_bearing())),
+            pitch: Some(mln_math::rad2deg(transform.get_pitch())),
+            ..camera_for_lat_lngs(lat_lngs, &transform, padding)?
+        })
     }
 
     /// `cameraForGeometry(geometry, padding, bearing, pitch)`: the camera
@@ -986,7 +986,7 @@ impl Map {
                 let min_zoom = min_zoom + latitude_term;
                 if transform.get_zoom() < min_zoom {
                     change_camera = true;
-                    camera_options = camera_options.with_zoom(Some(min_zoom));
+                    camera_options = CameraOptions { zoom: Some(min_zoom), ..camera_options };
                 }
             }
 
@@ -994,7 +994,7 @@ impl Map {
                 transform.set_max_zoom(max_zoom);
                 if transform.get_zoom() > max_zoom {
                     change_camera = true;
-                    camera_options = camera_options.with_zoom(options.max_zoom);
+                    camera_options = CameraOptions { zoom: options.max_zoom, ..camera_options };
                 }
             }
 
@@ -1002,7 +1002,7 @@ impl Map {
                 transform.set_max_pitch(max_pitch);
                 if transform.get_pitch() > transform.get_state().get_max_pitch() {
                     change_camera = true;
-                    camera_options = camera_options.with_pitch(options.max_pitch);
+                    camera_options = CameraOptions { pitch: options.max_pitch, ..camera_options };
                 }
             }
 
@@ -1010,7 +1010,7 @@ impl Map {
                 transform.set_min_pitch(min_pitch);
                 if transform.get_pitch() < transform.get_state().get_min_pitch() {
                     change_camera = true;
-                    camera_options = camera_options.with_pitch(options.min_pitch);
+                    camera_options = CameraOptions { pitch: options.min_pitch, ..camera_options };
                 }
             }
         }
@@ -1087,14 +1087,16 @@ impl Map {
     pub fn get_map_options(&self) -> MapOptions {
         let transform = &self.transform;
         let state = transform.get_state();
-        MapOptions::new()
-            .with_north_orientation(transform.get_north_orientation())
-            .with_map_mode(self.mode)
-            .with_constrain_mode(state.get_constrain_mode())
-            .with_viewport_mode(state.get_viewport_mode())
-            .with_cross_source_collisions(self.cross_source_collisions)
-            .with_size(state.get_size())
-            .with_pixel_ratio(self.pixel_ratio)
+        MapOptions {
+            north_orientation: transform.get_north_orientation(),
+            map_mode: self.mode,
+            constrain_mode: state.get_constrain_mode(),
+            viewport_mode: state.get_viewport_mode(),
+            cross_source_collisions: self.cross_source_collisions,
+            size: state.get_size(),
+            pixel_ratio: self.pixel_ratio,
+            ..Default::default()
+        }
     }
 
     // MARK: - Projection mode
@@ -1168,7 +1170,7 @@ impl Map {
 
     // MARK: - Rendered features
     //
-    // With `MapOptions::with_rendered_feature_info(true)`, these give the
+    // With `MapOptions::capture_rendered_features` on, these give the
     // features rendered in the most recently completed frame.
 
     /// The stats of the most recently completed frame, whose
@@ -1496,10 +1498,12 @@ fn camera_for_lat_lngs_on_screen(
     let center_pixel =
         ScreenCoordinate::new(f64::midpoint(ne_pixel.x, sw_pixel.x), f64::midpoint(ne_pixel.y, sw_pixel.y));
 
-    Ok(CameraOptions::default()
-        .with_center(Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)?))
-        .with_padding(Some(*padding))
-        .with_zoom(Some(zoom)))
+    Ok(CameraOptions {
+        center: Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)?),
+        padding: Some(*padding),
+        zoom: Some(zoom),
+        ..Default::default()
+    })
 }
 
 /// GL JS `solveVectorScale`: how much to scale the globe for a surface point
@@ -1559,7 +1563,7 @@ fn camera_for_lat_lngs_on_globe(
 ) -> Result<CameraOptions, Error> {
     let mut flat = crate::transform::Transform::from_state(transform.get_state().clone());
     flat.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Mercator));
-    flat.jump_to(&CameraOptions::default().with_pitch(Some(0.0)).with_roll(Some(0.0)));
+    flat.jump_to(&CameraOptions { pitch: Some(0.0), roll: Some(0.0), ..Default::default() });
     let fit = camera_for_lat_lngs_on_screen(lat_lngs, &flat, padding)?;
     let (Some(fit_center), Some(fit_zoom)) = (fit.center, fit.zoom) else {
         return Ok(fit);
@@ -1567,14 +1571,14 @@ fn camera_for_lat_lngs_on_globe(
 
     // Solve with the padding the returned camera is shown with.
     let mut globe = crate::transform::Transform::from_state(transform.get_state().clone());
-    globe.jump_to(
-        &CameraOptions::default()
-            .with_center(Some(fit_center))
-            .with_zoom(Some(fit_zoom))
-            .with_padding(Some(*padding))
-            .with_pitch(Some(0.0))
-            .with_roll(Some(0.0)),
-    );
+    globe.jump_to(&CameraOptions {
+        center: Some(fit_center),
+        zoom: Some(fit_zoom),
+        padding: Some(*padding),
+        pitch: Some(0.0),
+        roll: Some(0.0),
+        ..Default::default()
+    });
     let state = globe.get_state();
     let matrix = state.get_globe_view_projection_matrix();
     let size = state.get_size();
@@ -1633,7 +1637,10 @@ fn camera_for_lat_lngs_on_globe(
         );
         return Ok(fit);
     }
-    Ok(fit.with_zoom(Some(f64::min(globe.get_zoom() + state.scale_zoom(smallest), state.get_max_zoom()))))
+    Ok(CameraOptions {
+        zoom: Some(f64::min(globe.get_zoom() + state.scale_zoom(smallest), state.get_max_zoom())),
+        ..fit
+    })
 }
 
 /// GL JS's globe bounds: the farthest of eight edge points on each side of
@@ -1676,8 +1683,7 @@ fn globe_bounds(transform: &crate::transform::Transform) -> Result<LatLngBounds,
     let on_screen = |pole: &LatLng| {
         // In front of the camera and inside its depth range, as GL JS's
         // isSurfacePointOnScreen asks.
-        let mut clip: Vec4 = [0.0; 4];
-        VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.get_state(), pole, &mut clip);
+        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.get_state(), pole);
         if clip[3] <= 0.0 || (clip[2] / clip[3]).abs() >= 1.0 {
             return false;
         }

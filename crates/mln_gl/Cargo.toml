@@ -21,6 +21,7 @@ glow.workspace = true
 mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
+parking_lot.workspace = true
 
 # The headless backend's context: EGL, whose library is loaded at run time.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -42,8 +43,9 @@ raw-window-handle.workspace = true
 
 # The canvas backend's context: the browser's WebGL2.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
 wasm-bindgen.workspace = true
-web-sys = { workspace = true, features = ["WebGl2RenderingContext", "WebGlContextAttributes"] }
+web-sys = { workspace = true, features = ["HtmlCanvasElement", "WebGl2RenderingContext", "WebGlContextAttributes"] }
 
 # Compiles and links every GLSL program, in both projection variants, and
 # checks its uniform blocks against the UBOs the renderer writes.
@@ -58,6 +60,12 @@ path = "tests/glsl_compile_test.rs"
 [[test]]
 name = "background_test"
 path = "tests/background_test.rs"
+
+# A drawable's vertex arrays follow its index vector to a new buffer, though
+# the new buffer may have the GL name of the one it replaced.
+[[test]]
+name = "drawable_test"
+path = "tests/drawable_test.rs"
 
 [lints]
 workspace = true

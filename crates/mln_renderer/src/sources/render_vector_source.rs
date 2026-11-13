@@ -7,10 +7,9 @@ use std::sync::Arc;
 
 use mln_map_types::MapMode;
 use mln_style::layer_properties::LayerProperties;
-use mln_style::source::{self, static_immutable_cast};
+use mln_style::source::{self, downcast_arc};
 use mln_style::sources::tile_source;
 use mln_util::constants;
-use mln_util::immutable::Immutable;
 use mln_util::tileset::{Tileset, VectorEncoding};
 
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
@@ -34,12 +33,12 @@ impl RenderVectorSource {
     /// `RenderVectorSource(Immutable<style::TileSource::Impl>, const TaggedScheduler&)`.
     #[must_use]
     pub fn new(impl_: Arc<tile_source::Impl>) -> Self {
-        let impl_: Immutable<dyn source::Impl> = impl_;
+        let impl_: Arc<dyn source::Impl> = impl_;
         RenderVectorSource { tile_source: RenderTileSource::new(impl_), cached_tileset: None, fast_pfor_enabled: false }
     }
 
     fn impl_(&self) -> Arc<tile_source::Impl> {
-        static_immutable_cast::<tile_source::Impl>(&self.tile_source.base.base_impl)
+        downcast_arc::<tile_source::Impl>(&self.tile_source.base.base_impl)
     }
 
     /// `getTileset()`.
@@ -52,7 +51,7 @@ impl RenderVectorSource {
     fn update_internal(
         &mut self,
         tileset: &Tileset,
-        layers: &[Immutable<dyn LayerProperties>],
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
@@ -110,8 +109,8 @@ impl RenderSource for RenderVectorSource {
     /// `RenderTileSetSource::update`.
     fn update(
         &mut self,
-        base_impl: Immutable<dyn source::Impl>,
-        layers: &[Immutable<dyn LayerProperties>],
+        base_impl: Arc<dyn source::Impl>,
+        layers: &[Arc<dyn LayerProperties>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,

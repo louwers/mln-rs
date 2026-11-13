@@ -47,7 +47,6 @@ use mln_text::BiDi;
 use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
-use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
@@ -235,6 +234,8 @@ pub struct GeometryTileInner {
     mailbox: Arc<Mailbox>,
 
     correlation_id: Cell<u64>,
+    /// The worker has data to parse: set by `set_data`, cleared by `reset`.
+    has_data: Cell<bool>,
     /// The tileset has no tile here (`LoaderTile::set_missing`): the tile
     /// lays out without data but isn't renderable.
     pub(crate) missing: Cell<bool>,
@@ -254,7 +255,7 @@ pub struct GeometryTileInner {
 }
 
 impl GeometryTileInner {
-    fn available_images(&self) -> Immutable<VecSet<String>> {
+    fn available_images(&self) -> Arc<VecSet<String>> {
         self.image_manager.get_available_images()
     }
 
@@ -272,6 +273,11 @@ impl GeometryTileInner {
     /// `setError(std::exception_ptr)`.
     pub fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
+        // Without data, the worker has nothing to parse, so the tile is
+        // complete.
+        if !self.has_data.get() {
+            self.base.pending.set(false);
+        }
         self.base.observer().on_tile_error(&self.base, err);
     }
 
@@ -289,6 +295,7 @@ impl GeometryTileInner {
         // prevent signaling a complete state despite pending parse
         // operations.
         self.base.pending.set(true);
+        self.has_data.set(true);
 
         self.correlation_id.set(self.correlation_id.get() + 1);
         let correlation_id = self.correlation_id.get();
@@ -309,6 +316,7 @@ impl GeometryTileInner {
         // Reset the tile to an unloaded state to avoid signaling completion
         // after clearing the tile's pending status.
         self.base.loaded.set(false);
+        self.has_data.set(false);
 
         // Reset the worker to the `NeedsParse` state.
         self.correlation_id.set(self.correlation_id.get() + 1);
@@ -537,6 +545,7 @@ impl GeometryTile {
                 worker: parameters.tile_worker_transport.create(worker_parameters, tile),
                 mailbox: mailbox.clone(),
                 correlation_id: Cell::new(0),
+                has_data: Cell::new(false),
                 missing: Cell::new(false),
                 layout_result: RefCell::new(None),
                 bucket_geometry: RefCell::default(),
@@ -607,10 +616,6 @@ impl Tile for GeometryTile {
         &self.inner.base
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
         Box::new(GeometryTileRenderData {
             atlas_textures: self.inner.atlas_textures.borrow().clone(),
@@ -623,18 +628,18 @@ impl Tile for GeometryTile {
         self.inner.mark_obsolete();
     }
 
-    fn set_layers(&self, layers: &[Immutable<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
+    fn set_layers(&self, layers: &[Arc<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
         let inner = &self.inner;
         // Mark the tile as pending again if it was complete before to
         // prevent signaling a complete state despite pending parse
-        // operations.
-        if !inner.base.pending.get() {
+        // operations. A tile whose data failed to load has nothing to parse.
+        if !inner.base.pending.get() && (inner.has_data.get() || !inner.base.loaded.get()) {
             inner.base.pending.set(true);
             inner.base.on_tile_action(TileOperation::StartParse);
         }
 
         let id = inner.base.id();
-        let mut impls: Vec<Immutable<dyn LayerProperties>> = Vec::with_capacity(layers.len());
+        let mut impls: Vec<Arc<dyn LayerProperties>> = Vec::with_capacity(layers.len());
 
         for layer in layers {
             // Skip irrelevant layers.
@@ -725,7 +730,7 @@ impl Tile for GeometryTile {
         }
     }
 
-    fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+    fn layer_properties_updated(&self, layer_properties: &Arc<dyn LayerProperties>) -> bool {
         let mut layout_result = self.inner.layout_result.borrow_mut();
         let Some(result) = layout_result.as_mut() else {
             return false;

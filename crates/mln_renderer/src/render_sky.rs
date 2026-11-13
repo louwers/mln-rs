@@ -1,8 +1,9 @@
 // Ports src/mln/renderer/render_sky.hpp and src/mln/renderer/render_sky.cpp.
 
+use std::sync::Arc;
+
 use mln_style::sky::{self, SkyProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
-use mln_util::immutable::Immutable;
 
 /// `TransitioningSky = style::SkyProperties::Unevaluated`.
 pub type TransitioningSky = SkyProperties::Unevaluated;
@@ -11,7 +12,7 @@ pub type EvaluatedSky = SkyProperties::PossiblyEvaluated;
 
 /// `RenderSky`.
 pub struct RenderSky {
-    pub impl_: Immutable<sky::Impl>,
+    pub impl_: Arc<sky::Impl>,
     transitioning: TransitioningSky,
     evaluated: EvaluatedSky,
 }
@@ -19,7 +20,7 @@ pub struct RenderSky {
 impl RenderSky {
     /// `explicit RenderSky(Immutable<style::Sky::Impl>)`.
     #[must_use]
-    pub fn new(impl_: Immutable<sky::Impl>) -> Self {
+    pub fn new(impl_: Arc<sky::Impl>) -> Self {
         let transitioning = impl_.properties.untransitioned();
         RenderSky { impl_, transitioning, evaluated: EvaluatedSky::default() }
     }

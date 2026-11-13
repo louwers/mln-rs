@@ -75,12 +75,11 @@ pub fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {
 // Ports test/algorithm/update_tile_masks.test.cpp.
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
     use std::cell::RefCell;
+    use std::sync::Arc;
 
     use mln_style::layer_properties::LayerProperties;
     use mln_tile_id::OverscaledTileID;
-    use mln_util::immutable::Immutable;
 
     use super::*;
     use crate::tile::tile::{Kind, TileBase};
@@ -95,14 +94,11 @@ mod tests {
         fn base(&self) -> &TileBase {
             &self.base
         }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
         fn create_render_data(&self) -> Box<dyn TileRenderData> {
             unreachable!()
         }
         fn cancel(&self) {}
-        fn layer_properties_updated(&self, _layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+        fn layer_properties_updated(&self, _layer_properties: &Arc<dyn LayerProperties>) -> bool {
             false
         }
         fn set_mask(&self, mask: TileMask) {

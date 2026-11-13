@@ -1,10 +1,10 @@
-//! The map's font faces (a style's "font-faces"), shaped and rasterized by
-//! the shaper module (`crates/mln_web_shaper`, `web/pkg/mln_web_shaper.js`): the
-//! map's `FontFaceEngine`. This module is built without the in-process
-//! shaper, so HarfRust, skrifa and the FreeType port are only in that one,
-//! which the map's Web Worker loads the first time a style declares font
-//! faces, as a second wasm instance beside this one. Once it is loaded,
-//! calls go to it synchronously, through JavaScript.
+//! A map's font faces (a style's "font-faces"), shaped and rasterized by
+//! the shaper module (`crates/mln_web_shaper`): the map's `FontFaceEngine`.
+//! A module built without `mln_renderer`'s in-process shaper leaves HarfRust,
+//! skrifa and the FreeType port to that one, which the map's instance
+//! loads the first time a style declares font faces, as a second wasm
+//! instance beside it. Once it is loaded, calls go to it synchronously,
+//! through JavaScript.
 
 use std::cell::RefCell;
 
@@ -43,7 +43,7 @@ extern "C" {
 
 type Ready = Box<dyn FnOnce(Result<(), String>) + Send>;
 
-/// Where the shaper module is in this instance (the map's Web Worker).
+/// Where the shaper module is in this instance.
 enum Module {
     /// `loader()` returns a promise of the module.
     NotLoaded {
@@ -60,8 +60,9 @@ thread_local! {
     static MODULE: RefCell<Option<Module>> = const { RefCell::new(None) };
 }
 
-/// Sets how this instance loads the shaper module, unless it is loading or
-/// loaded it already (for an earlier map).
+/// Sets how this instance loads the shaper module: `loader()` returns a
+/// promise of the module, initialized. It has no effect once the module is
+/// loading or loaded (for an earlier map).
 pub fn set_loader(loader: js_sys::Function) {
     MODULE.with(|module| {
         let mut module = module.borrow_mut();
@@ -69,6 +70,23 @@ pub fn set_loader(loader: js_sys::Function) {
             *module = Some(Module::NotLoaded { loader });
         }
     });
+}
+
+/// Sets how this instance loads the shaper module, unless a loader is set
+/// already: for the package that ships the module beside its own.
+pub fn set_default_loader(loader: js_sys::Function) {
+    MODULE.with(|module| {
+        let mut module = module.borrow_mut();
+        if module.is_none() {
+            *module = Some(Module::NotLoaded { loader });
+        }
+    });
+}
+
+/// [`set_loader`], for the JavaScript that hosts the instance.
+#[wasm_bindgen(js_name = mlnWebSetShaperLoader)]
+pub fn set_loader_js(loader: js_sys::Function) {
+    set_loader(loader);
 }
 
 fn message(error: &JsValue) -> String {

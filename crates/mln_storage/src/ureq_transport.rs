@@ -19,10 +19,11 @@
 use std::net::SocketAddr;
 #[cfg(any(target_os = "android", test))]
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::time::Duration;
 
 use mln_util::chrono::rfc1123;
+use parking_lot::Mutex;
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::unversioned::resolver::{DefaultResolver, Resolver};
 #[cfg(target_os = "windows")]
@@ -182,10 +183,7 @@ impl HttpTransport for Transport {
 
 fn worker(client: &OnceLock<Client>, requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
     loop {
-        let request = match requests.lock() {
-            Ok(receiver) => receiver.recv(),
-            Err(_) => return,
-        };
+        let request = requests.lock().recv();
         let Ok(request) = request else {
             return; // the transport is gone
         };
@@ -453,9 +451,9 @@ fn remove_dot_segments(path: &str) -> String {
 mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::Mutex;
     use std::time::Instant;
 
+    use parking_lot::Mutex;
     use ureq::config::Config;
     use ureq::http::Uri;
     use ureq::unversioned::resolver::ResolvedSocketAddrs;
@@ -495,7 +493,7 @@ mod tests {
 
         fn connect(&self, details: &ConnectionDetails, _chained: Option<()>) -> Result<Option<Self::Out>, ureq::Error> {
             let addr = details.addrs[0];
-            self.attempts.lock().unwrap().push(addr);
+            self.attempts.lock().push(addr);
             if self.dropped.contains(&addr) {
                 std::thread::sleep(Duration::from_secs(60));
                 return Err(ureq::Error::ConnectionFailed);
@@ -540,7 +538,7 @@ mod tests {
         assert_eq!(b"ok".to_vec(), transfer.body.unwrap());
         // The families alternate: the IPv4 address goes second, after
         // HAPPY_EYEBALLS_DELAY.
-        assert_eq!([dropped[0], server], attempts.lock().unwrap()[..2]);
+        assert_eq!([dropped[0], server], attempts.lock()[..2]);
     }
 
     #[test]

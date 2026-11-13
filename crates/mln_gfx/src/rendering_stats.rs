@@ -159,7 +159,7 @@ pub struct RenderingStats {
     /// Stencil buffer updates.
     pub stencil_updates: i32,
     /// Collected feature information by layer, if enabled via
-    /// `MapOptions::with_rendered_feature_info`.
+    /// `MapOptions::capture_rendered_features`.
     pub frame_rendered_features: FrameRenderedFeaturesMap,
 }
 

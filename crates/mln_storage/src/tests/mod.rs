@@ -25,10 +25,11 @@ mod sqlite;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, MutexGuard, mpsc};
+use std::sync::{Arc, mpsc};
 
 use mln_actor::ActorRef;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::AsyncRequest;
 
@@ -44,7 +45,7 @@ pub fn req() -> Req {
 /// in parallel.
 pub fn serial() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    LOCK.lock()
 }
 
 /// Holds `actor`'s thread in a message, after the messages already sent to
@@ -138,7 +139,7 @@ struct Recorder(Arc<Mutex<Vec<(Message, bool)>>>);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push((Message { severity, event, code, msg: msg.to_owned() }, false));
+        self.0.lock().push((Message { severity, event, code, msg: msg.to_owned() }, false));
         true
     }
 }
@@ -158,7 +159,7 @@ impl FixtureLog {
 
     /// `count(message, substring)`: marks the matches checked.
     pub fn count(&self, message: &Message, substring: bool) -> usize {
-        let mut messages = self.messages.lock().unwrap();
+        let mut messages = self.messages.lock();
         let mut count = 0;
         for (m, checked) in messages.iter_mut() {
             if !*checked
@@ -175,11 +176,11 @@ impl FixtureLog {
     }
 
     pub fn unchecked_count(&self) -> usize {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).count()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).count()
     }
 
     pub fn unchecked(&self) -> Vec<Message> {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
     }
 }
 

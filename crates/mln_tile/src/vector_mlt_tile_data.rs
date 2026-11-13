@@ -12,7 +12,7 @@
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use mln_tile_id::{
@@ -23,7 +23,7 @@ use mln_util::constants::EXTENT;
 use mln_util::error::Error as MlnError;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::mlt::{self, Coordinate, MapLibreTile, Property, Shape};
 
@@ -293,7 +293,7 @@ impl VectorMLTTileData {
     /// The decoded tile (`Impl::getLayer`'s decoding step): decodes once,
     /// then drops the raw data.
     pub fn tile(&self) -> Option<Arc<MapLibreTile>> {
-        let mut state = self.state.lock_unpoisoned();
+        let mut state = self.state.lock();
         if let Some(data) = &state.data
             && state.tile.is_none()
         {
@@ -317,10 +317,10 @@ impl VectorMLTTileData {
     /// `layerNames()`: in tile order (MVT: sorted), duplicates included.
     pub fn layer_names(&self) -> Vec<String> {
         let decode = {
-            let state = self.state.lock_unpoisoned();
+            let state = self.state.lock();
             state.data.as_ref().is_some_and(|data| !data.is_empty()) && state.tile.is_none()
         };
-        let tile = if decode { self.tile() } else { self.state.lock_unpoisoned().tile.clone() };
+        let tile = if decode { self.tile() } else { self.state.lock().tile.clone() };
         match tile {
             Some(tile) => tile.get_layers().iter().map(|layer| layer.get_name().to_string()).collect(),
             None => Vec::new(),
@@ -331,10 +331,7 @@ impl VectorMLTTileData {
 impl Clone for VectorMLTTileData {
     /// The C++ copy constructor: shares the data and the decoded tile.
     fn clone(&self) -> Self {
-        VectorMLTTileData {
-            state: Mutex::new(self.state.lock_unpoisoned().clone()),
-            fast_pfor_enabled: self.fast_pfor_enabled,
-        }
+        VectorMLTTileData { state: Mutex::new(self.state.lock().clone()), fast_pfor_enabled: self.fast_pfor_enabled }
     }
 }
 
@@ -350,7 +347,7 @@ impl GeometryTileData for VectorMLTTileData {
     /// The raw data, until the first decoding drops it (a tile sends its
     /// data to its worker before anything decodes it).
     fn encoded(&self) -> Option<EncodedTileData> {
-        let data = self.state.lock_unpoisoned().data.clone()?;
+        let data = self.state.lock().data.clone()?;
         Some(EncodedTileData::Mlt { data, fast_pfor_enabled: self.fast_pfor_enabled })
     }
 }

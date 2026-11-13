@@ -16,17 +16,17 @@ use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use geometry::Point;
 use mln_map_types::{
     AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
     CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay,
-    MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TransformState,
-    TransformStateProperties, TransitionEnd, TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
+    MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TransformState, TransitionEnd,
+    TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
 };
 use mln_style_types::ProjectionDefinition;
 use mln_util::UnitBezier;
-use mln_util::chrono::{Clock, Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI, PITCH_MAX};
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -34,7 +34,8 @@ use mln_util::interpolate::interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
-use mln_util::sync::SyncCell;
+use mln_util::time::Instant;
+use parking_lot::Mutex;
 
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -150,7 +151,7 @@ struct Transition {
     /// `fields` when reporting movement, so replaced properties no longer
     /// contribute. A momentum adds the fields its settling moves.
     moving_fields: Cell<u16>,
-    start: TimePoint,
+    start: Instant,
     /// A momentum extends it for its settling.
     duration: Cell<Duration>,
     animation: AnimationOptions,
@@ -176,7 +177,7 @@ impl Transition {
     fn new(
         fields: u16,
         moving_fields: u16,
-        start: TimePoint,
+        start: Instant,
         duration: Duration,
         animation: &AnimationOptions,
         frame: FrameFn,
@@ -200,7 +201,7 @@ impl Transition {
     }
 
     fn mode(&self) -> CameraChangeMode {
-        if self.duration.get() == Duration::zero() { CameraChangeMode::Immediate } else { CameraChangeMode::Animated }
+        if self.duration.get() == Duration::ZERO { CameraChangeMode::Immediate } else { CameraChangeMode::Animated }
     }
 
     /// Records why the command stops: `Cancelled` or `Replaced`. A
@@ -226,20 +227,35 @@ impl Transition {
         TransitionEnd { outcome, velocity, generation: 0 }
     }
 
-    /// The elapsed share of the duration, in [0, 1]; 1 for an immediate
-    /// command.
-    fn progress(&self, now: TimePoint) -> f64 {
+    /// The elapsed share of the duration at `now`, in [0, 1]; 1 for an
+    /// immediate command, or without a clock.
+    fn progress(&self, now: Option<Instant>) -> f64 {
         let duration = self.duration.get();
-        if duration == Duration::zero() {
-            return 1.0;
+        match now {
+            Some(now) if !duration.is_zero() => {
+                mln_math::clamp_f64(now.saturating_duration_since(self.start).div_duration_f64(duration), 0.0, 1.0)
+            }
+            _ => 1.0,
         }
-        mln_math::clamp_f64((now - self.start).count() as f64 / duration.count() as f64, 0.0, 1.0)
+    }
+
+    /// The time since the command started, at `now`; zero before it, and
+    /// `Duration::MAX` without a clock, which ends every command.
+    fn elapsed(&self, now: Option<Instant>) -> Duration {
+        now.map_or(Duration::MAX, |now| now.saturating_duration_since(self.start))
+    }
+
+    /// Whether the command's time has run out at `now`.
+    fn has_run_out(&self, now: Option<Instant>) -> bool {
+        now.is_none_or(|now| now >= self.start && self.elapsed(Some(now)) >= self.duration.get())
     }
 }
 
-/// A `Duration` in seconds.
-fn seconds_f64(duration: Duration) -> f64 {
-    duration.count() as f64 / 1e9
+/// `seconds` truncated to whole nanoseconds, as `duration_cast` does; `None`
+/// when negative, NaN, or too long for a `Duration` made of nanoseconds. The
+/// bound is exclusive because `u64::MAX` rounds up as a double.
+fn nanos_from_secs(seconds: f64) -> Option<Duration> {
+    (seconds >= 0.0 && seconds * 1e9 < u64::MAX as f64).then(|| Duration::from_nanos((seconds * 1e9) as u64))
 }
 
 /// `MomentumState::Glide`: how far one part moves, over how long, and along
@@ -265,7 +281,7 @@ impl Glide {
         let seconds;
         match decay.model {
             MomentumDecayModel::Friction => {
-                let half_life = seconds_f64(decay.half_life);
+                let half_life = decay.half_life.as_secs_f64();
                 if half_life.is_nan() || half_life <= 0.0 || decay.stop_speed.is_nan() || decay.stop_speed <= 0.0 {
                     return None;
                 }
@@ -279,26 +295,15 @@ impl Glide {
             }
             MomentumDecayModel::Ease => {
                 glide.distance = f64::min(decay.distance, decay.max_distance);
-                seconds = seconds_f64(decay.duration);
+                seconds = decay.duration.as_secs_f64();
                 glide.easing = Some(decay.easing);
             }
         }
-        // A glide too long for the clock doesn't move. The bound is
-        // exclusive, as in flyTo(), because Duration::max() rounds up as a
-        // double.
-        if glide.distance.is_nan()
-            || glide.distance <= 0.0
-            || seconds.is_nan()
-            || seconds <= 0.0
-            || seconds >= seconds_f64(Duration::max())
-        {
+        // A glide too long for the clock doesn't move.
+        if glide.distance.is_nan() || glide.distance <= 0.0 {
             return None;
         }
-        // duration_cast truncates.
-        glide.duration = Duration::from_nanos((seconds * 1e9) as i64);
-        if glide.duration <= Duration::zero() {
-            return None;
-        }
+        glide.duration = nanos_from_secs(seconds).filter(|duration| !duration.is_zero())?;
         Some(glide)
     }
 
@@ -307,11 +312,11 @@ impl Glide {
         if elapsed >= self.duration {
             return 1.0;
         }
-        if elapsed <= Duration::zero() {
+        if elapsed.is_zero() {
             return 0.0;
         }
-        let t = seconds_f64(elapsed);
-        let total = seconds_f64(self.duration);
+        let t = elapsed.as_secs_f64();
+        let total = self.duration.as_secs_f64();
         match self.easing {
             None => (-self.rate * t).exp_m1() / (-self.rate * total).exp_m1(),
             Some(easing) => bezier(&easing).solve(t / total, 1e-6),
@@ -323,8 +328,8 @@ impl Glide {
         if elapsed >= self.duration {
             return 0.0;
         }
-        let t = f64::max(0.0, seconds_f64(elapsed));
-        let total = seconds_f64(self.duration);
+        let t = elapsed.as_secs_f64();
+        let total = self.duration.as_secs_f64();
         let Some(easing) = self.easing else {
             return self.rate * (-self.rate * t).exp() / -(-self.rate * total).exp_m1();
         };
@@ -479,7 +484,7 @@ pub struct Transform {
     source: CameraChangeSource,
     gesture: GestureState,
     /// The host's current frame time (see [`Self::set_frame_time`]).
-    frame_time: Option<TimePoint>,
+    frame_time: Option<Instant>,
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
 }
@@ -565,14 +570,8 @@ impl Transform {
 
         self.observer.on_camera_will_change(CameraChange::default());
         self.state.set_size(size);
-        let mut scale = self.state.get_scale();
-        let mut x = self.state.get_x();
-        let mut y = self.state.get_y();
-        let z = self.state.get_z();
-
-        let mut lat = 0.0;
-        let mut lon = 0.0;
-        if self.state.constrain_screen(&mut scale, &mut lat, &mut lon) {
+        let (scale, center) = self.state.constrain_screen(self.state.get_scale());
+        if let Some(center) = center {
             // Turns out that if you resize during a transition any changes
             // made to the state will be ignored :( So if we have to constrain
             // because of a resize and a transition is in progress - cancel
@@ -581,23 +580,15 @@ impl Transform {
                 self.cancel_transitions();
             }
 
-            // It also turns out that state.setProperties isn't enough if you
-            // change the center, you need to set Cc and Bc too, which
-            // setLatLngZoom does.
+            // Setting x and y isn't enough to change the center: Cc and Bc
+            // must change too, which setLatLngZoom does.
             let zoom = self.state.scale_zoom(scale);
-            self.state.set_lat_lng_zoom(&lat_lng(lat, lon), zoom);
+            self.state.set_lat_lng_zoom(&center, zoom);
             self.observer.on_camera_did_change(CameraChange::default());
 
             return Ok(());
         }
-        self.state.constrain(&mut scale, &mut x, &mut y);
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_scale(Some(scale))
-                .with_x(Some(x))
-                .with_y(Some(y))
-                .with_z(Some(z)),
-        );
+        self.constrain_position(scale);
 
         self.observer.on_camera_did_change(CameraChange::default());
         Ok(())
@@ -626,7 +617,7 @@ impl Transform {
                     self.get_lat_lng(WrapMode::Wrapped).latitude(),
                     center.latitude(),
                 );
-            self.ease_to(&camera.with_zoom(Some(zoom)), &AnimationOptions::default());
+            self.ease_to(&CameraOptions { zoom: Some(zoom), ..*camera }, &AnimationOptions::default());
             return;
         }
         self.ease_to(camera, &AnimationOptions::default());
@@ -639,14 +630,17 @@ impl Transform {
         let mut camera = *input_camera;
         let globe = self.state.is_globe_rendering();
 
-        let duration = animation.duration.unwrap_or(Duration::zero());
+        let duration = animation.duration.unwrap_or(Duration::ZERO);
         if !globe
             && self.state.get_lat_lng_bounds() == LatLngBounds::default()
             && !self.is_gesture_in_progress()
-            && duration != Duration::zero()
+            && duration != Duration::ZERO
+            && animation.easing.is_none()
         {
-            // reuse flyTo, without exaggerated animation, to achieve constant
-            // ground speed.
+            // A plain timed ease flies without the zoom-out. The flight's
+            // ground speed rises and falls along its path even at a constant
+            // zoom, so an ease given an easing interpolates instead, and
+            // moves as that easing says, as GL JS's easeTo does.
             self.fly_to(&camera, animation, true);
             return;
         }
@@ -817,19 +811,17 @@ impl Transform {
                     interpolate(&start_zoom, &zoom, t),
                 )
             };
-            CameraOptions::default()
-                .with_center(frame_lat_lng)
-                .with_zoom(Some(frame_zoom))
-                .with_center_altitude(Some(interpolate(&start_center_alt, &center_alt, t)))
-                .with_bearing(Some(-mln_math::rad2deg(mln_math::wrap(
-                    interpolate(&start_bearing, &bearing, t),
-                    -PI,
-                    PI,
-                ))))
-                .with_padding(interpolate_edge_insets(&start_edge_insets, &padding, t))
-                .with_pitch(Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, t))))
-                .with_roll(Some(mln_math::rad2deg(interpolate(&start_roll, &roll, t))))
-                .with_fov(Some(mln_math::rad2deg(interpolate(&start_fov, &fov, t))))
+            CameraOptions {
+                center: frame_lat_lng,
+                zoom: Some(frame_zoom),
+                center_altitude: Some(interpolate(&start_center_alt, &center_alt, t)),
+                bearing: Some(-mln_math::rad2deg(mln_math::wrap(interpolate(&start_bearing, &bearing, t), -PI, PI))),
+                padding: interpolate_edge_insets(&start_edge_insets, &padding, t),
+                pitch: Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, t))),
+                roll: Some(mln_math::rad2deg(interpolate(&start_roll, &roll, t))),
+                fov: Some(mln_math::rad2deg(interpolate(&start_fov, &fov, t))),
+                ..Default::default()
+            }
         });
 
         // On the globe the zoom keeps the planet's size as the center's
@@ -838,9 +830,9 @@ impl Transform {
         // (an anchored one gets its center from the anchor).
         let moves_center = input_camera.center.is_some() || lat_lng_end.wrapped() != start_lat_lng.wrapped();
         let fields = if globe && moves_around_anchor {
-            input_camera.with_zoom(Some(zoom))
+            CameraOptions { zoom: Some(zoom), ..*input_camera }
         } else if globe && moves_center {
-            input_camera.with_center(Some(lat_lng_end)).with_zoom(Some(zoom))
+            CameraOptions { center: Some(lat_lng_end), zoom: Some(zoom), ..*input_camera }
         } else {
             *input_camera
         };
@@ -1076,19 +1068,13 @@ impl Transform {
             if let Some(v) = animation.velocity {
                 velocity = v / rho;
             }
-            let seconds = total_s / velocity;
-            // A duration Duration can't hold jumps, as one past max_duration
-            // does, rather than saturating to a flight that never ends. The
-            // bound is exclusive: Duration::max() rounds up as a double.
-            if seconds.is_finite() && seconds >= 0.0 && seconds < Duration::max().count() as f64 / 1_000_000_000.0 {
-                // duration_cast<Duration>(duration<double>(S / velocity))
-                Duration::from_nanos((seconds * 1_000_000_000.0) as i64)
-            } else {
-                Duration::zero()
-            }
+            // duration_cast<Duration>(duration<double>(S / velocity)). A
+            // duration Duration can't hold jumps, as one past max_duration
+            // does, rather than saturating to a flight that never ends.
+            nanos_from_secs(total_s / velocity).unwrap_or_default()
         };
         let duration = match animation.max_duration {
-            Some(max) if !linear_zoom_interpolation && duration > max => Duration::zero(),
+            Some(max) if !linear_zoom_interpolation && duration > max => Duration::ZERO,
             _ => duration,
         };
         let start_scale = self.state.get_scale();
@@ -1157,19 +1143,17 @@ impl Transform {
                 // Convert to geographic coordinates and set the new viewpoint.
                 (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), frame_zoom)
             };
-            CameraOptions::default()
-                .with_center(frame_lat_lng)
-                .with_zoom(Some(frame_zoom))
-                .with_center_altitude(Some(interpolate(&start_center_alt, &center_alt, us)))
-                .with_bearing(Some(-mln_math::rad2deg(mln_math::wrap(
-                    interpolate(&start_bearing, &bearing, k),
-                    -PI,
-                    PI,
-                ))))
-                .with_padding(interpolate_edge_insets(&start_edge_insets, &padding, k))
-                .with_pitch(Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, k))))
-                .with_roll(Some(mln_math::rad2deg(interpolate(&start_roll, &roll, k))))
-                .with_fov(Some(mln_math::rad2deg(interpolate(&start_fov, &fov, k))))
+            CameraOptions {
+                center: frame_lat_lng,
+                zoom: Some(frame_zoom),
+                center_altitude: Some(interpolate(&start_center_alt, &center_alt, us)),
+                bearing: Some(-mln_math::rad2deg(mln_math::wrap(interpolate(&start_bearing, &bearing, k), -PI, PI))),
+                padding: interpolate_edge_insets(&start_edge_insets, &padding, k),
+                pitch: Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, k))),
+                roll: Some(mln_math::rad2deg(interpolate(&start_roll, &roll, k))),
+                fov: Some(mln_math::rad2deg(interpolate(&start_fov, &fov, k))),
+                ..Default::default()
+            }
         });
 
         self.start_transition(input_camera, animation, frame, duration, !linear_zoom_interpolation);
@@ -1204,7 +1188,7 @@ impl Transform {
         };
         let size = self.state.get_size();
         let view_center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
-        let fling_duration = animation.duration.filter(|duration| *duration > Duration::zero());
+        let fling_duration = animation.duration.filter(|duration| *duration > Duration::ZERO);
         let globe = self.globe_on_screen();
         if globe && (offset.x.is_nan() || offset.y.is_nan()) {
             return Err(Error::invalid_argument("offset must not be NaN"));
@@ -1232,23 +1216,27 @@ impl Transform {
             let frame: FrameFn = Rc::new(move |state: &TransformState, t: f64| {
                 let camera = VerticalPerspectiveProjection::interpolate_camera(&start, &end, t);
                 let center = state.constrained_center(&camera.center, state.get_zoom());
-                CameraOptions::default()
-                    .with_center(Some(center))
-                    .with_zoom(Some(
+                CameraOptions {
+                    center: Some(center),
+                    zoom: Some(
                         start_zoom
                             + VerticalPerspectiveProjection::zoom_adjustment(
                                 start.center.latitude(),
                                 center.latitude(),
                             ),
-                    ))
-                    .with_bearing(Some(camera.bearing))
+                    ),
+                    bearing: Some(camera.bearing),
+                    ..Default::default()
+                }
             });
             // The fling sets the center, the zoom that keeps the planet's
             // size and the bearing.
-            let fields = CameraOptions::default()
-                .with_center(Some(end.center))
-                .with_zoom(Some(start_zoom))
-                .with_bearing(Some(end.bearing));
+            let fields = CameraOptions {
+                center: Some(end.center),
+                zoom: Some(start_zoom),
+                bearing: Some(end.bearing),
+                ..Default::default()
+            };
             self.start_transition(&fields, animation, frame, duration, false);
             return Ok(());
         }
@@ -1265,7 +1253,7 @@ impl Transform {
             if (center.longitude() - longitude).abs() > 180.0 {
                 center = lat_lng(center.latitude(), longitude + 179.5f64.copysign(center.longitude() - longitude));
             }
-            self.ease_to(&CameraOptions::default().with_center(Some(center)), animation);
+            self.ease_to(&CameraOptions { center: Some(center), ..Default::default() }, animation);
             return Ok(());
         }
 
@@ -1291,7 +1279,7 @@ impl Transform {
             let mut center = if self.globe_free_bearing {
                 let drag =
                     VerticalPerspectiveProjection::drag_camera(&self.state, &flipped(&self.state, &grab), &pan_delta);
-                camera = camera.with_bearing(Some(drag.bearing));
+                camera = CameraOptions { bearing: Some(drag.bearing), ..camera };
                 drag.center
             } else {
                 VerticalPerspectiveProjection::drag_center(&self.state, &flipped(&self.state, &grab), &pan_delta)
@@ -1302,7 +1290,7 @@ impl Transform {
                     self.get_lat_lng(WrapMode::Wrapped).latitude(),
                     center.latitude(),
                 );
-            self.ease_to(&camera.with_center(Some(center)).with_zoom(Some(zoom)), animation);
+            self.ease_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..camera }, animation);
             return Ok(());
         }
 
@@ -1330,7 +1318,7 @@ impl Transform {
         let point_on_screen = ScreenCoordinate::new(center.x - center_offset.x, center.y - center_offset.y);
         // Use unwrapped LatLng to carry information about moveBy direction.
         let center = self.screen_coordinate_to_lat_lng(&point_on_screen, WrapMode::Unwrapped)?;
-        self.ease_to(&CameraOptions::default().with_center(Some(center)), animation);
+        self.ease_to(&CameraOptions { center: Some(center), ..Default::default() }, animation);
         Ok(())
     }
 
@@ -1434,7 +1422,7 @@ impl Transform {
                     &Point::new(second.x - center.x, second.y - center.y),
                 ),
         );
-        self.ease_to(&CameraOptions::default().with_bearing(Some(bearing)), animation);
+        self.ease_to(&CameraOptions { bearing: Some(bearing), ..Default::default() }, animation);
     }
 
     pub fn get_bearing(&self) -> f64 {
@@ -1484,33 +1472,27 @@ impl Transform {
 
     pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
         self.state.set_north_orientation(orientation);
-        self.constrain_and_set_properties();
+        self.constrain_position(self.state.get_scale());
     }
 
     pub fn get_north_orientation(&self) -> NorthOrientation {
         self.state.get_north_orientation()
     }
 
-    fn constrain_and_set_properties(&mut self) {
-        let mut scale = self.state.get_scale();
-        let mut x = self.state.get_x();
-        let mut y = self.state.get_y();
-        let z = self.state.get_z();
-        self.state.constrain(&mut scale, &mut x, &mut y);
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_scale(Some(scale))
-                .with_x(Some(x))
-                .with_y(Some(y))
-                .with_z(Some(z)),
-        );
+    /// Moves the state to the position nearest its own at `scale` that the
+    /// constrain mode allows.
+    fn constrain_position(&mut self, scale: f64) {
+        let (scale, x, y) = self.state.constrain(scale, self.state.get_x(), self.state.get_y());
+        self.state.set_x(x);
+        self.state.set_y(y);
+        self.state.set_scale(scale);
     }
 
     // MARK: - Constrain mode
 
     pub fn set_constrain_mode(&mut self, mode: ConstrainMode) {
         self.state.set_constrain_mode(mode);
-        self.constrain_and_set_properties();
+        self.constrain_position(self.state.get_scale());
     }
 
     pub fn get_constrain_mode(&self) -> ConstrainMode {
@@ -1530,11 +1512,15 @@ impl Transform {
     // MARK: - Projection mode
 
     pub fn set_projection_mode(&mut self, options: &ProjectionMode) {
-        let properties = TransformStateProperties::default()
-            .with_axonometric(Some(options.axonometric.unwrap_or(self.state.get_axonometric())))
-            .with_x_skew(Some(options.x_skew.unwrap_or(self.state.get_x_skew())))
-            .with_y_skew(Some(options.y_skew.unwrap_or(self.state.get_y_skew())));
-        self.state.set_properties(&properties);
+        if let Some(x_skew) = options.x_skew {
+            self.state.set_x_skew(x_skew);
+        }
+        if let Some(y_skew) = options.y_skew {
+            self.state.set_y_skew(y_skew);
+        }
+        if let Some(axonometric) = options.axonometric {
+            self.state.set_axonometric(axonometric);
+        }
     }
 
     pub fn get_projection_mode(&self) -> ProjectionMode {
@@ -1595,7 +1581,7 @@ impl Transform {
             | (if rotating { BEARING } else { 0 });
 
         let start = self.now();
-        let duration = if fields != 0 { duration } else { Duration::zero() };
+        let duration = if fields != 0 { duration } else { Duration::ZERO };
         let transition = Rc::new(Transition {
             coupled_fields,
             anchor,
@@ -1608,11 +1594,11 @@ impl Transform {
         self.update_movement_flags();
         self.finish_transitions(&finished);
 
-        let animated = duration != Duration::zero();
+        let animated = duration != Duration::ZERO;
         self.observer.on_camera_will_change(CameraChange { mode: transition.mode(), source: self.source });
 
         if !animated {
-            self.apply_transitions(std::slice::from_ref(&transition), start);
+            self.apply_transitions(std::slice::from_ref(&transition), Some(start));
             self.transitions.retain(|active| !Rc::ptr_eq(active, &transition));
             self.update_movement_flags();
             self.finish_transitions(&[transition]);
@@ -1621,7 +1607,7 @@ impl Transform {
 
     /// Composes the current camera with each of `active`'s cameras at `now`,
     /// for the fields it still owns, then applies the result.
-    fn apply_transitions(&mut self, active: &[Rc<Transition>], now: TimePoint) {
+    fn apply_transitions(&mut self, active: &[Rc<Transition>], now: Option<Instant>) {
         // The center is unwrapped, or wrapped on the globe without bounds
         // (TransformState::get_camera_options).
         let current = self.state.get_camera_options(None);
@@ -1746,12 +1732,9 @@ impl Transform {
     /// scaling and rotating flags.
     fn update_movement_flags(&mut self) {
         let moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields.get() & t.moving_fields.get()));
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_panning_in_progress(Some(moving & CENTER != 0))
-                .with_scaling_in_progress(Some(moving & ZOOM != 0))
-                .with_rotating_in_progress(Some(moving & BEARING != 0)),
-        );
+        self.state.set_panning_in_progress(moving & CENTER != 0);
+        self.state.set_scaling_in_progress(moving & ZOOM != 0);
+        self.state.set_rotating_in_progress(moving & BEARING != 0);
     }
 
     fn finish_transitions(&mut self, finished: &[Rc<Transition>]) {
@@ -1771,7 +1754,9 @@ impl Transform {
         !self.transitions.is_empty()
     }
 
-    pub fn update_transitions(&mut self, now: TimePoint) {
+    /// Moves the camera to where its commands are at `now`, and ends the
+    /// ones that have run out; `None`, for a map without a clock, ends them all.
+    pub fn update_transitions(&mut self, now: Option<Instant>) {
         if self.transitions.is_empty() {
             return;
         }
@@ -1791,7 +1776,7 @@ impl Transform {
         // command finishes exactly once.
         let mut finished = Vec::new();
         for transition in &active {
-            if now - transition.start >= transition.duration.get() || transition.fields.get() == 0 {
+            if transition.has_run_out(now) || transition.fields.get() == 0 {
                 self.transitions.retain(|t| !Rc::ptr_eq(t, transition));
                 finished.push(transition.clone());
             }
@@ -1847,11 +1832,11 @@ impl Transform {
             scalars: [MomentumPart::default(); 3],
             scalar_totals: [0.0; 3],
             replaced: false,
-            elapsed: Duration::zero(),
+            elapsed: Duration::ZERO,
         };
         let mut moving = 0;
         let mut settling = 0;
-        let mut motion = Duration::zero();
+        let mut motion = Duration::ZERO;
         if let Some(velocity) = options.pan_velocity {
             let speed = velocity.x.hypot(velocity.y);
             if let Some(glide) = Glide::plan(speed, &options.pan_decay) {
@@ -1887,7 +1872,7 @@ impl Transform {
             });
             if part.snap_pending {
                 settling |= part.fields;
-                if snap.is_some_and(|snap| snap.duration != Duration::zero()) {
+                if snap.is_some_and(|snap| snap.duration != Duration::ZERO) {
                     instant = false;
                 }
             }
@@ -1962,10 +1947,10 @@ impl Transform {
         }
     }
 
-    fn advance_momentum(&mut self, transition: &Transition, now: TimePoint) {
+    fn advance_momentum(&mut self, transition: &Transition, now: Option<Instant>) {
         let Some(momentum) = &transition.momentum else { return };
         let mut momentum = momentum.borrow_mut();
-        let elapsed = now - transition.start;
+        let elapsed = transition.elapsed(now);
         momentum.elapsed = elapsed;
 
         let advance = |part: &mut MomentumPart| -> f64 {
@@ -2005,16 +1990,17 @@ impl Transform {
                 if delta != 0.0 {
                     part.snap_delta = Some(delta);
                     part.snap_start = elapsed;
-                    transition.duration.set(transition.duration.get().max(elapsed + snap.duration));
+                    transition.duration.set(transition.duration.get().max(elapsed.saturating_add(snap.duration)));
                     transition.moving_fields.set(transition.moving_fields.get() | part.fields);
                 }
             }
             if let Some(delta) = part.snap_delta {
                 let duration = part.snap.unwrap_or_default().duration;
-                let t = if duration == Duration::zero() {
+                // Without a clock, the snap ends with its command.
+                let t = if duration.is_zero() || now.is_none() {
                     1.0
                 } else {
-                    mln_math::clamp_f64(seconds_f64(elapsed - part.snap_start) / seconds_f64(duration), 0.0, 1.0)
+                    mln_math::clamp_f64(elapsed.saturating_sub(part.snap_start).div_duration_f64(duration), 0.0, 1.0)
                 };
                 let eased = if t >= 1.0 { 1.0 } else { DEFAULT_TRANSITION_EASE.solve(t, 0.001) };
                 let fraction = eased - part.snap_applied;
@@ -2093,8 +2079,10 @@ impl Transform {
                     break;
                 }
             };
-            let mut camera =
-                CameraOptions::default().with_center(Some(if bounded { unwrapped } else { unwrapped.wrapped() }));
+            let mut camera = CameraOptions {
+                center: Some(if bounded { unwrapped } else { unwrapped.wrapped() }),
+                ..Default::default()
+            };
             let mut zoom = self.state.get_zoom();
             self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
             self.state.set_lat_lng_zoom(&camera.center.unwrap_or(unwrapped), zoom);
@@ -2140,7 +2128,7 @@ impl Transform {
             self.state.get_min_zoom_at_latitude(center.latitude()),
             self.state.get_max_zoom(),
         );
-        let mut camera = CameraOptions::default().with_center(Some(center));
+        let mut camera = CameraOptions { center: Some(center), ..Default::default() };
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut target);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or(center), target);
         // The altitude in meters holds before the anchor correction, which
@@ -2188,17 +2176,17 @@ impl Transform {
     }
 
     /// Puts the camera's animations on the host's frame clock: commands start
-    /// at the latest frame's time rather than at `Clock::now()` when they are
+    /// at the latest frame's time rather than at `Instant::now()` when they are
     /// made, and the map samples them at it. Each frame then shows its
     /// animations exactly one frame further on, whenever the input or the
     /// map's update ran, and an animation started between frames moves by
     /// that frame's interval on the next one: no frame repeats the
-    /// camera, and none skips ahead. `None` goes back to `Clock::now()`.
+    /// camera, and none skips ahead. `None` goes back to `Instant::now()`.
     ///
     /// Orbis starts animations on the first frame after the call, which
     /// keeps the camera still for that frame; a glide that continues a drag
     /// would pause there.
-    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+    pub fn set_frame_time(&mut self, time: Option<Instant>) {
         self.frame_time = time;
     }
 
@@ -2207,17 +2195,17 @@ impl Transform {
     /// forgot to set it this frame. A stale frame time would start a command
     /// in the past, which the next frame would show already under way or
     /// over.
-    pub fn frame_time(&self) -> Option<TimePoint> {
-        self.fresh_frame_time(Clock::now())
+    pub fn frame_time(&self) -> Option<Instant> {
+        self.fresh_frame_time(Instant::now())
     }
 
-    fn fresh_frame_time(&self, now: TimePoint) -> Option<TimePoint> {
-        self.frame_time.filter(|&time| now - time <= STALE_FRAME_TIME)
+    fn fresh_frame_time(&self, now: Instant) -> Option<Instant> {
+        self.frame_time.filter(|&time| now.saturating_duration_since(time) <= STALE_FRAME_TIME)
     }
 
     /// When commands start: the frame time, or now.
-    fn now(&self) -> TimePoint {
-        let now = Clock::now();
+    fn now(&self) -> Instant {
+        let now = Instant::now();
         self.fresh_frame_time(now).unwrap_or(now)
     }
 
@@ -2456,16 +2444,18 @@ fn joint_end(animation: &AnimationOptions, count: u32) -> AnimationOptions {
         return animation.clone();
     };
     // The remaining commands and the outcome so far.
-    let state = SyncCell::new((count, TransitionOutcome::Completed));
+    let state = Mutex::new((count, TransitionOutcome::Completed));
     let joint = move |end: &TransitionEnd| {
-        let (remaining, outcome) = state.get();
+        let mut state = state.lock();
+        let (remaining, outcome) = *state;
         let worst = match (outcome, end.outcome) {
             (TransitionOutcome::Cancelled, _) | (_, TransitionOutcome::Cancelled) => TransitionOutcome::Cancelled,
             (TransitionOutcome::Closed, _) | (_, TransitionOutcome::Closed) => TransitionOutcome::Closed,
             (TransitionOutcome::Replaced, _) | (_, TransitionOutcome::Replaced) => TransitionOutcome::Replaced,
             _ => TransitionOutcome::Completed,
         };
-        state.set((remaining - 1, worst));
+        *state = (remaining - 1, worst);
+        drop(state);
         if remaining == 1 {
             end_fn(&TransitionEnd { outcome: worst, ..*end });
         }

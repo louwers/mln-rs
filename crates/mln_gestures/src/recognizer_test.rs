@@ -3,17 +3,18 @@
 // The rig runs the transform on its own frame clock, as a host does with
 // `set_frame_time`: each frame samples the animations 16 ms after the one
 // before, and commands start at the latest frame's time. The clock runs an
-// hour ahead of `Clock::now()`, so its frame time never goes stale.
+// hour ahead of `Instant::now()`, so its frame time never goes stale.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
-use mln_util::chrono::{Clock, TimePoint, milliseconds, seconds};
 use mln_util::geo::LatLngBounds;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use super::*;
 
@@ -21,8 +22,11 @@ fn transform() -> Transform {
     let mut transform =
         Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(800, 600)).unwrap();
-    transform
-        .jump_to(&CameraOptions::default().with_center(Some(LatLng::new(35.68, 139.7).unwrap())).with_zoom(Some(12.0)));
+    transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(35.68, 139.7).unwrap()),
+        zoom: Some(12.0),
+        ..Default::default()
+    });
     transform
 }
 
@@ -40,7 +44,7 @@ struct Rig {
     camera: Transform,
     input: GestureRecognizer,
     now: f64,
-    time: TimePoint,
+    time: Instant,
 }
 
 impl Rig {
@@ -49,7 +53,7 @@ impl Rig {
     }
 
     fn with(options: &GestureOptions) -> Self {
-        let time = Clock::now() + seconds(3600);
+        let time = Instant::now() + Duration::from_secs(3600);
         let mut camera = transform();
         camera.set_frame_time(Some(time));
         Rig { camera, input: GestureRecognizer::new(*options), now: 1000.0, time }
@@ -108,8 +112,8 @@ impl Rig {
     fn frame(&mut self) -> bool {
         self.now += 16.0;
         let gesture = self.input.frame(&mut self.camera, self.now);
-        self.time += milliseconds(16);
-        self.camera.update_transitions(self.time);
+        self.time += Duration::from_millis(16);
+        self.camera.update_transitions(Some(self.time));
         self.camera.set_frame_time(Some(self.time));
         gesture || self.camera.in_transition()
     }
@@ -453,7 +457,7 @@ fn notches_past_a_zoom_limit_dont_hold_the_zoom_there() {
     let at = p(400.0, 300.0);
     for (zoom, direction) in [(2.0, 1.0), (20.0, -1.0)] {
         let mut rig = Rig::new();
-        rig.camera.jump_to(&CameraOptions::default().with_zoom(Some(zoom)));
+        rig.camera.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
         let (limit, back) = spin_into_a_limit_and_back(&mut rig, at, direction);
         let (min, max) = rig.camera.zoom_range();
         assert!((limit - if direction > 0.0 { min } else { max }).abs() < 1e-6, "{limit}");
@@ -465,8 +469,11 @@ fn notches_past_a_zoom_limit_dont_hold_the_zoom_there() {
 fn notches_on_the_globe_zoom_out_to_the_floor_at_the_center_latitude() {
     let mut rig = Rig::new();
     rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-    rig.camera
-        .jump_to(&CameraOptions::default().with_center(Some(LatLng::new(60.0, 20.0).unwrap())).with_zoom(Some(1.0)));
+    rig.camera.jump_to(&CameraOptions {
+        center: Some(LatLng::new(60.0, 20.0).unwrap()),
+        zoom: Some(1.0),
+        ..Default::default()
+    });
     let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
     // The floor at 60° is a level below the plain minimum.
     assert!((limit - rig.camera.get_state().get_min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
@@ -480,8 +487,11 @@ fn notches_zoom_out_to_the_floor_screen_bounds_set() {
     rig.camera.set_constrain_mode(ConstrainMode::Screen);
     let bounds = LatLngBounds::hull(LatLng::new(52.3, 4.8).unwrap(), LatLng::new(52.4, 5.0).unwrap());
     rig.camera.set_lat_lng_bounds(bounds).unwrap();
-    rig.camera
-        .jump_to(&CameraOptions::default().with_center(Some(LatLng::new(52.35, 4.9).unwrap())).with_zoom(Some(14.0)));
+    rig.camera.jump_to(&CameraOptions {
+        center: Some(LatLng::new(52.35, 4.9).unwrap()),
+        zoom: Some(14.0),
+        ..Default::default()
+    });
     let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
     // The bounds fill the 800 px width at about 11.46, far above the plain
     // minimum.
@@ -541,7 +551,10 @@ fn the_scroll_zooms_around_where_the_pointer_is_now() {
 #[test]
 fn a_scroll_stops_the_cameras_animations() {
     let mut rig = Rig::new();
-    rig.camera.ease_to(&CameraOptions::default().with_bearing(Some(45.0)), &AnimationOptions::new(milliseconds(500)));
+    rig.camera.ease_to(
+        &CameraOptions { bearing: Some(45.0), ..Default::default() },
+        &AnimationOptions::new(Duration::from_millis(500)),
+    );
     rig.send(notches(p(400.0, 300.0), 1.0));
     assert!(!rig.camera.in_transition());
     assert!(rig.camera.is_gesture_in_progress());
@@ -567,14 +580,20 @@ fn keys_step_the_camera() {
 #[test]
 fn input_interrupts_animations() {
     let mut rig = Rig::new();
-    rig.camera.ease_to(&CameraOptions::default().with_zoom(Some(4.0)), &AnimationOptions::new(milliseconds(500)));
+    rig.camera.ease_to(
+        &CameraOptions { zoom: Some(4.0), ..Default::default() },
+        &AnimationOptions::new(Duration::from_millis(500)),
+    );
     rig.frame();
     rig.down(1, PointerKind::Mouse, 10.0, 10.0);
     assert!(!rig.camera.in_transition());
 
     // Or only the recognizer's own.
     let mut rig = Rig::with(&GestureOptions { interrupt_animations: false, ..GestureOptions::DEFAULT });
-    rig.camera.ease_to(&CameraOptions::default().with_zoom(Some(4.0)), &AnimationOptions::new(milliseconds(500)));
+    rig.camera.ease_to(
+        &CameraOptions { zoom: Some(4.0), ..Default::default() },
+        &AnimationOptions::new(Duration::from_millis(500)),
+    );
     rig.frame();
     rig.down(1, PointerKind::Mouse, 10.0, 10.0);
     assert!(rig.camera.in_transition());
@@ -841,7 +860,10 @@ fn a_cancelled_pointer_stops_the_gesture_and_the_cameras_animations() {
     rig.now += 16.0;
     rig.to(1, 450.0, 300.0);
     // An animation the app starts mid-gesture.
-    rig.camera.ease_to(&CameraOptions::default().with_bearing(Some(45.0)), &AnimationOptions::new(milliseconds(500)));
+    rig.camera.ease_to(
+        &CameraOptions { bearing: Some(45.0), ..Default::default() },
+        &AnimationOptions::new(Duration::from_millis(500)),
+    );
     rig.send(Input::PointerCancel { id: 1 });
     assert!(!rig.camera.is_gesture_in_progress());
     assert!(!rig.camera.in_transition(), "no glide, and the animation stopped");
@@ -987,9 +1009,11 @@ fn a_host_step_must_be_valid() {
 fn a_drag_on_the_globe_turns_it_around_the_cursor() {
     let globe = |transform: &mut Transform| {
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-        transform.jump_to(
-            &CameraOptions::default().with_center(Some(LatLng::new(30.0, 20.0).unwrap())).with_zoom(Some(1.0)),
-        );
+        transform.jump_to(&CameraOptions {
+            center: Some(LatLng::new(30.0, 20.0).unwrap()),
+            zoom: Some(1.0),
+            ..Default::default()
+        });
     };
     let mut rig = Rig::new();
     globe(&mut rig.camera);

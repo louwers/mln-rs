@@ -20,13 +20,14 @@
 #[cfg(target_os = "android")]
 pub(crate) mod choreographer {
     use core::ffi::{c_int, c_long, c_void};
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    use parking_lot::Mutex;
 
     use crate::error::Error;
     use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
-    use crate::lock;
 
     /// Longer than a vsync period at the lowest refresh rate that a phone
     /// display runs at while it is on.
@@ -192,7 +193,7 @@ pub(crate) mod choreographer {
         /// Sends a frame at `time` to the pacer. Runs on the looper's thread.
         fn send_frame(&self, time: Duration, from_vsync: bool) {
             let time = {
-                let mut state = lock(&self.state);
+                let mut state = self.state.lock();
                 state.requested = false;
                 state.vsync_stopped = !from_vsync;
                 // A vsync's time can come before the time of a timer frame
@@ -207,7 +208,7 @@ pub(crate) mod choreographer {
 
         /// Asks for a frame. Runs on the looper's thread.
         fn request_frame(self: &Arc<Self>) {
-            let mut state = lock(&self.state);
+            let mut state = self.state.lock();
             if std::mem::replace(&mut state.requested, true) {
                 return;
             }
@@ -238,7 +239,7 @@ pub(crate) mod choreographer {
             // SAFETY: the frame hold keeps the side until this takes it.
             let side = unsafe { Self::from_data(data) };
             // The hold lets go of the side once the frame has run.
-            let hold = lock(&side.state).frame_hold.take();
+            let hold = side.state.lock().frame_hold.take();
             if let Some(side) = hold {
                 side.run_frame(time);
             }
@@ -250,7 +251,7 @@ pub(crate) mod choreographer {
                 return;
             }
             let requested = {
-                let mut state = lock(&self.state);
+                let mut state = self.state.lock();
                 if !state.requested {
                     // A frame callback that was posted before the timer took
                     // over shows that vsyncs arrive again.
@@ -294,7 +295,7 @@ pub(crate) mod choreographer {
         let side = unsafe { LooperSide::from_data(data) };
         read_counter(fd);
         if !side.stopping.load(Ordering::SeqCst) {
-            let hold = lock(&side.state).watch_hold.clone();
+            let hold = side.state.lock().watch_hold.clone();
             if let Some(side) = hold {
                 side.request_frame();
             }
@@ -306,7 +307,7 @@ pub(crate) mod choreographer {
         // looper would otherwise still watch when this returns.
         // SAFETY: this thread's looper, which watches `fd`.
         unsafe { ALooper_removeFd(side.looper, fd) };
-        let hold = lock(&side.state).watch_hold.take();
+        let hold = side.state.lock().watch_hold.take();
         drop(hold);
         0
     }
@@ -319,7 +320,7 @@ pub(crate) mod choreographer {
         // read.
         let expired = read_counter(fd);
         if !side.stopping.load(Ordering::SeqCst) {
-            let requested = lock(&side.state).requested;
+            let requested = side.state.lock().requested;
             if expired && requested {
                 side.send_frame(monotonic_now(), false);
             }
@@ -327,7 +328,7 @@ pub(crate) mod choreographer {
         }
         // SAFETY: this thread's looper, which watches `fd`.
         unsafe { ALooper_removeFd(side.looper, fd) };
-        let hold = lock(&side.state).timer_hold.take();
+        let hold = side.state.lock().timer_hold.take();
         drop(hold);
         0
     }
@@ -374,7 +375,7 @@ pub(crate) mod choreographer {
                 state: Mutex::new(LooperState::default()),
             });
             let source = Self { side: Arc::clone(&side) };
-            lock(&side.state).watch_hold = Some(Arc::clone(&side));
+            side.state.lock().watch_hold = Some(Arc::clone(&side));
             // SAFETY: this thread's looper, and a callback whose data the
             // watch hold keeps.
             let added = unsafe {
@@ -388,17 +389,17 @@ pub(crate) mod choreographer {
                 )
             };
             if added != 1 {
-                lock(&side.state).watch_hold = None;
+                side.state.lock().watch_hold = None;
                 // Dropping the source signals a stop that no watch reads.
                 return Err(Error::native("the frame pacer could not watch its eventfd"));
             }
-            lock(&side.state).timer_hold = Some(Arc::clone(&side));
+            side.state.lock().timer_hold = Some(Arc::clone(&side));
             // SAFETY: as above.
             let added = unsafe {
                 ALooper_addFd(looper, timer_fd, ALOOPER_POLL_CALLBACK, ALOOPER_EVENT_INPUT, Some(on_timer), side.data())
             };
             if added != 1 {
-                lock(&side.state).timer_hold = None;
+                side.state.lock().timer_hold = None;
                 // Dropping the source ends the eventfd's watch.
                 return Err(Error::native("the frame pacer could not watch its timerfd"));
             }

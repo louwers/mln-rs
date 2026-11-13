@@ -2,15 +2,15 @@
 //! and their textures (`texture.h`).
 
 use core::ffi::c_void;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
 
 use ::mln_runtime::{
     AcquiredFrame, ConsumerSync, ExportedImage, FrameDepth, FrameTexture, FrameTextureKind, FrameView, GpuSync,
     NativeTexture, SyncKind,
 };
 use mln_util::ErrorKind;
-use mln_util::sync::MutexExt;
+use parking_lot::Mutex;
 
 use crate::error::Error;
 use crate::generated::types::{
@@ -85,7 +85,7 @@ fn with_frame<R>(
     read: impl FnOnce(&FrameObject, &AcquiredFrame) -> Result<R, Error>,
 ) -> Result<R, Error> {
     let object = FRAMES.get(frame)?;
-    let held = object.frame.lock_unpoisoned();
+    let held = object.frame.lock();
     let acquired = held.as_ref().ok_or_else(|| Error::invalid_state("acquired frame was already released"))?;
     read(&object, acquired)
 }
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn mln_acquired_frame_release(
         let consumer =
             kind.map(|kind| consumer_kind(GpuSync { kind, handle: sync.handle, value: sync.value })).transpose()?;
         let object = FRAMES.get(frame)?;
-        let mut held = object.frame.lock_unpoisoned();
+        let mut held = object.frame.lock();
         if object.views.load(Ordering::Acquire) != 0 {
             return Err(Error::new(ErrorKind::Busy, "acquired frame has active borrowed views"));
         }
@@ -291,7 +291,7 @@ pub unsafe extern "C" fn mln_acquired_frame_discard(
 ) -> mln_status {
     export!(out_diagnostic, {
         let object = FRAMES.get(frame)?;
-        let mut held = object.frame.lock_unpoisoned();
+        let mut held = object.frame.lock();
         let acquired = held.take().ok_or_else(|| Error::invalid_state("acquired frame was already released"))?;
         let _ = FRAMES.remove(frame);
         // A view keeps the frame's sync objects in place until it ends.
@@ -326,7 +326,7 @@ pub unsafe extern "C" fn mln_acquired_frame_view_begin(
         }
         let object = FRAMES.get(frame)?;
         let view = {
-            let held = object.frame.lock_unpoisoned();
+            let held = object.frame.lock();
             let acquired = held.as_ref().ok_or_else(|| Error::invalid_state("acquired frame was already released"))?;
             // The session counts the view, and checks that it can still
             // render, in one step with an abandon's check of the count.
@@ -354,7 +354,7 @@ pub unsafe extern "C" fn mln_acquired_frame_view_end(scope: *mut c_void) {
     }
     // SAFETY: the caller's contract: a scope of `view_begin`, ended once.
     let ViewScope(object, view) = *unsafe { Box::from_raw(scope.cast::<ViewScope>()) };
-    let mut held = object.frame.lock_unpoisoned();
+    let mut held = object.frame.lock();
     drop(view);
     let discarded = (object.views.fetch_sub(1, Ordering::AcqRel) == 1).then(|| held.discarded.take()).flatten();
     drop(held);

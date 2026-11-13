@@ -1,10 +1,11 @@
 // Ports test/style/properties.test.cpp.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use feature::Value;
 use mln_conversion::{Convertible, Error};
-use mln_util::chrono::{Duration, TimePoint, milliseconds};
+use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use super::util::parse_json;
@@ -22,12 +23,18 @@ use crate::renderer::property_evaluator::PropertyEvaluator;
 use crate::renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 use crate::transition_options::TransitionOptions;
 
+/// The time the tests' transitions start at.
+fn start() -> Instant {
+    static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+    *START
+}
+
 fn evaluate(property: &Transitioning<PropertyValue<f32>>, delta: Duration) -> f32 {
     let mut zoom_history = ZoomHistory::default();
-    zoom_history.update(0.0, &(TimePoint::min() + delta));
+    zoom_history.update(0.0, Some(start() + delta));
 
     let parameters =
-        PropertyEvaluationParameters::with_zoom_history(zoom_history, TimePoint::min() + delta, Duration::zero());
+        PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(start() + delta), Duration::ZERO);
 
     let evaluator = PropertyEvaluator::new(&parameters, 0.0_f32);
 
@@ -44,7 +51,7 @@ fn assert_float_eq(expected: f32, actual: f32) {
 #[test]
 fn evaluate_default_value() {
     let property = Transitioning::<PropertyValue<f32>>::default();
-    assert_eq!(0.0_f32, evaluate(&property, Duration::zero()));
+    assert_eq!(0.0_f32, evaluate(&property, Duration::ZERO));
 }
 
 // gtest: TransitioningPropertyValue.EvaluateUntransitionedConstant
@@ -54,37 +61,37 @@ fn evaluate_untransitioned_constant() {
         PropertyValue::Constant(1.0_f32),
         Transitioning::default(),
         &TransitionOptions::default(),
-        TimePoint::min(),
+        Some(start()),
     );
 
-    assert_eq!(1.0_f32, evaluate(&property, Duration::zero()));
+    assert_eq!(1.0_f32, evaluate(&property, Duration::ZERO));
 }
 
 // gtest: TransitioningPropertyValue.EvaluateTransitionedConstantWithoutDelay
 #[test]
 fn evaluate_transitioned_constant_without_delay() {
-    let transition = TransitionOptions { duration: Some(milliseconds(1000)), ..TransitionOptions::default() };
+    let transition = TransitionOptions { duration: Some(Duration::from_millis(1000)), ..TransitionOptions::default() };
 
     let t0 = Transitioning::with_prior(
         PropertyValue::Constant(0.0_f32),
         Transitioning::default(),
         &TransitionOptions::default(),
-        TimePoint::min(),
+        Some(start()),
     );
 
-    let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, TimePoint::min());
+    let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, Some(start()));
 
-    assert_float_eq(0.0, evaluate(&t1, milliseconds(0)));
-    assert_float_eq(0.823_099, evaluate(&t1, milliseconds(500)));
-    assert_float_eq(1.0, evaluate(&t1, milliseconds(1500)));
+    assert_float_eq(0.0, evaluate(&t1, Duration::from_millis(0)));
+    assert_float_eq(0.823_099, evaluate(&t1, Duration::from_millis(500)));
+    assert_float_eq(1.0, evaluate(&t1, Duration::from_millis(1500)));
 }
 
 // gtest: TransitioningPropertyValue.EvaluateTransitionedConstantWithDelay
 #[test]
 fn evaluate_transitioned_constant_with_delay() {
     let transition = TransitionOptions {
-        delay: Some(milliseconds(1000)),
-        duration: Some(milliseconds(1000)),
+        delay: Some(Duration::from_millis(1000)),
+        duration: Some(Duration::from_millis(1000)),
         ..TransitionOptions::default()
     };
 
@@ -92,16 +99,16 @@ fn evaluate_transitioned_constant_with_delay() {
         PropertyValue::Constant(0.0_f32),
         Transitioning::default(),
         &TransitionOptions::default(),
-        TimePoint::min(),
+        Some(start()),
     );
 
-    let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, TimePoint::min());
+    let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, Some(start()));
 
-    assert_float_eq(0.0, evaluate(&t1, milliseconds(0)));
-    assert_float_eq(0.0, evaluate(&t1, milliseconds(500)));
-    assert_float_eq(0.0, evaluate(&t1, milliseconds(612)));
-    assert_float_eq(0.823_099, evaluate(&t1, milliseconds(1500)));
-    assert_float_eq(1.0, evaluate(&t1, milliseconds(2500)));
+    assert_float_eq(0.0, evaluate(&t1, Duration::from_millis(0)));
+    assert_float_eq(0.0, evaluate(&t1, Duration::from_millis(500)));
+    assert_float_eq(0.0, evaluate(&t1, Duration::from_millis(612)));
+    assert_float_eq(0.823_099, evaluate(&t1, Duration::from_millis(1500)));
+    assert_float_eq(1.0, evaluate(&t1, Duration::from_millis(2500)));
 }
 
 fn evaluate_data_expression(
@@ -109,10 +116,10 @@ fn evaluate_data_expression(
     delta: Duration,
 ) -> PossiblyEvaluatedPropertyValue<f32> {
     let mut zoom_history = ZoomHistory::default();
-    zoom_history.update(0.0, &(TimePoint::min() + delta));
+    zoom_history.update(0.0, Some(start() + delta));
 
     let parameters =
-        PropertyEvaluationParameters::with_zoom_history(zoom_history, TimePoint::min() + delta, Duration::zero());
+        PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(start() + delta), Duration::ZERO);
 
     let evaluator = DataDrivenPropertyEvaluator::<f32>::new(&parameters, 0.0_f32);
 
@@ -123,8 +130,8 @@ fn evaluate_data_expression(
 #[test]
 fn transitioning_data_driven_property_value_evaluate() {
     let transition = TransitionOptions {
-        delay: Some(milliseconds(1000)),
-        duration: Some(milliseconds(1000)),
+        delay: Some(Duration::from_millis(1000)),
+        duration: Some(Duration::from_millis(1000)),
         ..TransitionOptions::default()
     };
 
@@ -132,17 +139,16 @@ fn transitioning_data_driven_property_value_evaluate() {
         PropertyValue::Constant(0.0_f32),
         Transitioning::default(),
         &TransitionOptions::default(),
-        TimePoint::min(),
+        Some(start()),
     );
 
     let expression = PropertyExpression::<f32>::from_box(dsl::number(dsl::get_str("property_name"), None), None);
 
-    let t1 =
-        Transitioning::with_prior(PropertyValue::Expression(expression), t0.clone(), &transition, TimePoint::min());
+    let t1 = Transitioning::with_prior(PropertyValue::Expression(expression), t0.clone(), &transition, Some(start()));
 
-    assert!(evaluate_data_expression(&t0, milliseconds(0)).is_constant());
+    assert!(evaluate_data_expression(&t0, Duration::from_millis(0)).is_constant());
     assert!(
-        !evaluate_data_expression(&t1, milliseconds(0)).is_constant(),
+        !evaluate_data_expression(&t1, Duration::from_millis(0)).is_constant(),
         "A paint property transition to a data-driven evaluates immediately to the final value (see \
          https://github.com/mapbox/mapbox-gl-native/issues/8237)."
     );
@@ -152,13 +158,13 @@ fn transitioning_data_driven_property_value_evaluate() {
 fn transition_completes_and_drops_prior() {
     // Not a C++ test: checks the `mutable prior` reset that hasTransition()
     // observes (properties.hpp).
-    let transition = TransitionOptions { duration: Some(milliseconds(1000)), ..TransitionOptions::default() };
+    let transition = TransitionOptions { duration: Some(Duration::from_millis(1000)), ..TransitionOptions::default() };
     let t0 = Transitioning::new(PropertyValue::Constant(0.0_f32));
-    let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, TimePoint::min());
+    let t1 = Transitioning::with_prior(PropertyValue::Constant(1.0_f32), t0, &transition, Some(start()));
     assert!(t1.has_transition());
-    assert_float_eq(0.823_099, evaluate(&t1, milliseconds(500)));
+    assert_float_eq(0.823_099, evaluate(&t1, Duration::from_millis(500)));
     assert!(t1.has_transition());
-    assert_eq!(1.0, evaluate(&t1, milliseconds(1000)));
+    assert_eq!(1.0, evaluate(&t1, Duration::from_millis(1000)));
     assert!(!t1.has_transition());
 }
 
@@ -219,10 +225,10 @@ fn evaluate_with_state(
     delta: Duration,
 ) -> f32 {
     let mut zoom_history = ZoomHistory::default();
-    zoom_history.update(0.0, &(TimePoint::min() + delta));
+    zoom_history.update(0.0, Some(start() + delta));
 
     let mut parameters =
-        PropertyEvaluationParameters::with_zoom_history(zoom_history, TimePoint::min() + delta, Duration::zero());
+        PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(start() + delta), Duration::ZERO);
     parameters.global_state = Some(global_state);
 
     let evaluator = PropertyEvaluator::new(&parameters, 0.0_f32);
@@ -236,9 +242,9 @@ fn global_state_change(
     delta: Duration,
     state_only: bool,
 ) -> TransitionParameters {
-    let transition = TransitionOptions { duration: Some(milliseconds(1000)), ..TransitionOptions::default() };
+    let transition = TransitionOptions { duration: Some(Duration::from_millis(1000)), ..TransitionOptions::default() };
     TransitionParameters {
-        now: TimePoint::min() + delta,
+        now: Some(start() + delta),
         transition,
         global_state_change: Some(GlobalStateChange {
             prior_state,
@@ -249,7 +255,7 @@ fn global_state_change(
 }
 
 fn untransitioned() -> TransitionParameters {
-    TransitionParameters::new(TimePoint::min(), TransitionOptions::default())
+    TransitionParameters::new(Some(start()), TransitionOptions::default())
 }
 
 fn width_transitionable() -> Transitionable<PropertyValue<f32>> {
@@ -261,13 +267,14 @@ fn width_transitionable() -> Transitionable<PropertyValue<f32>> {
 fn global_state_change_transitions_from_prior_state() {
     let width = width_transitionable();
     let mut property = width.transition(&untransitioned(), Transitioning::default());
-    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(0)));
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), Duration::from_millis(0)));
 
-    property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
+    property =
+        width.transition(&global_state_change(width_state(0.0), "width", Duration::from_millis(0), true), property);
 
-    assert_float_eq(0.0, evaluate_with_state(&property, width_state(1.0), milliseconds(0)));
-    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
-    assert_float_eq(1.0, evaluate_with_state(&property, width_state(1.0), milliseconds(1500)));
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(1.0), Duration::from_millis(0)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), Duration::from_millis(500)));
+    assert_float_eq(1.0, evaluate_with_state(&property, width_state(1.0), Duration::from_millis(1500)));
 }
 
 // gtest: TransitioningPropertyValue.GlobalStateChangeContinuesRunningTransition
@@ -275,14 +282,16 @@ fn global_state_change_transitions_from_prior_state() {
 fn global_state_change_continues_running_transition() {
     let width = width_transitionable();
     let mut property = width.transition(&untransitioned(), Transitioning::default());
-    property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
-    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+    property =
+        width.transition(&global_state_change(width_state(0.0), "width", Duration::from_millis(0), true), property);
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), Duration::from_millis(500)));
 
     // Changing the state back halfway starts from the value shown, not from the state now read.
-    property = width.transition(&global_state_change(width_state(1.0), "width", milliseconds(500), true), property);
+    property =
+        width.transition(&global_state_change(width_state(1.0), "width", Duration::from_millis(500), true), property);
 
-    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
-    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(2500)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(0.0), Duration::from_millis(500)));
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), Duration::from_millis(2500)));
 }
 
 // gtest: TransitioningPropertyValue.GlobalStateChangeWithLayerChangeTransitionsFromPriorState
@@ -290,14 +299,16 @@ fn global_state_change_continues_running_transition() {
 fn global_state_change_with_layer_change_transitions_from_prior_state() {
     let width = width_transitionable();
     let mut property = width.transition(&untransitioned(), Transitioning::default());
-    property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
-    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+    property =
+        width.transition(&global_state_change(width_state(0.0), "width", Duration::from_millis(0), true), property);
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(1.0), Duration::from_millis(500)));
 
     // A layer change in the same frame as the state change restarts the transition from the value shown.
-    property = width.transition(&global_state_change(width_state(1.0), "width", milliseconds(500), false), property);
+    property =
+        width.transition(&global_state_change(width_state(1.0), "width", Duration::from_millis(500), false), property);
 
-    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
-    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(2500)));
+    assert_float_eq(0.823_099, evaluate_with_state(&property, width_state(0.0), Duration::from_millis(500)));
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), Duration::from_millis(2500)));
 }
 
 // gtest: TransitioningPropertyValue.GlobalStateChangeSnapsPatternImage
@@ -312,7 +323,7 @@ fn global_state_change_snaps_pattern_image() {
 
     // Pattern images are laid out into tiles, not interpolated, so the state change applies at once.
     let prior_state = Arc::new(GlobalStateMap::from_iter([("pattern".to_owned(), Value::String("a".to_owned()))]));
-    property = value.transition(&global_state_change(prior_state, "pattern", milliseconds(0), true), property);
+    property = value.transition(&global_state_change(prior_state, "pattern", Duration::from_millis(0), true), property);
 
     assert!(!property.has_transition());
 }
@@ -323,10 +334,11 @@ fn global_state_change_of_unread_key_keeps_value() {
     let width = width_transitionable();
     let mut property = width.transition(&untransitioned(), Transitioning::default());
 
-    property = width.transition(&global_state_change(width_state(0.0), "color", milliseconds(0), true), property);
+    property =
+        width.transition(&global_state_change(width_state(0.0), "color", Duration::from_millis(0), true), property);
 
     assert!(!property.has_transition());
-    assert_float_eq(1.0, evaluate_with_state(&property, width_state(1.0), milliseconds(0)));
+    assert_float_eq(1.0, evaluate_with_state(&property, width_state(1.0), Duration::from_millis(0)));
 }
 
 // gtest: TransitioningPropertyValue.GlobalStateChangeTransitionsLightProperty
@@ -337,13 +349,13 @@ fn global_state_change_transitions_light_property() {
     let mut transitioning = light.transitioned(&untransitioned(), light.untransitioned());
 
     // A state-only change transitions the property that reads the key and leaves the others alone.
-    transitioning =
-        light.transitioned(&global_state_change(width_state(0.0), "width", milliseconds(0), true), transitioning);
+    transitioning = light
+        .transitioned(&global_state_change(width_state(0.0), "width", Duration::from_millis(0), true), transitioning);
 
     assert!(transitioning.get::<LightIntensity>().has_transition());
     assert!(!transitioning.get::<LightColor>().has_transition());
     let intensity = transitioning.get::<LightIntensity>();
-    assert_float_eq(0.0, evaluate_with_state(intensity, width_state(1.0), milliseconds(0)));
-    assert_float_eq(0.823_099, evaluate_with_state(intensity, width_state(1.0), milliseconds(500)));
-    assert_float_eq(1.0, evaluate_with_state(intensity, width_state(1.0), milliseconds(1500)));
+    assert_float_eq(0.0, evaluate_with_state(intensity, width_state(1.0), Duration::from_millis(0)));
+    assert_float_eq(0.823_099, evaluate_with_state(intensity, width_state(1.0), Duration::from_millis(500)));
+    assert_float_eq(1.0, evaluate_with_state(intensity, width_state(1.0), Duration::from_millis(1500)));
 }

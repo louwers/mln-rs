@@ -26,7 +26,6 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
-use mln_util::immutable::Immutable;
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::{Vec2, Vec3, Vec4};
@@ -50,7 +49,7 @@ pub type RenderLayerReferences = Vec<RenderLayerPtr>;
 #[derive(Clone)]
 pub struct LayerRenderData {
     pub bucket: BucketPtr,
-    pub layer_properties: Immutable<dyn LayerProperties>,
+    pub layer_properties: Arc<dyn LayerProperties>,
 }
 
 // symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
@@ -447,8 +446,8 @@ pub fn compute_globe_feature_ndc_bound(
 
 /// The data members of `RenderLayer`.
 pub struct RenderLayerBase {
-    pub evaluated_properties: Immutable<dyn LayerProperties>,
-    pub base_impl: Immutable<dyn layer::Impl>,
+    pub evaluated_properties: Arc<dyn LayerProperties>,
+    pub base_impl: Arc<dyn layer::Impl>,
 
     pub passes: RenderPass,
     pub layer_group: Option<LayerGroupBasePtr>,
@@ -478,7 +477,7 @@ pub struct RenderLayerBase {
 
 impl RenderLayerBase {
     /// `RenderLayer(Immutable<style::LayerProperties>)`.
-    pub fn new(properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(properties: Arc<dyn LayerProperties>) -> Self {
         let base_impl = properties.base_impl.clone();
         RenderLayerBase {
             evaluated_properties: properties,
@@ -569,7 +568,7 @@ pub trait RenderLayer {
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        _new_layer: &Immutable<dyn layer::Impl>,
+        _new_layer: &Arc<dyn layer::Impl>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
         // When a layer changes, the bucket won't be replaced until the new
@@ -693,7 +692,7 @@ pub trait RenderLayer {
     }
 
     /// `transition(const TransitionParameters&, Immutable<style::Layer::Impl> newImpl)`.
-    fn transition_with_impl(&mut self, parameters: &TransitionParameters, new_impl: Immutable<dyn layer::Impl>) {
+    fn transition_with_impl(&mut self, parameters: &TransitionParameters, new_impl: Arc<dyn layer::Impl>) {
         self.base_mut().base_impl = new_impl;
         self.transition(parameters);
     }

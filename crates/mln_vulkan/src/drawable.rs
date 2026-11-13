@@ -15,7 +15,6 @@
 //   bound at its start, and reads a fill extrusion wall's next outline vertex
 //   from the storage buffer.
 
-use std::any::Any;
 use std::rc::Rc;
 
 use ash::vk;
@@ -55,11 +54,7 @@ struct IndexBuffer {
     buffer: GfxIndexBuffer,
 }
 
-impl IndexBufferBase for IndexBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl IndexBufferBase for IndexBuffer {}
 
 /// `vulkan::Drawable::Impl`
 struct DrawableImpl {
@@ -282,7 +277,7 @@ impl Drawable {
                 let vertex_buffer = binding
                     .vertex_buffer_resource
                     .as_ref()
-                    .and_then(|resource| Some((resource, resource.as_any().downcast_ref::<VertexBufferResource>()?)))
+                    .and_then(|resource| Some((resource, resource.downcast_ref::<VertexBufferResource>()?)))
                     .filter(|(_, buffer)| buffer.get().is_valid());
                 let Some((resource, vertex_buffer)) = vertex_buffer else {
                     // Back missing attributes with a zero-stride dummy
@@ -366,7 +361,7 @@ impl Drawable {
                 let indexes = indexes.borrow();
                 let index_buffer = indexes
                     .get_buffer()
-                    .and_then(|b| b.as_any().downcast_ref::<IndexBuffer>())
+                    .and_then(|b| b.downcast_ref::<IndexBuffer>())
                     .and_then(|b| b.buffer.get_resource::<IndexBufferResource>())
                     .filter(|resource| resource.get().is_valid());
                 if let Some(index_buffer) = index_buffer {
@@ -427,19 +422,13 @@ impl drawable::Drawable for Drawable {
     fn base_mut(&mut self) -> &mut DrawableBase {
         &mut self.base
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
 
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
         let parameters: &dyn PaintParameters = parameters;
-        let Some(context) = parameters.context().as_any().downcast_ref::<Context>() else {
+        let Some(context) = parameters.context().downcast_ref::<Context>() else {
             return;
         };
-        let Some(render_pass) = parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>()) else {
+        let Some(render_pass) = parameters.render_pass().and_then(|p| p.downcast_ref::<RenderPass>()) else {
             debug_assert!(false);
             return;
         };

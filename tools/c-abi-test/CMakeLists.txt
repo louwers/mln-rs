@@ -1,9 +1,9 @@
 # Builds maplibre-native-ffi's ABI suite (testdata/tests/native/abi) against
 # crates/mln_c's headers and library, the way maplibre-native-ffi's
 # cmake/mln_ffi_tests.cmake builds it against its own: the same support files,
-# Unity, test plugin and graphics fixtures, for one render backend: vulkan, or
-# opengl on EGL, maplibre-native-ffi's Linux OpenGL preset. `just c-abi-test`
-# configures it with the library that Cargo built and runs it through run.py.
+# Unity and graphics fixtures, for one render backend: vulkan, or opengl on EGL,
+# maplibre-native-ffi's Linux OpenGL preset. `just c-abi-test` configures it
+# with the library that Cargo built and runs it through run.py.
 cmake_minimum_required(VERSION 3.25)
 project(mln_c_abi_test C CXX)
 
@@ -56,8 +56,7 @@ set(ABI_DOMAINS
     backend
     delivery
     binding
-    platform
-    plugin)
+    platform)
 set(FILE_TAGS
     metal
     opengl
@@ -115,6 +114,13 @@ file(
   CONFIGURE
   OUTPUT "${registry_dir}/mln_native_test_registry.inc"
   CONTENT "${registry}")
+# The harness reads the cases a build expects to fail from this file.
+# maplibre-native-ffi lists the cases that mln-rs fails; against crates/mln_c,
+# every case must pass, so the list is empty.
+file(
+  CONFIGURE
+  OUTPUT "${registry_dir}/mln_native_expected_failures.inc"
+  CONTENT "")
 
 include(FetchContent)
 fetchcontent_declare(
@@ -126,22 +132,6 @@ fetchcontent_declare(
 fetchcontent_makeavailable(unity)
 target_compile_definitions(unity PUBLIC UNITY_INCLUDE_CONFIG_H)
 target_include_directories(unity PUBLIC "$<BUILD_INTERFACE:${SUPPORT_DIR}>")
-
-# The plugin that the plugin group registers, a shared library of its own.
-add_library(mln_native_test_plugin SHARED "${TESTS_DIR}/plugin/square_plugin.c")
-set_target_properties(
-  mln_native_test_plugin
-  PROPERTIES OUTPUT_NAME mln-native-test-plugin
-             C_STANDARD 23
-             C_STANDARD_REQUIRED YES
-             C_EXTENSIONS OFF
-             C_VISIBILITY_PRESET hidden)
-target_include_directories(
-  mln_native_test_plugin
-  PUBLIC "${TESTS_DIR}/plugin"
-  PRIVATE "${MLN_C_INCLUDE_DIR}")
-target_compile_definitions(mln_native_test_plugin
-                           PRIVATE MLN_NATIVE_TEST_PLUGIN_BUILDING)
 
 # The GPU fixtures: a Vulkan device and the textures the suite renders into.
 add_library(mln_test_graphics_objects OBJECT "${GRAPHICS_DIR}/graphics.c")
@@ -215,7 +205,6 @@ target_link_libraries(
   mln_native_abi_tests
   PRIVATE unity::framework
           maplibre_native_c
-          mln_native_test_plugin
           mln_test_graphics_objects
           "${VULKAN_LOADER_LIBRARY}"
           Threads::Threads

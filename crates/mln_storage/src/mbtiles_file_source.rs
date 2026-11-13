@@ -16,16 +16,16 @@
 // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mln_actor::{ActorRef, Thread};
 use mln_util::chrono::Timestamp;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
 use mln_util::string::float_prefix;
-use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
 use mln_vec_map::VecMap;
+use parking_lot::Mutex;
 use serde_json::Value as Json;
 
 use crate::async_request::AsyncRequest;
@@ -242,6 +242,16 @@ impl MBTilesFileSourceThread {
     }
 
     fn tile(&self, resource: &Resource) -> Result<Response, String> {
+        // The etag is the tile's URL, so a matching one means the loader
+        // already has this tile: skip the re-read and its re-decode.
+        if resource.prior_etag.as_deref() == Some(resource.url.as_str()) {
+            let mut response = Response::new();
+            response.not_modified = true;
+            response.expires = Some(Timestamp::from_secs(i64::MAX));
+            response.etag = Some(resource.url.clone());
+            return Ok(response);
+        }
+
         let base_path = url_to_path(&resource.url);
         let path = db_path(&base_path).to_vec();
 
@@ -361,11 +371,11 @@ impl FileSource for MBTilesFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock_unpoisoned() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock_unpoisoned().clone()
+        self.resource_options.lock().clone()
     }
 }
 

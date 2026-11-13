@@ -19,11 +19,11 @@ use mln_gfx::{
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileLodMode, TransformState, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::Color;
-use mln_util::chrono::TimePoint;
 use mln_util::mat4::Mat4;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
@@ -46,18 +46,12 @@ pub struct TransformParameters {
 impl TransformParameters {
     pub fn new(state: &TransformState) -> Self {
         let state = state.clone();
-        // C++ leaves the matrices uninitialized; getProjMatrix fills them
-        // unless the size is empty.
-        let mut proj_matrix: Mat4 = [0.0; 16];
-        let mut aligned_proj_matrix: Mat4 = [0.0; 16];
-        let mut near_clipped_proj_matrix: Mat4 = [0.0; 16];
-
         // Update the default matrices to the current viewport dimensions.
-        state.get_proj_matrix(&mut proj_matrix, 1, false);
+        let proj_matrix = state.get_proj_matrix(1, false);
 
         // Also compute a projection matrix that aligns with the current pixel
         // grid, taking into account odd viewport sizes.
-        state.get_proj_matrix(&mut aligned_proj_matrix, 1, true);
+        let aligned_proj_matrix = state.get_proj_matrix(1, true);
 
         // Calculate a second projection matrix with the near plane moved
         // further, to a tenth of the far value, so as not to waste depth
@@ -65,7 +59,7 @@ impl TransformParameters {
         // (fill-extrusion) that use the depth buffer to emulate real-world
         // space.
         let near_z = (0.1 * f64::from(state.get_camera_to_center_distance())) as u16;
-        state.get_proj_matrix(&mut near_clipped_proj_matrix, near_z, false);
+        let near_clipped_proj_matrix = state.get_proj_matrix(near_z, false);
 
         TransformParameters {
             proj_matrix,
@@ -98,7 +92,8 @@ pub struct PaintParameters<'a> {
     pub pass: RenderPass,
     pub map_mode: MapMode,
     pub debug_options: MapDebugOptions,
-    pub time_point: TimePoint,
+    /// As in [`UpdateParameters::time_point`](crate::update_parameters::UpdateParameters::time_point).
+    pub time_point: Option<Instant>,
 
     pub pixel_ratio: f32,
     pub renderable_size: Size,
@@ -146,7 +141,7 @@ impl<'a> PaintParameters<'a> {
         backend: &'a dyn RendererBackend,
         map_mode: MapMode,
         debug_options: MapDebugOptions,
-        time_point: TimePoint,
+        time_point: Option<Instant>,
         transform_params: &'a TransformParameters,
         static_data: &'a RenderStaticData,
         pattern_atlas: Rc<RefCell<PatternAtlas>>,

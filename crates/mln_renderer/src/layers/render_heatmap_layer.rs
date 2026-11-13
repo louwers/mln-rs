@@ -27,7 +27,7 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer::static_immutable_cast;
+use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::HeatmapLayer;
 use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
@@ -38,9 +38,7 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
-use mln_util::immutable::Immutable;
 use mln_util::size::Size;
-use mln_util::sync::RwLockExt;
 
 use super::heatmap_layer_tweaker::HeatmapLayerTweaker;
 use super::heatmap_texture_layer_tweaker::HeatmapTextureLayerTweaker;
@@ -59,7 +57,7 @@ use crate::render_target::{RenderTarget, RenderTargetPtr};
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
-fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &HeatmapLayerImpl {
+fn impl_cast(impl_: &Arc<dyn layer::Impl>) -> &HeatmapLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), HeatmapLayerImpl::static_type_info()));
     impl_.downcast_ref::<HeatmapLayerImpl>().expect("RenderHeatmapLayer: not a heatmap layer impl")
 }
@@ -108,9 +106,9 @@ pub struct RenderHeatmapLayer {
 }
 
 impl RenderHeatmapLayer {
-    pub fn new(impl_: Immutable<HeatmapLayerImpl>) -> Self {
+    pub fn new(impl_: Arc<HeatmapLayerImpl>) -> Self {
         let unevaluated = impl_.paint.untransitioned();
-        let properties: Immutable<dyn LayerProperties> = Arc::new(HeatmapLayerProperties::new(impl_));
+        let properties: Arc<dyn LayerProperties> = Arc::new(HeatmapLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
         RenderHeatmapLayer {
@@ -212,7 +210,7 @@ impl RenderLayer for RenderHeatmapLayer {
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
-        _new_layer: &Immutable<dyn layer::Impl>,
+        _new_layer: &Arc<dyn layer::Impl>,
         _changes: &mut UniqueChangeRequestVec,
     ) {
         // RenderLayer::layerChanged
@@ -244,7 +242,7 @@ impl RenderLayer for RenderHeatmapLayer {
 
         let previous_evaluated = get_evaluated::<HeatmapLayerProperties>(&self.base.evaluated_properties).clone();
         let mut properties = HeatmapLayerProperties::with_evaluated(
-            static_immutable_cast::<HeatmapLayerImpl>(&self.base.base_impl),
+            downcast_arc::<HeatmapLayerImpl>(&self.base.base_impl),
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
@@ -394,7 +392,7 @@ impl RenderLayer for RenderHeatmapLayer {
             let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let binders_guard = binders_lock.read_unpoisoned();
+            let binders_guard = binders_lock.read();
             let paint_property_binders = &*binders_guard;
             let geometry = tile.get_bucket_geometry();
 

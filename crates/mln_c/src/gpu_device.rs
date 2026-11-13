@@ -48,6 +48,11 @@ pub(crate) const BACKENDS: &[(BackendType, mln_render_backend, mln_render_backen
     (BackendType::OpenGL, MLN_RENDER_BACKEND_OPEN_GL, types::MLN_RENDER_BACKEND_FLAG_OPEN_GL),
     #[cfg(not(target_family = "wasm"))]
     (BackendType::WebGPU, MLN_RENDER_BACKEND_WEB_GPU, types::MLN_RENDER_BACKEND_FLAG_WEB_GPU),
+    // A browser build has one of the two.
+    #[cfg(all(target_family = "wasm", feature = "webgpu"))]
+    (BackendType::WebGPU, MLN_RENDER_BACKEND_WEB_GPU, types::MLN_RENDER_BACKEND_FLAG_WEB_GPU),
+    #[cfg(all(target_family = "wasm", feature = "gl", not(feature = "webgpu")))]
+    (BackendType::OpenGL, MLN_RENDER_BACKEND_OPEN_GL, types::MLN_RENDER_BACKEND_FLAG_OPEN_GL),
 ];
 
 /// The window and layer kinds that this library takes, each with its
@@ -245,6 +250,13 @@ fn check_open_gl_options(request: &Request, backend: BackendType) -> Result<(), 
 /// The device that `request` asks for, and the queue lock it took, which
 /// takes its user data once the device has a handle.
 fn create(request: Request) -> Result<(Device, Option<std::sync::Arc<HostQueueLock>>), Error> {
+    if cfg!(target_family = "wasm") {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "the browser makes WebGPU devices asynchronously, and WebGL2 contexts on canvases: attach without a \
+             device, or wrap your WebGL2 context",
+        ));
+    }
     if let Some(backend) = request.backend {
         if !BACKENDS.iter().any(|(built, _, _)| *built == backend) {
             return Err(Error::new(ErrorKind::Unsupported, format!("this build draws with no {backend:?}")));
@@ -341,10 +353,16 @@ pub(crate) fn sync_kind_of(value: u32) -> Option<SyncKind> {
 /// The capabilities of `device`.
 fn capabilities(device: &Device) -> mln_gpu_device_capabilities {
     let backend = device.backend();
+    // The browser build renders into canvases only.
+    let offscreen = if cfg!(target_family = "wasm") {
+        types::MLN_RENDER_TARGET_KIND_FLAG_WEB_CANVAS
+    } else {
+        MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN
+    };
     let mut target_kinds = SURFACE_KINDS
         .iter()
         .filter(|(surface, _)| device.presents_to(*surface))
-        .fold(MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN, |kinds, (_, flag)| kinds | flag);
+        .fold(offscreen, |kinds, (_, flag)| kinds | flag);
     let mut sync = SyncKinds::NONE;
     #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
     if let Device::Vulkan(vulkan) = device {
@@ -421,7 +439,7 @@ pub unsafe extern "C" fn mln_gpu_device_get_capabilities(
 }
 
 /// `mln_gpu_device_wrap_web_gpu()`: this library's WebGPU is wgpu's, which
-/// takes no `webgpu.h` device.
+/// can't wrap a `GPUDevice` yet (louwers/mln-rs#263).
 ///
 /// # Safety
 ///
@@ -436,12 +454,15 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
         // SAFETY: the caller's contract.
         let context = unsafe { context.as_ref() }
             .ok_or_else(|| Error::invalid_argument("mln_web_gpu_context_descriptor must not be null"))?;
-        if context.device.is_null() {
-            return Err(Error::invalid_argument("mln_web_gpu_context_descriptor.device must not be null"));
+        if context.device == 0 {
+            return Err(Error::invalid_argument("mln_web_gpu_context_descriptor.device must not be 0"));
         }
         // SAFETY: the caller's contract.
         unsafe { handles::out_handle(out_device, "out_device") }?;
-        Err(Error::new(ErrorKind::Unsupported, "this library wraps no WebGPU device outside a browser"))
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "this library's WebGPU can't wrap a GPUDevice yet (https://github.com/louwers/mln-rs/issues/263)",
+        ))
     })
 }
 
@@ -620,6 +641,14 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_open_gl(
             *out_device = DEVICES.insert(Device::Gl(device).into())?;
             return Ok(());
         }
+        #[cfg(all(target_family = "wasm", feature = "gl"))]
+        if context.platform == types::MLN_OPEN_GL_CONTEXT_PLATFORM_WEB_GL {
+            // SAFETY: the variant that `platform` names, checked above.
+            let handle = unsafe { context.data.web_gl.context };
+            let context = crate::web::required(handle, "mln_open_gl_context_descriptor.data.web_gl.context")?;
+            *out_device = DEVICES.insert(Device::web_gl(context)?.into())?;
+            return Ok(());
+        }
         #[cfg(windows)]
         if context.platform == types::MLN_OPEN_GL_CONTEXT_PLATFORM_WGL {
             // SAFETY: the variant that `platform` names, checked above.
@@ -676,8 +705,7 @@ fn open_gl_platform(context: &mln_open_gl_context_descriptor) -> Result<&'static
                 Ok("WGL")
             }
             types::MLN_OPEN_GL_CONTEXT_PLATFORM_WEB_GL => {
-                let web_gl = context.data.web_gl;
-                if web_gl.kind == types::MLN_WEB_GL_CONTEXT_EXISTING && web_gl.context == 0 {
+                if context.data.web_gl.context == 0 {
                     return null("web_gl.context");
                 }
                 Ok("WebGL")

@@ -22,7 +22,7 @@ use std::cell::{Cell, RefCell, RefMut};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use mln_actor::{AsyncTask, LocalObject, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
@@ -37,6 +37,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
+use parking_lot::Mutex;
 
 // MARK: - Fixtures
 
@@ -380,7 +381,7 @@ impl Default for FakeFileSource {
 impl FileSource for FakeFileSource {
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let id = {
-            let mut next = self.next_id.lock().unwrap();
+            let mut next = self.next_id.lock();
             *next += 1;
             *next
         };
@@ -398,11 +399,11 @@ impl FileSource for FakeFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock().clone()
     }
 }
 
@@ -415,7 +416,7 @@ struct Recorder(LogRecords);
 
 impl mln_util::logging::Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().unwrap().push(((severity, event, code, msg.to_owned()), false));
+        self.0.lock().push(((severity, event, code, msg.to_owned()), false));
         true
     }
 }
@@ -436,7 +437,7 @@ impl FixtureLog {
     /// `count(message)`: marks the matching records checked.
     pub fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
         let mut count = 0;
-        for ((s, e, c, m), checked) in self.messages.lock().unwrap().iter_mut() {
+        for ((s, e, c, m), checked) in self.messages.lock().iter_mut() {
             if *s == severity && *e == event && *c == code && m == msg {
                 *checked = true;
                 count += 1;
@@ -447,7 +448,7 @@ impl FixtureLog {
 
     /// `unchecked()`: the records nobody counted.
     pub fn unchecked(&self) -> Vec<LogRecord> {
-        self.messages.lock().unwrap().iter().filter(|(_, checked)| !checked).map(|(record, _)| record.clone()).collect()
+        self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(record, _)| record.clone()).collect()
     }
 }
 
@@ -468,13 +469,13 @@ impl Drop for FixtureLog {
 /// `runLoop.run()`, stopped (and failed) after `seconds` if nothing stopped
 /// it: a hang fails the test instead of hanging the test run.
 #[track_caller]
-pub fn run_with_timeout(run_loop: &RunLoop, seconds: i64) {
+pub fn run_with_timeout(run_loop: &RunLoop, seconds: u64) {
     let timed_out = Rc::new(Cell::new(false));
     let timer = Timer::new();
     {
         let timed_out = timed_out.clone();
         let run_loop = run_loop.clone();
-        timer.start(mln_util::chrono::Duration::from_secs(seconds), mln_util::chrono::Duration::zero(), move || {
+        timer.start(std::time::Duration::from_secs(seconds), std::time::Duration::ZERO, move || {
             timed_out.set(true);
             run_loop.stop();
         });
@@ -534,8 +535,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     pub fn create(run_loop: RunLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
         let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio).expect("a headless frontend");
-        let options =
-            MapOptions::new().with_map_mode(mode).with_size(frontend.get_size()).with_pixel_ratio(pixel_ratio);
+        let options = MapOptions { map_mode: mode, size: frontend.get_size(), pixel_ratio, ..Default::default() };
         let map = Map::with_file_source(file_source.clone(), options).unwrap();
         frontend.attach(&map);
         let map = Rc::new(RefCell::new(map));

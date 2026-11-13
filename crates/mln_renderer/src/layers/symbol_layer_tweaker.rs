@@ -2,6 +2,8 @@
 // src/mln/renderer/layers/symbol_layer_tweaker.cpp (MLN_UBO_CONSOLIDATION
 // branches: the port's backend is WebGPU).
 
+use std::sync::Arc;
+
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
@@ -9,7 +11,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::symbol_layer_ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use mln_gfx::{Drawable, LayerGroupBase, UniformBufferPtr};
-use mln_map_types::{MercatorProjection, ProjectionBase, ProjectionData};
+use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_properties::{
     IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOpacity, IconTranslate, IconTranslateAnchor,
@@ -18,9 +20,7 @@ use mln_style::layers::symbol_layer_properties::{
 };
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
-use mln_util::immutable::Immutable;
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::sync::RwLockExt;
 
 use super::render_symbol_layer::{SymbolDrawableData, SymbolType, get_screen_matrix};
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
@@ -38,7 +38,7 @@ pub struct SymbolLayerTweaker {
 }
 
 impl SymbolLayerTweaker {
-    pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
+    pub fn new(id: String, properties: Arc<dyn LayerProperties>) -> Self {
         SymbolLayerTweaker {
             base: LayerTweakerBase::new(id, properties),
             evaluated_props_uniform_buffer: None,
@@ -83,10 +83,8 @@ impl LayerTweaker for SymbolLayerTweaker {
         let context = parameters.context;
         let state = parameters.state;
         let properties = self.base.evaluated_properties.clone();
-        let symbol_layer_properties = (*properties)
-            .as_any()
-            .downcast_ref::<SymbolLayerProperties>()
-            .expect("SymbolLayerTweaker: symbol layer properties");
+        let symbol_layer_properties =
+            (*properties).downcast_ref::<SymbolLayerProperties>().expect("SymbolLayerTweaker: symbol layer properties");
         let evaluated = get_evaluated::<SymbolLayerProperties>(&properties);
 
         let zoom = state.get_zoom() as f32;
@@ -163,13 +161,13 @@ impl LayerTweaker for SymbolLayerTweaker {
                 debug_assert!(false);
                 return;
             };
-            let paint_properties = paint_properties.read_unpoisoned();
+            let paint_properties = paint_properties.read();
 
             let translate = if is_text { evaluated.get::<TextTranslate>() } else { evaluated.get::<IconTranslate>() };
             let anchor =
                 if is_text { *evaluated.get::<TextTranslateAnchor>() } else { *evaluated.get::<IconTranslateAnchor>() };
             let mut projection: ProjectionData = if is_screen_space {
-                MercatorProjection.get_projection_data(state, &tile_id, &get_screen_matrix(*translate))
+                Projection::Mercator.get_projection_data(state, &tile_id, &get_screen_matrix(*translate))
             } else {
                 const NEAR_CLIPPED: bool = false;
                 const IN_VIEWPORT_PIXEL_UNITS: bool = false;

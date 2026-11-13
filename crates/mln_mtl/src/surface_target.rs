@@ -17,7 +17,6 @@
 //   `set_overlay` draws over each frame before it is presented, such as an
 //   app's controls over the map.
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -221,10 +220,6 @@ impl TargetResource for SurfaceResource {
     fn get_render_pass_descriptor(&self) -> Option<MTLRenderPassDescriptorPtr> {
         self.state.render_pass_descriptor.borrow().clone()
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// A `CAMetalLayer` that a [`SurfaceTarget`] presents to, which may move to
@@ -297,7 +292,7 @@ impl SurfaceTarget {
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
-        let image = Rc::new(DrawTarget::new(Size::new(0, 0), SurfaceResource { state: state.clone() }));
+        let image = Rc::new(DrawTarget::new(Size::new(0, 0), Rc::new(SurfaceResource { state: state.clone() })));
         let target = SurfaceTarget { state, image, size: Cell::new(Size::new(0, 0)) };
         target.resize(framebuffer_size);
         target

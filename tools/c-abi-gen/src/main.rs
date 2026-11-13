@@ -9,6 +9,10 @@
 //!   it returns another value, and leaves every out-parameter as it found it.
 //! - `signatures.rs`: a compile-time check that each function `crates/mln_c`
 //!   defines itself has the header's signature.
+//! - `trampolines.rs`: for the browser build, a function for each callback
+//!   typedef, with its signature, that forwards its call to the JavaScript
+//!   host's dispatcher (`crates/mln_c/src/web.rs`): the host can't put its own
+//!   functions in the module's function table.
 //!
 //! A function counts as defined when a `#[unsafe(no_mangle)]` function of its
 //! name is in a file under `crates/mln_c/src` outside `generated/`, at the
@@ -60,11 +64,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    let trampolines = trampolines(&types, &aliases)?;
+
     let (function_count, stub_count) = (functions.len(), stubs.len());
     fs::create_dir_all(&out_dir)?;
     write(&out_dir.join("types.rs"), "", types)?;
-    write(&out_dir.join("stubs.rs"), "use super::types::*;\n\n", stubs)?;
+    // Without a stub, the import would be unused.
+    let stubs_prelude = if stubs.is_empty() { "" } else { "use super::types::*;\n\n" };
+    write(&out_dir.join("stubs.rs"), stubs_prelude, stubs)?;
     write(&out_dir.join("signatures.rs"), "use super::types::*;\n\n", checks)?;
+    write(
+        &out_dir.join("trampolines.rs"),
+        "use super::types::*;\nuse wasm_bindgen::JsValue;\n\nuse crate::web::dispatch;\n\n",
+        trampolines,
+    )?;
     println!(
         "{function_count} functions from {} headers: {} defined, {stub_count} stubs",
         headers.len(),
@@ -303,4 +316,123 @@ fn write(path: &Path, prelude: &str, items: Vec<Item>) -> Result<(), Box<dyn Err
     let file = syn::File { shebang: None, attrs: Vec::new(), items };
     fs::write(path, format!("{HEADER_LINE}\n{prelude}{}", prettyplease::unparse(&file)))?;
     Ok(())
+}
+
+/// The callback typedefs: `Option<unsafe extern "C" fn(...)>` aliases.
+fn callback_types(types: &[Item]) -> Vec<(&syn::Ident, &syn::TypeBareFn)> {
+    types
+        .iter()
+        .filter_map(|item| match item {
+            Item::Type(alias) => Some((&alias.ident, option_fn(&alias.ty)?)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The function type of an `Option<fn>`.
+fn option_fn(ty: &Type) -> Option<&syn::TypeBareFn> {
+    let Type::Path(path) = ty else { return None };
+    let segment = path.path.segments.last().filter(|segment| segment.ident == "Option")?;
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else { return None };
+    match arguments.args.first()? {
+        syn::GenericArgument::Type(Type::BareFn(function)) => Some(function),
+        _ => None,
+    }
+}
+
+/// How a trampoline hands a value of a C type to JavaScript.
+enum Value {
+    /// A number: an integer of up to 32 bits, a float, or an address.
+    Number,
+    /// A `BigInt`: a 64-bit integer.
+    BigInt,
+    Bool,
+    /// An address, a number: a pointer, or a function's table index.
+    Pointer,
+    Function,
+    /// A struct by value, as the address of a copy that lives until the
+    /// dispatcher returns.
+    Struct,
+}
+
+fn value(ty: &Type, aliases: &BTreeMap<String, Type>) -> Value {
+    let ty = resolve(ty, aliases);
+    if option_fn(ty).is_some() {
+        return Value::Function;
+    }
+    match ty {
+        Type::Ptr(_) => Value::Pointer,
+        Type::Path(path) => match path.path.segments.last().map(|segment| segment.ident.to_string()).as_deref() {
+            Some("u64" | "i64" | "c_ulonglong" | "c_longlong") => Value::BigInt,
+            Some(
+                "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "usize" | "isize" | "f32" | "f64" | "c_int" | "c_uint"
+                | "c_char" | "c_uchar" | "c_long" | "c_ulong" | "c_short" | "c_ushort" | "c_float" | "c_double",
+            ) => Value::Number,
+            Some("bool") => Value::Bool,
+            _ => Value::Struct,
+        },
+        _ => Value::Struct,
+    }
+}
+
+/// A trampoline for each callback typedef, and `pointer(name)`, which gives
+/// each one's address by its typedef's name.
+fn trampolines(types: &[Item], aliases: &BTreeMap<String, Type>) -> Result<Vec<Item>, Box<dyn Error>> {
+    let mut items = Vec::new();
+    let mut arms = Vec::new();
+    for (ident, function) in callback_types(types) {
+        let name = ident.to_string();
+        let mut parameters = Vec::new();
+        let mut arguments = Vec::new();
+        for (index, input) in function.inputs.iter().enumerate() {
+            let argument = input.name.as_ref().map_or_else(|| format_ident!("arg{index}"), |(name, _)| name.clone());
+            let ty = &input.ty;
+            parameters.push(quote! { #argument: #ty });
+            arguments.push(match value(ty, aliases) {
+                Value::Number | Value::BigInt | Value::Bool => quote! { JsValue::from(#argument) },
+                Value::Pointer => quote! { JsValue::from(#argument as usize) },
+                Value::Function => {
+                    quote! { JsValue::from(#argument.map_or(0, |function| function as *const () as usize)) }
+                }
+                Value::Struct => quote! { JsValue::from(&raw const #argument as usize) },
+            });
+        }
+        let call = quote! { dispatch(#name, &[#(#arguments),*]) };
+        let (output, body) = match &function.output {
+            ReturnType::Default => (quote! {}, quote! { let _ = #call; }),
+            ReturnType::Type(_, ty) => {
+                let body = match value(ty, aliases) {
+                    Value::Number => quote! { #call.as_f64().unwrap_or(0.0) as #ty },
+                    Value::BigInt => {
+                        quote! { js_sys::BigInt::new(&#call).ok().and_then(|value| <#ty>::try_from(value).ok()).unwrap_or(0) }
+                    }
+                    Value::Bool => quote! { #call.is_truthy() },
+                    Value::Pointer => quote! { #call.as_f64().unwrap_or(0.0) as usize as #ty },
+                    Value::Function | Value::Struct => {
+                        return Err(format!("{name} returns {}, which a trampoline can't", ty.to_token_stream()).into());
+                    }
+                };
+                (quote! { -> #ty }, body)
+            }
+        };
+        let doc = format!(" `{name}`, forwarded to the host's dispatcher.");
+        items.push(syn::parse2(quote! {
+            #[doc = #doc]
+            unsafe extern "C" fn #ident(#(#parameters),*) #output {
+                #body
+            }
+        })?);
+        arms.push(quote! { #name => Some(#ident as *const () as usize) });
+    }
+    items.push(syn::parse2(quote! {
+        /// The address of the trampoline of the callback typedef `name`: its
+        /// index in the module's function table.
+        pub(crate) fn pointer(name: &str) -> Option<usize> {
+            match name {
+                #(#arms,)*
+                _ => None,
+            }
+        }
+    })?);
+    Ok(items)
 }

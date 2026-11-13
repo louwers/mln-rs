@@ -13,13 +13,12 @@
 // notifies also replaces `baseImpl`). Several setter calls through one guard
 // therefore notify once.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
-use mln_util::enum_::Enum;
-use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
 use crate::conversion::{Converter, convert};
@@ -27,9 +26,8 @@ use crate::expression::{
     Dependency, EvaluationContext, Expression, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
-pub use crate::layer_impl::{FontStack, Impl, ImplBase, static_immutable_cast};
+pub use crate::layer_impl::{FontStack, Impl, ImplBase, downcast_arc};
 use crate::style_property::StyleProperty;
-use crate::util::AsAny;
 
 /// The enums nested in C++ `LayerTypeInfo`.
 pub mod layer_type_info {
@@ -103,11 +101,11 @@ pub enum PropertyScope {
 }
 
 /// The runtime representation of a layer from the MapLibre Style Spec.
-pub trait Layer: AsAny {
+pub trait Layer: Any + Send + Sync {
     // --- virtual / protected members ---
 
     /// The `baseImpl` member.
-    fn base_impl(&self) -> Immutable<dyn Impl>;
+    fn base_impl(&self) -> Arc<dyn Impl>;
 
     /// `auto impl_ = mutableBaseImpl(); f(*impl_); baseImpl = std::move(impl_);`
     /// for the base members.
@@ -241,11 +239,11 @@ pub trait Layer: AsAny {
 impl dyn Layer {
     /// `layer->as<FooLayer>()`-style checked downcast.
     pub fn downcast_ref<T: Layer>(&self) -> Option<&T> {
-        self.as_any().downcast_ref::<T>()
+        (self as &dyn Any).downcast_ref()
     }
 
     pub fn downcast_mut<T: Layer>(&mut self) -> Option<&mut T> {
-        self.as_any_mut().downcast_mut::<T>()
+        (self as &mut dyn Any).downcast_mut()
     }
 }
 
@@ -253,7 +251,7 @@ fn evaluate_visibility_expression(expression: &dyn Expression, global_state: &Gl
     let result = expression.evaluate(&EvaluationContext::default().with_global_state(Some(global_state)));
     if let Ok(result) = result
         && let Some(string) = from_expression_value::<String>(&result)
-        && let Some(visibility) = VisibilityType::to_enum(&string)
+        && let Ok(visibility) = string.parse::<VisibilityType>()
     {
         return visibility;
     }

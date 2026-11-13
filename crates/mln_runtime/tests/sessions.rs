@@ -6,9 +6,9 @@
 
 mod support;
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
 
 use mln_map::{CameraOptions, CameraUpdate, MapEvent, MapMode, TileOperation};
 use mln_runtime::{
@@ -22,6 +22,7 @@ use mln_storage::{ResourceError, Response};
 use mln_util::chrono::Timestamp;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::size::Size;
+use parking_lot::Mutex;
 use support::{EventLog, TIMEOUT, eventually, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
@@ -33,7 +34,10 @@ fn style(color: &str) -> String {
 }
 
 fn map_in_mode(runtime: &Runtime, mode: MapMode) -> Map {
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(Size::new(256, 256)).with_map_mode(mode));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: mode, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     map
@@ -123,8 +127,11 @@ fn hold_runtime(map: &Map) -> std::sync::mpsc::Sender<()> {
 }
 
 fn zoom(map: &Map, zoom: f64) -> mln_runtime::Completion<mln_runtime::Applied> {
-    map.update_camera(CameraUpdate { camera: CameraOptions::default().with_zoom(Some(zoom)), ..Default::default() })
-        .unwrap()
+    map.update_camera(CameraUpdate {
+        camera: CameraOptions { zoom: Some(zoom), ..Default::default() },
+        ..Default::default()
+    })
+    .unwrap()
 }
 
 /// The premultiplied RGBA of the center pixel of the session's last frame.
@@ -420,7 +427,10 @@ fn resizes_apply_in_order_and_publish_generations() {
 #[test]
 fn a_session_renders_at_its_maps_pixel_ratio() {
     let runtime = runtime();
-    let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_pixel_ratio(2.0));
+    let options = MapOptions {
+        map: mln_map::MapOptions { size: SIZE, pixel_ratio: 2.0, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
     wait(map.set_style_json(style("#ff0000")));
@@ -964,7 +974,7 @@ impl HeldTile {
         let (holder, counter) = (held.clone(), requests.clone());
         wait(runtime.set_resource_provider(move |request: ResourceRequest| {
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                *holder.lock().unwrap() = Some(request);
+                *holder.lock() = Some(request);
             } else {
                 // A request that the renderer cancelled meanwhile takes no
                 // answer.
@@ -984,7 +994,7 @@ impl HeldTile {
     /// Answers the held request with an empty tile, unless the renderer
     /// cancelled it.
     fn answer(&self) {
-        if let Some(request) = self.held.lock().unwrap().take() {
+        if let Some(request) = self.held.lock().take() {
             let _ = request.respond(empty_tile());
         }
     }
@@ -1046,15 +1056,17 @@ fn host_demands_and_a_still_image_demand_never_replace_each_other() {
     demand(&session, DemandMode::WaitForUpdate, 7);
     held.answer();
     still.wait().unwrap();
-    // The image's frame showed the update that the host's demand waits for,
-    // and a static map publishes another only for its next still image, so
-    // the host's demand waits until a barrier ends it.
+    // The host's demand ends with no update, before or after the image's
+    // frame. Usually the image's frame shows the update that the demand waits
+    // for, and a static map publishes another only for its next still image,
+    // so the demand waits until a barrier ends it. But the demand may reach
+    // the session after the map published an update and before the session
+    // served the image with it: the demand then draws that update first,
+    // while the tile is still held, and ends with nothing to show.
     wait(session.barrier());
-    let results = take_results(&session, 2);
-    assert_eq!(
-        vec![(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate)],
-        tokens_and_dispositions(&results)
-    );
+    let mut results = tokens_and_dispositions(&take_results(&session, 2));
+    results.sort_by_key(|(token, _)| *token);
+    assert_eq!(vec![(None, FrameDisposition::Rendered), (Some(7), FrameDisposition::NoUpdate)], results);
 }
 
 #[test]
@@ -1097,7 +1109,7 @@ impl TileServer {
         let revalidation = request.resource().prior_expires.is_some();
         if request.resource().kind == Kind::Tile && !revalidation {
             self.loads.fetch_add(1, Ordering::SeqCst);
-            if let Some(held) = self.held.lock().unwrap().as_mut() {
+            if let Some(held) = self.held.lock().as_mut() {
                 return held.push(request);
             }
         }
@@ -1105,11 +1117,11 @@ impl TileServer {
     }
 
     fn hold(&self) {
-        *self.held.lock().unwrap() = Some(Vec::new());
+        *self.held.lock() = Some(Vec::new());
     }
 
     fn release(&self) {
-        for request in self.held.lock().unwrap().take().unwrap_or_default() {
+        for request in self.held.lock().take().unwrap_or_default() {
             TileServer::answer(request, false);
         }
     }
@@ -1140,9 +1152,12 @@ fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
     let serving = server.clone();
     wait(runtime.set_resource_provider(move |request: ResourceRequest| serving.serve(request)));
     let size = Size::new(256, 256);
-    let mut options = MapOptions::new(mln_map::MapOptions::new().with_size(size).with_map_mode(MapMode::Static));
+    let mut options = MapOptions {
+        map: mln_map::MapOptions { size, map_mode: MapMode::Static, ..Default::default() },
+        ..Default::default()
+    };
     if let Some(enabled) = tile_cache_enabled {
-        options = options.with_tile_cache_enabled(enabled);
+        options.tile_cache_enabled = enabled;
     }
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
@@ -1225,7 +1240,7 @@ fn query_session(runtime: &Runtime) -> (Map, RenderSession) {
     let map = map_in_mode(runtime, MapMode::Continuous);
     wait(map.set_style_json(QUERY_STYLE));
     wait(map.update_camera(CameraUpdate {
-        camera: CameraOptions::default().with_zoom(Some(0.0)).with_center(Some(mln_util::geo::LatLng::default())),
+        camera: CameraOptions { zoom: Some(0.0), center: Some(mln_util::geo::LatLng::default()), ..Default::default() },
         ..Default::default()
     }));
     let session = attach(&map);

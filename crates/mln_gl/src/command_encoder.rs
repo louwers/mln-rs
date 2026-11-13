@@ -64,8 +64,4 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         self.context.set_dirty_state();
         true
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }

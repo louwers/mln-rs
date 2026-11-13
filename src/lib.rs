@@ -44,6 +44,8 @@ pub use mln_util;
 pub use mln_vec_map;
 /// Empty on Apple platforms and in the browser build.
 pub use mln_vulkan;
+/// Empty except in the browser build.
+pub use mln_web_host;
 pub use mln_webgpu;
 pub use nunicode;
 pub use polylabel;
