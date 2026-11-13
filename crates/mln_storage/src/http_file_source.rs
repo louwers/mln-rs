@@ -18,8 +18,8 @@
 // Response fields and errors.
 //
 // The transfer itself is an `HttpTransport`, the platform's HTTP stack where
-// it has one: NSURLSession on Apple platforms, the browser's fetch on wasm,
-// ureq elsewhere.
+// it has one: NSURLSession on Apple platforms, HttpURLConnection on Android,
+// the browser's fetch on wasm, ureq elsewhere.
 //
 // Differences (ureq): ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
@@ -93,7 +93,7 @@ impl Cancellation {
         self.cancelled.load(Ordering::SeqCst)
     }
 
-    #[cfg(target_vendor = "apple")]
+    #[cfg(any(target_vendor = "apple", target_os = "android"))]
     fn set_handler(&self, handler: Box<dyn FnOnce() + Send>) {
         *self.handler.lock() = Some(handler);
         // `cancel` may have run before the handler was there.
@@ -159,7 +159,7 @@ impl TransferRequest {
     /// finishes, such as cancelling the HTTP stack's task. It runs once, on
     /// the thread that drops the request, or right away if the request is
     /// already dropped; `finish` discards it.
-    #[cfg(target_vendor = "apple")]
+    #[cfg(any(target_vendor = "apple", target_os = "android"))]
     pub(crate) fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) {
         self.cancellation.set_handler(Box::new(handler));
     }
@@ -182,8 +182,9 @@ impl TransferRequest {
 pub(crate) trait HttpTransport: Send + Sync {
     /// Starts the transfer of `request` without blocking the caller, and
     /// calls `request.finish` once it is done, from any thread (ureq: one
-    /// of its worker threads; `NSURLSession`: its delegate queue; a browser's
-    /// fetch: the event loop). A request
+    /// of its worker threads; `NSURLSession`: its delegate queue;
+    /// `HttpURLConnection`: one of the transport's worker threads; a
+    /// browser's fetch: the event loop). A request
     /// dropped without `finish` never answers, as if it had been cancelled.
     fn start(&self, request: TransferRequest);
 }
@@ -193,7 +194,12 @@ fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(crate::nsurlsession_transport::NSURLSessionTransport::new())
 }
 
-#[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+#[cfg(target_os = "android")]
+fn default_transport() -> Arc<dyn HttpTransport> {
+    Arc::new(crate::http_url_connection_transport::Transport::new())
+}
+
+#[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(crate::ureq_transport::Transport::new())
 }

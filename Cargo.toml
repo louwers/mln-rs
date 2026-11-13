@@ -218,9 +218,8 @@ ureq = { version = "3.5.1", default-features = false }
 # ureq's rustls, with ring's cryptography (ureq's own `rustls` feature would
 # also bring webpki-roots).
 rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
-# Android: the certificate verifier that ureq's `platform-verifier` feature
-# uses, which mln_android_init() points at the app's Java VM, through JNI.
-rustls-platform-verifier = { version = "0.7.1", default-features = false }
+# Android: HttpURLConnection for the online file source, and the app's
+# assets, in the Java VM that mln_android_init() gives, through JNI.
 jni = { version = "0.22.4", default-features = false }
 # Apple platforms: Foundation's NSURLSession for the online file source.
 block2 = { version = "0.6.2" }

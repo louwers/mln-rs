@@ -50,8 +50,8 @@ stub-file-source = []
 rusqlite = { workspace = true, optional = true, features = ["bundled"] }
 
 # The HTTP transport: the platform's HTTP stack where it has one (NSURLSession
-# on Apple platforms, the browser's fetch on wasm), else ureq, with the
-# system's trust store.
+# on Apple platforms, HttpURLConnection on Android, the browser's fetch on
+# wasm), else ureq, with the system's trust store.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 block2.workspace = true
 objc2.workspace = true
@@ -60,14 +60,13 @@ objc2-foundation.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 ureq = { workspace = true, features = ["gzip", "native-tls-no-default"] }
 
-[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "windows")))'.dependencies]
+[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "windows", target_os = "android")))'.dependencies]
 rustls.workspace = true
 ureq = { workspace = true, features = ["gzip", "platform-verifier", "rustls-no-provider"] }
 
-# Android's certificate verifier, which runs in the app's Java VM.
+# HttpURLConnection and the app's assets, through the app's Java VM.
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
-rustls-platform-verifier.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true

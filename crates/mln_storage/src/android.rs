@@ -1,7 +1,6 @@
-//! What the file sources need of the Android app that they run in: HTTPS
-//! checks certificates with Android's own verifier, which runs in the app's
-//! Java VM, plain HTTP follows the app's network security configuration, and
-//! `asset://` URLs load the app's assets, from its `AssetManager`.
+//! What the file sources need of the Android app that they run in: HTTP goes
+//! through `HttpURLConnection` in the app's Java VM, and `asset://` URLs load
+//! the app's assets, from its `AssetManager`.
 
 // JNI and the NDK's asset manager are the FFI here.
 #![allow(unsafe_code)]
@@ -11,11 +10,10 @@ use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, OnceLock};
 
 use jni::errors::Error as JniError;
-use jni::objects::{Global, JObject, JValue};
-use jni::{Env, EnvUnowned, JavaVM, Outcome, jni_sig, jni_str};
+use jni::objects::{Global, JObject};
+use jni::{EnvUnowned, JavaVM, Outcome, jni_sig, jni_str};
 use mln_actor::ActorRef;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 
 use crate::file_source_request::FileSourceRequestState;
 use crate::local_file_request::read_range;
@@ -61,33 +59,17 @@ struct AssetManager {
 
 static ASSETS: OnceLock<AssetManager> = OnceLock::new();
 
-/// Set once [`init`] gave rustls-platform-verifier the app's Java VM, and
-/// found the verifier's classes in the app.
-static VERIFIER: OnceLock<()> = OnceLock::new();
-
 /// The app's Java VM, which [`init`] keeps.
 static VM: OnceLock<JavaVM> = OnceLock::new();
 
-/// The class of rustls-platform-verifier's Android component that verifies
-/// the certificates.
-const VERIFIER_CLASS: &str = "org.rustls.platformverifier.CertificateVerifier";
-
-/// Whether [`init`] gave Android's certificate verifier the app's Java VM,
-/// which the verifier panics without, and the app has the verifier's classes,
-/// without which it fails every certificate.
-pub(crate) fn verifier_ready() -> bool {
-    VERIFIER.get().is_some()
+/// The app's Java VM, once [`init`] gave it.
+pub(crate) fn java_vm() -> Option<&'static JavaVM> {
+    VM.get()
 }
 
 /// Gives the file sources the Java VM of `jni_env` and the app's `context`.
 /// Call it before the first HTTP request or app asset; a later call changes
-/// nothing. Without it, HTTPS trusts the certificates of Android's store
-/// files, which leave out the ones a user installed, and plain HTTP goes to
-/// any host.
-///
-/// HTTPS verifies with Android's own verifier when the app includes
-/// rustls-platform-verifier's Android component, whose classes call it, and
-/// otherwise trusts the store files as without `init`.
+/// nothing. Without it, HTTP requests and app assets fail.
 ///
 /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when JNI fails,
 /// such as for a `context` that is no `Context`, and leaves no Java exception
@@ -102,15 +84,13 @@ pub unsafe fn init(jni_env: *mut c_void, context: *mut c_void) -> Result<(), Err
     // here go with the caller's frame.
     let mut env = unsafe { EnvUnowned::from_raw(jni_env.cast()) };
     let outcome = env
-        .with_env(|env| -> Result<bool, JniError> {
+        .with_env(|env| -> Result<(), JniError> {
             // SAFETY: the caller's reference, which nothing here deletes.
             let context = unsafe { JObject::from_raw(env, context.cast()) };
             let initialized = (|| {
                 retain_assets(env, &context)?;
                 let _ = VM.set(env.get_java_vm()?);
-                let has_verifier = has_class(env, &context, VERIFIER_CLASS);
-                rustls_platform_verifier::android::init_with_env(env, context)?;
-                Ok(has_verifier)
+                Ok(())
             })();
             if env.exception_check() {
                 env.exception_clear();
@@ -119,73 +99,10 @@ pub unsafe fn init(jni_env: *mut c_void, context: *mut c_void) -> Result<(), Err
         })
         .into_outcome();
     match outcome {
-        Outcome::Ok(has_verifier) => {
-            if has_verifier {
-                let _ = VERIFIER.set(());
-            } else {
-                Log::warning(
-                    Event::Android,
-                    format!(
-                        "the app has no {VERIFIER_CLASS} (rustls-platform-verifier's Android component), so HTTPS \
-                         trusts the system's certificates alone"
-                    ),
-                );
-            }
-            Ok(())
-        }
+        Outcome::Ok(()) => Ok(()),
         Outcome::Err(error) => Err(Error::native(format!("Android initialization failed: {error}"))),
         Outcome::Panic(_) => Err(Error::native("Android initialization panicked")),
     }
-}
-
-/// Whether `context`'s class loader loads the class `name`. Leaves no Java
-/// exception pending.
-fn has_class(env: &mut Env<'_>, context: &JObject<'_>, name: &str) -> bool {
-    let loaded = (|| -> Result<(), JniError> {
-        let loader =
-            env.call_method(context, jni_str!("getClassLoader"), jni_sig!("()Ljava/lang/ClassLoader;"), &[])?.l()?;
-        let name = env.new_string(name)?;
-        env.call_method(
-            &loader,
-            jni_str!("loadClass"),
-            jni_sig!("(Ljava/lang/String;)Ljava/lang/Class;"),
-            &[JValue::from(&name)],
-        )?;
-        Ok(())
-    })();
-    if env.exception_check() {
-        env.exception_clear();
-    }
-    loaded.is_ok()
-}
-
-/// Whether the app's network security configuration permits plain HTTP to
-/// `host`. Before [`init`], or when Java can't tell, any host is permitted.
-pub(crate) fn cleartext_permitted(host: &str) -> bool {
-    let Some(vm) = VM.get() else {
-        return true;
-    };
-    // The thread stays attached, so a transport's next request is cheaper.
-    vm.attach_current_thread(|env| -> Result<bool, JniError> {
-        let class = env.find_class(jni_str!("android/security/NetworkSecurityPolicy"))?;
-        let policy = env
-            .call_static_method(
-                &class,
-                jni_str!("getInstance"),
-                jni_sig!("()Landroid/security/NetworkSecurityPolicy;"),
-                &[],
-            )?
-            .l()?;
-        let host = env.new_string(host)?;
-        env.call_method(
-            &policy,
-            jni_str!("isCleartextTrafficPermitted"),
-            jni_sig!("(Ljava/lang/String;)Z"),
-            &[JValue::from(&host)],
-        )?
-        .z()
-    })
-    .unwrap_or(true)
 }
 
 /// Keeps `context`'s asset manager, unless one is kept already.

@@ -7,24 +7,18 @@
 //! Eyeballs), so the agent's TCP step does too: see `HappyEyeballsConnector`.
 //!
 //! A request for a byte range asks for the identity encoding, since a range
-//! of a compressed body isn't a range of the resource. On Android, plain
-//! HTTP follows the app's network security configuration.
+//! of a compressed body isn't a range of the resource.
 //!
 //! TLS checks certificates against the system's trust store (rustls with
 //! rustls-platform-verifier; `SChannel` through native-tls on Windows), as curl
-//! does with the system's CA bundle. On Android without the app's Java VM or
-//! the verifier's Android component, that is the store's certificate files.
-//! A proxy comes from the environment
+//! does with the system's CA bundle. A proxy comes from the environment
 //! (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, ...), as for curl.
 //!
 //! ureq follows redirects with every header it was given, so a request with
 //! the host's headers follows them here instead, and drops those headers
-//! once a redirect leaves their origin. On Android every request does, so
-//! that each URL's plain HTTP is checked.
+//! once a redirect leaves their origin.
 
 use std::net::SocketAddr;
-#[cfg(any(target_os = "android", test))]
-use std::path::Path;
 use std::sync::{Arc, OnceLock, mpsc};
 use std::time::Duration;
 
@@ -41,6 +35,7 @@ use ureq::unversioned::transport::{
 };
 
 use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
+use crate::redirect::redirect_url;
 use crate::resource::Resource;
 use crate::response::{Reason, ResourceError};
 
@@ -165,8 +160,7 @@ pub(crate) struct Transport {
 impl Transport {
     /// Starts as many workers as the online file source's default
     /// maximum of concurrent requests. Their client is made with the first
-    /// transfer, so that it sees the host's setup until then, such as
-    /// `android::init`.
+    /// transfer.
     pub(crate) fn new() -> Self {
         let client = Arc::new(OnceLock::new());
         let (requests, receiver) = mpsc::channel::<TransferRequest>();
@@ -226,51 +220,16 @@ fn tls_config() -> TlsConfig {
     TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build()
 }
 
-/// The system's trust store, with ring's cryptography (ureq's rustls without
-/// its baked-in Mozilla roots needs the provider spelled out).
+/// The system's verifier, through rustls-platform-verifier, with ring's
+/// cryptography (ureq's rustls without its baked-in Mozilla roots needs the
+/// provider spelled out).
 #[cfg(not(target_os = "windows"))]
 fn tls_config() -> TlsConfig {
     TlsConfig::builder()
         .provider(TlsProvider::Rustls)
-        .root_certs(root_certs())
+        .root_certs(RootCerts::PlatformVerifier)
         .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .build()
-}
-
-/// The system's verifier, through rustls-platform-verifier.
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
-fn root_certs() -> RootCerts {
-    RootCerts::PlatformVerifier
-}
-
-/// Android's verifier once [`android::init`](crate::android::init) gave it
-/// the app's Java VM, which it panics without, and found its component in
-/// the app. Otherwise the certificates of
-/// Android's store, from its files: Conscrypt's, which Android 14 and later
-/// update, else the system image's. Those leave out the ones a user
-/// installed.
-#[cfg(target_os = "android")]
-fn root_certs() -> RootCerts {
-    if crate::android::verifier_ready() {
-        return RootCerts::PlatformVerifier;
-    }
-    certificates_in(&[Path::new("/apex/com.android.conscrypt/cacerts"), Path::new("/system/etc/security/cacerts")])
-}
-
-/// The PEM certificates in the first of `dirs` that has any, or none.
-#[cfg(any(target_os = "android", test))]
-fn certificates_in(dirs: &[&Path]) -> RootCerts {
-    for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else { continue };
-        let certs: Vec<_> = entries
-            .filter_map(|entry| std::fs::read(entry.ok()?.path()).ok())
-            .filter_map(|pem| ureq::tls::Certificate::from_pem(&pem).ok())
-            .collect();
-        if !certs.is_empty() {
-            return RootCerts::new_with_certs(&certs);
-        }
-    }
-    RootCerts::new_with_certs(&[])
 }
 
 impl Client {
@@ -304,14 +263,8 @@ impl Client {
         let mut url = resource.url.clone();
         let mut headers = headers;
         let mut redirects = 0;
-        // Android's network security configuration applies to each URL of a
-        // redirect chain, so there every redirect is followed here.
-        let follows_redirects = !headers.is_empty() || cfg!(target_os = "android");
+        let follows_redirects = !headers.is_empty();
         loop {
-            #[cfg(target_os = "android")]
-            if let Some(refusal) = cleartext_refusal(&url, crate::android::cleartext_permitted) {
-                return Err(Box::new(refusal));
-            }
             let mut http_response = self.call(resource, &url, headers, follows_redirects)?;
             let status = http_response.status().as_u16();
             if follows_redirects
@@ -380,103 +333,6 @@ impl Client {
             request.call().map_err(|e| Box::new(error(&e)))
         }
     }
-}
-
-/// The error of a plain HTTP request to `url` that `permitted` refuses for
-/// its host, as Android's own HTTP clients word it, or `None` when the
-/// request may go ahead.
-#[cfg(any(target_os = "android", test))]
-fn cleartext_refusal(url: &str, permitted: impl FnOnce(&str) -> bool) -> Option<ResourceError> {
-    let uri = url.parse::<ureq::http::Uri>().ok()?;
-    if !uri.scheme_str().is_some_and(|scheme| scheme.eq_ignore_ascii_case("http")) {
-        return None;
-    }
-    let host = uri.host()?;
-    let host = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')).unwrap_or(host);
-    // A refusal is the app's policy, which no retry changes.
-    (!permitted(host))
-        .then(|| ResourceError::new(Reason::Other, format!("Cleartext HTTP traffic to {host} not permitted")))
-}
-
-/// The URL a redirect from `current` to `location` goes to: `location`
-/// resolved against `current` (RFC 3986, section 5.2), or `None` when it
-/// isn't an `http` or `https` URL.
-fn redirect_url(current: &str, location: &str) -> Option<String> {
-    let has_http_scheme = |url: &str| {
-        url.get(..7).is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
-            || url.get(..8).is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
-    };
-    if has_http_scheme(location) {
-        return Some(location.to_owned());
-    }
-    if has_url_scheme(location) || !has_http_scheme(current) {
-        return None;
-    }
-
-    let scheme_end = current.find("://")?;
-    let scheme = &current[..scheme_end];
-    if location.starts_with("//") {
-        return Some(format!("{scheme}:{location}"));
-    }
-
-    let authority_start = scheme_end + 3;
-    let origin_end =
-        current[authority_start..].find(['/', '?', '#']).map_or(current.len(), |index| authority_start + index);
-    let origin = &current[..origin_end];
-    let path_end = current.find(['?', '#']).unwrap_or(current.len()).max(origin_end);
-    if location.starts_with('/') {
-        let (path, suffix) = split_url_path_suffix(location);
-        return Some(format!("{origin}{}{suffix}", remove_dot_segments(path)));
-    }
-    if location.starts_with('?') {
-        return Some(format!("{}{location}", &current[..path_end]));
-    }
-    if location.starts_with('#') {
-        let fragment_start = current.find('#').unwrap_or(current.len());
-        return Some(format!("{}{location}", &current[..fragment_start]));
-    }
-
-    let current_path = &current[origin_end..path_end];
-    let directory = current_path.rfind('/').map_or("/", |index| &current_path[..=index]);
-    let (path, suffix) = split_url_path_suffix(location);
-    Some(format!("{origin}{}{suffix}", remove_dot_segments(&format!("{directory}{path}"))))
-}
-
-/// Whether `value` starts with a scheme (a `:` before any `/`, `?` or `#`).
-fn has_url_scheme(value: &str) -> bool {
-    value.find([':', '/', '?', '#']).is_some_and(|index| value.as_bytes()[index] == b':')
-}
-
-/// A URL reference's path, and its query and fragment.
-fn split_url_path_suffix(value: &str) -> (&str, &str) {
-    value.split_at(value.find(['?', '#']).unwrap_or(value.len()))
-}
-
-/// `path` without its `.` and `..` segments.
-fn remove_dot_segments(path: &str) -> String {
-    if !path.split('/').any(|segment| segment == "." || segment == "..") {
-        return path.to_owned();
-    }
-    let has_trailing_slash = path.ends_with('/') || path.ends_with("/.") || path.ends_with("/..");
-    let mut segments = Vec::new();
-    for segment in path.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                segments.pop();
-            }
-            segment => segments.push(segment),
-        }
-    }
-    let mut normalized = String::new();
-    if path.starts_with('/') {
-        normalized.push('/');
-    }
-    normalized.push_str(&segments.join("/"));
-    if (has_trailing_slash && !normalized.ends_with('/')) || normalized.is_empty() {
-        normalized.push('/');
-    }
-    normalized
 }
 
 #[cfg(test)]
@@ -610,120 +466,5 @@ mod tests {
         Client::new().transfer(&Resource::style(&format!("http://{addr}/style.json")), &[]).unwrap();
         let request = server.join().unwrap();
         assert!(request.contains("\r\naccept-encoding: gzip\r\n"), "{request}");
-    }
-
-    #[test]
-    fn plain_http_to_a_refused_host_fails_with_the_host() {
-        let refuse = |expected: &'static str| {
-            move |host: &str| {
-                assert_eq!(host, expected);
-                false
-            }
-        };
-        let refusal = cleartext_refusal("http://localhost:8080/style.json", refuse("localhost")).unwrap();
-        assert_eq!(refusal.reason, Reason::Other);
-        assert_eq!(refusal.message, "Cleartext HTTP traffic to localhost not permitted");
-        assert!(cleartext_refusal("HTTP://Tiles.Example/a", refuse("Tiles.Example")).is_some());
-        assert!(cleartext_refusal("http://[::1]:80/a", refuse("::1")).is_some());
-        assert!(cleartext_refusal("http://localhost/a", |_| true).is_none());
-        let unasked = |_: &str| -> bool { panic!("HTTPS has no cleartext policy") };
-        assert!(cleartext_refusal("https://localhost/a", unasked).is_none());
-    }
-
-    #[test]
-    fn a_location_resolves_against_the_current_url() {
-        let current = "https://tiles.localhost:8443/styles/v1/style.json?key=1#top";
-        let cases = [
-            ("https://other.localhost/a", Some("https://other.localhost/a")),
-            ("HTTP://other.localhost/a", Some("HTTP://other.localhost/a")),
-            ("//cdn.localhost/b", Some("https://cdn.localhost/b")),
-            ("/root.json", Some("https://tiles.localhost:8443/root.json")),
-            ("/a/../b/./c.json?x#y", Some("https://tiles.localhost:8443/b/c.json?x#y")),
-            ("next.json", Some("https://tiles.localhost:8443/styles/v1/next.json")),
-            ("../up.json", Some("https://tiles.localhost:8443/styles/up.json")),
-            ("?key=2", Some("https://tiles.localhost:8443/styles/v1/style.json?key=2")),
-            ("#bottom", Some("https://tiles.localhost:8443/styles/v1/style.json?key=1#bottom")),
-            ("ftp://files.localhost/a", None),
-            ("mailto:someone@tiles.localhost", None),
-        ];
-        for (location, expected) in cases {
-            assert_eq!(redirect_url(current, location).as_deref(), expected, "{location}");
-        }
-    }
-
-    #[test]
-    fn a_relative_location_needs_an_http_current_url() {
-        assert_eq!(redirect_url("file:///a/b.json", "c.json"), None);
-        assert_eq!(redirect_url("no-scheme", "/c.json"), None);
-        assert_eq!(redirect_url("http://host.localhost", "c.json").as_deref(), Some("http://host.localhost/c.json"));
-        assert_eq!(redirect_url("http://host.localhost?q", "c.json").as_deref(), Some("http://host.localhost/c.json"));
-    }
-
-    /// A self-signed certificate, followed by text as in Android's store
-    /// files.
-    const CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----
-MIIBajCCARCgAwIBAgIUCH3FebEqN5UxxXgKDcRPYzuZ5x8wCgYIKoZIzj0EAwIw
-GjEYMBYGA1UEAwwPY2VydGlmaWNhdGVzX2luMCAXDTI2MTExMzA4MDI0M1oYDzIx
-MjYxMDIwMDgwMjQzWjAaMRgwFgYDVQQDDA9jZXJ0aWZpY2F0ZXNfaW4wWTATBgcq
-hkjOPQIBBggqhkjOPQMBBwNCAAR+aUOIMLuZ3C54InMK72dDWUTvGmZBNB9xxyaA
-o6fcYEHKpiWN1lXFRyyCqAJxVvIyGgeKUgzUu+uOTTUv/1ndozIwMDAdBgNVHQ4E
-FgQUDQfGE8z6YxPo2nDz6XsWYHJQADowDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjO
-PQQDAgNIADBFAiEAxxCQPrBob9yTzGqIewLiHbeuMC7tbH2ggvzkL9WE3PcCIEVy
-EDlU/+n+jFaxs2Xlku8oIXS1LVGH0/GTBlXygJsx
------END CERTIFICATE-----
-Certificate:
-    Data:
-        Version: 3 (0x2)
-";
-
-    fn certificate_count(roots: &RootCerts) -> usize {
-        match roots {
-            RootCerts::Specific(certs) => certs.len(),
-            _ => panic!("not specific certificates"),
-        }
-    }
-
-    #[test]
-    fn certificates_come_from_the_first_folder_that_has_any() {
-        let temp = crate::tests::temp_path("stores");
-        let base = Path::new(&*temp);
-        let (missing, empty, store, later) =
-            (base.join("missing"), base.join("empty"), base.join("store"), base.join("later"));
-        for dir in [&empty, &store, &later] {
-            std::fs::create_dir_all(dir).unwrap();
-        }
-        std::fs::write(store.join("0a1b2c3d.0"), CERTIFICATE).unwrap();
-        std::fs::write(store.join("README"), "not a certificate").unwrap();
-        std::fs::write(later.join("0a1b2c3d.0"), CERTIFICATE).unwrap();
-        std::fs::write(later.join("0a1b2c3d.1"), CERTIFICATE).unwrap();
-
-        assert_eq!(certificate_count(&certificates_in(&[&missing, &empty, &store, &later])), 1);
-        assert_eq!(certificate_count(&certificates_in(&[&later, &store])), 2);
-    }
-
-    #[test]
-    fn without_certificates_nothing_is_trusted() {
-        let temp = crate::tests::temp_path("stores");
-        let empty = Path::new(&*temp).join("empty");
-        std::fs::create_dir_all(&empty).unwrap();
-        assert_eq!(certificate_count(&certificates_in(&[&empty, Path::new("/nonexistent/cacerts")])), 0);
-    }
-
-    #[test]
-    fn dot_segments_are_removed_from_a_path() {
-        let cases = [
-            ("/a/b/c", "/a/b/c"),
-            ("/a/./b", "/a/b"),
-            ("/a/../b", "/b"),
-            ("/../a", "/a"),
-            ("/a/b/..", "/a/"),
-            ("/a/.", "/a/"),
-            ("/..", "/"),
-            ("a/../b", "b"),
-            ("/a//b/../c", "/a/c"),
-        ];
-        for (path, expected) in cases {
-            assert_eq!(remove_dot_segments(path), expected, "{path}");
-        }
     }
 }

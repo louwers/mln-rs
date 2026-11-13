@@ -24,6 +24,8 @@ mod file_source_request;
 mod http_file_source;
 pub mod http_header_transform;
 mod http_timeout;
+#[cfg(target_os = "android")]
+mod http_url_connection_transport;
 mod json_document;
 mod local_file_request;
 mod local_file_source;
@@ -42,6 +44,8 @@ pub mod offline_database;
 mod offline_schema;
 pub mod online_file_source;
 mod pmtiles_file_source;
+#[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+mod redirect;
 pub mod resource;
 mod resource_options;
 pub mod resource_transform;
@@ -50,7 +54,7 @@ pub mod response;
 pub mod sqlite3;
 #[cfg(any(test, feature = "stub-file-source"))]
 pub mod stub_file_source;
-#[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+#[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 mod ureq_transport;
 
 pub use async_request::AsyncRequest;
