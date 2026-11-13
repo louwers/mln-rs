@@ -5706,8 +5706,11 @@ fn globe_momentum_stops_at_the_latitude_limit() {
         let mut transform = new_transform();
         set_up_globe(&mut transform, &ll(84.9, 10.0), 6.0, 0.0, 0.0);
         transform.set_globe_free_bearing(free_bearing);
-        let limit = VerticalPerspectiveProjection::max_latitude(transform.get_state(), transform.get_zoom());
-        assert!(limit < 86.0, "{limit}");
+        // The latitude the limit holds a center at the pole to.
+        let limit = |transform: &Transform| {
+            transform.get_state().constrained_center(&ll(90.0, 10.0), transform.get_zoom()).latitude()
+        };
+        assert!(limit(&transform) < 86.0, "{}", limit(&transform));
         let begin = start_clock(&mut transform);
         transform.start_momentum(&pan_momentum(sc(0.0, 3000.0), None), &AnimationOptions::default());
         let mut frames = 0;
@@ -5717,11 +5720,7 @@ fn globe_momentum_stops_at_the_latitude_limit() {
         }
         assert!(frames < 40, "{frames}");
         let center = transform.get_lat_lng(WrapMode::Wrapped);
-        assert_near(
-            VerticalPerspectiveProjection::max_latitude(transform.get_state(), transform.get_zoom()),
-            center.latitude(),
-            1e-9,
-        );
+        assert_near(limit(&transform), center.latitude(), 1e-9);
         assert_near(10.0, center.longitude(), 1e-6);
         assert_near(0.0, bearing_degrees(&transform), 1e-9);
     }
