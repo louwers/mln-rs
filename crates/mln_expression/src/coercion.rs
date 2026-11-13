@@ -33,53 +33,20 @@ fn to_boolean(v: &Value) -> Value {
     })
 }
 
-/// JS `Number(s)`: `s` without surrounding JS whitespace is empty (0), a
-/// decimal literal with an optional sign, `Infinity` or a `0x`, `0o` or `0b`
-/// integer literal, and NaN otherwise.
-fn js_string_to_number(s: &str) -> f64 {
-    let s = s.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}');
+/// A string as a number: what ECMAScript's `ToNumber` reads gives the same
+/// value, except `0x`, `0o` and `0b` literals above `u64::MAX`, and the extras
+/// Rust's `str::parse` reads, such as `inf`, are accepted too. Anything else
+/// is NaN.
+fn string_to_number(s: &str) -> f64 {
+    let s = s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     let radix = match s.get(..2) {
+        _ if s.is_empty() => return 0.0,
         Some("0x" | "0X") => 16,
         Some("0o" | "0O") => 8,
         Some("0b" | "0B") => 2,
-        _ => 10,
+        _ => return s.parse().unwrap_or(f64::NAN),
     };
-    if radix != 10 {
-        return non_decimal_integer(&s[2..], radix);
-    }
-    if s.is_empty() {
-        return 0.0;
-    }
-    match s.strip_prefix(['+', '-']).unwrap_or(s) {
-        "Infinity" if s.starts_with('-') => f64::NEG_INFINITY,
-        "Infinity" => f64::INFINITY,
-        // `str::parse` takes JS's decimal grammar, plus `inf` and `nan` in any
-        // case, which JS doesn't.
-        unsigned if unsigned.bytes().all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b)) => {
-            s.parse().unwrap_or(f64::NAN)
-        }
-        _ => f64::NAN,
-    }
-}
-
-/// The digits of a JS `0x`, `0o` or `0b` literal, rounded to the nearest
-/// `f64`; NaN unless they are one or more digits in `radix` (a power of 2).
-fn non_decimal_integer(digits: &str, radix: u32) -> f64 {
-    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
-        return f64::NAN;
-    }
-    let digits = digits.trim_start_matches('0');
-    let bits = radix.trailing_zeros() as usize;
-    let (head, tail) = digits.split_at(digits.len().min(128 / bits));
-    let mut mantissa = u128::from_str_radix(head, radix).unwrap_or(0);
-    // `head` holds more than 64 significant bits, so a 1 in its last bit for
-    // any nonzero digit in `tail` makes `as f64` round as the full value
-    // would.
-    if tail.bytes().any(|b| b != b'0') {
-        mantissa |= 1;
-    }
-    let scale = i32::try_from(bits * tail.len()).unwrap_or(i32::MAX);
-    mantissa as f64 * 2f64.powi(scale)
+    u64::from_str_radix(&s[2..], radix).map_or(f64::NAN, |n| n as f64)
 }
 
 /// JS `Number(value)`, as GL JS's `to-number` applies it: null and booleans
@@ -88,14 +55,14 @@ fn non_decimal_integer(digits: &str, radix: u32) -> f64 {
 ///
 /// The style spec defines `to-number` on a string as ECMAScript's `ToNumber`
 /// (<https://maplibre.org/maplibre-style-spec/expressions/#to-number>,
-/// <https://tc39.es/ecma262/#sec-tonumber-applied-to-the-string-type>), so
-/// strings follow JS's grammar rather than Rust's `str::parse`.
+/// <https://tc39.es/ecma262/#sec-tonumber-applied-to-the-string-type>). As a
+/// consumer of styles rather than a validator, this reads a superset of it.
 fn to_number(v: &Value) -> EvaluationResult {
     let result = match v {
         Value::Null => Some(0.0),
         Value::Bool(b) => Some(f64::from(u8::from(*b))),
         Value::Number(f) => Some(*f),
-        Value::String(s) => Some(js_string_to_number(s)),
+        Value::String(s) => Some(string_to_number(s)),
         _ => None,
     };
     match result.filter(|r| !r.is_nan()) {
@@ -435,8 +402,9 @@ impl Expression for Coercion {
 mod tests {
     use super::*;
 
+    /// Strings `ToNumber` reads, with the values JS gives.
     #[test]
-    fn strings_convert_as_js_number() {
+    fn strings_convert_as_to_number() {
         let cases = [
             ("12", 12.0),
             (" \t\n\u{a0}\u{feff}\u{3000}-1.5e3\u{2028} ", -1500.0),
@@ -451,38 +419,34 @@ mod tests {
             ("0x1F", 31.0),
             ("0o17", 15.0),
             ("0B101", 5.0),
-            ("0x0000000000000000000000000000000000000001", 1.0),
-            // 2^128 + 2^75 + 1 rounds up to 2^128 + 2^76.
-            ("0x100000000000008000000000000000001", 2f64.powi(128) + 2f64.powi(76)),
-            // 2^128 + 2^75 is a tie and rounds to even, 2^128.
-            ("0x100000000000008000000000000000000", 2f64.powi(128)),
+            ("0xFFFFFFFFFFFFFFFF", 2f64.powi(64)),
         ];
         for (s, expected) in cases {
-            let n = js_string_to_number(s);
+            let n = string_to_number(s);
             assert!(n == expected && n.is_sign_negative() == expected.is_sign_negative(), "{s:?}: {n}");
         }
-        for nan in ["12px", "1e", ".", "+", "-0x10", "0x", "0xg", "0b2", "inf", "infinity", "NaN", "1_000", "\u{85}1"] {
-            assert!(js_string_to_number(nan).is_nan(), "{nan:?}");
+        for nan in ["12px", "50 mph", "1e", ".", "+", "-0x10", "0x", "0xg", "0b2", "NaN", "1_000"] {
+            assert!(string_to_number(nan).is_nan(), "{nan:?}");
         }
     }
 
-    /// The strings on which `ToNumber` and `s.trim().parse::<f64>()` disagree.
+    /// The strings `ToNumber` reads that `s.trim().parse::<f64>()` doesn't,
+    /// which `string_to_number` handles itself.
     #[test]
-    fn strings_where_to_number_differs_from_str_parse() {
-        let cases = [
-            ("", Some(0.0), None),
-            ("0x10", Some(16.0), None),
-            ("0o17", Some(15.0), None),
-            ("0b101", Some(5.0), None),
-            ("\u{feff}1", Some(1.0), None),
-            ("inf", None, Some(f64::INFINITY)),
-            ("INFINITY", None, Some(f64::INFINITY)),
-            ("\u{85}1", None, Some(1.0)),
-        ];
-        for (s, to_number, str_parse) in cases {
-            let n = js_string_to_number(s);
-            assert_eq!((!n.is_nan()).then_some(n), to_number, "ToNumber({s:?})");
-            assert_eq!(s.trim().parse::<f64>().ok(), str_parse, "{s:?}.trim().parse()");
+    fn strings_to_number_reads_and_str_parse_does_not() {
+        let cases = [("", 0.0), ("0x10", 16.0), ("0o17", 15.0), ("0b101", 5.0), ("\u{feff}1", 1.0)];
+        for (s, expected) in cases {
+            assert_eq!(string_to_number(s), expected, "{s:?}");
+            assert!(s.trim().parse::<f64>().is_err(), "{s:?}");
+        }
+    }
+
+    /// Strings JS rejects but `str::parse` reads, which are accepted.
+    #[test]
+    fn strings_beyond_to_number_are_accepted() {
+        let cases = [("inf", f64::INFINITY), ("-INFINITY", f64::NEG_INFINITY), ("\u{85}1", 1.0)];
+        for (s, expected) in cases {
+            assert_eq!(string_to_number(s), expected, "{s:?}");
         }
     }
 
@@ -494,6 +458,7 @@ mod tests {
         assert_eq!(number(Value::Bool(false)), Some(0.0));
         assert_eq!(number(Value::String("0x10".into())), Some(16.0));
         assert_eq!(number(Value::String("12px".into())), None);
+        assert_eq!(number(Value::String("nan".into())), None);
         assert_eq!(number(Value::Number(f64::NAN)), None);
         assert_eq!(number(Value::Array(vec![Value::Number(1.0)])), None);
     }
