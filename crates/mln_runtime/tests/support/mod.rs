@@ -67,14 +67,35 @@ pub(crate) fn map(runtime: &Runtime) -> Map {
     map
 }
 
+/// How long a test waits for a completion before it fails, which is far
+/// longer than any command takes.
+pub(crate) const COMPLETION_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Waits for the result of `completion`. A result that doesn't arrive within
+/// [`COMPLETION_TIMEOUT`] fails the test at the caller's line, instead of
+/// hanging it.
+#[track_caller]
+pub(crate) fn result_of<T: Send + 'static>(completion: Completion<T>) -> Result<T, Error> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    completion.on_complete(move |result| {
+        let _ = sender.send(result);
+    });
+    let Ok(result) = receiver.recv_timeout(COMPLETION_TIMEOUT) else {
+        panic!("the completion waited for here didn't complete within {COMPLETION_TIMEOUT:?}");
+    };
+    result
+}
+
 /// The result of a command that was sent.
+#[track_caller]
 pub(crate) fn wait<T: Send + 'static>(completion: Result<Completion<T>, Error>) -> T {
-    completion.unwrap().wait().unwrap()
+    result_of(completion.unwrap()).unwrap()
 }
 
 /// The error a command that was sent completes with.
+#[track_caller]
 pub(crate) fn wait_err<T: Send + 'static + std::fmt::Debug>(completion: Result<Completion<T>, Error>) -> Error {
-    completion.unwrap().wait().unwrap_err()
+    result_of(completion.unwrap()).unwrap_err()
 }
 
 /// Waits until `done` holds, polling.

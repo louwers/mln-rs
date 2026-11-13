@@ -23,7 +23,7 @@ use mln_util::chrono::Timestamp;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use support::{EventLog, TIMEOUT, eventually, runtime, wait, wait_err};
+use support::{EventLog, TIMEOUT, eventually, result_of, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -39,7 +39,7 @@ fn map_in_mode(runtime: &Runtime, mode: MapMode) -> Map {
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
-    created.wait().unwrap();
+    result_of(created).unwrap();
     map
 }
 
@@ -57,7 +57,7 @@ fn offscreen(size: Size) -> RenderTarget {
 /// An offscreen session of `SIZE` that has attached.
 fn attach(map: &Map) -> RenderSession {
     let (session, attached) = map.attach(offscreen(SIZE), AttachOptions::default()).unwrap();
-    attached.wait().unwrap();
+    result_of(attached).unwrap();
     session
 }
 
@@ -177,7 +177,7 @@ fn frame_results_wake_the_host_once_until_it_drains() {
         ..AttachOptions::default()
     };
     let (session, attached) = map.attach(offscreen(SIZE), options).unwrap();
-    attached.wait().unwrap();
+    result_of(attached).unwrap();
     demand(&session, DemandMode::Force, 1);
     demand(&session, DemandMode::Force, 2);
     assert!(eventually(|| session.snapshot().unwrap().frame_generation == 2));
@@ -220,7 +220,7 @@ fn a_demand_shows_the_commands_sent_before_it() {
     assert_eq!(session.drain_frame_results().unwrap(), Vec::<FrameResult>::new());
     drop(open);
 
-    let applied = moved.wait().unwrap();
+    let applied = result_of(moved).unwrap();
     let result = take_one(&session);
     assert_eq!(631, result.token.unwrap());
     assert_eq!(FrameDisposition::Rendered, result.disposition);
@@ -239,7 +239,7 @@ fn a_demand_behind_a_command_without_an_update_finishes() {
     let logged = map.dump_debug_logs().unwrap();
     demand(&session, DemandMode::IfChanged, 641);
     drop(open);
-    logged.wait().unwrap();
+    result_of(logged).unwrap();
     let result = take_one(&session);
     assert_eq!(641, result.token.unwrap());
     assert_eq!(FrameDisposition::NoUpdate, result.disposition);
@@ -258,7 +258,7 @@ fn a_waiting_demand_renders_the_next_map_update() {
     // update.
     wait(session.dump_debug_logs());
     assert_eq!(session.drain_frame_results().unwrap(), Vec::<FrameResult>::new());
-    zoom(&map, 2.0).wait().unwrap();
+    result_of(zoom(&map, 2.0)).unwrap();
     let result = take_one(&session);
     assert_eq!(601, result.token.unwrap());
     assert_eq!(FrameDisposition::Rendered, result.disposition);
@@ -277,7 +277,7 @@ fn a_burst_of_queued_commands_renders_in_one_frame() {
     let open = hold_runtime(&map);
     let zooms: Vec<_> = (1..=8).map(|step| zoom(&map, f64::from(step))).collect();
     drop(open);
-    let applied: Vec<_> = zooms.into_iter().map(|zoom| zoom.wait().unwrap()).collect();
+    let applied: Vec<_> = zooms.into_iter().map(|zoom| result_of(zoom).unwrap()).collect();
     let last = applied.last().unwrap();
     let result = take_one(&session);
     assert_eq!((621, FrameDisposition::Rendered), (result.token.unwrap(), result.disposition));
@@ -320,11 +320,11 @@ fn a_detach_ends_a_demand_waiting_for_commands() {
     // command sent ahead of it runs.
     assert!(eventually(|| detached.is_complete()));
     assert!(!moved.is_complete());
-    detached.wait().unwrap();
+    result_of(detached).unwrap();
     let result = take_one(&session);
     assert_eq!((661, FrameDisposition::TargetNotReady), (result.token.unwrap(), result.disposition));
     drop(open);
-    moved.wait().unwrap();
+    result_of(moved).unwrap();
 }
 
 #[test]
@@ -359,18 +359,18 @@ fn the_redraw_wake_runs_once_per_demand() {
         ..AttachOptions::default()
     };
     let (session, attached) = map.attach(offscreen(SIZE), options).unwrap();
-    attached.wait().unwrap();
+    result_of(attached).unwrap();
     render_until_idle(&map, &session);
     let before = redraws.load(Ordering::SeqCst);
 
-    zoom(&map, 2.0).wait().unwrap();
+    result_of(zoom(&map, 2.0)).unwrap();
     assert!(eventually(|| redraws.load(Ordering::SeqCst) == before + 1));
-    zoom(&map, 3.0).wait().unwrap();
+    result_of(zoom(&map, 3.0)).unwrap();
     wait(session.dump_debug_logs());
     assert_eq!(before + 1, redraws.load(Ordering::SeqCst));
     demand(&session, DemandMode::IfChanged, 1);
     assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
-    zoom(&map, 4.0).wait().unwrap();
+    result_of(zoom(&map, 4.0)).unwrap();
     assert!(eventually(|| redraws.load(Ordering::SeqCst) == before + 2));
 }
 
@@ -387,7 +387,7 @@ fn a_new_session_wakes_for_the_map_it_has_to_draw() {
         ..AttachOptions::default()
     };
     let (session, attached) = map.attach(offscreen(SIZE), options).unwrap();
-    attached.wait().unwrap();
+    result_of(attached).unwrap();
     assert!(eventually(|| redraws.load(Ordering::SeqCst) == 1));
     demand(&session, DemandMode::IfChanged, 1);
     assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
@@ -432,7 +432,7 @@ fn a_session_renders_at_its_maps_pixel_ratio() {
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
-    created.wait().unwrap();
+    result_of(created).unwrap();
     wait(map.set_style_json(style("#ff0000")));
     let session = attach(&map);
     assert_eq!(2.0, session.snapshot().unwrap().extent.scale_factor);
@@ -494,7 +494,7 @@ fn work_sent_after_a_resize_waits_for_it() {
     drop(session.resize(LogicalExtent::new(Size::new(96, 80), 1.0)).unwrap());
     let barrier = session.barrier().unwrap();
     drop(open);
-    barrier.wait().unwrap();
+    result_of(barrier).unwrap();
     let snapshot = session.snapshot().unwrap();
     assert_eq!(Size::new(96, 80), snapshot.extent.size);
     assert_eq!(before + 1, snapshot.generation);
@@ -621,7 +621,7 @@ fn a_disposed_map_lasts_until_its_session_ends() {
     // A disposed runtime shuts down once the session lets go of the map.
     runtime.dispose().unwrap();
     wait(session.release());
-    disposed.wait().unwrap();
+    result_of(disposed).unwrap();
 }
 
 #[test]
@@ -790,7 +790,7 @@ fn work_queued_before_an_abandon_completes_as_target_lost() {
     let resized = session.resize(LogicalExtent::new(Size::new(32, 32), 1.0)).unwrap();
     session.abandon().unwrap();
     drop(open);
-    assert_eq!(ErrorKind::TargetLost, resized.wait().unwrap_err().kind);
+    assert_eq!(ErrorKind::TargetLost, result_of(resized).unwrap_err().kind);
 }
 
 #[test]
@@ -835,7 +835,7 @@ fn maintenance_work_waits_behind_a_demand_for_map_commands() {
         let _ = sender.send((result, drained.drain_frame_results().unwrap()));
     });
     drop(open);
-    zoomed.wait().unwrap();
+    result_of(zoomed).unwrap();
     let (result, results) = receiver.recv_timeout(TIMEOUT).unwrap();
     result.unwrap();
     assert_eq!(1, results.len(), "{results:?}");
@@ -853,7 +853,7 @@ fn sessions_on_two_maps_share_one_device() {
         .map(|map| {
             let target = RenderTarget::Offscreen { size: SIZE, device: Some(device.clone()) };
             let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
-            attached.wait().unwrap();
+            result_of(attached).unwrap();
             session
         })
         .collect();
@@ -919,7 +919,7 @@ fn a_still_image_waits_for_a_session() {
     wait(map.camera());
     assert!(!still.is_complete());
     let session = attach(&map);
-    still.wait().unwrap();
+    result_of(still).unwrap();
     assert_eq!([255, 0, 0, 255], center_pixel(&session, SIZE));
 }
 
@@ -946,7 +946,7 @@ fn map_release_cancels_the_pending_still_image() {
     let pending = map.request_still_image().unwrap();
     assert_eq!(ErrorKind::InvalidState, wait_err(map.request_still_image()).kind);
     wait(map.release());
-    assert_eq!(ErrorKind::Cancelled, pending.wait().unwrap_err().kind);
+    assert_eq!(ErrorKind::Cancelled, result_of(pending).unwrap_err().kind);
 }
 
 /// One vector source with one tile at zoom 0, which a still image of a
@@ -973,9 +973,13 @@ impl HeldTile {
         let requests = Arc::new(AtomicUsize::new(0));
         let (holder, counter) = (Arc::clone(&held), Arc::clone(&requests));
         wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+            // Counted under the lock, so that a test that sees the first
+            // request counted finds it held once it takes the lock.
+            let mut held = holder.lock();
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                *holder.lock() = Some(request);
+                *held = Some(request);
             } else {
+                drop(held);
                 // A request that the renderer cancelled meanwhile takes no
                 // answer.
                 let _ = request.respond(empty_tile());
@@ -1019,7 +1023,7 @@ fn a_still_image_waits_for_the_next_session() {
     // The detach cancelled the held request, so the next session's renderer
     // asks for the tile again, and gets an empty one.
     let second = attach(&held.map);
-    still.wait().unwrap();
+    result_of(still).unwrap();
     let rendered = second.drain_frame_results().unwrap();
     assert_eq!(vec![(None, FrameDisposition::Rendered)], tokens_and_dispositions(&rendered));
     assert_eq!([255, 0, 0, 255], center_pixel(&second, SIZE));
@@ -1041,7 +1045,7 @@ fn a_barrier_ends_a_still_image_demand_until_the_next() {
     // The demand that the barrier made again renders the image once the
     // tile loads.
     held.answer();
-    still.wait().unwrap();
+    result_of(still).unwrap();
     let rendered = session.drain_frame_results().unwrap();
     assert_eq!(vec![(None, FrameDisposition::Rendered)], tokens_and_dispositions(&rendered));
 }
@@ -1055,7 +1059,7 @@ fn host_demands_and_a_still_image_demand_never_replace_each_other() {
     held.wait_for_requests(1);
     demand(&session, DemandMode::WaitForUpdate, 7);
     held.answer();
-    still.wait().unwrap();
+    result_of(still).unwrap();
     // Each demand ends once, with a result of its own, and the image's frame
     // draws the map. How the host's demand ends depends on what it finds
     // when the session evaluates it, which can happen only after the map has
@@ -1170,10 +1174,10 @@ fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
         options.tile_cache_enabled = enabled;
     }
     let (map, created) = runtime.create_map(options).unwrap();
-    created.wait().unwrap();
+    result_of(created).unwrap();
     wait(map.set_style_json(TILE_CACHE_STYLE));
     let (_session, attached) = map.attach(offscreen(size), AttachOptions::default()).unwrap();
-    attached.wait().unwrap();
+    result_of(attached).unwrap();
     let render_at = |latitude: f64, longitude: f64, fall_back: bool| {
         let camera = CameraOptions {
             center: Some(LatLng::new(latitude, longitude).unwrap()),
@@ -1190,7 +1194,7 @@ fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
             assert!(log.wait_for(looked_up_zoom_0).is_some(), "the tiles never fell back on zoom 0");
             server.release();
         }
-        still.wait().unwrap();
+        result_of(still).unwrap();
         server.loads.load(Ordering::SeqCst)
     };
     let first = render_at(0.0, 0.0, true);
