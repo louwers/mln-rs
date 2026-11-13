@@ -88,15 +88,12 @@ pub enum EventType {
     MapSourceChanged = 16,
     OfflineRegionStatusChanged = 17,
     OfflineRegionResponseError = 18,
-    /// No event has this type. It keeps maplibre-native-ffi's value, so that
-    /// a mask that names it stays valid.
-    OfflineRegionTileCountLimitExceeded = 19,
-    MapGlyphsRequested = 20,
-    MapGlyphsLoaded = 21,
-    MapGlyphsError = 22,
-    MapSpriteRequested = 23,
-    MapSpriteLoaded = 24,
-    MapSpriteError = 25,
+    MapGlyphsRequested = 19,
+    MapGlyphsLoaded = 20,
+    MapGlyphsError = 21,
+    MapSpriteRequested = 22,
+    MapSpriteLoaded = 23,
+    MapSpriteError = 24,
 }
 
 fn map_event_type(event: &MapEvent) -> EventType {
@@ -163,11 +160,8 @@ impl EventMask {
             | bit(EventType::MapSpriteError),
     );
     /// Every event that a runtime raises: those of its offline regions.
-    pub const ALL_RUNTIME_EVENTS: EventMask = EventMask(
-        bit(EventType::OfflineRegionStatusChanged)
-            | bit(EventType::OfflineRegionResponseError)
-            | bit(EventType::OfflineRegionTileCountLimitExceeded),
-    );
+    pub const ALL_RUNTIME_EVENTS: EventMask =
+        EventMask(bit(EventType::OfflineRegionStatusChanged) | bit(EventType::OfflineRegionResponseError));
     pub const ALL: EventMask = EventMask(Self::ALL_MAP_EVENTS.0 | Self::ALL_RUNTIME_EVENTS.0);
 
     /// The mask with these bits, or `None` when a bit names no event type.
@@ -241,10 +235,10 @@ mod tests {
     #[test]
     fn the_masks_match_ffis_flags() {
         assert_eq!(1 << 1, EventMask::from(EventType::MapCameraWillChange).bits());
-        assert_eq!(0x03FF_FFFE, EventMask::ALL.bits());
-        assert_eq!(0b111 << 17, EventMask::ALL_RUNTIME_EVENTS.bits());
+        assert_eq!(0x01FF_FFFE, EventMask::ALL.bits());
+        assert_eq!(0b11 << 17, EventMask::ALL_RUNTIME_EVENTS.bits());
         assert_eq!(None, EventMask::from_bits(1));
-        assert_eq!(None, EventMask::from_bits(1 << 26));
+        assert_eq!(None, EventMask::from_bits(1 << 25));
         assert_eq!(Some(EventMask::ALL), EventMask::from_bits(EventMask::ALL.bits()));
     }
 
