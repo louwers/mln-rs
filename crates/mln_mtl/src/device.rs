@@ -67,13 +67,12 @@ impl Device {
         let device: MTLDevicePtr = unsafe { Retained::retain(device.cast()) }
             .ok_or_else(|| Error::invalid_argument("the Metal device must not be null"))?;
         // SAFETY: as above.
-        match unsafe { Retained::retain(queue.cast()) } {
-            Some(queue) => Ok(Device { device, queue, host_queue: true, export_kinds: Arc::default() }),
-            None => {
-                let queue =
-                    device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
-                Ok(Device { device, queue, host_queue: false, export_kinds: Arc::default() })
-            }
+        if let Some(queue) = unsafe { Retained::retain(queue.cast()) } {
+            Ok(Device { device, queue, host_queue: true, export_kinds: Arc::default() })
+        } else {
+            let queue =
+                device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
+            Ok(Device { device, queue, host_queue: false, export_kinds: Arc::default() })
         }
     }
 

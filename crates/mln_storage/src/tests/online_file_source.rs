@@ -729,7 +729,7 @@ fn pending_requests_start_by_order() {
         .iter()
         .enumerate()
         .map(|(index, resource)| {
-            let (answered, stop) = (answered.clone(), run_loop.clone());
+            let (answered, stop) = (Rc::clone(&answered), run_loop.clone());
             Some(fs.request(
                 resource,
                 Box::new(move |_: Response| {

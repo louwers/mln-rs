@@ -444,7 +444,7 @@ fn tile_requests_follow_the_view() {
     // the side leaves every ideal tile behind, next to the new ones.
     test.transform.resize(Size::new(256, 1024)).unwrap();
     let file_source = Arc::new(PendingTileSource::default());
-    let (requested, orders) = (file_source.requested.clone(), file_source.orders.clone());
+    let (requested, orders) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.orders));
     let layers = Tiled::Vector.layers();
     let source = Tiled::Vector.source(tiles_tileset());
     source.load_description(&*file_source);
@@ -454,7 +454,7 @@ fn tile_requests_follow_the_view() {
     // an update with the camera at `center`.
     let mut look_at = |test: &mut SourceTest, center: LatLng, needs_relayout: bool| {
         test.transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(6.0), ..Default::default() });
-        let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs.clone()));
+        let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
         parameters.prefetch_zoom_delta = 4;
         render_source.update(source.base_impl(), &layers, true, needs_relayout, &parameters);
         let orders: Vec<u32> = orders.lock().iter().map(RequestOrder::get).collect();
@@ -1160,7 +1160,7 @@ impl TurningSource {
         let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
         let requests = Rc::new(RefCell::new(0));
         {
-            let requests = requests.clone();
+            let requests = Rc::clone(&requests);
             file_source.set_response(Kind::Tile, move |_| {
                 *requests.borrow_mut() += 1;
                 let mut response = Response::new();
@@ -1198,7 +1198,7 @@ impl TurningSource {
             zoom: Some(zoom),
             ..Default::default()
         });
-        let file_source: Arc<dyn FileSource> = self.file_source.clone();
+        let file_source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
         let mut parameters = self.test.tile_parameters_with(MapMode::Continuous, Some(file_source));
         parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
         self.render_source.update(self.source.base_impl(), &self.layers, true, false, &parameters);

@@ -206,6 +206,7 @@ impl BorrowedRing {
 
     /// A ring of the host's Metal textures.
     #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    #[must_use]
     pub fn metal(textures: mln_mtl::BorrowedTextures) -> BorrowedRing {
         BorrowedRing { kind: RingKind::Metal(textures) }
     }

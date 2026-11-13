@@ -8,6 +8,8 @@ doc-valid-idents = [
     "GeoJSON",
     "HarfBuzz",
     "HarfRust",
+    "IOSurface",
+    "IOSurfaces",
     "LamAlef",
     "LamAlefs",
     "MapLibre",

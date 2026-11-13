@@ -132,7 +132,7 @@ impl Network {
             };
             let mut response = Response::new();
             let data = if pending.tile.starts_with("vector") { &self.vector_tile } else { &self.raster_tile };
-            response.data = Some(data.clone());
+            response.data = Some(Arc::clone(data));
             callback(response);
         }
     }
@@ -156,7 +156,7 @@ impl FileSource for Network {
             cancelled: Cell::new(false),
             in_flight_since: Cell::new(None),
         });
-        self.requests().borrow_mut().open.push_back(pending.clone());
+        self.requests().borrow_mut().open.push_back(Rc::clone(&pending));
         Box::new(PendingRequest(pending))
     }
 
@@ -199,7 +199,7 @@ impl Scene {
         let run_loop = RunLoop::new();
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         let network = Arc::new(Network::new());
-        let file_source: Arc<dyn FileSource> = network.clone();
+        let file_source: Arc<dyn FileSource> = Arc::<Network>::clone(&network);
 
         let tileset = |url: &str, max_zoom| {
             UrlOrTileset::Tileset(Tileset {
@@ -257,7 +257,7 @@ impl Scene {
             zoom: Some(zoom),
             ..Default::default()
         });
-        let file_source: Arc<dyn FileSource> = self.network.clone();
+        let file_source: Arc<dyn FileSource> = Arc::<Network>::clone(&self.network);
         let parameters = TileParameters {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
@@ -275,10 +275,10 @@ impl Scene {
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
-            image_manager: self.image_manager.clone(),
-            glyph_manager: self.glyph_manager.clone(),
-            dynamic_texture_atlas: self.texture_atlas.clone(),
-            tile_worker_transport: self.transport.clone(),
+            image_manager: Rc::clone(&self.image_manager),
+            glyph_manager: Rc::clone(&self.glyph_manager),
+            dynamic_texture_atlas: Arc::clone(&self.texture_atlas),
+            tile_worker_transport: Rc::<InProcessTransport>::clone(&self.transport),
         };
         // The first frame lays the tiles out.
         let relayout = !self.laid_out;

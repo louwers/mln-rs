@@ -318,10 +318,10 @@ mod tests {
         );
         let far_tile = VectorTileMock::new(far);
         far_tile.base.renderable.set(false);
-        let far_necessity = far_tile.necessity.clone();
+        let far_necessity = Rc::clone(&far_tile.necessity);
         let near_tile = VectorTileMock::new(near);
         near_tile.base.renderable.set(false);
-        let near_necessity = near_tile.necessity.clone();
+        let near_necessity = Rc::clone(&near_tile.necessity);
         cache.add(far, Box::new(far_tile));
         cache.add(near, Box::new(near_tile));
         cache.add(loaded, Box::new(VectorTileMock::new(loaded)));

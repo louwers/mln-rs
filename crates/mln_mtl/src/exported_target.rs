@@ -37,6 +37,7 @@ const BYTES_PER_ELEMENT: i64 = 4;
 
 /// The kinds of exported ring that sessions on `device` share their images
 /// in: IOSurfaces, once the device renders into one.
+#[must_use]
 pub fn export_kinds(device: &Device) -> ExportKinds {
     device.export_kinds()
 }
@@ -68,6 +69,7 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
 /// The kinds of sync with which the host waits for a frame (the
 /// producer's), and the target for the host's reads (the consumer's): a
 /// shared event, which other APIs import, or a finished frame.
+#[must_use]
 pub fn sync_kinds(_device: &Device) -> (SyncKinds, SyncKinds) {
     let kinds = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::MetalSharedEvent]);
     (kinds, kinds)
