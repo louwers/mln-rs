@@ -1,4 +1,4 @@
-# https://editorconfig.org. rustfmt formats the Rust code (`mise run fmt`).
+# https://editorconfig.org. dprint formats the code (`mise run fix`).
 root = true
 
 [*]

@@ -1,7 +1,7 @@
 # The Rust that builds, lints and tests the workspace, locally and in CI. Bump
 # it on purpose, so a new release's lints and formatting land in their own
 # change. The msrv job checks the oldest Rust separately (`rust-version` in
-# Cargo.toml), and `mise run fmt` runs the nightly rustfmt that mise.toml
+# Cargo.toml), and dprint formats with the nightly rustfmt that mise.toml
 # pins (MLN_NIGHTLY).
 [toolchain]
 channel = "1.99.1"

@@ -17,7 +17,8 @@ every task. The justfile keeps the tasks' names from before they moved to
 mise, each running its task. The common ones:
 
 - `mise run test`: every test, including the render suite.
-- `mise run fmt`: format with the pinned nightly rustfmt.
+- `mise run check`, `mise run fix`: the formatters and linters (hk.pkl);
+  `fix` formats with dprint and the pinned nightly rustfmt.
 - `CI=true mise run ci:lint`: CI's lint job, warnings as errors.
 - `mise run bench:compare <ref>`: benchmarks against another commit.
 - `mise run web:build`, `mise run web:check`: build the browser build and its

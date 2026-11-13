@@ -1,3 +1,0 @@
-self-hosted-runner:
-  labels:
-    - ubuntu-26.04  # can be removed once actionlint knows it (as in maplibre-native)

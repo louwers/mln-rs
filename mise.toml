@@ -35,10 +35,20 @@ idiomatic_version_file_enable_tools = ["rust"]
 # reads Cargo's JSON output.
 "core:python" = "3.15.2"
 "aqua:jqlang/jq" = "1.8.2"
+# The formatters and linters (hk.pkl): hk runs them, dprint formats
+# (dprint.jsonc), jactionlint lints the workflows and shellcheck the tasks.
+"aqua:jdx/hk" = "2.12.0"
+"aqua:dprint/dprint" = "0.64.3"
+"aqua:jdx/jactionlint" = "2.6.0"
+"aqua:koalaman/shellcheck" = "0.11.0"
 
 [deps.pnpm]
 auto = true
 dir = "examples/web"
+
+[hooks]
+# The pre-commit hook, and the nightly rustfmt that dprint runs.
+postinstall = ["hk install --mise", "mise run install-nightly"]
 
 [env]
 # In CI (CI set), warnings are errors and a panic prints its backtrace, unless
@@ -46,15 +56,23 @@ dir = "examples/web"
 # checks as CI does.
 CARGO_BUILD_WARNINGS = "{% if get_env(name='CARGO_BUILD_WARNINGS', default='') != '' %}{{ get_env(name='CARGO_BUILD_WARNINGS') }}{% elif get_env(name='CI', default='') != '' %}deny{% else %}warn{% endif %}"
 RUST_BACKTRACE = "{% if get_env(name='RUST_BACKTRACE', default='') != '' %}{{ get_env(name='RUST_BACKTRACE') }}{% elif get_env(name='CI', default='') != '' %}1{% else %}0{% endif %}"
-# The nightly whose rustfmt `mise run fmt` runs (its import options,
+# The nightly whose rustfmt dprint runs (its import options,
 # imports_granularity and group_imports, are unstable), and that builds the
 # sanitizer tests and runs udeps. Pinned so every machine formats alike: bump
-# it on purpose, then run `mise run fmt`.
+# it on purpose, with the one in dprint.jsonc, then run `mise run fix`.
 MLN_NIGHTLY = "nightly-2026-11-04"
 
 [tasks."bench:fixtures"]
 description = "Download the benchmarks' map data into target/bench-fixtures, once"
 run = "python3 -I tools/bench/fixtures.py target/bench-fixtures"
+
+[tasks.check]
+description = "Check every file with the formatters and linters (hk.pkl)"
+run = "hk check --all"
+
+[tasks.fix]
+description = "Format every file and apply the linters' fixes (hk.pkl)"
+run = "hk fix --all"
 
 # The C library as maplibre-native-ffi's 32-bit presets build it (Android's
 # armeabi-v7a and x86): a type whose size a dependency asserts, or a cast that
@@ -68,15 +86,12 @@ run = [
 ]
 
 [tasks."ci:lint"]
-description = "Run what CI's lint job runs: formatting, the ratchet, clippy, the docs, the browser and 32-bit builds and the licenses"
+description = "Run what CI's lint job runs: `check`, the docs and the browser and 32-bit builds"
 run = [
-  "mise run fmt --check",
-  "mise run ratchet",
-  "mise run clippy",
+  "mise run check",
   "mise run docs",
   "mise run check:wasm",
   "mise run check:32bit",
-  "mise run licenses",
   "mise run ci:assert-clean",
 ]
 
@@ -110,6 +125,11 @@ run = 'python3 -I crates/mln_text/tools/gen_icu_tables.py "$usage_icu_common" > 
 [tasks."generate:style"]
 description = "Regenerate the style layer code (crates/mln_style) from the style spec"
 run = "cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates/mln_style/src"
+
+[tasks.install-nightly]
+description = "Install the nightly that MLN_NIGHTLY names, with rustfmt and the standard library's sources"
+hide = true
+run = "rustup toolchain install $MLN_NIGHTLY --profile minimal --component rustfmt,rust-src --no-self-update"
 
 [tasks.licenses]
 description = "Check every dependency's license against deny.toml"

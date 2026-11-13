@@ -3,5 +3,7 @@
 __pycache__/
 .DS_Store
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 rustc-ice-*.txt

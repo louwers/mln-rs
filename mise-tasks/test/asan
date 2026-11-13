@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Run the runtime, Vulkan and C library tests under AddressSanitizer, over and over for a while"
+#MISE depends=["install-nightly"]
 #USAGE arg "[minutes]" default="20" help="How long to keep starting rounds, in minutes"
 # AddressSanitizer stops a test at the first read or write of freed or
 # out-of-bounds memory. rustc's sanitizers are unstable, so the pinned nightly
@@ -15,9 +16,6 @@
 # so warnings aren't errors here; CI's lint job checks them.
 set -euo pipefail
 source tools/dev-shell.sh
-if ! rustup component list --toolchain "$MLN_NIGHTLY" --installed 2> /dev/null | grep -q '^rust-src'; then
-    rustup toolchain install "$MLN_NIGHTLY" --profile minimal --component rust-src --no-self-update
-fi
 host="$(rustc "+$MLN_NIGHTLY" -vV | sed -n 's/^host: //p')"
 export RUSTFLAGS=-Zsanitizer=address CARGO_BUILD_WARNINGS=warn CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/asan"
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
