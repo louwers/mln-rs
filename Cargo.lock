@@ -2063,7 +2063,6 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-cheap-ruler",
  "mln-rs-conversion",
- "mln-rs-earcut",
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geojson",
@@ -2234,18 +2233,6 @@ dependencies = [
  "wgpu",
  "winit",
 ]
-
-[[package]]
-name = "mln-rs-earcut"
-version = "0.0.11"
-dependencies = [
- "mln-rs-earcut-test-fixtures",
- "mln-rs-geometry",
-]
-
-[[package]]
-name = "mln-rs-earcut-test-fixtures"
-version = "0.0.11"
 
 [[package]]
 name = "mln-rs-expression"
@@ -2516,9 +2503,9 @@ name = "mln-rs-renderer"
 version = "0.0.11"
 dependencies = [
  "bytemuck",
+ "earcut",
  "mln-rs-actor",
  "mln-rs-conversion",
- "mln-rs-earcut",
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geojson",

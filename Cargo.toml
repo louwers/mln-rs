@@ -16,7 +16,6 @@ members = [
     "tools/style-codegen",
     "tools/test-server",
     "vendor/*",
-    "vendor/earcut/test_fixtures",
 ]
 
 [workspace.package]
@@ -39,8 +38,6 @@ include = ["/src", "/tests", "/LICENSE*"]
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
 cheap_ruler = { package = "mln-rs-cheap-ruler", path = "vendor/cheap-ruler", version = "=0.0.11" }
-earcut = { package = "mln-rs-earcut", path = "vendor/earcut", version = "=0.0.11" }
-earcut_test_fixtures = { package = "mln-rs-earcut-test-fixtures", path = "vendor/earcut/test_fixtures", version = "=0.0.11" }
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.11" }
 geojson = { package = "mln-rs-geojson", path = "vendor/geojson", version = "=0.0.11" }
 geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.11" }
@@ -125,6 +122,9 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 # crates/mln_gl's window backend: loads libwayland-egl at run time.
 libloading = { version = "0.8.9" }
+# Polygon triangulation (mln_renderer's fills and fill extrusions), a port of
+# earcut.js, the triangulation GL JS uses.
+earcut = { version = "0.4.5" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
 # porting the C++ decoder (vendor/maplibre-tile-spec/cpp). Assumed correct
 # (user decision, 2026-11-04); the differential test against the C++ decoder
@@ -353,7 +353,6 @@ categories = ["graphics", "rendering::engine", "science::geo"]
 
 [dependencies]
 cheap_ruler.workspace = true
-earcut.workspace = true
 feature.workspace = true
 geojson.workspace = true
 geojson_vt.workspace = true

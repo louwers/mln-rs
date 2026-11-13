@@ -6,11 +6,10 @@
 //!
 //! Every library crate of <https://github.com/louwers/mln-rs> is
 //! re-exported here under its crate name: `mln_rs::mln_map`,
-//! `mln_rs::mln_util`, `mln_rs::earcut`, and so on. They are published as
+//! `mln_rs::mln_util`, `mln_rs::geojson_vt`, and so on. They are published as
 //! the `mln-rs-*` packages, which only exist for this crate.
 
 pub use cheap_ruler;
-pub use earcut;
 pub use feature;
 pub use geojson;
 pub use geojson_vt;
