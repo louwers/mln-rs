@@ -113,7 +113,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     {
         let observer = observer.clone();
         timeout.start(Duration::from_secs(30), Duration::ZERO, move || {
-            observer.report(Outcome::Error("timeout".to_owned()))
+            observer.report(Outcome::Error("timeout".to_owned()));
         });
     }
 
@@ -133,7 +133,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     {
         let image_manager = image_manager.clone();
         frame.start(Duration::from_millis(10), Duration::from_millis(10), move || {
-            image_manager.notify_if_missing_image_added()
+            image_manager.notify_if_missing_image_added();
         });
     }
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
