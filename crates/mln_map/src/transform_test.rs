@@ -5190,7 +5190,7 @@ fn only_the_parts_a_gesture_changed_settle() {
 #[test]
 fn an_animated_snap_settles_without_a_clock() {
     let mut transform = outcome_transform();
-    transform.jump_to(&cam().with_bearing(Some(3.0)));
+    transform.jump_to(&CameraOptions { bearing: Some(3.0), ..Default::default() });
     transform.apply_camera_delta(&CameraDelta { bearing: Some(1.0), ..delta(GesturePhase::Begin) }).unwrap();
     let momentum = CameraMomentum { bearing_snap: Some(MomentumSnap::BEARING), ..CameraMomentum::default() };
     transform.apply_camera_delta(&CameraDelta { momentum: Some(momentum), ..delta(GesturePhase::End) }).unwrap();
