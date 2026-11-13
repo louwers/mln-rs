@@ -310,9 +310,6 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
     case 'stats':
       debug.stats(data.stats);
       break;
-    case 'features':
-      if (hovering) debug.features(data.at, data.features);
-      break;
   }
 };
 
@@ -641,15 +638,13 @@ function setFreeBearing(on: boolean) {
 freeBearingToggle.addEventListener('change', () => setFreeBearing(freeBearingToggle.checked));
 if (params.has('freeBearing')) setFreeBearing(true);
 
-// The debug overlay (debug.ts), off as the page starts unless `?debug`. While
-// it shows, the pointer over the canvas goes to the map's Web Worker, at most
-// once a frame, which answers with the features under it.
+// The debug overlay (debug.ts), off as the page starts unless `?debug`.
 const debugToggle = element('debug-toggle', HTMLInputElement);
 function showDebugPage() {
   debug.page({
     backend: backend === 'webgl2' ? 'WebGL2' : 'WebGPU',
-    width: devicePixels(size[0]),
-    height: devicePixels(size[1]),
+    width: size[0],
+    height: size[1],
     ratio,
   });
 }
@@ -661,34 +656,8 @@ function setDebug(on: boolean) {
   if (on) {
     showDebugPage();
     debug.camera(latestCamera);
-  } else {
-    hover(null);
   }
 }
-let hovering = false;
-let hoverPoint: [number, number] | null = null;
-let hoverQueued = false;
-function hover(point: [number, number] | null) {
-  hovering = point !== null;
-  hoverPoint = point;
-  if (point === null) {
-    debug.hideFeatures();
-    toMap({ type: 'hover', point: null });
-    return;
-  }
-  if (hoverQueued) return;
-  hoverQueued = true;
-  requestAnimationFrame(() => {
-    hoverQueued = false;
-    if (hoverPoint) toMap({ type: 'hover', point: hoverPoint });
-  });
-}
-canvas.addEventListener('pointermove', (e) => {
-  if (debug.shown && e.pointerType !== 'touch') hover([at(e).x, at(e).y]);
-});
-canvas.addEventListener('pointerleave', () => {
-  if (hovering) hover(null);
-});
 debugToggle.addEventListener('change', () => setDebug(debugToggle.checked));
 // D, unless a modifier makes it another shortcut or a field takes the text.
 window.addEventListener('keydown', (e) => {

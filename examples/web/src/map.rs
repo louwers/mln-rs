@@ -15,11 +15,11 @@ use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MapOptions,
     UpdateReader,
 };
-use mln_renderer::Renderer;
-use mln_renderer::query::RenderedQueryOptions;
 use mln_renderer::text::font_face_engine;
+use mln_renderer::tile::worker_codec::SerializingTransport;
+use mln_renderer::{RenderTimings, Renderer};
 use mln_util::LatLng;
-use mln_util::geo::{ScreenCoordinate, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 use mln_web_host::shaper::{self, ShaperModuleEngine};
@@ -97,14 +97,19 @@ pub struct WebMap {
     received: Rc<Cell<u32>>,
     /// The page's pointer, wheel and key input, turned into camera moves.
     gestures: GestureRecognizer,
-    /// Milliseconds the `RunLoop` ran between frames since the last frame.
-    between_frames_ms: Rc<Cell<f64>>,
-    /// What the last frame spent on each of its phases (`frame_timings`).
+    /// The transport of the tiles' workers, which times their replies.
+    transport: Rc<SerializingTransport>,
+    /// Milliseconds the `RunLoop` ran between frames, and of those, received
+    /// tile replies, since the last frame took them.
+    between_frames_ms: Rc<Cell<[f64; 2]>>,
+    /// The work of the frames since the last one that drew, by phase.
+    pending: [f64; PHASES],
+    /// What the last frame that drew spent on each phase (`frame_timings`).
     phases: [f64; PHASES],
 }
 
 /// How many phases `WebMap::frame_timings` reports.
-const PHASES: usize = 4;
+const PHASES: usize = 8;
 
 #[wasm_bindgen]
 impl WebMap {
@@ -311,28 +316,48 @@ impl WebMap {
     /// cooperative scheduler's tasks (sprites, glyphs, raster tiles) for up
     /// to `budget_ms` and delivers their results. Returns whether it drew.
     pub fn frame(&mut self, budget_ms: f64, now: f64) -> bool {
-        let between = self.between_frames_ms.replace(0.0);
+        let [between, between_tiles] = self.between_frames_ms.replace([0.0; 2]);
+        let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
         let start = Instant::now();
         // The map samples its animations at this frame's time.
         self.map.set_frame_time(Some(start));
         self.gestures.frame(&mut self.map, now);
         self.run_loop.run_once();
         self.handle_map_events();
-        let updated = Instant::now();
+        let update_tiles = ms(self.transport.take_receive_time());
+        let update = ms(start.elapsed()) - update_tiles;
         let drew = self.frontend.render();
-        let rendered = Instant::now();
+        let tasks_start = Instant::now();
         self.run_tasks(budget_ms);
         self.handle_map_events();
-        let ran = Instant::now();
-        let ms = |from: Instant, to: Instant| to.duration_since(from).as_secs_f64() * 1000.0;
-        self.phases = [ms(start, updated), ms(updated, rendered), ms(rendered, ran), between];
+        let tasks_tiles = ms(self.transport.take_receive_time());
+        let tasks = ms(tasks_start.elapsed()) - tasks_tiles;
+
+        let render = if drew { self.frontend.renderer.render_timings() } else { RenderTimings::default() };
+        let frame = [
+            update + between - between_tiles,
+            between_tiles + update_tiles + tasks_tiles,
+            ms(render.sources),
+            ms(render.symbols),
+            ms(render.layers),
+            ms(render.upload),
+            ms(render.draw),
+            tasks,
+        ];
+        for (pending, ms) in self.pending.iter_mut().zip(frame) {
+            *pending += ms;
+        }
+        if drew {
+            self.phases = std::mem::take(&mut self.pending);
+        }
         drew
     }
 
-    /// The milliseconds the last `frame` spent on each of its phases, in
-    /// order: stepping the gestures and running the `RunLoop`, drawing,
-    /// running the cooperative scheduler's tasks, and the `RunLoop` runs
-    /// between the frame before it and this one.
+    /// The milliseconds of work on this thread since the frame that drew
+    /// before the last one that drew, up to its end, by phase: the gestures
+    /// and the `RunLoop`, but for tile replies; receiving the tile workers'
+    /// replies; then the renderer's `RenderTimings` (sources, symbols,
+    /// layers, upload, draw); and the cooperative scheduler's tasks.
     pub fn frame_timings(&self) -> Vec<f64> {
         self.phases.to_vec()
     }
@@ -344,46 +369,6 @@ impl WebMap {
         let _scope = BackendScope::new(backend, ScopeType::Implicit);
         let stats = backend.get_context().rendering_stats();
         vec![f64::from(stats.num_draw_calls), f64::from(stats.mem_textures), f64::from(stats.mem_buffers)]
-    }
-
-    /// Where (`x`, `y`) CSS pixels on the canvas are, as `[latitude,
-    /// longitude]`, or undefined where the map isn't (past the globe's edge).
-    pub fn lat_lng_at(&self, x: f64, y: f64) -> Option<Vec<f64>> {
-        let at = self.map.lat_lng_for_pixel(&ScreenCoordinate::new(x, y), WrapMode::Wrapped).ok()?;
-        Some(vec![at.latitude(), at.longitude()])
-    }
-
-    /// The features drawn within `radius` CSS pixels of (`x`, `y`), topmost
-    /// first, as a JSON array: each an object with its style `layer`, the
-    /// layer's `type`, its `source`, `sourceLayer`, `id` (or null),
-    /// `geometry` type, `properties` and feature `state`. One that several
-    /// layers draw is there once per layer.
-    pub fn query_features(&self, x: f64, y: f64, radius: f64) -> Result<String, JsValue> {
-        let min = ScreenCoordinate::new(x - radius, y - radius);
-        let max = ScreenCoordinate::new(x + radius, y + radius);
-        let features = self
-            .frontend
-            .renderer
-            .query_rendered_features_in_box(&min, &max, &RenderedQueryOptions::default())
-            .map_err(js_error)?;
-        let style = self.map.style();
-        let features = features
-            .iter()
-            .map(|feature| {
-                let layer_type = style.get_layer(&feature.layer).map(|layer| layer.get_type_info().type_);
-                serde_json::json!({
-                    "layer": feature.layer,
-                    "type": layer_type,
-                    "source": feature.source,
-                    "sourceLayer": feature.source_layer,
-                    "id": identifier_json(&feature.id),
-                    "geometry": geometry_type(&feature.geometry),
-                    "properties": object_json(&feature.properties),
-                    "state": object_json(&feature.state),
-                })
-            })
-            .collect();
-        Ok(serde_json::Value::Array(features).to_string())
     }
 
     /// A pointer went down on the canvas, at `x`, `y` CSS pixels from its
@@ -496,51 +481,6 @@ impl WebMap {
     }
 }
 
-/// A feature's geometry type, as GeoJSON names it.
-fn geometry_type(geometry: &geometry::Geometry<f64>) -> &'static str {
-    use geometry::Geometry;
-    match geometry {
-        Geometry::Empty => "Empty",
-        Geometry::Point(_) => "Point",
-        Geometry::MultiPoint(_) => "MultiPoint",
-        Geometry::LineString(_) => "LineString",
-        Geometry::MultiLineString(_) => "MultiLineString",
-        Geometry::Polygon(_) => "Polygon",
-        Geometry::MultiPolygon(_) => "MultiPolygon",
-        Geometry::GeometryCollection(_) => "GeometryCollection",
-    }
-}
-
-fn identifier_json(id: &feature::Identifier) -> serde_json::Value {
-    use feature::Identifier;
-    match id {
-        Identifier::Null => serde_json::Value::Null,
-        Identifier::Uint(n) => (*n).into(),
-        Identifier::Int(n) => (*n).into(),
-        Identifier::Double(n) => (*n).into(),
-        Identifier::String(s) => s.as_str().into(),
-    }
-}
-
-fn object_json(object: &feature::PropertyMap) -> serde_json::Value {
-    object.iter().map(|(key, value)| (key.clone(), value_json(value))).collect::<serde_json::Map<_, _>>().into()
-}
-
-fn value_json(value: &feature::Value) -> serde_json::Value {
-    use feature::Value;
-    match value {
-        Value::Null => serde_json::Value::Null,
-        Value::Bool(b) => (*b).into(),
-        Value::Uint(n) => (*n).into(),
-        Value::Int(n) => (*n).into(),
-        // Null for a NaN or an infinity, which JSON has no number for.
-        Value::Double(n) => (*n).into(),
-        Value::String(s) => s.as_str().into(),
-        Value::Array(values) => values.iter().map(value_json).collect(),
-        Value::Object(object) => object_json(object),
-    }
-}
-
 /// `WebMap::wheel`'s `kind`, as web/protocol.ts's `WHEEL_PIXELS` and
 /// `WHEEL_NOTCHES` send it.
 const WHEEL_PIXELS: u32 = 0;
@@ -572,17 +512,6 @@ impl WebMap {
         let run_loop = RunLoop::get();
         run_loop.set_waker(Some(pump::waker()));
         scheduler.set_waker(Some(pump::waker()));
-        let between_frames_ms = Rc::new(Cell::new(0.0));
-        let between_frames = {
-            let run_loop = run_loop.clone();
-            let spent = Rc::clone(&between_frames_ms);
-            pump::add(move || {
-                let start = Instant::now();
-                run_loop.run_once();
-                spent.set(spent.get() + start.elapsed().as_secs_f64() * 1000.0);
-                true
-            })
-        };
         let mut renderer = Renderer::new(Rc::clone(&backend), pixel_ratio as f32, local_ideograph_font_family);
         let received = Rc::new(Cell::new(0));
         let count = Rc::clone(&received);
@@ -593,7 +522,21 @@ impl WebMap {
                 let _ = on_fatal.call2(&JsValue::NULL, &JsValue::from(instance as u32), &message);
             },
         );
-        renderer.set_tile_worker_transport(transport);
+        renderer.set_tile_worker_transport(Rc::<SerializingTransport>::clone(&transport));
+        let between_frames_ms = Rc::new(Cell::new([0.0; 2]));
+        let between_frames = {
+            let run_loop = run_loop.clone();
+            let transport = Rc::clone(&transport);
+            let spent = Rc::clone(&between_frames_ms);
+            pump::add(move || {
+                let start = Instant::now();
+                run_loop.run_once();
+                let [all, tiles] = spent.get();
+                let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+                spent.set([all + ms(start.elapsed()), tiles + ms(transport.take_receive_time())]);
+                true
+            })
+        };
         let mut map =
             Map::new(MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() }).map_err(js_error)?;
         map.set_waker(Some(pump::waker()));
@@ -610,7 +553,9 @@ impl WebMap {
             pixel_ratio,
             received,
             gestures: GestureRecognizer::default(),
+            transport,
             between_frames_ms,
+            pending: [0.0; PHASES],
             phases: [0.0; PHASES],
         })
     }

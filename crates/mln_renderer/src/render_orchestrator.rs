@@ -201,6 +201,9 @@ pub(crate) struct RenderOrchestrator {
     placement_controller: crate::text::placement::PlacementController,
     background_layer_as_color: bool,
     placed_symbol_data_collected: bool,
+    /// Port-only: when the last `create_render_tree` started placing
+    /// symbols, for the renderer's `RenderTimings`.
+    pub(crate) symbol_placement_start: Option<Instant>,
     tile_cache_enabled: bool,
 
     /// Vector with reference wrappers to the layers in style order.
@@ -284,6 +287,7 @@ impl RenderOrchestrator {
             render_sky: None,
             background_layer_as_color,
             placed_symbol_data_collected: false,
+            symbol_placement_start: None,
             tile_cache_enabled: true,
             ordered_layers: Vec::new(),
             remake_render_layers: false,
@@ -834,6 +838,7 @@ impl RenderOrchestrator {
         }
 
         // Symbol placement. (symbols)
+        self.symbol_placement_start = Some(Instant::now());
         let mut symbol_buckets_changed = false;
         let mut symbol_buckets_added = false;
         let mut used_symbol_layers: VecSet<String> = VecSet::new();

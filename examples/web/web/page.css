@@ -481,8 +481,7 @@ a {
 
 /* The debug overlay (debug.ts): a heads-up display that stays dark over
    any style, its numbers in tabular figures so that they hold still as they
-   change. The numbers and the graph sit bottom-left, the features under the
-   pointer top-right. */
+   change. It sits bottom-left. */
 
 .debug {
   --debug-ink: #e8ecf0;
@@ -596,61 +595,6 @@ a {
 .debug-legend-note {
   margin-top: 2px;
   color: var(--debug-muted);
-}
-
-.debug-features {
-  top: calc(max(var(--gap), env(safe-area-inset-top)) + 42px);
-  right: max(var(--gap), env(safe-area-inset-right));
-  width: min(300px, calc(100vw - 2 * var(--gap)));
-  max-height: min(70vh, calc(100vh - 220px));
-  overflow: auto;
-  pointer-events: none;
-}
-
-.debug-features > .debug-group:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.debug-feature {
-  padding: 6px 0;
-}
-
-.debug-feature + .debug-feature {
-  border-top: 1px solid var(--debug-line);
-}
-
-.debug-feature-title {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.debug-feature-layer {
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.debug-pill {
-  flex: none;
-  padding: 0 5px;
-  border-radius: 3px;
-  background: rgb(255 255 255 / 0.1);
-  color: var(--debug-muted);
-  font-size: 10px;
-}
-
-.debug-properties {
-  grid-template-columns: minmax(0, 16ch) minmax(0, 1fr);
-  margin-top: 4px;
-}
-
-.debug-more {
-  margin-top: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

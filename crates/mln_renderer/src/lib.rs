@@ -53,7 +53,7 @@ pub mod util;
 
 pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub(crate) use paint_property_binder::paint_property_binders;
-pub use renderer::Renderer;
+pub use renderer::{RenderTimings, Renderer};
 pub use renderer_event::{
     FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, OverscaledTileID,
     RenderMode, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, TileOperation,

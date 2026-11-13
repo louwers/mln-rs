@@ -3067,8 +3067,6 @@ version = "0.0.11"
 dependencies = [
  "js-sys",
  "mln-rs-actor",
- "mln-rs-feature",
- "mln-rs-geometry",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -3080,7 +3078,6 @@ dependencies = [
  "mln-rs-web-host",
  "mln-rs-webgpu",
  "parking_lot",
- "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

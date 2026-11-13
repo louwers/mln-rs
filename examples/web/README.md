@@ -110,14 +110,16 @@ comparison first opens. Each side takes its own input: the map that last took in
 and the other jumps to its camera.
 
 `?debug`, the D key, or the switch in the panel shows a debug overlay
-(web/debug.ts): the frame rate, the camera, the draw calls and memory of
-the renderer (`WebMap::render_stats`), the requests in flight and the load
-time, a graph of the last two seconds of frames with each frame's work
-stacked by phase (`WebMap::frame_timings`) in front of its whole interval,
-and where the pointer is on the map with the features within a few pixels
-of it (`WebMap::query_features`), each with its layer, source and
-properties. The map's Web Worker reports frames and
-features only while the overlay shows.
+(web/debug.ts): the frame rate, the camera, the renderer's draw calls and
+memory (`WebMap::render_stats`), the requests in flight and the load time,
+and a graph of the last frames that drew. Each bar stacks the work since
+the frame before by phase (`WebMap::frame_timings`): the map's RunLoop,
+decoding tile replies (`SerializingTransport::take_receive_time`), the
+renderer's steps (`Renderer::render_timings`: sources, symbols, layers,
+upload, draw) and the cooperative scheduler's tasks, in front of the time
+between the two frames. Frames that draw nothing add no bar, so the graph
+pauses while the map is still. The map's Web Worker reports frames only
+while the overlay shows.
 
 `?freeBearing`, or the other switch in the panel, gives the globe free bearing (`Map::set_globe_free_bearing`): drags and zooms on it turn the bearing with the planet, and a drag carries on over a pole. Off, as the page starts, north stays up and a drag stops at the pole.
 

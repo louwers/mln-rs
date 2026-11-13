@@ -23,11 +23,13 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread, scheduler};
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
+use mln_util::time::Instant;
 
 use super::TileWorkerHost;
 use super::envelope::Encoded;
@@ -81,6 +83,8 @@ pub struct SerializingTransport {
     tiles: RefCell<HashMap<u64, Route>>,
     next_tile: Cell<u64>,
     next_instance: Cell<usize>,
+    /// The time `receive` took since `take_receive_time` last took it.
+    receive_time: Cell<Duration>,
 }
 
 /// Where a tile's worker is, and the tile's endpoint for its replies.
@@ -119,6 +123,7 @@ impl SerializingTransport {
                 tiles: RefCell::new(HashMap::new()),
                 next_tile: Cell::new(0),
                 next_instance: Cell::new(0),
+                receive_time: Cell::new(Duration::ZERO),
             }
         })
     }
@@ -127,7 +132,19 @@ impl SerializingTransport {
     /// replies on this thread itself rather than through the `ReplySink`):
     /// its bytes and its payloads, which the buckets and images it carries
     /// take as they are.
+    /// Port-only: the time this thread spent receiving replies, decoding
+    /// them and handing them to their tiles, since the last call.
+    pub fn take_receive_time(&self) -> Duration {
+        self.receive_time.take()
+    }
+
     pub(crate) fn receive(&self, instance: usize, reply: Encoded) {
+        let start = Instant::now();
+        self.receive_reply(instance, reply);
+        self.receive_time.set(self.receive_time.get() + start.elapsed());
+    }
+
+    fn receive_reply(&self, instance: usize, reply: Encoded) {
         let decoded = self.codecs[instance].borrow_mut().decode(reply);
         match decoded {
             Ok(Some((tile, message))) => self.deliver(tile, message),

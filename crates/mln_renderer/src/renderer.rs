@@ -4,6 +4,7 @@
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
@@ -15,6 +16,7 @@ use mln_map_types::{MapDebugOptions, MapView};
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_util::Color;
+use mln_util::time::Instant;
 
 use crate::frame_projection::{self, FrameProjection};
 use crate::paint_parameters::PaintParameters;
@@ -33,6 +35,25 @@ enum RenderState {
     Fully,
 }
 
+/// Port-only: what the last frame that [`Renderer::render`] drew spent on
+/// each of its steps, on the CPU. They follow each other, and together take
+/// nearly all of `render`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RenderTimings {
+    /// Updating the render layers and sources from the update: the sources'
+    /// tile pyramids and the tiles' matrices.
+    pub sources: Duration,
+    /// Placing symbols across tiles and updating their opacities.
+    pub symbols: Duration,
+    /// Updating the layer groups and their drawables from the tiles.
+    pub layers: Duration,
+    /// Making the shaders when there are none, running the layer tweakers,
+    /// and uploading buffers and textures.
+    pub upload: Duration,
+    /// Encoding the render passes and submitting them.
+    pub draw: Duration,
+}
+
 pub struct Renderer {
     /// Dropped by hand in `drop`, inside a `BackendScope`: its layer groups,
     /// atlases and tiles release graphics objects, which some backends (GL)
@@ -48,6 +69,7 @@ pub struct Renderer {
     style_loaded: bool,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
+    timings: RenderTimings,
 }
 
 impl Renderer {
@@ -74,6 +96,7 @@ impl Renderer {
             frame_count: 0,
             style_loaded: false,
             frame_projection: None,
+            timings: RenderTimings::default(),
         }
     }
 
@@ -122,9 +145,24 @@ impl Renderer {
         if style_changed {
             self.orchestrator.reset_dynamic_texture_atlas();
         }
+        let start = Instant::now();
         let mut render_tree = self.orchestrator.create_render_tree(update_parameters)?;
         render_tree.prepare();
-        self.render_frame(&render_tree, update_parameters, target)
+        let prepared = Instant::now();
+        let placement = self.orchestrator.symbol_placement_start.unwrap_or(prepared).max(start);
+        let handoff = self.render_frame(&render_tree, update_parameters, target);
+        if handoff.is_some() {
+            self.timings.sources = placement - start;
+            self.timings.symbols = prepared - placement;
+        }
+        handoff
+    }
+
+    /// Port-only: what the last frame that [`render`](Self::render) drew
+    /// spent on each of its steps.
+    #[must_use]
+    pub fn render_timings(&self) -> RenderTimings {
+        self.timings
     }
 
     /// Where the last frame that [`render`](Self::render) drew put the map,
@@ -268,6 +306,7 @@ impl Renderer {
         update_parameters: &Arc<UpdateParameters>,
         target: &dyn FrameTarget,
     ) -> Option<Handoff> {
+        let start = Instant::now();
         let backend = Rc::clone(&self.backend);
         let context = backend.get_context();
 
@@ -348,6 +387,7 @@ impl Renderer {
 
         // - LAYER GROUP UPDATE --------------------------------------------
         // Updates all layer groups and process changes
+        let uploaded = Instant::now();
         orchestrator.update_layers(
             &static_data.shaders,
             context,
@@ -358,6 +398,7 @@ impl Renderer {
         );
 
         orchestrator.process_changes();
+        let layers_updated = Instant::now();
 
         // Upload layer groups
         {
@@ -406,6 +447,7 @@ impl Renderer {
             }
         }
 
+        let layers_uploaded = Instant::now();
         let atlas_size = parameters.pattern_atlas.borrow().get_pixel_size();
         let world_size = parameters.renderable_size;
         let global_paint_params_ubo = GlobalPaintParamsUBO {
@@ -580,10 +622,11 @@ impl Renderer {
         // Ends the RenderPass
         parameters.render_pass = None;
 
-        let start_rendering = mln_util::time::Instant::now();
+        let start_rendering = Instant::now();
         // Ending the frame submits its commands.
         let handoff = target.end_frame(&**parameters.encoder.as_ref().expect("encoder"));
-        context.rendering_stats().rendering_time = start_rendering.elapsed().as_secs_f64();
+        let submitted = Instant::now();
+        context.rendering_stats().rendering_time = (submitted - start_rendering).as_secs_f64();
 
         parameters.encoder = None;
         context.end_frame();
@@ -595,6 +638,10 @@ impl Renderer {
         stats.frame_rendered_features = orchestrator.move_frame_rendered_features();
         let stats = Arc::new(stats);
         drop(parameters);
+
+        self.timings.layers = layers_updated - uploaded;
+        self.timings.upload = (uploaded - start) + (layers_uploaded - layers_updated);
+        self.timings.draw = submitted - layers_uploaded;
 
         self.orchestrator.emit(RendererEvent::RenderFrameFinished {
             mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },

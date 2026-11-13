@@ -23,7 +23,7 @@
 // can't start the map, the worker says `unsupported` rather than `fatal`.
 
 import type { WebMap } from './pkg/mln_web.js';
-import type { Bindings, Box, Camera, DebugFeature, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
+import type { Bindings, Box, Camera, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
 
 // Every URL this worker fetched, and how many times, and how many fetches
 // are still transferring: the map's fetches look the global `fetch` up at
@@ -74,11 +74,6 @@ type Handle = (message: ToMap) => void;
 
 // Frames without a camera change after which the map has stopped moving.
 const IDLE_FRAMES = 10;
-// How far from the pointer, in CSS pixels, the debug overlay looks for
-// features, and how often it looks again while the map redraws under a
-// still pointer.
-const HOVER_RADIUS = 3;
-const HOVER_REQUERY_MS = 200;
 
 let start: Promise<Handle | undefined> | null = null;
 const early: ToMap[] = []; // messages before the map exists
@@ -271,14 +266,8 @@ async function run(
   let reported = 0;
   let attribution = '';
   let styleName = '';
-  // The debug overlay: whether the page shows it, and the pointer it asks
-  // about, which `hoverMoved` marks as not yet queried and `hoverStale` as
-  // queried before the map last drew.
+  // Whether the page shows its debug overlay.
   let debug = false;
-  let hover: [number, number] | null = null;
-  let hoverMoved = false;
-  let hoverStale = false;
-  let hoverQueried = 0;
   const report = (force: boolean) => {
     const now = performance.now();
     if (!force && now - reported < 250) return;
@@ -314,28 +303,20 @@ async function run(
       });
     }
   };
-  let lastFrame: number | null = null;
   function frame(time: number) {
-    const interval = lastFrame === null ? 0 : time - lastFrame;
-    lastFrame = time;
-    guard(() => drawFrame(interval));
+    guard(() => drawFrame(time));
     if (!stopped) requestAnimationFrame(frame);
   }
   let shownCamera = '';
-  function drawFrame(interval: number) {
+  // When the last frame that drew began, for the debug overlay.
+  let lastDrawn: number | null = null;
+  function drawFrame(time: number) {
     const drew = map.frame(8, performance.now());
-    if (debug) {
-      post({ type: 'frame', sample: { interval, phases: Array.from(map.frame_timings()) } });
-      const now = performance.now();
-      hoverStale ||= drew;
-      if (hover && (hoverMoved || (hoverStale && now - hoverQueried >= HOVER_REQUERY_MS))) {
-        hoverMoved = false;
-        hoverStale = false;
-        hoverQueried = now;
-        const features = JSON.parse(map.query_features(hover[0], hover[1], HOVER_RADIUS)) as DebugFeature[];
-        const [lat, lon] = map.lat_lng_at(hover[0], hover[1]) ?? [];
-        post({ type: 'features', at: lat === undefined || lon === undefined ? null : [lat, lon], features });
+    if (drew) {
+      if (debug && lastDrawn !== null) {
+        post({ type: 'frame', sample: { interval: time - lastDrawn, phases: Array.from(map.frame_timings()) } });
       }
+      lastDrawn = time;
     }
     const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();
     const next = [lat, lon, zoom, bearing, pitch].join();
@@ -426,10 +407,6 @@ async function run(
       case 'debug':
         debug = data.on;
         report(true);
-        break;
-      case 'hover':
-        hover = data.point;
-        hoverMoved = hover !== null;
         break;
       case 'preload':
       case 'start':
