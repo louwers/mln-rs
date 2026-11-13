@@ -32,7 +32,6 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBasePtr};
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::{StencilMode, Test};
@@ -58,6 +57,22 @@ use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
 use crate::uniform_buffer::{UNIFORM_BUFFER_ALIGNMENT, UniformBuffer};
 
+/// The uniforms of one clipping mask shader's draws: a buffer of slots
+/// [`UNIFORM_BUFFER_ALIGNMENT`] bytes apart, kept across submissions and
+/// replaced by a bigger one when a submission needs more, and a bind group
+/// per slot, made with `layout`.
+#[derive(Default)]
+struct ClipMaskSlots {
+    buffer: Option<wgpu::Buffer>,
+    layout: Option<wgpu::BindGroupLayout>,
+    bind_groups: Vec<wgpu::BindGroup>,
+    /// The submission (`Context::submissions`) that the used slots are
+    /// drawn in, and how many it uses.
+    used: (u64, usize),
+    /// The bytes of the last write, kept for their allocation.
+    data: Vec<u8>,
+}
+
 /// A globe clipping mask mesh's vertex and index buffers (with their sizes in
 /// bytes) and its index count.
 struct GlobeClipMesh {
@@ -78,10 +93,10 @@ pub struct Context {
     clip_mask_shader: RefCell<Option<Weak<dyn ShaderProgramBase>>>,
     clip_mask_renderable: Cell<Option<usize>>,
     clip_mask_pipeline_hash: Cell<Option<u64>>,
-    /// The last clipping masks' UBOs, kept to count their release.
-    clip_mask_uniform_buffer: RefCell<Option<wgpu::Buffer>>,
+    clip_mask_slots: RefCell<ClipMaskSlots>,
     globe_clip_mask_shader: RefCell<Option<Weak<dyn ShaderProgramBase>>>,
     globe_clip_mask_pipeline_hash: Cell<Option<u64>>,
+    globe_clip_mask_slots: RefCell<ClipMaskSlots>,
     /// `globeClipMeshes`: per zoom, north pole row, south pole row and
     /// border.
     globe_clip_meshes: RefCell<BTreeMap<(u8, bool, bool, bool), GlobeClipMesh>>,
@@ -128,9 +143,10 @@ impl Context {
             clip_mask_shader: RefCell::new(None),
             clip_mask_renderable: Cell::new(None),
             clip_mask_pipeline_hash: Cell::new(None),
-            clip_mask_uniform_buffer: RefCell::new(None),
+            clip_mask_slots: RefCell::default(),
             globe_clip_mask_shader: RefCell::new(None),
             globe_clip_mask_pipeline_hash: Cell::new(None),
+            globe_clip_mask_slots: RefCell::default(),
             globe_clip_meshes: RefCell::new(BTreeMap::new()),
             submissions: Cell::new(0),
             index_table: RefCell::new(None),
@@ -291,25 +307,76 @@ impl Context {
             .clone()
     }
 
-    /// A new uniform buffer holding `ubos`, `stride` bytes apart, and
-    /// `stride`: one buffer and one write for all of a pass's clipping masks,
-    /// which bind it at their offsets. Each call makes a new one, since the
-    /// draws of an earlier call may not have been submitted yet.
-    fn clip_mask_uniform_buffer<'a, T: bytemuck::Pod>(
+    /// Writes `ubos` to slots of `slots` that no draw of the coming
+    /// submission binds yet, and returns the first: the draw of `ubos[i]`
+    /// binds `slots.bind_groups[first + i]`, whose binding `binding` of
+    /// `layout` holds it.
+    ///
+    /// The writes land ahead of the next submission's commands and after
+    /// the earlier submissions' (see `BackendImpl::write_buffer`), so a slot
+    /// is written again only once the commands that read it have gone, and
+    /// masks drawn again before then take slots after these.
+    fn reserve_clip_mask_slots<'a, T: bytemuck::Pod>(
         &self,
+        slots: &mut ClipMaskSlots,
+        layout: &wgpu::BindGroupLayout,
+        binding: u32,
         ubos: impl ExactSizeIterator<Item = &'a T>,
-    ) -> (wgpu::Buffer, u64) {
+    ) -> usize {
+        let device = self.backend.device();
         let size = std::mem::size_of::<T>();
         let stride = size.next_multiple_of(UNIFORM_BUFFER_ALIGNMENT);
-        let mut data = vec![0; stride * ubos.len()];
-        for (ubo, slot) in ubos.zip(data.chunks_exact_mut(stride)) {
+        let submission = self.submissions();
+        let first = if slots.used.0 == submission { slots.used.1 } else { 0 };
+        let needed = first + ubos.len();
+
+        let capacity = slots.buffer.as_ref().map_or(0, |buffer| buffer.size() as usize / stride);
+        let buffer = match &slots.buffer {
+            Some(buffer) if needed <= capacity => buffer.clone(),
+            _ => {
+                // Draws recorded already keep the old buffer and bind groups.
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Clipping mask uniforms"),
+                    size: (needed.max(capacity * 2) * stride) as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.count_buffer_created(buffer.size());
+                if let Some(previous) = slots.buffer.replace(buffer.clone()) {
+                    self.count_buffer_released(previous.size());
+                }
+                slots.bind_groups.clear();
+                buffer
+            }
+        };
+        if slots.layout.as_ref() != Some(layout) {
+            slots.layout = Some(layout.clone());
+            slots.bind_groups.clear();
+        }
+        while slots.bind_groups.len() < needed {
+            let offset = (slots.bind_groups.len() * stride) as u64;
+            slots.bind_groups.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Clipping mask uniforms"),
+                layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset,
+                        size: wgpu::BufferSize::new(size as u64),
+                    }),
+                }],
+            }));
+        }
+
+        slots.data.clear();
+        slots.data.resize(stride * ubos.len(), 0);
+        for (ubo, slot) in ubos.zip(slots.data.chunks_exact_mut(stride)) {
             slot[..size].copy_from_slice(bytemuck::bytes_of(ubo));
         }
-        let (buffer, _) = self.create_raw_buffer(&data, wgpu::BufferUsages::UNIFORM);
-        if let Some(previous) = self.clip_mask_uniform_buffer.replace(Some(buffer.clone())) {
-            self.count_buffer_released(previous.size());
-        }
-        (buffer, stride as u64)
+        self.backend.write_buffer(&buffer, (first * stride) as u64, &slots.data);
+        slots.used = (submission, needed);
+        first
     }
 
     fn get_clip_mask_shader(&self, shaders: &ShaderRegistry) -> Option<ShaderProgramBasePtr> {
@@ -410,10 +477,6 @@ impl Context {
 
         encoder.set_pipeline(&pipeline);
 
-        let ubo_size = std::mem::size_of::<ProjectionUBO>() as u64;
-        let (uniform_buffer, stride) = self.clip_mask_uniform_buffer(masks.iter().map(|mask| &mask.projection));
-
-        let device = self.backend.device();
         let Some(&bind_group_index) = shader.get_bind_group_order().first() else {
             return false;
         };
@@ -429,22 +492,14 @@ impl Context {
             return false;
         };
 
-        let bind_groups: Vec<wgpu::BindGroup> = (0..masks.len() as u64)
-            .map(|i| {
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: uniform_binding,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &uniform_buffer,
-                            offset: i * stride,
-                            size: wgpu::BufferSize::new(ubo_size),
-                        }),
-                    }],
-                })
-            })
-            .collect();
+        let mut slots = self.globe_clip_mask_slots.borrow_mut();
+        let first_slot = self.reserve_clip_mask_slots(
+            &mut slots,
+            layout,
+            uniform_binding,
+            masks.iter().map(|mask| &mask.projection),
+        );
+        let bind_groups = &slots.bind_groups[first_slot..first_slot + masks.len()];
 
         // Each mask is drawn with a border first, then exactly, as GL JS does:
         // where a tile meets finer ones, its coarser edge leaves a sliver
@@ -452,7 +507,7 @@ impl Context {
         let mut draw_calls = 0;
         let mut meshes = self.globe_clip_meshes.borrow_mut();
         for borders in [true, false] {
-            for (mask, bind_group) in masks.iter().zip(&bind_groups) {
+            for (mask, bind_group) in masks.iter().zip(bind_groups) {
                 let tile = &mask.tile;
                 let key = (tile.z, tile.y == 0, tile.y == (1u32 << tile.z) - 1, borders);
                 if let Entry::Vacant(entry) = meshes.entry(key) {
@@ -555,10 +610,6 @@ impl Context {
         encoder.set_vertex_buffer(0, vertex_buffer.slice(0..vertex_size));
         encoder.set_index_buffer(index_buffer.slice(0..index_size), wgpu::IndexFormat::Uint16);
 
-        let ubo_size = std::mem::size_of::<ClipUBO>() as u64;
-        let (uniform_buffer, stride) = self.clip_mask_uniform_buffer(tile_ubos.iter());
-
-        let device = self.backend.device();
         let Some(&bind_group_index) = shader.get_bind_group_order().first() else {
             eprintln!("WebGPU: No bind group layouts available for clipping mask shader");
             return false;
@@ -577,20 +628,10 @@ impl Context {
             return false;
         };
 
-        for (i, ubo) in tile_ubos.iter().enumerate() {
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: uniform_binding,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &uniform_buffer,
-                        offset: i as u64 * stride,
-                        size: wgpu::BufferSize::new(ubo_size),
-                    }),
-                }],
-            });
-            encoder.set_bind_group(bind_group_index, &bind_group, &[]);
+        let mut slots = self.clip_mask_slots.borrow_mut();
+        let first_slot = self.reserve_clip_mask_slots(&mut slots, layout, uniform_binding, tile_ubos.iter());
+        for (ubo, bind_group) in tile_ubos.iter().zip(&slots.bind_groups[first_slot..]) {
+            encoder.set_bind_group(bind_group_index, bind_group, &[]);
             encoder.set_stencil_reference(ubo.stencil_ref);
             encoder.draw_indexed(0..6, 0, 0..1);
         }
