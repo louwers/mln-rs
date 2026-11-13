@@ -17,6 +17,8 @@ members = [
     "tools/test-server",
     "vendor/*",
 ]
+# Patched copies of crates.io packages ([patch.crates-io] below), not ours.
+exclude = ["patches/*"]
 
 [workspace.package]
 # Every package is published at this version. To release, bump it here and
@@ -415,6 +417,10 @@ supercluster.workspace = true
 
 [lints]
 workspace = true
+
+# Dependencies with a fix not yet released (patches/README.md).
+[patch.crates-io]
+fsst-rs = { path = "patches/fsst-rs" }
 
 # Fat LTO with one codegen unit: smaller release binaries, for a longer
 # build. The browser build adds opt-level "s" (`just web`).

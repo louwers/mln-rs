@@ -1,0 +1,38 @@
+# fsst-rs 0.6.0 from crates.io, its library only, with one change: TableEntry
+# (src/lossy_pht.rs) is aligned to 8 bytes, so it is 16 bytes on 32-bit
+# targets too, where u64 aligns to 4 and the crate's size assertion failed.
+# patches/README.md says when to drop the copy.
+[package]
+name = "fsst-rs"
+version = "0.6.0"
+description = "Pure-Rust implementation of Fast Static Symbol Tables algorithm for string compression"
+authors = ["SpiralDB Developers <hello@spiraldb.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/spiraldb/fsst"
+readme = "README.md"
+keywords = ["fsst", "compression", "string", "symbol-table", "encoding"]
+categories = ["compression"]
+rust-version = "1.86.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "fsst"
+
+[lints.rust]
+warnings = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+if_then_some_else_none = { level = "deny" }
+mem_forget = { level = "deny" }
+or_fun_call = "deny"
+panic_in_result_fn = { level = "deny" }
+same_name_method = { level = "deny" }
+tests_outside_test_module = { level = "deny" }
+unwrap_in_result = { level = "deny" }
+use_debug = { level = "deny" }
+
+[dependencies]
+rustc-hash = "2.1.1"

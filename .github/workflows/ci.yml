@@ -165,14 +165,21 @@ jobs:
   # justfile pins), the panic and TODO(port) ratchet (`just ratchet`,
   # tools/ratchet), clippy with the workspace's lints (Cargo.toml), the API
   # docs as docs.rs builds them, and clippy on the libraries and examples/web
-  # for wasm32-unknown-unknown (`just check-wasm`, the browser build), all
-  # with warnings as errors (the justfile denies them in CI), and the
-  # packages' licenses against deny.toml (`just licenses`).
+  # for wasm32-unknown-unknown (`just check-wasm`, the browser build) and on
+  # the C library for 32-bit x86 Linux (`just check-32bit`), all with
+  # warnings as errors (the justfile denies them in CI), and the packages'
+  # licenses against deny.toml (`just licenses`).
   lint:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+
+      # The C compiler for `just check-32bit`'s SQLite.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-i686-linux-gnu
 
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-deny' }
