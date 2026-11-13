@@ -305,6 +305,10 @@ mod globe {
         }
     }
 
+    /// The part of a zoom level added to the zoom a tile's on-screen size
+    /// asks for, before that zoom decides that the tile needs no splitting.
+    const SCREEN_SIZE_ZOOM_BIAS: f64 = 0.5;
+
     /// A tile's bounding volume in unit-sphere space: a box at zoom 0 and 1,
     /// a wedge with up to eight corners after.
     struct ConvexVolume {
@@ -577,6 +581,95 @@ mod globe {
         smallest
     }
 
+    /// What [`projected_tile_size`] needs of the view.
+    struct ScreenScale<'a> {
+        /// Takes unit-sphere positions to clip space.
+        matrix: &'a Mat4,
+        horizon: &'a Vec4,
+        half_viewport: [f64; 2],
+        /// The point under the camera, in a Mercator world of size 1.
+        nadir: [f64; 2],
+    }
+
+    impl<'a> ScreenScale<'a> {
+        fn new(matrix: &'a Mat4, horizon: &'a Vec4, half_viewport: [f64; 2], camera: &Vec3) -> Self {
+            let length = vec3_dot(camera, camera).sqrt();
+            let x = (camera[0].atan2(camera[2]) / (2.0 * PI) - 0.5).rem_euclid(1.0);
+            let y = 0.5 - clamp(camera[1] / length, -1.0, 1.0).atanh() / (2.0 * PI);
+            ScreenScale { matrix, horizon, half_viewport, nadir: [x, clamp(y, 0.0, 1.0)] }
+        }
+
+        fn to_screen(&self, point: &Vec3) -> Option<[f64; 2]> {
+            let clip = matrix::transform_mat4_value(&[point[0], point[1], point[2], 1.0], self.matrix);
+            (clip[3] > 0.0)
+                .then(|| [clip[0] / clip[3] * self.half_viewport[0], clip[1] / clip[3] * self.half_viewport[1]])
+        }
+
+        /// The pixels that a radian of the sphere's surface takes at `point`:
+        /// the square root of the area a small square there projects to, so
+        /// foreshortening along one direction counts for half. `None` behind
+        /// the camera.
+        fn pixels_per_radian(&self, point: &Vec3, east: &Vec3, north: &Vec3) -> Option<f64> {
+            const STEP: f64 = 1e-4;
+            let stepped = |along: &Vec3| -> Vec3 {
+                [point[0] + along[0] * STEP, point[1] + along[1] * STEP, point[2] + along[2] * STEP]
+            };
+            let origin = self.to_screen(point)?;
+            let to_east = self.to_screen(&stepped(east))?;
+            let to_north = self.to_screen(&stepped(north))?;
+            let area = (to_east[0] - origin[0]) * (to_north[1] - origin[1])
+                - (to_east[1] - origin[1]) * (to_north[0] - origin[0]);
+            Some(area.abs().sqrt() / STEP)
+        }
+    }
+
+    /// The side in pixels of the square a tile would fill if all of it were
+    /// drawn at the scale of its most magnified part. The scale is sampled on
+    /// a grid over the tile and at the tile's point nearest the one under
+    /// the camera, where perspective magnifies it most; samples behind the
+    /// horizon don't count. Infinite when the samples can't tell: none is
+    /// on the near side of the horizon, or one is behind the camera.
+    fn projected_tile_size(tile: &CanonicalTileID, view: &ScreenScale) -> f64 {
+        const GRID: usize = 3;
+        let extent = f64::from(constants::EXTENT);
+        let tiles = f64::from(1u32 << tile.z);
+        let mut samples = [[0.0f64; 2]; GRID * GRID + 1];
+        for (index, sample) in samples.iter_mut().take(GRID * GRID).enumerate() {
+            let step = extent / (GRID - 1) as f64;
+            *sample = [(index % GRID) as f64 * step, (index / GRID) as f64 * step];
+        }
+        // The nadir in tile units, on the world copy that puts it nearest the
+        // tile.
+        let tile_center_x = (f64::from(tile.x) + 0.5) / tiles;
+        let nadir_x = view.nadir[0] - (view.nadir[0] - tile_center_x).round();
+        samples[GRID * GRID] = [
+            clamp((nadir_x * tiles - f64::from(tile.x)) * extent, 0.0, extent),
+            clamp((view.nadir[1] * tiles - f64::from(tile.y)) * extent, 0.0, extent),
+        ];
+
+        let mut largest: Option<f64> = None;
+        for sample in &samples {
+            let point = to_sphere(sample[0], sample[1], tile);
+            if !passes(view.horizon, &point) {
+                continue;
+            }
+            // A Mercator tile spans the same angle along both axes: its
+            // share of the circle of latitude it is on.
+            let latitude_radius = point[0].hypot(point[2]);
+            let mut size = 0.0;
+            if latitude_radius > 1e-9 {
+                let east: Vec3 = [point[2] / latitude_radius, 0.0, -point[0] / latitude_radius];
+                let north = vec3_cross(&point, &east);
+                let Some(scale) = view.pixels_per_radian(&point, &east, &north) else {
+                    return f64::INFINITY;
+                };
+                size = scale * 2.0 * PI * latitude_radius / tiles;
+            }
+            largest = Some(f64::max(largest.unwrap_or(0.0), size));
+        }
+        largest.unwrap_or(f64::INFINITY)
+    }
+
     /// The wrap that keeps a tile loaded while the view crosses the
     /// antimeridian.
     fn wrap_for(center_x: f64, tile: &CanonicalTileID) -> i16 {
@@ -679,6 +772,27 @@ mod globe {
         );
         let culling_elevation = elevation_for_tile_culling(transform.get_pitch() * 180.0 / PI, fov_degrees, 0.0, 0.0);
 
+        // The pixels across a tile at the center of an unpitched view, were
+        // tiles loaded at the requested zoom before it is made whole.
+        let nominal_tile_size = constants::TILE_SIZE_D * 2.0f64.powf(transform_zoom - requested_center_zoom);
+        let size = transform.get_size();
+        let screen_scale = ScreenScale::new(
+            &projection.main_matrix,
+            &horizon,
+            [f64::from(size.width) / 2.0, f64::from(size.height) / 2.0],
+            &projection.camera_position,
+        );
+
+        let children = |node: &Node| -> [Node; 4] {
+            std::array::from_fn(|i| Node {
+                zoom: node.zoom + 1,
+                x: (node.x << 1) + (i as u32 % 2),
+                y: (node.y << 1) + (i as u32 >> 1),
+                wrap: node.wrap,
+                fully_visible: node.fully_visible,
+            })
+        };
+
         let mut stack: Vec<Node> = Vec::with_capacity(64);
         let mut result: Vec<ResultTile> = Vec::with_capacity(64);
         stack.push(Node { zoom: 0, x: 0, y: 0, wrap: 0, fully_visible: false });
@@ -707,7 +821,31 @@ mod globe {
             }
             let target_zoom = clamp(desired_z, 0.0, f64::from(max_zoom)) as u8;
 
-            if node.zoom >= target_zoom {
+            // Where GL JS keeps splitting to the zoom above, a tile that is
+            // already small on screen is taken as it is. Tiles shrink toward
+            // the poles as the meridians converge and flatten toward the
+            // limb, neither of which the distances above see, and below the
+            // variable zoom's threshold nothing else makes them coarser. The
+            // size is biased so that a tile as large as the tiles at the
+            // center of an unpitched view splits as they do.
+            let small_on_screen = node.zoom < target_zoom && node.zoom >= min_zoom && {
+                let size = projected_tile_size(&tile, &screen_scale);
+                whole_zoom((size / nominal_tile_size).log2() + SCREEN_SIZE_ZOOM_BIAS) <= 0.0
+            };
+            // The volumes fit large tiles loosely: one that passed the test
+            // above is still out of view when none of its children pass it.
+            if small_on_screen
+                && !node.fully_visible
+                && children(&node).iter().all(|child| {
+                    let volume =
+                        tile_bounding_volume(&CanonicalTileID::new(child.zoom, child.x, child.y), culling_elevation);
+                    is_tile_visible(&frustum, &volume, &horizon) == IntersectionResult::Separate
+                })
+            {
+                continue;
+            }
+
+            if node.zoom >= target_zoom || small_on_screen {
                 if node.zoom < min_zoom {
                     continue;
                 }
@@ -728,15 +866,7 @@ mod globe {
                 });
                 continue;
             }
-            for i in 0..4u32 {
-                stack.push(Node {
-                    zoom: node.zoom + 1,
-                    x: (node.x << 1) + (i % 2),
-                    y: (node.y << 1) + (i >> 1),
-                    wrap: node.wrap,
-                    fully_visible: node.fully_visible,
-                });
-            }
+            stack.extend(children(&node));
         }
 
         // GL JS's sort is stable: equally distant tiles, as around a pole,

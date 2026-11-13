@@ -1042,6 +1042,101 @@ mod tile_cover {
         );
     }
 
+    // Unlike GL JS, a tile that is already small on screen is not split further. Around a pole the meridians converge,
+    // so a view from the middle latitudes takes the polar rows from the zoom above its own.
+    #[test]
+    fn globe_polar_rows_are_coarser() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(1920, 1080), ll(45.0, 10.0), 3.0, 0.0, 0.0);
+        let cover = tile_cover(&params(&transform), 3, ZOOM_RANGE, None);
+        let polar_row: Vec<_> = cover.iter().map(|tile| tile.canonical).filter(|tile| tile.y == 0).collect();
+        assert_ne!(0, polar_row.len());
+        for tile in &polar_row {
+            assert_eq!(2, tile.z, "{tile:?}");
+        }
+        // The tiles under the center keep the view's zoom.
+        assert!(cover.contains(&os(3, 4, 2)));
+        assert!(cover.contains(&os(3, 4, 3)));
+        assert_eq!(18, cover.len());
+    }
+
+    // A pitched view below the zoom from which GL JS varies the zoom takes the tiles toward the horizon coarser too.
+    #[test]
+    fn globe_low_zoom_pitched_is_coarser_toward_the_horizon() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(1920, 1080), ll(75.0, 10.0), 4.0, 60.0, 0.0);
+        let cover = tile_cover(&params(&transform), 4, ZOOM_RANGE, None);
+        assert!(cover.contains(&os(4, 8, 2)));
+        assert!(cover.iter().any(|tile| tile.canonical.z < 4));
+        assert!(cover.len() <= 24, "{}", cover.len());
+    }
+
+    // Tiles at the center of an unpitched view are as large as tiles get, and so are their neighbors near the equator.
+    #[test]
+    fn globe_equator_view_keeps_its_zoom() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(1024, 768), ll(0.0, 10.0), 3.0, 0.0, 0.0);
+        let cover = tile_cover(&params(&transform), 3, ZOOM_RANGE, None);
+        assert_eq!(16, cover.len());
+        assert!(cover.iter().all(|tile| tile.canonical.z == 3));
+    }
+
+    // Whatever zooms the cover mixes, every point of the planet that the view shows is in exactly one of its tiles.
+    #[test]
+    fn globe_cover_has_no_gaps_or_overlaps() {
+        let (width, height) = (1024u32, 768u32);
+        let mut mixed = 0;
+        for latitude in [0.0, 45.0, 60.0, 75.0, 90.0, -80.0] {
+            for zoom in [1.0, 2.5, 3.0, 4.0, 4.7, 5.5, 7.0] {
+                for (pitch, bearing) in [(0.0, 0.0), (60.0, 0.0), (75.0, 140.0)] {
+                    let mut transform = new_transform();
+                    set_up_globe(&mut transform, Size::new(width, height), ll(latitude, 170.0), zoom, pitch, bearing);
+                    let state = transform.get_state();
+                    let view = format!("latitude {latitude}, zoom {zoom}, pitch {pitch}, bearing {bearing}");
+                    let cover = tile_cover(&params(&transform), zoom.floor() as u8, ZOOM_RANGE, None);
+                    if cover.iter().any(|tile| tile.canonical.z != cover[0].canonical.z) {
+                        mixed += 1;
+                    }
+                    let mut on_planet = 0;
+                    for row in 0..=24 {
+                        for column in 0..=32 {
+                            let point = mln_util::geo::ScreenCoordinate::new(
+                                f64::from(column) * f64::from(width) / 32.0,
+                                f64::from(row) * f64::from(height) / 24.0,
+                            );
+                            let Ok(location) = state.screen_coordinate_to_lat_lng(&point, WrapMode::Wrapped) else {
+                                continue;
+                            };
+                            // Off the planet's disc the location is not the one under the point; past the Mercator
+                            // range there are no tiles.
+                            let back = state.lat_lng_to_screen_coordinate(&location);
+                            if (back.x - point.x).hypot(back.y - point.y) > 0.5
+                                || state.is_location_occluded(&location)
+                                || location.latitude().abs() >= constants::LATITUDE_MAX
+                            {
+                                continue;
+                            }
+                            on_planet += 1;
+                            let x = (location.longitude() + 180.0) / 360.0;
+                            let y = 0.5 - location.latitude().to_radians().tan().asinh() / (2.0 * std::f64::consts::PI);
+                            let covering = cover
+                                .iter()
+                                .filter(|tile| {
+                                    let tiles = f64::from(1u32 << tile.canonical.z);
+                                    (x * tiles).floor() == f64::from(tile.canonical.x)
+                                        && (y * tiles).floor() == f64::from(tile.canonical.y)
+                                })
+                                .count();
+                            assert_eq!(1, covering, "{view}: {location:?} at {point:?}");
+                        }
+                    }
+                    assert!(on_planet > 0, "{view}");
+                }
+            }
+        }
+        assert!(mixed > 20, "{mixed}");
+    }
+
     // gtest: TileCover.GlobeAntimeridian
     #[test]
     fn globe_antimeridian() {
