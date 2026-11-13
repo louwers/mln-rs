@@ -105,14 +105,19 @@ export interface FrameSample {
 }
 
 /** The phases of FrameSample's `phases`, in order. */
-export const PHASES = ['input', 'update', 'render', 'tasks', 'between'] as const;
+export const PHASES = ['update', 'render', 'tasks', 'between'] as const;
 
 /** What the debug overlay shows of the map beside its frames. */
 export interface DebugStats {
-  tileWorkers: number;
-  replies: number;
+  /** Draw calls of the last frame drawn. */
+  drawCalls: number;
   /** Bytes of the map's wasm instance's memory. */
   memory: number;
+  /** Bytes of the live textures and buffers on the GPU. */
+  gpuMemory: number;
+  /** Requests the map's Web Worker is waiting on, and all it has made. */
+  pending: number;
+  requests: number;
   /** Milliseconds the current style took to load fully, once it has. */
   loadedMs: number | null;
 }
@@ -149,7 +154,8 @@ export type FromMap =
   // While the page shows its debug overlay.
   | { type: 'frame'; sample: FrameSample }
   | { type: 'stats'; stats: DebugStats }
-  | { type: 'features'; point: [number, number]; features: DebugFeature[] }
+  // `at` is the pointer's [lat, lon], or null past the globe's edge.
+  | { type: 'features'; at: [number, number] | null; features: DebugFeature[] }
   // The map stopped: a panic, or it failed to start.
   | { type: 'fatal'; message: string }
   // The map didn't start: the browser's API couldn't draw it.

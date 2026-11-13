@@ -25,14 +25,21 @@
 import type { WebMap } from './pkg/mln_web.js';
 import type { Bindings, Box, Camera, DebugFeature, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
 
-// Every URL this worker fetched, and how many times: the map's fetches look
-// the global `fetch` up at each call, and so do the preloads below.
+// Every URL this worker fetched, and how many times, and how many fetches
+// wait for their response: the map's fetches look the global `fetch` up at
+// each call, and so do the preloads below.
 const fetches = new Map<string, number>();
+let requests = 0;
+let pending = 0;
 const globalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = input instanceof Request ? input.url : String(input);
   fetches.set(url, (fetches.get(url) ?? 0) + 1);
-  return globalFetch(input, init);
+  requests++;
+  pending++;
+  const response = globalFetch(input, init);
+  response.finally(() => pending--).catch(() => {});
+  return response;
 };
 
 const webgl2 = self.name === 'webgl2';
@@ -272,12 +279,15 @@ async function run(
       post({ type: 'styleName', name });
     }
     if (debug) {
+      const [drawCalls = 0, textures = 0, buffers = 0] = map.render_stats();
       post({
         type: 'stats',
         stats: {
-          tileWorkers: ports.length,
-          replies: map.received(),
+          drawCalls,
           memory: exports.memory?.buffer.byteLength ?? 0,
+          gpuMemory: textures + buffers,
+          pending,
+          requests,
           loadedMs: loaded?.loadedMs ?? null,
         },
       });
@@ -302,7 +312,8 @@ async function run(
         hoverStale = false;
         hoverQueried = now;
         const features = JSON.parse(map.query_features(hover[0], hover[1], HOVER_RADIUS)) as DebugFeature[];
-        post({ type: 'features', point: hover, features });
+        const [lat, lon] = map.lat_lng_at(hover[0], hover[1]) ?? [];
+        post({ type: 'features', at: lat === undefined || lon === undefined ? null : [lat, lon], features });
       }
     }
     const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();

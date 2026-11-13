@@ -33,7 +33,7 @@
 //                          turn the bearing with the planet, and a drag
 //                          carries on over a pole (default: off, north
 //                          stays up)
-//   debug                  the debug overlay (debug.ts), which F3 also
+//   debug                  the debug overlay (debug.ts), which D also
 //                          toggles
 //   panic=<map|tile>       the map's instance or the first tile worker's
 //                          panics once it starts, for check/check.mjs
@@ -311,7 +311,7 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
       debug.stats(data.stats);
       break;
     case 'features':
-      if (hovering) debug.features(data.point, data.features);
+      if (hovering) debug.features(data.at, data.features);
       break;
   }
 };
@@ -506,7 +506,6 @@ let loading = true;
 let styleName = '';
 function showStyle() {
   element('style-name', HTMLElement).textContent = current.key === null ? styleName || current.name : current.name;
-  showDebugPage();
   element('style-detail', HTMLElement).textContent = fatal ? 'Stopped' : loading ? 'Loading…' : current.provider;
   document.documentElement.dataset.theme = current.dark ? 'dark' : 'light';
   for (const option of styleList.querySelectorAll<HTMLElement>('.style-option')) {
@@ -648,7 +647,6 @@ if (params.has('freeBearing')) setFreeBearing(true);
 const debugToggle = element('debug-toggle', HTMLInputElement);
 function showDebugPage() {
   debug.page({
-    style: current.key === null ? styleName || current.name : current.name,
     backend: backend === 'webgl2' ? 'WebGL2' : 'WebGPU',
     width: devicePixels(size[0]),
     height: devicePixels(size[1]),
@@ -674,7 +672,7 @@ function hover(point: [number, number] | null) {
   hovering = point !== null;
   hoverPoint = point;
   if (point === null) {
-    debug.features(null, []);
+    debug.hideFeatures();
     toMap({ type: 'hover', point: null });
     return;
   }
@@ -692,9 +690,10 @@ canvas.addEventListener('pointerleave', () => {
   if (hovering) hover(null);
 });
 debugToggle.addEventListener('change', () => setDebug(debugToggle.checked));
+// D, unless a modifier makes it another shortcut or a field takes the text.
 window.addEventListener('keydown', (e) => {
-  if (e.key !== 'F3' || e.repeat) return;
-  e.preventDefault();
+  if (e.key.toLowerCase() !== 'd' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')) return;
   setDebug(!debug.shown);
 });
 if (params.has('debug')) setDebug(true);

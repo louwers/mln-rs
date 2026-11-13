@@ -541,7 +541,7 @@ a {
 
 .debug-grid {
   display: grid;
-  grid-template-columns: 7ch minmax(0, 1fr);
+  grid-template-columns: 8ch minmax(0, 1fr);
   gap: 0 10px;
   margin: 0;
 }
@@ -569,8 +569,7 @@ a {
 
 .debug-legend {
   display: grid;
-  grid-template-columns: repeat(3, auto);
-  justify-content: space-between;
+  grid-template-columns: repeat(2, 1fr);
   gap: 2px 10px;
   margin: 6px 0 0;
   padding: 0;

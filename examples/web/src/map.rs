@@ -19,7 +19,7 @@ use mln_renderer::Renderer;
 use mln_renderer::query::RenderedQueryOptions;
 use mln_renderer::text::font_face_engine;
 use mln_util::LatLng;
-use mln_util::geo::ScreenCoordinate;
+use mln_util::geo::{ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
 use mln_util::time::Instant;
 use mln_web_host::shaper::{self, ShaperModuleEngine};
@@ -104,7 +104,7 @@ pub struct WebMap {
 }
 
 /// How many phases `WebMap::frame_timings` reports.
-const PHASES: usize = 5;
+const PHASES: usize = 4;
 
 #[wasm_bindgen]
 impl WebMap {
@@ -316,7 +316,6 @@ impl WebMap {
         // The map samples its animations at this frame's time.
         self.map.set_frame_time(Some(start));
         self.gestures.frame(&mut self.map, now);
-        let animated = Instant::now();
         self.run_loop.run_once();
         self.handle_map_events();
         let updated = Instant::now();
@@ -326,16 +325,32 @@ impl WebMap {
         self.handle_map_events();
         let ran = Instant::now();
         let ms = |from: Instant, to: Instant| to.duration_since(from).as_secs_f64() * 1000.0;
-        self.phases = [ms(start, animated), ms(animated, updated), ms(updated, rendered), ms(rendered, ran), between];
+        self.phases = [ms(start, updated), ms(updated, rendered), ms(rendered, ran), between];
         drew
     }
 
     /// The milliseconds the last `frame` spent on each of its phases, in
-    /// order: stepping the gestures and animations, running the `RunLoop`,
-    /// drawing, running the cooperative scheduler's tasks, and the `RunLoop`
-    /// runs between the frame before it and this one.
+    /// order: stepping the gestures and running the `RunLoop`, drawing,
+    /// running the cooperative scheduler's tasks, and the `RunLoop` runs
+    /// between the frame before it and this one.
     pub fn frame_timings(&self) -> Vec<f64> {
         self.phases.to_vec()
+    }
+
+    /// The graphics context's counters: the draw calls of the last frame it
+    /// drew, and the bytes of its live textures and of its live buffers.
+    pub fn render_stats(&self) -> Vec<f64> {
+        let backend = &*self.frontend.backend;
+        let _scope = BackendScope::new(backend, ScopeType::Implicit);
+        let stats = backend.get_context().rendering_stats();
+        vec![f64::from(stats.num_draw_calls), f64::from(stats.mem_textures), f64::from(stats.mem_buffers)]
+    }
+
+    /// Where (`x`, `y`) CSS pixels on the canvas are, as `[latitude,
+    /// longitude]`, or undefined where the map isn't (past the globe's edge).
+    pub fn lat_lng_at(&self, x: f64, y: f64) -> Option<Vec<f64>> {
+        let at = self.map.lat_lng_for_pixel(&ScreenCoordinate::new(x, y), WrapMode::Wrapped).ok()?;
+        Some(vec![at.latitude(), at.longitude()])
     }
 
     /// The features drawn within `radius` CSS pixels of (`x`, `y`), topmost

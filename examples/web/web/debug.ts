@@ -1,7 +1,8 @@
-// The debug overlay (F3, `?debug`, or the switch in the about panel): the
-// frame rate and the map's numbers, the camera, a graph of the last frames'
-// time stacked by phase, and the features under the pointer. The map's Web
-// Worker reports frames, numbers and features only while it shows.
+// The debug overlay (D, `?debug`, or the switch in the about panel): the
+// frame rate, the camera, what the renderer holds and draws, what the map is
+// loading, a graph of the last frames' time stacked by phase, and where the
+// pointer is and the features under it. The map's Web Worker reports frames,
+// numbers and features only while it shows.
 //
 // Hovering a bar of the graph shows that frame's phases in the legend, which
 // otherwise shows their average over the last second.
@@ -11,8 +12,7 @@ import { type Camera, type DebugFeature, type DebugStats, type FrameSample, PHAS
 type Phase = (typeof PHASES)[number];
 
 const PHASE_INFO: Record<Phase, { color: string; title: string }> = {
-  input: { color: '#a594ff', title: 'Gestures and animations stepping the camera' },
-  update: { color: '#4cc3ff', title: "The map's RunLoop, at the start of the frame" },
+  update: { color: '#4cc3ff', title: "Gestures and animations moving the camera, and the map's RunLoop" },
   render: { color: '#5ee08a', title: 'Drawing the frame and submitting it to the GPU' },
   tasks: { color: '#ffb547', title: "The cooperative scheduler's tasks: sprites, glyphs, tiles (8 ms budget)" },
   between: { color: '#ff7a9a', title: "The map's RunLoop between this frame and the one before" },
@@ -42,9 +42,11 @@ export interface DebugOverlay {
    * What the page knows of the map, rather than its Web Worker: the canvas's
    * size in device pixels, and its pixel ratio.
    */
-  page(info: { style: string; backend: string; width: number; height: number; ratio: number }): void;
-  /** The features at `point`, or null once the pointer left the canvas. */
-  features(point: [number, number] | null, features: DebugFeature[]): void;
+  page(info: { backend: string; width: number; height: number; ratio: number }): void;
+  /** The features under the pointer, which is at `at` ([lat, lon]) on the map, or past its edge. */
+  features(at: [number, number] | null, features: DebugFeature[]): void;
+  /** The pointer left the canvas. */
+  hideFeatures(): void;
 }
 
 /** Creates the overlay, hidden, in `parent`. */
@@ -94,7 +96,8 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
   hud.append(
     headline,
     grid('camera', ['center', 'zoom', 'bearing', 'pitch', 'tile']),
-    grid('map', ['style', 'canvas', 'backend', 'replies', 'loaded', 'memory']),
+    grid('render', ['backend', 'canvas', 'draws', 'memory']),
+    grid('load', ['requests', 'loaded']),
     graph,
     legend,
     legendNote,
@@ -241,28 +244,29 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
       showText(false);
       queueDraw();
     },
-    stats({ tileWorkers, replies, memory, loadedMs }) {
-      set('replies', `${replies.toLocaleString('en')} from ${tileWorkers} tile workers`);
+    stats({ drawCalls, memory, gpuMemory, pending, requests, loadedMs }) {
+      set('draws', `${drawCalls.toLocaleString('en')} calls`);
+      set('memory', `wasm ${mib(memory)} · GPU ${mib(gpuMemory)} MiB`);
+      set('requests', `${pending.toLocaleString('en')} pending · ${requests.toLocaleString('en')} made`);
       set('loaded', loadedMs === null ? 'loading…' : `in ${Math.round(loadedMs).toLocaleString('en')} ms`);
-      set('memory', memory > 0 ? `${(memory / 2 ** 20).toFixed(1)} MiB wasm` : '–');
     },
     camera([lat, lon, zoom, bearing, pitch]) {
       set('center', `${lat.toFixed(5)}, ${lon.toFixed(5)}`);
       set('zoom', zoom.toFixed(2));
-      const heading = ((bearing % 360) + 360) % 360;
-      set('bearing', `${bearing.toFixed(1)}° ${compassPoint(heading)}`);
+      set('bearing', `${bearing.toFixed(1)}°`);
       set('pitch', `${pitch.toFixed(1)}°`);
       set('tile', tileAt(lat, lon, zoom));
     },
-    page({ style, backend, width, height, ratio }) {
-      set('style', style);
+    page({ backend, width, height, ratio }) {
       set('backend', backend);
       set('canvas', `${width}×${height} px @ ${Number(ratio.toFixed(2))}×`);
     },
-    features(point, features) {
-      panel.hidden = !shown || point === null;
-      if (panel.hidden || point === null) return;
-      panel.replaceChildren(featureList(point, features));
+    features(at, features) {
+      panel.hidden = !shown;
+      if (shown) panel.replaceChildren(featureList(at, features));
+    },
+    hideFeatures() {
+      panel.hidden = true;
     },
   };
 }
@@ -273,12 +277,15 @@ function averagePhases(samples: FrameSample[]): number[] {
   return sums.map((sum) => (samples.length ? sum / samples.length : 0));
 }
 
-function featureList([x, y]: [number, number], features: DebugFeature[]): DocumentFragment {
+function mib(bytes: number): string {
+  return (bytes / 2 ** 20).toFixed(1);
+}
+
+function featureList(at: [number, number] | null, features: DebugFeature[]): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const heading = el('div', 'debug-group');
-  heading.textContent = features.length === 0
-    ? `nothing at ${Math.round(x)}, ${Math.round(y)}`
-    : `${features.length} ${features.length === 1 ? 'feature' : 'features'} at ${Math.round(x)}, ${Math.round(y)}`;
+  const count = features.length === 0 ? 'nothing' : `${features.length} ${features.length === 1 ? 'feature' : 'features'}`;
+  heading.textContent = at === null ? `${count} past the map's edge` : `${count} at ${at[0].toFixed(5)}, ${at[1].toFixed(5)}`;
   fragment.append(heading);
   for (const feature of features.slice(0, MAX_FEATURES)) {
     const item = el('article', 'debug-feature');
@@ -299,8 +306,10 @@ function featureList([x, y]: [number, number], features: DebugFeature[]): Docume
     ].filter((part) => part !== null).join(' · ');
     item.append(title, origin);
 
+    // Plain keys first: a tile's localized names (`name:de`, ...) would
+    // otherwise crowd out the rest.
     const entries = [
-      ...Object.entries(feature.properties),
+      ...Object.entries(feature.properties).sort(([a], [b]) => Number(a.includes(':')) - Number(b.includes(':'))),
       ...Object.entries(feature.state).map(([key, value]) => [`state.${key}`, value] as const),
     ];
     if (entries.length > 0) {
@@ -329,13 +338,6 @@ function featureList([x, y]: [number, number], features: DebugFeature[]): Docume
     fragment.append(more);
   }
   return fragment;
-}
-
-const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-
-/** The compass point the map faces at `heading` degrees, [0, 360). */
-function compassPoint(heading: number): string {
-  return COMPASS[Math.round(heading / 45) % 8] ?? 'N';
 }
 
 /** The z/x/y of the Web Mercator tile at the camera's center and whole zoom. */
