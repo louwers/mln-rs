@@ -1,21 +1,17 @@
-// Ports include/mln/util/enum.hpp: `Enum<T>::toString` / `Enum<T>::toEnum`
-// and the `MBGL_DEFINE_ENUM` macro (here `define_enum!`). The module is
-// `enum_` because `enum` is a Rust keyword.
+// The module is `enum_` because `enum` is a Rust keyword.
 
-/// `mln::Enum<T>`: the string names of an enum, as defined with
-/// `MBGL_DEFINE_ENUM`.
+/// The string names of an enum, as defined with `define_enum!`.
 pub trait Enum: Sized + Copy + 'static {
-    /// `Enum<T>::toString`. C++ asserts that the value has a name; enums
-    /// defined with `define_enum!` panic the same way in debug builds.
+    /// The value's name. Enums defined with `define_enum!` panic in debug
+    /// builds when the value has no name, as C++ asserts.
     fn to_string(self) -> &'static str;
 
-    /// `Enum<T>::toEnum`: the first value whose name equals `s`.
+    /// The first value whose name equals `s`.
     fn to_enum(s: &str) -> Option<Self>;
 }
 
-/// `MBGL_DEFINE_ENUM(T, {{T::A, "a"}, ...})`: implements [`Enum`] for `T`
-/// by linear search through the name table, in table order (as the C++
-/// `std::find_if` does).
+/// `define_enum!(T, [(T::A, "a"), ...])` implements [`Enum`] for `T` by
+/// linear search through the name table, in table order.
 #[macro_export]
 macro_rules! define_enum {
     ($t:ty, [$(($value:expr, $name:expr)),* $(,)?]) => {

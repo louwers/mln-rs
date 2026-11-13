@@ -1,5 +1,3 @@
-// Ports src/mln/util/mat4.hpp and src/mln/util/mat4.cpp
-//
 // This is an incomplete port of http://glmatrix.net/
 //
 // Copyright (c) 2013 Brandon Jones, Colin MacKenzie IV
@@ -25,7 +23,7 @@
 pub type Mat4 = [f64; 16];
 pub type Matf4 = [f32; 16];
 
-/// `mln::matrix` (mat4 overloads).
+/// Matrix operations on `Mat4`.
 ///
 /// C++ lets `out` alias `a` (and `b`); in Rust the caller passes a copy
 /// (`let a = m; matrix::translate(&mut m, &a, x, y, z)`). The C++ aliased

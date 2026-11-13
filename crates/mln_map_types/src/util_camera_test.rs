@@ -1,5 +1,3 @@
-// Ports test/util/camera.test.cpp (TEST(FreeCameraOptions, *)).
-
 use std::f64::consts::SQRT_2;
 
 use mln_util::constants::LATITUDE_MAX;
@@ -41,7 +39,6 @@ fn assert_near(val1: f64, val2: f64, abs_error: f64) {
     assert!(diff <= abs_error, "ASSERT_NEAR: |{val1:?} - {val2:?}| = {diff:?} > {abs_error:?}");
 }
 
-/// `ASSERT_THAT(arg, Vec3NearEquals1E7(vec))`.
 #[track_caller]
 fn assert_vec3_near_1e7(arg: &Vec3, vec: &Vec3) {
     let near = (vec[0] - arg[0]).abs() <= ABS_DOUBLE_ERROR

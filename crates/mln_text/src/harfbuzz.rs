@@ -1,13 +1,10 @@
-// Ports src/mln/text/harfbuzz.hpp and src/mln/text/harfbuzz.cpp (the
-// MLN_TEXT_SHAPING_HARFBUZZ build).
-
 use serde::{Deserialize, Serialize};
 
 use crate::freetype::FreeTypeLibrary;
 use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz_impl::Impl;
 
-/// `HBShapeAdjust`: the HarfBuzz position of a glyph in pixels at 24 px.
+/// The HarfBuzz position of a glyph in pixels at 24 px.
 #[derive(Clone, Copy, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct HBShapeAdjust {
     pub x_offset: f32,
@@ -29,16 +26,15 @@ pub struct HBShaper {
 }
 
 impl HBShaper {
-    /// `HBShaper(GlyphIDType, const std::string& fontFileData, const FreeTypeLibrary&)`.
-    /// The shaper keeps `font_file_data` instead of copying it.
+    /// A shaper for the font in `font_file_data`, whose glyphs have type
+    /// `type_`. The shaper keeps `font_file_data` instead of copying it.
     pub fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, lib: &FreeTypeLibrary) -> Self {
         HBShaper { impl_: Impl::new(type_, font_file_data, lib) }
     }
 
-    /// `createComplexGlyphIDs`: appends the glyphs of `text` (UTF-16), one
-    /// run of one direction in logical order, and their positions. Glyphs
-    /// come back in visual order, so a right-to-left run's glyphs come back
-    /// reversed.
+    /// Appends the glyphs of `text` (UTF-16), one run of one direction in
+    /// logical order, and their positions. Glyphs come back in visual order,
+    /// so a right-to-left run's glyphs come back reversed.
     pub fn create_complex_glyph_ids(
         &self,
         text: &[u16],
@@ -49,12 +45,10 @@ impl HBShaper {
         self.impl_.create_complex_glyph_ids(text, rtl, glyph_ids, adjusts);
     }
 
-    /// `rasterizeGlyph`.
     pub fn rasterize_glyph(&self, glyph: &GlyphID) -> Glyph {
         self.impl_.rasterize_glyph(glyph)
     }
 
-    /// `valid()`.
     pub fn valid(&self) -> bool {
         self.impl_.valid()
     }

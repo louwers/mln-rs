@@ -1,7 +1,3 @@
-// Ports include/mln/util/interpolate.hpp (the Interpolator<T> specializations
-// for util types; those for style types live next to the types, orphan rule)
-// and src/mln/util/interpolate.cpp (interpolationFactor).
-//
 // C++ `util::interpolate(a, b, t)` has a `double t` and a `float t`
 // overload; `Interpolate::interpolate` is the first, `interpolate_f32` the
 // second. Specializations that only define one of the two get the other
@@ -14,12 +10,11 @@ use crate::padding::Padding;
 use crate::range::Range;
 
 pub trait Interpolate: Sized {
-    /// `Interpolator<T>()(a, b, double t)`.
     #[must_use]
     fn interpolate(&self, to: &Self, t: f64) -> Self;
 
-    /// `Interpolator<T>()(a, b, float t)`. Defaults to promoting `t`, which
-    /// is what C++ does for specializations without a float overload.
+    /// Interpolates with a float `t`. Defaults to promoting `t`, which is
+    /// what C++ does for specializations without a float overload.
     #[must_use]
     fn interpolate_f32(&self, to: &Self, t: f32) -> Self {
         self.interpolate(to, f64::from(t))
@@ -33,7 +28,6 @@ impl Interpolate for f64 {
     }
 }
 
-/// `Interpolator<float>`.
 impl Interpolate for f32 {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         // static_cast<float>(a * (1.0 - t) + b * t)
@@ -53,8 +47,7 @@ impl Interpolate for Point<f64> {
     }
 }
 
-/// `Interpolator<std::array<float, N>>`: only a float overload, so a double
-/// `t` is narrowed to float first.
+/// Interpolates in float: a double `t` is narrowed to float first.
 impl<const N: usize> Interpolate for [f32; N] {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         self.interpolate_f32(to, t as f32)
@@ -65,15 +58,13 @@ impl<const N: usize> Interpolate for [f32; N] {
     }
 }
 
-/// `Interpolator<std::array<double, N>>` (the generic `std::array<T, N>`
-/// specialization: double overload only).
 impl<const N: usize> Interpolate for [f64; N] {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         std::array::from_fn(|i| self[i].interpolate(&to[i], t))
     }
 }
 
-/// `Interpolator<Color>`: channel-wise lerp of the *premultiplied* channels
+/// Channel-wise lerp of the *premultiplied* channels
 /// (this is what `ColorSpace::RGB` means).
 impl Interpolate for Color {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
@@ -95,7 +86,6 @@ impl Interpolate for Color {
     }
 }
 
-/// `Interpolator<Padding>`.
 impl Interpolate for Padding {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         Padding::new(
@@ -130,25 +120,22 @@ impl Interpolate for String {
     }
 }
 
-/// `Interpolator<std::vector<T>> : Uninterpolated`. (The
-/// `std::vector<expression::Value>` specialization lives in `mln_expression`.)
+/// Vectors don't interpolate: the result is `self`. (Vectors of expression
+/// values interpolate in `mln_expression`.)
 impl<T: Clone> Interpolate for Vec<T> {
     fn interpolate(&self, _to: &Self, _t: f64) -> Self {
         self.clone()
     }
 }
 
-/// `util::interpolate(a, b, double t)`.
 pub fn interpolate<T: Interpolate>(from: &T, to: &T, t: f64) -> T {
     from.interpolate(to, t)
 }
 
-/// `util::interpolate(a, b, float t)`.
 pub fn interpolate_f32<T: Interpolate>(from: &T, to: &T, t: f32) -> T {
     from.interpolate_f32(to, t)
 }
 
-/// `util::interpolationFactor`.
 #[must_use]
 pub fn interpolation_factor(base: f32, range: Range<f32>, z: f32) -> f32 {
     let zoom_diff = range.max - range.min;

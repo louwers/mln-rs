@@ -1,11 +1,7 @@
-// Ports the helpers of include/mln/util/feature.hpp (`numericValue`,
-// `featureIDtoString`). `mln::Feature` arrives with queries.
-
 use feature::{Identifier, Value};
 
 use crate::string::to_string_double;
 
-/// `numericValue<double>(const Value&)`.
 #[must_use]
 pub fn numeric_value_f64(value: &Value) -> Option<f64> {
     match value {
@@ -30,9 +26,8 @@ pub fn feature_id_to_string(id: &Identifier) -> Option<String> {
     }
 }
 
-/// `mln::Feature`: a `GeoJSONFeature` (`mapbox::feature::feature<double>`)
-/// plus the source, source layer, style layer and feature state a query
-/// fills in.
+/// A `GeoJSONFeature` plus the source, source layer, style layer and feature
+/// state a query fills in.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Feature {
     pub geometry: geometry::Geometry<f64>,
@@ -50,7 +45,6 @@ pub struct Feature {
 }
 
 impl From<feature::Feature<f64>> for Feature {
-    /// `Feature(const GeoJSONFeature&)`.
     fn from(f: feature::Feature<f64>) -> Self {
         Feature { geometry: f.geometry, properties: f.properties, id: f.id, ..Default::default() }
     }

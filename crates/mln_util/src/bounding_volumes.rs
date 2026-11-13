@@ -1,6 +1,3 @@
-// Ports src/mln/util/bounding_volumes.hpp and src/mln/util/bounding_volumes.cpp
-// (C++ namespace mln::util).
-
 use geometry::Point;
 
 use crate::mat3::{vec3_add, vec3_cross, vec3_dot, vec3_length, vec3_normalize, vec3_scale, vec3_sub};
@@ -200,7 +197,6 @@ const FAR_TR: i32 = 5;
 const FAR_BR: i32 = 6;
 const FAR_BL: i32 = 7;
 
-/// `Frustum::Projection`.
 #[derive(Clone, Copy, Debug, Default)]
 struct Projection {
     axis: Vec3,
@@ -256,9 +252,8 @@ impl Frustum {
         Frustum { bounds, points, planes, projections }
     }
 
-    /// C++ defaults: `flippedY = false`, `horizonPlane = std::nullopt`. With
-    /// `horizon_plane`, the far plane is pulled in to the horizon so nothing
-    /// behind it counts as visible.
+    /// With `horizon_plane`, the far plane is pulled in to the horizon so
+    /// nothing behind it counts as visible.
     #[must_use]
     pub fn from_inv_proj_matrix(
         inv_proj: &Mat4,

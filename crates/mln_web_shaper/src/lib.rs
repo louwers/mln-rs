@@ -24,8 +24,8 @@ fn start() {
     std::panic::set_hook(Box::new(|info| error(&info.to_string())));
 }
 
-/// `HBShaper(type, fontFileData)`: undefined unless `data` is a font. The
-/// face keeps `data` instead of copying it.
+/// Opens the font in `data`; `undefined` unless `data` is a font. The face
+/// keeps `data` instead of copying it.
 #[wasm_bindgen(js_name = openFace)]
 #[must_use]
 pub fn open_face(type_: u16, data: Vec<u8>) -> Option<Face> {
@@ -42,7 +42,7 @@ pub struct Face {
 
 #[wasm_bindgen]
 impl Face {
-    /// `createComplexGlyphIDs(text, rtl)`: per glyph, its index, then its
+    /// Shapes the UTF-16 `text`: per glyph, its index, then its
     /// `HBShapeAdjust` (x offset, y offset, advance).
     pub fn shape(&self, text: &[u16], rtl: bool) -> Vec<f32> {
         let mut glyph_ids: Vec<GlyphID> = Vec::new();
@@ -55,9 +55,10 @@ impl Face {
             .collect()
     }
 
-    /// `rasterizeGlyph`: `[metrics, bitmap]`, the metrics a `Float64Array` of
-    /// width, height, left, top, advance, double resolution (0 or 1), and
-    /// the bitmap's width and height, the bitmap a `Uint8Array`.
+    /// Rasterizes the glyph `code` as `[metrics, bitmap]`, the metrics a
+    /// `Float64Array` of width, height, left, top, advance, double resolution
+    /// (0 or 1), and the bitmap's width and height, the bitmap a
+    /// `Uint8Array`.
     pub fn rasterize(&self, code: u16) -> js_sys::Array {
         let glyph = self.shaper.rasterize_glyph(&GlyphID::with_type(code, self.type_));
         let m = &glyph.metrics;

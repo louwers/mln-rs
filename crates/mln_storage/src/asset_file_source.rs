@@ -1,6 +1,3 @@
-// Ports include/mln/storage/asset_file_source.hpp and
-// platform/default/src/mln/storage/asset_file_source.cpp.
-//
 // The requests run on the "AssetFileSource" thread (`util::Thread`) as in
 // C++. The resource options are kept next to the thread behind a
 // mutex (C++ keeps them in the thread object and reads them back with a
@@ -27,13 +24,11 @@ fn accepts_url(url: &str) -> bool {
     url.starts_with(ASSET_PROTOCOL)
 }
 
-/// `AssetFileSource::Impl`.
 pub struct AssetFileSourceThread {
     root: String,
 }
 
 impl AssetFileSourceThread {
-    /// `request(const Resource&, const ActorRef<FileSourceRequest>&)`.
     pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         if !accepts_url(&resource.url) {
             let mut response = Response::new();
@@ -56,8 +51,8 @@ impl AssetFileSourceThread {
     }
 }
 
-/// `AssetFileSource`: the `Asset` file source (`asset://` URLs, relative to
-/// `ResourceOptions::assetPath()`). On Android, the files under
+/// The `Asset` file source: `asset://` URLs, relative to the resource
+/// options' asset path. On Android, the files under
 /// `mln_storage::android::APP_ASSETS` are the app's assets.
 pub struct AssetFileSource {
     thread: Thread<AssetFileSourceThread>,

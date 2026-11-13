@@ -1,7 +1,3 @@
-// Ports test/storage/asset_file_source.test.cpp. The asset path is the
-// fixture directory read in place (C++: "test/fixtures/storage/assets"
-// relative to the working directory).
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -81,7 +77,6 @@ impl WorkerChain {
     }
 }
 
-/// `TestWorker`.
 struct TestWorker {
     fs: Arc<AssetFileSource>,
     chain: RefCell<Option<Rc<WorkerChain>>>,

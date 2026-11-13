@@ -1,5 +1,3 @@
-// Ports src/mln/map/transform_state.hpp and src/mln/map/transform_state.cpp.
-//
 // The matrices are computed when a getter first needs them and cached in a
 // `OnceLock`, which each change that moves them clears, so a state shared
 // between threads reads them without locks. The camera follows from the
@@ -68,7 +66,8 @@ fn round_for_accuracy(x: f64) -> f64 {
     if diff < K_EPSILON && diff > 0.0 { round_x } else { x }
 }
 
-/// `std::modf` fractional part (same sign as `x`).
+/// The fractional part of `x`, with the sign of `x`, as `std::modf` returns
+/// it.
 fn modf_fraction(x: f64) -> f64 {
     if x.is_infinite() {
         return 0.0f64.copysign(x);
@@ -76,7 +75,6 @@ fn modf_fraction(x: f64) -> f64 {
     (x - x.trunc()).copysign(x)
 }
 
-/// `TransformStateProperties`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TransformStateProperties {
     pub x: Option<f64>,
@@ -440,7 +438,6 @@ impl TransformState {
         self.projection.as_ref()
     }
 
-    /// `getProjectionData(const UnwrappedTileID&, const mat4& projMatrix)`.
     pub fn get_projection_data_with(&self, tile_id: &UnwrappedTileID, proj_matrix: &Mat4) -> ProjectionData {
         let mut mercator_matrix: Mat4 = [0.0; 16];
         self.projection.tile_matrix(&mut mercator_matrix, tile_id, self.scale);
@@ -449,7 +446,6 @@ impl TransformState {
         self.projection.get_projection_data(self, tile_id, &mercator_matrix)
     }
 
-    /// `getProjectionData(const UnwrappedTileID&)`.
     pub fn get_projection_data(&self, tile_id: &UnwrappedTileID) -> ProjectionData {
         self.get_projection_data_with(tile_id, &self.get_projection_matrix())
     }
@@ -490,7 +486,6 @@ impl TransformState {
         furthest_distance * 1.01
     }
 
-    /// `getProjMatrix(mat4&, uint16_t nearZ = 1, bool aligned = false)`.
     pub fn get_proj_matrix(&self, proj_matrix: &mut Mat4, near_z: u16, aligned: bool) {
         if self.size.is_empty() {
             return;
@@ -931,13 +926,12 @@ impl TransformState {
 
     // MARK: - Position
 
-    /// `getLatLng(LatLng::WrapMode = LatLng::Unwrapped)`.
     pub fn get_lat_lng(&self, wrap_mode: WrapMode) -> LatLng {
         lat_lng(mln_math::rad2deg(2.0 * (self.y / self.cc).exp().atan() - 0.5 * PI), -self.x / self.bc, wrap_mode)
     }
 
-    /// `latLngNearCenter(latLng)`: the world copy of a location nearest the
-    /// center, which bounds can keep past the antimeridian.
+    /// The world copy of `location` nearest the center, which bounds can keep
+    /// past the antimeridian.
     pub fn lat_lng_near_center(&self, location: &LatLng) -> LatLng {
         let center = self.get_lat_lng(WrapMode::Unwrapped);
         let wrapped_center = center.wrapped();
@@ -981,7 +975,7 @@ impl TransformState {
         self.get_min_zoom_at_latitude_with(latitude, self.is_globe_rendering())
     }
 
-    /// `getMinZoomAtLatitude(double latitude, bool globe)`: the same for a
+    /// [`get_min_zoom_at_latitude`](Self::get_min_zoom_at_latitude) for a
     /// camera on the globe or not, whatever the current projection.
     pub fn get_min_zoom_at_latitude_with(&self, latitude: f64, globe: bool) -> f64 {
         if !globe {
@@ -1287,7 +1281,6 @@ impl TransformState {
         self.lat_lng_to_screen_coordinate_with(lat_lng, &mut p)
     }
 
-    /// `latLngToScreenCoordinate(const LatLng&, vec4&)`.
     pub fn lat_lng_to_screen_coordinate_with(&self, lat_lng: &LatLng, p: &mut Vec4) -> ScreenCoordinate {
         if self.size.is_empty() {
             return ScreenCoordinate::new(0.0, 0.0);
@@ -1364,7 +1357,7 @@ impl TransformState {
         TileCoordinate { p: Point::new(p.x / self.scale * factor, p.y / self.scale * factor), z: f64::from(at_zoom) }
     }
 
-    /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Unwrapped)`.
+    /// The location under `point`, measured from the bottom edge (y up).
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// NaN or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
@@ -1407,7 +1400,6 @@ impl TransformState {
         self.orientation == NorthOrientation::Leftwards || self.orientation == NorthOrientation::Rightwards
     }
 
-    /// `constrainScreen(double& scale_, double& lat, double& lon)`.
     pub fn constrain_screen(&self, scale: &mut f64, lat: &mut f64, lon: &mut f64) -> bool {
         if self.constrain_mode == ConstrainMode::Screen {
             let mut zoom = self.scale_zoom(*scale);

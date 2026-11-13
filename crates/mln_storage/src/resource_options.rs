@@ -1,9 +1,6 @@
-// Ports include/mln/storage/resource_options.hpp and
-// src/mln/storage/resource_options.cpp.
-
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 
-/// `ResourceOptions`. `Clone` is `clone()`.
+/// Where resources are cached and found, and the cache's maximum size.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResourceOptions {
     cache_path: String,
@@ -12,7 +9,6 @@ pub struct ResourceOptions {
 }
 
 impl Default for ResourceOptions {
-    /// `ResourceOptions()`: default values.
     fn default() -> Self {
         ResourceOptions {
             cache_path: ":memory:".to_owned(),

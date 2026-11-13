@@ -1,5 +1,3 @@
-// Ports src/mln/sprite/sprite_loader.hpp and src/mln/sprite/sprite_loader.cpp.
-//
 // The request callbacks and the parse reply reach the loader through a
 // `Weak` (C++ captures `this`; the reply checks a `WeakPtrFactory`), so
 // they do nothing once the loader is gone. C++ holds `dataMapMutex` while
@@ -23,7 +21,6 @@ use mln_vec_map::VecMap;
 use crate::sprite_loader_observer::{NullSpriteLoaderObserver, SpriteLoaderObserver};
 use crate::sprite_parser::parse_sprite_images;
 
-/// `SpriteLoader::Data`.
 #[derive(Default)]
 struct SpriteData {
     /// Which `load` this data is for, so a parse of an earlier load's data
@@ -43,7 +40,6 @@ struct Inner {
     loads: Cell<u64>,
 }
 
-/// `SpriteLoader`.
 pub struct SpriteLoader {
     pixel_ratio: f32,
     inner: Rc<Inner>,
@@ -94,7 +90,6 @@ impl Inner {
         self.emit_sprite_loaded_if_complete(sprite.clone());
     }
 
-    /// `emitSpriteLoadedIfComplete(style::Sprite)`.
     fn emit_sprite_loaded_if_complete(self: &Rc<Self>, sprite: Sprite) {
         let (image, json, load) = {
             let data_map = self.data_map.borrow();
@@ -139,7 +134,6 @@ impl Inner {
 }
 
 impl SpriteLoader {
-    /// `SpriteLoader(float pixelRatio, const TaggedScheduler& threadPool)`.
     #[must_use]
     pub fn new(pixel_ratio: f32, thread_pool: TaggedScheduler) -> Self {
         SpriteLoader {
@@ -153,7 +147,6 @@ impl SpriteLoader {
         }
     }
 
-    /// `load(std::optional<style::Sprite>, FileSource&)`.
     pub fn load(&self, sprite: Option<Sprite>, file_source: &dyn FileSource) {
         let Some(sprite) = sprite else {
             // Treat a non-existent sprite as a successfully loaded empty sprite.
@@ -206,7 +199,6 @@ impl SpriteLoader {
         Resource::sprite_json("", pixel_ratio).url != before
     }
 
-    /// `setObserver(SpriteLoaderObserver*)`.
     pub fn set_observer(&self, observer: Rc<dyn SpriteLoaderObserver>) {
         *self.inner.observer.borrow_mut() = observer;
     }

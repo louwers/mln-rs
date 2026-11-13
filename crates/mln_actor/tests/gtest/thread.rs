@@ -1,5 +1,3 @@
-// Ports test/util/thread.test.cpp.
-
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::ThreadId;

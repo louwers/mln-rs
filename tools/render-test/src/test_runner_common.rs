@@ -1,11 +1,10 @@
-// Ports expression-test/test_runner_common.cpp (`deepEqual`,
-// `stripPrecision`, `tokenize`), which the C++ render-test runner links for
-// the query tests. Same code as //tools/expression-test's port (that crate
-// depends on the style crates; this runner core must not).
+// Comparison helpers for the query tests: deep equality with stripped
+// precision, and tokenizing for diffs. The same code is in
+// tools/expression-test, which depends on the style crates; this runner core
+// must not.
 
 use feature::Value;
 
-/// `numericValue<double>`.
 fn numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Uint(t) => Some(*t as f64),
@@ -125,7 +124,6 @@ pub fn deep_equal(a: &Value, b: &Value) -> bool {
     false
 }
 
-/// `deepEqual(const std::optional<Value>&, const std::optional<Value>&)`.
 #[must_use]
 pub fn deep_equal_opt(a: &Option<Value>, b: &Option<Value>) -> bool {
     match (a, b) {

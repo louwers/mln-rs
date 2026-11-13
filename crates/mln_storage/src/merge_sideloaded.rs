@@ -1,6 +1,3 @@
-// Ports platform/default/include/mln/storage/merge_sideloaded.hpp (generated
-// from merge_sideloaded.sql; same string).
-
 pub const MERGE_SIDELOADED_DATABASE_SQL: &str = "INSERT INTO regions\n\
 \x20  SELECT DISTINCT NULL, sr.definition, sr.description\n\
 \x20   FROM side.regions sr \n\

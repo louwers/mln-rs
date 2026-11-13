@@ -1,5 +1,3 @@
-// Ports platform/default/src/mln/util/png_reader.cpp
-//
 // libpng is replaced by the `png` crate, configured to produce the same
 // pixels as the C++ transform chain:
 //
@@ -16,7 +14,6 @@ use mln_util::image::{PremultipliedImage, UnassociatedImage};
 use mln_util::premultiply::premultiply;
 use mln_util::size::Size;
 
-/// `mln::decodePNG(const uint8_t*, size_t)`.
 pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, Error> {
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
     if data.len() < 8 {

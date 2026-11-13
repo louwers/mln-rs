@@ -1,7 +1,3 @@
-// Ports platform/default/include/mln/storage/local_file_request.hpp,
-// platform/default/src/mln/storage/local_file_request.cpp and the
-// `util::readFile(filename, dataRange)` it uses (src/mln/util/io.cpp).
-
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,9 +7,9 @@ use mln_actor::ActorRef;
 use crate::file_source_request::FileSourceRequestState;
 use crate::response::{Reason, ResourceError, Response};
 
-/// `util::pathFromUTF8`: the path bytes as they are (POSIX paths are bytes;
-/// on other platforms invalid UTF-8 is an error, as `std::filesystem`'s UTF-8
-/// conversion throws there).
+/// The path bytes as they are (POSIX paths are bytes; on other platforms
+/// invalid UTF-8 is an error, as `std::filesystem`'s UTF-8 conversion throws
+/// there).
 pub fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
     #[cfg(unix)]
     {
@@ -26,9 +22,8 @@ pub fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
     }
 }
 
-/// `util::readFile(filename, dataRange)`: the whole file, or `dataRange`'s
-/// bytes (`second - first + 1` of them, zero-padded past the end as the C++
-/// `std::string data(size, '\0')` is), or `None` when the file can't be
+/// The whole file, or `data_range`'s bytes (`end - start + 1` of them,
+/// zero-padded past the end as in C++), or `None` when the file can't be
 /// opened. A range too large to allocate (e.g. from a corrupt PMTiles
 /// header) is `None` too; C++ throws `std::length_error` or `std::bad_alloc`,
 /// uncaught.
@@ -59,7 +54,6 @@ pub(crate) fn read_range(mut file: impl Read + Seek, data_range: Option<(u64, u6
     }
 }
 
-/// `requestLocalFile(path, req, dataRange)`.
 pub fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestState>, data_range: Option<(u64, u64)>) {
     let mut response = Response::new();
     let path_display = String::from_utf8_lossy(path).into_owned();

@@ -1,7 +1,3 @@
-// Ports `gfx::RenderingStatsView` (include/mln/gfx/rendering_stats.hpp,
-// src/mln/gfx/rendering_stats.cpp): the rendering stats as text in the map's
-// top right corner, drawn by a symbol layer that the view adds to the style.
-
 use std::fmt::Write;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -21,7 +17,6 @@ use mln_util::constants::EXTENT;
 use mln_util::range::Range;
 use mln_util::time::Instant;
 
-/// `RenderingStatsView::Options`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderingStatsViewOptions {
     /// The least time between two updates of the text.
@@ -43,7 +38,7 @@ impl Default for RenderingStatsViewOptions {
     }
 }
 
-/// `RenderingStatsView`: keeps a layer of the rendering stats in the style.
+/// Keeps a layer of the rendering stats in the style.
 pub struct RenderingStatsView {
     options: RenderingStatsViewOptions,
     last_update: Option<Instant>,
@@ -192,14 +187,14 @@ impl RenderingStatsView {
     }
 }
 
-/// `printNumber`: a line of a count.
+/// Appends a line with a count to `text` if `print` is set.
 fn number(text: &mut String, label: &str, value: f64, print: bool) {
     if print {
         let _ = writeln!(text, "{label}: {}", format_number(value));
     }
 }
 
-/// `printMemory`: a line of a byte count.
+/// Appends a line with a byte count to `text` if `print` is set.
 fn memory(text: &mut String, label: &str, value: u64, print: bool) {
     if print {
         let _ = writeln!(text, "{label}: {}", format_memory(value));

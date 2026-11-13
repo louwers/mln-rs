@@ -1,5 +1,3 @@
-// Ports include/mln/map/bound_options.hpp
-
 use mln_util::geo::LatLngBounds;
 
 /// Holds options to limit what parts of a map are visible. All fields are

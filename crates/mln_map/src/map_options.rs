@@ -1,5 +1,3 @@
-// Ports include/mln/map/map_options.hpp and src/mln/map/map_options.cpp.
-//
 // C++ hides the fields behind a pimpl; the port keeps them private with the
 // same builder (`with_*`, by value) and getter methods.
 
@@ -51,7 +49,7 @@ impl Default for MapOptions {
 }
 
 impl MapOptions {
-    /// `MapOptions()`: the defaults above.
+    /// The default options.
     #[must_use]
     pub fn new() -> Self {
         Self::default()

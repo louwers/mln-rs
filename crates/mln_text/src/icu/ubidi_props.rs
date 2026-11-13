@@ -1,10 +1,7 @@
-// Ports ICU 78.3 icu4c/source/common/ubidi_props.cpp and ubidi_props.h (the
-// property getters: `ubidi_getClass` = `u_charDirection`, `ubidi_getMirror`
-// = `u_charMirror`, `ubidi_getPairedBracketType`, `ubidi_getPairedBracket`
-// = `u_getBidiPairedBracket`), with the UTRIE2_GET16 lookup of utrie2.h.
-// The data is ICU's compiled-in `ubidi_props_singleton`
-// (ubidi_props_data.rs). The BiDi port uses the mirroring; the other
-// getters serve the difftest's comparison of classes with unicode-bidi.
+// ICU 78.3's BiDi property getters (ubidi_props.cpp), with the `UTRIE2_GET16`
+// lookup of utrie2.h. The data is ICU's compiled-in `ubidi_props_singleton`
+// (ubidi_props_data.rs). The BiDi code uses the mirroring; the other getters
+// serve the difftest's comparison of classes with unicode-bidi.
 
 use super::ubidi_props_data::{
     TRIE_DATA_LENGTH, TRIE_HIGH_START, TRIE_HIGH_VALUE_INDEX, TRIE_INDEX_LENGTH, UBIDI_PROPS_INDEXES,
@@ -29,7 +26,6 @@ const UTRIE2_UTF8_2B_INDEX_2_LENGTH: usize = 0x800 >> 6;
 const UTRIE2_INDEX_1_OFFSET: usize = UTRIE2_UTF8_2B_INDEX_2_OFFSET + UTRIE2_UTF8_2B_INDEX_2_LENGTH;
 const UTRIE2_BAD_UTF8_DATA_OFFSET: usize = 0x80;
 
-/// `_UTRIE2_INDEX_RAW(offset, trieIndex, c)`.
 #[inline]
 fn index_raw(index: &[u16], offset: usize, c: u32) -> usize {
     ((index[offset + (c >> UTRIE2_SHIFT_2) as usize] as usize) << UTRIE2_INDEX_SHIFT) + (c & UTRIE2_DATA_MASK) as usize
@@ -83,19 +79,17 @@ fn get_mirror_code_point(m: u32) -> i32 {
     (m & 0x001f_ffff) as i32
 }
 
-/// `UBiDiPairedBracketType`.
 pub const U_BPT_NONE: u32 = 0;
 pub const U_BPT_OPEN: u32 = 1;
 pub const U_BPT_CLOSE: u32 = 2;
 
-/// `ubidi_getClass(c)` = `u_charDirection(c)`: the `UCharDirection`.
+/// The BiDi class of `c`, a `UCharDirection` (ICU's `u_charDirection`).
 #[must_use]
 pub fn ubidi_get_class(c: i32) -> u8 {
     let props = trie_get16(c);
     (props & UBIDI_CLASS_MASK) as u8
 }
 
-/// `getMirror(c, props)`.
 fn get_mirror(c: i32, props: u16) -> i32 {
     let delta = get_mirror_delta(props);
     if delta == UBIDI_ESC_MIRROR_DELTA {
@@ -120,21 +114,21 @@ fn get_mirror(c: i32, props: u16) -> i32 {
     }
 }
 
-/// `ubidi_getMirror(c)` = `u_charMirror(c)`.
+/// The mirror image of `c`, or `c` itself (ICU's `u_charMirror`).
 #[must_use]
 pub fn ubidi_get_mirror(c: i32) -> i32 {
     let props = trie_get16(c);
     get_mirror(c, props)
 }
 
-/// `ubidi_getPairedBracketType(c)`.
 #[must_use]
 pub fn ubidi_get_paired_bracket_type(c: i32) -> u32 {
     let props = trie_get16(c);
     u32::from((props & UBIDI_BPT_MASK) >> UBIDI_BPT_SHIFT)
 }
 
-/// `ubidi_getPairedBracket(c)` = `u_getBidiPairedBracket(c)`.
+/// The bracket paired with `c`, or `c` itself (ICU's
+/// `u_getBidiPairedBracket`).
 #[must_use]
 pub fn ubidi_get_paired_bracket(c: i32) -> i32 {
     let props = trie_get16(c);

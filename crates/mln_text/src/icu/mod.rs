@@ -14,7 +14,7 @@ pub mod ubidi_props;
 mod ubidi_props_data;
 pub mod ushape;
 
-/// `UErrorCode` (the values these ports produce).
+/// ICU's `UErrorCode`, limited to the values this module produces.
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UErrorCode {
@@ -35,7 +35,6 @@ impl UErrorCode {
         !matches!(self, UErrorCode::U_STRING_NOT_TERMINATED_WARNING | UErrorCode::U_ZERO_ERROR)
     }
 
-    /// `u_errorName(code)`.
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {

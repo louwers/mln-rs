@@ -1,6 +1,3 @@
-// Ports include/mln/util/timer.hpp and platform/default/src/mln/util/timer.cpp
-// (the libuv `uv_timer_t`).
-//
 // A timer belongs to the RunLoop of the thread that created it and fires in
 // that loop's `run_once` (timers run first, as in `uv_run`). Like the C++
 // timer, the durations are truncated to milliseconds, and a timer does not
@@ -35,7 +32,7 @@ thread_local! {
     static NEXT_START_ID: Cell<u64> = const { Cell::new(0) };
 }
 
-/// `std::chrono::duration_cast<Milliseconds>(d).count()` cast to `uint64_t`.
+/// Truncates `d` to whole milliseconds.
 fn to_uv_millis(d: Duration) -> u64 {
     d.as_millis() as u64
 }
@@ -63,13 +60,12 @@ impl TimerHandle {
     }
 }
 
-/// `util::Timer`.
 pub struct Timer {
     handle: Rc<TimerHandle>,
 }
 
 impl Timer {
-    /// `Timer()`: a timer on the current thread's `RunLoop`.
+    /// Creates a timer on the current thread's `RunLoop`.
     #[must_use]
     pub fn new() -> Self {
         let handle = Rc::new(TimerHandle {
@@ -83,7 +79,6 @@ impl Timer {
         Timer { handle }
     }
 
-    /// `start(Duration timeout, Duration repeat, std::function<void()>&&)`.
     pub fn start(&self, timeout: Duration, repeat: Duration, cb: impl FnMut() + 'static) {
         let handle = &self.handle;
         *handle.cb.borrow_mut() = Some(Box::new(cb));
@@ -98,7 +93,6 @@ impl Timer {
         }));
     }
 
-    /// `stop()`.
     pub fn stop(&self) {
         let handle = &self.handle;
         *handle.cb.borrow_mut() = None;
@@ -139,7 +133,6 @@ mod tests {
 
     #[test]
     fn repeats_until_stopped() {
-        // Ports test/util/timer.test.cpp `Timer.Repeat`.
         let run_loop = RunLoop::new();
         let count = Rc::new(Cell::new(0));
         let timer = Rc::new(Timer::new());

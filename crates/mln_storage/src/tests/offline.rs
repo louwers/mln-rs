@@ -1,5 +1,3 @@
-// Ports test/storage/offline.test.cpp.
-
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::geometry::{Geometry, Point};
 

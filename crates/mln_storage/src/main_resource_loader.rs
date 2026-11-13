@@ -1,6 +1,3 @@
-// Ports src/mln/storage/main_resource_loader.hpp and
-// platform/default/src/mln/storage/main_resource_loader.cpp.
-//
 // The waterfall runs on the "ResourceLoaderThread" (`util::Thread`), as in
 // C++. `tasks` is keyed by a request id instead of the `AsyncRequest*` of
 // the caller's request. Callbacks of the chained requests reach the thread
@@ -37,7 +34,6 @@ struct ThreadInner {
     tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
 
-/// `MainResourceLoaderThread`.
 pub struct MainResourceLoaderThread {
     inner: Rc<ThreadInner>,
 }
@@ -106,7 +102,6 @@ impl MainResourceLoaderThread {
         }
     }
 
-    /// `request(AsyncRequest* req, const Resource&, const ActorRef<FileSourceRequest>&)`.
     pub fn request(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let inner = &self.inner;
         let callback = make_callback(r);
@@ -190,15 +185,14 @@ impl MainResourceLoaderThread {
         }
     }
 
-    /// `cancel(AsyncRequest* req)`.
     pub fn cancel(&self, req: u64) {
         let task = self.inner.tasks.borrow_mut().remove(&req);
         drop(task);
     }
 }
 
-/// `MainResourceLoader::Impl`. `thread` comes first: it is dropped (joined)
-/// before the file sources, as C++ destroys members in reverse order.
+/// `thread` comes first: it is dropped (joined) before the file sources, as
+/// C++ destroys members in reverse order.
 struct Impl {
     thread: Thread<MainResourceLoaderThread>,
     asset_file_source: FileSourcePtr,
@@ -291,7 +285,7 @@ impl Impl {
     }
 }
 
-/// `MainResourceLoader`: the `ResourceLoader` file source.
+/// The `ResourceLoader` file source.
 pub struct MainResourceLoader {
     impl_: Impl,
 }

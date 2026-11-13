@@ -1,6 +1,3 @@
-// Ports include/mln/map/map.hpp, src/mln/map/map.cpp and
-// src/mln/map/map_impl.cpp (the parts M1 runs).
-//
 // C++ `Map::Impl` observes the transform, the style and the renderer, and
 // reacts inside their callbacks. Here they push events into queues that the
 // map drains (`process_events`), so the map owns its style and transform and
@@ -738,9 +735,9 @@ impl Map {
         self.on_update();
     }
 
-    /// `cancelTransitions(uint64_t transitionId)`: cancels the commands whose
-    /// [`AnimationOptions::transition_id`] equals `transition_id`, and leaves
-    /// the others running. Requests an update only when a command ended.
+    /// Cancels the commands whose [`AnimationOptions::transition_id`] equals
+    /// `transition_id`, and leaves the others running. Requests an update only
+    /// when a command ended.
     pub fn cancel_transitions_with_id(&mut self, transition_id: u64) {
         self.process_events();
         let ended = self.transform.cancel_transitions_with_id(transition_id);
@@ -838,7 +835,7 @@ impl Map {
     }
 
     // query: the render-test runner's tile mode uses it.
-    /// `latLngBoundsForCamera(camera)`.
+    /// The bounds of the area the map shows from `camera`.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a camera whose
     /// corners have no `LatLng`.
     pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<mln_util::geo::LatLngBounds, Error> {
@@ -870,7 +867,8 @@ impl Map {
 
     // gtests-core: cameraForLatLngBounds, cameraForLatLngs,
     // latLngBoundsForCameraUnwrapped (test/map/map.test.cpp).
-    /// `cameraForLatLngBounds(bounds, padding, bearing, pitch)`. Fails with
+    /// The camera that fits `bounds` in the view, inset by `padding`, at
+    /// `bearing` and `pitch` (the current ones for `None`). Fails with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a center that has no
     /// `LatLng` (padding that pushes it to infinity).
     pub fn camera_for_lat_lng_bounds(
@@ -888,8 +886,10 @@ impl Map {
         )
     }
 
-    /// `cameraForLatLngs(latLngs, padding, bearing, pitch)`. Fails as
-    /// [`camera_for_lat_lng_bounds`](Self::camera_for_lat_lng_bounds) does.
+    /// The camera that fits every point of `lat_lngs` in the view, inset by
+    /// `padding`, at `bearing` and `pitch` (the current ones for `None`).
+    /// Fails as [`camera_for_lat_lng_bounds`](Self::camera_for_lat_lng_bounds)
+    /// does.
     pub fn camera_for_lat_lngs(
         &self,
         lat_lngs: &[LatLng],
@@ -910,12 +910,11 @@ impl Map {
             .with_pitch(Some(mln_math::rad2deg(transform.get_pitch()))))
     }
 
-    /// `cameraForGeometry(geometry, padding, bearing, pitch)`: the camera
-    /// that fits every point of `geometry` (x longitude, y latitude), as
-    /// [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits them. Fails as
-    /// that does, and with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// point with no `LatLng` (an infinite or NaN coordinate, or a latitude
-    /// beyond ±90°).
+    /// The camera that fits every point of `geometry` (x longitude, y
+    /// latitude), as [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits
+    /// them. Fails as that does, and with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point with no
+    /// `LatLng` (an infinite or NaN coordinate, or a latitude beyond ±90°).
     pub fn camera_for_geometry(
         &self,
         geometry: &Geometry<f64>,
@@ -929,8 +928,10 @@ impl Map {
         self.camera_for_lat_lngs(&lat_lngs, padding, bearing, pitch)
     }
 
-    /// `latLngBoundsForCameraUnwrapped(camera)`.
-    /// Fails as [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
+    /// The bounds of the area the map shows from `camera`, with the corners
+    /// unwrapped toward the center, so that the bounds can cross the
+    /// antimeridian. Fails as
+    /// [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
     pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
         let mut shallow = crate::transform::Transform::from_state(self.transform.get_state().clone());
         let size = shallow.get_state().get_size();
@@ -1256,13 +1257,12 @@ impl Map {
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
-    /// `pixelForLatLng(latLng)`.
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let transform = &self.transform;
         transform.lat_lng_to_screen_coordinate(&transform.get_state().lat_lng_near_center(lat_lng))
     }
 
-    /// `latLngForPixel(pixel, wrapMode)`. Fails with
+    /// The location under `pixel`. Fails with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         self.transform.screen_coordinate_to_lat_lng(pixel, wrap_mode)
@@ -1279,7 +1279,6 @@ impl Map {
         self.transform.get_state().is_globe_rendering()
     }
 
-    /// `latLngsForPixels(screenCoords, wrapMode)`.
     pub fn lat_lngs_for_pixels(
         &self,
         screen_coords: &[ScreenCoordinate],
@@ -1288,7 +1287,6 @@ impl Map {
         screen_coords.iter().map(|point| self.lat_lng_for_pixel(point, wrap_mode)).collect()
     }
 
-    /// `setPrefetchZoomDelta(delta)`.
     pub fn set_prefetch_zoom_delta(&mut self, delta: u8) {
         self.process_events();
         if self.prefetch_zoom_delta == delta {
@@ -1298,15 +1296,14 @@ impl Map {
         self.on_update();
     }
 
-    /// `getPrefetchZoomDelta()`.
     pub fn get_prefetch_zoom_delta(&self) -> u8 {
         self.prefetch_zoom_delta
     }
 
-    /// `setFreeCameraOptions(camera)`: places the camera by its position
-    /// and orientation, and cancels the running camera commands. A NaN
-    /// position, or a NaN or zero-length orientation, is ignored; the
-    /// position's height is clamped to the zoom range.
+    /// Places the camera by its position and orientation, and cancels the
+    /// running camera commands. A NaN position, or a NaN or zero-length
+    /// orientation, is ignored; the position's height is clamped to the zoom
+    /// range.
     pub fn set_free_camera_options(&mut self, camera: &mln_map_types::FreeCameraOptions) {
         self.process_events();
         self.transform.set_free_camera_options(camera);
@@ -1328,16 +1325,14 @@ impl Map {
         self.debug_options
     }
 
-    /// `isRenderingStatsViewEnabled()`.
     pub fn is_rendering_stats_view_enabled(&self) -> bool {
         self.rendering_stats_view.is_some()
     }
 
-    /// `enableRenderingStatsView(value)`: shows the rendering stats of the
-    /// last frames in the top right corner, with a symbol layer (and its
-    /// source) that the view adds to the style and keeps there, even when
-    /// the style is replaced. The text needs the style's glyphs. Disabling
-    /// the view removes them.
+    /// Shows the rendering stats of the last frames in the top right corner,
+    /// with a symbol layer (and its source) that the view adds to the style
+    /// and keeps there, even when the style is replaced. The text needs the
+    /// style's glyphs. Disabling the view removes them.
     pub fn enable_rendering_stats_view(&mut self, value: bool) {
         self.process_events();
         if value != self.is_rendering_stats_view_enabled() {
@@ -1419,7 +1414,7 @@ impl Map {
         self.style.impl_.is_loaded() && self.renderer_fully_loaded
     }
 
-    /// `dumpDebugLogs()`: logs the style's sources and their state.
+    /// Logs the style's sources and their state.
     pub fn dump_debug_logs(&self) {
         use mln_util::logging::{Event, Log};
         let rule = "-".repeat(80);

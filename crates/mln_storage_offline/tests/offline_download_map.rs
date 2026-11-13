@@ -1,9 +1,6 @@
-// Ports OfflineDownload.ResourceOfflineUsageUnset of
-// test/storage/offline_download.test.cpp, which renders a map after the
-// download (a separate target for the mln_map / mln_headless deps).
-// C++ opens the database through test::SQLite3TestFS without limiting it
-// (a pass-through); the port opens a file in the temporary directory
-// directly.
+// An offline download test that renders a map after the download, in a
+// separate target for the `mln_map` and `mln_headless` dependencies. The
+// database is a file in the temporary directory.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;

@@ -1,5 +1,3 @@
-// Ports test/math/clamp.test.cpp and test/math/wrap.test.cpp.
-
 use mln_math::{clamp_f64, wrap};
 
 /// gtest `ASSERT_DOUBLE_EQ`: equal within 4 ULPs.

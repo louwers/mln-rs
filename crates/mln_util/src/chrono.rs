@@ -1,7 +1,3 @@
-// Ports include/mln/util/chrono.hpp: `Clock` (= std::chrono::steady_clock),
-// `TimePoint`, `Duration`, `Seconds`, `Milliseconds`, and the wall-clock
-// `Timestamp` with its helpers (rfc1123, iso8601, parseTimestamp).
-//
 // `Duration` is `steady_clock::duration`, i.e. `std::chrono::nanoseconds`: a
 // *signed* 64-bit count of nanoseconds. `TimePoint` is a time since the clock's
 // epoch in the same unit. C++ signed overflow is undefined; the arithmetic here
@@ -13,7 +9,6 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
-/// `mln::Duration` (`std::chrono::nanoseconds`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Duration(i64);
 
@@ -56,22 +51,20 @@ impl Duration {
         self.0
     }
 
-    /// `std::chrono::duration_cast<std::chrono::milliseconds>(d).count()`
-    /// (truncates toward zero).
+    /// Whole milliseconds, truncated toward zero.
     #[must_use]
     pub const fn as_millis(self) -> i64 {
         self.0 / 1_000_000
     }
 
-    /// `std::chrono::duration<float>(d).count()`: libstdc++'s `duration_cast`
-    /// computes `float(count) / float(1e9)`.
+    /// Seconds as `f32`, computed as `float(count) / float(1e9)` as
+    /// libstdc++'s `duration_cast` does.
     #[must_use]
     pub fn as_secs_f32(self) -> f32 {
         self.0 as f32 / 1_000_000_000.0_f32
     }
 
-    /// `std::chrono::duration<float>(lhs) / rhs` where `rhs` is a `Duration`,
-    /// as `Transitioning::evaluate` (style/properties.hpp) computes its
+    /// `lhs / rhs` in float, as C++'s `Transitioning::evaluate` computes its
     /// progress: both operands go to the common type
     /// `duration<float, nano>`, so the float seconds are scaled back by 1e9
     /// before the float division.
@@ -116,25 +109,22 @@ impl SubAssign for Duration {
     }
 }
 
-/// `mln::Seconds(n)`.
 #[must_use]
 pub const fn seconds(n: i64) -> Duration {
     Duration::from_secs(n)
 }
 
-/// `mln::Milliseconds(n)`.
 #[must_use]
 pub const fn milliseconds(n: i64) -> Duration {
     Duration::from_millis(n)
 }
 
-/// `mln::TimePoint` (`steady_clock::time_point`). The default value is the
-/// clock's epoch, as for a default-constructed `time_point`.
+/// A reading of the monotonic clock. The default value is the clock's epoch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TimePoint(Duration);
 
 impl TimePoint {
-    /// `TimePoint(d)`: the epoch plus `d`.
+    /// The epoch plus `since_epoch`.
     #[must_use]
     pub const fn new(since_epoch: Duration) -> Self {
         TimePoint(since_epoch)
@@ -145,13 +135,11 @@ impl TimePoint {
         self.0
     }
 
-    /// `Clock::time_point::max()`.
     #[must_use]
     pub const fn max() -> Self {
         TimePoint(Duration::max())
     }
 
-    /// `Clock::time_point::min()`.
     #[must_use]
     pub const fn min() -> Self {
         TimePoint(Duration::min())
@@ -191,15 +179,15 @@ impl SubAssign<Duration> for TimePoint {
     }
 }
 
-/// `mln::Clock` (`std::chrono::steady_clock`).
 pub struct Clock;
 
 impl Clock {
-    /// `Clock::now()`. Monotonic. std exposes no raw `CLOCK_MONOTONIC` reading,
-    /// so the epoch is placed at the wall-clock time of the first call; like
-    /// the C++ steady clock, values are then far from the epoch (code that
-    /// compares against `TimePoint(Duration::zero())`, such as
-    /// `ZoomHistory`, sees a long-past time, as in C++).
+    /// Returns the current time. Monotonic. std exposes no raw
+    /// `CLOCK_MONOTONIC` reading, so the epoch is placed at the wall-clock
+    /// time of the first call; like the C++ steady clock, values are then far
+    /// from the epoch (code that compares against
+    /// `TimePoint::new(Duration::zero())`, such as `ZoomHistory`, sees a
+    /// long-past time, as in C++).
     pub fn now() -> TimePoint {
         static ANCHOR: OnceLock<(crate::time::Instant, i64)> = OnceLock::new();
         let (instant, base) = ANCHOR.get_or_init(|| {
@@ -243,8 +231,7 @@ mod tests {
 
 // Wall-clock timestamps (chrono.hpp, added by storage).
 
-/// `mln::Timestamp`: `std::chrono::time_point<std::chrono::system_clock,
-/// Seconds>`, a signed count of seconds since the Unix epoch.
+/// A wall-clock time: a signed count of seconds since the Unix epoch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(i64);
 
@@ -255,15 +242,14 @@ impl Timestamp {
         Timestamp(secs)
     }
 
-    /// `time_since_epoch().count()`.
     #[must_use]
     pub const fn secs_since_epoch(self) -> i64 {
         self.0
     }
 }
 
-/// `util::now()` (`platform::now()`: `time_point_cast<Seconds>(system_clock::now())`,
-/// which truncates toward zero).
+/// Returns the current wall-clock time, truncated toward zero to whole
+/// seconds.
 #[must_use]
 pub fn now() -> Timestamp {
     let secs = match crate::time::SystemTime::now().duration_since(crate::time::UNIX_EPOCH) {
@@ -296,7 +282,8 @@ fn gmtime(secs: i64) -> (usize, i64, usize, i64, i64, i64, i64) {
     (wday, mday, (month - 1) as usize, year, hour, min, sec)
 }
 
-/// `util::rfc1123(Timestamp)`: e.g. "Sun, 06 Nov 1994 08:49:37 GMT".
+/// Formats `timestamp` as an RFC 1123 date, e.g. "Sun, 06 Nov 1994 08:49:37
+/// GMT".
 #[must_use]
 pub fn rfc1123(timestamp: Timestamp) -> String {
     const WEEK: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -305,21 +292,21 @@ pub fn rfc1123(timestamp: Timestamp) -> String {
     format!("{}, {:02} {} {:4} {:02}:{:02}:{:02} GMT", WEEK[wday], mday, MONTHS[month], year, hour, min, sec)
 }
 
-/// `util::iso8601(Timestamp)`: e.g. "1994-11-06 08:49:37" (UTC).
+/// Formats `timestamp` as an ISO 8601 date in UTC, e.g. "1994-11-06
+/// 08:49:37".
 #[must_use]
 pub fn iso8601(timestamp: Timestamp) -> String {
     let (_, mday, month, year, hour, min, sec) = gmtime(timestamp.secs_since_epoch());
     format!("{year:04}-{:02}-{mday:02} {hour:02}:{min:02}:{sec:02}", month + 1)
 }
 
-/// `util::parseTimestamp(const char*)`: vendor/parsedate's `parse_date`
-/// (-1 when the date does not parse).
+/// Parses a date with vendor/parsedate's `parse_date`; -1 when the date does
+/// not parse.
 #[must_use]
 pub fn parse_timestamp_str(timestamp: &str) -> Timestamp {
     Timestamp::from_secs(crate::parsedate::parse_date(timestamp))
 }
 
-/// `util::parseTimestamp(int32_t)`.
 #[must_use]
 pub fn parse_timestamp_i32(timestamp: i32) -> Timestamp {
     Timestamp::from_secs(i64::from(timestamp))

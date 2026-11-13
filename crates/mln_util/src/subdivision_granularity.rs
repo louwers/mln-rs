@@ -1,5 +1,3 @@
-// Ports include/mln/util/subdivision_granularity.hpp.
-
 use serde::{Deserialize, Serialize};
 
 /// How finely tile geometry is split so the vertex shader can bend it onto

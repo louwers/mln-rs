@@ -1,10 +1,10 @@
-//! Ports `src/mln/text` (text shaping and glyphs) of the C++ core, with
-//! the ICU parts its platform/default BiDi uses (`icu`).
+//! Text shaping and glyphs, with the parts of ICU that the BiDi code uses
+//! (`icu`).
 //!
-//! Shaping uses HarfRust instead of HarfBuzz, and the ported FreeType subset
-//! in `ft` (charmaps, sizing, advances) instead of FreeType; outlines come
-//! from skrifa. HarfRust shaped 94.2% of 59,015 cases over 149
-//! fonts bit-identically to HarfBuzz; `harfbuzz_impl.rs` says where it differs.
+//! Shaping uses HarfRust instead of HarfBuzz, and the FreeType subset in
+//! `ft` (charmaps, sizing, advances) instead of FreeType; outlines come from
+//! skrifa. `harfbuzz_impl.rs` says where HarfRust's shaping differs from
+//! HarfBuzz's.
 
 pub mod bidi;
 #[cfg(target_family = "wasm")]

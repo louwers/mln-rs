@@ -1,5 +1,3 @@
-// Ports include/mln/util/image.hpp
-//
 // `decodeImage` and `encodePNG`, declared in image.hpp, are implemented by the
 // platform (platform/default/src/mln/util/{image,png_reader,png_writer}.cpp);
 // their port lives in //crates/mln_image so that this file
@@ -13,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::size::Size;
 
-/// `mln::ImageAlphaMode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ImageAlphaMode {
     Unassociated,
@@ -25,7 +22,7 @@ pub enum ImageAlphaMode {
 /// The `ImageAlphaMode Mode` template parameter of `mln::Image<Mode>`.
 pub trait AlphaMode {
     const MODE: ImageAlphaMode;
-    /// `Image::channels`: 1 for `Exclusive`, 4 otherwise.
+    /// The bytes per pixel: 1 for `Exclusive`, 4 otherwise.
     const CHANNELS: usize;
 }
 
@@ -58,14 +55,14 @@ pub enum ImageError {
     OutOfRange(&'static str),
 }
 
-/// `mln::Image<Mode>`: `size` plus `channels * width * height` bytes.
+/// An image: `size` plus `channels * width * height` bytes.
 ///
 /// C++ holds the pixels in a nullable `std::unique_ptr<uint8_t[]>`; here an
 /// empty `data` plays the role of `nullptr` (a default-constructed or
 /// moved-from image). C++ images are move-only with an explicit `clone()`;
 /// here `Clone` is that `clone()`.
 ///
-/// Port-only: serde writes the pixels as a payload (serialization/payload.rs)
+/// Serde writes the pixels as a payload (serialization/payload.rs)
 /// and reads back only images whose pixels fill their size.
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "", try_from = "ImageParts")]
@@ -114,7 +111,6 @@ impl<M: AlphaMode> Image<M> {
         Image { size, data: vec![0; bytes], _mode: PhantomData }
     }
 
-    /// `Image(Size, const uint8_t* srcData, std::size_t srcLength)`.
     pub fn from_slice(size: Size, src: &[u8]) -> Result<Self, ImageError> {
         let mut image = Image { size, data: Vec::new(), _mode: PhantomData };
         if src.len() != image.bytes() {
@@ -126,8 +122,7 @@ impl<M: AlphaMode> Image<M> {
         Ok(image)
     }
 
-    /// `Image(Size, std::unique_ptr<uint8_t[]>)`: takes the buffer as is (no
-    /// size check, as in C++).
+    /// Takes the buffer as is, without checking its length against `size`.
     #[must_use]
     pub fn from_vec(size: Size, data: Vec<u8>) -> Self {
         Image { size, data, _mode: PhantomData }

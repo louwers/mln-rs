@@ -1,7 +1,3 @@
-// Ports the `mln::Log` calls the runner makes (src/mln/util/logging.cpp with
-// the platform/default/src/mln/util/logging_stderr.cpp backend):
-// `[SEVERITY] {thread}[Event]: message` on stderr.
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
     General,

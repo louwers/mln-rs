@@ -1,5 +1,3 @@
-// Ports src/mln/util/mat3.hpp and src/mln/util/mat3.cpp
-//
 // This is an incomplete port of http://glmatrix.net/
 //
 // Copyright (c) 2013 Brandon Jones, Colin MacKenzie IV
@@ -38,7 +36,6 @@ pub const fn vec3_dot(a: &Vec3, b: &Vec3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// `vec3LengthSq`.
 #[must_use]
 pub const fn vec3_length_sq(a: &Vec3) -> f64 {
     vec3_dot(a, a)
@@ -76,9 +73,10 @@ pub const fn vec3_add(a: &Vec3, b: &Vec3) -> Vec3 {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
-/// `mln::matrix` (mat3 overloads). C++ lets `out` alias `a`; in Rust the
-/// caller passes a copy (`let a = m; matrix::rotate(&mut m, &a, rad)`). Every
-/// function reads all of `a` before writing `out`, so the result is the same.
+/// Matrix operations on `Mat3`. To update a matrix in place, the caller
+/// passes a copy (`let a = m; matrix::rotate(&mut m, &a, rad)`), where C++
+/// lets `out` alias `a`. Every function reads all of `a` before writing
+/// `out`, so the result is the same.
 pub mod matrix {
     use super::Mat3;
     use crate::vectors::Vec3f;
@@ -157,7 +155,8 @@ pub mod matrix {
         out[8] = a[8];
     }
 
-    /// `transformMat3f`: float arithmetic on the matrix entries cast to float.
+    /// Transforms `a` by `m` in float arithmetic, on the matrix entries cast
+    /// to float.
     pub fn transform_mat3f(out: &mut Vec3f, a: &Vec3f, m: &Mat3) {
         // Read the input before writing the output (C++ callers pass the
         // same vector as both).

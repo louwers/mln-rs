@@ -43,8 +43,8 @@ impl Document {
     }
 }
 
-/// `std::stoi(s)` / `std::strtol(s, nullptr, 10)`: the leading integer;
-/// 0 when there is none (C++ `stoi` throws then).
+/// The leading decimal integer of `s`, after whitespace; 0 when there is
+/// none (where C++ `stoi` throws).
 pub(crate) fn strtol(s: &str) -> i64 {
     let s = s.trim_start();
     let bytes = s.as_bytes();

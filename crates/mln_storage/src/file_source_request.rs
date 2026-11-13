@@ -1,6 +1,3 @@
-// Ports platform/default/include/mln/storage/file_source_request.hpp and
-// platform/default/src/mln/storage/file_source_request.cpp.
-//
 // The request's state lives on the requesting thread (it holds the
 // callback); file source threads reach it through `actor()`, an
 // `ActorRef<FileSourceRequestState>` whose messages run in the requesting
@@ -23,7 +20,6 @@ pub struct FileSourceRequestState {
 }
 
 impl FileSourceRequestState {
-    /// `setResponse(const Response&)`.
     pub fn set_response(&self, response: Response) {
         // Copy, because calling the callback will sometimes self destroy
         // this object. We cannot move because this method can be called
@@ -33,15 +29,14 @@ impl FileSourceRequestState {
     }
 }
 
-/// `FileSourceRequest`.
 pub struct FileSourceRequest {
     cancel_callback: Option<Box<dyn FnOnce()>>,
     mailbox: Arc<Mailbox>,
 }
 
 impl FileSourceRequest {
-    /// `FileSourceRequest(FileSource::Callback&&)`: the mailbox is on the
-    /// current thread's scheduler.
+    /// Creates a request that delivers responses to `callback` on the current
+    /// thread's scheduler.
     #[must_use]
     pub fn new(callback: Callback) -> Self {
         let state = Rc::new(FileSourceRequestState { response_callback: Rc::new(RefCell::new(callback)) });
@@ -49,12 +44,10 @@ impl FileSourceRequest {
         FileSourceRequest { cancel_callback: None, mailbox }
     }
 
-    /// `onCancel(std::function<void()>&&)`.
     pub fn on_cancel(&mut self, callback: Box<dyn FnOnce()>) {
         self.cancel_callback = Some(callback);
     }
 
-    /// `actor()`.
     #[must_use]
     pub fn actor(&self) -> ActorRef<FileSourceRequestState> {
         ActorRef::new(&self.mailbox)

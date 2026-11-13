@@ -1,9 +1,5 @@
-// Ports the interfaces of src/mln/tile/geometry_tile_data.hpp
-// (GeometryCoordinate(s), GeometryCollection, GeometryTileFeature,
-// GeometryTileLayer, GeometryTileData) and their default methods from
-// src/mln/tile/geometry_tile_data.cpp. The geometry algorithms
-// (classifyRings, limitHoles, convertGeometry, fixupPolygons, ...) arrive
-// with mln_tile.
+// The geometry algorithms on these types (ring classification, coordinate
+// conversion, polygon fixup, ...) are in `mln_tile`.
 
 use std::ops::{Deref, DerefMut, Range};
 use std::sync::Arc;
@@ -20,14 +16,14 @@ use serde::{Deserialize, Serialize};
 /// maximum extent applicable.
 pub type GeometryCoordinate = Point<i16>;
 
-/// `class GeometryCoordinates : public std::vector<GeometryCoordinate>`.
 pub type GeometryCoordinates = Vec<GeometryCoordinate>;
 
-/// `class GeometryCollection : public std::vector<GeometryCoordinates>`.
+/// The rings or lines of a feature's geometry, with the triangles of a
+/// pre-tessellated polygon.
 ///
-/// C++ makes the copy constructor private and offers `clone()`; here
-/// `Clone` is that `clone()` (it keeps the triangles, as the C++ copy
-/// does). `==` is the `std::vector` base's: the triangles are not compared.
+/// `Clone` keeps the triangles, as the C++ `clone()` does (C++ makes the
+/// copy constructor private). `==` compares only the rings, as the
+/// `std::vector` base does in C++.
 #[derive(Clone, Debug, Default)]
 pub struct GeometryCollection {
     rings: Vec<GeometryCoordinates>,
@@ -44,8 +40,8 @@ impl GeometryCollection {
         GeometryCollection { rings: Vec::new(), triangles: None }
     }
 
-    /// `getTriangles()`: three indices per triangle, counted from the
-    /// feature's first vertex; empty unless the tile carried triangles.
+    /// Three indices per triangle, counted from the feature's first vertex;
+    /// empty unless the tile carried triangles.
     #[must_use]
     pub fn get_triangles(&self) -> &[u32] {
         match &self.triangles {
@@ -54,8 +50,8 @@ impl GeometryCollection {
         }
     }
 
-    /// `setTriangles(owner, triangles)`, with the span given as
-    /// `owner[range]`.
+    /// Sets the triangles to `owner[range]`. Panics if `range` is out of
+    /// bounds.
     pub fn set_triangles(&mut self, owner: Arc<[u32]>, range: Range<usize>) {
         assert!(range.start <= range.end && range.end <= owner.len());
         self.triangles = Some((owner, range));
@@ -90,7 +86,7 @@ impl DerefMut for GeometryCollection {
 static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
 static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
-/// `GeometryTileFeature`.
+/// A feature of a tile layer.
 ///
 /// C++ `getValue`, `getProperties` and `getGeometries` throw on malformed
 /// tiles, from inside expression evaluation as well. Here they return null
@@ -106,17 +102,17 @@ pub trait GeometryTileFeature {
 
     fn get_value(&self, key: &str) -> Option<Value>;
 
-    /// C++ default: a static empty map.
+    /// The feature's properties; empty by default.
     fn get_properties(&self) -> &PropertyMap {
         &EMPTY_PROPERTIES
     }
 
-    /// `FeatureIdentifier getID()`; the default is `NullValue`.
+    /// The feature's id; [`Identifier::Null`] by default.
     fn get_id(&self) -> Identifier {
         Identifier::Null
     }
 
-    /// C++ default: a static empty collection.
+    /// The feature's geometries; empty by default.
     fn get_geometries(&self) -> &GeometryCollection {
         &EMPTY_GEOMETRIES
     }
@@ -133,7 +129,6 @@ pub trait GeometryTileFeature {
     }
 }
 
-/// `GeometryTileLayer`.
 pub trait GeometryTileLayer {
     fn feature_count(&self) -> usize;
 
@@ -163,7 +158,6 @@ pub struct FeatureGroups {
     pub first: Vec<usize>,
 }
 
-/// `GeometryTileData`.
 pub trait GeometryTileData {
     fn clone_data(&self) -> Box<dyn GeometryTileData>;
 

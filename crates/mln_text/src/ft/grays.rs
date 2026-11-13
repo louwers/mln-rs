@@ -1,10 +1,3 @@
-// Ports the FT_INT64 code paths of
-// ../maplibre-native/vendor/freetype/src/smooth/ftgrays.c (the "smooth"
-// anti-aliasing rasterizer of FreeType 2.13) and the overlap rendering of
-// src/smooth/ftsmooth.c (`ft_smooth_raster_overlap`,
-// `ft_smooth_overlap_spans`): same cells, same fixed-point line walk, same
-// conic DDA and cubic bisection, same fill rule.
-//
 // FreeType renders in bands and bisects a band when its cell pool (16 KiB)
 // overflows; the band layout does not change the result, so this port
 // renders the whole clip box as one band with an unbounded cell list.

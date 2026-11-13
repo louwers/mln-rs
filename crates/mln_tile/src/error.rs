@@ -11,8 +11,8 @@ pub enum Error {
 }
 
 impl Error {
-    /// `std::vector::at(n)` on a vector of `size` elements: libstdc++'s
-    /// `_M_range_check` message.
+    /// The error for index `n` of a vector of `size` elements, with the
+    /// message libstdc++'s `std::vector::at` throws.
     #[must_use]
     pub fn vector_range_check(n: usize, size: usize) -> Error {
         Error::OutOfRange(format!("vector::_M_range_check: __n (which is {n}) >= this->size() (which is {size})"))

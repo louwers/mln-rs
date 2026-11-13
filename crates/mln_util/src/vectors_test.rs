@@ -1,5 +1,3 @@
-// Ports test/util/vectors.test.cpp
-
 use super::*;
 
 // gtest: Vectors.ConcatenateArrayAndScalars

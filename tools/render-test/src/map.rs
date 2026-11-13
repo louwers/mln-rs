@@ -1,8 +1,3 @@
-// Ports the map side of render-test/runner.{hpp,cpp}: `TestRunner::Impl`
-// (HeadlessFrontend, Map),
-// `resetContext` and the map/style calls of the operations, over mln_map and
-// mln_headless.
-
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -29,18 +24,17 @@ fn map_mode(mode: MapMode) -> mln_map::MapMode {
     }
 }
 
-/// `TestRunner::Impl`.
 pub struct Impl {
     pub frontend: HeadlessFrontend,
-    /// `std::shared_ptr<FileSource> fileSource`: the `ProxyFileSource` over
-    /// the cache database of `ResourceOptions::cachePath`.
+    /// The `ProxyFileSource` over the cache database at the resource
+    /// options' cache path.
     pub file_source: Option<Arc<dyn FileSource>>,
     pub map: Map,
 }
 
 impl Impl {
-    /// `TestRunner::Impl::Impl(metadata, resourceOptions)` over
-    /// `file_sources`, plus the port's options (`ImplOptions`).
+    /// A frontend, file source and map for a test with `metadata`, loading
+    /// through `file_sources`.
     pub fn new(
         metadata: &TestMetadata,
         file_sources: &FileSourceManager,

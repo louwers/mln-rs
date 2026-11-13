@@ -1,9 +1,7 @@
-// Ports src/mln/util/token.hpp.
-
 const TOKEN_RESERVED_CHARS: &[u8] = b"{}";
 
-/// `util::replaceTokens(source, lookup)`: replaces `{tokens}` in a string by
-/// calling the lookup function; unknown tokens stay as they are.
+/// Replaces `{tokens}` in `source` by calling `lookup`; unknown tokens stay
+/// as they are.
 pub fn replace_tokens(source: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
     let bytes = source.as_bytes();
     let end = bytes.len();

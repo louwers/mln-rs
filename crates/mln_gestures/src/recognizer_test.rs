@@ -1,5 +1,3 @@
-// Ports Orbis's orb-camera `input/tests.rs` onto a bare Transform.
-//
 // The rig runs the transform on its own frame clock, as a host does with
 // `set_frame_time`: each frame samples the animations 16 ms after the one
 // before, and commands start at the latest frame's time. The clock runs an

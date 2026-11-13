@@ -1,5 +1,3 @@
-// Ports platform/default/src/mln/util/image.cpp
-
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 
@@ -51,8 +49,8 @@ pub fn image_type(data: &[u8]) -> Option<ImageType> {
 /// The message of the error for data of no type `decode_image` recognizes.
 pub const UNSUPPORTED: &str = "unsupported image type";
 
-/// `mln::decodeImage(const std::string&)`: dispatches on the magic bytes.
-/// Data of no type it recognizes fails with
+/// Decodes `data`, choosing the format by its magic bytes. Data of no type
+/// it recognizes fails with
 /// [`ErrorKind::Unsupported`](mln_util::ErrorKind), and an image that
 /// doesn't decode with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
 pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, Error> {

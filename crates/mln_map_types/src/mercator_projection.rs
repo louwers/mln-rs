@@ -1,6 +1,3 @@
-// Ports src/mln/map/mercator_projection.hpp and
-// src/mln/map/mercator_projection.cpp.
-
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::error::Error;

@@ -1,6 +1,3 @@
-// Ports test/storage/mbtiles_file_source.test.cpp. The fixture is read in
-// place (C++: relative to the working directory).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 

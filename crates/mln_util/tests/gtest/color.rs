@@ -1,5 +1,3 @@
-// Ports test/util/color.test.cpp.
-
 use mln_util::color::{Color, ColorSpace};
 
 use crate::{assert_double_eq, assert_float_eq, assert_near};

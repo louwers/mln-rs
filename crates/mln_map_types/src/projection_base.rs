@@ -1,5 +1,3 @@
-// Ports src/mln/map/projection_base.hpp.
-//
 // C++ `TransformState` holds its projection as a
 // `std::shared_ptr<const ProjectionBase>`; here it is an
 // `Arc<dyn ProjectionBase>`, so a `TransformState` stays cheap to clone and

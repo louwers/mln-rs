@@ -1,5 +1,3 @@
-// Ports src/mln/text/freetype.hpp and src/mln/text/freetype.cpp.
-//
 // `FreeTypeFace` keeps FreeType's semantics (face loading, charmap
 // selection, sizing, advances) through the ported subset of FreeType in
 // `crate::ft`; outlines come from skrifa (see `rasterize_glyph`).
@@ -12,8 +10,8 @@ use crate::glyph::{FontData, Glyph, GlyphID};
 /// `SDF_FONT_SIZE`: glyphs are loaded at 24 px (`FT_Set_Char_Size` at 72 dpi).
 pub const SDF_FONT_SIZE: i64 = 24;
 
-/// `FreeTypeLibrary` (`FT_Init_FreeType` / `FT_Done_FreeType`). The port has no
-/// library state; the type is kept because the C++ API passes it around.
+/// A FreeType library handle. It holds no state; the type exists because the
+/// C++ API passes it around.
 #[derive(Debug, Default)]
 pub struct FreeTypeLibrary;
 
@@ -24,11 +22,10 @@ impl FreeTypeLibrary {
     }
 }
 
-/// `FreeTypeFace`.
 #[derive(Clone)]
 pub struct FreeTypeFace {
-    /// `memoryFile`: the font data the face reads from, shared with whoever
-    /// handed it over (such as the response it arrived in).
+    /// The font data the face reads from, shared with whoever handed it over
+    /// (such as the response it arrived in).
     memory_file: FontData,
     face: Option<ft::face::Face>,
     /// The hinted glyph loader (`FT_Load_Glyph` at 24 px), made on first use.
@@ -36,7 +33,8 @@ pub struct FreeTypeFace {
 }
 
 impl FreeTypeFace {
-    /// `FreeTypeFace(const char* fontData, size_t fontDataSize, const FreeTypeLibrary&)`.
+    /// Opens a face on `font_data`.
+    ///
     /// The face keeps `font_data` instead of copying it, unless it is a WOFF
     /// or WOFF2 file: then it keeps the font decoded from it, and isn't valid
     /// when that fails.
@@ -70,13 +68,12 @@ impl FreeTypeFace {
         -1
     }
 
-    /// `isValid()`.
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.face.is_some()
     }
 
-    /// `getFace()`: the FreeType face state (None when not valid).
+    /// The FreeType face state (`None` when not valid).
     #[must_use]
     pub fn get_face(&self) -> Option<&ft::face::Face> {
         self.face.as_ref()
@@ -96,7 +93,6 @@ impl FreeTypeFace {
         ft::cmap::get_char_index(face.lookup_context(self.memory_file.as_bytes()), cm, charcode)
     }
 
-    /// `FT_Face_GetCharVariantIndex`.
     #[must_use]
     pub fn get_char_variant_index(&self, charcode: u32, variant_selector: u32) -> u32 {
         let Some(face) = &self.face else { return 0 };
@@ -122,7 +118,6 @@ impl FreeTypeFace {
         self.scaler.get_or_init(|| crate::rasterize::new_scaler(&self.memory_file)).as_ref()
     }
 
-    /// `rasterizeGlyph`.
     #[must_use]
     pub fn rasterize_glyph(&self, glyph: &GlyphID) -> Glyph {
         crate::rasterize::rasterize_glyph(self, *glyph)

@@ -1,7 +1,3 @@
-// Ports test/api/{custom_geometry_source.test.cpp, recycle_map.cpp}.
-// test/api/query.test.cpp is the module below; the fixture is in
-// support/mod.rs.
-
 mod gtest_query;
 mod support;
 
@@ -24,7 +20,6 @@ use mln_util::Color;
 use mln_util::geo::{LatLng, LatLngBounds};
 use support::*;
 
-/// `std::make_unique<style::Image>(id, image, pixelRatio)`.
 #[must_use]
 pub fn style_image(
     id: &str,

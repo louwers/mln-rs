@@ -1,6 +1,3 @@
-// Ports include/mln/storage/mbtiles_file_source.hpp and
-// platform/default/src/mln/storage/mbtiles_file_source.cpp.
-//
 // The database work runs on the "MBTilesFileSource" thread (`util::Thread`)
 // as in C++. The TileJSON is built as a rapidjson document would be (members
 // in insertion order, duplicates kept; json_document.rs). Needs the `sqlite`
@@ -70,8 +67,8 @@ fn stod(s: &str) -> Result<f64, String> {
     Ok(v)
 }
 
-/// `std::stoi(s)`: the leading decimal integer, after whitespace; an error
-/// when there is none or it doesn't fit an `int`.
+/// The leading decimal integer of `s`, after whitespace, as `std::stoi`
+/// parses it; an error when there is none or it doesn't fit an `i32`.
 fn stoi(s: &str) -> Result<i32, String> {
     let t = s.trim_start();
     let sign = usize::from(matches!(t.as_bytes().first(), Some(b'-' | b'+')));
@@ -111,7 +108,6 @@ fn error_response(reason: Reason, message: impl Into<String>) -> Response {
     response
 }
 
-/// `MBTilesFileSource::Impl`.
 pub struct MBTilesFileSourceThread {
     // Multiple databases open simultaneously, to effectively support
     // multiple .mbtiles maps
@@ -291,8 +287,7 @@ impl MBTilesFileSourceThread {
     }
 }
 
-/// `MBTilesFileSource`: the `Mbtiles` file source (`mbtiles://` URLs with
-/// absolute paths).
+/// The `Mbtiles` file source: `mbtiles://` URLs with absolute paths.
 pub struct MBTilesFileSource {
     thread: Thread<MBTilesFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,

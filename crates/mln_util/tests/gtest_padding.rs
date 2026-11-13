@@ -1,6 +1,6 @@
-// Ports test/util/padding.test.cpp. A separate target from mln_util_gtest:
-// the expression and function cases need mln_style (PropertyExpression and
-// the style conversions), which sits far above mln_util.
+// A separate target from `mln_util_gtest`: the expression and function
+// cases need `mln_style` (`PropertyExpression` and the style conversions),
+// which sits far above `mln_util`.
 
 use std::sync::Arc;
 
@@ -15,8 +15,6 @@ use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Padding;
 use mln_util::geometry::FeatureType;
 
-/// `StubGeometryTileFeature{{}, FeatureType::Unknown, {}, properties}`
-/// (`test/src/mln/test/stub_geometry_tile_feature.hpp`).
 struct StubGeometryTileFeature {
     properties: PropertyMap,
 }

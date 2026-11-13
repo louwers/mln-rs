@@ -1,5 +1,3 @@
-// Ports src/mln/util/longest_common_subsequence.hpp.
-
 /// Computes the longest common subsequence (LCS) of sequences A and B.
 /// Equality of elements is determined by the provided comparator.
 ///

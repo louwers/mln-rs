@@ -1,11 +1,8 @@
-// Ports src/mln/util/quaternion.hpp and src/mln/util/quaternion.cpp
-
 use crate::mat4::Mat4;
 use crate::vectors::{Vec3, Vec4};
 
-/// `mln::Quaternion`. C++ stores it as a union of `vec4 m` and
-/// `struct { double x, y, z, w; }`; the port keeps the named fields and
-/// offers `m()` / `from_vec4` for the array view.
+/// A quaternion with named fields; `m()` and `from_vec4` convert to and from
+/// the `vec4` view.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Quaternion {
     pub x: f64,
@@ -19,7 +16,7 @@ pub struct Quaternion {
 // (and operator!= is its negation).
 
 impl Quaternion {
-    /// `Quaternion::identity` (a mutable static in C++, never written).
+    /// The identity rotation.
     pub const IDENTITY: Quaternion = Quaternion::new(0.0, 0.0, 0.0, 1.0);
 
     #[must_use]
@@ -27,7 +24,6 @@ impl Quaternion {
         Quaternion { x, y, z, w }
     }
 
-    /// `Quaternion(const vec4&)`.
     #[must_use]
     pub const fn from_vec4(vec: &Vec4) -> Self {
         Quaternion { x: vec[0], y: vec[1], z: vec[2], w: vec[3] }

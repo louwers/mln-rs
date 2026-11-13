@@ -1,5 +1,3 @@
-// Ports test/sprite/sprite_loader.test.cpp.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;

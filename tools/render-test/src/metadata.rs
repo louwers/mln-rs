@@ -1,13 +1,11 @@
-// Ports render-test/metadata.hpp
-
 use std::collections::BTreeMap;
 
 use geometry::Point;
 use mln_util::size::Size;
 
-/// `mln::MapMode` (include/mln/map/mode.hpp). The runner keeps its own copy
-/// so that it does not depend on the map crate; `TestRunnerImpl`
-/// implementations convert.
+/// The map's mode. The runner keeps its own copy of the map's enum so that
+/// it does not depend on the map crate; `TestRunnerImpl` implementations
+/// convert.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum MapMode {
@@ -20,7 +18,7 @@ pub enum MapMode {
     Tile = 2,
 }
 
-/// `mln::MapDebugOptions` (include/mln/map/mode.hpp), a bit set.
+/// The map's debug overlays, a bit set.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct MapDebugOptions(pub u32);
 
@@ -41,14 +39,12 @@ impl std::ops::BitOrAssign for MapDebugOptions {
     }
 }
 
-/// `mln::ScreenBox` (`mapbox::geometry::box<double>`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScreenBox {
     pub min: Point<f64>,
     pub max: Point<f64>,
 }
 
-/// `mln::RenderedQueryOptions` (include/mln/renderer/query.hpp).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenderedQueryOptions {
     pub layer_ids: Option<Vec<String>>,
@@ -88,7 +84,6 @@ impl TestPaths {
     }
 }
 
-/// `checkValue(float expected, float actual, float tolerance)`.
 #[must_use]
 pub fn check_value(expected: f32, actual: f32, tolerance: f32) -> (bool, f32) {
     let delta = expected * tolerance;
@@ -160,7 +155,7 @@ pub struct GfxProbeMemory {
     pub peak: i32,
 }
 
-/// `GfxProbe`. TODO(port): `GfxProbe(const gfx::RenderingStats&, const GfxProbe&)`
+/// Graphics resource counts. TODO(port): `GfxProbe(const gfx::RenderingStats&, const GfxProbe&)`
 /// needs `RenderResult::stats` from the headless frontend.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GfxProbe {
@@ -173,7 +168,8 @@ pub struct GfxProbe {
     pub mem_textures: GfxProbeMemory,
 }
 
-/// `TestMetrics`; `std::map` → `BTreeMap` (same key order).
+/// A test's metrics, by probe kind and name. The maps are `BTreeMap`s to
+/// keep the key order of C++'s `std::map`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TestMetrics {
     pub file_size: BTreeMap<String, FileSizeProbe>,
@@ -194,7 +190,6 @@ impl TestMetrics {
     }
 }
 
-/// `TestMetadata`.
 #[derive(Clone, Debug)]
 pub struct TestMetadata {
     pub paths: TestPaths,
@@ -311,8 +306,8 @@ impl Default for TestMetadata {
 }
 
 impl TestMetadata {
-    /// `metadata.document.ObjectEmpty()`; a document that did not parse is
-    /// `Null` in the port (a zero-member value in rapidjson).
+    /// Whether the document has no members. A document that did not parse is
+    /// `Null` here (a zero-member value in rapidjson), and counts as empty.
     #[must_use]
     pub fn document_object_empty(&self) -> bool {
         match &self.document {

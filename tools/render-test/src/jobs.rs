@@ -213,9 +213,9 @@ fn unfinished_claims(dir: &Path, pid: u32) -> Vec<usize> {
         .collect()
 }
 
-/// `render-test --render-test-worker <dir>`: runs the tests of the run in
-/// `dir` that no other worker has taken, until every test is taken. 0 when
-/// no test is left.
+/// The worker of `render-test --render-test-worker <dir>`: runs the tests of
+/// the run in `dir` that no other worker has taken, until every test is
+/// taken. Returns 0 when no test is left.
 pub fn run_worker(dir: &Path, factory: Option<ImplFactory>) -> i32 {
     let run: Run = match fs::read(dir.join(RUN_FILE)).and_then(|bytes| Ok(serde_json::from_slice(&bytes)?)) {
         Ok(run) => run,
@@ -289,7 +289,7 @@ struct ResultHeader {
     render_failed: u32,
     label_cut_off_found: u32,
     error_message: String,
-    /// `difference.to_bits()`: exact, and JSON has no NaN.
+    /// The image difference as its `f64` bits: exact, and JSON has no NaN.
     difference: u64,
     actual_len: usize,
     expected_len: usize,

@@ -1,5 +1,3 @@
-// Ports platform/default/src/mln/util/webp_reader.cpp
-//
 // libwebp (`WebPGetInfo` + `WebPDecodeRGBAInto`) is replaced by the
 // `image-webp` crate: lossless (VP8L) images
 // decode to the same pixels; lossy (VP8) images use its bilinear ("fancy")
@@ -12,8 +10,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::premultiply::premultiply;
 use mln_util::size::Size;
 
-/// `decodeWEBP(data, size)`: an empty image (and a warning) when the data
-/// can't be decoded, as C++.
+/// Decodes WebP `data`. Logs a warning and returns an empty image when the
+/// data can't be decoded, as C++ does.
 #[must_use]
 pub fn decode_webp(data: &[u8]) -> PremultipliedImage {
     let Ok(mut decoder) = image_webp::WebPDecoder::new(Cursor::new(data)) else {

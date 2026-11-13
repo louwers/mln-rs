@@ -1,7 +1,3 @@
-// Ports include/mln/util/async_task.hpp and
-// platform/default/src/mln/util/async_task.cpp: a coalescing wake-up whose
-// callback runs on the RunLoop of the thread that created it.
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -9,13 +5,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::run_loop::{AsyncHandle, Core, RunLoop};
 
-/// `util::AsyncTask`.
 pub struct AsyncTask {
     handle: Rc<AsyncHandle>,
 }
 
 impl AsyncTask {
-    /// `AsyncTask(std::function<void()>&&)`, on the current thread's `RunLoop`.
+    /// Creates a task that runs `task` on the current thread's `RunLoop`.
     pub fn new(task: impl FnMut() + 'static) -> Self {
         let run_loop = RunLoop::get();
         let handle = Rc::new(AsyncHandle {
@@ -28,8 +23,8 @@ impl AsyncTask {
         AsyncTask { handle }
     }
 
-    /// `send()`: `uv_async_send` does the call coalescing (and wakes a
-    /// blocking `RunLoop::run`).
+    /// Schedules the task. Calls before it runs coalesce into one run; a
+    /// blocking `RunLoop::run` wakes up.
     pub fn send(&self) {
         self.handle.pending.store(true, Ordering::SeqCst);
         self.handle.core.wake();
@@ -45,8 +40,8 @@ impl AsyncTask {
 }
 
 impl Drop for AsyncTask {
-    /// `~AsyncTask()`: `uv_close` (gtests-core: the handle may outlive the
-    /// task while the loop runs it, so mark it closed).
+    /// Marks the handle closed: the loop may still hold it while it runs, so
+    /// the handle can outlive the task.
     fn drop(&mut self) {
         self.handle.closed.set(true);
     }

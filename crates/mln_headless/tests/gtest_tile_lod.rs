@@ -1,5 +1,3 @@
-// Ports test/tile/tile_lod.test.cpp.
-
 mod support;
 
 use std::f64::consts::PI;
@@ -18,7 +16,6 @@ use mln_util::Color;
 use mln_util::geo::LatLngBounds;
 use support::*;
 
-/// `TileLODTest`.
 struct TileLODTest {
     _run_loop: RunLoop,
     frontend: HeadlessFrontend,

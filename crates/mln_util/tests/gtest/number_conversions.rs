@@ -1,5 +1,3 @@
-// Ports test/util/number_conversions.test.cpp.
-//
 // The `util::toString` cases for doubles.
 
 use mln_util::string::to_string_double;

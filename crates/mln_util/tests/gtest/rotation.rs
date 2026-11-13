@@ -1,5 +1,3 @@
-// Ports test/util/rotation.test.cpp.
-
 use mln_style_types::Rotation;
 use mln_util::interpolate::Interpolate;
 

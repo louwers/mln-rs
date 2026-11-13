@@ -710,7 +710,6 @@ impl View {
         });
     }
 
-    /// `render()`
     fn render(&mut self) {
         if !self.needs_frame() {
             return;

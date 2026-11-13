@@ -62,13 +62,11 @@ pub fn float_prefix(s: &str) -> &str {
     &s[..end]
 }
 
-/// `util::toHex(uint32_t)`.
 #[must_use]
 pub fn to_hex_u32(value: u32) -> String {
     format!("{value:08x}")
 }
 
-/// `util::toHex(uint64_t)`.
 #[must_use]
 pub fn to_hex_u64(value: u64) -> String {
     format!("{value:016x}")

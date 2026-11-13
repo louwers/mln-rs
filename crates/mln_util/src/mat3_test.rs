@@ -1,5 +1,3 @@
-// Ports test/util/mat3.test.cpp
-
 use std::f64::consts::PI;
 
 use super::*;

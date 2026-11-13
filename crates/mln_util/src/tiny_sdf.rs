@@ -1,5 +1,3 @@
-// Ports src/mln/util/tiny_sdf.hpp and src/mln/util/tiny_sdf.cpp.
-//
 // C++ port of https://github.com/mapbox/tiny-sdf, which is in turn based on
 // the Felzenszwalb/Huttenlocher distance transform paper
 // (https://cs.brown.edu/~pff/papers/dt-final.pdf).
@@ -8,8 +6,8 @@ use crate::image::AlphaImage;
 
 const INF: f64 = 1e20;
 
-/// `tinysdf::edt1d`: 1D squared distance transform. `v` is `int16_t` in
-/// C++ (indices wrap for dimensions above 32767, as there).
+/// 1D squared distance transform. `v` holds `i16` indices, as in C++, so
+/// they wrap for dimensions above 32767.
 fn edt1d(f: &[f64], d: &mut [f64], v: &mut [i16], z: &mut [f64], n: u32) {
     v[0] = 0;
     z[0] = -INF;
@@ -42,7 +40,7 @@ fn edt1d(f: &[f64], d: &mut [f64], v: &mut [i16], z: &mut [f64], n: u32) {
     }
 }
 
-/// `tinysdf::edt`: 2D Euclidean distance transform.
+/// 2D Euclidean distance transform.
 #[allow(clippy::too_many_arguments)]
 fn edt(data: &mut [f64], width: u32, height: u32, f: &mut [f64], d: &mut [f64], v: &mut [i16], z: &mut [f64]) {
     for x in 0..width {
@@ -65,8 +63,7 @@ fn edt(data: &mut [f64], width: u32, height: u32, f: &mut [f64], d: &mut [f64], 
     }
 }
 
-/// `transformRasterToSDF`: an alpha raster to a signed distance field of
-/// the same size.
+/// Turns an alpha raster into a signed distance field of the same size.
 #[must_use]
 pub fn transform_raster_to_sdf(raster_input: &AlphaImage, radius: f64, cutoff: f64) -> AlphaImage {
     let size = raster_input.size.width * raster_input.size.height;
@@ -113,8 +110,8 @@ pub fn transform_raster_to_sdf(raster_input: &AlphaImage, radius: f64, cutoff: f
     sdf
 }
 
-/// `::lround` (halfway cases away from zero; out-of-range values give the
-/// x86-64 result, `LONG_MIN`).
+/// Rounds to the nearest integer as `lround` does: halfway cases away from
+/// zero, and out-of-range values give the x86-64 result, `i64::MIN`.
 fn lround(x: f64) -> i64 {
     let r = x.round();
     if (-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&r) { r as i64 } else { i64::MIN }

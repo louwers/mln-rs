@@ -1,5 +1,3 @@
-// Ports include/mln/storage/file_source.hpp.
-
 use feature::Value;
 
 use crate::async_request::AsyncRequest;
@@ -10,7 +8,6 @@ use crate::resource_transform::ResourceTransform;
 use crate::response::Response;
 
 // TODO: Rename to ResourceProviderType
-/// `FileSourceType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum FileSourceType {
@@ -28,12 +25,12 @@ pub enum FileSourceType {
     ResourceLoader,
 }
 
-/// `FileSource::Callback` (`std::function<void(Response)>`). It runs on the
-/// thread that made the request, so it need not be `Send`.
+/// Receives a request's response. It runs on the thread that made the
+/// request, so it need not be `Send`.
 pub type Callback = Box<dyn FnMut(Response) + 'static>;
 
-/// `FileSource`. File sources are shared between threads
-/// (`std::shared_ptr<FileSource>`), hence `Send + Sync`.
+/// A source of resources. File sources are shared between threads, hence
+/// `Send + Sync`.
 pub trait FileSource: Send + Sync {
     /// Request a resource. The callback will be called asynchronously, in
     /// the same thread as the request was made. This thread must have an

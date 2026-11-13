@@ -1,7 +1,6 @@
-// Ports test/storage/online_file_source.test.cpp against the test server
-// (mln_test_server, one per test) instead of the C++ one on port 3000. The
-// tests that request through the network take `serial()`: NetworkStatus is
-// process-wide and C++ runs one test at a time.
+// The tests run against a test server (`mln_test_server`), one per test.
+// The tests that request through the network take `serial()`:
+// `NetworkStatus` is process-wide.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -40,7 +39,6 @@ fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
 }
 
-/// `std::chrono::duration<const double>(Clock::now() - start).count()`.
 fn seconds_since(start: mln_util::chrono::TimePoint) -> f64 {
     (Clock::now() - start).count() as f64 / 1e9
 }

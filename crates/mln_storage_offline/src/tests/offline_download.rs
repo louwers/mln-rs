@@ -1,6 +1,6 @@
-// Ports test/storage/offline_download.test.cpp (but ResourceOfflineUsageUnset,
-// which renders a map: tests/offline_download_map.rs). Fixtures are read in
-// place from test/fixtures/offline_download.
+// The test that renders a map after a download is in
+// tests/offline_download_map.rs. Fixtures are read in place from
+// test/fixtures/offline_download.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -28,7 +28,6 @@ use mln_util::tileset::Scheme;
 use super::cpp_path;
 use crate::offline_download::{OfflineDownload, WeakOfflineDownload};
 
-/// `MockObserver`.
 #[derive(Default)]
 struct MockObserver {
     status_changed_fn: Option<Box<dyn Fn(OfflineRegionStatus)>>,
@@ -61,7 +60,6 @@ fn fixture_response(size: &Cell<u64>, path: &str) -> Response {
     result
 }
 
-/// `OfflineTest`.
 struct OfflineTest {
     run_loop: RunLoop,
     file_source: Arc<StubFileSource>,
@@ -102,7 +100,6 @@ impl OfflineTest {
         fixture_response(&self.size, path)
     }
 
-    /// `fileSource.<kind>Response = [&](const Resource&) { ... }`.
     fn respond(&self, kind: Kind, f: impl Fn(&Resource) -> Response + 'static) {
         self.file_source.set_response(kind, move |resource| Some(f(resource)));
     }
@@ -384,7 +381,6 @@ fn exclude_ideographs() {
     test.run_loop.run();
 }
 
-/// `FakeFileSource::FakeFileRequest`.
 struct FakeFileRequest {
     id: u64,
     requests: Rc<RefCell<Vec<FakeRequestEntry>>>,
@@ -404,9 +400,8 @@ impl Drop for FakeFileRequest {
     }
 }
 
-/// `FakeOnlineFileSource` (`test/src/mln/test/fake_file_source.hpp)`: records
-/// the requests; `respond` answers the first of a kind. Requests come from
-/// the thread that created it.
+/// Records the requests; `respond` answers the first of a kind. Requests
+/// come from the thread that created it.
 struct FakeOnlineFileSource {
     requests: LocalObject<RefCell<Vec<FakeRequestEntry>>>,
     next_id: std::sync::atomic::AtomicU64,
@@ -663,7 +658,6 @@ fn request_errors_are_retried() {
     test.run_loop.run();
 }
 
-/// `test.db.put(Resource::tile(...), test.response(...))`.
 fn put_tile(test: &OfflineTest, x: i32, y: i32, z: i8) {
     let response = test.response("0-0-0.vector.pbf");
     test.db.borrow_mut().put(
@@ -953,12 +947,11 @@ fn no_freezing_on_not_found_error() {
     // Passes if does not freeze.
 }
 
-/// `storedSize(data)`: the size the database stores `data` in.
+/// The size the database stores `data` in.
 fn stored_size(data: &[u8]) -> u64 {
     (data.len() as u64).min(compress(data).unwrap().len() as u64)
 }
 
-/// `util::read_file("test/fixtures/offline_download/" + path)`.
 fn read_fixture(path: &str) -> Vec<u8> {
     std::fs::read(cpp_path(&format!("test/fixtures/offline_download/{path}"))).unwrap()
 }
@@ -993,9 +986,9 @@ fn world_at_zoom(max_zoom: f64) -> OfflineRegionDefinition {
     OfflineTilePyramidRegionDefinition::new(STYLE_URL, LatLngBounds::world(), 0.0, max_zoom, 1.0, false).unwrap().into()
 }
 
-/// `runUntilInactive`: runs `download` until it goes inactive, and returns
-/// its last active status. Collects the errors the download reports in
-/// `errors`, and fails on any if it's `None`.
+/// Runs `download` until it goes inactive, and returns its last active
+/// status. Collects the errors the download reports in `errors`, and fails
+/// on any if it's `None`.
 fn run_until_inactive(
     test: &OfflineTest,
     download: &OfflineDownload,
@@ -1022,9 +1015,9 @@ fn run_until_inactive(
     completed.get()
 }
 
-/// `downloadUntilInactive`: runs a download of `region_id` until it goes
-/// inactive, and returns its last active status. The completed counts and
-/// sizes that the database reports afterwards must match it.
+/// Runs a download of `region_id` until it goes inactive, and returns its
+/// last active status. The completed counts and sizes that the database
+/// reports afterwards must match it.
 fn download_until_inactive(
     test: &OfflineTest,
     region_id: i64,
@@ -1046,9 +1039,9 @@ fn invalidate_region(test: &OfflineTest, region_id: i64) {
     assert!(test.db.borrow_mut().invalidate_region(region_id).is_none());
 }
 
-/// `testRefreshInvalidatedRegion`: downloads a region of a style and one
-/// tile, invalidates it, and downloads it again. The server answers 304 Not
-/// Modified for the resources marked, and sends new data for the others.
+/// Downloads a region of a style and one tile, invalidates it, and downloads
+/// it again. The server answers 304 Not Modified for the resources marked,
+/// and sends new data for the others.
 fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: bool) {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
@@ -1201,8 +1194,8 @@ fn tile_json(tile_url: &str) -> String {
     format!(r#"{{"tilejson":"2.1.0","tiles":["{tile_url}"]}}"#)
 }
 
-/// `storedStatus`: the status of the region `region_id` as the database
-/// reports it while no download runs.
+/// The status of the region `region_id` as the database reports it while no
+/// download runs.
 fn stored_status(test: &OfflineTest, region_id: i64) -> OfflineRegionStatus {
     OfflineDownload::new(region_id, world_at_zoom(0.0), test.db.clone(), test.file_source.clone()).get_status()
 }
@@ -1315,9 +1308,8 @@ fn reports_a_style_with_no_content() {
     assert!(!stored.required_resource_count_is_precise);
 }
 
-/// `RefreshedRegion`: downloads a region of a style, a TileJSON, and one
-/// tile, then invalidates it. The style and the TileJSON have the bodies
-/// the case sets.
+/// Downloads a region of a style, a TileJSON, and one tile, then invalidates
+/// it. The style and the TileJSON have the bodies the case sets.
 struct RefreshedRegion {
     test: OfflineTest,
     region: OfflineRegion,

@@ -1,7 +1,3 @@
-// Ports src/mln/storage/http_file_source.hpp and
-// platform/default/src/mln/storage/http_file_source.cpp (curl -> ureq) and
-// platform/darwin/src/http_file_source.mm (NSURLSession).
-//
 // C++ drives a curl multi handle from the requesting thread's RunLoop (socket
 // watches and a timer). Here the file source hands each request to its
 // `HttpTransport`, which finishes it from whatever thread the transfer ends
@@ -114,14 +110,14 @@ impl Cancellation {
     }
 }
 
-/// `HTTPFileSource::Impl`
 struct Impl {
     transport: Arc<dyn HttpTransport>,
     header_transform: Mutex<HttpHeaderTransform>,
     resource_options: Mutex<ResourceOptions>,
 }
 
-/// `headerMatches(header, buffer, length)`: ASCII-case-insensitive prefix.
+/// The value of `line` if it is the header `name`, matched as an
+/// ASCII-case-insensitive prefix.
 fn header_value<'a>(name: &str, header: &str, line: &'a str) -> Option<&'a str> {
     (name.eq_ignore_ascii_case(header)).then_some(line)
 }
@@ -346,7 +342,7 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
     (!host.is_empty()).then(|| (scheme, host.to_ascii_lowercase(), port))
 }
 
-/// `HTTPFileSource`: plain HTTP(S) requests, used by the `OnlineFileSource`.
+/// Plain HTTP(S) requests, used by the `OnlineFileSource`.
 pub struct HTTPFileSource {
     impl_: Impl,
 }

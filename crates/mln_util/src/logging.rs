@@ -79,7 +79,6 @@ crate::define_enum!(
     ]
 );
 
-/// `Log::Observer`.
 pub trait Observer: Send + Sync {
     /// Returns true when the record was handled (then it is not printed).
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool;
@@ -91,7 +90,6 @@ thread_local! {
     static THREAD_OBSERVER: RefCell<Option<Box<dyn Observer>>> = const { RefCell::new(None) };
 }
 
-/// `mln::Log`.
 pub struct Log;
 
 impl Log {
@@ -126,9 +124,8 @@ impl Log {
         Self::record(EventSeverity::Error, event, -1, msg.as_ref());
     }
 
-    /// `Log::Record` with the event filters from event.hpp
-    /// (`disabledEventPermutations = {{Debug, Shader}}`; Debug is disabled in
-    /// release builds).
+    /// Records a log message, unless it is filtered out: `Debug` severity is
+    /// dropped for `Shader` events and in release builds.
     pub fn record(severity: EventSeverity, event: Event, code: i64, msg: &str) {
         use crate::enum_::Enum;
         if !cfg!(debug_assertions) && severity == EventSeverity::Debug {

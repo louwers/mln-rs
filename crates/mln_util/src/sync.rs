@@ -11,7 +11,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-/// `std::mutex::lock` on a [`Mutex`].
+/// Locking a [`Mutex`] that ignores poisoning.
 pub trait MutexExt<T: ?Sized> {
     fn lock_unpoisoned(&self) -> MutexGuard<'_, T>;
     fn get_mut_unpoisoned(&mut self) -> &mut T;
@@ -27,7 +27,7 @@ impl<T: ?Sized> MutexExt<T> for Mutex<T> {
     }
 }
 
-/// `std::shared_mutex::lock_shared` / `lock` on an [`RwLock`].
+/// Locking an [`RwLock`] that ignores poisoning.
 pub trait RwLockExt<T: ?Sized> {
     fn read_unpoisoned(&self) -> RwLockReadGuard<'_, T>;
     fn write_unpoisoned(&self) -> RwLockWriteGuard<'_, T>;
@@ -48,7 +48,7 @@ impl<T: ?Sized> RwLockExt<T> for RwLock<T> {
     }
 }
 
-/// `std::condition_variable::wait` / `wait_for` on a [`Condvar`].
+/// Waiting on a [`Condvar`] that ignores poisoning.
 pub trait CondvarExt {
     fn wait_unpoisoned<'a, T>(&self, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T>;
     fn wait_timeout_unpoisoned<'a, T>(

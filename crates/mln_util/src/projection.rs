@@ -1,5 +1,3 @@
-// Ports include/mln/util/projection.hpp
-
 use std::f64::consts::PI;
 
 use geometry::Point;
@@ -17,7 +15,6 @@ const M2PI: f64 = PI * 2.0;
 // TODO(port): use mln_util::constants::EARTH_RADIUS_M once it exists.
 const EARTH_RADIUS_M: f64 = 6_378_137.0;
 
-/// `mln::ProjectedMeters`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectedMeters {
     /// Distance measured northwards.

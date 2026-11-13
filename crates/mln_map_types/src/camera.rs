@@ -1,7 +1,3 @@
-// Ports include/mln/map/camera.hpp (CameraOptions, AnimationOptions,
-// FreeCameraOptions; the FreeCameraOptions methods are in util/camera.cpp,
-// see util_camera.rs).
-
 use mln_util::UnitBezier;
 use mln_util::chrono::Duration;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate};
@@ -183,7 +179,6 @@ pub struct TransitionEnd {
 }
 
 impl AnimationOptions {
-    /// `AnimationOptions(Duration d)`.
     #[must_use]
     pub fn new(d: Duration) -> Self {
         AnimationOptions { duration: Some(d), ..Default::default() }

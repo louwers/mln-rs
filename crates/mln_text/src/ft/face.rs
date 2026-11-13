@@ -1,6 +1,3 @@
-// Ports the parts of ../maplibre-native/vendor/freetype (2.13) that
-// `FreeTypeFace` and hb-ft use on an SFNT font held in memory:
-//
 // - face loading: src/sfnt/sfobjs.c (`sfnt_open_font`, `sfnt_load_face`:
 //   table loading, face flags, charmaps), src/sfnt/ttload.c (`check_table_dir`,
 //   `tt_face_lookup_table`), src/truetype/ttobjs.c (`tt_face_init` format
@@ -32,13 +29,12 @@ struct TableRec {
 /// The `FT_FaceRec` / `TT_FaceRec` fields the port needs.
 #[derive(Clone, Debug)]
 pub struct Face {
-    /// `face->format_tag`.
     pub format_tag: u32,
     tables: Vec<TableRec>,
-    /// `face->root.units_per_EM`: the `head` value for scalable and `sbix`
-    /// faces, 0 otherwise.
+    /// Units per EM: the `head` value for scalable and `sbix` faces, 0
+    /// otherwise.
     pub units_per_em: u16,
-    /// `face->root.num_glyphs` (maxp numGlyphs).
+    /// The `maxp` table's `numGlyphs`.
     pub num_glyphs: u32,
     /// `FT_FACE_FLAG_SCALABLE`.
     pub scalable: bool,
@@ -48,14 +44,14 @@ pub struct Face {
     pub is_cff: bool,
     number_of_hmetrics: u16,
     hmtx: Option<(usize, usize)>,
-    /// `face->os2.version` (0xFFFF when missing) and `fsSelection`.
+    /// The `OS/2` table's version (0xFFFF when missing) and `fsSelection`.
     pub os2_version: u16,
     pub os2_fs_selection: u16,
     cmap: Option<(usize, usize)>,
     pub charmaps: Vec<CharMap>,
-    /// `face->charmap`, an index into `charmaps`.
+    /// The selected charmap, an index into `charmaps`.
     pub charmap: Option<usize>,
-    /// `face->size->metrics.x_scale` / `y_scale` (16.16).
+    /// The scale from font units to 26.6 pixels at the current size (16.16).
     pub x_scale: i64,
     pub y_scale: i64,
     /// Offset of the SFNT header (non-zero in a collection).

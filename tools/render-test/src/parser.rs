@@ -1,5 +1,3 @@
-// Ports render-test/parser.{hpp,cpp}
-//
 // rapidjson is replaced by serde_json (with `preserve_order`, so objects
 // keep document order). Differences that matter:
 // - parse error messages are serde_json's, not
@@ -80,8 +78,8 @@ const RESULTS_HEADER_BUTTON: &str = r"
 // empty); number spelling may differ (the text is only parsed back, written
 // to actual.json and shown in the report).
 
-/// `mln::Value` as a JSON value (object members sorted by key, as C++
-/// writes them).
+/// `value` as a JSON value (object members sorted by key, as C++ writes
+/// them).
 fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Null => serde_json::Value::Null,
@@ -97,13 +95,11 @@ fn value_to_json(value: &Value) -> serde_json::Value {
     }
 }
 
-/// `toJSON(const mln::Value&, 2, false)`.
 #[must_use]
 pub fn to_json_value(value: &Value) -> String {
     serde_json::to_string_pretty(&value_to_json(value)).expect("JSON value serializes")
 }
 
-/// `toJSON(const std::vector<mln::Feature>&, 2, false)`.
 #[must_use]
 pub fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     let mut array = Vec::with_capacity(features.len());
@@ -123,14 +119,13 @@ pub fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     serde_json::to_string_pretty(&serde_json::Value::Array(array)).expect("JSON value serializes")
 }
 
-/// `readJson(path)`.
 pub fn read_json(json_path: &str) -> Result<serde_json::Value, ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
-/// `readJson(path)` keeping the text, for documents the runner hands on
-/// unchanged (style.json).
+/// Reads the JSON document at `json_path`, keeping the text, for documents
+/// the runner hands on unchanged (style.json).
 pub fn read_json_with_text(json_path: &str) -> Result<(serde_json::Value, String), ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     let value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
@@ -162,14 +157,14 @@ impl<'de> Deserialize<'de> for ObjectMembers {
     }
 }
 
-/// `readJson(path)` for a document whose top level is an object, as its
-/// members in document order.
+/// Reads the JSON document at `json_path`, whose top level is an object, as
+/// its members in document order.
 pub fn read_json_object_members(json_path: &str) -> Result<Vec<(String, serde_json::Value)>, ErrorMessage> {
     let bytes = std::fs::read(json_path).map_err(|_| format!("Unable to open file {json_path}"))?;
     serde_json::from_slice::<ObjectMembers>(&bytes).map(|members| members.0).map_err(|e| e.to_string())
 }
 
-/// `serializeJsonValue(value)`: compact JSON (rapidjson `Writer`).
+/// `value` as compact JSON, as rapidjson's `Writer` writes it.
 #[must_use]
 pub fn serialize_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).expect("serde_json::Value serializes")
@@ -245,7 +240,6 @@ fn array_size(v: &serde_json::Value) -> usize {
     v.as_array().map_or(0, Vec::len)
 }
 
-/// `readExpectedMetrics(path)`.
 #[must_use]
 pub fn read_expected_metrics(path: &str) -> TestMetrics {
     let mut result = TestMetrics::default();
@@ -316,7 +310,6 @@ pub fn read_expected_metrics(path: &str) -> TestMetrics {
     result
 }
 
-/// `parseTestMetadata(paths)`.
 #[must_use]
 pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     let mut metadata = TestMetadata { paths: paths.clone(), ..TestMetadata::default() };
@@ -461,8 +454,8 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     metadata
 }
 
-/// `mln::TileLodMode` (include/mln/map/mode.hpp) with the names the runner's
-/// `MBGL_DEFINE_ENUM` gives it.
+/// The map's tile level-of-detail mode, with the names the C++ runner gives
+/// it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileLodMode {
     Default,
@@ -535,7 +528,6 @@ use test_operation_names::{
     SET_ZOOM_OP, SLEEP_OP, UPDATE_IMAGE_OP, WAIT_OP,
 };
 
-/// `parseGlobalStateValue(value)`.
 fn parse_global_state_value(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Null => Value::Null,
@@ -557,8 +549,8 @@ fn parse_global_state_value(value: &serde_json::Value) -> Value {
     }
 }
 
-/// `ConversionTraits<const JSValue*>::toValue`: null and false are
-/// `false`, arrays and objects have no value.
+/// The `Value` of a JSON value, as the runner's C++ conversion reads it:
+/// null and false are `false`, arrays and objects have no value.
 fn json_to_value(value: &serde_json::Value) -> Option<Value> {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(false) => Some(Value::Bool(false)),
@@ -633,7 +625,6 @@ fn infallible(ctx: &mut TestContext<'_>, result: Result<(), MapError>) -> bool {
     }
 }
 
-/// `parseTestOperations(metadata)`.
 pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
     let mut result: TestOperations = Vec::new();
     let Some(operations) = metadata.test_value().and_then(|t| t.get("operations")).cloned() else {
@@ -1068,7 +1059,7 @@ fn camera_operation(camera: CameraOptions) -> TestOperation {
     })
 }
 
-/// `encodeBase64(data)`: boost's
+/// Encodes `data` in base64 as C++ does with boost's
 /// `insert_linebreaks<base64_from_binary<transform_width<const char*, 6, 8>>, 72>`,
 /// which emits the last partial sextet zero-padded and no `=` padding, with
 /// a `\n` after every 72 characters (none at the end).
@@ -1100,8 +1091,7 @@ fn to_string_u32(v: u32) -> String {
     v.to_string()
 }
 
-/// `createResultItem`: a test's entry in the report, with its images or its
-/// error message.
+/// A test's entry in the report, with its images or its error message.
 #[must_use]
 pub fn create_result_item(metadata: &TestMetadata) -> String {
     let mut html = String::new();
@@ -1167,8 +1157,8 @@ pub fn create_result_item(metadata: &TestMetadata) -> String {
     html
 }
 
-/// `createResultPage(stats, metadatas, shuffle, seed)`, with entries for the
-/// failed and errored tests only.
+/// The HTML report of a run, with entries for the failed and errored tests
+/// only.
 #[must_use]
 pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], shuffle: bool, seed: u32) -> String {
     let failed_or_errored = |metadata: &&TestMetadata| metadata.status == "failed" || metadata.status == "errored";

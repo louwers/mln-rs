@@ -1,7 +1,3 @@
-// Ports src/mln/text/glyph_pbf.hpp and src/mln/text/glyph_pbf.cpp, reading
-// the protobuf with buffa's wire format functions where the C++ uses
-// protozero.
-
 use buffa::DecodeError;
 use buffa::encoding::{Tag, WireType, skip_field};
 use buffa::types::{borrow_bytes, decode_sint32, decode_uint32};
@@ -10,9 +6,8 @@ use mln_util::size::Size;
 
 use crate::glyph::{Glyph, GlyphID, GlyphRange};
 
-/// `parseGlyphPBF`: the valid glyphs of a glyph PBF within `glyph_range`.
-/// Errors: a malformed protobuf (varints, truncated data), which the C++
-/// lets propagate.
+/// The valid glyphs of a glyph PBF within `glyph_range`. Fails on a
+/// malformed protobuf (varints, truncated data).
 pub fn parse_glyph_pbf(glyph_range: &GlyphRange, data: &[u8]) -> Result<Vec<Glyph>, DecodeError> {
     let mut result = Vec::with_capacity(256);
     // glyphs { repeated fontstack stacks = 1; }
@@ -136,7 +131,6 @@ fn parse_glyph(glyph_range: GlyphRange, data: &[u8]) -> Result<Option<Glyph>, De
     Ok(Some(glyph))
 }
 
-/// Ports `test/text/glyph_pbf.test.cpp`.
 #[cfg(test)]
 mod tests {
     use super::*;

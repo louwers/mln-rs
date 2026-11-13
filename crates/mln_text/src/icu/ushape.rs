@@ -1,12 +1,11 @@
-// Ports ICU 78.3 icu4c/source/common/ushape.cpp: `u_shapeArabic` for the
-// options platform/default/src/mln/text/bidi.cpp passes,
-// `U_SHAPE_LETTERS_SHAPE | U_SHAPE_TEXT_DIRECTION_LOGICAL` (so
-// U_SHAPE_LAMALEF_RESIZE, no tashkeel option, no digit shaping, the old
-// tail character, presentation forms converted). For those options
-// `handleGeneratedSpaces` only removes the lam-alef placeholders and
-// `expandCompositChar` does nothing; the other option paths (unshaping,
-// tashkeel handling, near/begin/end lam-alef spaces, aggregation, digits)
-// are not ported.
+// ICU 78.3's Arabic shaping (ushape.cpp's `u_shapeArabic`) for the options
+// the BiDi code passes, `U_SHAPE_LETTERS_SHAPE |
+// U_SHAPE_TEXT_DIRECTION_LOGICAL` (so `U_SHAPE_LAMALEF_RESIZE`, no tashkeel
+// option, no digit shaping, the old tail character, presentation forms
+// converted). For those options `handle_generated_spaces` only removes the
+// lam-alef placeholders and ICU's `expandCompositChar` does nothing; the
+// other option paths (unshaping, tashkeel handling, near/begin/end lam-alef
+// spaces, aggregation, digits) are left out.
 
 use std::cmp::Ordering;
 
@@ -221,8 +220,8 @@ static SHAPE_TABLE: [[[u8; 4]; 4]; 4] = [
   [ [0,0,1,2], [0,0,1,2], [0,1,1,2], [0,1,1,3] ]
 ];
 
-/// `invertBuffer`: inverts the buffer, it's used in case the user specifies
-/// the buffer to be `U_SHAPE_TEXT_DIRECTION_LOGICAL`.
+/// Inverts the buffer, it's used in case the user specifies the buffer to be
+/// `U_SHAPE_TEXT_DIRECTION_LOGICAL`.
 fn invert_buffer(buffer: &mut [u16], size: i32, lowlimit: i32, highlimit: i32) {
     let mut i = lowlimit;
     let mut j = size - highlimit - 1;
@@ -233,10 +232,10 @@ fn invert_buffer(buffer: &mut [u16], size: i32, lowlimit: i32, highlimit: i32) {
     }
 }
 
-/// `changeLamAlef`: Converts the Alef characters into an equivalent LamAlef
-/// location in the 0x06xx Range, this is an intermediate stage in the
-/// operation of the program later it'll be converted into the 0xFExx
-/// LamAlefs in the shaping function.
+/// Converts the Alef characters into an equivalent LamAlef location in the
+/// 0x06xx Range, this is an intermediate stage in the operation of the
+/// program later it'll be converted into the 0xFExx LamAlefs in the shaping
+/// function.
 fn change_lam_alef(ch: u16) -> u16 {
     match ch {
         0x0622 => 0x065C,
@@ -247,8 +246,8 @@ fn change_lam_alef(ch: u16) -> u16 {
     }
 }
 
-/// `getLink`: Resolves the link between the characters as Arabic
-/// characters have four forms : Isolated, Initial, Middle and Final Form.
+/// Resolves the link between the characters as Arabic characters have four
+/// forms : Isolated, Initial, Middle and Final Form.
 fn get_link(ch: u16) -> u16 {
     if (0x0622..=0x06D3).contains(&ch) {
         ARA_LINK[(ch - 0x0622) as usize]
@@ -265,9 +264,9 @@ fn get_link(ch: u16) -> u16 {
     }
 }
 
-/// `countSpaces`: Counts the number of spaces at each end of the logical
-/// buffer. `dest` must have an element past `size` (ICU reads it when the
-/// buffer is all spaces).
+/// Counts the number of spaces at each end of the logical buffer. `dest`
+/// must have an element past `size` (ICU reads it when the buffer is all
+/// spaces).
 fn count_spaces(dest: &[u16], mut size: i32) -> (i32, i32) {
     let mut i = 0;
     let mut countl = 0;
@@ -286,29 +285,27 @@ fn count_spaces(dest: &[u16], mut size: i32) -> (i32, i32) {
     (countl, countr)
 }
 
-/// `isTashkeelChar`: 1 for Tashkeel characters in 06 range.
+/// Whether `ch` is a Tashkeel character in the 06 range.
 fn is_tashkeel_char(ch: u16) -> bool {
     (0x064B..=0x0652).contains(&ch)
 }
 
-/// `isTashkeelCharFE`: Tashkeel characters in FE range.
+/// Whether `ch` is a Tashkeel character in the FE range.
 fn is_tashkeel_char_fe(ch: u16) -> bool {
     (0xFE70..=0xFE7F).contains(&ch)
 }
 
-/// `isAlefChar`.
 fn is_alef_char(ch: u16) -> bool {
     ch == 0x0622 || ch == 0x0623 || ch == 0x0625 || ch == 0x0627
 }
 
-/// `isSeenFamilyChar`.
 fn is_seen_family_char(ch: u16) -> bool {
     (0x633..=0x636).contains(&ch)
 }
 
-/// `calculateSize` (`LETTERS_SHAPE`, `LAMALEF_RESIZE`, logical): the
-/// destination size after merging lam+alef; FE-range tashkeel also
-/// decrements it (ICU's condition for the resize options).
+/// The destination size after merging lam+alef, for the supported options;
+/// FE-range tashkeel also decrements it (ICU's condition for the resize
+/// options).
 fn calculate_size(source: &[u16], source_length: i32) -> i32 {
     let mut dest_size = source_length;
     // lamAlefOption = 1 (LETTERS_SHAPE with LAMALEF_RESIZE).
@@ -328,9 +325,9 @@ fn u_strlen(s: &[u16]) -> i32 {
     s.iter().position(|&c| c == 0).expect("NUL-terminated") as i32
 }
 
-/// `handleGeneratedSpaces` (`LAMALEF_RESIZE`, no tashkeel option): removes
-/// the `LAMALEF_SPACE_SUB` placeholders; the result length is the `u_strlen`
-/// of the buffer (an earlier NUL in the text shortens it).
+/// Removes the `LAMALEF_SPACE_SUB` placeholders (the only work for the
+/// supported options); the result length is the `u_strlen` of the buffer (an
+/// earlier NUL in the text shortens it).
 fn handle_generated_spaces(dest: &mut [u16], source_length: i32) -> i32 {
     let mut tempbuffer = vec![0u16; (source_length + 1) as usize];
 
@@ -363,9 +360,8 @@ fn handle_generated_spaces(dest: &mut [u16], source_length: i32) -> i32 {
     // taken for these options.)
 }
 
-/// `shapeUnicode(dest, sourceLength, destSize, options, pErrorCode, 1,
-/// shapeVars)`: Converts an Arabic Unicode buffer in 06xx Range into a
-/// shaped arabic Unicode buffer in `FExx` Range.
+/// Converts an Arabic Unicode buffer in 06xx Range into a shaped arabic
+/// Unicode buffer in `FExx` Range.
 fn shape_unicode(dest: &mut [u16], source_length: i32) -> i32 {
     let tashkeel_flag = 1;
     let mut lamalef_found = false;
@@ -505,11 +501,10 @@ fn shape_unicode(dest: &mut [u16], source_length: i32) -> i32 {
     dest_size
 }
 
-/// `u_shapeArabic(source, sourceLength, dest, destCapacity,
-/// U_SHAPE_LETTERS_SHAPE | U_SHAPE_TEXT_DIRECTION_LOGICAL, &errorCode)`
-/// with `dest` of `dest_capacity` code units (`None`: ICU's NULL dest for
-/// preflighting): (the code units written to dest, the returned length,
-/// the error code).
+/// Shapes `source` with `U_SHAPE_LETTERS_SHAPE` and
+/// `U_SHAPE_TEXT_DIRECTION_LOGICAL` into a destination of `dest_capacity`
+/// code units. Returns the code units written, the shaped length (which may
+/// exceed `dest_capacity`), and the error code.
 #[must_use]
 pub fn u_shape_arabic(source: &[u16], dest_capacity: i32) -> (Vec<u16>, i32, UErrorCode) {
     let mut error = UErrorCode::U_ZERO_ERROR;
@@ -572,7 +567,8 @@ pub fn u_shape_arabic(source: &[u16], dest_capacity: i32) -> (Vec<u16>, i32, UEr
     (written, n, error)
 }
 
-/// `u_terminateUChars` for the error code.
+/// Sets the error code for a result of `length` code units in
+/// `dest_capacity`, as ICU's `u_terminateUChars` does; returns `length`.
 fn terminate(dest_capacity: i32, length: i32, error: &mut UErrorCode) -> i32 {
     match length.cmp(&dest_capacity) {
         Ordering::Less => {

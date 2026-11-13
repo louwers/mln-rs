@@ -1,5 +1,3 @@
-// Ports test/text/shaping.test.cpp.
-
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageContent, ImagePosition, ImagePositions, Impl, RectU16, TextFit};
@@ -656,9 +654,8 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
     assert_eq!(orientations, expected);
 }
 
-/// `labelWithShapedSection(before, rtl, after, adjusts)`: a label with a
-/// section of glyphs that HarfBuzz laid out, standing in as "XY", between
-/// sections drawn from glyph PBFs.
+/// A label with a section of glyphs that HarfBuzz laid out, standing in as
+/// "XY", between sections drawn from glyph PBFs.
 fn label_with_shaped_section(
     before: &str,
     rtl: bool,
@@ -678,7 +675,6 @@ fn label_with_shaped_section(
     text
 }
 
-/// `shapedCodes(shaping)`.
 fn shaped_codes(shaping: &Shaping) -> Vec<u16> {
     shaping
         .positioned_lines

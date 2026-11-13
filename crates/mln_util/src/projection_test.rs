@@ -1,5 +1,3 @@
-// Ports test/util/projection.test.cpp
-
 use super::*;
 
 // TODO(port): use mln_util::constants::DEFAULT_MAX_ZOOM once it exists.

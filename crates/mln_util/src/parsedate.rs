@@ -1,8 +1,3 @@
-// Ports vendor/parsedate/parsedate.cpp (`parse_date`, curl's date parser as
-// vendored by the C++ core): RFC 1123, RFC 850, asctime and the other
-// free-form dates curl accepts, with the vendored copy's 32-bit `time_t`
-// limits (years before 1970 give 0, years after 2037 give INT_MAX).
-//
 // Copyright (C) 1998 - 2018, Daniel Stenberg, <daniel@haxx.se>, et al.
 // Licensed as described in LICENSE-curl (curl's COPYING).
 
@@ -156,7 +151,6 @@ fn scan_time(s: &[u8], fields: usize) -> Option<(Vec<i32>, usize)> {
     Some((values, pos))
 }
 
-/// `my_timegm`
 fn my_timegm(sec: i32, min: i32, hour: i32, mday: i32, mon: i32, year: i32) -> i64 {
     const MONTH_DAYS_CUMULATIVE: [i32; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
     let mut year_ = year;

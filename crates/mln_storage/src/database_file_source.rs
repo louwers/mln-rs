@@ -1,6 +1,3 @@
-// Ports include/mln/storage/database_file_source.hpp and
-// platform/default/src/mln/storage/database_file_source.cpp.
-//
 // The database runs on its own thread (`util::Thread<DatabaseFileSourceThread>`
 // "DatabaseFileSource"); requests reach it as actor messages and the
 // response goes back to the requesting thread's `FileSourceRequest`.
@@ -35,8 +32,7 @@ use crate::response::{Reason, ResourceError, Response};
 /// map load share one write.
 const ACCESSED_FLUSH_DELAY: Duration = Duration::from_millis(250);
 
-/// `DatabaseFileSourceThread`: owns the `OfflineDatabase` on the database
-/// thread.
+/// Owns the `OfflineDatabase` on the database thread.
 pub struct DatabaseFileSourceThread {
     db: Rc<RefCell<OfflineDatabase>>,
     online_file_source: Option<Arc<dyn FileSource>>,
@@ -84,7 +80,6 @@ impl DatabaseFileSourceThread {
         });
     }
 
-    /// `request(const Resource&, const ActorRef<FileSourceRequest>&)`.
     pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         let mut offline_response =
             if resource.storage_policy == StoragePolicy::Volatile { None } else { self.db.borrow_mut().get(resource) };
@@ -106,7 +101,6 @@ impl DatabaseFileSourceThread {
         req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
     }
 
-    /// `setDatabasePath(path, callback)`.
     pub fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
         self.db.borrow_mut().change_path(path);
         if let Some(callback) = callback {
@@ -122,17 +116,14 @@ impl DatabaseFileSourceThread {
         }
     }
 
-    /// `resetDatabase(callback)`.
     pub fn reset_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().reset_database()));
     }
 
-    /// `packDatabase(callback)`.
     pub fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().pack()));
     }
 
-    /// `runPackDatabaseAutomatically(bool)`.
     pub fn run_pack_database_automatically(&self, autopack: bool) {
         self.db.borrow_mut().run_pack_database_automatically(autopack);
     }
@@ -142,22 +133,18 @@ impl DatabaseFileSourceThread {
         self.db.borrow_mut().put(resource, response);
     }
 
-    /// `invalidateAmbientCache(callback)`.
     pub fn invalidate_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().invalidate_ambient_cache()));
     }
 
-    /// `clearAmbientCache(callback)`.
     pub fn clear_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().clear_ambient_cache()));
     }
 
-    /// `setMaximumAmbientCacheSize(size, callback)`.
     pub fn set_maximum_ambient_cache_size(&self, size: u64, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().set_maximum_ambient_cache_size(size)));
     }
 
-    /// `reopenDatabaseReadOnly(bool)`.
     pub fn reopen_database_read_only(&self, read_only: bool) {
         self.db.borrow_mut().reopen_database_read_only(read_only);
     }
@@ -185,12 +172,11 @@ impl DatabaseFileSourceThread {
     }
 }
 
-/// `std::exception_ptr` (null on success) as a `Result`.
+/// Turns an optional error into a `Result`.
 fn into_result(error: Option<DatabaseError>) -> Result<(), DatabaseError> {
     error.map_or(Ok(()), Err)
 }
 
-/// `DatabaseFileSource::Impl`.
 struct Impl {
     thread: Thread<DatabaseFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
@@ -202,7 +188,6 @@ impl Impl {
     }
 }
 
-/// `DatabaseFileSource`.
 pub struct DatabaseFileSource {
     impl_: Impl,
 }
@@ -221,27 +206,27 @@ impl DatabaseFileSource {
         DatabaseFileSource { impl_: Impl { thread, resource_options: Mutex::new(resource_options.clone()) } }
     }
 
-    /// `setDatabasePath(path, callback)`. The callback runs on the database
-    /// thread, as in C++.
+    /// Moves the database to `path`. The callback runs on the database
+    /// thread.
     pub fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
         let path = path.to_owned();
         self.impl_.actor().invoke(move |t: &DatabaseFileSourceThread| t.set_database_path(&path, callback));
     }
 
-    /// `resetDatabase(callback)`: deletes the database file and starts an
-    /// empty one. The callback runs on the database thread.
+    /// Deletes the database file and starts an empty one. The callback runs
+    /// on the database thread.
     pub fn reset_database(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
         self.invoke(move |t| t.reset_database(callback));
     }
 
-    /// `packDatabase(callback)`: vacuums the database file to the space its
-    /// data needs. The callback runs on the database thread.
+    /// Vacuums the database file to the space its data needs. The callback
+    /// runs on the database thread.
     pub fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
         self.invoke(move |t| t.pack_database(callback));
     }
 
-    /// `runPackDatabaseAutomatically(bool)`: whether deleting a region or
-    /// clearing the ambient cache packs the database (the default).
+    /// Sets whether deleting a region or clearing the ambient cache packs the
+    /// database (the default).
     pub fn run_pack_database_automatically(&self, autopack: bool) {
         self.invoke(move |t| t.run_pack_database_automatically(autopack));
     }
@@ -253,24 +238,22 @@ impl DatabaseFileSource {
         self.invoke(move |t| t.put(&resource, &response));
     }
 
-    /// `invalidateAmbientCache(callback)`: makes the ambient cache's
-    /// resources revalidate with their server before use. Offline regions'
-    /// resources are unaffected. The callback runs on the database thread.
+    /// Makes the ambient cache's resources revalidate with their server
+    /// before use. Offline regions' resources are unaffected. The callback
+    /// runs on the database thread.
     pub fn invalidate_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
         self.invoke(move |t| t.invalidate_ambient_cache(callback));
     }
 
-    /// `clearAmbientCache(callback)`: erases the ambient cache's resources.
-    /// Offline regions' resources are unaffected. The callback runs on the
-    /// database thread.
+    /// Erases the ambient cache's resources. Offline regions' resources are
+    /// unaffected. The callback runs on the database thread.
     pub fn clear_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
         self.invoke(move |t| t.clear_ambient_cache(callback));
     }
 
-    /// `setMaximumAmbientCacheSize(size, callback)`: limits the database to
-    /// `size` bytes, evicting ambient resources to fit. Offline regions
-    /// count towards the limit but are never evicted; 0 disables the
-    /// ambient cache. The callback runs on the database thread.
+    /// Limits the database to `size` bytes, evicting ambient resources to
+    /// fit. Offline regions count towards the limit but are never evicted; 0
+    /// disables the ambient cache. The callback runs on the database thread.
     pub fn set_maximum_ambient_cache_size(
         &self,
         size: u64,

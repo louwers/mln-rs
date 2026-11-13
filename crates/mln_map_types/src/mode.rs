@@ -1,8 +1,5 @@
-// Ports include/mln/map/mode.hpp
-
 use serde::{Deserialize, Serialize};
 
-/// `mln::MapMode`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u32)]
 pub enum MapMode {
@@ -47,8 +44,8 @@ pub enum TileLodMode {
     Distance,
 }
 
-/// `mln::MapDebugOptions`, a bit set over `uint32_t` (C++ `enum class` with
-/// `|`, `&`, `~` operators; `lhs & rhs` returns bool there, `contains` here).
+/// The map's debug overlays, a bit set. Where C++ tests a flag with
+/// `lhs & rhs`, which returns a bool there, use `contains`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct MapDebugOptions(pub u32);
 
@@ -62,7 +59,6 @@ impl MapDebugOptions {
     pub const STENCIL_CLIP: MapDebugOptions = MapDebugOptions(1 << 6);
     pub const DEPTH_BUFFER: MapDebugOptions = MapDebugOptions(1 << 7);
 
-    /// C++ `bool operator&(MapDebugOptions, MapDebugOptions)`.
     #[must_use]
     pub const fn contains(self, rhs: MapDebugOptions) -> bool {
         (self.0 & rhs.0) != 0

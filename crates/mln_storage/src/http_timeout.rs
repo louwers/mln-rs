@@ -1,6 +1,5 @@
-// Ports src/mln/util/http_timeout.hpp and src/mln/util/http_timeout.cpp
-// (`http::errorRetryTimeout`, `http::expirationTimeout`). They live here
-// rather than in mln_util because they take `Response::Error::Reason`.
+// HTTP retry and expiration timeouts. They live here rather than in
+// `mln_util` because they take a response error's `Reason`.
 
 use mln_util::chrono::{Duration, Timestamp, now};
 use mln_util::constants::DEFAULT_RATE_LIMIT_TIMEOUT;
@@ -16,7 +15,6 @@ fn timestamp_diff(a: Timestamp, b: Timestamp) -> Duration {
     seconds(a.secs_since_epoch() - b.secs_since_epoch())
 }
 
-/// `errorRetryTimeout(failedRequestReason, failedRequests, retryAfter)`
 #[must_use]
 pub fn error_retry_timeout(
     failed_request_reason: Reason,
@@ -43,7 +41,6 @@ pub fn error_retry_timeout(
     }
 }
 
-/// `expirationTimeout(expires, expiredRequests)`
 #[must_use]
 pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Duration {
     if expired_requests > 0 {
@@ -58,7 +55,6 @@ pub fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> 
 
 #[cfg(test)]
 mod tests {
-    // Ports test/util/http_timeout.test.cpp.
     use super::*;
 
     #[test]
