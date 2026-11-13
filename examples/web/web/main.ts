@@ -370,25 +370,20 @@ canvas.addEventListener('pointercancel', (e) => send({ kind: 'pointer_cancel', i
 // A wheel event as the recognizer takes it (WebMap::wheel's `kind`):
 // WHEEL_NOTCHES and the notches for a mouse wheel's detents, which it eases,
 // or WHEEL_PIXELS and the pixels for continuous scrolling (a trackpad, a
-// precise wheel), which it applies at once. Positive scrolls down. Browsers
-// don't say which device scrolled, so this reads it from how they report
-// each:
+// precise wheel), which it applies at once. Positive scrolls down. A
+// trackpad pinch comes as pixels with Ctrl, which the recognizer zooms at
+// its pinch rate. Browsers don't say which device scrolled, so this takes
+// pixels as they come but for two cases that would zoom far too little:
 // - Firefox reports wheels in lines, 3 a notch, and pages.
 // - Safari reports a notch as 4.000244140625 px, and a faster turn as a
 //   whole multiple of it (GL JS's test): one notch per multiple.
-// - Chromium's legacy wheelDeltaY is 120 a detent, and -3 × deltaY for
-//   precise scrolling.
-// Untested on real hardware; a misread zooms the same way by a similar
-// amount, with or without the easing.
+// Chromium reports a notch as about 100 px, which zooms by about a notch's
+// amount without the easing.
 const SAFARI_NOTCH = 4.000244140625;
 function wheelDelta(e: WheelEvent): { wheel: number; amount: number } {
   if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) return { wheel: WHEEL_NOTCHES, amount: e.deltaY / 3 };
   if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) return { wheel: WHEEL_NOTCHES, amount: e.deltaY };
   if (e.deltaY !== 0 && e.deltaY % SAFARI_NOTCH === 0) return { wheel: WHEEL_NOTCHES, amount: e.deltaY / SAFARI_NOTCH };
-  const legacy = 'wheelDeltaY' in e ? e.wheelDeltaY : undefined;
-  if (typeof legacy === 'number' && legacy !== 0 && Math.abs(legacy + 3 * e.deltaY) >= 1 && legacy % 120 === 0) {
-    return { wheel: WHEEL_NOTCHES, amount: -legacy / 120 };
-  }
   return { wheel: WHEEL_PIXELS, amount: e.deltaY };
 }
 canvas.addEventListener('wheel', (e) => {

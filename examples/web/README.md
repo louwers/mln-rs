@@ -82,8 +82,8 @@ worker turns it into its own `performance.now()`, the clock it gives
 `WebMap::frame`, which also puts the map's animations on the frame clock.
 The page tells a mouse wheel's notches, which the recognizer eases, from a
 trackpad's continuous pixels, which it applies at once, by how browsers
-report each (`wheelDelta` in web/main.ts: Firefox's lines, Safari's
-4.000244 px steps, Chromium's legacy `wheelDeltaY`); those rules aren't
+report each (`wheelDelta` in web/main.ts: Firefox's lines and Safari's
+4.000244 px steps; Chromium's notches pass as pixels); those rules aren't
 checked on real hardware yet. A ResizeObserver resizes the map with the
 window, and the map follows the window's pixel ratio. The canvas covers
 exactly the device pixels the map draws, as GL JS's does, so that the
