@@ -412,6 +412,6 @@ pub fn factory() -> ImplFactory {
     let file_sources = proxy_file_sources();
     Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions, impl_options: &ImplOptions| {
         let _ = &run_loop;
-        Ok(Box::new(Impl::new(metadata, &file_sources, resource_options, *impl_options)?) as Box<dyn TestRunnerImpl>)
+        Ok(Box::new(Impl::new(metadata, &file_sources, resource_options, *impl_options)?))
     })
 }

@@ -159,7 +159,7 @@ impl<'a> CaptureView<'a> {
         state: &'a TransformState,
         transform_params: &crate::paint_parameters::TransformParameters,
         translation: [f32; 2],
-        anchor: mln_style_types::TranslateAnchorType,
+        anchor: TranslateAnchorType,
         near_clipped: bool,
     ) -> Self {
         let unwrapped = tile_id.to_unwrapped();
@@ -217,7 +217,7 @@ pub(crate) fn capture_retained_features<'a>(
     state: &'a TransformState,
     transform_params: &crate::paint_parameters::TransformParameters,
     translation: [f32; 2],
-    anchor: mln_style_types::TranslateAnchorType,
+    anchor: TranslateAnchorType,
     mut visible: impl FnMut(usize) -> bool,
     mut bound: impl FnMut(&CaptureView<'_>, usize, usize) -> Option<NDCBound>,
 ) {
@@ -742,7 +742,7 @@ pub trait RenderLayer {
         _zoom: f32,
         _transform_state: &TransformState,
         _pixels_to_tile_units: f32,
-        _projector: &mln_map_types::TileProjector<'_>,
+        _projector: &TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         false

@@ -4266,9 +4266,9 @@ fn partial_camera_commands_finish_together_for_still_image() {
     let observer = Rc::new(EventObserver::default());
     let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
-    let push = |event: i32| {
+    let push = |event: i32| -> Option<TransitionEndFn> {
         let events = observer.events.clone();
-        Some(Arc::new(move |_: &TransitionEnd| events.lock().push(event)) as TransitionEndFn)
+        Some(Arc::new(move |_: &TransitionEnd| events.lock().push(event)))
     };
     let position = AnimationOptions { transition_end_fn: push(1), ..AnimationOptions::new(Duration::from_secs(5)) };
     let bearing = AnimationOptions { transition_end_fn: push(2), ..AnimationOptions::new(Duration::from_secs(10)) };

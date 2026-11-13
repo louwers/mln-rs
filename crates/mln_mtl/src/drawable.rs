@@ -530,7 +530,7 @@ impl drawable::Drawable for Drawable {
             }
             let primitive_type = get_primitive_type(segment.get_mode().type_);
             // In bytes, not indexes.
-            let index_offset = std::mem::size_of::<u16>() * ml_segment.index_offset;
+            let index_offset = size_of::<u16>() * ml_segment.index_offset;
             debug_assert!(ml_segment.index_offset + ml_segment.index_length <= indexes.elements());
             // SAFETY: the segment's indexes are in the index buffer and
             // refer to vertices of the bound buffers.

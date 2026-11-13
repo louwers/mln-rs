@@ -13,7 +13,7 @@ pub struct HeatmapDrawableUBO {
     /* 76 */ pub globe_extrude_scale: f32,
     /* 80 */
 }
-const _: () = assert!(std::mem::size_of::<HeatmapDrawableUBO>() == 5 * 16);
+const _: () = assert!(size_of::<HeatmapDrawableUBO>() == 5 * 16);
 
 /// Evaluated properties that do not depend on the tile (16 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -25,4 +25,4 @@ pub struct HeatmapEvaluatedPropsUBO {
     /* 12 */ pub padding: f32,
     /* 16 */
 }
-const _: () = assert!(std::mem::size_of::<HeatmapEvaluatedPropsUBO>() == 16);
+const _: () = assert!(size_of::<HeatmapEvaluatedPropsUBO>() == 16);

@@ -122,7 +122,7 @@ mod tests {
             })
             .collect();
         let renderables: Vec<(UnwrappedTileID, &dyn Tile)> =
-            expected.iter().zip(tiles.iter()).map(|((id, _), tile)| (*id, tile as &dyn Tile)).collect();
+            expected.iter().zip(tiles.iter()).map(|((id, _), tile)| -> (_, &dyn Tile) { (*id, tile) }).collect();
         update_tile_masks(&renderables);
         for ((id, mask), tile) in expected.iter().zip(tiles.iter()) {
             let expected_mask: TileMask = mask.iter().copied().collect();

@@ -78,7 +78,7 @@ fn tile_parameters<'a>(
         capture_rendered_features: false,
         image_manager: crate::image_manager::ImageManager::create(),
         glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
-        dynamic_texture_atlas: std::sync::Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+        dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
         tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
             thread_pool.clone(),
         )),

@@ -297,7 +297,7 @@ impl FrameTarget for BorrowedTarget {
                 }
             }
         }
-        image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
+        image.clone().map(|image| -> Rc<dyn frame::DrawTarget> { image })
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {

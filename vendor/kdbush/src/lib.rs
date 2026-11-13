@@ -179,7 +179,7 @@ impl<N: Number, I: Index> KDBush<N, I> {
 
     /// `fill(points)`
     pub fn fill<P: Nth<Number = N>>(&mut self, points: &[P]) {
-        debug_assert_eq!(self.points, [] as [(N, N); 0]);
+        debug_assert_eq!(self.points, Vec::<(N, N)>::new());
         let size = I::from_usize(points.len());
 
         if size == I::ZERO {

@@ -85,8 +85,8 @@ pub struct RenderTree {
     pub(crate) layer_render_items: VecMap<u32, LayerRenderItem>,
     source_render_items: Vec<Box<dyn RenderItem>>,
     // symbols:
-    layers_need_placement: Vec<crate::render_layer::RenderLayerPtr>,
-    layers_following_placement: Vec<crate::render_layer::RenderLayerPtr>,
+    layers_need_placement: Vec<RenderLayerPtr>,
+    layers_following_placement: Vec<RenderLayerPtr>,
     placement: Option<std::rc::Rc<crate::text::placement::Placement>>,
     update_symbol_opacities: bool,
     start_time: mln_util::time::Instant,
@@ -114,8 +114,8 @@ impl RenderTree {
     /// symbols: the placement half of the C++ `RenderTreeImpl` constructor.
     pub(crate) fn set_placement(
         &mut self,
-        layers_need_placement: Vec<crate::render_layer::RenderLayerPtr>,
-        layers_following_placement: Vec<crate::render_layer::RenderLayerPtr>,
+        layers_need_placement: Vec<RenderLayerPtr>,
+        layers_following_placement: Vec<RenderLayerPtr>,
         placement: std::rc::Rc<crate::text::placement::Placement>,
         update_symbol_opacities: bool,
     ) {

@@ -200,7 +200,7 @@ pub fn proxy_file_sources() -> FileSourceManager {
         FileSourceType::ResourceLoader,
         Arc::new(move |file_sources: &FileSourceManager, resource_options: &ResourceOptions| {
             let file_source = resource_loader_factory(file_sources, resource_options);
-            Arc::new(ProxyFileSource::new(file_source, file_sources, resource_options)) as Arc<dyn FileSource>
+            Arc::new(ProxyFileSource::new(file_source, file_sources, resource_options))
         }),
     );
     file_sources

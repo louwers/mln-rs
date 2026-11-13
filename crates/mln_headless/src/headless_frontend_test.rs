@@ -35,7 +35,7 @@ fn render_still_in_continuous_mode_is_an_error() {
     let mut map = Map::new(MapOptions { size, ..Default::default() }).unwrap();
     frontend.attach(&map);
     let error = frontend.render(&mut map).err().expect("error");
-    assert_eq!(error, mln_util::Error::invalid_state("Map is not in static or tile image render modes"));
+    assert_eq!(error, Error::invalid_state("Map is not in static or tile image render modes"));
 }
 
 /// A style of one background layer of `color`.

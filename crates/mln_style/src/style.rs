@@ -49,7 +49,7 @@ impl Style {
 
     #[must_use]
     pub fn with_file_source(
-        file_source: Option<std::sync::Arc<dyn mln_storage::FileSource>>,
+        file_source: Option<Arc<dyn mln_storage::FileSource>>,
         pixel_ratio: f32,
         thread_pool: mln_actor::TaggedScheduler,
     ) -> Self {
@@ -120,7 +120,7 @@ impl Style {
     /// `FontFace::fallback(url, ranges).with_data(bytes)` for a font file it
     /// holds in memory.
     pub fn set_fallback_font_face_list(&mut self, faces: mln_text::glyph::FontFaces) {
-        self.impl_.set_fallback_font_faces(Some(std::sync::Arc::new(faces)));
+        self.impl_.set_fallback_font_faces(Some(Arc::new(faces)));
     }
 
     // Light

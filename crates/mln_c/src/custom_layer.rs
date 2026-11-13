@@ -130,7 +130,7 @@ mod native {
         #[cfg(target_vendor = "apple")]
         if let Some(encoder) = encoder.downcast_ref::<mln_mtl::CustomLayerEncoder>() {
             data.metal = crate::generated::types::mln_metal_custom_layer_encoder {
-                command_buffer: mln_mtl::objc2::rc::Retained::as_ptr(&encoder.command_buffer).cast_mut().cast(),
+                command_buffer: objc2::rc::Retained::as_ptr(&encoder.command_buffer).cast_mut().cast(),
             };
             return Some((crate::generated::types::MLN_RENDER_BACKEND_METAL, data));
         }

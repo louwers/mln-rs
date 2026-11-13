@@ -368,7 +368,7 @@ where
         || (parameters.zoom_changed && dependencies.intersects(Dependency::ZOOM))
         || (parameters.global_state_changed
             && dependencies.intersects(Dependency::GLOBAL_STATE)
-            && crate::expression::global_state_refs_intersect(
+            && global_state_refs_intersect(
                 property.get_value().get_global_state_refs(),
                 parameters.changed_global_state_keys.as_deref(),
             ));

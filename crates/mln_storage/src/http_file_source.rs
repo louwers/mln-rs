@@ -27,7 +27,6 @@
 // read in the three formats of RFC 9110 only, where libcurl's `curl_getdate`
 // also takes other zones and free-form dates.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -350,7 +349,7 @@ impl HTTPFileSource {
     /// calling thread's `RunLoop`.
     pub(crate) fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
+        let mailbox = Mailbox::with_target(&scheduler::get_current(), state);
         let cancellation = Arc::new(Cancellation::default());
         let header_transform = self.header_transform.lock().clone();
         let headers = header_transform.headers(resource.kind, &resource.url);

@@ -82,7 +82,7 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
 /// Runs `f` with an upload pass of an offscreen target (the C++ tests create
 /// a `gl::HeadlessBackend`, a context and an upload pass).
 fn with_upload_pass(f: impl FnOnce(&dyn mln_gfx::UploadPass)) {
-    let backend = std::rc::Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    let backend = Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
     let target = OffscreenTarget::new(backend.clone(), Size { width: 512, height: 256 });
     let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
     let context = backend.get_context();
@@ -381,7 +381,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         .unwrap();
     assert!(bucket.has_data());
 
-    let backend = std::rc::Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    let backend = Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
     let target = OffscreenTarget::new(backend.clone(), Size { width: 512, height: 256 });
     let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
     let context = backend.get_context();

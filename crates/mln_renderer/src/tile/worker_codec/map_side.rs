@@ -227,7 +227,7 @@ impl MapCodec {
             // Before anything can fail: their bins are released when they
             // drop.
             let atlases = head.atlases.map(|mut atlases| {
-                atlases.dynamic_texture_atlas = Some(self.atlas.clone() as Arc<dyn TextureAtlas>);
+                atlases.dynamic_texture_atlas = Some(self.atlas.clone());
                 Arc::new(atlases)
             });
             let Some(worker_type) = self.tiles.get(&head.tile).map(|state| state.worker_type) else {

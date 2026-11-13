@@ -506,7 +506,7 @@ pub trait DrawableBuilder {
                     Some(verts.clone()),
                     0, // offsetof(LineLayoutVertex, a1)
                     /*vertexOffset=*/ 0,
-                    std::mem::size_of::<LineLayoutVertex>() as u32,
+                    size_of::<LineLayoutVertex>() as u32,
                     AttributeDataType::Short2,
                 );
             }
@@ -515,7 +515,7 @@ pub trait DrawableBuilder {
                     Some(verts),
                     4, // offsetof(LineLayoutVertex, a2)
                     /*vertexOffset=*/ 0,
-                    std::mem::size_of::<LineLayoutVertex>() as u32,
+                    size_of::<LineLayoutVertex>() as u32,
                     AttributeDataType::UByte4,
                 );
             }

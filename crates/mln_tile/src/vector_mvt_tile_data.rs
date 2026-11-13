@@ -378,7 +378,7 @@ impl GeometryTileData for VectorMVTTileData {
 
     fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, MlnError> {
         match self.try_get_layer(name) {
-            Ok(layer) => Ok(layer.map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>)),
+            Ok(layer) => Ok(layer.map(|layer| -> Box<dyn GeometryTileLayer + '_> { Box::new(layer) })),
             Err(e) => Err(MlnError::native(e.to_string())),
         }
     }

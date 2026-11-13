@@ -192,7 +192,7 @@ pub(crate) trait RenderSource {
     /// Makes the source's feature state `states`, `None` for no state, in
     /// place of what it held, as of the next `prepare`. Giving the same
     /// `states` again changes nothing.
-    fn set_feature_states(&mut self, _states: Option<&std::sync::Arc<crate::bucket::LayerFeatureStates>>) {}
+    fn set_feature_states(&mut self, _states: Option<&Arc<crate::bucket::LayerFeatureStates>>) {}
 
     fn get_feature_state(
         &self,
@@ -222,7 +222,7 @@ pub(crate) trait RenderSource {
         _options: &crate::query::RenderedQueryOptions,
         _global_state: Option<&mln_style::expression::GlobalStateMap>,
         _proj_matrix: &mln_util::mat4::Mat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
+    ) -> Result<crate::geometry::feature_index::QueryResults, Error> {
         Ok(crate::geometry::feature_index::QueryResults::default())
     }
 
@@ -230,7 +230,7 @@ pub(crate) trait RenderSource {
         &self,
         _options: &crate::query::SourceQueryOptions,
         _global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         Ok(Vec::new())
     }
 
@@ -242,7 +242,7 @@ pub(crate) trait RenderSource {
         _extension: &str,
         _extension_field: &str,
         _args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
+    ) -> Result<crate::query::FeatureExtensionValue, Error> {
         Ok(crate::query::FeatureExtensionValue::default())
     }
 

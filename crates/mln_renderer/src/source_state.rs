@@ -406,8 +406,8 @@ mod tests {
         state
     }
 
-    fn render_frame(state: &mut SourceFeatureState, tiles: &[&StubTile]) {
-        state.coalesce_changes(tiles.iter().map(|tile| *tile as &dyn Tile));
+    fn render_frame(state: &mut SourceFeatureState, tiles: &[&dyn Tile]) {
+        state.coalesce_changes(tiles.iter().copied());
     }
 
     // gtest: SourceFeatureState.CoalesceChanges

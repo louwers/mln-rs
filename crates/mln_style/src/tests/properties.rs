@@ -181,7 +181,7 @@ fn possibly_evaluated_evaluate_per_feature() {
     use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
     use crate::tests::util::{StubGeometryTileFeature, property_map};
 
-    let feature = StubGeometryTileFeature::new(property_map(&[("r", feature::Value::Double(7.5))]));
+    let feature = StubGeometryTileFeature::new(property_map(&[("r", Value::Double(7.5))]));
 
     // A constant.
     let mut paint = CirclePaintProperties::PossiblyEvaluated {

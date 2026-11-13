@@ -43,7 +43,7 @@ fn data(res: &Response) -> &[u8] {
 }
 
 /// The seconds since `start`.
-fn seconds_since(start: mln_util::time::Instant) -> f64 {
+fn seconds_since(start: Instant) -> f64 {
     start.elapsed().as_secs_f64()
 }
 

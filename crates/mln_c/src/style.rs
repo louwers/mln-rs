@@ -1024,9 +1024,9 @@ impl TileCallbacks {
     /// drops them.
     fn into_runtime(callbacks: &Arc<Self>) -> CustomSourceCallbacks {
         let fetch = Arc::clone(callbacks);
-        let cancel = callbacks.cancel_tile.map(|cancel_tile| {
+        let cancel = callbacks.cancel_tile.map(|cancel_tile| -> Box<dyn Fn(CanonicalTileID) + Send + Sync> {
             let callbacks = Arc::clone(callbacks);
-            Box::new(move |tile| callbacks.call(cancel_tile, tile)) as Box<dyn Fn(CanonicalTileID) + Send + Sync>
+            Box::new(move |tile| callbacks.call(cancel_tile, tile))
         });
         CustomSourceCallbacks {
             fetch_tile: Box::new(move |tile| fetch.call(fetch.fetch_tile, tile)),

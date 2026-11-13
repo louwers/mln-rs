@@ -576,7 +576,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let _ = &tweaker;
 
             let vertices = bucket_vertices(geometry, bucket, &bucket.vertices);
-            let stride = std::mem::size_of::<FillExtrusionLayoutVertex>() as u32;
+            let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
             {
                 let mut attrs = vertex_attrs.borrow_mut();
                 if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
@@ -605,7 +605,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             let instance_vertex_attrs = context.create_vertex_attribute_array();
             {
-                let static_stride = std::mem::size_of::<FillExtrusionStaticVertex>() as u32;
+                let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
                 let mut attrs = instance_vertex_attrs.borrow_mut();
                 if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
                 {

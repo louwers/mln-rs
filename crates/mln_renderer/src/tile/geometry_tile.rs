@@ -23,7 +23,6 @@
 // Not supported: image patches in GeometryTileRenderData (same-size runtime
 // image updates).
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -533,7 +532,7 @@ impl GeometryTile {
             }
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        mailbox.open(&scheduler::get_current(), inner.clone() as Rc<dyn Any>);
+        mailbox.open(&scheduler::get_current(), inner.clone());
         GeometryTile { inner }
     }
 
@@ -785,7 +784,7 @@ impl Tile for GeometryTile {
         global_state: Option<&GlobalStateMap>,
         proj_matrix: &Mat4,
         feature_state: &SourceFeatureState,
-    ) -> Result<(), mln_util::error::Error> {
+    ) -> Result<(), Error> {
         let layout_result = self.inner.layout_result.borrow().clone();
         // `if (!getData()) return;`
         let Some(layout_result) = layout_result else {
@@ -825,7 +824,7 @@ impl Tile for GeometryTile {
         result: &mut Vec<Feature>,
         options: &SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
-    ) -> Result<(), mln_util::error::Error> {
+    ) -> Result<(), Error> {
         let layout_result = self.inner.layout_result.borrow().clone();
         // Data not yet available, or tile is empty
         let Some(layout_result) = layout_result else {

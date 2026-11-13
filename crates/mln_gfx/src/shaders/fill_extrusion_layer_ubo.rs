@@ -19,7 +19,7 @@ pub struct FillExtrusionDrawableUBO {
     /* 108 */ pub pad1: f32,
     /* 112 */
 }
-const _: () = assert!(std::mem::size_of::<FillExtrusionDrawableUBO>() == 7 * 16);
+const _: () = assert!(size_of::<FillExtrusionDrawableUBO>() == 7 * 16);
 
 /// The fill extrusion shader's per-tile uniform block (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -32,7 +32,7 @@ pub struct FillExtrusionTilePropsUBO {
     /* 44 */ pub pad2: f32,
     /* 48 */
 }
-const _: () = assert!(std::mem::size_of::<FillExtrusionTilePropsUBO>() == 3 * 16);
+const _: () = assert!(size_of::<FillExtrusionTilePropsUBO>() == 3 * 16);
 
 /// Evaluated properties that do not depend on the tile (80 bytes). `color`
 /// is the premultiplied `mln::Color` as r, g, b, a floats.
@@ -54,4 +54,4 @@ pub struct FillExtrusionPropsUBO {
     /* 76 */ pub pad2: f32,
     /* 80 */
 }
-const _: () = assert!(std::mem::size_of::<FillExtrusionPropsUBO>() == 5 * 16);
+const _: () = assert!(size_of::<FillExtrusionPropsUBO>() == 5 * 16);

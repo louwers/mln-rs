@@ -51,7 +51,7 @@ impl ThreadedScheduler {
     }
 
     fn this_thread_is_owned(&self) -> bool {
-        OWNING_THREAD_POOL.with(std::cell::Cell::get) == Arc::as_ptr(&self.shared) as usize
+        OWNING_THREAD_POOL.with(Cell::get) == Arc::as_ptr(&self.shared) as usize
     }
 }
 

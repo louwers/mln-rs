@@ -218,5 +218,5 @@ fn set_mlt_tile_data() {
     let options = SourceQueryOptions { source_layers: Some(vec!["water".to_owned()]), filter: None };
     let mut result = Vec::new();
     tile.query_source_features(&mut result, &options, None).unwrap();
-    assert_ne!(result, [] as [mln_util::feature::Feature; 0]);
+    assert_ne!(result, Vec::<mln_util::feature::Feature>::new());
 }

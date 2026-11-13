@@ -1181,7 +1181,7 @@ impl Context {
             pipeline_info.input_bindings.push(
                 vk::VertexInputBindingDescription::default()
                     .binding(1)
-                    .stride(std::mem::size_of::<GlobeClipMaskInstance>() as u32)
+                    .stride(size_of::<GlobeClipMaskInstance>() as u32)
                     .input_rate(vk::VertexInputRate::INSTANCE),
             );
             for i in 0..3 {
@@ -1190,7 +1190,7 @@ impl Context {
                         .binding(1)
                         .location(1 + i)
                         .format(PipelineInfo::vulkan_format(AttributeDataType::Float4))
-                        .offset(i * std::mem::size_of::<[f32; 4]>() as u32),
+                        .offset(i * size_of::<[f32; 4]>() as u32),
                 );
             }
             pipeline_info.update_vertex_input_hash();
@@ -1278,7 +1278,7 @@ impl Context {
                         command_buffer,
                         0,
                         &[clip_mesh.vertices.get_vulkan_buffer(), instance_buffer.get_vulkan_buffer()],
-                        &[0, (i * std::mem::size_of::<GlobeClipMaskInstance>()) as vk::DeviceSize],
+                        &[0, (i * size_of::<GlobeClipMaskInstance>()) as vk::DeviceSize],
                     );
                     device.cmd_bind_index_buffer(
                         command_buffer,

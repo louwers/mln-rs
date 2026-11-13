@@ -320,7 +320,7 @@ impl drawable::Drawable for Drawable {
                 context.state().set_line_width(gl, mode.size);
             }
             context.state().bind_vertex_array(gl, Some(vertex_array.get_id()));
-            let index_offset = (ml_segment.index_offset * std::mem::size_of::<u16>()) as i32;
+            let index_offset = (ml_segment.index_offset * size_of::<u16>()) as i32;
             // SAFETY: the vertex array has the index buffer, which holds the
             // segment's indexes, and they refer to vertices of its buffers,
             // which have the segment's instances.

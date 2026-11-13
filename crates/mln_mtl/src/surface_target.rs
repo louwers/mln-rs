@@ -343,7 +343,7 @@ impl FrameTarget for SurfaceTarget {
     /// render pass without a color attachment trips the drawables' debug
     /// assertions.
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
-        autoreleasepool(|_| self.state.acquire_drawable()).then(|| self.image.clone() as Rc<dyn frame::DrawTarget>)
+        autoreleasepool(|_| self.state.acquire_drawable()).then(|| -> Rc<dyn frame::DrawTarget> { self.image.clone() })
     }
 
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {

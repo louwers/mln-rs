@@ -875,7 +875,7 @@ impl GeometryTileWorker {
             Arc::from(self.feature_index.take().expect("feature index")),
             glyph_atlas,
             image_atlas,
-            self.dynamic_texture_atlas.clone().map(|atlas| atlas as Arc<dyn TextureAtlas>),
+            self.dynamic_texture_atlas.clone().map(|atlas| -> Arc<dyn TextureAtlas> { atlas }),
         );
         self.parent.send(TileMessage::Layout { result: layout_result, correlation_id: self.correlation_id });
         Ok(())

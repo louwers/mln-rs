@@ -615,7 +615,7 @@ pub(crate) mod tests {
         within_deadline(|| {
             let log = Log::new();
             let (queue, _) = queue_with_abandon(Some(Log::abandon));
-            let other = super::tests::queue();
+            let other = tests::queue();
             let tag = log.user_data('c');
             push(queue, move || {
                 // Push to, dispatch and release queues from inside a call.
@@ -623,7 +623,7 @@ pub(crate) mod tests {
                 push(other, move || Log::record(tag, 'o'));
                 assert_eq!(dispatch(other), MLN_STATUS_OK);
                 mln_delivery_queue_release(other);
-                let _ = super::tests::queue();
+                let _ = tests::queue();
                 Log::record(tag, 'c');
             });
             assert_eq!(dispatch(queue), MLN_STATUS_OK);

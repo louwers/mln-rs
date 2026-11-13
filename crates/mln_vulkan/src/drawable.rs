@@ -449,7 +449,7 @@ impl drawable::Drawable for Drawable {
             return;
         }
 
-        debug_assert_eq!(std::mem::size_of_val(&self.base.ubo_index), UBO_INDEX_PUSH_CONSTANT_SIZE as usize);
+        debug_assert_eq!(size_of_val(&self.base.ubo_index), UBO_INDEX_PUSH_CONSTANT_SIZE as usize);
         // SAFETY: the command buffer is recording, and the index is the
         // push constant of the general pipeline layout.
         unsafe {

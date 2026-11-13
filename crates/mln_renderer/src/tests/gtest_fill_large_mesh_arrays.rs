@@ -290,5 +290,5 @@ fn mesh_with_nothing_to_draw_adds_nothing() {
     let mut triangles_only = Buffers::default();
     fill(&mut triangles_only, &Mesh { vertices: vec![0, 0, 1, 0, 0, 1], triangles: vec![0, 1, 2], lines: vec![] }, 16);
     assert_eq!(1, triangles_only.triangle_segments.len());
-    assert_eq!(triangles_only.line_segments, [] as [mln_gfx::shaders::segment::SegmentBase; 0]);
+    assert_eq!(triangles_only.line_segments, Vec::<SegmentBase>::new());
 }

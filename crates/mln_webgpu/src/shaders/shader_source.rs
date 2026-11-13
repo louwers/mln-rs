@@ -74,12 +74,12 @@ pub(crate) struct ShaderSource {
 
 // src/mln/shaders/webgpu/background.cpp
 const BACKGROUND_ATTRIBUTES: &[AttributeInfo] =
-    &[AttributeInfo { index: 3, data_type: AttributeDataType::Short2, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
+    &[AttributeInfo { index: 3, data_type: Short2, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
 const BACKGROUND_PATTERN_TEXTURES: &[TextureInfo] = &[TextureInfo { index: 0, id: ID_BACKGROUND_IMAGE_TEXTURE }];
 
 // src/mln/shaders/webgpu/clipping_mask.cpp
 const CLIPPING_MASK_ATTRIBUTES: &[AttributeInfo] =
-    &[AttributeInfo { index: 2, data_type: AttributeDataType::Short2, id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE }];
+    &[AttributeInfo { index: 2, data_type: Short2, id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE }];
 
 static BACKGROUND_SHADER: ShaderSource = ShaderSource {
     wgsl: &wgsl_sources::BACKGROUND_SHADER,

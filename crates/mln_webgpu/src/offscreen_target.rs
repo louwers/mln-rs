@@ -69,7 +69,7 @@ impl FrameTarget for OffscreenTarget {
             );
             *image = Some(Rc::new(DrawTarget::new(size, Rc::new(resource))));
         }
-        image.clone().map(|image| image as Rc<dyn frame::DrawTarget>)
+        image.clone().map(|image| -> Rc<dyn frame::DrawTarget> { image })
     }
 
     fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {

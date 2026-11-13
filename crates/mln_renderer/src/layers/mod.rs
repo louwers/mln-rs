@@ -74,7 +74,7 @@ pub(crate) fn drawable_binders_slot(bucket: &BucketPtr, layer_id: &str) -> Optio
         bucket: bucket.clone(),
         layer_id: layer_id.to_owned(),
         version: std::cell::Cell::new(bucket.get_version()),
-    }) as Rc<dyn Any>)
+    }))
 }
 
 /// Refreshes the drawable's copies of the bucket's data-driven attributes
@@ -134,7 +134,7 @@ impl DrawableRenderTile {
 #[must_use]
 pub(crate) fn drawable_render_tile_slot(owner: &Rc<Vec<RenderTile>>, tile: &RenderTile) -> Option<Rc<dyn Any>> {
     let index = owner.iter().position(|t| std::ptr::eq(t, tile))?;
-    Some(Rc::new(DrawableRenderTile { owner: owner.clone(), index }) as Rc<dyn Any>)
+    Some(Rc::new(DrawableRenderTile { owner: owner.clone(), index }))
 }
 
 pub(crate) fn get_drawable_render_tile(drawable: &dyn Drawable) -> Option<&RenderTile> {

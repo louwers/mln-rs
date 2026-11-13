@@ -241,7 +241,7 @@ impl RenderLayer for RenderBackgroundLayer {
         let tile_vertices = RenderStaticData::tile_vertices();
         let vertex_count = tile_vertices.len();
         // sizeof(a1): short2
-        let vert_size = std::mem::size_of::<[i16; 2]>();
+        let vert_size = size_of::<[i16; 2]>();
         let mut raw_vertices: Vec<u8> = vec![0; vertex_count * vert_size];
         for (i, vertex) in tile_vertices.iter().enumerate() {
             raw_vertices[i * vert_size..(i + 1) * vert_size].copy_from_slice(bytemuck::bytes_of(vertex));

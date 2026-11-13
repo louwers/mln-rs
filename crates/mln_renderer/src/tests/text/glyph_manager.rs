@@ -813,7 +813,7 @@ impl FontFaceEngine for DeferredEngine {
 
     fn load(&self, _type: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
         self.loads.fetch_add(1, Ordering::SeqCst);
-        (data.as_bytes() == b"font").then(|| Box::new(FakeShaper) as Box<dyn FontFaceShaper>)
+        (data.as_bytes() == b"font").then(|| -> Box<dyn FontFaceShaper> { Box::new(FakeShaper) })
     }
 }
 

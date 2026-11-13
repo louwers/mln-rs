@@ -394,7 +394,7 @@ impl Context {
     ) -> Option<MTLRenderPipelineStatePtr> {
         let attribute = shader_source(BuiltIn::ClippingMaskProgram)?.attributes[0];
         // sizeof(gfx::Vertex<PositionOnlyLayoutAttributes>::a1): one short2
-        let vertex_size = std::mem::size_of::<[i16; 2]>();
+        let vertex_size = size_of::<[i16; 2]>();
         // A vertex descriptor tells Metal what's in the vertex buffer.
         let vertex_descriptor = MTLVertexDescriptor::vertexDescriptor();
         // SAFETY: the attribute and buffer indexes are below Metal's 31.

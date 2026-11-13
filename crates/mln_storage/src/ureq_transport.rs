@@ -64,7 +64,7 @@ impl<In: UreqTransport, A: Connector> Connector<In> for HappyEyeballsConnector<A
         if details.addrs.len() < 2 {
             // Nothing to race.
             let transport = self.per_address.connect(details, None)?;
-            return Ok(transport.map(|transport| Either::B(Box::new(transport) as Box<dyn UreqTransport>)));
+            return Ok(transport.map(|transport| -> Box<dyn UreqTransport> { Box::new(transport) }).map(Either::B));
         }
 
         let (first, second): (Vec<SocketAddr>, Vec<SocketAddr>) =
@@ -141,7 +141,7 @@ fn start_attempt<A: Connector>(
         let result = per_address
             .connect(&details, None)
             .and_then(|transport| transport.ok_or(ureq::Error::ConnectionFailed))
-            .map(|transport| Box::new(transport) as Box<dyn UreqTransport>);
+            .map(|transport| -> Box<dyn UreqTransport> { Box::new(transport) });
         // After another attempt won, nobody listens: the
         // connection closes here.
         let _ = sender.send(result);
@@ -500,7 +500,7 @@ mod tests {
                 return Err(ureq::Error::ConnectionFailed);
             }
             let transport = TcpConnector::default().connect(details, None::<()>)?;
-            Ok(transport.map(|transport| Box::new(transport) as Box<dyn UreqTransport>))
+            Ok(transport.map(|transport| -> Box<dyn UreqTransport> { Box::new(transport) }))
         }
     }
 

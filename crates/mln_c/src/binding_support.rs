@@ -231,7 +231,8 @@ mod tests {
 
     #[test]
     fn a_dart_wake_posts_zero_per_wake_and_one_on_release() {
-        let post = record_post as DartPost as *mut c_void;
+        let post: DartPost = record_post;
+        let post = post as *mut c_void;
         let mut wake = mln_wake { callback: None, user_data: core::ptr::null_mut(), release_user_data: None, queue: 0 };
         let mut out = diagnostic();
         // SAFETY: each pointer is null or to a local.
@@ -302,7 +303,7 @@ mod tests {
         let again = unsafe { mln_binding_render_session_abandon_at_exit(session, &raw mut result, NO_DIAGNOSTIC) };
         assert_eq!(again, MLN_STATUS_INVALID_STATE);
         render_session::tests::release_session(session);
-        crate::map::tests::release_map(map);
+        map::tests::release_map(map);
         runtime::tests::release(runtime);
     }
 
@@ -312,7 +313,7 @@ mod tests {
         // SAFETY: a token from `mln_binding_owner_token_create`, used once.
         unsafe { mln_binding_owner_finalize(mln_binding_owner_token_create(session)) };
         assert_eq!(render_session::tests::snapshot(session).unwrap_err(), MLN_STATUS_INVALID_STATE);
-        crate::map::tests::release_map(map);
+        map::tests::release_map(map);
         runtime::tests::release(runtime);
     }
 }

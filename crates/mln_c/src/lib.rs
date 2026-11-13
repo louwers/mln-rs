@@ -27,6 +27,9 @@
 
 // Every export takes raw pointers from C callers.
 #![allow(unsafe_code)]
+// A cast between C's types can be to the same type on one platform only:
+// `c_char` is signed on some and unsigned on others, `c_ulong` 32 or 64 bits.
+#![allow(trivial_numeric_casts)]
 
 #[macro_use]
 mod export;

@@ -50,14 +50,14 @@ impl CollatorExpression {
         }
 
         let case_sensitive = match options.object_member("case-sensitive") {
-            Some(option) => ctx.parse(&option, 1, Some(Type::Boolean), None),
-            None => Some(Box::new(Literal::new(Value::Bool(false))) as Box<dyn Expression>),
-        }?;
+            Some(option) => ctx.parse(&option, 1, Some(Type::Boolean), None)?,
+            None => Box::new(Literal::new(Value::Bool(false))),
+        };
 
         let diacritic_sensitive = match options.object_member("diacritic-sensitive") {
-            Some(option) => ctx.parse(&option, 1, Some(Type::Boolean), None),
-            None => Some(Box::new(Literal::new(Value::Bool(false))) as Box<dyn Expression>),
-        }?;
+            Some(option) => ctx.parse(&option, 1, Some(Type::Boolean), None)?,
+            None => Box::new(Literal::new(Value::Bool(false))),
+        };
 
         let mut locale = None;
         if let Some(option) = options.object_member("locale") {

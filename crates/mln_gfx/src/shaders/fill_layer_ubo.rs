@@ -16,7 +16,7 @@ pub struct FillDrawableUBO {
     /* 76 */ pub pad2: f32,
     /* 80 */
 }
-const _: () = assert!(std::mem::size_of::<FillDrawableUBO>() == 5 * 16);
+const _: () = assert!(size_of::<FillDrawableUBO>() == 5 * 16);
 
 //
 // Fill outline
@@ -34,7 +34,7 @@ pub struct FillOutlineDrawableUBO {
     /* 76 */ pub pad2: f32,
     /* 80 */
 }
-const _: () = assert!(std::mem::size_of::<FillOutlineDrawableUBO>() == 5 * 16);
+const _: () = assert!(size_of::<FillOutlineDrawableUBO>() == 5 * 16);
 
 //
 // Fill pattern
@@ -58,7 +58,7 @@ pub struct FillPatternDrawableUBO {
     /*108 */ pub pad3: f32,
     /*112 */
 }
-const _: () = assert!(std::mem::size_of::<FillPatternDrawableUBO>() == 7 * 16);
+const _: () = assert!(size_of::<FillPatternDrawableUBO>() == 7 * 16);
 
 /// The fill pattern shader's per-tile uniform block (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -71,7 +71,7 @@ pub struct FillPatternTilePropsUBO {
     /* 44 */ pub pad2: f32,
     /* 48 */
 }
-const _: () = assert!(std::mem::size_of::<FillPatternTilePropsUBO>() == 3 * 16);
+const _: () = assert!(size_of::<FillPatternTilePropsUBO>() == 3 * 16);
 
 //
 // Fill pattern outline
@@ -99,7 +99,7 @@ pub struct FillOutlineTriangulatedDrawableUBO {
     /* 76 */ pub pad3: f32,
     /* 80 */
 }
-const _: () = assert!(std::mem::size_of::<FillOutlineTriangulatedDrawableUBO>() == 5 * 16);
+const _: () = assert!(size_of::<FillOutlineTriangulatedDrawableUBO>() == 5 * 16);
 
 /// Evaluated properties that do not depend on the tile (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -113,7 +113,7 @@ pub struct FillEvaluatedPropsUBO {
     /* 44 */ pub to_scale: f32,
     /* 48 */
 }
-const _: () = assert!(std::mem::size_of::<FillEvaluatedPropsUBO>() == 3 * 16);
+const _: () = assert!(size_of::<FillEvaluatedPropsUBO>() == 3 * 16);
 
 /// Any fill per-drawable uniform block, for consolidated UBOs: a C++ union, the
 /// size of the largest member, 112 bytes. Members are written with the `from_*`
@@ -123,7 +123,7 @@ const _: () = assert!(std::mem::size_of::<FillEvaluatedPropsUBO>() == 3 * 16);
 pub struct FillDrawableUnionUBO {
     bytes: [u8; 112],
 }
-const _: () = assert!(std::mem::size_of::<FillDrawableUnionUBO>() == 7 * 16);
+const _: () = assert!(size_of::<FillDrawableUnionUBO>() == 7 * 16);
 
 impl Default for FillDrawableUnionUBO {
     fn default() -> Self {
@@ -156,4 +156,4 @@ impl FillDrawableUnionUBO {
 pub struct FillTilePropsUnionUBO {
     pub fill_pattern_tile_props_ubo: FillPatternTilePropsUBO,
 }
-const _: () = assert!(std::mem::size_of::<FillTilePropsUnionUBO>() == 3 * 16);
+const _: () = assert!(size_of::<FillTilePropsUnionUBO>() == 3 * 16);

@@ -262,7 +262,7 @@ fn reference_can_outlive_thread() {
         worker.invoke(move |_: &TestWorker| TestWorker::send(move || h.store(true, Ordering::SeqCst)));
     }
 
-    std::thread::sleep(std::time::Duration::from_secs(10));
+    std::thread::sleep(Duration::from_secs(10));
     assert!(!happened.load(Ordering::SeqCst), "Should never happen");
 }
 
@@ -351,7 +351,7 @@ fn pool_wait() {
 
     let thread_count = 10;
     for _ in 0..thread_count {
-        pool.schedule(Box::new(|| std::thread::sleep(std::time::Duration::from_millis(100))));
+        pool.schedule(Box::new(|| std::thread::sleep(Duration::from_millis(100))));
     }
 
     pool.wait_for_empty();
@@ -367,10 +367,10 @@ fn pool_wait_recursive_add() {
         // Scheduled tasks can add more tasks
         let p2 = p.clone();
         p.schedule(Box::new(move || {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            p2.schedule(Box::new(|| std::thread::sleep(std::time::Duration::from_millis(10))));
+            std::thread::sleep(Duration::from_millis(10));
+            p2.schedule(Box::new(|| std::thread::sleep(Duration::from_millis(10))));
         }));
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(10));
     }));
 
     pool.wait_for_empty();
@@ -409,12 +409,12 @@ fn pool_wait_add() {
 
     // Wait be sure some are added
     while state.added.load(Ordering::SeqCst) < 1 {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(10));
     }
 
     // Add an item that should take long enough to be confident that
     // more items would be added by the sequential task if not blocked
-    pool.schedule(Box::new(|| std::thread::sleep(std::time::Duration::from_millis(100))));
+    pool.schedule(Box::new(|| std::thread::sleep(Duration::from_millis(100))));
 
     pool.wait_for_empty();
 
@@ -439,7 +439,7 @@ fn wrong_thread() {
 
 fn make_counter_thread(pool: TaggedScheduler, stop_flag: Arc<AtomicBool>, counter: Arc<AtomicUsize>) -> Task {
     Box::new(move || {
-        std::thread::sleep(std::time::Duration::from_micros(10));
+        std::thread::sleep(Duration::from_micros(10));
         counter.fetch_add(1, Ordering::SeqCst);
         if !stop_flag.load(Ordering::SeqCst) {
             pool.schedule(make_counter_thread(pool.clone(), stop_flag.clone(), counter.clone()));
@@ -463,7 +463,7 @@ fn tagged_pools() {
         pool_tag1.schedule(make_counter_thread(pool_tag1.clone(), stop_tasks1.clone(), run_count1.clone()));
         pool_tag2.schedule(make_counter_thread(pool_tag2.clone(), stop_tasks2.clone(), run_count2.clone()));
     }
-    std::thread::sleep(std::time::Duration::from_millis(150));
+    std::thread::sleep(Duration::from_millis(150));
 
     // Stop tasks on queue 1 and wait for it to empty
     stop_tasks1.store(true, Ordering::SeqCst);
@@ -478,7 +478,7 @@ fn tagged_pools() {
     // No other tasks in queue 1 ran while waiting on queue 2.
     assert_eq!(total_runs1, run_count1.load(Ordering::SeqCst));
 
-    std::thread::sleep(std::time::Duration::from_millis(150));
+    std::thread::sleep(Duration::from_millis(150));
 
     // Same for queue 2
     assert_eq!(total_runs2, run_count2.load(Ordering::SeqCst));

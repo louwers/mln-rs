@@ -234,7 +234,7 @@ impl GeometryTileLayer for VectorMLTTileLayer {
         let columns: Vec<mlt::ValueCodes<'_>> = keys
             .iter()
             .filter_map(|key| layer.get_property_column(key))
-            .map(super::mlt::PresentProperties::codes)
+            .map(mlt::PresentProperties::codes)
             .collect::<Option<_>>()?;
         let mut index: HashMap<Box<[Option<u64>]>, u32> = HashMap::new();
         let mut codes = vec![None; columns.len() + 1];
@@ -335,7 +335,7 @@ impl GeometryTileData for VectorMLTTileData {
     }
 
     fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, MlnError> {
-        Ok(self.get_mlt_layer(name).map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>))
+        Ok(self.get_mlt_layer(name).map(|layer| -> Box<dyn GeometryTileLayer + '_> { Box::new(layer) }))
     }
 
     /// The raw data, until the first decoding drops it (a tile sends its

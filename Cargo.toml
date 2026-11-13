@@ -338,6 +338,11 @@ unsafe_code = "deny"
 # A `pub` item that no other crate can reach is `pub(crate)`, so that each
 # crate's public API is what its dependents use.
 unreachable_pub = "warn"
+# Casts to the type a value already has or coerces to, and paths that spell
+# out a module whose item is in scope.
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

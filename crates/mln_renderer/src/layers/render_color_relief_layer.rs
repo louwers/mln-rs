@@ -228,7 +228,7 @@ fn color_relief_vertex_attributes(context: &dyn Context, vertices: &VertexVector
     let vertex_attrs = context.create_vertex_attribute_array();
     {
         let mut attrs = vertex_attrs.borrow_mut();
-        let stride = std::mem::size_of::<HillshadeLayoutVertex>() as u32;
+        let stride = size_of::<HillshadeLayoutVertex>() as u32;
         if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(
                 Some(vertices.clone()),

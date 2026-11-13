@@ -104,7 +104,7 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
         &self,
         font_stack: &mln_util::font_stack::FontStack,
         glyph_range: mln_text::glyph::GlyphRange,
-        error: mln_util::error::Error,
+        error: Error,
     ) {
         let range = if glyph_range.type_ == mln_text::glyph::GlyphIDType::FontPBF {
             format!("{}-{}", glyph_range.first, glyph_range.second)
@@ -333,7 +333,7 @@ impl RenderOrchestrator {
     }
 
     pub(crate) fn create_render_tree(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<RenderTree> {
-        let start_time = mln_util::time::Instant::now();
+        let start_time = Instant::now();
 
         let is_map_mode_continuous = update_parameters.mode == MapMode::Continuous;
         if !is_map_mode_continuous {
@@ -1132,7 +1132,7 @@ impl RenderOrchestrator {
                 continue;
             }
             let tweaker = Rc::new(RefCell::new(PolylineLayerTweaker::new(debug_line_properties(*type_))));
-            let weak: Weak<RefCell<dyn LayerTweaker>> = Rc::downgrade(&tweaker) as _;
+            let weak = Rc::downgrade(&tweaker);
             self.layer_group_tweakers.entry(group.borrow().get_id()).or_default().push(weak);
             self.debug_layer_tweakers.insert(*type_, (group.clone(), tweaker));
         }
@@ -1311,7 +1311,7 @@ impl RenderOrchestrator {
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
-        let render_layers: Vec<&crate::render_layer::RenderLayerPtr> = match &options.layer_ids {
+        let render_layers: Vec<&RenderLayerPtr> = match &options.layer_ids {
             Some(layer_ids) => layer_ids.iter().filter_map(|id| self.render_layers.get(id)).collect(),
             None => self.render_layers.values().collect(),
         };

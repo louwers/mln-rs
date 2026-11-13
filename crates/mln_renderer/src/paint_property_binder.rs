@@ -269,8 +269,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             return;
         }
         self.has_interleaved_buffer = true;
-        let new_vertex_offset =
-            buffer.extend_vertex_format(Self::zoom_interpolated_size(), std::mem::align_of::<f32>());
+        let new_vertex_offset = buffer.extend_vertex_format(Self::zoom_interpolated_size(), align_of::<f32>());
         if self.vertex_offset == usize::MAX {
             self.vertex_offset = new_vertex_offset;
         }
@@ -507,8 +506,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
             return;
         }
         self.has_interleaved_buffer = true;
-        let new_vertex_offset =
-            buffer.extend_vertex_format(PATTERN_ZOOM_INTERPOLATED_SIZE, std::mem::align_of::<u16>());
+        let new_vertex_offset = buffer.extend_vertex_format(PATTERN_ZOOM_INTERPOLATED_SIZE, align_of::<u16>());
         if self.vertex_offset == usize::MAX {
             self.vertex_offset = new_vertex_offset;
         }

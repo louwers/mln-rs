@@ -119,8 +119,8 @@ pub(crate) const fn image_sampler_binding(index: usize) -> u32 {
 
 /// The size of the push constants of the general pipeline layout: the
 /// drawable's index into its layer's consolidated buffers (`int ubo_index`).
-pub(crate) const UBO_INDEX_PUSH_CONSTANT_SIZE: u32 = std::mem::size_of::<u32>() as u32;
+pub(crate) const UBO_INDEX_PUSH_CONSTANT_SIZE: u32 = size_of::<u32>() as u32;
 
 /// The largest push-constant block, the globe clip mask's two matrices,
 /// which is all the guaranteed 128 bytes hold.
-pub(crate) const CLIP_MASK_PUSH_CONSTANT_SIZE: u32 = 2 * std::mem::size_of::<[f32; 16]>() as u32;
+pub(crate) const CLIP_MASK_PUSH_CONSTANT_SIZE: u32 = 2 * size_of::<[f32; 16]>() as u32;

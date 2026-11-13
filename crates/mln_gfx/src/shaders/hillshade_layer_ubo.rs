@@ -10,7 +10,7 @@ pub struct HillshadeDrawableUBO {
     /*  0 */ pub matrix: [f32; 4 * 4],
     /* 64 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadeDrawableUBO>() == 4 * 16);
+const _: () = assert!(size_of::<HillshadeDrawableUBO>() == 4 * 16);
 
 /// The hillshade shader's per-tile uniform block (32 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -25,7 +25,7 @@ pub struct HillshadeTilePropsUBO {
     /* 28 */ pub pad2: f32,
     /* 32 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadeTilePropsUBO>() == 32);
+const _: () = assert!(size_of::<HillshadeTilePropsUBO>() == 32);
 
 /// Evaluated properties that do not depend on the tile (176 bytes). The
 /// colors are the premultiplied `mln::Color` as r, g, b, a floats.
@@ -39,4 +39,4 @@ pub struct HillshadeEvaluatedPropsUBO {
     /* 112 */ pub highlights: [f32; 16],
     /* 176 */
 }
-const _: () = assert!(std::mem::size_of::<HillshadeEvaluatedPropsUBO>() == 176);
+const _: () = assert!(size_of::<HillshadeEvaluatedPropsUBO>() == 176);

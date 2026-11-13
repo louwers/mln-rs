@@ -167,7 +167,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
             image_manager: image_manager.clone(),
             glyph_manager: crate::text::glyph_manager::GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
-            tile_worker_transport: std::rc::Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
+            tile_worker_transport: Rc::new(crate::tile::tile_worker_transport::InProcessTransport::new(
                 thread_pool.clone(),
             )),
         },

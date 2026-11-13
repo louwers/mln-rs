@@ -4,7 +4,6 @@
 // own for the loader's messages, separate from the GeometryTile's mailbox
 // for its worker's replies.
 
-use std::any::Any;
 use std::cell::Cell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -122,7 +121,7 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
             loader,
         });
         // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), link.clone() as Rc<dyn Any>);
+        let mailbox = Mailbox::with_target(&scheduler::get_current(), link.clone());
         CustomTile { tile, link, mailbox, single_layer }
     }
 
@@ -179,10 +178,10 @@ impl CustomVectorTile {
             loader,
             observer,
             Box::new(move |(data, format): CustomVectorTileData| {
-                data.map(|data| match format {
-                    TileDataFormat::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)) as SharedTileData,
-                    TileDataFormat::Mlt => {
-                        Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled)) as SharedTileData
+                data.map(|data| -> SharedTileData {
+                    match format {
+                        TileDataFormat::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)),
+                        TileDataFormat::Mlt => Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled)),
                     }
                 })
             }),

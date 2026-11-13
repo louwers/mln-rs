@@ -188,7 +188,7 @@ impl RenderSource for RenderVectorSource {
         self.tile_source.set_feature_state(source_layer_id, feature_id, state);
     }
 
-    fn set_feature_states(&mut self, states: Option<&std::sync::Arc<crate::bucket::LayerFeatureStates>>) {
+    fn set_feature_states(&mut self, states: Option<&Arc<crate::bucket::LayerFeatureStates>>) {
         self.tile_source.feature_state.set_states(states);
     }
 

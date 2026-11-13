@@ -603,7 +603,7 @@ impl RenderLayer for RenderLineLayer {
                     Some(shared.clone()),
                     0, // offsetof(LineLayoutVertex, a1)
                     /*vertexOffset=*/ 0,
-                    std::mem::size_of::<LineLayoutVertex>() as u32,
+                    size_of::<LineLayoutVertex>() as u32,
                     AttributeDataType::Short2,
                 );
             }
@@ -615,7 +615,7 @@ impl RenderLayer for RenderLineLayer {
                     Some(shared),
                     4, // offsetof(LineLayoutVertex, a2)
                     /*vertexOffset=*/ 0,
-                    std::mem::size_of::<LineLayoutVertex>() as u32,
+                    size_of::<LineLayoutVertex>() as u32,
                     AttributeDataType::UByte4,
                 );
             }

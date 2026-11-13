@@ -1262,18 +1262,15 @@ mod tests {
         unread.duration_ms = f64::NAN;
         unread.velocity = -1.0;
         assert!(Animation::new(&unread).is_ok());
-        for (fields, edit, expected) in [
-            (
-                MLN_ANIMATION_OPTION_DURATION,
-                (|a: &mut mln_animation_options| a.duration_ms = 1e300) as fn(&mut _),
-                "native duration range",
-            ),
+        let cases: [(_, fn(&mut mln_animation_options), _); 6] = [
+            (MLN_ANIMATION_OPTION_DURATION, |a| a.duration_ms = 1e300, "native duration range"),
             (MLN_ANIMATION_OPTION_MAX_DURATION, |a| a.max_duration_ms = -1.0, "native duration range"),
             (MLN_ANIMATION_OPTION_VELOCITY, |a| a.velocity = 0.0, "positive and finite"),
             (MLN_ANIMATION_OPTION_MIN_ZOOM, |a| a.min_zoom = f64::INFINITY, "min_zoom must be finite"),
             (MLN_ANIMATION_OPTION_EASING, |a| a.easing.x1 = 1.5, "within [0, 1]"),
             (1 << 31, |_| {}, "unknown bits"),
-        ] {
+        ];
+        for (fields, edit, expected) in cases {
             let mut options = animation(fields);
             edit(&mut options);
             let message = Animation::new(&options).err().unwrap().message().to_owned();

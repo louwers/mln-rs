@@ -461,7 +461,7 @@ impl RenderLayer for RenderHeatmapLayer {
                     Some(bucket_vertices(geometry, bucket, &bucket.vertices)),
                     0, // offsetof(HeatmapLayoutVertex, a1)
                     /*vertex_offset=*/ 0,
-                    std::mem::size_of::<HeatmapLayoutVertex>() as u32,
+                    size_of::<HeatmapLayoutVertex>() as u32,
                     AttributeDataType::Short2,
                 );
             }
@@ -547,7 +547,7 @@ impl RenderLayer for RenderHeatmapLayer {
                 Some(shared_texture_vertices),
                 0, // offsetof(HeatmapLayoutVertex, a1)
                 /*vertex_offset=*/ 0,
-                std::mem::size_of::<HeatmapLayoutVertex>() as u32,
+                size_of::<HeatmapLayoutVertex>() as u32,
                 AttributeDataType::Short2,
             );
         }

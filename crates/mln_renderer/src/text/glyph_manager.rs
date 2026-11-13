@@ -55,7 +55,7 @@ use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct HBShapeResult {
     pub(crate) str_: Vec<u16>,
-    pub(crate) adjusts: Arc<Vec<mln_text::HBShapeAdjust>>,
+    pub(crate) adjusts: Arc<Vec<HBShapeAdjust>>,
 }
 
 pub(crate) type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<u16>, HBShapeResult>>>;
@@ -319,10 +319,7 @@ impl GlyphManager {
             let url = self.get_font_face_url(range.type_);
             if url.is_empty() {
                 // C++ logs and requests an empty Resource.
-                mln_util::logging::Log::error(
-                    mln_util::logging::Event::Style,
-                    "Try download a glyph doesn't in current faces",
-                );
+                Log::error(Event::Style, "Try download a glyph doesn't in current faces");
             }
             Resource::font_face(&url)
         };

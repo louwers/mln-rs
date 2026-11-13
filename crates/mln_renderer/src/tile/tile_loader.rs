@@ -86,10 +86,12 @@ impl LoaderTile for GeometryTileInner {
     fn set_data(&self, data: Option<Data>, encoding: VectorTileEncoding) {
         if !self.is_obsolete() {
             self.missing.set(false);
-            let data: Option<SharedTileData> = data.map(|data| match encoding {
-                VectorTileEncoding::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)) as SharedTileData,
-                VectorTileEncoding::Mlt { fast_pfor_enabled } => {
-                    Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled)) as SharedTileData
+            let data = data.map(|data| -> SharedTileData {
+                match encoding {
+                    VectorTileEncoding::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)),
+                    VectorTileEncoding::Mlt { fast_pfor_enabled } => {
+                        Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled))
+                    }
                 }
             });
             GeometryTileInner::set_data(self, data);

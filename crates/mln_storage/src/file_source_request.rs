@@ -3,7 +3,6 @@
 // `ActorRef<FileSourceRequestState>` whose messages run in the requesting
 // thread's RunLoop, as the C++ mailbox on `Scheduler::GetCurrent()` does.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -40,7 +39,7 @@ impl FileSourceRequest {
     #[must_use]
     pub(crate) fn new(callback: Callback) -> Self {
         let state = Rc::new(FileSourceRequestState { response_callback: Rc::new(RefCell::new(callback)) });
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
+        let mailbox = Mailbox::with_target(&scheduler::get_current(), state);
         FileSourceRequest { cancel_callback: None, mailbox }
     }
 

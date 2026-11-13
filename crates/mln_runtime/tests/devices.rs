@@ -1401,7 +1401,7 @@ mod metal {
                 4,
                 region,
                 0,
-            )
+            );
         };
         pixel
     }

@@ -306,7 +306,7 @@ fn geojsonvt_clip_vertex_on_tile_border() {
     let mut index = GeoJSONVT::from_geojson(&geojson, options);
 
     let tile = index.get_tile(13, 2344, 3134).unwrap();
-    assert_ne!(tile.features, [] as [feature::Feature<i16>; 0]);
+    assert_ne!(tile.features, Vec::<feature::Feature<i16>>::new());
     let expected = vec![Point::new(-2048i16, 2747), Point::new(408, 5037)];
     assert_eq!(tile.features[0].geometry, Geometry::LineString(expected));
 

@@ -31,8 +31,8 @@ use crate::offline_schema::OFFLINE_DATABASE_SCHEMA;
 use crate::resource::{Kind, Resource, TileData};
 use crate::response::Response;
 use crate::sqlite3::{
-    self, Database, OpenFlag, SqliteError, Transaction, TransactionMode, extended_result_code, get_bool, get_bytes,
-    get_i64, get_optional_bytes, get_optional_i64, get_optional_string, result_code,
+    Database, OpenFlag, SqliteError, Transaction, TransactionMode, extended_result_code, get_bool, get_bytes, get_i64,
+    get_optional_bytes, get_optional_i64, get_optional_string, result_code,
 };
 
 /// The most rows whose `accessed` timestamp waits to be written. Reads of
@@ -569,7 +569,7 @@ impl OfflineDatabase {
     }
 
     fn get_pragma_i64(&mut self, sql: &str) -> DbResult<i64> {
-        Ok(self.query_row(sql, [], |row| Ok(sqlite3::get_i64(row, 0)?))?.unwrap_or(0))
+        Ok(self.query_row(sql, [], |row| Ok(get_i64(row, 0)?))?.unwrap_or(0))
     }
 
     /// `get(const Resource&)`.

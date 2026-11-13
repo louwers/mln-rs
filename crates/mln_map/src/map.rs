@@ -815,19 +815,19 @@ impl Map {
     /// The bounds of the area the map shows from `camera`.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a camera whose
     /// corners have no `LatLng`.
-    pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<mln_util::geo::LatLngBounds, Error> {
-        let mut shallow = crate::transform::Transform::from_state(self.transform.get_state().clone());
+    pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
+        let mut shallow = Transform::from_state(self.transform.get_state().clone());
         let size = shallow.get_state().get_size();
 
         shallow.jump_to(camera);
         if shallow.get_state().is_globe_rendering() {
             return globe_bounds(&shallow);
         }
-        Ok(mln_util::geo::LatLngBounds::hull(
-            shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, 0.0), mln_util::geo::WrapMode::Wrapped)?,
+        Ok(LatLngBounds::hull(
+            shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, 0.0), WrapMode::Wrapped)?,
             shallow.screen_coordinate_to_lat_lng(
                 &ScreenCoordinate::new(f64::from(size.width), f64::from(size.height)),
-                mln_util::geo::WrapMode::Wrapped,
+                WrapMode::Wrapped,
             )?,
         ))
     }
@@ -878,7 +878,7 @@ impl Map {
             return camera_for_lat_lngs(lat_lngs, &self.transform, padding);
         }
 
-        let mut transform = crate::transform::Transform::from_state(self.transform.get_state().clone());
+        let mut transform = Transform::from_state(self.transform.get_state().clone());
 
         transform.jump_to(&CameraOptions { bearing, pitch, ..Default::default() });
 
@@ -912,7 +912,7 @@ impl Map {
     /// antimeridian. Fails as
     /// [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
     pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
-        let mut shallow = crate::transform::Transform::from_state(self.transform.get_state().clone());
+        let mut shallow = Transform::from_state(self.transform.get_state().clone());
         let size = shallow.get_state().get_size();
 
         shallow.jump_to(camera);
@@ -1399,7 +1399,7 @@ impl Map {
 // padding)` of map.cpp (Map::cameraForLatLngs and MapProjection use it).
 pub(crate) fn camera_for_lat_lngs(
     lat_lngs: &[LatLng],
-    transform: &crate::transform::Transform,
+    transform: &Transform,
     padding: &EdgeInsets,
 ) -> Result<CameraOptions, Error> {
     if lat_lngs.is_empty() {
@@ -1415,7 +1415,7 @@ pub(crate) fn camera_for_lat_lngs(
 /// Fails as `Map::camera_for_lat_lngs` does.
 fn camera_for_lat_lngs_on_screen(
     lat_lngs: &[LatLng],
-    transform: &crate::transform::Transform,
+    transform: &Transform,
     padding: &EdgeInsets,
 ) -> Result<CameraOptions, Error> {
     let size = transform.get_state().get_size();
@@ -1522,10 +1522,10 @@ fn keep_smallest_scale(smallest: &mut f64, candidate: Option<f64>) {
 /// Fails as `Map::camera_for_lat_lngs` does.
 fn camera_for_lat_lngs_on_globe(
     lat_lngs: &[LatLng],
-    transform: &crate::transform::Transform,
+    transform: &Transform,
     padding: &EdgeInsets,
 ) -> Result<CameraOptions, Error> {
-    let mut flat = crate::transform::Transform::from_state(transform.get_state().clone());
+    let mut flat = Transform::from_state(transform.get_state().clone());
     flat.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Mercator));
     flat.jump_to(&CameraOptions { pitch: Some(0.0), roll: Some(0.0), ..Default::default() });
     let fit = camera_for_lat_lngs_on_screen(lat_lngs, &flat, padding)?;
@@ -1534,7 +1534,7 @@ fn camera_for_lat_lngs_on_globe(
     };
 
     // Solve with the padding the returned camera is shown with.
-    let mut globe = crate::transform::Transform::from_state(transform.get_state().clone());
+    let mut globe = Transform::from_state(transform.get_state().clone());
     globe.jump_to(&CameraOptions {
         center: Some(fit_center),
         zoom: Some(fit_zoom),
@@ -1611,7 +1611,7 @@ fn camera_for_lat_lngs_on_globe(
 /// the center, where points off the planet fall on its horizon, widened to
 /// every longitude when a pole is on screen.
 /// Fails as `Map::lat_lng_bounds_for_camera` does.
-fn globe_bounds(transform: &crate::transform::Transform) -> Result<LatLngBounds, Error> {
+fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
     let width = f64::from(transform.get_state().get_size().width);
     let height = f64::from(transform.get_state().get_size().height);
     let center = transform.get_lat_lng(WrapMode::Wrapped);

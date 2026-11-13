@@ -484,7 +484,7 @@ impl RenderLayer for RenderFillLayer {
                     Some(bucket_vertices(geometry, bucket, &bucket.vertices)),
                     0, // offsetof(FillLayoutVertex, a1)
                     /*vertexOffset=*/ 0,
-                    std::mem::size_of::<FillLayoutVertex>() as u32,
+                    size_of::<FillLayoutVertex>() as u32,
                     AttributeDataType::Short2,
                 );
             }
@@ -500,7 +500,7 @@ impl RenderLayer for RenderFillLayer {
                         Some(shared.clone()),
                         0, // offsetof(LineLayoutVertex, a1)
                         /*vertexOffset=*/ 0,
-                        std::mem::size_of::<LineLayoutVertex>() as u32,
+                        size_of::<LineLayoutVertex>() as u32,
                         AttributeDataType::Short2,
                     );
                 }
@@ -511,7 +511,7 @@ impl RenderLayer for RenderFillLayer {
                         Some(shared),
                         4, // offsetof(LineLayoutVertex, a2)
                         /*vertexOffset=*/ 0,
-                        std::mem::size_of::<LineLayoutVertex>() as u32,
+                        size_of::<LineLayoutVertex>() as u32,
                         AttributeDataType::UByte4,
                     );
                 }
@@ -687,8 +687,8 @@ impl RenderLayer for RenderFillLayer {
                 };
 
                 // getAtlasTweaker()
-                let atlas_tweaker: Option<mln_gfx::drawable_tweaker::DrawableTweakerPtr> =
-                    tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()).map(|atlases| {
+                let atlas_tweaker = tile.get_atlas_textures().filter(|a| a.icon.borrow().is_some()).map(
+                    |atlases| -> mln_gfx::drawable_tweaker::DrawableTweakerPtr {
                         Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
                             Some(atlases.clone()),
                             None,
@@ -698,8 +698,9 @@ impl RenderLayer for RenderFillLayer {
                             /*rotation_alignment*/ mln_style_types::AlignmentType::Auto,
                             /*icon_scaled*/ false,
                             /*text_size_is_zoom_constant*/ false,
-                        )) as mln_gfx::drawable_tweaker::DrawableTweakerPtr
-                    });
+                        ))
+                    },
+                );
 
                 if pattern_builder.is_none() {
                     let mut builder = context.create_drawable_builder();

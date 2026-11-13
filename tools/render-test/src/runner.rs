@@ -1312,7 +1312,7 @@ fn panic_error_message(what: &str, panic: &Box<dyn std::any::Any + Send>) -> Str
 
 /// The requests a test that timed out was still waiting for, or that it
 /// waited for none, which points at the map itself.
-pub(crate) fn waiting_for(pending: &[(String, std::time::Duration)]) -> String {
+pub(crate) fn waiting_for(pending: &[(String, Duration)]) -> String {
     const SHOWN: usize = 5;
     if pending.is_empty() {
         return "no resource request was outstanding".to_string();

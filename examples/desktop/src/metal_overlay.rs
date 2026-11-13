@@ -266,7 +266,7 @@ impl Painter {
         unsafe {
             encoder.setVertexBytes_length_atIndex(
                 NonNull::from(&screen_size).cast::<c_void>(),
-                std::mem::size_of_val(&screen_size),
+                size_of_val(&screen_size),
                 SCREEN_SIZE_BUFFER,
             );
             encoder.setVertexBuffer_offset_atIndex(Some(&vertex_buffer), 0, VERTEX_BUFFER);

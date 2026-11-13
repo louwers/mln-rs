@@ -151,11 +151,7 @@ impl AttachRequest {
     /// Fails with `MLN_STATUS_UNSUPPORTED` unless the caller asked for a core
     /// worker.
     pub(crate) fn require_core_worker(&self, message: &'static str) -> Result<(), Error> {
-        if self.driver == Driver::CoreWorker {
-            Ok(())
-        } else {
-            Err(Error::new(mln_util::ErrorKind::Unsupported, message))
-        }
+        if self.driver == Driver::CoreWorker { Ok(()) } else { Err(Error::new(ErrorKind::Unsupported, message)) }
     }
 
     fn wakes(&self) -> [&Wake; 3] {
@@ -243,7 +239,7 @@ fn state(state: RenderSessionState) -> u32 {
 fn failure_status(failure: Option<&mln_util::Error>) -> mln_status {
     match failure {
         None => MLN_STATUS_OK,
-        Some(error) if error.kind == mln_util::ErrorKind::TargetLost => MLN_STATUS_TARGET_LOST,
+        Some(error) if error.kind == ErrorKind::TargetLost => MLN_STATUS_TARGET_LOST,
         Some(_) => MLN_STATUS_NATIVE_ERROR,
     }
 }
@@ -279,7 +275,7 @@ pub(crate) unsafe extern "C" fn mln_render_session_get_capabilities(
             consumer_sync_kinds: crate::gpu_device::sync_flags(capabilities.consumer_sync_kinds),
             export_kind: capabilities
                 .export_kind
-                .map_or(crate::generated::types::MLN_GPU_EXPORT_KIND_NONE, crate::render_target::export_kind_value),
+                .map_or(crate::generated::types::MLN_GPU_EXPORT_KIND_NONE, render_target::export_kind_value),
         };
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_capabilities, &capabilities) }

@@ -261,7 +261,7 @@ fn symbol_order() {
         assert_eq!(type_ == SortKeyType::Undefined, bucket.sort_features_by_y, "{type_:?}");
         match type_ {
             SortKeyType::Undefined => {
-                assert_eq!(bucket.sort_key_ranges, [] as [crate::buckets::symbol_bucket::SortKeyRange; 0]);
+                assert_eq!(bucket.sort_key_ranges, Vec::<crate::buckets::symbol_bucket::SortKeyRange>::new());
             }
             SortKeyType::Constant | SortKeyType::Camera => {
                 assert_eq!(bucket.sort_key_ranges.len(), 1, "{type_:?}");

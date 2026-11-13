@@ -225,9 +225,9 @@ pub struct Impl {
 
     glyph_url: String,
     /// symbols: `std::shared_ptr<FontFaces> fontFaces`.
-    font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
+    font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
     /// symbols: `std::shared_ptr<FontFaces> fallbackFontFaces`.
-    fallback_font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
+    fallback_font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
     sources: CollectionWithPersistentOrder<dyn Source>,
     /// The source impls with the changes made through the sources since the
     /// collection's last update (see `get_source_impls`), keyed by the
@@ -496,7 +496,7 @@ impl Impl {
             // The style's own faces come first, so they win where both cover a font.
             let mut merged = self.font_faces.as_deref().cloned().unwrap_or_default();
             merged.extend(fallback.iter().cloned());
-            self.font_faces = Some(std::sync::Arc::new(merged));
+            self.font_faces = Some(Arc::new(merged));
         }
         self.loaded = true;
         self.observer().on_style_loaded();
@@ -799,12 +799,12 @@ impl Impl {
     }
 
     /// symbols: `getFontFaces()`.
-    pub fn get_font_faces(&self) -> Option<std::sync::Arc<mln_text::glyph::FontFaces>> {
+    pub fn get_font_faces(&self) -> Option<Arc<mln_text::glyph::FontFaces>> {
         self.font_faces.clone()
     }
 
     /// symbols: `setFallbackFontFaces(faces)`.
-    pub(crate) fn set_fallback_font_faces(&mut self, faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>) {
+    pub(crate) fn set_fallback_font_faces(&mut self, faces: Option<Arc<mln_text::glyph::FontFaces>>) {
         self.fallback_font_faces = faces;
     }
 
@@ -882,7 +882,7 @@ impl Impl {
             return false;
         }
 
-        self.sources.iter().all(super::source::Source::loaded)
+        self.sources.iter().all(Source::loaded)
     }
 
     /// Sets the pixel ratio that the style loads its sprites for. Where

@@ -4,7 +4,6 @@
 // `RasterDEMTileMessage`s through the `TileWorkerTransport` of the
 // TileParameters (tile_worker_transport.rs).
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -288,7 +287,7 @@ impl RasterDEMTile {
             worker,
             mailbox: mailbox.clone(),
         });
-        mailbox.open(&scheduler::get_current(), inner.clone() as Rc<dyn Any>);
+        mailbox.open(&scheduler::get_current(), inner.clone());
         let weak: std::rc::Weak<RasterDEMTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
         RasterDEMTile { inner, loader: Some(loader) }
@@ -372,7 +371,7 @@ impl Tile for RasterDEMTile {
     }
 
     fn create_render_data(&self) -> Box<dyn TileRenderData> {
-        let bucket: Option<BucketPtr> = self.inner.bucket.borrow().clone().map(|b| b as BucketPtr);
+        let bucket = self.inner.bucket.borrow().clone().map(|b| -> BucketPtr { b });
         Box::new(SharedBucketTileRenderData::new(bucket))
     }
 

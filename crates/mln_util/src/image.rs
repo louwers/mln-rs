@@ -358,7 +358,7 @@ mod tests {
         let moved = std::mem::take(&mut rgba);
 
         assert_eq!(rgba.size.width, 0);
-        assert_eq!(rgba.data, [] as [u8; 0]);
+        assert_eq!(rgba.data, Vec::<u8>::new());
         assert_eq!(moved.data[1], 254);
         assert_eq!(moved.size.width, 1);
     }

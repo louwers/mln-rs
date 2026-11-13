@@ -99,7 +99,7 @@ mod in_process {
         /// `loadHBShaper`'s `HBShaper(type, data, ftLibrary)` and `valid()`.
         fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
             let shaper = HBShaper::new(type_, data, &FreeTypeLibrary::new());
-            shaper.valid().then(|| Box::new(shaper) as Box<dyn FontFaceShaper>)
+            shaper.valid().then(|| -> Box<dyn FontFaceShaper> { Box::new(shaper) })
         }
     }
 

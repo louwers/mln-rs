@@ -632,7 +632,7 @@ fn set_layout_attributes(
     buffer: &Buffer,
     attribs: &mut VertexAttributeArray,
 ) {
-    let layout_size = std::mem::size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
+    let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
     let layout_data = bucket_vertices(geometry, bucket, &buffer.attribute_data);
     if let Some(attr) = attribs.set(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
         attr.set_shared_raw_data(Some(layout_data.clone()), 0, 0, layout_size, AttributeDataType::Short4);
@@ -656,7 +656,7 @@ fn set_projected_pos_attribute(buffer: &Buffer, layer_id: &str, attribs: &mut Ve
             Some(shared_vertices(buffer.dynamic_attribute_data_for(layer_id))),
             0,
             0,
-            std::mem::size_of::<crate::buckets::symbol_bucket::SymbolDynamicLayoutVertex>() as u32,
+            size_of::<crate::buckets::symbol_bucket::SymbolDynamicLayoutVertex>() as u32,
             AttributeDataType::Float3,
         );
     }
@@ -669,7 +669,7 @@ fn set_fade_opacity_attribute(buffer: &Buffer, attribs: &mut VertexAttributeArra
             Some(shared_vertices(&buffer.opacity_attribute_data)),
             0,
             0,
-            std::mem::size_of::<crate::buckets::symbol_bucket::SymbolOpacityVertex>() as u32,
+            size_of::<crate::buckets::symbol_bucket::SymbolOpacityVertex>() as u32,
             AttributeDataType::Float,
         );
     }
@@ -995,9 +995,9 @@ fn get_collision_vertex_attributes(
     let vertex_attrs = context.create_vertex_attribute_array();
     {
         let mut attrs = vertex_attrs.borrow_mut();
-        let layout_stride = std::mem::size_of::<CollisionBoxLayoutVertex>() as u32;
+        let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
         let layout = shared_vertices(&buffer.vertices);
-        let dynamic_stride = std::mem::size_of::<CollisionBoxDynamicVertex>() as u32;
+        let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
         let dynamic = shared_vertices(&buffer.dynamic_vertices);
         if let Some(attr) = attrs.set(ID_COLLISION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             attr.set_shared_raw_data(Some(layout.clone()), 0, 0, layout_stride, AttributeDataType::Short2);
@@ -1331,7 +1331,7 @@ impl RenderLayer for RenderSymbolLayer {
 
         let mut renderable_segments: Vec<SegmentGroup> = Vec::new();
 
-        let tiles: Vec<&crate::render_tile::RenderTile> = render_tiles.iter().collect();
+        let tiles: Vec<&RenderTile> = render_tiles.iter().collect();
         for (tile_index, tile) in tiles.iter().enumerate() {
             let tile_id = *tile.get_overscaled_tile_id();
 

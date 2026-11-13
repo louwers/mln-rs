@@ -272,8 +272,9 @@ impl FileSource for DatabaseFileSource {
             return;
         }
 
-        let wrapper: Option<Box<dyn FnMut() + Send>> =
-            callback.map(|callback| Box::new(scheduler::bind_once(&scheduler::get_current(), callback)) as _);
+        let wrapper: Option<Box<dyn FnMut() + Send>> = callback.map(|callback| -> Box<dyn FnMut() + Send> {
+            Box::new(scheduler::bind_once(&scheduler::get_current(), callback))
+        });
         let res = res.clone();
         let response = response.clone();
         self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.forward(&res, &response, wrapper));

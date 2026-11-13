@@ -313,10 +313,10 @@ fn read_circle_attributes(
 // query
 fn project_point(
     p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
-    projector: &mln_map_types::TileProjector<'_>,
+    projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinate {
-    let pos = projector.project(&geometry::Point::new(f64::from(p.x), f64::from(p.y)), 0.0).point;
+    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), 0.0).point;
     // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
     mln_tile_id::geometry_tile_data::GeometryCoordinate::new(
         (f64::from((pos.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
@@ -326,7 +326,7 @@ fn project_point(
 
 fn project_query_geometry(
     query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-    projector: &mln_map_types::TileProjector<'_>,
+    projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinates {
     query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
@@ -407,7 +407,7 @@ impl RenderLayer for RenderCircleLayer {
         zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
-        projector: &mln_map_types::TileProjector<'_>,
+        projector: &TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         use mln_style_types::{AlignmentType, CirclePitchScaleType};
@@ -449,7 +449,7 @@ impl RenderLayer for RenderCircleLayer {
         // The shader hides a circle whose center the horizon covers where it
         // draws it: translated, and through the projection as blended. The
         // query finds none there either.
-        let drawn_translation = crate::render_tile::RenderTile::tile_unit_translation(
+        let drawn_translation = RenderTile::tile_unit_translation(
             projector.get_tile_id(),
             *evaluated.get::<CircleTranslate>(),
             *evaluated.get::<CircleTranslateAnchor>(),
@@ -461,7 +461,7 @@ impl RenderLayer for RenderCircleLayer {
                 if transform_state.is_globe_rendering()
                     && projector
                         .project_as_drawn(
-                            &geometry::Point::new(
+                            &Point::new(
                                 f64::from(f32::from(point.x) + drawn_translation[0]),
                                 f64::from(f32::from(point.y) + drawn_translation[1]),
                             ),
@@ -474,7 +474,7 @@ impl RenderLayer for RenderCircleLayer {
                 let transformed_point =
                     if align_with_map { *point } else { project_point(*point, projector, transform_state.get_size()) };
 
-                let projected = projector.project(&geometry::Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
                 let mut adjusted_size = transformed_size;
                 let w = projected.signed_distance_from_camera;
                 let pitch_scale = *evaluated.get::<CirclePitchScale>();
@@ -668,7 +668,7 @@ impl RenderLayer for RenderCircleLayer {
                     Some(bucket_vertices(geometry, bucket, &bucket.vertices)),
                     0, // offsetof(CircleLayoutVertex, a1)
                     0,
-                    std::mem::size_of::<crate::buckets::circle_bucket::CircleLayoutVertex>() as u32,
+                    size_of::<CircleLayoutVertex>() as u32,
                     AttributeDataType::Short2,
                 );
             }

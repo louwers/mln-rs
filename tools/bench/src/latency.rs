@@ -43,7 +43,7 @@ pub(crate) fn register(file_sources: &FileSourceManager) {
     file_sources.register_file_source_factory(
         FileSourceType::ResourceLoader,
         Arc::new(move |file_sources: &FileSourceManager, resource_options: &ResourceOptions| {
-            Arc::new(Delayed { inner: inner(file_sources, resource_options) }) as Arc<dyn FileSource>
+            Arc::new(Delayed { inner: inner(file_sources, resource_options) })
         }),
     );
 }
@@ -86,8 +86,8 @@ impl FileSource for Delayed {
         let timer = Timer::new();
         let (inner, resource, slot) = (self.inner.clone(), resource.clone(), Rc::downgrade(&request));
         let mut callback = Some(callback);
-        let delay = std::time::Duration::from_millis(latency);
-        timer.start(delay, std::time::Duration::ZERO, move || {
+        let delay = Duration::from_millis(latency);
+        timer.start(delay, Duration::ZERO, move || {
             if let (Some(slot), Some(mut callback)) = (slot.upgrade(), callback.take()) {
                 let fresh = Box::new(move |mut response: Response| {
                     let expires = mln_util::chrono::now().secs_since_epoch() + FRESH_SECONDS;

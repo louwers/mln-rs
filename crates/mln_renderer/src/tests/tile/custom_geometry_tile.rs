@@ -195,7 +195,7 @@ fn invoke_tile_changed() {
     tile.set_observer(observer);
     let mut result = Vec::new();
     tile.query_source_features(&mut result, &SourceQueryOptions::default(), None).unwrap();
-    assert_eq!(result, [] as [mln_util::feature::Feature; 0]);
+    assert_eq!(result, Vec::<mln_util::feature::Feature>::new());
 
     tile.set_tile_data(Arc::new(vec![Feature::new(Geometry::Point(Point::new(0i16, 0)))]));
 
