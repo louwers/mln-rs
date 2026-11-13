@@ -15,8 +15,7 @@
 //   geometry for it), which shifts the property index of later features;
 //   an id column whose length then differs fails the tile;
 // - the triangles of a tessellated (multi-)polygon are its slice of the index
-//   buffer, counted from the feature's first vertex as the tile stores them
-//   (mlt-core rebases them to the layer; this undoes that);
+//   buffer, counted from the feature's first vertex.
 // - property columns keep their presence: a value of an optional column is
 //   absent past its end, and a non-optional column shorter than the layer
 //   throws "Missing property value" when read (PresentProperties::getProperty);
@@ -87,7 +86,10 @@ pub(crate) enum Shape {
 pub(crate) struct Geometry {
     pub(crate) shape: Shape,
     /// The geometry's triangles, as a range of the layer's triangle buffer
-    /// ([`Layer::triangle_buffer`]); `None` for an empty span.
+    /// ([`Layer::triangle_buffer`]): three indices per triangle into the
+    /// vertices of the shape's rings, closing vertices included, numbered
+    /// from 0 across the rings in order. `None` for an empty span, and for a
+    /// span that names a vertex outside the feature.
     pub(crate) triangles: Option<Range<usize>>,
 }
 
@@ -574,6 +576,19 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Tria
     let mut geometries = Vec::with_capacity(types.len());
     // The geometry of each feature (`None`: dropped).
     let mut geometry_of = Vec::with_capacity(types.len());
+    // With triangles, the stored and decoded vertex counts of each polygon
+    // ring, and the range of them that each feature's rings take.
+    let tessellated = values.index_buffer().is_some() && values.triangle_offsets().is_some();
+    let mut ring_lens: Vec<(u32, u32)> = Vec::new();
+    let mut rings_of: Vec<Range<usize>> = if tessellated { vec![0..0; types.len()] } else { Vec::new() };
+    let ring = |range: Range<usize>, ring_lens: &mut Vec<(u32, u32)>| -> Result<CoordVec, Error> {
+        let stored = range.len() as u32;
+        let coords = line(range, true)?;
+        if tessellated {
+            ring_lens.push((stored, coords.len() as u32));
+        }
+        Ok(coords)
+    };
 
     if parts.is_none() && values.index_buffer().is_some() {
         // A FlatGpuVector without topology: points read the vertex buffer in
@@ -625,9 +640,13 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Tria
                     Some(g) => offset(g, index, "geometryOffsets")?,
                     None => index,
                 };
+                let first_ring = ring_lens.len();
                 let mut result = Vec::new();
-                for ring in span(p, polygon, "partOffsets")? {
-                    result.push(line(span(r, ring, "ringOffsets")?, true)?);
+                for i in span(p, polygon, "partOffsets")? {
+                    result.push(ring(span(r, i, "ringOffsets")?, &mut ring_lens)?);
+                }
+                if tessellated {
+                    rings_of[index] = first_ring..ring_lens.len();
                 }
                 Shape::Polygon(result)
             }
@@ -668,17 +687,21 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Tria
             WireGeometryType::MultiPolygon => {
                 let g = require(geoms, cpp_name(t))?;
                 let polygons = span(g, index, "geometryOffsets")?;
+                let first_ring = ring_lens.len();
                 let mut result = Vec::with_capacity(polygons.len());
                 if !polygons.is_empty() {
                     let p = require(parts, cpp_name(t))?;
                     let r = require(rings, cpp_name(t))?;
                     for polygon in polygons {
                         let mut rings_out = Vec::new();
-                        for ring in span(p, polygon, "partOffsets")? {
-                            rings_out.push(line(span(r, ring, "ringOffsets")?, true)?);
+                        for i in span(p, polygon, "partOffsets")? {
+                            rings_out.push(ring(span(r, i, "ringOffsets")?, &mut ring_lens)?);
                         }
                         result.push(rings_out);
                     }
+                }
+                if tessellated {
+                    rings_of[index] = first_ring..ring_lens.len();
                 }
                 Shape::MultiPolygon(result)
             }
@@ -688,11 +711,11 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Tria
     }
 
     // GeometryVector::applyTriangles: each (multi-)polygon takes the next
-    // count of triangles from the index buffer. mlt-core counts the indices
-    // from the layer's first vertex; the tile (and the C++) from the feature's.
+    // count of triangles from the index buffer.
     let mut buffer = None;
     if let (Some(indices), Some(counts)) = (values.index_buffer(), values.triangle_offsets()) {
         let mut rebased = Vec::with_capacity(indices.len());
+        let mut ring_shifts = Vec::new();
         let mut runs = counts.windows(2);
         for (index, &t) in types.iter().enumerate() {
             if !matches!(t, WireGeometryType::Polygon | WireGeometryType::MultiPolygon) {
@@ -706,9 +729,11 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Tria
             }
             let start = values.vertex_range(index)?.start as u32;
             let first = rebased.len();
-            rebased.extend(corners.iter().map(|&i| i.wrapping_sub(start)));
+            let rings = &ring_lens[rings_of[index].clone()];
             // Polygons are never dropped.
-            if let Some(g) = geometry_of[index] {
+            if let Some(g) = geometry_of[index]
+                && rebase_triangles(corners, start, rings, &mut ring_shifts, &mut rebased)
+            {
                 geometries[g].triangles = Some(first..rebased.len());
             }
         }
@@ -716,6 +741,45 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Tria
     }
 
     Ok((geometries, buffer))
+}
+
+/// Appends `corners`, the triangles of a feature as indices of the layer's
+/// vertices, to `out` as indices of the feature's decoded vertices; returns
+/// `false`, appending nothing, when a corner is not one of the feature's
+/// vertices.
+///
+/// `first_vertex` is the feature's first vertex in the layer, and `rings`
+/// the stored and decoded vertex counts of its rings. A ring decodes one
+/// vertex longer than it is stored when decoding closes it, which moves the
+/// vertices of the rings after it up by one. `ring_shifts` is scratch space.
+fn rebase_triangles(
+    corners: &[u32],
+    first_vertex: u32,
+    rings: &[(u32, u32)],
+    ring_shifts: &mut Vec<(u32, u32)>,
+    out: &mut Vec<u32>,
+) -> bool {
+    // The first stored vertex of each ring, and how far decoding moves it.
+    ring_shifts.clear();
+    let (mut stored, mut decoded) = (0u32, 0u32);
+    for &(stored_len, decoded_len) in rings {
+        ring_shifts.push((stored, decoded - stored));
+        stored += stored_len;
+        decoded += decoded_len;
+    }
+    // Only a closing vertex before the last ring moves any corner.
+    let moved = ring_shifts.last().is_some_and(|&(_, shift)| shift > 0);
+    let first = out.len();
+    for &corner in corners {
+        let i = corner.wrapping_sub(first_vertex);
+        if i >= stored {
+            out.truncate(first);
+            return false;
+        }
+        let shift = if moved { ring_shifts[ring_shifts.partition_point(|&(start, _)| start <= i) - 1].1 } else { 0 };
+        out.push(i + shift);
+    }
+    true
 }
 
 /// The geometry names of the C++ "... geometry without topology vector" errors.

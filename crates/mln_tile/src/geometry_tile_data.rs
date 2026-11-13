@@ -20,7 +20,8 @@ use crate::Error;
 /// Twice the signed area of `ring`. The products are C++ `int` arithmetic,
 /// which can overflow for coordinates near the int16 limits; x86-64 wraps,
 /// and so does this.
-fn signed_area(ring: &GeometryCoordinates) -> f64 {
+#[must_use]
+pub fn signed_area(ring: &GeometryCoordinates) -> f64 {
     let mut sum = 0.0;
 
     let len = ring.len();

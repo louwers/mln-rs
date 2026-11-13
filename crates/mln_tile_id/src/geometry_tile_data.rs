@@ -40,11 +40,12 @@ impl GeometryCollection {
         GeometryCollection { rings: Vec::new(), triangles: None }
     }
 
-    /// Three indices per triangle, counted from the feature's first vertex;
-    /// empty unless the tile carried triangles.
-    #[cfg(test)]
+    /// The triangles of a pre-tessellated polygon: three indices per
+    /// triangle into the vertices of the rings, numbered from 0 across the
+    /// rings in order. Empty unless the tile carried triangles. Nothing
+    /// checks that the indices are in range.
     #[must_use]
-    pub(crate) fn get_triangles(&self) -> &[u32] {
+    pub fn get_triangles(&self) -> &[u32] {
         match &self.triangles {
             Some((owner, range)) => &owner[range.clone()],
             None => &[],

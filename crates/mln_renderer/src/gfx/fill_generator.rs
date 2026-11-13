@@ -1,12 +1,9 @@
 // The C++ includes renderer/buckets/{fill,line}_bucket.hpp for the vertex
 // types and layout functions, so the port lives in mln_renderer.
-//
-// Not supported: pre-tessellated geometry (`GeometryCollection::getTriangles`,
-// MLT tiles).
 
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
-use mln_tile::geometry_tile_data::{classify_rings, limit_holes};
+use mln_tile::geometry_tile_data::{classify_rings, limit_holes, signed_area};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
@@ -163,10 +160,57 @@ fn add_subdivided_polygon(
     );
 }
 
+/// Adds the fill and outlines of `geometry` with the triangles the tile
+/// carried ([`GeometryCollection::get_triangles`]) instead of triangulating
+/// it: the vertices of every ring, the triangles over all of them in one
+/// segment, and an outline of each ring with an area. Returns `false`,
+/// adding nothing, when the triangles can't be drawn: an index past the
+/// vertices, an incomplete triangle, or more vertices than a segment holds.
+///
+/// Every ring keeps its outline: the tile's triangles cut every hole, so
+/// the earcut path's limit on holes doesn't apply.
+#[allow(clippy::too_many_arguments)]
+fn add_tessellated_polygon(
+    geometry: &GeometryCollection,
+    fill_vertices: &mut Vec<FillLayoutVertex>,
+    fill_indexes: &mut Vec<u16>,
+    fill_segments: &mut Vec<SegmentBase>,
+    basic_line_indexes: &mut Vec<u16>,
+    basic_line_segments: &mut Vec<SegmentBase>,
+    line_generator: &mut impl FnMut(&GeometryCoordinates),
+) -> bool {
+    let indices = geometry.get_triangles();
+    let total_vertices: usize = geometry.iter().map(Vec::len).sum();
+    if total_vertices > u16::MAX as usize
+        || !indices.len().is_multiple_of(3)
+        || indices.iter().any(|&i| i as usize >= total_vertices)
+    {
+        return false;
+    }
+
+    let start_vertices = fill_vertices.len();
+    // The rings the earcut path outlines: classify_rings drops those
+    // without an area, unless there is only one.
+    let single = geometry.len() <= 1;
+    for ring in geometry.iter() {
+        let base = fill_vertices.len();
+        let n_vertices = add_ring_vertices(fill_vertices, ring);
+        if single || signed_area(ring) != 0.0 {
+            add_outline_indices(base, n_vertices, basic_line_segments, basic_line_indexes);
+            line_generator(ring);
+        }
+    }
+    add_fill_indices(fill_segments, fill_indexes, indices, start_vertices, total_vertices);
+    true
+}
+
 /// Generates the fill triangles and outlines of `geometry`, the outlines both
 /// as triangles and as simple lines (the `MLN_TRIANGULATE_FILL_OUTLINES`
 /// variant the WebGPU fill bucket uses). C++ defaults
 /// `subdivision_granularity` to 1.
+///
+/// Without subdivision, a geometry that carries triangles is filled with
+/// them, and triangulated only when they can't be drawn.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn generate_fill_and_outline_buffers(
     geometry: &GeometryCollection,
@@ -191,6 +235,21 @@ pub(crate) fn generate_fill_and_outline_buffers(
     );
 
     let line_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
+
+    if subdivision_granularity < 2
+        && !geometry.get_triangles().is_empty()
+        && add_tessellated_polygon(
+            geometry,
+            fill_vertices,
+            fill_indexes,
+            fill_segments,
+            basic_line_indexes,
+            basic_line_segments,
+            &mut |ring| line_generator.generate(ring, &line_options),
+        )
+    {
+        return Ok(());
+    }
 
     for mut polygon in classify_rings(geometry) {
         // Optimize polygons with many interior rings for earcut tessellation.
@@ -226,7 +285,6 @@ pub(crate) fn generate_fill_and_outline_buffers(
             line_generator.generate(ring, &line_options);
         }
 
-        // tessellate, if no triangles are provided
         let indices: Vec<u32> = triangulate(&polygon[..]);
 
         add_fill_indices(fill_segments, fill_indexes, &indices, start_vertices, total_vertices);
