@@ -209,7 +209,7 @@
 "crates/mln_renderer/src/layers/render_custom_layer.rs" = 6
 "crates/mln_renderer/src/layers/render_fill_extrusion_layer.rs" = 9
 "crates/mln_renderer/src/layers/render_fill_layer.rs" = 8
-"crates/mln_renderer/src/layers/render_heatmap_layer.rs" = 20
+"crates/mln_renderer/src/layers/render_heatmap_layer.rs" = 18
 "crates/mln_renderer/src/layers/render_hillshade_layer.rs" = 10
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 10
 "crates/mln_renderer/src/layers/render_raster_layer.rs" = 13
