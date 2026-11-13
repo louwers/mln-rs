@@ -80,9 +80,13 @@ fn add_outline_indices(
         return;
     }
 
+    // A segment counts its vertices from its first, so a ring that doesn't
+    // follow the segment's last vertex starts one of its own.
     let needs_segment = match line_segments.last() {
         None => true,
-        Some(last) => last.vertex_length + n_vertices > u16::MAX as usize,
+        Some(last) => {
+            last.vertex_offset + last.vertex_length != base || last.vertex_length + n_vertices > u16::MAX as usize
+        }
     };
     if needs_segment {
         line_segments.push(SegmentBase::new(base, line_indexes.len()));

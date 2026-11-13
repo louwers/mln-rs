@@ -357,3 +357,23 @@ fn pretessellated_geometries_beyond_a_segment_fall_back_to_earcut() {
     assert_eq!(earcut.fill_indexes, buffers.fill_indexes);
     assert_eq!(drawn(&earcut), drawn(&buffers));
 }
+
+// A ring without an area between two with one keeps its vertices for the
+// tile's triangles but draws no outline, and the outline after it still
+// follows its own ring.
+#[test]
+fn pretessellated_outlines_skip_rings_without_an_area() {
+    let outer = vec![p(0, 0), p(4000, 0), p(4000, 4000), p(0, 4000), p(0, 0)];
+    let flat = vec![p(100, 100), p(200, 100), p(300, 100), p(100, 100)];
+    let hole = vec![p(1000, 1000), p(1000, 2000), p(2000, 2000), p(2000, 1000), p(1000, 1000)];
+    let geometry = GeometryCollection::from(vec![outer, flat, hole]);
+    let mut pretessellated = geometry.clone();
+    pretessellated.set_triangles(Arc::from(&[0u32, 1, 2][..]), 0..3);
+    let canonical = CanonicalTileID::new(14, 0, 0);
+    let earcut = generate(&geometry, &canonical, 1);
+    let (_, earcut_lines, earcut_line_vertices) = drawn(&earcut);
+    let buffers = generate(&pretessellated, &canonical, 1);
+    let (_, lines, line_vertices) = drawn(&buffers);
+    assert_eq!(earcut_lines, lines);
+    assert_eq!(earcut_line_vertices, line_vertices);
+}
