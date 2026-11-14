@@ -1,4 +1,4 @@
-import { WHEEL_NOTCHES, WHEEL_PIXELS } from './protocol.ts';
+import { WHEEL_NOTCHES, WHEEL_PIXELS } from "./protocol.ts";
 
 // A wheel event as the recognizer takes it (WebMap::wheel's `kind`):
 // WHEEL_NOTCHES and the notches for a mouse wheel's detents, which it eases,
@@ -45,12 +45,16 @@ export function wheelDelta(e: WheelDeltas): { wheel: number; amount: number } {
   const mode = e.deltaMode;
   const legacy = e.wheelDeltaY ?? 0;
   const ticks = legacy !== 0 && legacy % 120 === 0 ? -legacy / 120 : undefined;
-  if (mode === DOM_DELTA_LINE) return { wheel: WHEEL_NOTCHES, amount: ticks ?? e.deltaY };
-  if (mode === DOM_DELTA_PAGE) return { wheel: WHEEL_NOTCHES, amount: e.deltaY };
+  if (mode === DOM_DELTA_LINE)
+    return { wheel: WHEEL_NOTCHES, amount: ticks ?? e.deltaY };
+  if (mode === DOM_DELTA_PAGE)
+    return { wheel: WHEEL_NOTCHES, amount: e.deltaY };
   const delta = e.deltaY;
-  if (delta !== 0 && delta % MAC_NOTCH === 0) return { wheel: WHEEL_NOTCHES, amount: delta / MAC_NOTCH };
+  if (delta !== 0 && delta % MAC_NOTCH === 0)
+    return { wheel: WHEEL_NOTCHES, amount: delta / MAC_NOTCH };
   const precise = Math.abs(legacy + 3 * delta) < 1;
   const pinch = e.ctrlKey && 4 * Math.abs(delta) < Math.abs(legacy);
-  if (ticks !== undefined && !precise && !pinch) return { wheel: WHEEL_NOTCHES, amount: ticks };
+  if (ticks !== undefined && !precise && !pinch)
+    return { wheel: WHEEL_NOTCHES, amount: ticks };
   return { wheel: WHEEL_PIXELS, amount: delta };
 }

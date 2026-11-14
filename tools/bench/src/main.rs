@@ -132,7 +132,7 @@ fn selected(options: &Options) -> Vec<cases::Case> {
 fn fixture_version(fixtures: &Path) -> Result<String, String> {
     std::fs::read_to_string(fixtures.join("version")).map(|v| v.trim().to_string()).map_err(|_| {
         format!(
-            "no basemap fixture in {}; prepare it with `just bench-fixtures` (tools/bench/fixtures.py <dir>)",
+            "no basemap fixture in {}; prepare it with `mise run bench:fixtures` (tools/bench/fixtures.py <dir>)",
             fixtures.display()
         )
     })

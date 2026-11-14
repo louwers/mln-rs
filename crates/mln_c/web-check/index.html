@@ -1,11 +1,12 @@
 <!doctype html>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <title>mln_c browser check</title>
 <script type="module">
   const params = new URLSearchParams(location.search);
-  const worker = new Worker(`worker.js?${params}`, { type: 'module' });
+  const worker = new Worker(`worker.js?${params}`, { type: "module" });
   window.result = new Promise((resolve) => {
-    worker.onmessage = ({ data }) => (data.log ? console.log(...data.log) : resolve(data));
+    worker.onmessage = ({ data }) =>
+      data.log ? console.log(...data.log) : resolve(data);
     worker.onerror = (event) => resolve({ ok: false, error: event.message });
   });
 </script>

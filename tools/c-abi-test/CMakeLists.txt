@@ -2,7 +2,7 @@
 # crates/mln_c's headers and library, the way maplibre-native-ffi's
 # cmake/mln_ffi_tests.cmake builds it against its own: the same support files,
 # Unity and graphics fixtures, for one render backend: vulkan, or opengl on EGL,
-# maplibre-native-ffi's Linux OpenGL preset. `just c-abi-test` configures it
+# maplibre-native-ffi's Linux OpenGL preset. `mise run test:c-abi` configures it
 # with the library that Cargo built and runs it through run.py.
 cmake_minimum_required(VERSION 3.25)
 project(mln_c_abi_test C CXX)

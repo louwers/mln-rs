@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Run the desktop demo app"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile to build with: `--profile release` runs an optimized build"
+#USAGE arg "[args]..." var=#true help="Arguments to the app"
+set -euo pipefail
+source tools/dev-shell.sh
+eval "set -- ${usage_args:-}"
+dev_shell cargo run --profile "$usage_profile" -p mln-rs-desktop --bin mln-desktop -- "$@"

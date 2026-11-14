@@ -1,7 +1,7 @@
 //! `style-codegen --spec <v8.json> --out <crates/mln_style/src> [--check]`
 //! writes (or with `--check` compares) the generated style code.
 //!
-//! `just generate-style-code` regenerates the checked-in files.
+//! `mise run generate:style` regenerates the checked-in files.
 
 use std::path::PathBuf;
 use std::process::ExitCode;

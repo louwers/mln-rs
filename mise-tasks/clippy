@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Lint the Rust code with clippy"
+# On Linux, also lint the C library with each native backend's feature alone,
+# as maplibre-native-ffi's presets build it: the workspace's build turns them
+# all on.
+set -euo pipefail
+cargo clippy --workspace --all-targets "$@"
+if [[ "$(uname -s)" == Linux ]]; then
+    for backend in vulkan gl; do
+        cargo clippy -p mln-rs-c --all-targets --no-default-features --features "$backend" "$@"
+    done
+fi

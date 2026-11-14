@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  # A branch's benchmarks against a base (`just bench-compare`,
+  # A branch's benchmarks against a base (`mise run bench:compare`,
   # tools/bench/README.md), run by hand: it takes about half an hour, too
   # long for every pull request, and bench-nightly.yml compares main every
   # night. GitHub's runners have no GPU, so both sides draw on lavapipe,
@@ -29,7 +29,7 @@ jobs:
       # Both sides build with these, so they still compare like with like,
       # in less time than the release profile's fat LTO.
       CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
     steps:
       # The base is checked out in a worktree, so the history comes too.
       - uses: actions/checkout@v7
@@ -39,11 +39,9 @@ jobs:
       - name: Install lavapipe
         uses: ./.github/actions/lavapipe
 
-      - uses: taiki-e/install-action@v2
-        with: { tool: just }
-
-      - name: Install Rust
-        run: rustup toolchain install --profile minimal --no-self-update
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
 
       # Saves from main only, as in ci.yml.
       - uses: Swatinem/rust-cache@v2
@@ -63,9 +61,10 @@ jobs:
         env:
           BASE: ${{ inputs.base }}
         run: >-
-          just bench-compare "$BASE"
-          --filter Load/Jump --filter Frame/Throughput --filter Frame/Idle --filter Frame/Oscillate
-          --filter Load/Style/basemap --fail-on allocs --fail-on peak_heap_mib | tee report.md
+          mise run bench:compare "$BASE" --filter Load/Jump --filter
+          Frame/Throughput --filter Frame/Idle --filter Frame/Oscillate --filter
+          Load/Style/basemap --fail-on allocs --fail-on peak_heap_mib | tee
+          report.md
 
       - name: Report
         if: always()

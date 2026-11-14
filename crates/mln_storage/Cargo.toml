@@ -62,7 +62,11 @@ ureq = { workspace = true, features = ["gzip", "native-tls-no-default"] }
 
 [target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "windows", target_os = "android")))'.dependencies]
 rustls.workspace = true
-ureq = { workspace = true, features = ["gzip", "platform-verifier", "rustls-no-provider"] }
+ureq = { workspace = true, features = [
+  "gzip",
+  "platform-verifier",
+  "rustls-no-provider",
+] }
 
 # HttpURLConnection and the app's assets, through the app's Java VM.
 [target.'cfg(target_os = "android")'.dependencies]

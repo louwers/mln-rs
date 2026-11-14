@@ -1,6 +1,6 @@
 name: pages
 
-# Builds the browser build and its page (`just profile=release web`,
+# Builds the browser build and its page (`mise run web:build --profile release`,
 # examples/web/README.md) and deploys the page, examples/web/dist, to GitHub
 # Pages (https://louwers.github.io/mln-rs/). It needs no COOP/COEP headers,
 # so Pages serves it as is. Publishing only: CI's web job checks the build.
@@ -34,35 +34,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: taiki-e/install-action@v2
-        with: { tool: 'just,wasm-bindgen@0.2.130' }
-
-      # pnpm, the version in examples/web/package.json, for the page's Vite
-      # build; the runner has Node.
-      - uses: pnpm/action-setup@v6
-        with:
-          package_json_file: examples/web/package.json
-          cache: true
-          cache_dependency_path: examples/web/pnpm-lock.yaml
-
-      # wasm-opt, which `just profile=release web` runs, from binaryen's
-      # latest release.
-      - name: Install binaryen
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download --repo WebAssembly/binaryen --pattern 'binaryen-*-x86_64-linux.tar.gz' --output - |
-            tar -xz -C "$RUNNER_TEMP"
-          echo "$(echo "$RUNNER_TEMP"/binaryen-version_*)/bin" >> "$GITHUB_PATH"
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install --profile minimal --no-self-update
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: just profile=release web
+        run: mise run web:build --profile release
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

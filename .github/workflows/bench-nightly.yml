@@ -2,12 +2,13 @@ name: bench-nightly
 
 on:
   schedule:
-    - cron: '41 3 * * *'
+    - cron: "41 3 * * *"
   workflow_dispatch:
     inputs:
       base:
-        description: The Git ref main is compared with (main a day earlier when empty)
-        default: ''
+        description:
+          The Git ref main is compared with (main a day earlier when empty)
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}
@@ -18,7 +19,7 @@ permissions:
   issues: write
 
 jobs:
-  # Main against main a day earlier, every case (`just bench-compare`,
+  # Main against main a day earlier, every case (`mise run bench:compare`,
   # tools/bench/README.md), on lavapipe. A worse verdict opens the
   # "Nightly benchmarks: main got worse" issue with the report, or comments
   # on it when it's open already, and a night without one closes it
@@ -31,7 +32,7 @@ jobs:
     env:
       # Both sides build with these, as in bench.yml.
       CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
     steps:
       # The base is checked out in a worktree, so the history comes too.
       - uses: actions/checkout@v7
@@ -53,13 +54,10 @@ jobs:
         if: steps.base.outputs.changed == 'true'
         uses: ./.github/actions/lavapipe
 
-      - uses: taiki-e/install-action@v2
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
         if: steps.base.outputs.changed == 'true'
-        with: { tool: just }
-
-      - name: Install Rust
-        if: steps.base.outputs.changed == 'true'
-        run: rustup toolchain install --profile minimal --no-self-update
 
       - uses: Swatinem/rust-cache@v2
         if: steps.base.outputs.changed == 'true'
@@ -75,14 +73,16 @@ jobs:
         if: steps.base.outputs.changed == 'true'
         env:
           BASE: ${{ steps.base.outputs.sha }}
-        run: just bench-compare "$BASE" | tee report.md
+        run: mise run bench:compare "$BASE" | tee report.md
 
       - name: File or update the issue
         if: steps.base.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BASE: ${{ steps.base.outputs.sha }}
-        run: python3 -I tools/bench/nightly.py --report report.md --base "$BASE" --head "$(git rev-parse HEAD)"
+        run:
+          python3 -I tools/bench/nightly.py --report report.md --base "$BASE"
+          --head "$(git rev-parse HEAD)"
 
       - name: Report
         if: always()

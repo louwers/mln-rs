@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Package the crates as a release does, and build every test"
+# The desktop app is never released.
+# The verify step serves the packaged crates to each other from a local
+# registry, and Cargo treats a registry crate's name and version as immutable:
+# it keeps the source it unpacked into CARGO_HOME and the build in target/ from
+# the last run. Delete both, or a branch is verified against an older branch's
+# copy of the in-repo crates at the same version.
+set -euo pipefail
+rm -rf "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/mln-rs-* "${CARGO_TARGET_DIR:-target}"/debug/.fingerprint/mln-rs-*
+cargo package --workspace --locked --exclude mln-rs-desktop
+cargo test --workspace --locked --no-run

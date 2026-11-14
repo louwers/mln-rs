@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Refresh the test data copied from maplibre-native"
+#USAGE arg "[checkout]" help="A maplibre-native checkout (default ../maplibre-native)"
+# The shared suites' directories are copied whole, so new tests come along;
+# every other file that is there, outside tools/c-abi-test (update-ffi-abi), is
+# copied again.
+# The copies are from johncarmack1984/maplibre-native's
+# maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe
+# branch of maplibre/maplibre-native#4533 (phased/12h), with
+# louwers/maplibre-native's maplibre-native-next-support branch at
+# 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs) and the
+# sky branch of maplibre/maplibre-native#4534 merged in.
+set -euo pipefail
+checkout="${usage_checkout:-$PWD/../maplibre-native}"
+for dir in tools/render-test/testdata/metrics/{integration/render-tests,integration/query-tests,expectations/platform-linux,expectations/platform-macos,ignores,linux-gcc8-release} \
+        tools/expression-test/testdata/metrics/integration/expression-tests; do
+    rsync -a --delete "$checkout/${dir#*/testdata/}"/ "$dir"/
+done
+git ls-files -z '*/testdata/*' ':!tools/c-abi-test/testdata' | while IFS= read -r -d '' file; do
+    cp "$checkout/${file#*/testdata/}" "$file"
+done
+echo "copied from $checkout ($(git -C "$checkout" describe --always --dirty 2>/dev/null || echo "not a git checkout"))"

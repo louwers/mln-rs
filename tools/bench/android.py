@@ -142,7 +142,7 @@ def main() -> None:
         options += [word for name in FILTERS for word in ("--filter", name)]
     fixtures = ROOT / "target/bench-fixtures"
     if not (fixtures / "version").is_file():
-        raise SystemExit(f"no basemap fixture in {fixtures}; prepare it with `just bench-fixtures`")
+        raise SystemExit(f"no basemap fixture in {fixtures}; prepare it with `mise run bench:fixtures`")
 
     push(build(arguments.ndk, arguments.api), fixtures)
     arguments.out.mkdir(parents=True, exist_ok=True)

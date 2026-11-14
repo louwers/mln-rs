@@ -1,5 +1,7 @@
-# https://mise.jdx.dev: the tools that build, run and check mln-rs. `mise
-# install` installs them; the justfile's recipes run with them on the PATH.
+# https://mise.jdx.dev: the tools that build, run and check mln-rs, and the
+# tasks that run them. `mise install` installs the tools, `mise tasks` lists
+# the tasks and `mise run <task>` runs one. The tasks of more than a few lines
+# are scripts in mise-tasks/.
 
 min_version = "2026.10.0"
 
@@ -13,9 +15,15 @@ lockfile_mode = "merge"
 idiomatic_version_file_enable_tools = ["rust"]
 
 [tools]
+# just, for the justfile: each recipe runs the task of its name.
 "aqua:casey/just" = "1.59.0"
 # The test runner, which ends a test that hangs (.config/nextest.toml).
 "github:nextest-rs/nextest" = { version = "0.9.151", version_prefix = "cargo-nextest-" }
+# Cargo subcommands: the tests' coverage, the packages' licenses
+# (deny.toml) and unused dependencies.
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+"github:est31/cargo-udeps" = "0.1.61"
 # The browser build: wasm-bindgen must match the wasm-bindgen crate in
 # Cargo.lock, and binaryen's wasm-opt shrinks the release build.
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
@@ -23,9 +31,126 @@ idiomatic_version_file_enable_tools = ["rust"]
 # The browser build's page (examples/web) and its check.
 "core:node" = "24.22.2"
 "aqua:pnpm/pnpm" = "12.18.0"
-# The justfile's scripts that generate tables and fixtures.
+# The tasks' scripts that generate tables and fixtures, and the jq that
+# reads Cargo's JSON output.
 "core:python" = "3.15.2"
+"aqua:jqlang/jq" = "1.8.2"
+# The formatters and linters (hk.pkl): hk runs them, dprint formats
+# (dprint.jsonc), jactionlint lints the workflows and shellcheck the tasks.
+"aqua:jdx/hk" = "2.12.0"
+"aqua:dprint/dprint" = "0.64.3"
+"aqua:jdx/jactionlint" = "2.6.0"
+"aqua:koalaman/shellcheck" = "0.11.0"
 
 [deps.pnpm]
 auto = true
 dir = "examples/web"
+
+[hooks]
+# The nightly rustfmt that dprint runs.
+postinstall = "mise run install-nightly"
+
+[env]
+# In CI (CI set), warnings are errors and a panic prints its backtrace, unless
+# the environment sets them. `CI=true mise run ci:lint` runs the lint job's
+# checks as CI does.
+CARGO_BUILD_WARNINGS = "{% if get_env(name='CARGO_BUILD_WARNINGS', default='') != '' %}{{ get_env(name='CARGO_BUILD_WARNINGS') }}{% elif get_env(name='CI', default='') != '' %}deny{% else %}warn{% endif %}"
+RUST_BACKTRACE = "{% if get_env(name='RUST_BACKTRACE', default='') != '' %}{{ get_env(name='RUST_BACKTRACE') }}{% elif get_env(name='CI', default='') != '' %}1{% else %}0{% endif %}"
+# The nightly whose rustfmt dprint runs (its import options,
+# imports_granularity and group_imports, are unstable), and that builds the
+# sanitizer tests and runs udeps. Pinned so every machine formats alike: bump
+# it on purpose, with the one in dprint.jsonc, then run `mise run fix`.
+MLN_NIGHTLY = "nightly-2026-11-04"
+
+[tasks."bench:fixtures"]
+description = "Download the benchmarks' map data into target/bench-fixtures, once"
+run = "python3 -I tools/bench/fixtures.py target/bench-fixtures"
+
+[tasks.check]
+description = "Check every file with the formatters and linters (hk.pkl)"
+run = "hk check --all"
+
+[tasks.fix]
+description = "Format every file and apply the linters' fixes (hk.pkl)"
+run = "hk fix --all"
+
+# The C library as maplibre-native-ffi's 32-bit presets build it (Android's
+# armeabi-v7a and x86): a type whose size a dependency asserts, or a cast that
+# assumes a 64-bit usize, fails here. Needs a C compiler for the target, for
+# SQLite: i686-linux-gnu-gcc, or the one CC_i686_unknown_linux_gnu names.
+[tasks."check:32bit"]
+description = "Lint the C library for 32-bit Linux"
+run = [
+  "rustup target add i686-unknown-linux-gnu",
+  "cargo clippy --target i686-unknown-linux-gnu -p mln-rs-c",
+]
+
+[tasks."ci:lint"]
+description = "Run what CI's lint job runs: `check`, the docs and the browser and 32-bit builds"
+run = [
+  "mise run check",
+  "mise run docs",
+  "mise run check:wasm",
+  "mise run check:32bit",
+  "mise run ci:assert-clean",
+]
+
+[tasks."ci:msrv"]
+description = "Run what CI's msrv job runs"
+run = ["mise run test:msrv", "mise run ci:assert-clean"]
+
+[tasks."ci:package"]
+description = "Run what CI's release-crate job runs"
+run = ["mise run package", "mise run ci:assert-clean"]
+
+[tasks.docs]
+description = "Build the API docs as docs.rs does; `--open` opens them"
+usage = 'arg "[args]..." var=#true help="Arguments to `cargo doc`, such as `--open`"'
+env = { DOCS_RS = "1" }
+run = 'eval "set -- ${usage_args:-}"; cargo doc --no-deps --workspace "$@"'
+
+# Needs libclang, which bindgen loads at run time (LIBCLANG_PATH names its
+# directory if it isn't found).
+[tasks."generate:c-abi"]
+description = "Regenerate the C library's bindings (crates/mln_c/src/generated) from its headers"
+run = "cargo run -q -p mln-rs-c-abi-gen"
+
+# crates/mln_text/tools/gen_icu_tables.py says where to get the sources.
+[tasks."generate:icu-tables"]
+description = "Regenerate the Unicode bidi table from ICU 78.3's sources"
+usage = '''arg "<icu_common>" help="The icu/source/common directory of ICU 78.3's sources"'''
+run = 'python3 -I crates/mln_text/tools/gen_icu_tables.py "$usage_icu_common" > crates/mln_text/src/icu/ubidi_props_data.rs'
+
+# style-codegen's generated_code_test checks that the code is up to date.
+[tasks."generate:style"]
+description = "Regenerate the style layer code (crates/mln_style) from the style spec"
+run = "cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates/mln_style/src"
+
+[tasks.install-nightly]
+description = "Install the nightly that MLN_NIGHTLY names, with rustfmt and the standard library's sources"
+hide = true
+run = "rustup toolchain install $MLN_NIGHTLY --profile minimal --component rustfmt,rust-src --no-self-update"
+
+[tasks.licenses]
+description = "Check every dependency's license against deny.toml"
+run = "cargo deny --locked check licenses"
+
+[tasks.ratchet]
+description = "Check that no file gains panics or RefCell borrows (tools/ratchet); `--update` lowers the counts"
+usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet/ratchet.py, such as `--update`"'
+run = 'eval "set -- ${usage_args:-}"; python3 -I tools/ratchet/ratchet.py "$@"'
+
+[tasks.release]
+description = "Publish the crates from main at the version in Cargo.toml (RELEASING.md)"
+run = "gh workflow run release.yml --repo louwers/mln-rs --ref main"
+
+[tasks.udeps]
+description = "Find unused dependencies"
+run = "cargo +$MLN_NIGHTLY udeps --workspace --all-targets"
+
+# The default is a commit after v26.6.0 that replaces `emptyResponse` with
+# vector sources' `sparse`. Run `mise run generate:style` after.
+[tasks."update:style-spec"]
+description = "Refresh the copy of the MapLibre style spec (tools/style-codegen/v8.json)"
+usage = 'arg "[ref]" default="c2a460f6e55899e4b6e04b44f8e29e08fef3067b" help="A maplibre-style-spec tag or commit"'
+run = 'curl -fsSL "https://raw.githubusercontent.com/maplibre/maplibre-style-spec/$usage_ref/src/reference/v8.json" -o tools/style-codegen/v8.json'

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://dprint.dev/schemas/v0.json",
+  "lineWidth": 80,
+  "indentWidth": 2,
+  "useTabs": false,
+  "newLineKind": "lf",
+  "oxc": {
+    "sortImports": { "newlinesBetween": true },
+    "lineWidth": 80,
+    "proseWrap": "always",
+    "sortPackageJson": false,
+  },
+  // Rust: the nightly rustfmt that mise.toml's MLN_NIGHTLY names, with its
+  // unstable import options; rustfmt.toml has the rest. Bump the two together.
+  "exec": {
+    "commands": [
+      {
+        "cacheKeyFiles": ["rustfmt.toml"],
+        "command": "rustfmt +nightly-2026-11-04 --config imports_granularity=Module,group_imports=StdExternalCrate",
+        "exts": ["rs"],
+      },
+    ],
+  },
+  "excludes": [
+    // Generated code stays as its generator writes it.
+    "crates/mln_c/src/generated/**",
+    "crates/mln_style/src/layers/*_layer_properties.rs",
+    "crates/mln_style/src/layers/background_layer.rs",
+    "crates/mln_style/src/layers/circle_layer.rs",
+    "crates/mln_style/src/layers/color_relief_layer.rs",
+    "crates/mln_style/src/layers/fill_extrusion_layer.rs",
+    "crates/mln_style/src/layers/fill_layer.rs",
+    "crates/mln_style/src/layers/heatmap_layer.rs",
+    "crates/mln_style/src/layers/hillshade_layer.rs",
+    "crates/mln_style/src/layers/line_layer.rs",
+    "crates/mln_style/src/layers/raster_layer.rs",
+    "crates/mln_style/src/layers/symbol_layer.rs",
+    "crates/mln_style/src/light.rs",
+    "crates/mln_style/src/sky.rs",
+    "crates/mln_text/src/icu/ubidi_props_data.rs",
+    "examples/web/pnpm-lock.yaml",
+    // Copies of other projects' files, kept as they are there.
+    "**/testdata/**",
+    "patches/**",
+    "tools/bench/fixtures.json",
+    "tools/bench/style.json",
+    "tools/style-codegen/v8.json",
+  ],
+  "plugins": [
+    "npm:@dprint/oxc@0.50.0",
+    "npm:@dprint/exec@0.9.0/plugin.json@d4f708dc00798b51013ca4e7c26a86656bfb31e7255cdcde28a487f86813e34d",
+  ],
+}

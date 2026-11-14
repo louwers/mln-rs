@@ -12,12 +12,14 @@
 // carry `panic`, a message to panic with once the instance starts
 // (`panic_for_check`), for check/check.mjs.
 
-import type { Bindings, FromTileWorker, StartTileWorker } from './protocol.ts';
+import type { Bindings, FromTileWorker, StartTileWorker } from "./protocol.ts";
 
 /** Runs tile workers in this Web Worker, on a build of the module. */
-export function serve(
-  { default: init, mlnWebServeTileWorker, panic_for_check }: Bindings<'mlnWebServeTileWorker' | 'panic_for_check'>,
-) {
+export function serve({
+  default: init,
+  mlnWebServeTileWorker,
+  panic_for_check,
+}: Bindings<"mlnWebServeTileWorker" | "panic_for_check">) {
   let port: MessagePort | null = null;
   let dead = false;
 
@@ -39,8 +41,8 @@ export function serve(
 
   // What throws outside `call`: the instance's work between requests, a
   // reply's image decode, the instance's start.
-  addEventListener('error', (event) => fatal(event.error ?? event.message));
-  addEventListener('unhandledrejection', (event) => fatal(event.reason));
+  addEventListener("error", (event) => fatal(event.error ?? event.message));
+  addEventListener("unhandledrejection", (event) => fatal(event.reason));
 
   // The port keeps the requests that arrive before the instance serves it.
   onmessage = async ({ data }: MessageEvent<StartTileWorker>) => {

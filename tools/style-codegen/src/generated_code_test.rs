@@ -15,7 +15,7 @@ fn generated_code_is_up_to_date() {
     let stale = style_codegen::check(&spec, &root).expect("generator");
     assert!(
         stale.is_empty(),
-        "generated style code is out of date: {stale:?}\nRegenerate it with `just generate-style-code`."
+        "generated style code is out of date: {stale:?}\nRegenerate it with `mise run generate:style`."
     );
 }
 

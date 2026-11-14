@@ -63,10 +63,16 @@ js-sys.workspace = true
 mln_web_host.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["HtmlCanvasElement", "OffscreenCanvas", "WebGl2RenderingContext"] }
+web-sys = { workspace = true, features = [
+  "HtmlCanvasElement",
+  "OffscreenCanvas",
+  "WebGl2RenderingContext",
+] }
 # wgpu's objects are Send and Sync on an instance without threads, as the
 # runtime's handles need.
-wgpu = { workspace = true, optional = true, features = ["fragile-send-sync-non-atomic-wasm"] }
+wgpu = { workspace = true, optional = true, features = [
+  "fragile-send-sync-non-atomic-wasm",
+] }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 mln_mtl = { workspace = true, optional = true }

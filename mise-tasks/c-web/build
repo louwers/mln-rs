@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#MISE description="Build the C library's browser package for one backend into target/c-web/<backend>"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web:build`"
+#USAGE arg "[backend]" default="webgpu" help="webgpu, or gl (WebGL2)"
+# One package per backend, each with only that backend: wasm-bindgen's
+# bindings (maplibre_native_c.js, whose exports are the raw `mln_*` functions
+# and the module's memory; crates/mln_c/src/web.rs has the JavaScript
+# contract), the tile worker and shaper loader under snippets/, and the
+# font-face shaper.
+set -euo pipefail
+profile="$usage_profile"
+backend="$usage_backend"
+if [[ "$profile" == release ]]; then
+    export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+fi
+target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/$([[ "$profile" == dev ]] && echo debug || echo "$profile")"
+pkg="${CARGO_TARGET_DIR:-target}/c-web/$backend"
+# The tile worker script imports the bindings beside it, so it stays a file (`--split-linked-modules`).
+bind() {
+    wasm-bindgen --target web --split-linked-modules --out-dir "$pkg" "$target/$1.wasm"
+    if [[ "$profile" != dev ]]; then
+        wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
+            --strip-debug --strip-producers --strip-target-features "$pkg/$1_bg.wasm" -o "$pkg/$1_bg.wasm"
+    fi
+}
+rm -rf "$pkg"
+cargo build --profile "$profile" --target wasm32-unknown-unknown -p mln-rs-c -p mln-rs-web-shaper \
+    --no-default-features --features "mln-rs-c/$backend"
+bind maplibre_native_c
+bind mln_web_shaper

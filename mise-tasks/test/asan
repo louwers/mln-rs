@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#MISE description="Run the runtime, Vulkan and C library tests under AddressSanitizer, over and over for a while"
+#MISE depends=["install-nightly"]
+#USAGE arg "[minutes]" default="20" help="How long to keep starting rounds, in minutes"
+# AddressSanitizer stops a test at the first read or write of freed or
+# out-of-bounds memory. rustc's sanitizers are unstable, so the pinned nightly
+# (MLN_NIGHTLY) builds the tests, and std with them (-Zbuild-std). Each test
+# binary of mln-rs-runtime, mln-rs-vulkan and mln-rs-c runs as `cargo test`
+# runs it, its tests in parallel, then the next, and rounds of them start until
+# `minutes` have passed: a race between threads can fail one run in a hundred.
+# The first failure stops it. The tests render with the backend
+# MLN_RENDER_BACKEND names; CI's sanitizers workflow runs them on the Vulkan
+# backend on lavapipe, under Vulkan's validation layer. Leaks aren't checked,
+# since an abandoned render session keeps its graphics objects until the
+# process exits, on purpose. The nightly warns where the pinned Rust doesn't,
+# so warnings aren't errors here; CI's lint job checks them.
+set -euo pipefail
+source tools/dev-shell.sh
+host="$(rustc "+$MLN_NIGHTLY" -vV | sed -n 's/^host: //p')"
+export RUSTFLAGS=-Zsanitizer=address CARGO_BUILD_WARNINGS=warn CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/asan"
+export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+built="$(dev_shell cargo "+$MLN_NIGHTLY" test -Zbuild-std --target "$host" -p mln-rs-runtime -p mln-rs-vulkan -p mln-rs-c --lib --tests --no-run --message-format=json \
+    | jq -r 'select(.profile.test and .executable) | [(.manifest_path | rtrimstr("/Cargo.toml")), .executable] | @tsv')"
+dirs=()
+executables=()
+while IFS=$'\t' read -r dir executable; do
+    dirs+=("$dir")
+    executables+=("$executable")
+done <<< "$built"
+end=$((SECONDS + usage_minutes * 60))
+round=1
+while true; do
+    for i in "${!executables[@]}"; do
+        if ! output="$(cd "${dirs[$i]}" && dev_shell "${executables[$i]}" -q 2>&1)"; then
+            printf '%s\n' "$output"
+            echo "${executables[$i]##*/} failed in round $round" >&2
+            exit 1
+        fi
+    done
+    echo "Round $round of ${#executables[@]} test binaries passed, $SECONDS s in"
+    [ "$SECONDS" -lt "$end" ] || break
+    round=$((round + 1))
+done

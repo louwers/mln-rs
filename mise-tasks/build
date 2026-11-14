@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build every package and test"
+set -euo pipefail
+source tools/dev-shell.sh
+dev_shell cargo build --workspace --all-targets

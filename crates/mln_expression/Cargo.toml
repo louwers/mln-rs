@@ -37,16 +37,19 @@ thiserror.workspace = true
 # Intl on wasm), else ICU4X with the CLDR data it compiles in.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2.workspace = true
-objc2-core-foundation = { workspace = true, features = ["CFNumberFormatter", "CFString"] }
+objc2-core-foundation = { workspace = true, features = [
+  "CFNumberFormatter",
+  "CFString",
+] }
 objc2-foundation = { workspace = true, features = [
-    "NSArray",
-    "NSFormatter",
-    "NSLocale",
-    "NSNumberFormatter",
-    "NSObjCRuntime",
-    "NSRange",
-    "NSString",
-    "NSValue",
+  "NSArray",
+  "NSFormatter",
+  "NSLocale",
+  "NSNumberFormatter",
+  "NSObjCRuntime",
+  "NSRange",
+  "NSString",
+  "NSValue",
 ] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]

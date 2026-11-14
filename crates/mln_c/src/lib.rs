@@ -2,12 +2,13 @@
 //! and static) for hosts that link maplibre-native-ffi's.
 //!
 //! The headers in `include/` are maplibre-native-ffi's. `src/generated` comes
-//! from them (`just generate-c-abi`): their types, and a stub for each function
-//! this crate doesn't define, which fails with `MLN_STATUS_UNSUPPORTED`. To
-//! implement a function, define it outside `generated/` as
-//! `#[unsafe(no_mangle)] pub unsafe extern "C" fn` with the header's signature
-//! and regenerate; the generated code then checks that signature.
-//! maplibre-native-ffi's ABI suite runs against the library (`just c-abi-test`).
+//! from them (`mise run generate:c-abi`): their types, and a stub for each
+//! function this crate doesn't define, which fails with
+//! `MLN_STATUS_UNSUPPORTED`. To implement a function, define it outside
+//! `generated/` as `#[unsafe(no_mangle)] pub unsafe extern "C" fn` with the
+//! header's signature and regenerate; the generated code then checks that
+//! signature. maplibre-native-ffi's ABI suite runs against the library
+//! (`mise run test:c-abi`).
 //!
 //! Each header's functions live in the module of its name, except
 //! `mln_frame_pacer_create()`, which lives in `frame_pacer` beside each
@@ -18,9 +19,9 @@
 //! headers' geometry values (`geo`), and the
 //! `parse_thread` that parses for callers that wait.
 //!
-//! In the browser, the library is a wasm-bindgen package per backend (`just
-//! c-web webgpu` or `gl`): its instance's exports are the raw functions and
-//! its memory, and `web` holds what a JavaScript host needs beside them, such
+//! In the browser, the library is a wasm-bindgen package per backend (`mise
+//! run c-web:build webgpu` or `gl`): its instance's exports are the raw
+//! functions and its memory, and `web` holds what a JavaScript host needs beside them, such
 //! as the object handles of `web.h` and the callback trampolines that
 //! tools/c-abi-gen generates. Everything runs on the thread that loaded the
 //! module, and nothing waits.

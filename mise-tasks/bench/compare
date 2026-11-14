@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Compare the benchmarks of this checkout, uncommitted changes included, with another commit"
+#MISE depends=["bench:fixtures"]
+#USAGE arg "[base]" default="main" help="The Git ref to compare with"
+#USAGE arg "[args]..." var=#true help="Arguments to the benchmarks' `compare`, such as `--filter`"
+set -euo pipefail
+source tools/dev-shell.sh
+eval "set -- ${usage_args:-}"
+dev_shell cargo run --release -q -p mln-rs-bench -- compare "$usage_base" "$@"

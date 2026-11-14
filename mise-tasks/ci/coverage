@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run what CI's test job runs: every test, with coverage written to target/llvm-cov/lcov.info"
+set -euo pipefail
+rm -rf target/llvm-cov
+mkdir -p target/llvm-cov
+mise run coverage --lcov --output-path target/llvm-cov/lcov.info

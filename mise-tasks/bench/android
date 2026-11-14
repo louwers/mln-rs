@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Compare the WebGPU and Vulkan backends on an Android device over adb"
+#MISE depends=["bench:fixtures"]
+#USAGE arg "<ndk>" help="The Android NDK's directory"
+#USAGE arg "[args]..." var=#true help="Arguments to tools/bench/android.py"
+set -euo pipefail
+python3 -I tools/bench/android.py "$@"

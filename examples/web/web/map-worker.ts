@@ -22,8 +22,17 @@
 // then runs that build of the module (pkg/webgl). When the browser's API
 // can't start the map, the worker says `unsupported` rather than `fatal`.
 
-import type { WebMap } from './pkg/mln_web.js';
-import type { Bindings, Box, Camera, FromMap, Input, Loaded, Start, ToMap } from './protocol.ts';
+import type { WebMap } from "./pkg/mln_web.js";
+import type {
+  Bindings,
+  Box,
+  Camera,
+  FromMap,
+  Input,
+  Loaded,
+  Start,
+  ToMap,
+} from "./protocol.ts";
 
 // Every URL this worker fetched, and how many times, and how many fetches
 // are still transferring: the map's fetches look the global `fetch` up at
@@ -47,28 +56,31 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     settled = true;
     pending--;
   };
-  return globalFetch(input, init).then((response) => {
-    if (response.type === 'opaqueredirect') {
-      done(); // mln_storage reads no body from it
+  return globalFetch(input, init).then(
+    (response) => {
+      if (response.type === "opaqueredirect") {
+        done(); // mln_storage reads no body from it
+        return response;
+      }
+      const read = response.arrayBuffer.bind(response);
+      response.arrayBuffer = () => read().finally(done);
+      settle.set(response, done);
       return response;
-    }
-    const read = response.arrayBuffer.bind(response);
-    response.arrayBuffer = () => read().finally(done);
-    settle.set(response, done);
-    return response;
-  }, (error: unknown) => {
-    done();
-    throw error;
-  });
+    },
+    (error: unknown) => {
+      done();
+      throw error;
+    },
+  );
 };
 
-const webgl2 = self.name === 'webgl2';
+const webgl2 = self.name === "webgl2";
 
 // Imported rather than a static import, so that the preloads below don't
 // wait for it.
-const bindings: Promise<Bindings<'WebMap' | 'set_preloads' | 'panic_for_check' | 'mlnWebStopPump'>> = webgl2
-  ? import('./pkg/webgl/mln_web.js')
-  : import('./pkg/mln_web.js');
+const bindings: Promise<
+  Bindings<"WebMap" | "set_preloads" | "panic_for_check" | "mlnWebStopPump">
+> = webgl2 ? import("./pkg/webgl/mln_web.js") : import("./pkg/mln_web.js");
 
 type Handle = (message: ToMap) => void;
 
@@ -78,14 +90,17 @@ const IDLE_FRAMES = 10;
 let start: Promise<Handle | undefined> | null = null;
 const early: ToMap[] = []; // messages before the map exists
 onmessage = ({ data }: MessageEvent<ToMap>) => {
-  if (data.type === 'preload') preloadStyle(data.style, data.ratio, data.zoom);
-  else if (data.type === 'fetches') post({ type: 'fetches', fetches: Object.fromEntries(fetches) });
-  else if (data.type === 'start') start = run(data).catch((error: unknown) => fatal('map', error));
+  if (data.type === "preload") preloadStyle(data.style, data.ratio, data.zoom);
+  else if (data.type === "fetches")
+    post({ type: "fetches", fetches: Object.fromEntries(fetches) });
+  else if (data.type === "start")
+    start = run(data).catch((error: unknown) => fatal("map", error));
   else if (start) start.then((handle) => handle?.(data));
   else early.push(data);
 };
 
-const post = (message: FromMap, transfer: Transferable[] = []) => postMessage(message, transfer);
+const post = (message: FromMap, transfer: Transferable[] = []) =>
+  postMessage(message, transfer);
 
 let stopped = false;
 // Stops the instance's work between frames, once it has started.
@@ -99,7 +114,10 @@ function fatal(where: string, error: unknown): undefined {
   } catch {
     // The instance panicked: nothing runs in it any more.
   }
-  post({ type: 'fatal', message: `${where}: ${self.mlnPanic ?? String(error)}` });
+  post({
+    type: "fatal",
+    message: `${where}: ${self.mlnPanic ?? String(error)}`,
+  });
 }
 
 // Calls into the instance, unless the map has stopped.
@@ -108,13 +126,15 @@ function guard(f: () => void) {
   try {
     f();
   } catch (error) {
-    fatal('map', error);
+    fatal("map", error);
   }
 }
 
 // What throws outside `guard`: a fetch's or an image decode's completion.
-addEventListener('error', (event) => fatal('map', event.error ?? event.message));
-addEventListener('unhandledrejection', (event) => fatal('map', event.reason));
+addEventListener("error", (event) =>
+  fatal("map", event.error ?? event.message),
+);
+addEventListener("unhandledrejection", (event) => fatal("map", event.reason));
 
 // What the map fetches first, fetched while the module downloads and
 // compiles: the style, then its sources' TileJSON, its sprite and its
@@ -123,7 +143,10 @@ addEventListener('unhandledrejection', (event) => fatal('map', event.reason));
 // once, when they ask for the same URL; one never asked for is dropped
 // after a minute. Only absolute http(s) URLs: the map's file source maps
 // the others first.
-const preloads = new Map<string, { response: Promise<Response>; expiry: ReturnType<typeof setTimeout> }>();
+const preloads = new Map<
+  string,
+  { response: Promise<Response>; expiry: ReturnType<typeof setTimeout> }
+>();
 
 function takePreload(url: string): Promise<Response> | undefined {
   const preloaded = preloads.get(url);
@@ -134,11 +157,19 @@ function takePreload(url: string): Promise<Response> | undefined {
 }
 
 function preload(url: unknown): Promise<Response> | undefined {
-  if (typeof url !== 'string' || !/^https?:\/\//.test(url) || preloads.has(url)) return undefined;
+  if (typeof url !== "string" || !/^https?:\/\//.test(url) || preloads.has(url))
+    return undefined;
   const response = fetch(url);
   // Unclaimed, a failure is quiet; claimed, the map fetches again.
   response.catch(() => {});
-  response.then((r) => r.clone().arrayBuffer().finally(() => settle.get(r)?.())).catch(() => {});
+  response
+    .then((r) =>
+      r
+        .clone()
+        .arrayBuffer()
+        .finally(() => settle.get(r)?.()),
+    )
+    .catch(() => {});
   const expiry = setTimeout(() => preloads.delete(url), 60_000);
   preloads.set(url, { response, expiry });
   return response;
@@ -147,7 +178,9 @@ function preload(url: unknown): Promise<Response> | undefined {
 function preloadStyle(url: string, ratio: number, zoom: number) {
   // A clone to read: the map takes the original.
   preload(url)
-    ?.then((response): Promise<unknown> | undefined => (response.ok ? response.clone().json() : undefined))
+    ?.then((response): Promise<unknown> | undefined =>
+      response.ok ? response.clone().json() : undefined,
+    )
     .then((style) => {
       if (isRecord(style)) preloadParts(style, ratio, zoom);
     })
@@ -155,55 +188,99 @@ function preloadStyle(url: string, ratio: number, zoom: number) {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function preloadParts(style: Record<string, unknown>, ratio: number, zoom: number) {
-  for (const source of Object.values(isRecord(style.sources) ? style.sources : {})) {
+function preloadParts(
+  style: Record<string, unknown>,
+  ratio: number,
+  zoom: number,
+) {
+  for (const source of Object.values(
+    isRecord(style.sources) ? style.sources : {},
+  )) {
     if (isRecord(source)) preload(source.url);
   }
-  const sprites = typeof style.sprite === 'string' ? [style.sprite]
-    : Array.isArray(style.sprite) ? style.sprite.map((sprite: unknown) => (isRecord(sprite) ? sprite.url : undefined)) : [];
+  const sprites =
+    typeof style.sprite === "string"
+      ? [style.sprite]
+      : Array.isArray(style.sprite)
+        ? style.sprite.map((sprite: unknown) =>
+            isRecord(sprite) ? sprite.url : undefined,
+          )
+        : [];
   for (const sprite of sprites) {
     // mln_storage's `Resource::sprite_json` and `sprite_image`.
-    if (typeof sprite !== 'string' || sprite.includes('#')) continue;
-    const query = sprite.includes('?') ? sprite.indexOf('?') : sprite.length;
-    const scale = ratio > 1 ? '@2x' : '';
-    for (const extension of ['.json', '.png']) {
-      preload(`${sprite.slice(0, query)}${scale}${extension}${sprite.slice(query)}`);
+    if (typeof sprite !== "string" || sprite.includes("#")) continue;
+    const query = sprite.includes("?") ? sprite.indexOf("?") : sprite.length;
+    const scale = ratio > 1 ? "@2x" : "";
+    for (const extension of [".json", ".png"]) {
+      preload(
+        `${sprite.slice(0, query)}${scale}${extension}${sprite.slice(query)}`,
+      );
     }
   }
   const glyphs = style.glyphs;
-  if (typeof glyphs === 'string') {
+  if (typeof glyphs === "string") {
     for (const stack of firstFontStacks(style, zoom)) {
       // mln_storage's `Resource::glyphs`, for the first range.
-      preload(glyphs.replaceAll('{fontstack}', percentEncode(stack)).replaceAll('{range}', '0-255'));
+      preload(
+        glyphs
+          .replaceAll("{fontstack}", percentEncode(stack))
+          .replaceAll("{range}", "0-255"),
+      );
     }
   }
 }
 
 // The style spec's default `text-font`.
-const DEFAULT_FONT = ['Open Sans Regular', 'Arial Unicode MS Regular'];
+const DEFAULT_FONT = ["Open Sans Regular", "Arial Unicode MS Regular"];
 // Expressions whose arguments are all strings, unlike a font stack's.
-const STRING_EXPRESSIONS = new Set(['get', 'has', 'var', 'feature-state', 'global-state', 'properties']);
+const STRING_EXPRESSIONS = new Set([
+  "get",
+  "has",
+  "var",
+  "feature-state",
+  "global-state",
+  "properties",
+]);
 
 // The font stacks, joined, of the symbol layers with text shown at `zoom`
 // whose `text-font` is a constant: the glyphs their tiles' labels ask for
 // first.
-function firstFontStacks(style: Record<string, unknown>, zoom: number): Set<string> {
+function firstFontStacks(
+  style: Record<string, unknown>,
+  zoom: number,
+): Set<string> {
   const stacks = new Set<string>();
   for (const layer of Array.isArray(style.layers) ? style.layers : []) {
     if (!isRecord(layer)) continue;
     const layout = isRecord(layer.layout) ? layer.layout : {};
-    const shown = layer.type === 'symbol' && layout.visibility !== 'none' &&
-      (typeof layer.minzoom !== 'number' || zoom >= layer.minzoom) &&
-      (typeof layer.maxzoom !== 'number' || zoom < layer.maxzoom);
-    if (!shown || layout['text-field'] === undefined || layout['text-field'] === '') continue;
-    const font = layout['text-font'];
-    const fonts: unknown = font === undefined ? DEFAULT_FONT : Array.isArray(font) && font[0] === 'literal' ? font[1] : font;
+    const shown =
+      layer.type === "symbol" &&
+      layout.visibility !== "none" &&
+      (typeof layer.minzoom !== "number" || zoom >= layer.minzoom) &&
+      (typeof layer.maxzoom !== "number" || zoom < layer.maxzoom);
+    if (
+      !shown ||
+      layout["text-field"] === undefined ||
+      layout["text-field"] === ""
+    )
+      continue;
+    const font = layout["text-font"];
+    const fonts: unknown =
+      font === undefined
+        ? DEFAULT_FONT
+        : Array.isArray(font) && font[0] === "literal"
+          ? font[1]
+          : font;
     if (!Array.isArray(fonts) || fonts.length === 0) continue;
-    const names = fonts.filter((name: unknown) => typeof name === 'string');
-    if (names.length === fonts.length && !STRING_EXPRESSIONS.has(names[0] ?? '')) stacks.add(names.join(','));
+    const names = fonts.filter((name: unknown) => typeof name === "string");
+    if (
+      names.length === fonts.length &&
+      !STRING_EXPRESSIONS.has(names[0] ?? "")
+    )
+      stacks.add(names.join(","));
   }
   return stacks;
 }
@@ -211,19 +288,39 @@ function firstFontStacks(style: Record<string, unknown>, zoom: number): Set<stri
 // mln_util's `percent_encode`: every UTF-8 byte but the unreserved ones, as
 // lowercase hex.
 function percentEncode(text: string): string {
-  let encoded = '';
+  let encoded = "";
   for (const byte of new TextEncoder().encode(text)) {
     const char = String.fromCharCode(byte);
-    encoded += /[A-Za-z0-9\-_.~]/.test(char) ? char : `%${byte.toString(16).padStart(2, '0')}`;
+    encoded += /[A-Za-z0-9\-_.~]/.test(char)
+      ? char
+      : `%${byte.toString(16).padStart(2, "0")}`;
   }
   return encoded;
 }
 
-async function run(
-  { module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily, panic }: Start,
-): Promise<Handle> {
-  const { default: init, WebMap, set_preloads, panic_for_check, mlnWebStopPump } = await bindings;
-  const exports = await init({ module_or_path: module }) as { memory?: WebAssembly.Memory };
+async function run({
+  module,
+  canvas,
+  ports,
+  width,
+  height,
+  ratio,
+  style,
+  fallbackFontFaces,
+  camera,
+  localIdeographFontFamily,
+  panic,
+}: Start): Promise<Handle> {
+  const {
+    default: init,
+    WebMap,
+    set_preloads,
+    panic_for_check,
+    mlnWebStopPump,
+  } = await bindings;
+  const exports = (await init({ module_or_path: module })) as {
+    memory?: WebAssembly.Memory;
+  };
   stopPump = mlnWebStopPump;
   set_preloads(takePreload);
 
@@ -236,19 +333,31 @@ async function run(
   // A style's font faces are shaped by a second module, which only this
   // worker loads, the first time a style declares them.
   const loadShaper = async () => {
-    const shaper = await import('./pkg/mln_web_shaper.js');
+    const shaper = await import("./pkg/mln_web_shaper.js");
     await shaper.default();
     return shaper;
   };
-  const tileWorkerFatal = (instance: number, message: unknown) => fatal(`tile worker ${instance}`, message);
+  const tileWorkerFatal = (instance: number, message: unknown) =>
+    fatal(`tile worker ${instance}`, message);
   let map: WebMap;
   try {
-    map = await WebMap.create(canvas, width, height, ratio, ports, tileWorkerFatal, loadShaper,
-      localIdeographFontFamily);
+    map = await WebMap.create(
+      canvas,
+      width,
+      height,
+      ratio,
+      ports,
+      tileWorkerFatal,
+      loadShaper,
+      localIdeographFontFamily,
+    );
   } catch (error) {
     if (self.mlnPanic !== undefined) throw error;
     stopped = true;
-    post({ type: 'unsupported', message: error instanceof Error ? error.message : String(error) });
+    post({
+      type: "unsupported",
+      message: error instanceof Error ? error.message : String(error),
+    });
     return () => {};
   }
 
@@ -264,8 +373,8 @@ async function run(
   let idle = 0; // `idle` requests to answer
   let stillFrames = 0;
   let reported = 0;
-  let attribution = '';
-  let styleName = '';
+  let attribution = "";
+  let styleName = "";
   // Whether the page shows its debug overlay.
   let debug = false;
   const report = (force: boolean) => {
@@ -273,25 +382,29 @@ async function run(
     if (!force && now - reported < 250) return;
     reported = now;
     post({
-      type: 'status',
-      text: `${ports.length} tile workers, ${map.received()} replies` + (webgl2 ? ', WebGL2' : '') +
-        (loaded === null ? '' : `, loaded in ${Math.round(loaded.loadedMs)} ms`),
+      type: "status",
+      text:
+        `${ports.length} tile workers, ${map.received()} replies` +
+        (webgl2 ? ", WebGL2" : "") +
+        (loaded === null
+          ? ""
+          : `, loaded in ${Math.round(loaded.loadedMs)} ms`),
     });
     // A source's attribution can come later than its style, with its TileJSON.
     const next = map.attributions();
-    if (next.join('\n') !== attribution) {
-      attribution = next.join('\n');
-      post({ type: 'attribution', attribution: next });
+    if (next.join("\n") !== attribution) {
+      attribution = next.join("\n");
+      post({ type: "attribution", attribution: next });
     }
     const name = map.style_name();
     if (name !== styleName) {
       styleName = name;
-      post({ type: 'styleName', name });
+      post({ type: "styleName", name });
     }
     if (debug) {
       const [drawCalls = 0, textures = 0, buffers = 0] = map.render_stats();
       post({
-        type: 'stats',
+        type: "stats",
         stats: {
           drawCalls,
           memory: exports.memory?.buffer.byteLength ?? 0,
@@ -307,14 +420,20 @@ async function run(
     guard(() => drawFrame(time));
     if (!stopped) requestAnimationFrame(frame);
   }
-  let shownCamera = '';
+  let shownCamera = "";
   // When the last frame that drew began, for the debug overlay.
   let lastDrawn: number | null = null;
   function drawFrame(time: number) {
     const drew = map.frame(8, performance.now());
     if (drew) {
       if (debug && lastDrawn !== null) {
-        post({ type: 'frame', sample: { interval: time - lastDrawn, phases: Array.from(map.frame_timings()) } });
+        post({
+          type: "frame",
+          sample: {
+            interval: time - lastDrawn,
+            phases: Array.from(map.frame_timings()),
+          },
+        });
       }
       lastDrawn = time;
     }
@@ -324,25 +443,34 @@ async function run(
     if (next !== shownCamera) {
       shownCamera = next;
       stillFrames = 0;
-      post({ type: 'camera', camera });
+      post({ type: "camera", camera });
     } else {
       stillFrames++;
     }
     // Stopped: the camera hasn't moved for a few frames, past any ease the
     // last gesture started.
     if (idle > 0 && stillFrames >= IDLE_FRAMES && map.is_fully_loaded()) {
-      for (; idle > 0; idle--) post({ type: 'idle', camera });
+      for (; idle > 0; idle--) post({ type: "idle", camera });
     }
     if (loaded === null && map.is_fully_loaded()) {
-      loaded = { loadedMs: performance.now() - started, replies: map.received() };
-      post({ type: 'loaded', loaded });
+      loaded = {
+        loadedMs: performance.now() - started,
+        replies: map.received(),
+      };
+      post({ type: "loaded", loaded });
       report(true);
     }
     if (readPixels > 0) {
       const pixels = webgl2 ? canvasPixels(canvas) : map.take_pixels();
       if (pixels !== undefined) {
         readPixels--;
-        post({ type: 'pixels', pixels: { width: canvas.width, height: canvas.height, pixels } }, [pixels.buffer]);
+        post(
+          {
+            type: "pixels",
+            pixels: { width: canvas.width, height: canvas.height, pixels },
+          },
+          [pixels.buffer],
+        );
         if (readPixels > 0) map.request_pixels();
       }
     }
@@ -351,69 +479,75 @@ async function run(
   requestAnimationFrame(frame);
 
   let box: Box | null = null;
-  const handle = (data: ToMap) => guard(() => {
-    switch (data.type) {
-      case 'readPixels':
-        if (readPixels++ === 0) map.request_pixels();
-        break;
-      case 'idle':
-        idle++;
-        break;
-      case 'resize':
-        map.resize(data.width, data.height);
-        break;
-      case 'pixelRatio':
-        map.set_pixel_ratio(data.ratio);
-        break;
-      case 'style':
-        map.set_style_url(data.url);
-        started = performance.now();
-        loaded = null;
-        // The page clears both for the new style, so they go again even
-        // when the new style's are the same.
-        attribution = '';
-        styleName = '';
-        report(true);
-        break;
-      case 'jumpTo':
-        map.jump_to(...data.camera);
-        break;
-      case 'resetNorth':
-        map.reset_north();
-        break;
-      case 'globeFreeBearing':
-        map.set_globe_free_bearing(data.on);
-        break;
-      case 'follow':
-        map.follow(...data.camera);
-        break;
-      case 'stop': {
-        const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();
-        map.follow(lat, lon, zoom, bearing, pitch);
-        break;
-      }
-      case 'input': {
-        for (const input of data.inputs) applyInput(map, input);
-        const [x0, y0, x1, y1] = map.box_zoom() ?? [];
-        const next: Box | null = x0 === undefined || y0 === undefined || x1 === undefined || y1 === undefined
-          ? null
-          : [x0, y0, x1, y1];
-        if (String(next) !== String(box)) {
-          box = next;
-          post({ type: 'box', box });
+  const handle = (data: ToMap) =>
+    guard(() => {
+      switch (data.type) {
+        case "readPixels":
+          if (readPixels++ === 0) map.request_pixels();
+          break;
+        case "idle":
+          idle++;
+          break;
+        case "resize":
+          map.resize(data.width, data.height);
+          break;
+        case "pixelRatio":
+          map.set_pixel_ratio(data.ratio);
+          break;
+        case "style":
+          map.set_style_url(data.url);
+          started = performance.now();
+          loaded = null;
+          // The page clears both for the new style, so they go again even
+          // when the new style's are the same.
+          attribution = "";
+          styleName = "";
+          report(true);
+          break;
+        case "jumpTo":
+          map.jump_to(...data.camera);
+          break;
+        case "resetNorth":
+          map.reset_north();
+          break;
+        case "globeFreeBearing":
+          map.set_globe_free_bearing(data.on);
+          break;
+        case "follow":
+          map.follow(...data.camera);
+          break;
+        case "stop": {
+          const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] =
+            map.camera();
+          map.follow(lat, lon, zoom, bearing, pitch);
+          break;
         }
-        break;
+        case "input": {
+          for (const input of data.inputs) applyInput(map, input);
+          const [x0, y0, x1, y1] = map.box_zoom() ?? [];
+          const next: Box | null =
+            x0 === undefined ||
+            y0 === undefined ||
+            x1 === undefined ||
+            y1 === undefined
+              ? null
+              : [x0, y0, x1, y1];
+          if (String(next) !== String(box)) {
+            box = next;
+            post({ type: "box", box });
+          }
+          break;
+        }
+        case "debug":
+          debug = data.on;
+          report(true);
+          break;
+        case "preload":
+        case "start":
+        case "fetches":
+          break;
       }
-      case 'debug':
-        debug = data.on;
-        report(true);
-        break;
-      case 'preload':
-      case 'start':
-      case 'fetches':
-        break;
-    }
-  });
+    });
   for (const data of early.splice(0)) handle(data);
   return handle;
 }
@@ -422,35 +556,54 @@ async function run(
 // copied from on the GPU, and keeps its frame only until it is shown. The
 // rows are RGBA, not premultiplied.
 function canvasPixels(canvas: OffscreenCanvas): Uint8Array | undefined {
-  const copy = new OffscreenCanvas(canvas.width, canvas.height).getContext('2d');
+  const copy = new OffscreenCanvas(canvas.width, canvas.height).getContext(
+    "2d",
+  );
   if (copy === null) return undefined;
   copy.drawImage(canvas, 0, 0);
-  return new Uint8Array(copy.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
+  return new Uint8Array(
+    copy.getImageData(0, 0, canvas.width, canvas.height).data.buffer,
+  );
 }
 
 // The page's events, on this worker's clock: the one frames run on.
 function applyInput(map: WebMap, input: Input) {
   const time = input.time - performance.timeOrigin;
   switch (input.kind) {
-    case 'pointer_down':
-      map.pointer_down(input.id, input.pointerType, input.button, input.x, input.y, input.modifiers, time);
+    case "pointer_down":
+      map.pointer_down(
+        input.id,
+        input.pointerType,
+        input.button,
+        input.x,
+        input.y,
+        input.modifiers,
+        time,
+      );
       break;
-    case 'pointer_move':
+    case "pointer_move":
       map.pointer_move(input.id, input.x, input.y, time);
       break;
-    case 'pointer_up':
+    case "pointer_up":
       map.pointer_up(input.id, input.x, input.y, time);
       break;
-    case 'pointer_cancel':
+    case "pointer_cancel":
       map.pointer_cancel(input.id, time);
       break;
-    case 'wheel':
-      map.wheel(input.x, input.y, input.wheel, input.amount, input.modifiers, time);
+    case "wheel":
+      map.wheel(
+        input.x,
+        input.y,
+        input.wheel,
+        input.amount,
+        input.modifiers,
+        time,
+      );
       break;
-    case 'key':
+    case "key":
       map.key(input.key, input.modifiers, time);
       break;
-    case 'blur':
+    case "blur":
       map.blur(time);
       break;
   }

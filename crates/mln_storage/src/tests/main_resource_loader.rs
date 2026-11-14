@@ -469,11 +469,13 @@ fn no_cache_refresh_etag_not_modified() {
     resource.loading_method = LoadingMethod::NetworkOnly;
     resource.prior_etag = Some("snowfall".to_owned());
 
-    no_cache(&resource, |res| {
+    // The 304 says max-age=1, counted from no earlier than the request.
+    let requested = now();
+    no_cache(&resource, move |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
         assert!(res.expires.is_some());
-        assert!(Some(now()) < res.expires);
+        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.expires);
         assert!(res.must_revalidate);
         assert!(res.modified.is_none());
         assert_eq!(Some("snowfall"), res.etag.as_deref());
@@ -532,11 +534,13 @@ fn no_cache_refresh_modified_not_modified() {
     resource.loading_method = LoadingMethod::NetworkOnly;
     resource.prior_modified = Some(Timestamp::from_secs(1_420_070_400)); // January 1, 2015
 
-    no_cache(&resource, |res| {
+    // The 304 says max-age=1, counted from no earlier than the request.
+    let requested = now();
+    no_cache(&resource, move |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
         assert!(res.expires.is_some());
-        assert!(Some(now()) < res.expires);
+        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.expires);
         assert!(res.must_revalidate);
         assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
         assert!(res.etag.is_none());
