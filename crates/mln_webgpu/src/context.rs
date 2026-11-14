@@ -569,7 +569,7 @@ impl Context {
                 stride: size_of::<[i16; 2]>() as u32,
                 step: VertexStep::Vertex,
                 attributes: vec![GpuVertexAttribute {
-                    location: source.attributes[0].index as u32,
+                    id: source.attributes[0].id as u32,
                     format: AttributeDataType::Short2,
                     offset: 0,
                 }],

@@ -9,9 +9,10 @@
 //!
 //! Bindings use the shaders' own numbering: a buffer binds at its uniform
 //! or storage buffer id (`shaders::shader_defines`, e.g.
-//! `ID_GLOBAL_PAINT_PARAMS_UBO`) and a texture at its texture id (e.g.
-//! `ID_LINE_DASH_TEXTURE`). Each backend maps them to its own slots, groups
-//! or descriptor sets.
+//! `ID_GLOBAL_PAINT_PARAMS_UBO`), a texture at its texture id (e.g.
+//! `ID_LINE_DASH_TEXTURE`) and a vertex attribute at its attribute id (e.g.
+//! `ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE`). Each backend maps them to its own
+//! slots, groups, descriptor sets or shader locations.
 
 use std::ops::Range;
 
@@ -167,11 +168,13 @@ pub enum VertexStep {
     Instance,
 }
 
-/// An attribute of a vertex buffer: the shader input at `location` reads
-/// `format` from `offset` bytes into each element.
+/// An attribute of a vertex buffer: the shader input with attribute id
+/// `id` reads `format` from `offset` bytes into each element. The id is of
+/// the shader's per-vertex attributes in a [`VertexStep::Vertex`] buffer,
+/// and of its per-instance ones in a [`VertexStep::Instance`] buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VertexAttribute {
-    pub location: u32,
+    pub id: u32,
     pub format: AttributeDataType,
     pub offset: u32,
 }

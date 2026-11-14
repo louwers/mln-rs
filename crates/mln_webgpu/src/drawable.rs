@@ -519,9 +519,17 @@ struct UniqueBinding {
     attributes: Vec<GpuVertexAttribute>,
 }
 
-fn accumulate_bindings(source: &AttributeBindingArray, step: VertexStep, out: &mut Vec<UniqueBinding>) {
-    for (attribute_index, binding) in source.iter().enumerate() {
+/// Adds the bindings of `source`, which is indexed by `shader`'s locations,
+/// to the slots in `out`.
+fn accumulate_bindings(
+    shader: &ShaderProgram,
+    source: &AttributeBindingArray,
+    step: VertexStep,
+    out: &mut Vec<UniqueBinding>,
+) {
+    for (location, binding) in source.iter().enumerate() {
         let Some(binding) = binding else { continue };
+        let Some(id) = shader.attribute_id(step, location) else { continue };
         let Some(resource) = &binding.vertex_buffer_resource else { continue };
         let Some(vertex_buffer_res) = resource.downcast_ref::<VertexBufferResource>() else {
             continue;
@@ -554,7 +562,7 @@ fn accumulate_bindings(source: &AttributeBindingArray, step: VertexStep, out: &m
             Some(i) => &mut out[i],
         };
         entry.attributes.push(GpuVertexAttribute {
-            location: attribute_index as u32,
+            id,
             format: binding.attribute.data_type,
             offset: binding.attribute.offset,
         });
@@ -654,8 +662,8 @@ impl drawable::Drawable for Drawable {
 
             let mut unique_bindings =
                 Vec::with_capacity(self.impl_.attribute_bindings.len() + self.impl_.instance_bindings.len());
-            accumulate_bindings(&self.impl_.attribute_bindings, VertexStep::Vertex, &mut unique_bindings);
-            accumulate_bindings(&self.impl_.instance_bindings, VertexStep::Instance, &mut unique_bindings);
+            accumulate_bindings(shader, &self.impl_.attribute_bindings, VertexStep::Vertex, &mut unique_bindings);
+            accumulate_bindings(shader, &self.impl_.instance_bindings, VertexStep::Instance, &mut unique_bindings);
 
             if unique_bindings.len() > MAX_VERTEX_BUFFER_SLOTS {
                 Log::warning(

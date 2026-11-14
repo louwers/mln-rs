@@ -373,6 +373,21 @@ impl ShaderProgram {
         })
     }
 
+    /// The id of the per-vertex or per-instance attribute at `location`.
+    pub(crate) fn attribute_id(&self, step: VertexStep, location: usize) -> Option<u32> {
+        let attributes = self.attributes(step);
+        (0..attributes.allocated_size())
+            .find(|&id| attributes.get(id).is_some_and(|attribute| attribute.get_index() as usize == location))
+            .map(|id| id as u32)
+    }
+
+    fn attributes(&self, step: VertexStep) -> &VertexAttributeArray {
+        match step {
+            VertexStep::Vertex => &self.vertex_attributes,
+            VertexStep::Instance => &self.instance_attributes,
+        }
+    }
+
     fn init_attribute(&mut self, info: &AttributeInfo) {
         let index = info.index as i32;
         // Indexes must be unique, if there's a conflict check the `attributes`
@@ -418,10 +433,13 @@ impl ShaderProgram {
                         let format = vertex_format(attribute.format).ok_or_else(|| {
                             GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format))
                         })?;
+                        let location = self.attributes(layout.step).get(attribute.id as usize).ok_or_else(|| {
+                            GpuError::Invalid(format!("{} has no attribute {}", self.name(), attribute.id))
+                        })?;
                         Ok(wgpu::VertexAttribute {
                             format,
                             offset: u64::from(attribute.offset),
-                            shader_location: attribute.location,
+                            shader_location: location.get_index() as u32,
                         })
                     })
                     .collect::<Result<Vec<_>, GpuError>>()

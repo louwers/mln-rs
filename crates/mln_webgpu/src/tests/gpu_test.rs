@@ -16,7 +16,8 @@ use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, Backgro
 use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_CLIPPING_MASK_UBO, ID_PROJECTION_UBO,
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
+    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_CLIPPING_MASK_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::{StencilMode, Test};
@@ -78,11 +79,11 @@ fn read_back(device: &Device, texture: &wgpu::Texture) -> Vec<u8> {
     mapped.chunks(padded as usize).flat_map(|line| &line[..row as usize]).copied().collect()
 }
 
-fn position_layout(location: u32) -> VertexBufferLayout {
+fn position_layout(id: usize) -> VertexBufferLayout {
     VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
-        attributes: vec![VertexAttribute { location, format: AttributeDataType::Short2, offset: 0 }],
+        attributes: vec![VertexAttribute { id: id as u32, format: AttributeDataType::Short2, offset: 0 }],
     }
 }
 
@@ -124,7 +125,7 @@ fn clip_mask_and_background_through_gpu() {
         .create_pipeline(&PipelineKey {
             shader: ShaderKey::new(BuiltIn::ClippingMaskProgram, []),
             state: PipelineState {
-                vertex_buffers: vec![position_layout(2)],
+                vertex_buffers: vec![position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)],
                 primitive: DrawModeType::Triangles,
                 cull: CullFaceMode::disabled(),
                 blend: disabled.blend_function,
@@ -157,7 +158,7 @@ fn clip_mask_and_background_through_gpu() {
         .create_pipeline(&PipelineKey {
             shader: ShaderKey::new(BuiltIn::BackgroundShader, []),
             state: PipelineState {
-                vertex_buffers: vec![position_layout(3)],
+                vertex_buffers: vec![position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
                 primitive: DrawModeType::Triangles,
                 cull: CullFaceMode::disabled(),
                 blend: unblended.blend_function,
