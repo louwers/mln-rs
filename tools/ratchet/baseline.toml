@@ -272,4 +272,4 @@
 "crates/mln_webgpu/src/render_pass.rs" = 7
 "crates/mln_webgpu/src/renderer_backend.rs" = 2
 "crates/mln_webgpu/src/shaders/shader_program.rs" = 2
-"crates/mln_webgpu/src/surface_target.rs" = 21
+"crates/mln_webgpu/src/surface_target.rs" = 20
