@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::fill_layer_ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO,
     FillOutlineTriangulatedDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO, FillTilePropsUnionUBO,
@@ -24,6 +23,7 @@ use super::render_fill_layer::FillVariant;
 use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::bucket::Bucket;
 use crate::buckets::fill_bucket::FillBucket;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;

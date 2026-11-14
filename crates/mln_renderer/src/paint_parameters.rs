@@ -6,7 +6,7 @@ use mln_gfx::backend::Type as BackendType;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, GpuError, LoadOp, Pass, RenderCommand, TargetFormats};
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
-use mln_gfx::{Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, StencilMode};
+use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::mat4::Mat4;
@@ -15,6 +15,7 @@ use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
 use crate::clip_masks::ClipMasks;
+use crate::gfx::context::Context;
 use crate::line_atlas::LineAtlas;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
@@ -84,8 +85,7 @@ impl RecordedPass {
 }
 
 pub struct PaintParameters<'a> {
-    pub(crate) context: &'a dyn Context,
-    pub(crate) backend: &'a dyn RendererBackend,
+    pub(crate) context: &'a Context,
     /// The pass of the backend's `Gpu` that drawables record into, while
     /// one is begun.
     pub(crate) recorded: RefCell<Option<RecordedPass>>,
@@ -134,9 +134,8 @@ impl<'a> PaintParameters<'a> {
 
     #[expect(clippy::too_many_arguments, reason = "each argument is a field of the paint parameters")]
     pub(crate) fn new(
-        context: &'a dyn Context,
+        context: &'a Context,
         pixel_ratio: f32,
-        backend: &'a dyn RendererBackend,
         debug_options: MapDebugOptions,
         transform_params: &'a TransformParameters,
         static_data: &'a RenderStaticData,
@@ -153,7 +152,6 @@ impl<'a> PaintParameters<'a> {
 
         PaintParameters {
             context,
-            backend,
             recorded: RefCell::new(None),
             finished: RefCell::new(Vec::new()),
             transform_params,

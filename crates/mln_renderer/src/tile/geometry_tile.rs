@@ -27,7 +27,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::{ActorRef, LocalObject, Mailbox, scheduler};
-use mln_gfx::Context;
 use mln_map_types::{MapDebugOptions, MapMode};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -48,6 +47,7 @@ use serde::{Deserialize, Serialize};
 use crate::bucket::BucketPtr;
 use crate::bucket_geometry::BucketGeometry;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{GlyphAtlas, ImageAtlas, ImageVersionMap, TextureAtlas};
 use crate::image_manager::{ImageManager, ImageRequestPair, ImageRequestor, ImageRequestorBase, requestor_key};
 use crate::render_layer::LayerRenderData;
@@ -204,7 +204,7 @@ impl TileRenderData for GeometryTileRenderData {
         Some(&self.bucket_geometry)
     }
 
-    fn upload(&self, context: &dyn Context) {
+    fn upload(&self, context: &Context) {
         let Some(layout_result) = &self.layout_result else {
             return;
         };

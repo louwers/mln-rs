@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
@@ -21,6 +20,7 @@ use mln_util::Color;
 use mln_util::geo::LatLng;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;

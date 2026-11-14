@@ -11,7 +11,6 @@ use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE};
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
-use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::DepthMaskType;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
@@ -20,6 +19,7 @@ use mln_util::logging::{Event, Log};
 
 use crate::drawable::{DrawPriority, DrawSegment, Drawable, Textures, UniqueDrawSegment, UniqueDrawable};
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
+use crate::gfx::texture2d::Texture2DPtr;
 use crate::render_pass::RenderPass;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

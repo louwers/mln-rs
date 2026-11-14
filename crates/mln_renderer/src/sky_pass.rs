@@ -7,7 +7,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
-use mln_gfx::{Context, DepthMaskType, ShaderProgramPtr, ShaderRegistry};
+use mln_gfx::{DepthMaskType, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::light::{LightAnchor, LightPosition};
 use mln_style::sky::{SkyAtmosphereBlend, SkyColor, SkyHorizonBlend, SkyHorizonColor};
@@ -19,6 +19,7 @@ use mln_util::size::Size;
 use mln_util::vectors::Vec4;
 
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::bind_no_projection;
 use crate::render_light::EvaluatedLight;
@@ -110,7 +111,7 @@ impl SkyPass {
     pub(crate) fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         viewport_size: Size,
         pixel_ratio: f32,

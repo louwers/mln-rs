@@ -1,10 +1,8 @@
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
-use mln_gfx::backend::Type as BackendType;
-use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::gpu::Gpu;
-use mln_gfx::renderer_backend::{self, RendererBackendBase};
+use mln_gfx::renderer_backend;
 
 use crate::device::Device;
 use crate::gpu::MetalGpu;
@@ -13,7 +11,6 @@ use crate::gpu::MetalGpu;
 /// resources belong to, and that the targets built on it import their
 /// textures into.
 pub struct RendererBackend {
-    base: RendererBackendBase,
     gpu: Rc<RefCell<MetalGpu>>,
     device: Device,
 }
@@ -23,10 +20,11 @@ impl RendererBackend {
     #[must_use]
     pub fn new(device: &Device) -> Self {
         let gpu = Rc::new(RefCell::new(MetalGpu::new(device)));
-        RendererBackend { base: RendererBackendBase::new(), gpu, device: device.clone() }
+        RendererBackend { gpu, device: device.clone() }
     }
 
     /// The device the backend renders on.
+    #[must_use]
     pub fn device(&self) -> &Device {
         &self.device
     }
@@ -43,41 +41,6 @@ impl RendererBackend {
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
-    fn renderer_backend_base(&self) -> &RendererBackendBase {
-        &self.base
-    }
-
-    fn create_context(&self) -> Rc<dyn GfxContext> {
-        Rc::new(Context { base: ContextBase::default(), gpu: Rc::clone(&self.gpu) })
-    }
-
-    /// Metal has no context to make current. `MetalGpu` and the targets
-    /// drain autorelease pools of their own.
-    fn activate(&self) {}
-    fn deactivate(&self) {}
-}
-
-/// The renderer's caches over the backend's [`MetalGpu`].
-struct Context {
-    base: ContextBase,
-    gpu: Rc<RefCell<MetalGpu>>,
-}
-
-impl GfxContext for Context {
-    fn context_base(&self) -> &ContextBase {
-        &self.base
-    }
-
-    fn backend_type(&self) -> BackendType {
-        BackendType::Metal
-    }
-
-    fn begin_frame(&self) {}
-
-    fn end_frame(&self) {}
-
-    fn reduce_memory_usage(&self) {}
-
     fn gpu(&self) -> RefMut<'_, dyn Gpu> {
         RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }

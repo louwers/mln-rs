@@ -1,10 +1,9 @@
-//! The Metal backend: [`MetalGpu`], the backend's
-//! [`Gpu`](mln_gfx::gpu::Gpu), on the `objc2-metal` bindings, with its MSL
-//! shaders and the targets the renderer draws frames into.
+//! The Metal backend: `MetalGpu`, the backend's `mln_gfx::gpu::Gpu`, on the
+//! `objc2-metal` bindings, with its MSL shaders and the targets the renderer
+//! draws frames into.
 //!
-//! A [`RendererBackend`] renders on a [`Device`], into an
-//! [`OffscreenTarget`], a [`SurfaceTarget`], a [`BorrowedTarget`] or an
-//! [`ExportedTarget`] built on it.
+//! A `RendererBackend` renders on a `Device`, into an `OffscreenTarget`, a
+//! `SurfaceTarget`, a `BorrowedTarget` or an `ExportedTarget` built on it.
 //!
 //! Metal exists on Apple platforms only; elsewhere this crate is empty.
 

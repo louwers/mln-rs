@@ -103,6 +103,7 @@ impl SurfaceTarget {
     /// A target on `backend` that presents to `layer`, whose drawables it
     /// sizes to `framebuffer_size`. With `cap_frame_rate` off, frames are
     /// presented without waiting for the display.
+    #[must_use]
     pub fn new(backend: &RendererBackend, layer: Layer, framebuffer_size: Size, cap_frame_rate: bool) -> SurfaceTarget {
         let Layer(layer) = layer;
         let device = backend.device().device().clone();

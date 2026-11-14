@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
-use crate::context::Context;
-use crate::gpu::{BufferDesc, BufferId, BufferUsage, GpuError};
+use crate::gpu::{BufferDesc, BufferId, BufferUsage, Gpu, GpuError};
 use crate::released::Released;
 use crate::rendering_stats::RenderingStats;
 
@@ -11,9 +10,9 @@ use crate::rendering_stats::RenderingStats;
 /// any device can bind.
 const UNIFORM_BUFFER_ALIGNMENT: usize = 256;
 
-/// A buffer of the renderer: a buffer of the backend's
-/// [`Gpu`](crate::gpu::Gpu), which goes back to the context to destroy when
-/// the last handle to it drops (see [`Released`]).
+/// A buffer of the renderer: a buffer of the backend's [`Gpu`], which goes
+/// to the renderer's release queue when the last handle to it drops (see
+/// [`Released`]), and which the renderer's rendering stats count.
 pub struct Buffer {
     id: BufferId,
     size: usize,
@@ -24,31 +23,46 @@ pub struct Buffer {
 pub type BufferPtr = Rc<Buffer>;
 
 impl Buffer {
-    /// Makes a buffer of `usage` holding `data`.
-    pub fn create<C: Context + ?Sized>(context: &C, usage: BufferUsage, data: &[u8]) -> Result<BufferPtr, GpuError> {
-        let buffer = Buffer::allocate(context, usage, data.len())?;
-        buffer.write_bytes(context, data)?;
-        buffer.count_write(&mut context.rendering_stats(), data.len(), false);
+    /// Makes a buffer of `gpu` of `usage` holding `data`, which goes to
+    /// `released` once dropped, and counts it in `stats`.
+    pub fn create(
+        gpu: &mut dyn Gpu,
+        released: &Rc<Released>,
+        stats: &mut RenderingStats,
+        usage: BufferUsage,
+        data: &[u8],
+    ) -> Result<BufferPtr, GpuError> {
+        let buffer = Buffer::allocate(gpu, released, stats, usage, data.len())?;
+        buffer.write_bytes(gpu, data)?;
+        buffer.count_write(stats, data.len(), false);
         Ok(buffer)
     }
 
     /// Makes a buffer of `usage` holding the bytes of `data`, written from
     /// the JS array they're in.
     #[cfg(target_family = "wasm")]
-    pub fn create_from_host<C: Context + ?Sized>(
-        context: &C,
+    pub fn create_from_host(
+        gpu: &mut dyn Gpu,
+        released: &Rc<Released>,
+        stats: &mut RenderingStats,
         usage: BufferUsage,
         data: &mln_util::host_bytes::HostBytes,
     ) -> Result<BufferPtr, GpuError> {
-        let buffer = Buffer::allocate(context, usage, data.len())?;
+        let buffer = Buffer::allocate(gpu, released, stats, usage, data.len())?;
         if !data.is_empty() {
-            context.gpu().write_buffer_from_host(buffer.id, 0, data)?;
+            gpu.write_buffer_from_host(buffer.id, 0, data)?;
         }
         Ok(buffer)
     }
 
     /// A buffer of `usage` that writes of up to `size` bytes fit in.
-    fn allocate<C: Context + ?Sized>(context: &C, usage: BufferUsage, size: usize) -> Result<BufferPtr, GpuError> {
+    fn allocate(
+        gpu: &mut dyn Gpu,
+        released: &Rc<Released>,
+        stats: &mut RenderingStats,
+        usage: BufferUsage,
+        size: usize,
+    ) -> Result<BufferPtr, GpuError> {
         let allocated = allocated_size(usage, size);
         let label = match usage {
             BufferUsage::Vertex => "vertex buffer",
@@ -56,16 +70,13 @@ impl Buffer {
             BufferUsage::Uniform => "uniform buffer",
             BufferUsage::Storage => "storage buffer",
         };
-        let id = context.gpu().create_buffer(&BufferDesc { label, usage, size: allocated as u64 })?;
+        let id = gpu.create_buffer(&BufferDesc { label, usage, size: allocated as u64 })?;
         // Counted before the first write, whose failure drops the buffer,
         // which releases it and takes it out of the stats.
-        {
-            let mut stats = context.rendering_stats();
-            count(&mut stats, usage, allocated as i32);
-            stats.total_buffers += 1;
-            stats.total_buffer_objs += 1;
-        }
-        Ok(Rc::new(Buffer { id, size, usage, released: Rc::clone(&context.context_base().released) }))
+        count(stats, usage, allocated as i32);
+        stats.total_buffers += 1;
+        stats.total_buffer_objs += 1;
+        Ok(Rc::new(Buffer { id, size, usage, released: Rc::clone(released) }))
     }
 
     #[must_use]
@@ -92,16 +103,17 @@ impl Buffer {
         self.usage == BufferUsage::Storage
     }
 
-    /// Writes `data` at the start of the buffer. Fails if `data` is longer
-    /// than [`size`](Self::size).
-    pub fn write<C: Context + ?Sized>(&self, context: &C, data: &[u8]) -> Result<(), GpuError> {
-        self.write_bytes(context, data)?;
-        self.count_write(&mut context.rendering_stats(), data.len(), true);
+    /// Writes `data` at the start of the buffer, of `gpu`, and counts the
+    /// write in `stats`. Fails if `data` is longer than
+    /// [`size`](Self::size).
+    pub fn write(&self, gpu: &mut dyn Gpu, stats: &mut RenderingStats, data: &[u8]) -> Result<(), GpuError> {
+        self.write_bytes(gpu, data)?;
+        self.count_write(stats, data.len(), true);
         Ok(())
     }
 
     /// [`write`](Self::write) without counting it in the stats.
-    fn write_bytes<C: Context + ?Sized>(&self, context: &C, data: &[u8]) -> Result<(), GpuError> {
+    fn write_bytes(&self, gpu: &mut dyn Gpu, data: &[u8]) -> Result<(), GpuError> {
         if data.len() > self.size {
             return Err(GpuError::Invalid(format!("a write of {} bytes to a buffer of {}", data.len(), self.size)));
         }
@@ -110,11 +122,11 @@ impl Buffer {
         }
         // `Gpu::write_buffer` takes whole 4-byte words.
         if data.len().is_multiple_of(4) {
-            context.gpu().write_buffer(self.id, 0, data)?;
+            gpu.write_buffer(self.id, 0, data)?;
         } else {
             let mut padded = data.to_vec();
             padded.resize(data.len().next_multiple_of(4), 0);
-            context.gpu().write_buffer(self.id, 0, &padded)?;
+            gpu.write_buffer(self.id, 0, &padded)?;
         }
         Ok(())
     }

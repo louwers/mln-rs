@@ -18,7 +18,6 @@ mod allocation;
 #[cfg(target_os = "android")]
 mod android_hardware_buffer;
 mod borrowed_target;
-mod context;
 mod custom_layer;
 mod descriptor_set;
 pub mod device;

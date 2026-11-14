@@ -224,10 +224,7 @@ fn vulkan_frame(backend: &mln_vulkan::RendererBackend, target: &mln_vulkan::Surf
     use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, Pass};
     use mln_gfx::renderer_backend::RendererBackend as _;
 
-    let _scope = mln_gfx::BackendScope::new(backend, mln_gfx::ScopeType::Explicit);
     let image = target.begin_frame()?;
-    let context = backend.get_context();
-    context.begin_frame();
     let pass = Pass {
         label: "frame".to_owned(),
         color: Some(ColorAttachment {
@@ -241,9 +238,8 @@ fn vulkan_frame(backend: &mln_vulkan::RendererBackend, target: &mln_vulkan::Surf
         }),
         commands: Vec::new(),
     };
-    context.gpu().submit(&[pass]).ok()?;
+    backend.gpu().submit(&[pass]).ok()?;
     let handoff = target.end_frame();
-    context.end_frame();
     Some(handoff)
 }
 

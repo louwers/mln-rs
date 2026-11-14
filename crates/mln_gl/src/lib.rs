@@ -28,7 +28,6 @@
 
 #![expect(unsafe_code, reason = "OpenGL through glow is the FFI here")]
 
-mod context;
 mod custom_layer;
 mod enums;
 mod frame_image;

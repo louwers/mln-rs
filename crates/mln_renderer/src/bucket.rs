@@ -10,7 +10,6 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use mln_gfx::Context;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
@@ -19,6 +18,7 @@ use mln_util::feature::feature_id_to_string;
 use mln_util::identity::SimpleIdentity;
 use serde::{Deserialize, Serialize};
 
+use crate::gfx::context::Context;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::RenderLayer;
 
@@ -123,7 +123,7 @@ pub(crate) trait Bucket: Any + Send + Sync {
     /// As long as this bucket has a Prepare render pass, this function is
     /// getting called. Typically, this only happens once when the bucket is
     /// being rendered for the first time.
-    fn upload(&self, context: &dyn Context);
+    fn upload(&self, context: &Context);
 
     fn has_data(&self) -> bool;
 

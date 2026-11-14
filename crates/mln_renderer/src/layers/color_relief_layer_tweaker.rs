@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
 };
@@ -12,6 +11,7 @@ use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefOpacity};
 
 use super::cast_matrix;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;

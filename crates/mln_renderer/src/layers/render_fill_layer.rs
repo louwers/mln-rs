@@ -10,7 +10,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
+    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
     VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
@@ -34,6 +34,7 @@ use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::buckets::line_bucket::LineLayoutVertex;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -304,7 +305,7 @@ impl RenderLayer for RenderFillLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

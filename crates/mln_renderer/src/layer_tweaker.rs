@@ -9,10 +9,8 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_gfx::context::Context;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_map_types::{ProjectionData, TransformState};
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
@@ -21,6 +19,8 @@ use mln_util::constants::{EXTENT, M2PI};
 use mln_util::mat4::{Mat4, matrix};
 
 use crate::drawable::Drawable;
+use crate::gfx::context::Context;
+use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::layer_group::LayerGroup;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -52,7 +52,7 @@ impl LayerTweakerBase {
         &mut self,
         layer_uniforms: &mut UniformBufferArray,
         ubos: &[ProjectionUBO],
-        context: &dyn Context,
+        context: &Context,
     ) {
         let bytes: &[u8] = bytemuck::cast_slice(ubos);
         context.write_storage_buffer(&mut self.projection_uniform_buffer, bytes);
@@ -64,7 +64,7 @@ impl LayerTweakerBase {
 /// projection, a projection block of zeros if they have none. GL's programs
 /// declare the block whether they read it or not, so a draw binds it all the
 /// same.
-pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &dyn Context) {
+pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &Context) {
     if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
         layer_uniforms
             .set(ID_PROJECTION_UBO, context.create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())));

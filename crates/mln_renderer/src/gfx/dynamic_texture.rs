@@ -14,14 +14,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use etagere::{AllocId, AtlasAllocator, size2};
 use mln_actor::LocalObject;
-use mln_gfx::Context;
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
+use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 
 /// A bin of a dynamic texture.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -187,7 +189,7 @@ impl DynamicTexture {
 
     /// Creates the texture on first use and uploads the queued images. Runs
     /// on the render thread.
-    pub(crate) fn upload_deferred_images(&self, context: &dyn Context) {
+    pub(crate) fn upload_deferred_images(&self, context: &Context) {
         let mut inner = self.inner.lock();
         let texture = if let Some(texture) = self.get_texture() {
             texture

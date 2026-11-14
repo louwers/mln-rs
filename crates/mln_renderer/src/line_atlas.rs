@@ -3,14 +3,16 @@
 // the port keys by the values themselves (the float bits), which is the same
 // map without the collisions. The hash is only a cache key.
 
-use mln_gfx::Context;
 use mln_gfx::gpu::TextureFormat;
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
+
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct LinePatternPos {
@@ -228,7 +230,7 @@ impl DashPatternTexture {
     /// Uploads the texture to the GPU to be available when we need it. This
     /// is a lazy operation; the texture is only bound when the data is
     /// uploaded for the first time.
-    pub(crate) fn upload(&mut self, context: &dyn Context) {
+    pub(crate) fn upload(&mut self, context: &Context) {
         if let DashTexture::Image(image) = &self.texture {
             let temp_texture = context.create_texture_2d();
             {
@@ -312,7 +314,7 @@ impl LineAtlas {
     }
 
     /// Uploads the textures to the GPU to be available when we need it.
-    pub(crate) fn upload(&mut self, context: &dyn Context) {
+    pub(crate) fn upload(&mut self, context: &Context) {
         for key in std::mem::take(&mut self.needs_upload) {
             if let Some(texture) = self.textures.get_mut(&key) {
                 texture.upload(context);

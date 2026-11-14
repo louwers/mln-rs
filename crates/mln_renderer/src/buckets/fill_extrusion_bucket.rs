@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use geometry::Point;
-use mln_gfx::Context;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
@@ -36,6 +35,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::context::Context;
 use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
@@ -331,7 +331,7 @@ impl Bucket for FillExtrusionBucket {
         Ok(())
     }
 
-    fn upload(&self, _context: &dyn Context) {
+    fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

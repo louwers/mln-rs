@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use block2::RcBlock;
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::color_mode::{BlendFunction, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
@@ -1468,8 +1469,16 @@ impl Resources for MetalGpu {
 }
 
 impl Gpu for MetalGpu {
+    fn backend_type(&self) -> BackendType {
+        BackendType::Metal
+    }
+
     fn limits(&self) -> Limits {
-        Limits { buffer_offset_alignment: BUFFER_OFFSET_ALIGNMENT, max_texture_size: self.max_texture_size }
+        Limits {
+            buffer_offset_alignment: BUFFER_OFFSET_ALIGNMENT,
+            max_texture_size: self.max_texture_size,
+            half_float_render_targets: true,
+        }
     }
 
     fn create_buffer(&mut self, desc: &BufferDesc<'_>) -> Result<BufferId, GpuError> {

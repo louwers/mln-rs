@@ -22,7 +22,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
-use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -55,6 +55,7 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for};
@@ -1202,7 +1203,7 @@ impl RenderLayer for RenderSymbolLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

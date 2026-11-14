@@ -25,7 +25,7 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType}
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry,
+    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry,
     VertexAttributeArray,
 };
 use mln_map_types::TransformState;
@@ -49,6 +49,7 @@ use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable::Drawable;
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
@@ -244,7 +245,7 @@ impl RenderLayer for RenderHillshadeLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

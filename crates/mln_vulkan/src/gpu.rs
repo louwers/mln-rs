@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 
 use ash::vk;
 use gpu_allocator::MemoryLocation;
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::validation::{self, Resources, ShaderBinding};
@@ -1906,6 +1907,10 @@ impl Resources for VulkanGpu {
 }
 
 impl Gpu for VulkanGpu {
+    fn backend_type(&self) -> BackendType {
+        BackendType::Vulkan
+    }
+
     fn limits(&self) -> Limits {
         let limits = &self.backend.get_device_properties().limits;
         Limits {
@@ -1913,6 +1918,7 @@ impl Gpu for VulkanGpu {
                 .min_uniform_buffer_offset_alignment
                 .max(limits.min_storage_buffer_offset_alignment) as u32,
             max_texture_size: limits.max_image_dimension2_d,
+            half_float_render_targets: true,
         }
     }
 

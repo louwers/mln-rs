@@ -1,19 +1,16 @@
 //! Frames drawn into textures of the library's and read back, which headless
 //! rendering and render tests draw into.
 
-use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::cell::Cell;
+use std::rc::Rc;
 
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::attachment::Attachment;
-use crate::backend_scope::{BackendScope, ScopeType};
-use crate::context::Context;
 use crate::frame::{FrameImage, FrameTarget, Handoff};
-use crate::gpu::{GpuError, TargetFormats, TextureFormat, TextureRegion};
+use crate::gpu::{GpuError, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
 use crate::renderer_backend::RendererBackend;
 
 /// The format of an offscreen frame's color, which
@@ -27,29 +24,21 @@ pub struct OffscreenTarget<B: RendererBackend> {
     backend: Rc<B>,
     size: Cell<Size>,
     /// The textures, made with the first frame of a size.
-    image: RefCell<Option<Image>>,
+    image: Cell<Option<Image>>,
 }
 
-/// A frame's color and depth-stencil textures, which the rendering stats
-/// count as a framebuffer while they live.
+/// A frame's color and depth-stencil textures, of `size`.
+#[derive(Clone, Copy)]
 struct Image {
-    color: Attachment,
-    depth_stencil: Attachment,
-    context: Weak<dyn Context>,
-}
-
-impl Drop for Image {
-    fn drop(&mut self) {
-        if let Some(context) = self.context.upgrade() {
-            context.rendering_stats().num_frame_buffers -= 1;
-        }
-    }
+    size: Size,
+    color: TextureId,
+    depth_stencil: TextureId,
 }
 
 impl<B: RendererBackend> OffscreenTarget<B> {
     /// A target of `size` physical pixels on `backend`.
     pub fn new(backend: Rc<B>, size: Size) -> Self {
-        OffscreenTarget { backend, size: Cell::new(size), image: RefCell::new(None) }
+        OffscreenTarget { backend, size: Cell::new(size), image: Cell::new(None) }
     }
 
     /// The backend the target renders on.
@@ -61,7 +50,7 @@ impl<B: RendererBackend> OffscreenTarget<B> {
     /// one.
     pub fn resize(&self, size: Size) {
         if self.size.replace(size) != size {
-            self.image.borrow_mut().take();
+            self.release();
         }
     }
 
@@ -72,27 +61,42 @@ impl<B: RendererBackend> OffscreenTarget<B> {
     /// [`ErrorKind::Native`](mln_util::ErrorKind) where the backend reads
     /// nothing back.
     pub fn read_image(&self) -> Result<PremultipliedImage, Error> {
-        let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
-        let image = self.image.borrow();
-        let color = &image
-            .as_ref()
-            .ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized"))?
-            .color;
+        let image = self
+            .image
+            .get()
+            .ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized"))?;
         let texels = self
             .backend
-            .get_context()
             .gpu()
-            .read_texels(color.id(), TextureRegion::whole(color.size()))
+            .read_texels(image.color, TextureRegion::whole(image.size))
             .map_err(|error| Error::native(format!("reading the frame back failed: {error}")))?;
-        Ok(PremultipliedImage::from_vec(color.size(), texels))
+        Ok(PremultipliedImage::from_vec(image.size, texels))
     }
 
     fn make_image(&self, size: Size) -> Result<Image, GpuError> {
-        let context = self.backend.get_context_ptr();
-        let color = Attachment::new(&**context, "offscreen color", size, COLOR, true)?;
-        let depth_stencil = Attachment::new(&**context, "offscreen depth and stencil", size, DEPTH_STENCIL, false)?;
-        context.rendering_stats().num_frame_buffers += 1;
-        Ok(Image { color, depth_stencil, context: Rc::downgrade(context) })
+        let mut gpu = self.backend.gpu();
+        let texture = |gpu: &mut dyn crate::gpu::Gpu, label, format, copy_src| {
+            let usage = TextureUsage { render_target: true, copy_src, ..TextureUsage::default() };
+            gpu.create_texture(&TextureDesc { label, size, format, usage })
+        };
+        let color = texture(&mut *gpu, "offscreen color", COLOR, true)?;
+        match texture(&mut *gpu, "offscreen depth and stencil", DEPTH_STENCIL, false) {
+            Ok(depth_stencil) => Ok(Image { size, color, depth_stencil }),
+            Err(error) => {
+                gpu.destroy_texture(color);
+                Err(error)
+            }
+        }
+    }
+
+    /// Destroys the textures of the last frame, which the `Gpu` keeps until
+    /// the submits that use them finish.
+    fn release(&self) {
+        if let Some(image) = self.image.take() {
+            let mut gpu = self.backend.gpu();
+            gpu.destroy_texture(image.color);
+            gpu.destroy_texture(image.depth_stencil);
+        }
     }
 }
 
@@ -102,27 +106,35 @@ impl<B: RendererBackend> FrameTarget for OffscreenTarget<B> {
         if size.width == 0 || size.height == 0 {
             return None;
         }
-        let mut image = self.image.borrow_mut();
-        if image.is_none() {
-            match self.make_image(size) {
-                Ok(made) => *image = Some(made),
+        let image = match self.image.get() {
+            Some(image) => image,
+            None => match self.make_image(size) {
+                Ok(image) => {
+                    self.image.set(Some(image));
+                    image
+                }
                 Err(error) => {
                     Log::error(Event::Render, format!("Making an offscreen frame's textures failed: {error}"));
                     return None;
                 }
-            }
-        }
-        let image = image.as_ref()?;
+            },
+        };
         Some(FrameImage {
             size,
-            color: image.color.id(),
-            depth_stencil: Some(image.depth_stencil.id()),
+            color: image.color,
+            depth_stencil: Some(image.depth_stencil),
             targets: TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) },
         })
     }
 
     /// The frame is read back when it is read.
     fn end_frame(&self) -> Handoff {
-        if self.image.borrow().is_some() { Handoff::ReadBack } else { Handoff::Dropped }
+        if self.image.get().is_some() { Handoff::ReadBack } else { Handoff::Dropped }
+    }
+}
+
+impl<B: RendererBackend> Drop for OffscreenTarget<B> {
+    fn drop(&mut self) {
+        self.release();
     }
 }

@@ -4,17 +4,18 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_gfx::Context;
-use mln_gfx::attachment::Attachment;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, GpuError, LoadOp, Pass, TargetFormats};
 use mln_gfx::scissor_rect::ScissorRect;
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
+use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
+use crate::gfx::attachment::Attachment;
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_group::LayerGroupPtr;
 use crate::paint_parameters::{PaintParameters, RecordedPass};
 use crate::render_orchestrator::RenderOrchestrator;
@@ -35,7 +36,7 @@ pub struct RenderTarget {
 }
 
 impl RenderTarget {
-    pub(crate) fn new(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub(crate) fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget {
             texture: texture(context, size, type_),
             depth: None,
@@ -45,7 +46,7 @@ impl RenderTarget {
     }
 
     /// Creates a shared render target of `size` with channel type `type_`.
-    pub(crate) fn create(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
+    pub(crate) fn create(context: &Context, size: Size, type_: TextureChannelDataType) -> RenderTargetPtr {
         Rc::new(RefCell::new(RenderTarget::new(context, size, type_)))
     }
 
@@ -58,7 +59,7 @@ impl RenderTarget {
     /// Draws into a texture of `size` from now on: a texture of another size
     /// replaces the current one, and [`get_texture`](Self::get_texture)
     /// returns the new one.
-    pub(crate) fn set_size(&mut self, context: &dyn Context, size: Size) {
+    pub(crate) fn set_size(&mut self, context: &Context, size: Size) {
         if self.texture.borrow().size() != size {
             self.texture = texture(context, size, self.type_);
             self.depth = None;
@@ -100,7 +101,7 @@ impl RenderTarget {
     }
 
     /// Upload the layer groups
-    pub(crate) fn upload(&self, context: &dyn Context) {
+    pub(crate) fn upload(&self, context: &Context) {
         for layer_group in self.layer_groups_by_layer_index.values() {
             layer_group.borrow_mut().upload(context);
         }
@@ -165,14 +166,14 @@ impl RenderTarget {
     }
 
     /// The pass that clears the texture to opaque black and its depth to 1.
-    fn begin_pass(&mut self, context: &dyn Context) -> Result<RecordedPass, GpuError> {
+    fn begin_pass(&mut self, context: &Context) -> Result<RecordedPass, GpuError> {
         let mut texture = self.texture.borrow_mut();
         let (color, size, format) = (texture.create(context)?, texture.size(), texture.format());
         drop(texture);
         if self.depth.is_none()
             && let Some(depth_format) = context.render_target_depth()
         {
-            self.depth = Some(Attachment::new(context, "render target depth", size, depth_format, false)?);
+            self.depth = Some(Attachment::new(context, "render target depth", size, depth_format)?);
         }
         let pass = Pass {
             label: "render target".to_owned(),
@@ -191,7 +192,7 @@ impl RenderTarget {
 
 /// The color texture of a render target of `size`, which drawables draw into
 /// and then sample, linear and clamped.
-fn texture(context: &dyn Context, size: Size, type_: TextureChannelDataType) -> Texture2DPtr {
+fn texture(context: &Context, size: Size, type_: TextureChannelDataType) -> Texture2DPtr {
     let texture = context.create_texture_2d();
     {
         let mut texture = texture.borrow_mut();

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
     ID_SYMBOL_TILE_PROPS_UBO,
@@ -21,6 +20,7 @@ use super::render_symbol_layer::{SymbolType, get_screen_matrix};
 use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::drawable::Drawable;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};

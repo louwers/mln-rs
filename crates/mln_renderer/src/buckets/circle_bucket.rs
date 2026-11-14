@@ -5,7 +5,6 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -22,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::context::Context;
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::render_layer::RenderLayer;
 
@@ -112,7 +112,7 @@ impl Bucket for CircleBucket {
         &mut self.base
     }
 
-    fn upload(&self, _context: &dyn Context) {
+    fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

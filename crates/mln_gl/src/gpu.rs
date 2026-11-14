@@ -4,9 +4,10 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 use glow::HasContext;
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
@@ -320,6 +321,17 @@ fn buffer_target(usage: BufferUsage) -> u32 {
     }
 }
 
+/// Logs the GPU that `gl`'s context renders on, once per process, as C++'s
+/// context does when it loads its extensions. The context must be current.
+fn log_gpu_identifier(gl: &Gl) {
+    static LOGGED: Once = Once::new();
+    LOGGED.call_once(|| {
+        // SAFETY: the context is current.
+        let renderer = unsafe { gl.get_parameter_string(glow::RENDERER) };
+        Log::info(Event::General, format!("GPU Identifier: {renderer}"));
+    });
+}
+
 /// A [`Gpu`] on an OpenGL ES 3.0, WebGL2 or desktop OpenGL 3.3 context,
 /// which it makes current inside each call.
 ///
@@ -340,10 +352,6 @@ fn buffer_target(usage: BufferUsage) -> u32 {
 pub(crate) struct GlGpu {
     context: Rc<GlContext>,
     desktop: bool,
-    /// Whether a half-float texture can be rendered into: on desktop
-    /// OpenGL, and elsewhere with `EXT_color_buffer_half_float` or
-    /// `EXT_color_buffer_float`.
-    half_float_renderable: bool,
     limits: Limits,
     anisotropic: bool,
     /// The widths that lines may be drawn at.
@@ -378,10 +386,11 @@ impl GlGpu {
     pub(crate) fn on(context: Rc<GlContext>) -> GlGpu {
         let current = context.enter();
         let gl = context.gl();
+        log_gpu_identifier(gl);
         let desktop = !gl.version().is_embedded;
         // SAFETY: the context is current, and the parameters and the
         // capability are GL ES 3.0's or desktop OpenGL 3.0's.
-        let (limits, anisotropic, half_float_renderable, line_widths) = unsafe {
+        let (limits, anisotropic, line_widths) = unsafe {
             if desktop {
                 // OpenGL ES encodes what it writes to an sRGB framebuffer as
                 // sRGB; desktop OpenGL only with this.
@@ -392,7 +401,9 @@ impl GlGpu {
             let extensions = gl.supported_extensions();
             let has = |name: &str| extensions.contains(name) || extensions.contains(&format!("GL_{name}"));
             let anisotropic = has("EXT_texture_filter_anisotropic");
-            let half_float_renderable = desktop || has("EXT_color_buffer_half_float") || has("EXT_color_buffer_float");
+            // Desktop OpenGL draws into half floats without an extension.
+            let half_float_render_targets =
+                desktop || has("EXT_color_buffer_half_float") || has("EXT_color_buffer_float");
             let mut line_widths = [1.0; 2];
             gl.get_parameter_f32_slice(glow::ALIASED_LINE_WIDTH_RANGE, &mut line_widths);
             // A forward-compatible desktop context draws no wide lines.
@@ -402,14 +413,14 @@ impl GlGpu {
             let limits = Limits {
                 buffer_offset_alignment: alignment.max(1) as u32,
                 max_texture_size: max_texture_size.max(0) as u32,
+                half_float_render_targets,
             };
-            (limits, anisotropic, half_float_renderable, line_widths[0].min(1.0)..=max_line_width)
+            (limits, anisotropic, line_widths[0].min(1.0)..=max_line_width)
         };
         drop(current);
         GlGpu {
             context,
             desktop,
-            half_float_renderable,
             limits,
             anisotropic,
             line_widths,
@@ -438,14 +449,10 @@ impl GlGpu {
         f(self)
     }
 
-    /// Whether a texture of half floats can be rendered into.
-    pub(crate) fn half_float_renderable(&self) -> bool {
-        self.half_float_renderable
-    }
-
-    /// Ends a frame: what draws on the context outside the frames samples
-    /// with its textures' own parameters. In debug builds, logs an error GL
-    /// recorded, which waits for GL to run every call so far.
+    /// Ends a hold of the context: what draws on the context outside the
+    /// renderer samples with its textures' own parameters. In debug builds,
+    /// logs an error GL recorded, which waits for GL to run every call so
+    /// far.
     pub(crate) fn end_frame(&mut self) {
         self.current(|gpu| {
             let gl = gpu.context.gl();
@@ -1282,6 +1289,10 @@ impl Resources for GlGpu {
 }
 
 impl Gpu for GlGpu {
+    fn backend_type(&self) -> BackendType {
+        BackendType::OpenGL
+    }
+
     fn limits(&self) -> Limits {
         self.limits
     }

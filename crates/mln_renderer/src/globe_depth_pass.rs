@@ -8,14 +8,15 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
-use mln_gfx::uniform_buffer::UniformBufferPtr;
-use mln_gfx::{AttributeDataType, Context, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
+use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_tile_id::OverscaledTileID;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::to_projection_ubo;
@@ -42,7 +43,7 @@ impl GlobeDepthPass {
     pub(crate) fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         update_parameters: &UpdateParameters,
         needed: bool,

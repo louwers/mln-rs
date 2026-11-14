@@ -10,7 +10,7 @@ use std::time::Duration;
 use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
-use mln_gfx::{BackendScope, FrameTarget, RendererBackend, ScopeType};
+use mln_gfx::{FrameTarget, RendererBackend};
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MapOptions,
     UpdateReader,
@@ -33,10 +33,8 @@ use crate::{deadline, js_error};
 
 /// Draws the map's updates on the canvas.
 struct Frontend {
-    /// Dropped first, before its backend.
     renderer: Renderer,
     target: Target,
-    backend: Rc<dyn RendererBackend>,
     updates: UpdateReader,
     /// The generation of the update the renderer drew last.
     drawn_update: u64,
@@ -53,7 +51,6 @@ impl Frontend {
         if !self.redraw && update.generation == self.drawn_update {
             return false;
         }
-        let _scope = BackendScope::new(&*self.backend, ScopeType::Implicit);
         if self.target.begin_frame().is_none() {
             return false;
         }
@@ -373,9 +370,7 @@ impl WebMap {
     /// The graphics context's counters: the draw calls of the last frame it
     /// drew, and the bytes of its live textures and of its live buffers.
     pub fn render_stats(&self) -> Vec<f64> {
-        let backend = &*self.frontend.backend;
-        let _scope = BackendScope::new(backend, ScopeType::Implicit);
-        let stats = backend.get_context().rendering_stats();
+        let stats = self.frontend.renderer.rendering_stats();
         vec![f64::from(stats.num_draw_calls), f64::from(stats.mem_textures), f64::from(stats.mem_buffers)]
     }
 
@@ -523,7 +518,7 @@ impl WebMap {
         let run_loop = RunLoop::get();
         run_loop.set_waker(Some(pump::waker()));
         scheduler.set_waker(Some(pump::waker()));
-        let mut renderer = Renderer::new(Rc::clone(&backend), pixel_ratio as f32, local_ideograph_font_family);
+        let mut renderer = Renderer::new(backend, pixel_ratio as f32, local_ideograph_font_family);
         let received = Rc::new(Cell::new(0));
         let count = Rc::clone(&received);
         let transport = tile_workers::transport(
@@ -552,8 +547,7 @@ impl WebMap {
             Map::new(MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() }).map_err(js_error)?;
         map.set_waker(Some(pump::waker()));
         renderer.set_event_queue(Some(map.renderer_events()));
-        let frontend =
-            Frontend { renderer, target, backend, updates: map.update_reader(), drawn_update: 0, redraw: false };
+        let frontend = Frontend { renderer, target, updates: map.update_reader(), drawn_update: 0, redraw: false };
         Ok(WebMap {
             frontend,
             map,

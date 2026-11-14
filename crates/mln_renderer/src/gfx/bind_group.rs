@@ -1,24 +1,25 @@
 use std::rc::Rc;
 
-use crate::context::Context;
-use crate::gpu::{BindGroupDesc, BindGroupEntry, BindGroupId, GpuError};
-use crate::released::Released;
-use crate::uniform_buffer::UniformBufferArray;
+use mln_gfx::gpu::{BindGroupDesc, BindGroupEntry, BindGroupId, GpuError};
+use mln_gfx::released::Released;
 
-/// A bind group of the context's [`Gpu`](crate::gpu::Gpu), made again when
+use crate::gfx::context::Context;
+use crate::gfx::uniform_buffer::UniformBufferArray;
+
+/// A bind group of the context's [`Gpu`](mln_gfx::gpu::Gpu), made again when
 /// what it binds changes. The replaced group, and the last one when this
 /// drops, go to the context's release queue.
 #[derive(Default)]
-pub struct BindGroup {
+pub(crate) struct BindGroup {
     entries: Vec<BindGroupEntry>,
     group: Option<(BindGroupId, Rc<Released>)>,
 }
 
 impl BindGroup {
     /// The group that binds `entries`.
-    pub fn get<C: Context + ?Sized>(
+    pub(crate) fn get(
         &mut self,
-        context: &C,
+        context: &Context,
         label: &str,
         entries: Vec<BindGroupEntry>,
     ) -> Result<BindGroupId, GpuError> {
@@ -29,7 +30,7 @@ impl BindGroup {
         }
         self.release();
         let group = context.gpu().create_bind_group(&BindGroupDesc { label, entries: &entries })?;
-        self.group = Some((group, Rc::clone(&context.context_base().released)));
+        self.group = Some((group, Rc::clone(context.released())));
         self.entries = entries;
         Ok(group)
     }
@@ -50,7 +51,7 @@ impl Drop for BindGroup {
 impl UniformBufferArray {
     /// An entry for each of the buffers, binding all of it at its id.
     #[must_use]
-    pub fn entries(&self) -> Vec<BindGroupEntry> {
+    pub(crate) fn entries(&self) -> Vec<BindGroupEntry> {
         (0..self.allocated_size())
             .filter_map(|id| {
                 let buffer = self.get(id)?;

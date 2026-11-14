@@ -2,18 +2,18 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use mln_gfx::bind_group::BindGroup;
-use mln_gfx::context::Context;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::BindGroupId;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
-use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 
 use crate::drawable::{Drawable, UniqueDrawable};
+use crate::gfx::bind_group::BindGroup;
+use crate::gfx::context::Context;
+use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layers::render_custom_layer::CustomLayerDraw;
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
@@ -180,7 +180,7 @@ impl LayerGroup {
     }
 
     /// Uploads the enabled drawables, before the frame draws them.
-    pub(crate) fn upload(&mut self, context: &dyn Context) {
+    pub(crate) fn upload(&mut self, context: &Context) {
         if !self.enabled {
             return;
         }
@@ -208,7 +208,7 @@ impl LayerGroup {
     }
 
     /// The group of the buffers, `None` where there are none.
-    fn bind_group(&mut self, context: &dyn Context) -> Result<Option<BindGroupId>, ()> {
+    fn bind_group(&mut self, context: &Context) -> Result<Option<BindGroupId>, ()> {
         let entries = self.uniform_buffers.entries();
         if entries.is_empty() {
             return Ok(None);

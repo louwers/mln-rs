@@ -3,7 +3,6 @@
 
 use std::rc::Rc;
 
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, Pass};
 use mln_util::Color;
@@ -22,7 +21,6 @@ fn headless(device: &Device) -> OffscreenTarget {
 fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
     // The offscreen target reaches the backend's context, which a scope
     // must hold.
-    let _scope = BackendScope::new(&**target.backend(), ScopeType::Explicit);
     let image = target.begin_frame().expect("a frame");
     let pass = Pass {
         label: "main buffer".to_owned(),

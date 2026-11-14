@@ -3,12 +3,10 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::upload::{upload_indexes, vertex_buffer};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
-use mln_gfx::{AttributeDataType, Context, DrawMode};
+use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
@@ -46,6 +44,8 @@ use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
+use crate::gfx::upload::{upload_indexes, vertex_buffer};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 
@@ -83,10 +83,10 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
 
 /// Runs `f` with the context of a headless WebGPU backend (the C++ tests
 /// create a `gl::HeadlessBackend`, a context and an upload pass).
-fn with_context(f: impl FnOnce(&dyn Context)) {
-    let backend = mln_webgpu::RendererBackend::new(&Device::new(None).expect("device"));
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    f(backend.get_context());
+fn with_context(f: impl FnOnce(&Context)) {
+    let backend: Rc<dyn RendererBackend> =
+        Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    f(&Context::new(Rc::clone(&backend)));
 }
 
 // gtest: Buckets.CircleBucket
@@ -365,9 +365,9 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         .unwrap();
     assert!(bucket.has_data());
 
-    let backend = mln_webgpu::RendererBackend::new(&Device::new(None).expect("device"));
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let context = backend.get_context();
+    let backend: Rc<dyn RendererBackend> =
+        Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    let context = &Context::new(Rc::clone(&backend));
     bucket.upload(context);
 
     // An earlier drawable put the indexes in a buffer, which frees their CPU
