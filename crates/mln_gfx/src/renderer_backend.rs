@@ -16,6 +16,13 @@ pub trait RendererBackend: Any {
     fn hold(&self) -> Hold<'_> {
         Hold::default()
     }
+
+    /// The renderer is about to draw a frame or wait for the GPU through the
+    /// backend: where C++'s renderer gets the backend's context, which it
+    /// makes at the first call. OpenGL logs the GPU it renders on at the
+    /// first call in the process, as C++'s context does when it is made.
+    /// Other backends do nothing.
+    fn context_used(&self) {}
 }
 
 impl dyn RendererBackend {

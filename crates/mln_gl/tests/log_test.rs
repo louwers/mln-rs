@@ -54,9 +54,9 @@ fn each_device_logs_its_platform_and_the_first_context_its_gpu() {
     }
     let mut renderer = String::new();
     for device in &devices {
-        // The backend's `GlGpu` is the context's first use, which logs the
-        // GPU.
+        // The renderer's first frame uses the context, which logs the GPU.
         let backend = RendererBackend::new(device).unwrap();
+        mln_gfx::RendererBackend::context_used(&backend);
         renderer = backend.get_renderer_name();
     }
     drop(Log::set_thread_observer(previous));

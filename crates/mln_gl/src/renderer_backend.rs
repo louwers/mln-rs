@@ -206,4 +206,8 @@ impl renderer_backend::RendererBackend for RendererBackend {
             drop(current);
         })
     }
+
+    fn context_used(&self) {
+        crate::gpu::log_gpu_identifier(&self.context);
+    }
 }

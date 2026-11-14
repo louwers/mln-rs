@@ -321,13 +321,14 @@ fn buffer_target(usage: BufferUsage) -> u32 {
     }
 }
 
-/// Logs the GPU that `gl`'s context renders on, once per process, as C++'s
-/// context does when it loads its extensions. The context must be current.
-fn log_gpu_identifier(gl: &Gl) {
+/// Logs the GPU that `context` renders on, once per process, as C++'s
+/// context does when it loads its extensions.
+pub(crate) fn log_gpu_identifier(context: &Rc<GlContext>) {
     static LOGGED: Once = Once::new();
     LOGGED.call_once(|| {
+        let _current = context.enter();
         // SAFETY: the context is current.
-        let renderer = unsafe { gl.get_parameter_string(glow::RENDERER) };
+        let renderer = unsafe { context.gl().get_parameter_string(glow::RENDERER) };
         Log::info(Event::General, format!("GPU Identifier: {renderer}"));
     });
 }
@@ -386,7 +387,6 @@ impl GlGpu {
     pub(crate) fn on(context: Rc<GlContext>) -> GlGpu {
         let current = context.enter();
         let gl = context.gl();
-        log_gpu_identifier(gl);
         let desktop = !gl.version().is_embedded;
         // SAFETY: the context is current, and the parameters and the
         // capability are GL ES 3.0's or desktop OpenGL 3.0's.

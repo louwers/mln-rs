@@ -326,6 +326,7 @@ impl Renderer {
     /// of what the orchestrator caches.
     pub fn reduce_memory_use(&mut self) {
         let _hold = self.backend.hold();
+        self.backend.context_used();
         self.context.destroy_released();
         if let Err(error) = self.context.gpu().finish() {
             Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
@@ -365,6 +366,7 @@ impl Renderer {
         let context = Rc::clone(&self.context);
         let context = &*context;
 
+        self.backend.context_used();
         let image = target.begin_frame()?;
         {
             let mut stats = context.rendering_stats();
