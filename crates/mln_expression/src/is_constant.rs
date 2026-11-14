@@ -1,16 +1,12 @@
-use crate::compound_expression::CompoundExpression;
-use crate::expression::{Dependency, Expression, Kind, downcast};
-use crate::literal::Literal;
+use crate::compound_expression::Op;
+use crate::expression::{Dependency, Expr, Node};
 use crate::value::Value;
 
-pub(crate) fn is_global_property_constant(expression: &dyn Expression, properties: &[&str]) -> bool {
-    if expression.get_kind() == Kind::CompoundExpression {
-        let e = downcast::<CompoundExpression>(expression).expect("CompoundExpression");
-        for property in properties {
-            if e.get_operator() == *property {
-                return false;
-            }
-        }
+pub(crate) fn is_global_property_constant(expression: &Expr, properties: &[&str]) -> bool {
+    if let Some(e) = expression.as_compound()
+        && properties.contains(&e.signature().name)
+    {
+        return false;
     }
 
     let mut is_constant = true;
@@ -24,10 +20,10 @@ pub(crate) fn is_global_property_constant(expression: &dyn Expression, propertie
 
 const FILTER: &str = "filter-";
 
-pub fn is_feature_constant(expression: &dyn Expression) -> bool {
-    if expression.get_kind() == Kind::CompoundExpression {
-        let e = downcast::<CompoundExpression>(expression).expect("CompoundExpression");
-        let name = e.get_operator();
+#[must_use]
+pub fn is_feature_constant(expression: &Expr) -> bool {
+    if let Some(e) = expression.as_compound() {
+        let name = e.signature().name;
         let parameter_count = e.get_parameter_count();
         // Legacy filters begin with "filter-" and are never constant.
         if ((name == "get" || name == "has") && parameter_count == Some(1))
@@ -41,19 +37,11 @@ pub fn is_feature_constant(expression: &dyn Expression) -> bool {
         }
     }
 
-    if expression.get_kind() == Kind::FormatSectionOverride {
+    if matches!(expression.node(), Node::FormatSectionOverride(_) | Node::Within(_) | Node::Distance(_)) {
         return false;
     }
 
-    if expression.get_kind() == Kind::Within {
-        return false;
-    }
-
-    if expression.get_kind() == Kind::Distance {
-        return false;
-    }
-
-    if expression.get_kind() == Kind::CollatorExpression {
+    if matches!(expression.node(), Node::Collator(_)) {
         // Although the results of a Collator expression with fixed arguments
         // generally shouldn't change between executions, we can't serialize
         // them as constant expressions because results change based on
@@ -72,24 +60,25 @@ pub fn is_feature_constant(expression: &dyn Expression) -> bool {
 
 const ZOOM_PROPERTY: [&str; 1] = ["zoom"];
 
-pub fn is_zoom_constant(e: &dyn Expression) -> bool {
+#[must_use]
+pub fn is_zoom_constant(e: &Expr) -> bool {
     is_global_property_constant(e, &ZOOM_PROPERTY)
 }
 
 /// Returns true if expression does not depend on information provided by the
 /// runtime.
-pub fn is_runtime_constant(expression: &dyn Expression) -> bool {
-    if expression.get_kind() == Kind::ImageExpression {
+#[must_use]
+pub fn is_runtime_constant(expression: &Expr) -> bool {
+    if matches!(expression.node(), Node::Image(_)) {
         return false;
     }
 
-    if expression.get_kind() == Kind::CompoundExpression {
-        let e = downcast::<CompoundExpression>(expression).expect("CompoundExpression");
-        if e.get_operator() == "global-state" {
-            // The result depends on the style's global state, which can be
-            // changed at runtime, so the expression is not runtime constant.
-            return false;
-        }
+    if let Some(e) = expression.as_compound()
+        && e.signature().op == Op::GlobalState
+    {
+        // The result depends on the style's global state, which can be
+        // changed at runtime, so the expression is not runtime constant.
+        return false;
     }
 
     let mut runtime_constant = true;
@@ -106,7 +95,8 @@ pub fn is_runtime_constant(expression: &dyn Expression) -> bool {
 /// not its id, its geometry, its feature state, all its properties or a key
 /// it computes. The expression then gives features with the same geometry
 /// type and the same values under those keys the same result.
-pub fn feature_property_keys(expression: &dyn Expression) -> Option<Vec<String>> {
+#[must_use]
+pub fn feature_property_keys(expression: &Expr) -> Option<Vec<String>> {
     let mut keys = Vec::new();
     if !collect_feature_property_keys(expression, &mut keys) {
         return None;
@@ -116,13 +106,10 @@ pub fn feature_property_keys(expression: &dyn Expression) -> Option<Vec<String>>
     Some(keys)
 }
 
-fn collect_feature_property_keys(expression: &dyn Expression, keys: &mut Vec<String>) -> bool {
-    match expression.get_kind() {
-        Kind::Within | Kind::Distance | Kind::FormatSectionOverride => return false,
-        Kind::CompoundExpression => {
-            let Some(e) = downcast::<CompoundExpression>(expression) else {
-                return false;
-            };
+fn collect_feature_property_keys(expression: &Expr, keys: &mut Vec<String>) -> bool {
+    match expression.node() {
+        Node::Within(_) | Node::Distance(_) | Node::FormatSectionOverride(_) => return false,
+        Node::Compound(e) => {
             let signature = e.signature();
             if signature.dependencies.intersects(Dependency::FEATURE) {
                 let reads_key = match signature.name {
@@ -134,8 +121,7 @@ fn collect_feature_property_keys(expression: &dyn Expression, keys: &mut Vec<Str
                     _ => return false,
                 };
                 if reads_key {
-                    let key = e.args().first().and_then(|arg| downcast::<Literal>(&**arg));
-                    match key.map(Literal::get_value) {
+                    match e.args().first().and_then(Expr::literal_value) {
                         Some(Value::String(key)) => keys.push(key.clone()),
                         _ => return false,
                     }

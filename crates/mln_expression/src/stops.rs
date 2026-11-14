@@ -1,89 +1,88 @@
-// The `std::map<double, std::unique_ptr<Expression>>` that Interpolate and
-// Step hold, plus src/mln/style/expression/get_covering_stops.cpp.
+// The stops of an `interpolate` or a `step`, plus the stops that cover a
+// zoom range.
 //
-// Keys are ordered with `<` like std::map<double>: equivalent keys (e.g. -0
-// and +0) are one key.
+// Keys are ordered with `<`: equivalent keys (-0 and +0) are one key.
 
 use std::cmp::Ordering;
 
-use crate::expression::Expression;
+use crate::expression::Expr;
 use crate::range::Range;
 
-#[derive(Default)]
+/// The stops of a curve: outputs by input key, in key order. The keys are
+/// kept apart from the outputs, so that finding a stop reads only keys.
+#[derive(Clone, Default, PartialEq)]
 pub struct Stops {
-    stops: Vec<(f64, Box<dyn Expression>)>,
+    keys: Vec<f64>,
+    outputs: Vec<Expr>,
 }
 
 impl Stops {
     #[must_use]
     pub fn new() -> Self {
-        Stops { stops: Vec::new() }
+        Stops::default()
     }
 
     /// The first index whose key is not less than `key`.
     #[must_use]
     pub(crate) fn lower_bound(&self, key: f64) -> usize {
-        self.stops.partition_point(|(k, _)| *k < key)
+        self.keys.partition_point(|k| *k < key)
     }
 
     /// The first index whose key is greater than `key`.
     #[must_use]
     pub(crate) fn upper_bound(&self, key: f64) -> usize {
-        self.stops.partition_point(|(k, _)| key.partial_cmp(k) != Some(Ordering::Less))
+        self.keys.partition_point(|k| key.partial_cmp(k) != Some(Ordering::Less))
     }
 
     /// Inserts `value` at `key` unless `key` is already present; returns
     /// whether it inserted.
-    pub fn emplace(&mut self, key: f64, value: Box<dyn Expression>) -> bool {
+    pub fn emplace(&mut self, key: f64, value: Expr) -> bool {
         let i = self.lower_bound(key);
-        if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
+        if i < self.keys.len() && key.partial_cmp(&self.keys[i]) != Some(Ordering::Less) {
             return false;
         }
-        self.stops.insert(i, (key, value));
+        self.keys.insert(i, key);
+        self.outputs.insert(i, value);
         true
     }
 
-    /// `stops[key] = value`: inserts or replaces.
-    pub(crate) fn insert_or_assign(&mut self, key: f64, value: Box<dyn Expression>) {
+    /// Inserts `value` at `key`, or replaces the output there.
+    pub(crate) fn insert_or_assign(&mut self, key: f64, value: Expr) {
         let i = self.lower_bound(key);
-        if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
-            self.stops[i].1 = value;
+        if i < self.keys.len() && key.partial_cmp(&self.keys[i]) != Some(Ordering::Less) {
+            self.outputs[i] = value;
         } else {
-            self.stops.insert(i, (key, value));
+            self.keys.insert(i, key);
+            self.outputs.insert(i, value);
         }
     }
 
     #[must_use]
     pub(crate) fn len(&self) -> usize {
-        self.stops.len()
+        self.keys.len()
     }
 
     #[must_use]
     pub(crate) fn is_empty(&self) -> bool {
-        self.stops.is_empty()
+        self.keys.is_empty()
     }
 
     #[must_use]
-    pub(crate) fn get(&self, i: usize) -> (f64, &dyn Expression) {
-        let (k, v) = &self.stops[i];
-        (*k, &**v)
+    pub(crate) fn key(&self, i: usize) -> f64 {
+        self.keys[i]
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (f64, &dyn Expression)> {
-        self.stops.iter().map(|(k, v)| (*k, &**v))
-    }
-
-    pub(crate) fn values(&self) -> impl Iterator<Item = &Box<dyn Expression>> {
-        self.stops.iter().map(|(_, v)| v)
-    }
-
-    /// Whether both have the same stops with equal outputs.
     #[must_use]
-    pub(crate) fn children_equal(&self, rhs: &Stops) -> bool {
-        if self.stops.len() != rhs.stops.len() {
-            return false;
-        }
-        self.stops.iter().zip(&rhs.stops).all(|(l, r)| l.0 == r.0 && l.1.equals(&*r.1))
+    pub(crate) fn output(&self, i: usize) -> &Expr {
+        &self.outputs[i]
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (f64, &Expr)> {
+        self.keys.iter().copied().zip(&self.outputs)
+    }
+
+    pub(crate) fn values(&self) -> std::slice::Iter<'_, Expr> {
+        self.outputs.iter()
     }
 }
 
@@ -102,12 +101,12 @@ pub(crate) fn get_covering_stops(stops: &Stops, lower: f64, upper: f64) -> Range
 
     // lower_bound yields first element >= lowerZoom, but we want the *last*
     // element <= lowerZoom, so if we found a stop > lowerZoom, back up by one.
-    if min_it != 0 && min_it != end && stops.get(min_it).0 > lower {
+    if min_it != 0 && min_it != end && stops.key(min_it) > lower {
         min_it -= 1;
     }
-    let last = stops.get(end - 1).0;
+    let last = stops.key(end - 1);
     Range::new(
-        (if min_it == end { last } else { stops.get(min_it).0 }) as f32,
-        (if max_it == end { last } else { stops.get(max_it).0 }) as f32,
+        (if min_it == end { last } else { stops.key(min_it) }) as f32,
+        (if max_it == end { last } else { stops.key(max_it) }) as f32,
     )
 }

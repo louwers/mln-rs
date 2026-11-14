@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread::ThreadId;
 
-use mln_actor::{RunLoop, RunLoopHandle};
+use mln_actor::{AsyncTask, RunLoop, RunLoopHandle};
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::DatabaseFileSource;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
@@ -203,6 +203,13 @@ thread_local! {
 /// Posts `task` to the runtime thread whose loop is `run_loop`.
 pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
     run_loop.invoke(move || run(task, false));
+}
+
+/// An `AsyncTask` on the runtime's loop that runs `task` as [`post`] would,
+/// after the loop has run the tasks queued on it. Sends before it runs make
+/// one run. It must be made on the runtime's thread.
+pub(crate) fn async_task(task: impl Fn(&mut RuntimeCore, &mut Outbox) + 'static) -> AsyncTask {
+    AsyncTask::new(move || run(&task, false))
 }
 
 /// Runs `task` on the runtime's state, then delivers what it sends to the

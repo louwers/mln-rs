@@ -48,6 +48,8 @@ pub(crate) type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
 /// A call of the style's observer.
 enum StyleEvent {
     SourceChanged(String),
+    /// A source reloads its description, and isn't loaded meanwhile.
+    SourceDescriptionChanged,
     Update,
     StyleLoading,
     StyleLoaded,
@@ -56,6 +58,7 @@ enum StyleEvent {
     SpriteLoaded(Option<Sprite>),
     SpriteError(Option<Sprite>, Error),
     SpriteRequested(Option<Sprite>),
+    ProjectionChanged,
     /// A response to the style's URL is waiting (see
     /// `Observer::on_style_response`).
     StyleResponse,
@@ -67,6 +70,9 @@ struct StyleEvents(EventQueue<StyleEvent>);
 impl SourceObserver for StyleEvents {
     fn on_source_changed(&self, source: &dyn Source) {
         self.0.push(StyleEvent::SourceChanged(source.get_id()));
+    }
+    fn on_source_description_changed(&self, _source: &dyn Source) {
+        self.0.push(StyleEvent::SourceDescriptionChanged);
     }
 }
 
@@ -97,6 +103,9 @@ impl StyleObserver for StyleEvents {
     }
     fn on_style_response(&self) {
         self.0.push(StyleEvent::StyleResponse);
+    }
+    fn on_projection_changed(&self) {
+        self.0.push(StyleEvent::ProjectionChanged);
     }
 }
 
@@ -248,6 +257,7 @@ impl Map {
             events,
             file_source,
         };
+        map.share_projection_with_transform();
         map.transform.resize(map_options.size)?;
         Ok(map)
     }
@@ -314,6 +324,25 @@ impl Map {
         self.events.set_waker(waker);
     }
 
+    /// Whether the style or the renderer reported something that
+    /// [`process_events`](Self::process_events) hasn't handled. A report
+    /// counts once it is queued, though its waker may not have run yet.
+    #[must_use]
+    pub fn has_reports(&self) -> bool {
+        !self.style_events.is_empty() || !self.renderer_events.is_empty()
+    }
+
+    /// Sets a waker as [`set_waker`](Self::set_waker) does, that runs only
+    /// when the style or the renderer reports something for the map to
+    /// handle, which can come from any thread. The events that the map's own
+    /// calls report don't run it, for an owner that drains them after each
+    /// call.
+    pub fn set_reports_waker(&mut self, waker: Option<Waker>) {
+        self.style_events.set_waker(waker.clone());
+        self.renderer_events.set_waker(waker);
+        self.events.set_waker(None);
+    }
+
     /// Handles what the style and the renderer reported since the last
     /// call: loads, frames, errors and missing images. The map's reactions,
     /// such as an update for the renderer or a still image's callback, run
@@ -340,7 +369,6 @@ impl Map {
                 self.handle_renderer_event(event);
             }
         }
-        self.share_projection_with_transform();
     }
 
     /// Handles what the style and the renderer reported, as
@@ -358,6 +386,8 @@ impl Map {
     fn handle_style_event(&mut self, event: StyleEvent) {
         match event {
             StyleEvent::SourceChanged(source_id) => self.emit(MapEvent::SourceChanged { source_id }),
+            // The style is no longer loaded, which the map's state shows.
+            StyleEvent::SourceDescriptionChanged => self.changed(),
             StyleEvent::Update => self.on_update(),
             StyleEvent::StyleLoading => {
                 self.changed();
@@ -378,6 +408,7 @@ impl Map {
             StyleEvent::SpriteLoaded(sprite) => self.emit(MapEvent::SpriteLoaded(sprite)),
             StyleEvent::SpriteError(sprite, error) => self.emit(MapEvent::SpriteError(sprite, error)),
             StyleEvent::SpriteRequested(sprite) => self.emit(MapEvent::SpriteRequested(sprite)),
+            StyleEvent::ProjectionChanged => self.share_projection_with_transform(),
             // C++ parses inside the file source callback (the lambda in
             // Style::Impl::loadURL). A style that parses here loads a batch
             // later, and the updates in between carry its sources, so its
@@ -593,7 +624,8 @@ impl Map {
     }
 
     /// Gives the transform the style's current projection, which constrains
-    /// the target of an animation it starts.
+    /// the target of an animation it starts. The style reports each change
+    /// to its projection, and the map calls this then.
     fn share_projection_with_transform(&mut self) {
         let projection = (self.mode != MapMode::Tile).then(|| Arc::clone(&self.style.impl_.get_projection().impl_));
         self.transform.set_projection_for_zoom(Some(Rc::new(move |zoom: f64| match &projection {

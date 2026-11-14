@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use feature::Value;
+use mln_conversion::borrowed_conversion::{Json, borrowed_json_to_value, member, members};
 use mln_conversion::{Convertible, value_to_json};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
@@ -381,7 +382,7 @@ impl Style {
     pub fn set_global_state_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
         self.require_loaded()?;
         let value = parse(json, &format!("global state property {}", quote(name)))?;
-        self.set_global_state_property(name, &mln_conversion::json_to_value(&value))
+        self.set_global_state_property(name, &borrowed_json_to_value(&value))
     }
 
     /// The values that the style's `global-state` expressions read, as a
@@ -484,20 +485,20 @@ fn milliseconds_json(duration: Duration) -> serde_json::Value {
 
 /// The defaults of a root `state` object: each member is an object, whose
 /// `default` is the property's default.
-fn state_defaults(value: &serde_json::Value, context: &str) -> Result<GlobalStateMap, Error> {
+fn state_defaults(value: &Json<'_>, context: &str) -> Result<GlobalStateMap, Error> {
     let Some(object) = value.as_object() else {
         return Err(Error::invalid_argument(format!("{context}: state must be an object")));
     };
     let mut defaults = GlobalStateMap::new();
-    for (name, definition) in object {
+    for (name, definition) in members(object) {
         let Some(definition) = definition.as_object() else {
             return Err(Error::invalid_argument(format!(
                 "{context}: state property {} must be an object",
                 quote(name)
             )));
         };
-        if let Some(default) = definition.get("default") {
-            defaults.insert(name.clone(), mln_conversion::json_to_value(default));
+        if let Some(default) = member(definition, "default") {
+            defaults.insert(name.to_owned(), borrowed_json_to_value(default));
         }
     }
     Ok(defaults)
@@ -507,7 +508,7 @@ fn quote(id: &str) -> String {
     format!("\"{id}\"")
 }
 
-fn parse(json: &str, context: &str) -> Result<serde_json::Value, Error> {
+fn parse<'a>(json: &'a str, context: &str) -> Result<Json<'a>, Error> {
     serde_json::from_str(json).map_err(|error| Error::invalid_argument(format!("{context} is not valid JSON: {error}")))
 }
 

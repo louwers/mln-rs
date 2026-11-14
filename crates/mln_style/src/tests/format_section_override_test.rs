@@ -8,7 +8,7 @@ use std::sync::Arc;
 use feature::{PropertyMap, Value as MbglValue};
 use mln_conversion::Convertible;
 use mln_expression::dsl::{format_str, get_str, literal_str, string, to_color};
-use mln_expression::expression::{Dependency, EvaluationContext, Expression, GlobalStateMap};
+use mln_expression::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap};
 use mln_expression::format_expression::{FormatExpression, FormatExpressionSection};
 use mln_expression::formatted::{Formatted, FormattedSection};
 use mln_expression::match_::Match;
@@ -20,7 +20,7 @@ use mln_util::Color;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::format_section_override::{FormatSectionOverride, set_overrides};
+use crate::format_section_override::{format_section_override as new_override, set_overrides};
 use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides as MockOverrides;
 use crate::layers::symbol_layer_properties::{TextColor, TextField};
 use crate::layers::{SymbolLayoutProperties, SymbolPaintProperties};
@@ -56,16 +56,12 @@ impl GeometryTileFeature for StubGeometryTileFeature {
     }
 }
 
-fn create_override(
-    expr_type: Type,
-    prop_value: PossiblyEvaluatedPropertyValue<Color>,
-    prop_name: &str,
-) -> Arc<FormatSectionOverride> {
-    Arc::new(FormatSectionOverride::new(expr_type, prop_value, prop_name.to_owned()))
+fn create_override(prop_value: PossiblyEvaluatedPropertyValue<Color>, prop_name: &str) -> Arc<Expr> {
+    Arc::new(new_override(prop_value, prop_name.to_owned()))
 }
 
 /// Parses an expression from JSON text, with an optional expected type.
-fn parse_expression(json: &str, expected: Option<Type>) -> Option<Box<dyn Expression>> {
+fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut ctx = match expected {
         Some(t) => ParsingContext::with_expected(t),
@@ -84,7 +80,7 @@ fn format_section_override() {
     let ctx = EvaluationContext::from_feature(Some(&one_double)).with_formatted_section(Some(&formatted_section));
     let constant_value_red = PossiblyEvaluatedPropertyValue::Constant(Color::red());
     let constant_value_green = PossiblyEvaluatedPropertyValue::Constant(Color::green());
-    let dds_value_red = PossiblyEvaluatedPropertyValue::Expression(PropertyExpression::<Color>::from_box(
+    let dds_value_red = PossiblyEvaluatedPropertyValue::Expression(PropertyExpression::<Color>::from_expr(
         to_color(string(get_str("color"), None), None),
         None,
     ));
@@ -93,7 +89,7 @@ fn format_section_override() {
 
     // Evaluation test
     {
-        let override1 = create_override(Type::Color, constant_value_green.clone(), "text-color");
+        let override1 = create_override(constant_value_green.clone(), "text-color");
         let prop_expr = PropertyExpression::<Color>::new(override1, None);
         assert_eq!(Color::green(), prop_expr.evaluate_zoom_feature(15.0, &one_double, Color::default()));
         assert_eq!(Color::green(), prop_expr.evaluate_feature(&one_double, Color::default()));
@@ -102,7 +98,7 @@ fn format_section_override() {
         // Override implies a feature dependency (See `::isFeatureConstant`)
         assert_eq!(Dependency::OVERRIDE | Dependency::FEATURE, prop_expr.get_dependencies());
 
-        let override2 = create_override(Type::Color, dds_value_red.clone(), "text-color");
+        let override2 = create_override(dds_value_red.clone(), "text-color");
         let prop_expr_dds = PropertyExpression::<Color>::new(override2, None);
         assert_eq!(Color::red(), prop_expr_dds.evaluate_feature(&one_color, Color::default()));
         assert_eq!(Color::blue(), prop_expr_dds.evaluate(&ctx, Color::default()));
@@ -110,13 +106,13 @@ fn format_section_override() {
 
     // Equality test
     {
-        let override1 = create_override(Type::Color, constant_value_red, "text-color");
-        let override2 = create_override(Type::Color, constant_value_green.clone(), "text-color");
-        let override3 = create_override(Type::Color, constant_value_green, "text-halo-color");
-        let override4 = create_override(Type::Color, dds_value_red, "text-color");
-        assert!(!override1.equals(override2.as_ref()));
-        assert!(!override2.equals(override3.as_ref()));
-        assert!(!override1.equals(override4.as_ref()));
+        let override1 = create_override(constant_value_red, "text-color");
+        let override2 = create_override(constant_value_green.clone(), "text-color");
+        let override3 = create_override(constant_value_green, "text-halo-color");
+        let override4 = create_override(dds_value_red, "text-color");
+        assert_ne!(override1, override2);
+        assert_ne!(override2, override3);
+        assert_ne!(override1, override4);
     }
 }
 
@@ -125,18 +121,18 @@ fn format_section_override() {
 fn format_section_override_uses_captured_state() {
     let expr = parse_expression(r#"["to-color", ["global-state", "labelColor"]]"#, Some(Type::Color)).unwrap();
 
-    let mut property_expression = PropertyExpression::<Color>::from_box(expr, None);
+    let mut property_expression = PropertyExpression::<Color>::from_expr(expr, None);
     let state: Arc<GlobalStateMap> =
         Arc::new(GlobalStateMap::from([("labelColor".to_owned(), MbglValue::String("red".to_owned()))]));
     property_expression.capture_global_state(Some(state));
 
     let default_value = PossiblyEvaluatedPropertyValue::Expression(property_expression);
-    let override_expression = FormatSectionOverride::new(Type::Color, default_value, "text-color".to_owned());
+    let override_expression = new_override(default_value, "text-color".to_owned());
 
     // Evaluating without a formatted section and without global state in the
     // context must fall back to the state captured by the wrapped expression.
     let result = override_expression.evaluate(&EvaluationContext::default());
-    assert_eq!(Ok(Value::Color(Color::parse("red").unwrap())), result.map_err(|e| e.message));
+    assert_eq!(Ok(Value::Color(Color::parse("red").unwrap())), result.map_err(|e| e.message().to_owned()));
 }
 
 /// The text-field values `testHasOverrides` sets, in its order.
@@ -185,29 +181,29 @@ impl FormattedCase {
     }
 
     fn expression(self) -> Option<PropertyExpression<Formatted>> {
-        let expression: Box<dyn Expression> = match self {
+        let expression: Expr = match self {
             // Expression, no overrides.
-            FormattedCase::ExpressionNoOverride => Box::new(FormatExpression::new(Vec::new())),
+            FormattedCase::ExpressionNoOverride => FormatExpression::new_expr(Vec::new()),
             // Expression, overridden text-color.
             FormattedCase::ExpressionOverride => {
                 let mut section = FormatExpressionSection::new(literal_str(""));
                 section.set_text_section_options(None, None, Some(to_color(literal_str("red"), None)));
-                Box::new(FormatExpression::new(vec![section]))
+                FormatExpression::new_expr(vec![section])
             }
             // Nested expressions, overridden text-color.
             FormattedCase::NestedOverride => {
                 let formatted_expr1 = format_str("first paragraph");
                 let mut second_paragraph = FormatExpressionSection::new(literal_str("second paragraph"));
                 second_paragraph.set_text_section_options(None, None, Some(to_color(literal_str("blue"), None)));
-                let formatted_expr2: Box<dyn Expression> = Box::new(FormatExpression::new(vec![second_paragraph]));
-                let mut branches: VecMap<String, Arc<dyn Expression>> = VecMap::new();
-                branches.insert("1st".to_owned(), Arc::from(formatted_expr1));
-                branches.insert("2nd".to_owned(), Arc::from(formatted_expr2));
-                Box::new(Match::<String>::new(Type::Formatted, literal_str("input"), branches, format_str("otherwise")))
+                let formatted_expr2: Expr = FormatExpression::new_expr(vec![second_paragraph]);
+                let mut branches: VecMap<String, Expr> = VecMap::new();
+                branches.insert("1st".to_owned(), formatted_expr1);
+                branches.insert("2nd".to_owned(), formatted_expr2);
+                Match::new_expr(Type::Formatted, literal_str("input"), branches, format_str("otherwise"))
             }
             _ => return None,
         };
-        Some(PropertyExpression::from_box(expression, None))
+        Some(PropertyExpression::from_expr(expression, None))
     }
 }
 
@@ -310,7 +306,7 @@ fn symbol_layer_overrides() {
         let state_expression = state_expression.expect("global-state");
         let mut unevaluated = SymbolPaintProperties::Unevaluated::default();
         *unevaluated.get_mut::<TextColor>() = Transitioning::new(PropertyValue::Expression(
-            PropertyExpression::<Color>::from_box(to_color(state_expression, None), None),
+            PropertyExpression::<Color>::from_expr(to_color(state_expression, None), None),
         ));
 
         let state: Arc<GlobalStateMap> =

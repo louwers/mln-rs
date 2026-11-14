@@ -84,12 +84,23 @@ impl<'l> VectorMVTTileFeature<'l> {
         if let Some(properties) = self.properties.get() {
             return Ok(properties);
         }
-        let mut properties = PropertyMap::new();
-        for property in self.feature.properties() {
-            let (key, value) = property?;
-            properties.entry(key.to_owned()).or_insert_with(|| to_value(value));
-        }
+        let properties = self.decode_properties()?;
         Ok(self.properties.get_or_init(|| properties))
+    }
+
+    /// Every property, decoded anew. The tags are sorted by key before they
+    /// are copied, so that the map is built by appending and a repeated key
+    /// is copied once.
+    fn decode_properties(&self) -> Result<PropertyMap, Error> {
+        // A feature seldom has a key twice: room for one tag per key.
+        let mut tags = Vec::with_capacity(self.layer.keys().len());
+        for property in self.feature.properties() {
+            tags.push(property?);
+        }
+        // Stable, so the first of a repeated key stays first and is kept.
+        tags.sort_by_key(|&(key, _)| key);
+        tags.dedup_by(|(a, _), (b, _)| a == b);
+        Ok(tags.into_iter().map(|(key, value)| (key.to_owned(), to_value(value))).collect())
     }
 }
 
@@ -118,6 +129,16 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
                 &EMPTY_PROPERTIES
             }
         }
+    }
+
+    fn to_properties(&self) -> PropertyMap {
+        if let Some(properties) = self.properties.get() {
+            return properties.clone();
+        }
+        self.decode_properties().unwrap_or_else(|e| {
+            self.keep_error(&e);
+            PropertyMap::new()
+        })
     }
 
     fn get_id(&self) -> Identifier {
@@ -381,6 +402,12 @@ impl GeometryTileData for VectorMVTTileData {
             Ok(layer) => Ok(layer.map(|layer| -> Box<dyn GeometryTileLayer + '_> { Box::new(layer) })),
             Err(e) => Err(MlnError::native(e.to_string())),
         }
+    }
+
+    /// Finds the layer without decoding it.
+    fn has_layer(&self, name: &str) -> Result<bool, MlnError> {
+        let layers = self.layers().map_err(|e| MlnError::native(e.to_string()))?;
+        Ok(layers.iter().any(|entry| self.data.get(entry.name.clone()) == Some(name.as_bytes())))
     }
 
     fn encoded(&self) -> Option<EncodedTileData> {

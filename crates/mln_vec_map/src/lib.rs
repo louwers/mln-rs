@@ -242,6 +242,10 @@ impl<K: Ord, V> VecMap<K, V> {
 
 impl<K: Ord, V> Extend<(K, V)> for VecMap<K, V> {
     fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iter: I) {
+        let iter = iter.into_iter();
+        let (additional, _) = iter.size_hint();
+        self.keys.reserve(additional);
+        self.values.reserve(additional);
         for (k, v) in iter {
             self.insert(k, v);
         }

@@ -64,14 +64,11 @@ impl OffscreenTextureResource {
     }
 
     pub(crate) fn read_still_image(&self) -> PremultipliedImage {
-        let mut image = PremultipliedImage::new(self.size);
-        if let Some(context) = self.context.upgrade()
-            && let Some(framebuffer) = self.framebuffer.get()
-        {
-            context.bind_framebuffer(Some(framebuffer), self.size, false);
-            image.data = context.read_framebuffer(self.size);
-        }
-        image
+        let (Some(context), Some(framebuffer)) = (self.context.upgrade(), self.framebuffer.get()) else {
+            return PremultipliedImage::new(self.size);
+        };
+        context.bind_framebuffer(Some(framebuffer), self.size, false);
+        PremultipliedImage::from_vec(self.size, context.read_framebuffer(self.size))
     }
 
     pub(crate) fn get_texture(&self) -> Texture2DPtr {

@@ -31,6 +31,18 @@ impl AsyncTask {
         self.handle.core.wake();
     }
 
+    /// Whether a send waits for the task to run.
+    #[must_use]
+    pub fn is_pending(&self) -> bool {
+        self.handle.pending.load(Ordering::SeqCst)
+    }
+
+    /// Withdraws the sends that wait: the task doesn't run for them. A send
+    /// after this one schedules the task again.
+    pub fn cancel(&self) {
+        self.handle.pending.store(false, Ordering::SeqCst);
+    }
+
     /// A `Send + Sync` handle whose `send()` is this task's `send()`: C++
     /// calls `AsyncTask::send` from other threads through a pointer (e.g.
     /// `NetworkStatus` observers).
@@ -86,5 +98,23 @@ mod tests {
         assert_eq!(count.get(), 2);
         drop(task);
         run_loop.run_once();
+    }
+
+    #[test]
+    fn cancel_withdraws_the_sends_that_wait() {
+        let run_loop = RunLoop::new();
+        let count = Rc::new(Cell::new(0));
+        let c = Rc::clone(&count);
+        let task = AsyncTask::new(move || c.set(c.get() + 1));
+        task.send();
+        assert!(task.is_pending());
+        task.cancel();
+        assert!(!task.is_pending());
+        run_loop.run_once();
+        assert_eq!(count.get(), 0);
+        task.sender().send();
+        run_loop.run_once();
+        assert_eq!(count.get(), 1);
+        assert!(!task.is_pending());
     }
 }

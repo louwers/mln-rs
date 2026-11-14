@@ -32,7 +32,7 @@ impl SymbolFeature {
         SymbolFeature {
             feature_type: feature.get_type(),
             id: feature.get_id(),
-            properties: feature.get_properties().clone(),
+            properties: feature.to_properties(),
             original_geometry: geometry.clone(),
             geometry,
             formatted_text: None,

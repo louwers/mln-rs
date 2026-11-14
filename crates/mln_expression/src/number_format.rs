@@ -1,13 +1,11 @@
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
+use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::locale::{self, FractionDigits, currency_code};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
-use crate::value::{Value, to_string};
+use crate::value::to_string;
 
 const LOCALE_KEY: &str = "locale";
 const CURRENCY_KEY: &str = "currency";
@@ -39,25 +37,14 @@ fn format_number(
     locale::format_number(number, locale, currency.as_deref(), FractionDigits::new(min, max))
 }
 
+/// `["number-format", number, options]`.
+#[derive(Clone, PartialEq)]
 pub(crate) struct NumberFormat {
-    base: ExpressionBase,
-    number: Box<dyn Expression>,
-    locale: Option<Box<dyn Expression>>,
-    currency: Option<Box<dyn Expression>>,
-    min_fraction_digits: Option<Box<dyn Expression>>,
-    max_fraction_digits: Option<Box<dyn Expression>>,
-}
-
-fn opt_deps(e: Option<&dyn Expression>) -> Dependency {
-    e.map_or(Dependency::NONE, Expression::dependencies)
-}
-
-fn opt_equal(l: Option<&dyn Expression>, r: Option<&dyn Expression>) -> bool {
-    match (l, r) {
-        (Some(l), Some(r)) => l.equals(r),
-        (None, None) => true,
-        _ => false,
-    }
+    number: Expr,
+    locale: Option<Expr>,
+    currency: Option<Expr>,
+    min_fraction_digits: Option<Expr>,
+    max_fraction_digits: Option<Expr>,
 }
 
 /// Truncates `d` to `u8` through `i32`, as C++ `static_cast<uint8_t>(double)`
@@ -67,29 +54,6 @@ fn static_cast_u8(d: f64) -> u8 {
 }
 
 impl NumberFormat {
-    #[must_use]
-    pub(crate) fn new(
-        number: Box<dyn Expression>,
-        locale: Option<Box<dyn Expression>>,
-        currency: Option<Box<dyn Expression>>,
-        min_fraction_digits: Option<Box<dyn Expression>>,
-        max_fraction_digits: Option<Box<dyn Expression>>,
-    ) -> Self {
-        let deps = number.dependencies()
-            | opt_deps(locale.as_deref())
-            | opt_deps(currency.as_deref())
-            | opt_deps(min_fraction_digits.as_deref())
-            | opt_deps(max_fraction_digits.as_deref());
-        NumberFormat {
-            base: ExpressionBase::new(Kind::NumberFormat, Type::String, deps),
-            number,
-            locale,
-            currency,
-            min_fraction_digits,
-            max_fraction_digits,
-        }
-    }
-
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let length = value.array_length();
 
@@ -104,8 +68,8 @@ impl NumberFormat {
         };
 
         let t = number_result.get_type();
-        if *t != Type::Number {
-            ctx.error(format!("Expected argument of type number, but found {} instead.", type_::to_string(t)));
+        if t != Type::Number {
+            ctx.error(format!("Expected argument of type number, but found {} instead.", type_::to_string(&t)));
             return None;
         }
 
@@ -115,7 +79,7 @@ impl NumberFormat {
             return None;
         }
 
-        let mut parse_option = |key: &str, t: Type, message: &str| -> Result<Option<Box<dyn Expression>>, ()> {
+        let mut parse_option = |key: &str, t: Type, message: &str| -> Result<Option<Expr>, ()> {
             if let Some(option) = options.object_member(key) {
                 if let Some(r) = ctx.parse(&option, 1, Some(t), None) {
                     Ok(Some(r))
@@ -138,43 +102,36 @@ impl NumberFormat {
             parse_option(MAX_FRACTION_DIGITS_KEY, Type::Number, "Number-format max-fraction-digits parsing failed.")
                 .ok()?;
 
-        Some(Box::new(NumberFormat::new(
-            number_result,
-            locale_result,
-            currency_result,
-            min_fraction_digits_result,
-            max_fraction_digits_result,
-        )))
-    }
-}
-
-impl Expression for NumberFormat {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Expr::new(Node::NumberFormat(Box::new(NumberFormat {
+            number: number_result,
+            locale: locale_result,
+            currency: currency_result,
+            min_fraction_digits: min_fraction_digits_result,
+            max_fraction_digits: max_fraction_digits_result,
+        }))))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
-        let number_result = self.number.evaluate(params)?;
-        let evaluated_number = number_result.as_number().expect("numeric input");
+    pub(crate) fn eval_str(&self, params: &EvaluationContext<'_>) -> EvalResult<String> {
+        let evaluated_number = self.number.eval_num(params)?;
 
         let mut evaluated_locale = String::new();
         if let Some(locale) = &self.locale {
-            evaluated_locale = to_string(&locale.evaluate(params)?);
+            evaluated_locale = to_string(&*locale.evaluate_ref(params)?);
         }
 
         let mut evaluated_currency = String::new();
         if let Some(currency) = &self.currency {
-            evaluated_currency = to_string(&currency.evaluate(params)?);
+            evaluated_currency = to_string(&*currency.evaluate_ref(params)?);
         }
 
         let mut evaluated_min_fraction_digits = None;
         if let Some(min) = &self.min_fraction_digits {
-            evaluated_min_fraction_digits = Some(static_cast_u8(min.evaluate(params)?.as_number().expect("number")));
+            evaluated_min_fraction_digits = Some(static_cast_u8(min.eval_num(params)?));
         }
 
         let mut evaluated_max_fraction_digits = None;
         if let Some(max) = &self.max_fraction_digits {
-            evaluated_max_fraction_digits = Some(static_cast_u8(max.evaluate(params)?.as_number().expect("number")));
+            evaluated_max_fraction_digits = Some(static_cast_u8(max.eval_num(params)?));
         }
 
         format_number(
@@ -184,36 +141,19 @@ impl Expression for NumberFormat {
             evaluated_min_fraction_digits,
             evaluated_max_fraction_digits,
         )
-        .map(Value::String)
         .map_err(EvaluationError::new)
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        visit(&*self.number);
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.number);
         for e in
             [&self.locale, &self.currency, &self.min_fraction_digits, &self.max_fraction_digits].into_iter().flatten()
         {
-            visit(&**e);
+            visit(e);
         }
     }
 
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::NumberFormat {
-            let rhs = downcast::<NumberFormat>(e).expect("NumberFormat");
-            return opt_equal(self.locale.as_deref(), rhs.locale.as_deref())
-                && opt_equal(self.currency.as_deref(), rhs.currency.as_deref())
-                && opt_equal(self.min_fraction_digits.as_deref(), rhs.min_fraction_digits.as_deref())
-                && opt_equal(self.max_fraction_digits.as_deref(), rhs.max_fraction_digits.as_deref())
-                && self.number.equals(&*rhs.number);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![None]
-    }
-
-    fn serialize(&self) -> MbglValue {
+    pub(crate) fn serialize(&self) -> MbglValue {
         let mut options = ValueObject::new();
         if let Some(locale) = &self.locale {
             options.insert(LOCALE_KEY.to_owned(), locale.serialize());
@@ -228,14 +168,10 @@ impl Expression for NumberFormat {
             options.insert(MAX_FRACTION_DIGITS_KEY.to_owned(), max.serialize());
         }
         MbglValue::Array(vec![
-            MbglValue::String(self.get_operator()),
+            MbglValue::String("number-format".to_owned()),
             self.number.serialize(),
             MbglValue::Object(options),
         ])
-    }
-
-    fn get_operator(&self) -> String {
-        "number-format".to_owned()
     }
 }
 

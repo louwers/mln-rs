@@ -12,7 +12,7 @@ use super::function::{
     convert_token_string_to_image_expression, has_tokens,
 };
 use super::{Converter, Convertible, Error, convert};
-use crate::expression::{Image, Kind, Literal, ParsingContext, ValueConverter, downcast, is_expression};
+use crate::expression::{Image, ParsingContext, ValueConverter, is_expression};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 
@@ -69,7 +69,7 @@ no_tokens!(
 impl MaybeConvertTokens for String {
     fn maybe_convert_tokens(self) -> PropertyValue<String> {
         if has_tokens(&self) {
-            PropertyValue::Expression(PropertyExpression::from_box(convert_token_string_to_expression(&self), None))
+            PropertyValue::Expression(PropertyExpression::from_expr(convert_token_string_to_expression(&self), None))
         } else {
             PropertyValue::Constant(self)
         }
@@ -84,7 +84,7 @@ impl MaybeConvertTokens for Formatted {
         // General purpose `format` expressions with embedded tokens are not supported
         let first_unformatted_section = &self.sections[0].text;
         if has_tokens(first_unformatted_section) {
-            PropertyValue::Expression(PropertyExpression::from_box(
+            PropertyValue::Expression(PropertyExpression::from_expr(
                 convert_token_string_to_format_expression(first_unformatted_section),
                 None,
             ))
@@ -97,7 +97,7 @@ impl MaybeConvertTokens for Formatted {
 impl MaybeConvertTokens for Image {
     fn maybe_convert_tokens(self) -> PropertyValue<Image> {
         if has_tokens(self.id()) {
-            PropertyValue::Expression(PropertyExpression::from_box(
+            PropertyValue::Expression(PropertyExpression::from_expr(
                 convert_token_string_to_image_expression(self.id()),
                 None,
             ))
@@ -126,7 +126,7 @@ where
             error.message = ctx.get_combined_errors();
             return None;
         };
-        Some(PropertyExpression::from_box(parsed, None))
+        Some(PropertyExpression::from_expr(parsed, None))
     } else if value.is_object() {
         convert_function_to_expression::<T>(value, error, convert_tokens)
     } else {
@@ -140,9 +140,8 @@ where
         None
     } else if !expression.is_feature_constant() || !expression.is_zoom_constant() || !expression.is_runtime_constant() {
         Some(PropertyValue::Expression(expression))
-    } else if expression.get_expression().get_kind() == Kind::Literal {
-        let literal = downcast::<Literal>(expression.get_expression()).expect("Kind::Literal is a Literal");
-        let constant = T::from_expression_value(literal.get_value())?;
+    } else if let Some(literal) = expression.get_expression().literal_value() {
+        let constant = T::from_expression_value(literal)?;
         Some(PropertyValue::Constant(constant))
     } else {
         debug_assert!(false, "expected a literal expression");

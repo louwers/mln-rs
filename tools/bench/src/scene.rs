@@ -160,22 +160,31 @@ pub(crate) fn prepare_basemap_mlt(fixtures: &Path) {
             entries.sort();
             entries
         };
-        for z in walk(&tiles) {
-            for x in walk(&z) {
-                for mvt in walk(&x) {
-                    let relative = mvt.strip_prefix(&tiles).expect("under the tiles").with_extension("mlt");
-                    let out = fixtures.join(BASEMAP_MLT_DIR).join(relative);
-                    let layers = mlt_core::mvt::mvt_to_tile_layers(std::fs::read(&mvt).expect("a basemap tile"))
-                        .expect("an MVT tile");
-                    let mut mlt = Vec::new();
-                    for layer in layers {
-                        mlt.extend(layer.encode(config).expect("an MLT layer"));
+        // mlt-core keeps its encoder's scratch in a pool per thread, which
+        // would stay on the bench's thread through every case after this
+        // one. A thread of its own takes its pool with it when it ends.
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                for z in walk(&tiles) {
+                    for x in walk(&z) {
+                        for mvt in walk(&x) {
+                            let relative = mvt.strip_prefix(&tiles).expect("under the tiles").with_extension("mlt");
+                            let out = fixtures.join(BASEMAP_MLT_DIR).join(relative);
+                            let layers =
+                                mlt_core::mvt::mvt_to_tile_layers(std::fs::read(&mvt).expect("a basemap tile"))
+                                    .expect("an MVT tile");
+                            let mut mlt = Vec::new();
+                            for layer in layers {
+                                mlt.extend(layer.encode(config).expect("an MLT layer"));
+                            }
+                            std::fs::create_dir_all(out.parent().expect("a directory"))
+                                .expect("the MLT tile directory");
+                            std::fs::write(&out, mlt).expect("an MLT tile");
+                        }
                     }
-                    std::fs::create_dir_all(out.parent().expect("a directory")).expect("the MLT tile directory");
-                    std::fs::write(&out, mlt).expect("an MLT tile");
                 }
-            }
-        }
+            });
+        });
     });
 }
 
@@ -519,6 +528,29 @@ impl Scene {
         for id in ids {
             self.map.style_mut().get_layer_mut(&id).expect("the layer").set_visibility(visibility);
         }
+    }
+
+    /// Sets the minimum zoom of every layer that draws a source, and returns
+    /// how many there are.
+    pub(crate) fn set_sourced_min_zoom(&mut self, min_zoom: f32) -> usize {
+        let ids: Vec<String> = self
+            .map
+            .style()
+            .get_layers()
+            .iter()
+            .filter(|layer| !layer.get_source_id().is_empty())
+            .map(|layer| layer.get_id())
+            .collect();
+        for id in &ids {
+            self.map.style_mut().get_layer_mut(id).expect("the layer").set_min_zoom(min_zoom);
+        }
+        ids.len()
+    }
+
+    /// Whether the renderer keeps tiles that left the view, to show them
+    /// again without loading; it does by default.
+    pub(crate) fn set_tile_cache_enabled(&self, enabled: bool) {
+        self.frontend.with_renderer(|renderer| renderer.set_tile_cache_enabled(enabled));
     }
 
     /// The vertex and index buffers the GPU held after the last frame, in

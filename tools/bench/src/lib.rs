@@ -10,6 +10,7 @@ pub mod cases;
 pub mod compare;
 mod latency;
 pub mod meter;
+mod runtime_scene;
 pub mod scene;
 mod stats;
 

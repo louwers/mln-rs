@@ -1,33 +1,33 @@
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
-use crate::expression::{
-    EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, children_equal, collect_dependencies,
-    downcast,
-};
+use crate::expression::{EvaluationContext, EvaluationResult, Expr, Node};
 use crate::literal::Literal;
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
 use crate::value::Value;
 
-fn array_type(elements: &[Box<dyn Expression>]) -> type_::Array {
-    let item_type = if elements.is_empty() { Type::Value } else { elements[0].get_type().clone() };
-    let homogeneous = elements.iter().all(|element| *element.get_type() == item_type);
-    type_::Array::with_n(if homogeneous { item_type } else { Type::Value }, Some(elements.len()))
-}
-
+/// `["semiliteral", [...]]`: an array whose elements are expressions.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Semiliteral {
-    base: ExpressionBase,
-    elements: Vec<Box<dyn Expression>>,
+    elements: Box<[Expr]>,
 }
 
 impl Semiliteral {
-    #[must_use]
-    pub(crate) fn new(elements: Vec<Box<dyn Expression>>) -> Self {
-        Semiliteral {
-            base: ExpressionBase::new(Kind::Semiliteral, array_type(&elements).into(), collect_dependencies(&elements)),
-            elements,
-        }
+    #[cfg(test)]
+    pub(crate) fn new_expr(elements: Vec<Expr>) -> Expr {
+        Expr::new(Node::Semiliteral(Box::new(Semiliteral { elements: elements.into() })))
+    }
+
+    pub(crate) fn elements(&self) -> &[Expr] {
+        &self.elements
+    }
+
+    /// An array of the elements' count, of their type when they share one.
+    pub(crate) fn get_type(&self) -> Type {
+        let item_type = self.elements.first().map_or(Type::Value, Expr::get_type);
+        let homogeneous = self.elements.iter().all(|element| element.get_type() == item_type);
+        type_::Array::with_n(if homogeneous { item_type } else { Type::Value }, Some(self.elements.len())).into()
     }
 
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -52,16 +52,10 @@ impl Semiliteral {
             elements.push(element);
         }
 
-        Some(Box::new(Semiliteral::new(elements)))
-    }
-}
-
-impl Expression for Semiliteral {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Expr::new(Node::Semiliteral(Box::new(Semiliteral { elements: elements.into() }))))
     }
 
-    fn evaluate(&self, ctx: &EvaluationContext<'_>) -> EvaluationResult {
+    pub(crate) fn evaluate(&self, ctx: &EvaluationContext<'_>) -> EvaluationResult {
         let mut values = Vec::with_capacity(self.elements.len());
         for element in &self.elements {
             values.push(element.evaluate(ctx)?);
@@ -69,27 +63,8 @@ impl Expression for Semiliteral {
         Ok(Value::Array(values))
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        for element in &self.elements {
-            visit(&**element);
-        }
-    }
-
-    fn equals(&self, other: &dyn Expression) -> bool {
-        other.get_kind() == Kind::Semiliteral
-            && children_equal(&self.elements, &downcast::<Semiliteral>(other).expect("Semiliteral").elements)
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        vec![None]
-    }
-
-    fn serialize(&self) -> MbglValue {
-        let values = self.elements.iter().map(|e| e.serialize()).collect();
-        MbglValue::Array(vec![MbglValue::String(self.get_operator()), MbglValue::Array(values)])
-    }
-
-    fn get_operator(&self) -> String {
-        "semiliteral".to_owned()
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let values = self.elements.iter().map(Expr::serialize).collect();
+        MbglValue::Array(vec![MbglValue::String("semiliteral".to_owned()), MbglValue::Array(values)])
     }
 }

@@ -118,7 +118,7 @@ impl FeatureTrackingTest {
         symbol_layer.set_icon_allow_overlap(&constant(false));
         symbol_layer.set_symbol_placement(&constant(SymbolPlacementType::Point));
         symbol_layer.set_icon_image(&constant(mln_style::expression::Image::new(MARKER_NAME)));
-        symbol_layer.set_text_field(&PropertyValue::Expression(PropertyExpression::from_box(
+        symbol_layer.set_text_field(&PropertyValue::Expression(PropertyExpression::from_expr(
             format(get(literal_str("name"))),
             None,
         )));
@@ -502,7 +502,7 @@ fn zero_opacity_expression() {
     test.show(SYMBOL_LAYER_NAME);
 
     let expression = || {
-        PropertyValue::Expression(PropertyExpression::from_box(
+        PropertyValue::Expression(PropertyExpression::from_expr(
             interpolate(
                 linear(),
                 zoom(),
@@ -530,7 +530,7 @@ fn zero_opacity_data_driven() {
     let mut test = FeatureTrackingTest::new(camera(10.0));
     test.show(SYMBOL_LAYER_NAME);
 
-    let expression = || PropertyValue::Expression(PropertyExpression::from_box(get(literal_str("opacity")), None));
+    let expression = || PropertyValue::Expression(PropertyExpression::from_expr(get(literal_str("opacity")), None));
     test.with_symbol_layer(|layer| {
         layer.set_icon_opacity(&expression());
         layer.set_text_opacity(&expression());

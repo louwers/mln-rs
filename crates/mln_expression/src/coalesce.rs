@@ -1,36 +1,30 @@
 use mln_conversion::Convertible;
 
 use crate::check_subtype::check_subtype;
-use crate::expression::{
-    EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, children_equal, collect_dependencies,
-    downcast,
-};
+use crate::expression::{EvalResult, EvaluationContext, EvaluationResult, Expr, Node, Output};
 use crate::image::Image;
 use crate::parsing_context::{ParseResult, ParsingContext, TypeAnnotationOption};
 use crate::type_::Type;
 use crate::value::{Value, from_expression_value};
 
-pub(crate) type Args = Vec<Box<dyn Expression>>;
-
+/// `["coalesce", ...]`: the first operand that is not null.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Coalesce {
-    base: ExpressionBase,
-    args: Args,
+    type_: Type,
+    args: Box<[Expr]>,
 }
 
 impl Coalesce {
-    #[must_use]
-    pub(crate) fn new(type_: Type, args: Args) -> Self {
-        Coalesce { base: ExpressionBase::new(Kind::Coalesce, type_, collect_dependencies(&args)), args }
+    pub(crate) fn new_expr(type_: Type, args: Vec<Expr>) -> Expr {
+        Expr::new(Node::Coalesce(Box::new(Coalesce { type_, args: args.into() })))
     }
 
-    #[must_use]
-    pub(crate) fn get_length(&self) -> usize {
-        self.args.len()
+    pub(crate) fn get_type(&self) -> &Type {
+        &self.type_
     }
 
-    #[must_use]
-    pub(crate) fn get_child(&self, i: usize) -> &dyn Expression {
-        &*self.args[i]
+    pub(crate) fn args(&self) -> &[Expr] {
+        &self.args
     }
 
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -49,11 +43,11 @@ impl Coalesce {
             output_type = Some(expected.clone());
         }
 
-        let mut args = Args::with_capacity(length - 1);
+        let mut args = Vec::with_capacity(length - 1);
         for i in 1..length {
             let parsed = ctx.parse(&value.array_member(i), i, output_type.clone(), Some(TypeAnnotationOption::Omit))?;
             if output_type.is_none() {
-                output_type = Some(parsed.get_type().clone());
+                output_type = Some(parsed.get_type());
             }
             args.push(parsed);
         }
@@ -66,18 +60,12 @@ impl Coalesce {
         // enclosing coalesce expression with it instead.
         let needs_annotation = expected_type
             .as_ref()
-            .is_some_and(|expected| args.iter().any(|arg| check_subtype(expected, arg.get_type()).is_some()));
+            .is_some_and(|expected| args.iter().any(|arg| check_subtype(expected, &arg.get_type()).is_some()));
 
-        Some(Box::new(Coalesce::new(if needs_annotation { Type::Value } else { output_type }, args)))
-    }
-}
-
-impl Expression for Coalesce {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Coalesce::new_expr(if needs_annotation { Type::Value } else { output_type }, args))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+    pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
         let mut result: EvaluationResult = Ok(Value::Null);
         let mut args_count = self.args.len();
         let mut requested_image: Option<Image> = None;
@@ -87,7 +75,7 @@ impl Expression for Coalesce {
             // We need to keep track of the first requested image in a
             // coalesce statement. If coalesce can't find a valid image, we
             // return the first requested image.
-            if *self.get_type() == Type::Image
+            if self.type_ == Type::Image
                 && let Ok(r) = &result
                 && let Some(image) = from_expression_value::<Image>(r)
                 && !image.is_available()
@@ -110,29 +98,25 @@ impl Expression for Coalesce {
         result
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
+    /// The typed evaluation, for a coalesce of type `type_`. An operand of
+    /// that type is never null, so the first one decides; an operand that
+    /// the parser left a value (it omits annotations here) is skipped while
+    /// it is null.
+    pub(crate) fn eval_typed<'e, T: Output<'e>>(
+        &'e self,
+        params: &EvaluationContext<'_>,
+        type_: &Type,
+    ) -> EvalResult<T> {
+        debug_assert_eq!(&self.type_, type_);
         for arg in &self.args {
-            visit(&**arg);
+            if arg.get_type() == *type_ {
+                return T::eval(arg, params);
+            }
+            match arg.evaluate(params)? {
+                Value::Null => {}
+                value => return T::from_value(value),
+            }
         }
-    }
-
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Coalesce {
-            let rhs = downcast::<Coalesce>(e).expect("Coalesce");
-            return children_equal(&self.args, &rhs.args);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        let mut result = Vec::new();
-        for arg in &self.args {
-            result.extend(arg.possible_outputs());
-        }
-        result
-    }
-
-    fn get_operator(&self) -> String {
-        "coalesce".to_owned()
+        T::from_value(Value::Null)
     }
 }

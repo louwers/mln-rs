@@ -830,23 +830,17 @@ impl Impl {
     /// callbacks).
     pub fn get_source_impls(&self) -> ImmutableVector<dyn source::Impl> {
         let impls = self.sources.get_impls();
-        let current = |impl_: &Arc<dyn source::Impl>| -> Arc<dyn source::Impl> {
-            match self.sources.get(&impl_.id) {
-                Some(source) => source.base_impl(),
-                None => Arc::clone(impl_),
-            }
-        };
-        if impls.iter().all(|impl_| Arc::ptr_eq(impl_, &current(impl_))) {
+        if self.sources.are_current(&impls) {
             return impls;
         }
         let mut cache = self.source_impls_cache.borrow_mut();
         if let Some((base, refreshed)) = &*cache
             && Arc::ptr_eq(base, &impls)
-            && refreshed.iter().all(|impl_| Arc::ptr_eq(impl_, &current(impl_)))
+            && self.sources.are_current(refreshed)
         {
             return Arc::clone(refreshed);
         }
-        let refreshed: ImmutableVector<dyn source::Impl> = Arc::new(impls.iter().map(current).collect());
+        let refreshed: ImmutableVector<dyn source::Impl> = Arc::new(self.sources.current_impls());
         *cache = Some((impls, Arc::clone(&refreshed)));
         refreshed
     }
@@ -940,7 +934,9 @@ impl Impl {
     // ProjectionObserver implementation.
 
     pub(crate) fn on_projection_changed(&mut self) {
-        self.observer().on_update();
+        let observer = self.observer();
+        observer.on_projection_changed();
+        observer.on_update();
     }
 }
 

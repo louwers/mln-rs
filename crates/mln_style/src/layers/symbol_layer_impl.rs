@@ -4,14 +4,14 @@
 
 use std::sync::OnceLock;
 
-use mln_expression::format_expression::{FormatExpression, FormatExpressionSection};
+use mln_expression::format_expression::FormatExpressionSection;
 use mln_expression::value::from_expression_value;
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
-use crate::expression::{Dependency, Expression, Formatted, FormattedSection, Kind, Literal, Type, downcast};
+use crate::expression::{Dependency, Expr, Formatted, FormattedSection, Type};
 use crate::layer::{self, FontStack, ImplBase, LayerTypeInfo};
 use crate::layers::symbol_layer_properties::{
     SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField, TextFont,
@@ -78,7 +78,7 @@ impl SymbolLayerPaintPropertyOverrides {
             FormattedValue::Constant(literal) => check_literal(literal),
             FormattedValue::Expression(property) => {
                 fn check_expression<'a>(
-                    e: &'a dyn Expression,
+                    e: &'a Expr,
                     found: &mut bool,
                     check_literal: &dyn Fn(&Formatted) -> bool,
                     expression_section_has_override: fn(&FormatExpressionSection) -> bool,
@@ -87,17 +87,16 @@ impl SymbolLayerPaintPropertyOverrides {
                         return;
                     }
 
-                    if e.get_kind() == Kind::Literal && *e.get_type() == Type::Formatted {
-                        let literal_expr = downcast::<Literal>(e).expect("Kind::Literal is a Literal");
-                        let formatted_value = from_expression_value::<Formatted>(literal_expr.get_value());
+                    if let Some(literal) = e.literal_value()
+                        && e.get_type() == Type::Formatted
+                    {
+                        let formatted_value = from_expression_value::<Formatted>(literal);
                         if let Some(formatted_value) = formatted_value
                             && check_literal(&formatted_value)
                         {
                             *found = true;
                         }
-                    } else if e.get_kind() == Kind::FormatExpression {
-                        let format_expr =
-                            downcast::<FormatExpression>(e).expect("Kind::FormatExpression is a FormatExpression");
+                    } else if let Some(format_expr) = e.as_format() {
                         for section in format_expr.get_sections() {
                             if expression_section_has_override(section) {
                                 *found = true;
@@ -147,7 +146,7 @@ impl SymbolLayerPaintPropertyOverrides {
         if !property.is_constant() {
             let has_format_section_override = match &property {
                 PossiblyEvaluatedPropertyValue::Expression(e) => {
-                    e.get_expression().get_kind() == Kind::FormatSectionOverride
+                    e.get_expression().as_format_section_override().is_some()
                 }
                 PossiblyEvaluatedPropertyValue::Constant(_) => false,
             };

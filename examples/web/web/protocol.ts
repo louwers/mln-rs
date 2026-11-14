@@ -87,6 +87,7 @@ export type ToMap =
   | { type: "readPixels" }
   | { type: "fetches" }
   | { type: "idle" }
+  | { type: "nextFrame" }
   | { type: "resize"; width: number; height: number }
   | { type: "pixelRatio"; ratio: number }
   | { type: "style"; url: string }
@@ -169,6 +170,8 @@ export type FromMap =
   | { type: "fetches"; fetches: Record<string, number> }
   // The camera, once the map is fully loaded and has stopped moving.
   | { type: "idle"; camera: Camera }
+  // The map's next animation frame has run, with the inputs before it.
+  | { type: "nextFrame" }
   | { type: "box"; box: Box | null }
   | { type: "camera"; camera: Camera }
   | { type: "attribution"; attribution: string[] }

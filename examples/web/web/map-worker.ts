@@ -371,6 +371,7 @@ async function run({
   let loaded: Loaded | null = null;
   let readPixels = 0;
   let idle = 0; // `idle` requests to answer
+  let nextFrames = 0; // `nextFrame` requests to answer
   let stillFrames = 0;
   let reported = 0;
   let attribution = "";
@@ -452,6 +453,7 @@ async function run({
     if (idle > 0 && stillFrames >= IDLE_FRAMES && map.is_fully_loaded()) {
       for (; idle > 0; idle--) post({ type: "idle", camera });
     }
+    for (; nextFrames > 0; nextFrames--) post({ type: "nextFrame" });
     if (loaded === null && map.is_fully_loaded()) {
       loaded = {
         loadedMs: performance.now() - started,
@@ -487,6 +489,9 @@ async function run({
           break;
         case "idle":
           idle++;
+          break;
+        case "nextFrame":
+          nextFrames++;
           break;
         case "resize":
           map.resize(data.width, data.height);

@@ -1,6 +1,6 @@
 use crate::collator_expression::CollatorExpression;
 use crate::dsl::*;
-use crate::expression::{Dependency, Expression};
+use crate::expression::Dependency;
 use crate::semiliteral::Semiliteral;
 
 // gtest: ExpressionDependencies.Get
@@ -40,7 +40,7 @@ fn convert() {
     );
     assert_eq!(
         Dependency::FEATURE | Dependency::ZOOM,
-        CollatorExpression::new(gt(literal(1.0.into()), zoom()), literal(true.into()), Some(literal_str("en-us")))
+        CollatorExpression::new_expr(gt(literal(1.0.into()), zoom()), literal(true.into()), Some(literal_str("en-us")))
             .dependencies()
     );
 }
@@ -93,6 +93,6 @@ fn distance() {
 // gtest: ExpressionDependencies.Semiliteral
 #[test]
 fn semiliteral() {
-    let expression = Semiliteral::new(vec![get_str("property"), zoom()]);
+    let expression = Semiliteral::new_expr(vec![get_str("property"), zoom()]);
     assert_eq!(Dependency::FEATURE | Dependency::ZOOM, expression.dependencies());
 }

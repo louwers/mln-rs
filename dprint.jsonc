@@ -37,7 +37,7 @@
     "crates/mln_style/src/layers/symbol_layer.rs",
     "crates/mln_style/src/light.rs",
     "crates/mln_style/src/sky.rs",
-    "crates/mln_text/src/icu/ubidi_props_data.rs",
+    "crates/mln_text/src/bidi_mirroring.rs",
     "examples/web/pnpm-lock.yaml",
     // Copies of other projects' files, kept as they are there.
     "**/testdata/**",

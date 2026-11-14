@@ -50,8 +50,8 @@ fn assert_all(pixels: &[[u8; 4]], expected: [u8; 4]) {
     assert!(pixels.iter().all(|px| *px == expected), "expected every pixel {expected:?}, got {:?}", pixels[0]);
 }
 
-const RED: Color = Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
-const BLUE: Color = Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 };
+const RED: Color = Color::red();
+const BLUE: Color = Color::blue();
 
 #[test]
 fn backends_on_one_device_render_in_turn() {

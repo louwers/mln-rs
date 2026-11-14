@@ -1,9 +1,9 @@
 //! What a case measures besides wall time: the process's CPU time, every
 //! thread's, so work moved to the tile workers or a busy wait still counts;
-//! on macOS, the instructions and cycles of every thread, which other load
-//! on the machine hardly changes; and the heap allocations of the whole
-//! process, through [`CountingAllocator`], which the `mln-bench` binary
-//! installs.
+//! on macOS and Linux, the instructions and cycles of every thread, which
+//! other load on the machine hardly changes; and the heap allocations of the
+//! whole process, through [`CountingAllocator`], which the `mln-bench`
+//! binary installs.
 //!
 //! A `Meter` times the timed part of each iteration of a case and leaves
 //! its setup out.
@@ -128,12 +128,152 @@ pub(crate) fn process_counters() -> Option<Counters> {
         .then_some(Counters { instructions: info.ri_instructions, cycles: info.ri_cycles })
 }
 
+/// Opens the counters of `process_counters` where they count only the
+/// threads that start after them, as on Linux, so that `main` calls it
+/// before any thread starts; elsewhere it does nothing.
+pub fn start_counters() {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    linux::counters();
+}
+
+/// The user-space instructions and cycles that the threads of the process
+/// have retired since [`start_counters`], the calling thread and every
+/// thread started after that call, or `None` where perf events aren't open
+/// to the process: `perf_event_paranoid` above 2, or a container that
+/// blocks the system call.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[must_use]
+pub(crate) fn process_counters() -> Option<Counters> {
+    linux::counters().map(linux::Pmus::read)
+}
+
 /// The instructions and cycles every thread of the process has retired so
 /// far, or `None` where the system doesn't count them.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
 #[must_use]
 pub(crate) fn process_counters() -> Option<Counters> {
     None
+}
+
+/// Instructions and cycles through `perf_event_open(2)`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod linux {
+    use std::fs::File;
+    use std::io::Read as _;
+    use std::os::fd::FromRawFd as _;
+    use std::sync::OnceLock;
+
+    use super::Counters;
+
+    /// `struct perf_event_attr` as of its first version
+    /// (`PERF_ATTR_SIZE_VER0`), which every kernel with perf events takes;
+    /// none of the later fields is needed here.
+    #[repr(C)]
+    struct Attr {
+        kind: u32,
+        size: u32,
+        config: u64,
+        sample_period: u64,
+        sample_type: u64,
+        read_format: u64,
+        flags: u64,
+        wakeup_events: u32,
+        bp_type: u32,
+        config1: u64,
+    }
+
+    // linux/perf_event.h.
+    const PERF_TYPE_HARDWARE: u32 = 0;
+    const PERF_COUNT_HW_CPU_CYCLES: u64 = 0;
+    const PERF_COUNT_HW_INSTRUCTIONS: u64 = 1;
+    /// A hardware event's `config` names the PMU's type above these bits.
+    const PERF_PMU_TYPE_SHIFT: u64 = 32;
+    const FLAG_INHERIT: u64 = 1 << 1;
+    const FLAG_EXCLUDE_KERNEL: u64 = 1 << 5;
+    const FLAG_EXCLUDE_HV: u64 = 1 << 6;
+    const PERF_FLAG_FD_CLOEXEC: libc::c_ulong = 1 << 3;
+
+    /// One counter of the calling thread and the threads it, and they,
+    /// start from now on, in user space, counting from its opening.
+    fn open(config: u64) -> Option<File> {
+        let attr = Attr {
+            kind: PERF_TYPE_HARDWARE,
+            size: size_of::<Attr>() as u32,
+            config,
+            sample_period: 0,
+            sample_type: 0,
+            read_format: 0,
+            flags: FLAG_INHERIT | FLAG_EXCLUDE_KERNEL | FLAG_EXCLUDE_HV,
+            wakeup_events: 0,
+            bp_type: 0,
+            config1: 0,
+        };
+        // SAFETY: `attr` is a perf_event_attr of the size it states, which
+        // the kernel only reads; pid 0 and cpu -1 are the calling thread on
+        // any CPU, and group -1 is none.
+        let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, &raw const attr, 0, -1, -1, PERF_FLAG_FD_CLOEXEC) };
+        // SAFETY: a non-negative result is a new file descriptor that
+        // nothing else owns.
+        (fd >= 0).then(|| unsafe { File::from_raw_fd(fd as libc::c_int) })
+    }
+
+    /// A counter's value: what it counted while it had the hardware, not
+    /// scaled up for the time the kernel shared it with other events, so
+    /// that the value only grows. Two events per PMU fit on any CPU with
+    /// perf events, unless other counters take its hardware.
+    fn read(mut counter: &File) -> u64 {
+        let mut bytes = [0u8; 8];
+        counter.read_exact(&mut bytes).expect("a perf event's value");
+        u64::from_ne_bytes(bytes)
+    }
+
+    /// The instruction and cycle counter of each kind of core.
+    pub(super) struct Pmus(Vec<(File, File)>);
+
+    impl Pmus {
+        pub(super) fn read(&self) -> Counters {
+            let mut counters = Counters { instructions: 0, cycles: 0 };
+            for (instructions, cycles) in &self.0 {
+                counters.instructions += read(instructions);
+                counters.cycles += read(cycles);
+            }
+            counters
+        }
+    }
+
+    /// The counters, opened by the first call.
+    pub(super) fn counters() -> Option<&'static Pmus> {
+        static COUNTERS: OnceLock<Option<Pmus>> = OnceLock::new();
+        COUNTERS
+            .get_or_init(|| {
+                let pair = |pmu: u64| {
+                    let config = pmu << PERF_PMU_TYPE_SHIFT;
+                    Some((open(config | PERF_COUNT_HW_INSTRUCTIONS)?, open(config | PERF_COUNT_HW_CPU_CYCLES)?))
+                };
+                // A CPU with two kinds of cores, such as Intel's P and E cores
+                // or Arm's big.LITTLE, has a PMU for each, and a hardware event
+                // counts on one PMU's cores only: count on each and add them up.
+                let hybrid: Option<Vec<_>> = core_pmus().into_iter().map(pair).collect();
+                match hybrid {
+                    Some(pmus) if !pmus.is_empty() => Some(Pmus(pmus)),
+                    _ => pair(0).map(|pair| Pmus(vec![pair])),
+                }
+            })
+            .as_ref()
+    }
+
+    /// The type of each PMU that counts some of the CPUs' cores, where the
+    /// kinds of cores have PMUs of their own; sysfs lists their CPUs.
+    fn core_pmus() -> Vec<u64> {
+        let Ok(devices) = std::fs::read_dir("/sys/bus/event_source/devices") else {
+            return Vec::new();
+        };
+        devices
+            .flatten()
+            .filter(|device| device.path().join("cpus").exists())
+            .filter_map(|device| std::fs::read_to_string(device.path().join("type")).ok()?.trim().parse().ok())
+            .collect()
+    }
 }
 
 /// What [`process_counters`] reads.
@@ -153,10 +293,23 @@ struct Reading {
 }
 
 impl Reading {
-    fn now() -> Reading {
+    /// A reading at the start of an iteration: the clocks last, so that
+    /// they leave out reading the counters.
+    fn start() -> Reading {
+        let allocations = ALLOCATIONS.load(Ordering::Relaxed);
+        let allocated = ALLOCATED.load(Ordering::Relaxed);
+        let counters = process_counters();
+        let cpu = process_cpu();
+        Reading { wall: Instant::now(), cpu, counters, allocations, allocated }
+    }
+
+    /// A reading at the end of an iteration: the clocks first.
+    fn end() -> Reading {
+        let wall = Instant::now();
+        let cpu = process_cpu();
         Reading {
-            wall: Instant::now(),
-            cpu: process_cpu(),
+            wall,
+            cpu,
             counters: process_counters(),
             allocations: ALLOCATIONS.load(Ordering::Relaxed),
             allocated: ALLOCATED.load(Ordering::Relaxed),
@@ -207,12 +360,12 @@ impl Meter {
     /// Starts an iteration, for one that [`Meter::time`] can't wrap.
     pub(crate) fn start(&mut self) {
         assert!(self.started.is_none(), "an iteration is already running");
-        self.started = Some(Reading::now());
+        self.started = Some(Reading::start());
     }
 
     /// Ends the iteration [`Meter::start`] started.
     pub(crate) fn stop(&mut self) {
-        let end = Reading::now();
+        let end = Reading::end();
         let start = self.started.take().expect("no iteration is running");
         self.wall.push(ms(end.wall - start.wall));
         self.cpu.push(ms(end.cpu.checked_sub(start.cpu).unwrap()));
@@ -265,9 +418,15 @@ mod tests {
 
     #[test]
     fn counts_instructions_where_the_system_does() {
+        start_counters();
         let mut meter = Meter::new();
-        // At least one instruction per step, so at least 10 million.
-        meter.time(|| (0..10_000_000u64).fold(0u64, |sum, i| std::hint::black_box(sum.wrapping_add(i))));
+        // At least one instruction per step, so at least 10 million, on a
+        // thread of its own, which the counters count as well.
+        meter.time(|| {
+            std::thread::spawn(|| (0..10_000_000u64).fold(0u64, |sum, i| std::hint::black_box(sum.wrapping_add(i))))
+                .join()
+                .unwrap()
+        });
         let metrics = meter.finish();
         match process_counters() {
             Some(_) => {

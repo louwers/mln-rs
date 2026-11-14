@@ -76,8 +76,8 @@ fn bytes_field(out: &mut Vec<u8>, tag: u64, bytes: &[u8]) {
     out.extend_from_slice(bytes);
 }
 
-/// A tile with one layer "l" (key "k", value "v") holding one point
-/// feature with the given packed tags.
+/// A tile with one layer "l" (key "k", values "v" and "w") holding one
+/// point feature with the given packed tags.
 fn tile_with_tags(tags: &[u64]) -> Vec<u8> {
     let mut packed_tags = Vec::new();
     for &tag in tags {
@@ -90,12 +90,15 @@ fn tile_with_tags(tags: &[u64]) -> Vec<u8> {
     bytes_field(&mut feature, 4, &[9, 0, 0]); // MoveTo(0, 0)
     let mut value = Vec::new();
     bytes_field(&mut value, 1, b"v");
+    let mut other_value = Vec::new();
+    bytes_field(&mut other_value, 1, b"w");
     let mut layer = Vec::new();
     varint_field(&mut layer, 15, 2); // version
     bytes_field(&mut layer, 1, b"l");
     bytes_field(&mut layer, 2, &feature);
     bytes_field(&mut layer, 3, b"k");
     bytes_field(&mut layer, 4, &value);
+    bytes_field(&mut layer, 4, &other_value);
     varint_field(&mut layer, 5, 4096); // extent
     let mut tile = Vec::new();
     bytes_field(&mut tile, 3, &layer);
@@ -141,6 +144,17 @@ fn malformed_value_is_the_feature_error() {
     // The geometry is fine, and the first exception is kept.
     assert_eq!(feature.get_geometries().len(), 1);
     assert_eq!(feature.error().unwrap().to_string(), message);
+}
+
+#[test]
+fn repeated_key_keeps_its_first_value() {
+    let data = VectorMVTTileData::new(Arc::new(tile_with_tags(&[0, 1, 0, 0])));
+    let layer = data.get_layer("l").unwrap().unwrap();
+    let feature = layer.get_feature(0).unwrap();
+    let first = feature::Value::String("w".to_owned());
+    assert_eq!(feature.to_properties().into_iter().collect::<Vec<_>>(), [("k".to_owned(), first.clone())]);
+    assert_eq!(feature.get_properties().get("k"), Some(&first));
+    assert_eq!(feature.get_value("k"), Some(first));
 }
 
 #[test]

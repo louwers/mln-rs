@@ -13,9 +13,10 @@ Licensed under the BSD 2-Clause License, as the rest of mln-rs is
 ([LICENSE.md](../../LICENSE.md)), except the ports that keep their own licenses:
 the FreeType subset (`ft`) under the FreeType License
 ([LICENSE-FreeType](LICENSE-FreeType)), hb-ft under HarfBuzz's license
-([LICENSE-HarfBuzz](LICENSE-HarfBuzz)), and ICU's BiDi properties and Arabic
-shaping (`icu`) under ICU's license ([LICENSE-ICU](LICENSE-ICU)), whose Unicode
-License V3 also covers the Unicode data in the tables.
+([LICENSE-HarfBuzz](LICENSE-HarfBuzz)), and ICU's Arabic shaping (`icu`) under
+ICU's license ([LICENSE-ICU](LICENSE-ICU)), whose Unicode License V3 also covers
+the Unicode data in its tables and in the BiDi mirroring table
+(`bidi_mirroring.rs`).
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

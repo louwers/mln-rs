@@ -1,10 +1,8 @@
 use mln_util::logging::{Event, Log};
 
-use crate::coalesce::Coalesce;
-use crate::compound_expression::CompoundExpression;
-use crate::expression::{Dependency, Expression, Kind, downcast};
+use crate::compound_expression::Op;
+use crate::expression::{Dependency, Expr, Node};
 use crate::interpolate::Interpolate;
-use crate::let_::Let;
 use crate::parsing_context::ParsingError;
 use crate::step::Step;
 
@@ -54,43 +52,34 @@ impl ZoomCurvePtr<'_> {
     }
 }
 
-fn zoom_input(input: &dyn Expression) -> bool {
-    input.get_kind() == Kind::CompoundExpression
-        && downcast::<CompoundExpression>(input).is_some_and(|z| z.get_operator() == "zoom")
+fn zoom_input(input: &Expr) -> bool {
+    input.as_compound().is_some_and(|z| z.signature().op == Op::Zoom)
 }
 
 /// Find a zoom curve in the expression tree: the relevant step or
 /// interpolate item, or the error if the expression represents an error.
-pub(crate) fn find_zoom_curve(e: &dyn Expression) -> ZoomCurveOrError<'_> {
+pub(crate) fn find_zoom_curve(e: &Expr) -> ZoomCurveOrError<'_> {
     let mut result: ZoomCurveOrError<'_> = None;
 
-    match e.get_kind() {
-        Kind::Let => {
-            let let_ = downcast::<Let>(e).expect("Let");
-            result = find_zoom_curve(let_.get_result());
+    match e.node() {
+        Node::Let(let_) => {
+            result = find_zoom_curve(let_.result());
         }
-        Kind::Coalesce => {
-            let coalesce = downcast::<Coalesce>(e).expect("Coalesce");
-            let length = coalesce.get_length();
-            for i in 0..length {
-                let child = coalesce.get_child(i);
+        Node::Coalesce(coalesce) => {
+            for child in coalesce.args() {
                 result = find_zoom_curve(child);
                 if result.is_some() {
                     break;
                 }
             }
         }
-        Kind::Interpolate => {
-            let curve = downcast::<Interpolate>(e).expect("Interpolate");
+        Node::Interpolate(curve) => {
             if zoom_input(curve.get_input()) {
                 result = Some(ZoomCurve::Interpolate(curve));
             }
         }
-        Kind::Step => {
-            let step = downcast::<Step>(e).expect("Step");
-            if zoom_input(step.get_input()) {
-                result = Some(ZoomCurve::Step(step));
-            }
+        Node::Step(step) if zoom_input(step.get_input()) => {
+            result = Some(ZoomCurve::Step(step));
         }
         _ => {}
     }
@@ -124,7 +113,8 @@ pub(crate) fn find_zoom_curve(e: &dyn Expression) -> ZoomCurveOrError<'_> {
 /// Find a zoom curve in the expression tree: the relevant step or
 /// interpolate item, or null if the expression represents an error, which
 /// is logged.
-pub fn find_zoom_curve_checked(e: &dyn Expression) -> ZoomCurvePtr<'_> {
+#[must_use]
+pub fn find_zoom_curve_checked(e: &Expr) -> ZoomCurvePtr<'_> {
     if !e.has(Dependency::ZOOM) {
         return ZoomCurvePtr::Null;
     }

@@ -26,8 +26,7 @@ use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramBasePtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::expression::{
-    Dependency, EvaluationContext, GlobalStateMap, Interpolate, downcast, from_expression_value,
-    global_state_refs_intersect,
+    Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -144,7 +143,7 @@ impl RenderColorReliefLayer {
 
         let expr = color_value.get_expression();
 
-        if let Some(interpolate) = downcast::<Interpolate>(expr) {
+        if let Some(interpolate) = expr.as_interpolate() {
             let stop_count = interpolate.get_stop_count();
 
             elevation_stops_vector.reserve(stop_count);

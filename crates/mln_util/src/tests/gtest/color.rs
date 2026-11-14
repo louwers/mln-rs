@@ -110,10 +110,9 @@ fn oklch() {
 // gtest: ColorParse.OklchClampsAndReadsNoneAsZero
 #[test]
 fn oklch_clamps_and_reads_none_as_zero() {
+    let lightest = Color::parse("oklch(1 0.1 30)").unwrap();
     let darkest = Color::parse("oklch(0 0.1 30)").unwrap();
-    // Deviation: C++ clamps the lightness to 1, as CSS Color 4 does. The
-    // csscolorparser crate clamps it only to 0, so this clips to white.
-    expect_color(Color::parse("oklch(1.2 0.1 30)").unwrap(), 1.0, 1.0, 1.0, 1.0);
+    expect_color(Color::parse("oklch(1.2 0.1 30)").unwrap(), lightest.r, lightest.g, lightest.b, lightest.a);
     expect_color(Color::parse("oklch(-0.1 0.1 30)").unwrap(), darkest.r, darkest.g, darkest.b, darkest.a);
     expect_color(Color::parse("oklch(0.6 -0.1 30)").unwrap(), 0.502_110_7, 0.502_110_7, 0.502_110_7, 1.0);
     expect_color(Color::parse("oklch(0.6 0.1 90 / 1.5)").unwrap(), 0.593_718_5, 0.490_827_5, 0.190_116_1, 1.0);
@@ -132,13 +131,12 @@ fn oklch_clamps_and_reads_none_as_zero() {
     expect_color(Color::parse("oklch(0.6 0.1 90 / none)").unwrap(), 0.0, 0.0, 0.0, 0.0);
 }
 
-// Deviation: C++ reads oklch() in double precision and wraps these within one
-// turn. The csscolorparser crate reads it in f32, where they overflow.
 // gtest: ColorParse.OklchWrapsAHugeHueAngleBeforeConvertingIt
 #[test]
 fn oklch_wraps_a_huge_hue_angle_before_converting_it() {
-    assert!(Color::parse("oklch(0.6 0.1 1e306turn)").is_none());
-    assert!(Color::parse("oklch(0.6 0.1 1e307rad)").is_none());
+    let zero_hue = Color::parse("oklch(0.6 0.1 0)").unwrap();
+    expect_color(Color::parse("oklch(0.6 0.1 1e306turn)").unwrap(), zero_hue.r, zero_hue.g, zero_hue.b, zero_hue.a);
+    assert!(Color::parse("oklch(0.6 0.1 1e307rad)").is_some());
 }
 
 // gtest: ColorParse.OklchOutsideSrgbIsClipped
@@ -147,17 +145,19 @@ fn oklch_outside_srgb_is_clipped() {
     expect_color(Color::parse("oklch(0.7 0.3 140)").unwrap(), 0.0, 0.771_585_4, 0.0, 1.0);
     expect_color(Color::parse("oklch(0.9 0.3 300)").unwrap(), 1.0, 0.625_509_3, 1.0, 1.0);
     expect_color(Color::parse("oklch(0.3 0.25 30)").unwrap(), 0.509_169_5, 0.0, 0.0, 1.0);
-    // Deviation: C++ converts a huge chroma as chroma 1e6, which gives green.
-    // The csscolorparser crate reads it in f32, where 1e110 overflows.
-    assert!(Color::parse("oklch(0.6 1e110 90)").is_none());
+    // A huge chroma converts as chroma 1e6, which stays finite.
+    expect_color(Color::parse("oklch(0.6 1e110 90)").unwrap(), 0.0, 1.0, 0.0, 1.0);
 }
 
 // gtest: ColorParse.OklchInvalid
 #[test]
 fn oklch_invalid() {
     for input in [
+        "oklch(0.6, 0.1, 90)",
+        "oklch(0.6 0.1 90, 0.5)",
         "oklch()",
         "oklch(0.6 0.1)",
+        "oklch(0.6 0.1 90 0.5)",
         "oklch(0.6 0.1 90 /)",
         "oklch(0.6 0.1 90 / 0.5 / 0.5)",
         "oklch(0.6 0.1 90%)",
@@ -166,25 +166,15 @@ fn oklch_invalid() {
         "oklch(0.6 0.1 nonedeg)",
         "oklch(0.6deg 0.1 90)",
         "oklch(0.6 0.1deg 90)",
+        "oklch(1. 0.1 90)",
         "oklch(0.6 0.1 --90)",
         "oklch(0.6 0.1 9e)",
         "oklch(0.6 0.1 1e999)",
+        "oklch (0.6 0.1 90)",
         "oklch(0.6 0.1 90",
         "oklch(0.6 0.1 90))",
     ] {
         assert!(Color::parse(input).is_none(), "{input}");
-    }
-    // Deviation: C++ turns these away, as CSS Color 4 does. The csscolorparser
-    // crate reads commas, an alpha without its slash, a number that ends in a
-    // dot and a space before the parenthesis.
-    for input in [
-        "oklch(0.6, 0.1, 90)",
-        "oklch(0.6 0.1 90, 0.5)",
-        "oklch(0.6 0.1 90 0.5)",
-        "oklch(1. 0.1 90)",
-        "oklch (0.6 0.1 90)",
-    ] {
-        assert!(Color::parse(input).is_some(), "{input}");
     }
 }
 
@@ -347,10 +337,8 @@ fn oklab_clamps_and_reads_none_as_zero() {
     expect_color(Color::parse("oklab(0.6 0.1 0.1 / none)").unwrap(), 0.0, 0.0, 0.0, 0.0);
     expect_color(Color::parse("oklab(0.6 0.1 0.1 / 1.5)").unwrap(), 0.764_660_1, 0.376_467_9, 0.181_543_6, 1.0);
     expect_color(Color::parse("oklab(0.6 0.1 0.1 / -1)").unwrap(), 0.0, 0.0, 0.0, 0.0);
-    // Deviation: CSS Color 4 clamps the lightness to 1, which makes this
-    // (1, 0.891_362_5, 0.989_415_5). The csscolorparser crate clamps it only
-    // to 0, so this clips to white.
-    expect_color(Color::parse("oklab(1.2 0.1 0)").unwrap(), 1.0, 1.0, 1.0, 1.0);
+    // The lightness clamps to 1, as CSS Color 4 has it.
+    expect_color(Color::parse("oklab(1.2 0.1 0)").unwrap(), 1.0, 0.891_362_5, 0.989_415_5, 1.0);
 }
 
 #[test]
@@ -386,4 +374,75 @@ fn oklab_premultiplies_lightness_a_and_b() {
         0.5,
     );
     expect_color(Color::interpolate(&Color::default(), &Color::default(), 0.5, ColorSpace::Oklab), 0.0, 0.0, 0.0, 0.0);
+}
+
+// Port-only, as the style spec reads color(display-p3 ...).
+#[test]
+fn display_p3() {
+    for input in [
+        "color(display-p3 0.8 0.6 0.4)",
+        "color(display-p3 80% 60% 40%)",
+        "COLOR(Display-P3 0.8 0.6 0.4)",
+        "color(  display-p3   0.8 0.6 0.4  /  1  )",
+        "color(display-p3 8e-1 6E-1 +.4)",
+    ] {
+        let color = Color::parse(input).unwrap_or_else(|| panic!("{input}: no value"));
+        expect_color(color, 0.836_748_2, 0.589_605_4, 0.363_997_5, 1.0);
+    }
+    expect_color(Color::parse("color(display-p3 0 1 0 / 0.5)").unwrap(), 0.0, 0.5, 0.0, 0.5);
+    expect_color(Color::parse("color(display-p3 0.8 0.6 0.4 / none)").unwrap(), 0.0, 0.0, 0.0, 0.0);
+}
+
+// Port-only: color() reads Display P3 alone.
+#[test]
+fn display_p3_invalid() {
+    for input in [
+        "color(srgb 0.8 0.6 0.4)",
+        "color(display-p3-linear 0.8 0.6 0.4)",
+        "color(0.8 0.6 0.4)",
+        "color(display-p30.8 0.6 0.4)",
+        "color (display-p3 0.8 0.6 0.4)",
+        "color(display-p3 0.8, 0.6, 0.4)",
+        "color(display-p3 0.8 0.6)",
+        "color(display-p3 0.8 0.6 0.4 0.5)",
+        "color(display-p3 0.8deg 0.6 0.4)",
+    ] {
+        assert!(Color::parse(input).is_none(), "{input}");
+    }
+}
+
+// Port-only: a color outside sRGB clips channel by channel, and interpolation
+// reads it unclipped.
+#[test]
+fn display_p3_outside_srgb_keeps_its_unclipped_channels() {
+    let green = Color::parse("color(display-p3 0 1 0)").unwrap();
+    expect_color(green, 0.0, 1.0, 0.0, 1.0);
+    // Halfway to white from (-0.511_605, 1.018_266, -0.310_675), not from (0, 1, 0).
+    expect_color(Color::interpolate(&green, &Color::white(), 0.5, ColorSpace::Rgb), 0.244_197_5, 1.0, 0.344_662_7, 1.0);
+}
+
+// Port-only: a huge Display P3 component converts as 1e6, which keeps the
+// color finite.
+#[test]
+fn display_p3_caps_a_huge_component() {
+    for (huge, capped) in [
+        ("color(display-p3 1e200 0 0)", "color(display-p3 1e6 0 0)"),
+        ("color(display-p3 -1e200 0 0)", "color(display-p3 -1e6 0 0)"),
+    ] {
+        let (huge, capped) = (Color::parse(huge).unwrap(), Color::parse(capped).unwrap());
+        assert_eq!(huge, capped);
+        assert!(huge.unclipped.unwrap().iter().all(|c| c.is_finite()));
+    }
+    expect_color(Color::parse("color(display-p3 1e200 0 0)").unwrap(), 1.0, 0.0, 0.0, 1.0);
+}
+
+// Port-only: HCL and LAB interpolation keep a lightness below 0, so halfway
+// from a color darker than black to as light a gray is black.
+#[test]
+fn hcl_and_lab_keep_a_lightness_below_zero() {
+    let darker_than_black = Color::parse("color(display-p3 -0.1 -0.1 -0.1)").unwrap();
+    let dark_gray = Color::parse("color(display-p3 0.1 0.1 0.1)").unwrap();
+    for space in [ColorSpace::Hcl, ColorSpace::Lab] {
+        expect_color(Color::interpolate(&darker_than_black, &dark_gray, 0.5, space), 0.0, 0.0, 0.0, 1.0);
+    }
 }

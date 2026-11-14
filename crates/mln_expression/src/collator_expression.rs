@@ -1,40 +1,43 @@
+use std::sync::OnceLock;
+
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 
 use crate::collator::Collator;
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
-};
-use crate::literal::Literal;
+use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::Value;
 
+/// `["collator", options]`. Collators count as feature-dependent, so the
+/// parser never folds one into a literal; one whose options are literals is
+/// made on its first evaluation and kept.
+#[derive(Clone)]
 pub(crate) struct CollatorExpression {
-    base: ExpressionBase,
-    case_sensitive: Box<dyn Expression>,
-    diacritic_sensitive: Box<dyn Expression>,
-    locale: Option<Box<dyn Expression>>,
+    case_sensitive: Expr,
+    diacritic_sensitive: Expr,
+    locale: Option<Expr>,
+    /// The collator of literal options, once made.
+    constant: Option<OnceLock<EvaluationResult>>,
+}
+
+impl PartialEq for CollatorExpression {
+    fn eq(&self, other: &Self) -> bool {
+        self.case_sensitive == other.case_sensitive
+            && self.diacritic_sensitive == other.diacritic_sensitive
+            && self.locale == other.locale
+    }
 }
 
 impl CollatorExpression {
-    #[must_use]
-    pub(crate) fn new(
-        case_sensitive: Box<dyn Expression>,
-        diacritic_sensitive: Box<dyn Expression>,
-        locale: Option<Box<dyn Expression>>,
-    ) -> Self {
-        // Collators are considered feature-dependent, see `isFeatureConstant`
-        let deps = case_sensitive.dependencies()
-            | diacritic_sensitive.dependencies()
-            | locale.as_ref().map_or(Dependency::NONE, |l| l.dependencies())
-            | Dependency::FEATURE;
-        CollatorExpression {
-            base: ExpressionBase::new(Kind::CollatorExpression, Type::Collator, deps),
+    #[cfg(test)]
+    pub(crate) fn new_expr(case_sensitive: Expr, diacritic_sensitive: Expr, locale: Option<Expr>) -> Expr {
+        Expr::new(Node::Collator(Box::new(CollatorExpression {
             case_sensitive,
             diacritic_sensitive,
             locale,
-        }
+            constant: None,
+        })))
     }
 
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -51,12 +54,12 @@ impl CollatorExpression {
 
         let case_sensitive = match options.object_member("case-sensitive") {
             Some(option) => ctx.parse(&option, 1, Some(Type::Boolean), None)?,
-            None => Box::new(Literal::new(Value::Bool(false))),
+            None => Expr::literal(Value::Bool(false)),
         };
 
         let diacritic_sensitive = match options.object_member("diacritic-sensitive") {
             Some(option) => ctx.parse(&option, 1, Some(Type::Boolean), None)?,
-            None => Box::new(Literal::new(Value::Bool(false))),
+            None => Expr::literal(Value::Bool(false)),
         };
 
         let mut locale = None;
@@ -64,16 +67,25 @@ impl CollatorExpression {
             locale = Some(ctx.parse(&option, 1, Some(Type::String), None)?);
         }
 
-        Some(Box::new(CollatorExpression::new(case_sensitive, diacritic_sensitive, locale)))
+        let constant = case_sensitive.literal_value().is_some()
+            && diacritic_sensitive.literal_value().is_some()
+            && locale.as_ref().is_none_or(|locale| locale.literal_value().is_some());
+        Some(Expr::new(Node::Collator(Box::new(CollatorExpression {
+            case_sensitive,
+            diacritic_sensitive,
+            locale,
+            constant: constant.then(OnceLock::new),
+        }))))
     }
-}
 
-impl Expression for CollatorExpression {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+    pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+        match &self.constant {
+            Some(constant) => constant.get_or_init(|| self.make(params)).clone(),
+            None => self.make(params),
+        }
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+    fn make(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
         let case_sensitive_result = self.case_sensitive.evaluate(params)?;
         let diacritic_sensitive_result = self.diacritic_sensitive.evaluate(params)?;
 
@@ -91,39 +103,15 @@ impl Expression for CollatorExpression {
         .map_err(EvaluationError::new)
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        visit(&*self.case_sensitive);
-        visit(&*self.diacritic_sensitive);
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.case_sensitive);
+        visit(&self.diacritic_sensitive);
         if let Some(locale) = &self.locale {
-            visit(&**locale);
+            visit(locale);
         }
     }
 
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::CollatorExpression {
-            let rhs = downcast::<CollatorExpression>(e).expect("CollatorExpression");
-            match (&self.locale, &rhs.locale) {
-                (None, Some(_)) | (Some(_), None) => return false,
-                (Some(l), Some(r)) if !l.equals(&**r) => return false,
-                _ => {}
-            }
-            return self.case_sensitive.equals(&*rhs.case_sensitive)
-                && self.diacritic_sensitive.equals(&*rhs.diacritic_sensitive);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        // Technically the set of possible outputs is the combinatoric set of
-        // Collators produced by all possibleOutputs of
-        // locale/caseSensitive/diacriticSensitive But for the primary use of
-        // Collators in comparison operators, we ignore the Collator's
-        // possibleOutputs anyway, so we can get away with leaving this
-        // undefined for now.
-        vec![None]
-    }
-
-    fn serialize(&self) -> MbglValue {
+    pub(crate) fn serialize(&self) -> MbglValue {
         let mut options = ValueObject::new();
         options.insert("case-sensitive".to_owned(), self.case_sensitive.serialize());
         options.insert("diacritic-sensitive".to_owned(), self.diacritic_sensitive.serialize());
@@ -131,9 +119,5 @@ impl Expression for CollatorExpression {
             options.insert("locale".to_owned(), locale.serialize());
         }
         MbglValue::Array(vec![MbglValue::String("collator".to_owned()), MbglValue::Object(options)])
-    }
-
-    fn get_operator(&self) -> String {
-        "collator".to_owned()
     }
 }

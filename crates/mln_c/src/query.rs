@@ -244,7 +244,13 @@ impl CompletionValue for SourceFeatures {
 }
 
 fn feature_collection(features: &[feature::Feature<f64>]) -> LentText {
-    LentText::new(&features.iter().map(geojson::Feature::from).collect::<geojson::FeatureCollection>().to_string())
+    // Not `collect()`: geojson's `FromIterator` gives an empty collection the
+    // bounding box `[]`, which isn't valid GeoJSON.
+    let collection = geojson::FeatureCollection {
+        features: features.iter().map(geojson::Feature::from).collect(),
+        ..geojson::FeatureCollection::default()
+    };
+    LentText::new(&collection.to_string())
 }
 
 /// `mln_render_session_query_rendered_features()`.
@@ -415,6 +421,24 @@ mod tests {
         let error = result.err().unwrap();
         assert_eq!(error.status(), MLN_STATUS_INVALID_ARGUMENT);
         error.message().to_owned()
+    }
+
+    #[test]
+    fn cluster_feature_collections_have_no_bounding_box() {
+        let json = |features: &[feature::Feature<f64>]| {
+            let collection = feature_collection(features);
+            // SAFETY: the view of a live `LentText`.
+            unsafe { buffer::text(collection.view(), "collection") }.unwrap().to_owned()
+        };
+        assert_eq!(json(&[]), r#"{"type":"FeatureCollection","features":[]}"#);
+        let point = feature::Feature {
+            geometry: Some(geo_types::Geometry::Point(geo_types::Point::new(1.0, 2.0))),
+            ..feature::Feature::default()
+        };
+        assert_eq!(
+            json(&[point]),
+            r#"{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[1.0,2.0]},"properties":{}}]}"#
+        );
     }
 
     #[test]

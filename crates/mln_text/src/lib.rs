@@ -7,6 +7,8 @@
 //! HarfBuzz's.
 
 mod bidi;
+#[rustfmt::skip]
+mod bidi_mirroring;
 #[cfg(target_family = "wasm")]
 mod browser_glyph_rasterizer;
 mod freetype;

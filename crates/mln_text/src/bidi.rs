@@ -1,15 +1,10 @@
-// The C++ runs ICU's ubidi (UBIDI_DEFAULT_LTR paragraphs, ubidi_setLine per
-// line, ubidi_writeReordered / ubidi_writeReverse with UBIDI_DO_MIRRORING |
-// UBIDI_REMOVE_BIDI_CONTROLS). The port resolves levels and visual runs
-// with the `unicode-bidi` crate (UAX #9, Unicode 16) and does the writing
-// itself: runs in visual order, RTL runs reversed by code point with each
-// character replaced by its Bidi_Mirroring_Glyph (ICU's `u_charMirror`
-// data, crate::icu::ubidi_props), BiDi controls (ZWNJ, ZWJ, LRM, RLM,
-// LRE..RLO, LRI..PDI) removed. Known differences to ICU: ICU treats CR LF
-// as one paragraph separator, unicode-bidi splits after each; line-level L1
-// handling, bracket pairs and the Bidi_Class of code points new in Unicode
-// 17 may differ. Arabic letter shaping (`applyArabicShaping`,
-// ICU's u_shapeArabic) is a port of ICU's ushape.cpp (crate::icu::ushape).
+// The `unicode-bidi` crate resolves levels and visual runs (UAX #9), and
+// this module writes them: runs in visual order, RTL runs reversed by code
+// point with each character replaced by its Bidi_Mirroring_Glyph (rule L4,
+// which unicode-bidi leaves to the renderer; crate::bidi_mirroring, from the
+// same Unicode version as unicode-bidi's tables), and BiDi controls (ZWNJ,
+// ZWJ, LRM, RLM, LRE..RLO, LRI..PDI) removed. Arabic letter shaping
+// (`applyArabicShaping`) is a port of ICU's ushape.cpp (crate::icu::ushape).
 //
 // Where the C++ throws std::runtime_error, these return Err with the same
 // message (`what()`).
@@ -17,10 +12,10 @@
 use std::ops::Range;
 
 use mln_vec_map::VecSet;
-use unicode_bidi::ParagraphInfo;
 use unicode_bidi::utf16::BidiInfo;
+use unicode_bidi::{BidiClass, ParagraphInfo};
 
-use crate::icu::ubidi_props::{ubidi_get_class, ubidi_get_mirror};
+use crate::bidi_mirroring::BIDI_MIRRORING_GLYPH;
 use crate::icu::ushape::u_shape_arabic;
 pub(crate) use crate::tagged_string::StyledText;
 
@@ -48,22 +43,26 @@ pub fn apply_arabic_shaping(input: &[u16]) -> Vec<u16> {
 }
 
 /// Whether the first character in `text` with a strong direction runs right
-/// to left.
+/// to left. Unpaired surrogates have no direction.
 #[must_use]
 pub fn starts_right_to_left(text: &[u16]) -> bool {
-    // u_charDirection: U_LEFT_TO_RIGHT, U_RIGHT_TO_LEFT,
-    // U_RIGHT_TO_LEFT_ARABIC.
-    const U_LEFT_TO_RIGHT: u8 = 0;
-    const U_RIGHT_TO_LEFT: u8 = 1;
-    const U_RIGHT_TO_LEFT_ARABIC: u8 = 13;
-    for &ch in text {
-        match ubidi_get_class(i32::from(ch)) {
-            U_LEFT_TO_RIGHT => return false,
-            U_RIGHT_TO_LEFT | U_RIGHT_TO_LEFT_ARABIC => return true,
+    for ch in char::decode_utf16(text.iter().copied()).flatten() {
+        match unicode_bidi::bidi_class(ch) {
+            BidiClass::L => return false,
+            BidiClass::R | BidiClass::AL => return true,
             _ => {}
         }
     }
     false
+}
+
+/// The character's `Bidi_Mirroring_Glyph`, or the character itself if it has
+/// none.
+fn mirror(c: u32) -> u32 {
+    u16::try_from(c)
+        .ok()
+        .and_then(|c| BIDI_MIRRORING_GLYPH.binary_search_by_key(&c, |&(from, _)| from).ok())
+        .map_or(c, |i| u32::from(BIDI_MIRRORING_GLYPH[i].1))
 }
 
 /// `IS_BIDI_CONTROL_CHAR(c)` (ICU ubidiimp.h): what
@@ -105,7 +104,7 @@ fn write_reverse_mirrored(src: &[u16], out: &mut Vec<u16>) {
         if c <= 0xffff && is_bidi_control_char(c as u16) {
             continue;
         }
-        push_code_point(out, ubidi_get_mirror(c as i32) as u32);
+        push_code_point(out, mirror(c));
     }
 }
 
@@ -509,5 +508,40 @@ mod bidi_test {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].0, u("XY-"));
         assert_eq!(lines[0].1, vec![1, 1, 0]);
+    }
+
+    #[test]
+    fn starts_right_to_left_at_the_first_strong_character() {
+        assert!(!starts_right_to_left(&u("1 abc שלום")));
+        assert!(starts_right_to_left(&u("1 שלום abc")));
+        assert!(starts_right_to_left(&u("(سلام)")));
+        // A supplementary letter (Adlam), as a surrogate pair.
+        assert!(starts_right_to_left(&u("\u{1E900}")));
+        assert!(!starts_right_to_left(&u("123 !?")));
+    }
+
+    #[test]
+    fn mirrors_the_characters_unicode_mirrors() {
+        assert_eq!(mirror('(' as u32), ')' as u32);
+        assert_eq!(mirror('<' as u32), '>' as u32);
+        assert_eq!(mirror('«' as u32), '»' as u32);
+        assert_eq!(mirror('≤' as u32), '≥' as u32);
+        assert_eq!(mirror('a' as u32), 'a' as u32);
+        assert_eq!(mirror(0x1E900), 0x1E900);
+    }
+
+    #[test]
+    fn writes_rtl_runs_mirrored() {
+        let mut out = Vec::new();
+        write_reverse_mirrored(&u("א<ב(ג"), &mut out);
+        assert_eq!(out, u("ג)ב>א"));
+    }
+
+    #[test]
+    fn mirroring_table_is_sorted_and_symmetric() {
+        assert!(BIDI_MIRRORING_GLYPH.windows(2).all(|w| w[0].0 < w[1].0));
+        for &(from, to) in &BIDI_MIRRORING_GLYPH {
+            assert_eq!(mirror(u32::from(to)), u32::from(from), "U+{from:04X}");
+        }
     }
 }

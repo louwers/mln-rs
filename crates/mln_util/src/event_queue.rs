@@ -63,8 +63,10 @@ impl<T> EventQueue<T> {
         std::mem::take(&mut *self.shared.events.lock())
     }
 
+    /// Whether the queue has no events. A push counts once it has queued its
+    /// event, before it runs the waker.
     #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.shared.events.lock().is_empty()
     }
 

@@ -1,14 +1,13 @@
+use std::borrow::Cow;
+
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 use mln_style_types::{
     AnchorOffsetPair, ProjectionDefinition, SymbolAnchorType, VariableAnchorOffsetCollection, projection_type_from_name,
 };
-use mln_util::Padding;
+use mln_util::{Color, Padding};
 
-use crate::expression::{
-    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, children_equal,
-    collect_dependencies, default_serialize, downcast,
-};
+use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
 use crate::formatted::Formatted;
 use crate::image::Image;
 use crate::parsing_context::{ParseResult, ParsingContext};
@@ -18,15 +17,15 @@ use crate::value::{Value, stringify, to_string};
 
 type CoerceFunction = fn(&Value) -> EvaluationResult;
 
-fn to_boolean(v: &Value) -> Value {
-    Value::Bool(match v {
+fn to_boolean(v: &Value) -> bool {
+    match v {
         Value::Number(f) => *f != 0.0,
         Value::String(s) => !s.is_empty(),
         Value::Bool(b) => *b,
         Value::Null => false,
         Value::Image(i) => i.is_available(),
         _ => true,
-    })
+    }
 }
 
 /// A string as a number: what ECMAScript's `ToNumber` reads gives the same
@@ -53,7 +52,7 @@ fn string_to_number(s: &str) -> f64 {
 /// (<https://maplibre.org/maplibre-style-spec/expressions/#to-number>,
 /// <https://tc39.es/ecma262/#sec-tonumber-applied-to-the-string-type>). As a
 /// consumer of styles rather than a validator, this reads a superset of it.
-fn to_number(v: &Value) -> EvaluationResult {
+fn to_number(v: &Value) -> EvalResult<f64> {
     let result = match v {
         Value::Null => Some(0.0),
         Value::Bool(b) => Some(f64::from(u8::from(*b))),
@@ -62,16 +61,16 @@ fn to_number(v: &Value) -> EvaluationResult {
         _ => None,
     };
     match result.filter(|r| !r.is_nan()) {
-        Some(r) => Ok(Value::Number(r)),
+        Some(r) => Ok(r),
         None => Err(EvaluationError::new(format!("Could not convert {} to number.", stringify(v)))),
     }
 }
 
-fn to_color(color_value: &Value) -> EvaluationResult {
+fn to_color(color_value: &Value) -> EvalResult<Color> {
     match color_value {
-        Value::Color(color) => Ok(Value::Color(*color)),
-        Value::String(color_string) => match mln_util::Color::parse(color_string) {
-            Some(result) => Ok(Value::Color(result)),
+        Value::Color(color) => Ok(*color),
+        Value::String(color_string) => match Color::parse(color_string) {
+            Some(result) => Ok(result),
             None => Err(EvaluationError::new(format!("Could not parse color from value '{color_string}'"))),
         },
         Value::Array(components) => {
@@ -79,8 +78,7 @@ fn to_color(color_value: &Value) -> EvaluationResult {
             let is_numeric = components.iter().all(|item| matches!(item, Value::Number(_)));
             if (len == 3 || len == 4) && is_numeric {
                 let n = |i: usize| components[i].as_number().unwrap();
-                let c = rgba(n(0), n(1), n(2), if len == 4 { n(3) } else { 1.0 })?;
-                Ok(Value::Color(c))
+                rgba(n(0), n(1), n(2), if len == 4 { n(3) } else { 1.0 })
             } else {
                 Err(EvaluationError::new(format!(
                     "Invalid rbga value {}: expected an array containing either three or four numeric values.",
@@ -220,12 +218,12 @@ fn to_string_value(value: &Value) -> Value {
 
 fn get_coerce_function(t: &Type) -> CoerceFunction {
     match t {
-        Type::Boolean => |v| Ok(to_boolean(v)),
-        Type::Color => to_color,
+        Type::Boolean => |v| Ok(Value::Bool(to_boolean(v))),
+        Type::Color => |v| to_color(v).map(Value::Color),
         Type::Padding => to_padding,
         Type::ProjectionDefinition => to_projection_definition,
         Type::VariableAnchorOffsetCollection => to_variable_anchor_offset,
-        Type::Number => to_number,
+        Type::Number => |v| to_number(v).map(Value::Number),
         Type::String => |v| Ok(to_string_value(v)),
         Type::Formatted => |v| Ok(to_formatted(v)),
         Type::Image => |v| Ok(to_image(v)),
@@ -236,25 +234,29 @@ fn get_coerce_function(t: &Type) -> CoerceFunction {
     }
 }
 
+/// `["to-number", ...]` and the other coercions, explicit or inserted by
+/// the parser: the first input that converts, or the last one's error.
+#[derive(Clone, PartialEq)]
 pub(crate) struct Coercion {
-    base: ExpressionBase,
-    coerce_single_value: CoerceFunction,
-    inputs: Vec<Box<dyn Expression>>,
+    type_: Type,
+    inputs: Box<[Expr]>,
 }
 
 impl Coercion {
-    #[must_use]
-    pub(crate) fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
-        assert_ne!(inputs, Vec::<Box<dyn Expression>>::new());
+    pub(crate) fn new_expr(type_: Type, inputs: Vec<Expr>) -> Expr {
+        assert!(!inputs.is_empty(), "Coercion without inputs");
         // `isRuntimeConstant` does not consider values coerced to `Type`
         // image to be of `Kind` image, so we don't either (no extra
         // dependency).
-        let coerce_single_value = get_coerce_function(&type_);
-        Coercion {
-            base: ExpressionBase::new(Kind::Coercion, type_, collect_dependencies(&inputs) | Dependency::NONE),
-            coerce_single_value,
-            inputs,
-        }
+        Expr::new(Node::Coercion(Box::new(Coercion { type_, inputs: inputs.into() })))
+    }
+
+    pub(crate) fn get_type(&self) -> &Type {
+        &self.type_
+    }
+
+    pub(crate) fn inputs(&self) -> &[Expr] {
+        &self.inputs
     }
 
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -294,45 +296,63 @@ impl Coercion {
             parsed.push(input);
         }
 
-        Some(Box::new(Coercion::new(type_, parsed)))
-    }
-}
-
-impl Expression for Coercion {
-    fn base(&self) -> &ExpressionBase {
-        &self.base
+        Some(Coercion::new_expr(type_, parsed))
     }
 
-    fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+    /// Converts each input's value with `coerce` until one converts.
+    fn coerce<T>(&self, params: &EvaluationContext<'_>, coerce: impl Fn(&Value) -> EvalResult<T>) -> EvalResult<T> {
         for (i, input) in self.inputs.iter().enumerate() {
-            let value = input.evaluate(params)?;
-            let coerced = (self.coerce_single_value)(&value);
+            let value = input.evaluate_ref(params)?;
+            let coerced = coerce(&value);
             if coerced.is_ok() || i == self.inputs.len() - 1 {
                 return coerced;
             }
         }
-
         unreachable!("Coercion without inputs")
     }
 
-    fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
-        for input in &self.inputs {
-            visit(&**input);
-        }
+    pub(crate) fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult {
+        self.coerce(params, get_coerce_function(&self.type_))
     }
 
-    fn serialize(&self) -> MbglValue {
+    pub(crate) fn eval_num(&self, params: &EvaluationContext<'_>) -> EvalResult<f64> {
+        debug_assert_eq!(self.type_, Type::Number);
+        self.coerce(params, to_number)
+    }
+
+    pub(crate) fn eval_bool(&self, params: &EvaluationContext<'_>) -> EvalResult<bool> {
+        debug_assert_eq!(self.type_, Type::Boolean);
+        self.coerce(params, |v| Ok(to_boolean(v)))
+    }
+
+    pub(crate) fn eval_str<'e>(&'e self, params: &EvaluationContext<'_>) -> EvalResult<Cow<'e, str>> {
+        debug_assert_eq!(self.type_, Type::String);
+        // The input of a string coercion that is already a string is
+        // borrowed, not converted.
+        let input = &self.inputs[0];
+        if input.get_type() == Type::String {
+            return input.eval_str(params);
+        }
+        self.coerce(params, |v| Ok(Cow::Owned(to_string(v))))
+    }
+
+    pub(crate) fn eval_color(&self, params: &EvaluationContext<'_>) -> EvalResult<Color> {
+        debug_assert_eq!(self.type_, Type::Color);
+        self.coerce(params, to_color)
+    }
+
+    pub(crate) fn serialize(&self) -> MbglValue {
         // Port-only: the conversion of a token string without tokens (a
         // legacy function's stop, say) makes `["to-string", "text"]`, which
         // the parser folds into the literal it coerces to itself. Writing the
         // literal makes the serialized form the one it parses back to.
-        if let [input] = self.inputs.as_slice()
-            && input.get_kind() == Kind::Literal
-            && input.get_type() == self.get_type()
+        if let [input] = &*self.inputs
+            && input.literal_value().is_some()
+            && input.get_type() == self.type_
         {
             return input.serialize();
         }
-        match self.get_type() {
+        match &self.type_ {
             Type::Formatted => {
                 // Since there's no explicit "to-formatted" coercion, the only
                 // coercions should be created by string expressions that get
@@ -356,28 +376,16 @@ impl Expression for Coercion {
             // collection is expected and the input is an array or a value, so
             // the input alone parses back to it.
             Type::VariableAnchorOffsetCollection if self.inputs.len() == 1 => self.inputs[0].serialize(),
-            _ => default_serialize(self),
+            _ => {
+                let mut serialized = vec![MbglValue::String(self.get_operator().to_owned())];
+                serialized.extend(self.inputs.iter().map(Expr::serialize));
+                MbglValue::Array(serialized)
+            }
         }
     }
 
-    fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Coercion {
-            let rhs = downcast::<Coercion>(e).expect("Coercion");
-            return self.get_type() == rhs.get_type() && children_equal(&self.inputs, &rhs.inputs);
-        }
-        false
-    }
-
-    fn possible_outputs(&self) -> Vec<Option<Value>> {
-        let mut result = Vec::new();
-        for input in &self.inputs {
-            result.extend(input.possible_outputs());
-        }
-        result
-    }
-
-    fn get_operator(&self) -> String {
-        match self.get_type() {
+    pub(crate) fn get_operator(&self) -> &'static str {
+        match &self.type_ {
             Type::Boolean => "to-boolean",
             Type::Color => "to-color",
             Type::Padding => "to-padding",
@@ -390,13 +398,13 @@ impl Expression for Coercion {
                 ""
             }
         }
-        .to_owned()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::Value;
 
     /// Strings `ToNumber` reads, with the values JS gives.
     #[test]
@@ -448,7 +456,7 @@ mod tests {
 
     #[test]
     fn values_convert_as_gl_js_to_number() {
-        let number = |v: Value| to_number(&v).ok().and_then(|n| n.as_number());
+        let number = |v: Value| to_number(&v).ok();
         assert_eq!(number(Value::Null), Some(0.0));
         assert_eq!(number(Value::Bool(true)), Some(1.0));
         assert_eq!(number(Value::Bool(false)), Some(0.0));

@@ -109,6 +109,14 @@ pub trait GeometryTileFeature {
         &EMPTY_PROPERTIES
     }
 
+    /// An owned copy of [`get_properties`](Self::get_properties), for a
+    /// caller that keeps the properties past the feature. A feature that
+    /// decodes its properties on demand builds the copy without keeping one
+    /// of its own.
+    fn to_properties(&self) -> PropertyMap {
+        self.get_properties().clone()
+    }
+
     /// The feature's id; [`Identifier::Null`] by default.
     fn get_id(&self) -> Identifier {
         Identifier::Null
@@ -166,6 +174,12 @@ pub trait GeometryTileData {
     /// Returns the layer with the given name. `Err`: the exception C++
     /// throws (malformed tile).
     fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error>;
+
+    /// Whether the data has a layer named `name`, found without decoding
+    /// the layer where the data can. `Err`: a malformed tile.
+    fn has_layer(&self, name: &str) -> Result<bool, Error> {
+        Ok(self.get_layer(name)?.is_some())
+    }
 
     /// Port-only: what the data is made from, for a tile worker in another
     /// wasm instance, which makes the data again (`mln_renderer`'s

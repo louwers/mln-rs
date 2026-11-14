@@ -1384,10 +1384,20 @@ fn cluster_queries_read_a_clustered_source() {
     assert_ne!(wait(session.cluster_children("clustered", cluster_id)), Vec::<feature::Feature>::new());
     assert_eq!(3, wait(session.cluster_leaves("clustered", cluster_id, 10, 0)).len());
     assert_eq!(1, wait(session.cluster_leaves("clustered", cluster_id, 1, 2)).len());
+    // As in C++ supercluster, an offset at or past the last leaf, or a limit
+    // of 0, gives no leaves rather than an error.
+    for (limit, offset) in [(10, 3), (10, 10), (0, 0)] {
+        assert_eq!(
+            wait(session.cluster_leaves("clustered", cluster_id, limit, offset)),
+            Vec::<feature::Feature>::new()
+        );
+    }
     assert!(wait(session.cluster_expansion_zoom("clustered", cluster_id)) > 0);
 
     let kind = |completion| wait_err(completion).kind;
     assert_eq!(ErrorKind::NotFound, kind(session.cluster_children("missing", cluster_id)));
     assert_eq!(ErrorKind::InvalidArgument, kind(session.cluster_children("points", cluster_id)));
     assert_eq!(ErrorKind::NotFound, kind(session.cluster_children("clustered", 0)));
+    // A limit of 0 still checks the cluster ID.
+    assert_eq!(ErrorKind::NotFound, kind(session.cluster_leaves("clustered", 0, 0, 0)));
 }
