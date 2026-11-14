@@ -2,23 +2,10 @@
 // too, where `getBytes` would need a synchronized managed texture.
 
 use mln_gfx::gpu::TextureRegion;
-use mln_util::size::Size;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLOrigin, MTLSize, MTLTexture,
 };
-
-/// Encodes a copy of all of `texture` into `buffer`, rows `bytes_per_row`
-/// apart. False if the command buffer has no blit encoder to give.
-pub(crate) fn encode_texture_copy(
-    command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
-    texture: &ProtocolObject<dyn MTLTexture>,
-    bytes_per_row: usize,
-    buffer: &ProtocolObject<dyn MTLBuffer>,
-) -> bool {
-    let size = Size::new(texture.width() as u32, texture.height() as u32);
-    encode_region_copy(command_buffer, texture, TextureRegion::whole(size), bytes_per_row, buffer)
-}
 
 /// Encodes a copy of `region` of `texture`, which is inside it, into
 /// `buffer`, rows `bytes_per_row` apart. False if the command buffer has no

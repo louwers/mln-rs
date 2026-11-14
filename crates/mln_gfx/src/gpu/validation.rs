@@ -203,27 +203,11 @@ impl PassFormats {
 /// global index.
 pub fn check_pass(resources: &impl Resources, pass: &Pass) -> Result<(), GpuError> {
     let formats = check_attachments(resources, pass)?;
-    check_commands_for(resources, &pass.label, formats, &pass.commands)
+    check_commands(resources, &pass.label, formats, &pass.commands)
 }
 
-/// Checks `commands` as [`check_pass`] checks a pass's, for a pass over
-/// attachments of `targets`.
-///
-/// The old frame submission encodes the renderer's commands into the
-/// backends' own render passes, whose attachments aren't textures of the
-/// `Gpu`, with this, until frames go through [`Gpu::submit`](super::Gpu::submit).
-pub fn check_commands(
-    resources: &impl Resources,
-    label: &str,
-    targets: TargetFormats,
-    commands: &[RenderCommand],
-) -> Result<(), GpuError> {
-    let formats =
-        PassFormats { has_color: targets.color.is_some(), color: targets.color, depth_stencil: targets.depth_stencil };
-    check_commands_for(resources, label, formats, commands)
-}
-
-fn check_commands_for(
+/// Checks `commands`, a pass's over attachments of `formats`.
+fn check_commands(
     resources: &impl Resources,
     label: &str,
     formats: PassFormats,

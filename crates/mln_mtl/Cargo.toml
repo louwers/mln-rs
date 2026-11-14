@@ -50,15 +50,5 @@ mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 name = "msl_compile_test"
 path = "tests/msl_compile_test.rs"
 
-# Ports test/renderer/metal_renderable.test.cpp.
-[[test]]
-name = "gtest_metal_renderable"
-path = "tests/gtest_metal_renderable.rs"
-
-# A library device logs the GPU it is on.
-[[test]]
-name = "log_test"
-path = "tests/log_test.rs"
-
 [lints]
 workspace = true

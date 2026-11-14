@@ -2,13 +2,13 @@
 // and resources hold an `Rc<Context>`.
 //
 // What the backend draws into is a target built on it (`OffscreenTarget`,
-// `SurfaceTarget`), whose draw targets give the render passes their views.
+// `SurfaceTarget`, `BorrowedTarget`), whose textures it imports into the
+// backend's `WebGpu`.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
-use mln_gfx::gpu::TextureId;
 use mln_gfx::released::Released;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
 
@@ -17,8 +17,6 @@ use crate::device::Device;
 use crate::gpu::WebGpu;
 
 pub(crate) struct BackendImpl {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
     /// The `Gpu` the renderer's resources belong to and its draws encode
     /// through.
     gpu: RefCell<WebGpu>,
@@ -29,38 +27,15 @@ pub(crate) struct BackendImpl {
 
 impl BackendImpl {
     fn new(device: &Device) -> Self {
-        BackendImpl {
-            device: device.device().clone(),
-            queue: device.queue().clone(),
-            gpu: RefCell::new(WebGpu::new(device)),
-            released: Rc::default(),
-        }
+        BackendImpl { gpu: RefCell::new(WebGpu::new(device)), released: Rc::default() }
     }
 
     pub(crate) fn gpu(&self) -> &RefCell<WebGpu> {
         &self.gpu
     }
 
-    /// The wgpu texture of `texture`, and its view.
-    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(wgpu::Texture, wgpu::TextureView)> {
-        let gpu = self.gpu.borrow();
-        gpu.native_texture(texture).map(|(texture, view)| (texture.clone(), view.clone()))
-    }
-
     pub(crate) fn released(&self) -> &Rc<Released> {
         &self.released
-    }
-    pub(crate) fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
-    pub(crate) fn queue(&self) -> &wgpu::Queue {
-        &self.queue
-    }
-
-    /// Submits `command_buffer` after the copies of the writes made to the
-    /// `Gpu`'s buffers so far.
-    pub(crate) fn submit(&self, command_buffer: wgpu::CommandBuffer) {
-        self.gpu.borrow_mut().submit_native(command_buffer);
     }
 }
 
@@ -85,17 +60,10 @@ impl RendererBackend {
         &self.device
     }
 
-    /// The backend's context, made on first use. Call inside a
-    /// `BackendScope`.
     /// The device state that the backend's contexts share, with its
     /// `WebGpu`.
     pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
         &self.impl_
-    }
-
-    pub(crate) fn webgpu_context(&self) -> Option<Rc<Context>> {
-        let context = renderer_backend::RendererBackend::get_context(self);
-        context.downcast_ref::<Context>().map(Context::rc)
     }
 
     /// Drops the context, releasing the resources it caches first.

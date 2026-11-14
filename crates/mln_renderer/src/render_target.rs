@@ -157,9 +157,7 @@ impl RenderTarget {
         }
 
         // Submitted now, so that what samples the texture later sees it.
-        if let Some(RecordedPass { pass, .. }) = parameters.recorded.borrow_mut().take()
-            && let Err(error) = parameters.context.gpu().submit(&[pass])
-        {
+        if let Err(error) = parameters.submit() {
             Log::error(Event::Render, format!("Submitting a render target's pass failed: {error}"));
         }
 

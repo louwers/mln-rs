@@ -78,8 +78,7 @@ fn custom_layers_through_gpu() {
 fn imported_textures_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     imported_textures(&mut WebGpu::new(&device), |gpu, texture| {
-        let (native, _) = gpu.native_texture(texture).expect("a texture of the backend's");
-        let native = native.clone();
+        let native = gpu.native_texture(texture).expect("a texture of the backend's").clone();
         Ok(gpu.import_texture(&native))
     })
     .expect("the frames");

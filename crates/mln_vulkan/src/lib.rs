@@ -1,6 +1,6 @@
-//! The Vulkan backend: the `mln_gfx` traits implemented on the `ash`
-//! bindings, with its shaders and its offscreen, window and borrowed render
-//! targets.
+//! The Vulkan backend: [`VulkanGpu`], the backend's `mln_gfx::gpu::Gpu`, on
+//! the `ash` bindings, with its shaders and the targets the renderer draws
+//! frames into.
 //!
 //! The C++ backend calls Vulkan through vulkan-hpp, allocates with
 //! `VulkanMemoryAllocator` and compiles its GLSL with glslang; this port makes
@@ -25,16 +25,12 @@
 mod android_hardware_buffer;
 mod borrowed_target;
 mod buffer_resource;
-mod command_encoder;
 mod context;
 mod custom_layer;
 mod descriptor_set;
 pub mod device;
-mod draw_target;
 pub mod exported_target;
 mod gpu;
-mod offscreen_target;
-mod render_pass;
 mod renderer_backend;
 mod shaders;
 mod surface_resource;
@@ -52,7 +48,8 @@ pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{AdapterId, Device, HostDevice, QueueLease, QueueLock, RawDevice};
 pub use exported_target::ExportedTarget;
 pub use gpu::{ImportedImage, VulkanGpu};
-pub use offscreen_target::OffscreenTarget;
+/// Frames drawn into textures of the library's and read back.
+pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
 pub use renderer_backend::RendererBackend;
 pub use shaders::compiler::{Stage as ShaderStage, compile as compile_glsl};
 pub use surface_target::{HostSurface, Overlay, OverlayTarget, SurfaceTarget};

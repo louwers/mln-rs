@@ -16,22 +16,19 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
-use mln_gfx::gpu::Gpu as _;
 use mln_gfx::released::Released;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
-use mln_util::logging::{Event, Log};
 
 use crate::context::Context;
 use crate::device::Device;
 use crate::gpu::MetalGpu;
-use crate::mtl_fwd::{MTLCommandQueuePtr, MTLDevicePtr};
+use crate::mtl_fwd::MTLDevicePtr;
 
 /// The device state the backend and its context share.
 pub(crate) struct BackendImpl {
     device: MTLDevicePtr,
-    command_queue: MTLCommandQueuePtr,
-    /// The `Gpu` the renderer's resources belong to and its draws encode
-    /// through, whose writes a frame's commands read (`flush_writes`).
+    /// The `Gpu` the renderer's resources belong to and its frames are
+    /// submitted through.
     gpu: RefCell<MetalGpu>,
     /// The buffers the renderer dropped, which a context destroys at the
     /// end of a frame.
@@ -44,25 +41,12 @@ impl BackendImpl {
         &self.device
     }
 
-    #[must_use]
-    pub(crate) fn get_command_queue(&self) -> &MTLCommandQueuePtr {
-        &self.command_queue
-    }
-
     pub(crate) fn gpu(&self) -> &RefCell<MetalGpu> {
         &self.gpu
     }
 
     pub(crate) fn released(&self) -> &Rc<Released> {
         &self.released
-    }
-
-    /// Commits the writes made to the `Gpu`'s buffers so far, ahead of a
-    /// command buffer that reads them and is committed next.
-    pub(crate) fn flush_writes(&self) {
-        if let Err(error) = self.gpu.borrow_mut().submit(&[]) {
-            Log::error(Event::Render, format!("Committing the buffer writes failed: {error}"));
-        }
     }
 }
 
@@ -85,7 +69,6 @@ impl RendererBackend {
             base: RendererBackendBase::new(),
             impl_: Rc::new(BackendImpl {
                 device: mtl_device.clone(),
-                command_queue: device.queue().clone(),
                 gpu: RefCell::new(MetalGpu::new(device)),
                 released: Rc::default(),
             }),
@@ -97,13 +80,6 @@ impl RendererBackend {
     /// The device the backend renders on.
     pub fn device(&self) -> &Device {
         &self.device
-    }
-
-    /// The backend's context, made on first use. Call inside a
-    /// `BackendScope`.
-    pub(crate) fn mtl_context(&self) -> Option<Rc<Context>> {
-        let context = renderer_backend::RendererBackend::get_context(self);
-        context.downcast_ref::<Context>().map(Context::rc)
     }
 
     pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {

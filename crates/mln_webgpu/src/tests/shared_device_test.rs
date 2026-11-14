@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::frame::FrameTarget as _;
-use mln_gfx::render_pass::RenderPassDescriptor;
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, Pass};
 use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_util::Color;
 use mln_util::size::Size;
@@ -27,18 +27,18 @@ fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
     let context = backend.get_context();
     let image = target.begin_frame().expect("a frame");
     context.begin_frame();
-    let encoder = context.create_command_encoder();
-    let pass = encoder.create_render_pass(
-        "main buffer",
-        &RenderPassDescriptor {
-            target: &*image,
-            clear_color: Some(color),
-            clear_depth: Some(1.0),
-            clear_stencil: Some(0),
-        },
-    );
-    drop(pass);
-    target.end_frame(&*encoder);
+    let pass = Pass {
+        label: "main buffer".to_owned(),
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(color) }),
+        depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
+            texture,
+            depth: LoadOp::Clear(1.0),
+            stencil: LoadOp::Clear(0),
+        }),
+        commands: Vec::new(),
+    };
+    context.gpu().submit(&[pass]).expect("submit");
+    target.end_frame();
     context.end_frame();
     let image = target.read_image().expect("a frame");
     assert_eq!(image.size, SIZE);

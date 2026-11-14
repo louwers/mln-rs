@@ -555,7 +555,7 @@ pub trait RenderLayer {
 
     /// Runs a custom layer's prerender, after the layer groups upload and
     /// before the frame's first pass, which draws into `target`.
-    fn prerender(&mut self, _parameters: &PaintParameters<'_>, _target: &dyn mln_gfx::DrawTarget) {}
+    fn prerender(&mut self, _parameters: &PaintParameters<'_>) {}
 
     /// Tells a custom layer's host that the renderer's graphics objects are
     /// lost, and lets go of it.

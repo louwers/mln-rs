@@ -3,40 +3,24 @@
 // it.
 
 use std::cell::RefMut;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 
-use crate::command_encoder::CommandEncoder;
 use crate::renderer_backend::BackendImpl;
 
 pub(crate) struct Context {
     base: ContextBase,
     backend: Rc<BackendImpl>,
-    weak_self: Weak<Context>,
 }
 
 impl Context {
     #[must_use]
     pub(crate) fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
-        Rc::new_cyclic(|weak| Context {
-            base: ContextBase::new(Rc::clone(backend.released())),
-            backend,
-            weak_self: Weak::clone(weak),
-        })
-    }
-
-    /// The owning `Rc` (resources keep the context alive, as the C++
-    /// `Context&` members assume).
-    pub(crate) fn rc(&self) -> Rc<Context> {
-        self.weak_self.upgrade().expect("mtl::Context used after drop")
-    }
-
-    pub(crate) fn get_backend(&self) -> &Rc<BackendImpl> {
-        &self.backend
+        Rc::new(Context { base: ContextBase::new(Rc::clone(backend.released())), backend })
     }
 
     /// Port-only: drops what the context caches, before the backend lets go
@@ -63,18 +47,7 @@ impl GfxContext for Context {
         self.destroy_released();
     }
 
-    /// Called at the end of a frame.
-    fn perform_cleanup(&self) {
-        let mut stats = self.rendering_stats();
-        stats.num_draw_calls = 0;
-        stats.num_frames += 1;
-    }
-
     fn reduce_memory_usage(&self) {}
-
-    fn create_command_encoder(&self) -> Box<dyn mln_gfx::command_encoder::CommandEncoder> {
-        Box::new(CommandEncoder::new(self.rc()))
-    }
 
     fn gpu(&self) -> RefMut<'_, dyn Gpu> {
         RefMut::map(self.backend.gpu().borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })

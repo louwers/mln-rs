@@ -1,6 +1,7 @@
-//! The OpenGL backend: the `mln_gfx` traits implemented on the `glow`
-//! bindings, which call OpenGL ES 3.0 or desktop OpenGL 3.3 natively and
-//! WebGL2 in a browser, with its shaders and render targets.
+//! The OpenGL backend: [`GlGpu`], the backend's `mln_gfx::gpu::Gpu`, on the
+//! `glow` bindings, which call OpenGL ES 3.0 or desktop OpenGL 3.3 natively
+//! and WebGL2 in a browser, with its shaders and the targets the renderer
+//! draws frames into.
 //!
 //! The renderer drives every backend the way C++ drives Metal and WebGPU, so
 //! this backend differs from the C++ one where that one has code of its own
@@ -9,8 +10,7 @@
 //! - A layer's per-drawable UBOs arrive as one buffer of every drawable's
 //!   (C++: `MLN_UBO_CONSOLIDATION`, which its OpenGL build leaves off).
 //!   OpenGL ES 3.0 has no storage buffers to index in the shader, so a
-//!   drawable binds its element of that buffer as the uniform block
-//!   (`GlGpu::uniform_block_range`).
+//!   draw binds its element of that buffer as the uniform block.
 //! - Scissor rectangles arrive with a top-left origin and are flipped here.
 //!
 //! The GLSL comes from the C++ headers, with the port's changes
@@ -25,26 +25,24 @@
 //!
 //! A [`RendererBackend`] renders on a [`Device`], an EGL share group or one
 //! context that its backends take turns in, or on Windows a WGL share group,
-//! into an `OffscreenTarget`'s framebuffer. A `SurfaceTarget` presents to a
+//! into an `OffscreenTarget`'s textures. A `SurfaceTarget` presents to a
 //! Wayland, X11 or Android window through EGL from a context of the window's
 //! display, or to a Win32 window through WGL from a context of its own, and a
 //! `CanvasTarget` draws into the canvas of a WebGL2 context. An
 //! `ExportedTarget` renders into dmabufs, or on Android into hardware
 //! buffers, that it allocates.
 //!
-//! A `GlGpu` draws through the `mln_gfx::gpu::Gpu` interface instead, on a
-//! context of its own in a device's share group. A backend's context hosts
-//! one too, which owns the renderer's buffers and textures.
+//! A backend's context hosts a `GlGpu`, which owns the renderer's
+//! resources and draws its frames; a `GlGpu` can also run on a context of
+//! its own in a device's share group.
 
 #![expect(unsafe_code, reason = "OpenGL through glow is the FFI here")]
 
-mod command_encoder;
 mod context;
 mod custom_layer;
-mod draw_target;
 mod enums;
+mod frame_image;
 mod gpu;
-mod render_pass;
 mod renderer_backend;
 mod shaders;
 mod state;
@@ -60,8 +58,6 @@ mod device;
 mod egl;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod exported_target;
-#[cfg(not(target_arch = "wasm32"))]
-mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
 #[cfg(windows)]
@@ -79,8 +75,9 @@ pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use exported_target::ExportedTarget;
 pub use gpu::{FramebufferTextures, GlGpu};
+/// Frames drawn into textures of the library's and read back.
 #[cfg(not(target_arch = "wasm32"))]
-pub use offscreen_target::OffscreenTarget;
+pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
 pub use renderer_backend::RendererBackend;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use surface_target::SurfaceTarget;

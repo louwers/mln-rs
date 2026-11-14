@@ -1071,24 +1071,6 @@ impl GlGpu {
         self.encode_commands(&pass.label, size, attachments, &pass.commands)
     }
 
-    /// Records `commands` into the bound framebuffer, of `size` and with
-    /// attachments of `targets`, as the commands of a pass of their own.
-    ///
-    /// The old frame submission encodes the renderer's commands into the
-    /// framebuffer it has bound with this, until frames go through
-    /// [`Gpu::submit`].
-    pub(crate) fn encode_into(
-        &mut self,
-        size: Size,
-        targets: TargetFormats,
-        commands: &[RenderCommand],
-    ) -> Result<(), GpuError> {
-        validation::check_commands(self, "render pass", targets, commands)?;
-        self.check_gl("render pass", commands)?;
-        let attachments = (targets.color.is_some(), targets.depth_stencil.is_some());
-        self.current(|gpu| gpu.encode_commands("render pass", size, attachments, commands))
-    }
-
     /// Records `commands`, which the checks passed, into the bound
     /// framebuffer of `size`, of whose color and depth-stencil attachments
     /// the pass names those that `attachments` says.
