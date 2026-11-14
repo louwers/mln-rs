@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::LayerGroupBase;
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO,
 };
@@ -10,6 +8,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -38,7 +37,7 @@ impl LayerTweaker for CollisionLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -47,16 +46,16 @@ impl LayerTweaker for CollisionLayerTweaker {
         self.base.properties_updated = false;
 
         let self_ptr: *const Self = self;
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-            let Some(overscaled_tile_id) = drawable.get_tile_id() else {
+            let Some(overscaled_tile_id) = drawable.tile_id else {
                 return;
             };
-            let Some(data) = drawable.get_data().and_then(|d| d.downcast_ref::<CollisionDrawableData>()).copied()
-            else {
+            let Some(crate::drawable::DrawableData::Collision(data)) = &drawable.data else {
                 return;
             };
+            let data = *data;
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
                 return;
             }

@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::backend::Type as BackendType;
-use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
 use mln_gfx::render_pass::RenderPass as GfxRenderPass;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
@@ -140,8 +139,7 @@ impl<'a> PaintParameters<'a> {
             clip_masks: ClipMasks::default(),
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
-            // C++ leaves these uninitialized; the renderer sets them before
-            // use.
+            // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
             opaque_pass_cutoff: 0,
@@ -167,7 +165,7 @@ impl<'a> PaintParameters<'a> {
             return DepthMode::disabled();
         }
 
-        // C++: `((1 + currentLayer) * numSublayers + n)`, unsigned arithmetic, times a float.
+        // Wrapping unsigned arithmetic, then a float product.
         let steps =
             (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32).wrapping_add(u32::from(n));
         let depth = self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON;
@@ -287,8 +285,7 @@ impl<'a> PaintParameters<'a> {
     /// the clear is drawn after it. Returns false, handing out none, when
     /// there are more drawables than the buffer holds values: the caller then
     /// takes each one's value with `stencil_mode_for_3d` as it draws it, so a
-    /// clear falls between two draws. (C++ takes the modes keyed by drawable;
-    /// see the gfx trait.)
+    /// clear falls between two draws.
     pub(crate) fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
         if modes.len() >= Self::MAX_STENCIL_VALUE as usize {
             return false;
@@ -300,64 +297,5 @@ impl<'a> PaintParameters<'a> {
             *mode = self.stencil_mode_for_3d();
         }
         true
-    }
-}
-
-impl GfxPaintParameters for PaintParameters<'_> {
-    fn context(&self) -> &dyn Context {
-        self.context
-    }
-
-    fn encoder(&self) -> Option<&dyn CommandEncoder> {
-        self.encoder.as_deref()
-    }
-
-    fn render_pass(&self) -> Option<&dyn GfxRenderPass> {
-        self.render_pass.as_deref()
-    }
-
-    fn pass(&self) -> RenderPass {
-        self.pass
-    }
-
-    fn scissor_rect(&self) -> ScissorRect {
-        self.scissor_rect
-    }
-
-    fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
-        PaintParameters::depth_mode_for_sublayer(self, n, mask)
-    }
-
-    fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
-        PaintParameters::depth_mode_for_3d(self, mask)
-    }
-
-    fn layer_depth(&self) -> f32 {
-        PaintParameters::layer_depth(self)
-    }
-
-    fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) {
-        PaintParameters::render_tile_clipping_masks(self, tile_ids);
-    }
-
-    fn stencil_mode_for_clipping(&self, tile_id: &UnwrappedTileID) -> StencilMode {
-        PaintParameters::stencil_mode_for_clipping(self, tile_id)
-    }
-
-    fn stencil_mode_for_3d(&mut self) -> StencilMode {
-        PaintParameters::stencil_mode_for_3d(self)
-    }
-
-    fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
-        PaintParameters::stencil_modes_for_3d(self, modes)
-    }
-
-    // conformance: for DrawableAtlasesTweaker.
-    fn state_pitch(&self) -> f64 {
-        self.state.get_pitch()
-    }
-
-    fn state_is_changing(&self) -> bool {
-        self.state.is_changing()
     }
 }

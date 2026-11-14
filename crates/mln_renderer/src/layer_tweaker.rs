@@ -3,7 +3,6 @@
 // Tweakers are shared (`std::shared_ptr`) by the render layer and, weakly, by
 // its layer group: `Rc<RefCell<dyn LayerTweaker>>`.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,7 +13,6 @@ use mln_gfx::context::Context;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
-use mln_gfx::{Drawable, LayerGroupBase};
 use mln_map_types::{ProjectionData, TransformState};
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
@@ -22,6 +20,8 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
 use mln_util::mat4::{Mat4, matrix};
 
+use crate::drawable::Drawable;
+use crate::layer_group::LayerGroup;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
@@ -76,7 +76,7 @@ pub trait LayerTweaker {
     fn base(&self) -> &LayerTweakerBase;
     fn base_mut(&mut self) -> &mut LayerTweakerBase;
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>);
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>);
 
     fn get_id(&self) -> &str {
         &self.base().id
@@ -87,13 +87,6 @@ pub trait LayerTweaker {
         base.evaluated_properties = new_props;
         base.properties_updated = true;
     }
-}
-
-/// The value for `Drawable::set_layer_tweaker` (C++
-/// `drawable->setLayerTweaker(layerTweaker)`).
-#[expect(clippy::unnecessary_wraps, reason = "the value of a `Drawable` setter, which takes an `Option`")]
-pub(crate) fn layer_tweaker_slot(tweaker: &LayerTweakerPtr) -> Option<Rc<dyn Any>> {
-    Some(Rc::new(Rc::clone(tweaker)))
 }
 
 #[expect(
@@ -116,7 +109,7 @@ pub(crate) fn get_tile_matrix(
         parameters.transform_params,
         translation,
         anchor,
-        drawable.get_origin(),
+        drawable.origin,
         near_clipped,
         in_viewport_pixel_units,
         aligned,

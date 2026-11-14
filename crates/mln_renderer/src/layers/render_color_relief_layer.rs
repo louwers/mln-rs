@@ -25,8 +25,8 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, DrawableBuilder, ShaderProgramPtr, ShaderRegistry,
-    TileLayerGroup, VertexAttributeArray,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry,
+    VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{
@@ -53,8 +53,10 @@ use super::color_relief_layer_tweaker::{ColorReliefDrawableData, ColorReliefLaye
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::drawable_builder::DrawableBuilder;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -360,7 +362,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         // Set up layer group
         if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -390,12 +392,10 @@ impl RenderLayer for RenderColorReliefLayer {
         }
 
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group =
-                group.as_tile_layer_group_mut().expect("color-relief layer group is a TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             let base = &self.base;
             tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
         }
 
@@ -560,7 +560,7 @@ impl RenderLayer for RenderColorReliefLayer {
             };
             dem_texture.borrow_mut().set_sampler(dem_sampler);
 
-            let update_existing = |drawable: &mut mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut crate::drawable::Drawable| {
                 if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
                     return false;
                 }
@@ -586,7 +586,7 @@ impl RenderLayer for RenderColorReliefLayer {
             builder.set_shader(Some(Rc::clone(&color_relief_shader)));
             builder.set_enable_depth(false);
             builder.set_color_mode(&ColorMode::alpha_blended());
-            builder.set_cull_face_mode(&CullFaceMode::disabled());
+            builder.set_cull_face_mode(CullFaceMode::disabled());
             builder.set_render_pass(render_pass);
             builder.set_vertex_attributes(Some(color_relief_vertex_attributes(&vertices)));
             builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
@@ -600,17 +600,18 @@ impl RenderLayer for RenderColorReliefLayer {
 
             builder.flush();
 
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
+                drawable.tile_id = Some(tile_id);
+                drawable.layer_tweaker = layer_tweaker.clone();
 
                 // Store tile props in drawable data for use by the tweaker
                 // (for consolidated backends)
-                drawable.set_data(Some(Box::new(ColorReliefDrawableData { tile_props: tile_props_ubo })));
+                drawable.data = Some(crate::drawable::DrawableData::ColorRelief(ColorReliefDrawableData {
+                    tile_props: tile_props_ubo,
+                }));
 
-                tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
+                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
             }
         }
     }

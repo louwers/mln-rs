@@ -458,7 +458,7 @@ impl Renderer {
         // of them uses the stencil buffer, of the tile that clears it.
         let mut clip_tiles = BTreeSet::new();
         orchestrator.visit_layer_groups(|layer_group| {
-            if let Some(tiles) = layer_group.as_tile_layer_group().and_then(|group| group.stencil_tiles.as_ref()) {
+            if let Some(tiles) = &layer_group.stencil_tiles {
                 clip_tiles.extend(tiles.iter().copied().chain(parameters.stencil_clear_tile()));
             }
         });
@@ -637,9 +637,6 @@ impl Renderer {
             layer_group.borrow_mut().render(&mut parameters);
             parameters.current_layer += 1;
         }
-
-        // Give the layers a chance to do cleanup
-        orchestrator.visit_layer_groups(|layer_group| layer_group.post_render(&mut parameters));
 
         // Ends the RenderPass
         parameters.render_pass = None;

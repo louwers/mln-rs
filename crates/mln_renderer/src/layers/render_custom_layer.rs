@@ -1,11 +1,10 @@
-// Differences from C++:
+// How a custom layer differs from the others:
 // - The host's prerender runs in a step of its own after the layer groups
 //   upload (`RenderLayer::prerender`), not in `update`, so it gets the frame's
 //   final projection, whose depth range depends on how many layer groups the
 //   frame has.
-// - The layer group is a type of its own whose `render` lends the backend's
-//   live pass to the host (`gfx::RenderPass::lend_to_custom_layer`); C++
-//   adds a tweaker to an empty drawable.
+// - The layer group is of a kind of its own, whose `render` lends the
+//   backend's live pass to the host (`gfx::RenderPass::lend_to_custom_layer`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`gfx::Context::finish`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`).
@@ -14,9 +13,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
-use mln_gfx::renderer::layer_group::{LayerGroupBase, LayerGroupBaseData, Type as LayerGroupType};
-use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::{Context, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
@@ -29,6 +25,7 @@ use mln_style::layers::{
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 
 use crate::change_request::UniqueChangeRequestVec;
+use crate::layer_group::{LayerGroup, LayerGroupKind};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
 use crate::render_pass::RenderPass;
@@ -159,16 +156,8 @@ impl RenderLayer for RenderCustomLayer {
         changes: &mut UniqueChangeRequestVec,
     ) {
         if self.base.layer_group.is_none() {
-            let group = CustomLayerGroup {
-                base: LayerGroupBaseData::new(
-                    self.base.layer_index,
-                    self.get_id().to_owned(),
-                    LayerGroupType::LayerGroup,
-                ),
-                shared: Rc::clone(&self.shared),
-                uniform_buffers: UniformBufferArray::new(),
-            };
-            self.set_layer_group(Some(Rc::new(RefCell::new(group))), changes);
+            let kind = LayerGroupKind::Custom(CustomLayerDraw { shared: Rc::clone(&self.shared) });
+            self.set_layer_group(Some(LayerGroup::new(self.base.layer_index, self.get_id(), kind)), changes);
         }
     }
 
@@ -193,39 +182,19 @@ impl RenderLayer for RenderCustomLayer {
     }
 }
 
-/// The layer group of a custom layer: rendering it in the translucent pass
+/// What a custom layer's layer group draws: in the translucent pass, it
 /// lends the live pass to the host.
-struct CustomLayerGroup {
-    base: LayerGroupBaseData,
+pub(crate) struct CustomLayerDraw {
     shared: Rc<Shared>,
-    uniform_buffers: UniformBufferArray,
 }
 
-impl LayerGroupBase for CustomLayerGroup {
-    fn base(&self) -> &LayerGroupBaseData {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut LayerGroupBaseData {
-        &mut self.base
-    }
-
-    /// The host draws as one drawable.
-    fn get_drawable_count(&self) -> usize {
-        1
-    }
-
-    fn clear_drawables(&mut self) -> usize {
-        0
-    }
-
-    fn render(&mut self, parameters: &mut dyn GfxPaintParameters) {
-        let parameters: &dyn GfxPaintParameters = parameters;
-        if !self.base.enabled || parameters.pass() != RenderPass::Translucent {
+impl CustomLayerDraw {
+    pub(crate) fn render(&self, parameters: &PaintParameters<'_>) {
+        if parameters.pass != RenderPass::Translucent {
             return;
         }
         let (Some(host), Some(frame), Some(render_pass)) =
-            (self.shared.host(), self.shared.frame.get(), parameters.render_pass())
+            (self.shared.host(), self.shared.frame.get(), parameters.render_pass.as_deref())
         else {
             return;
         };
@@ -236,9 +205,5 @@ impl LayerGroupBase for CustomLayerGroup {
         if lent {
             self.shared.used.set(true);
         }
-    }
-
-    fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
-        &mut self.uniform_buffers
     }
 }

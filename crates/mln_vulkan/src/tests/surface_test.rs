@@ -7,9 +7,9 @@
 // the desktop app's do (acquire, render pass, overlay, present), and each
 // one checked is read back (`request_readback`).
 //
-// A frame clears to one color and draws a background drawable in another
-// over half of it, as background_test.rs does: a frame that shows another
-// frame's image, or reads another frame's uniforms, has the wrong colors.
+// A frame clears to one color and draws the background shader in another
+// over half of it: a frame that shows another frame's image, or reads
+// another frame's uniforms, has the wrong colors.
 //
 // A backend made for a surface keeps two frames in flight, so a uniform buffer
 // has a copy for each: the frames that aren't read back aren't waited for,
@@ -23,32 +23,29 @@ use std::rc::Rc;
 
 use ash::vk;
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
+use mln_gfx::bind_group::BindGroup;
+use mln_gfx::buffer::{Buffer, BufferPtr};
 use mln_gfx::color_mode::ColorMode;
-use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context;
-use mln_gfx::depth_mode::DepthMode;
-use mln_gfx::draw_mode::DrawMode;
-use mln_gfx::drawable_builder::DrawableBuilder;
+use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::frame::FrameTarget as _;
-use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::paint_parameters::PaintParameters;
+use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::{
+    BufferUsage, DepthState, PipelineKey, PipelineState, RenderCommand, StencilState, VertexAttribute,
+    VertexBufferLayout, VertexStep, Viewport,
+};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::render_pass::{RenderPass as GfxRenderPass, RenderPassDescriptor};
-use mln_gfx::renderer::layer_group::{LayerGroupBasePtr, TileLayerGroup};
-use mln_gfx::renderer::render_pass::RenderPass;
+use mln_gfx::render_pass::RenderPassDescriptor;
 use mln_gfx::renderer_backend::RendererBackend as _;
-use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
+use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::types::{DepthMaskType, TextureChannelDataType, TexturePixelType};
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_gfx::types::{DepthFunctionType, TextureChannelDataType, TexturePixelType};
+use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -166,66 +163,6 @@ fn surface_backend(size: Size, cap_frame_rate: bool) -> Option<Window> {
     surface_backend_on(Rc::default(), size, cap_frame_rate)
 }
 
-const NUM_SUBLAYERS: u32 = 3;
-const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
-/// `1 - (layer_groups + 2) * NUM_SUBLAYERS * DEPTH_EPSILON`, for one layer
-/// group.
-const DEPTH_RANGE_SIZE: f32 = 1.0 - ((1 + 2) * NUM_SUBLAYERS) as f32 * DEPTH_EPSILON;
-
-/// The gfx-facing part of the renderer's `PaintParameters`, as in
-/// `background_test.rs`.
-struct TestPaintParameters<'a> {
-    context: &'a dyn Context,
-    encoder: Box<dyn CommandEncoder>,
-    render_pass: Option<Box<dyn GfxRenderPass>>,
-    pass: RenderPass,
-    scissor_rect: ScissorRect,
-}
-
-impl PaintParameters for TestPaintParameters<'_> {
-    fn context(&self) -> &dyn Context {
-        self.context
-    }
-    fn encoder(&self) -> Option<&dyn CommandEncoder> {
-        Some(&*self.encoder)
-    }
-    fn render_pass(&self) -> Option<&dyn GfxRenderPass> {
-        self.render_pass.as_deref()
-    }
-    fn pass(&self) -> RenderPass {
-        self.pass
-    }
-    fn scissor_rect(&self) -> ScissorRect {
-        self.scissor_rect
-    }
-    fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
-        let depth = DEPTH_RANGE_SIZE + (NUM_SUBLAYERS + u32::from(n)) as f32 * DEPTH_EPSILON;
-        DepthMode {
-            func: mln_gfx::types::DepthFunctionType::LessEqual,
-            mask,
-            range: mln_util::range::Range::new(depth, depth),
-        }
-    }
-    fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
-        DepthMode {
-            func: mln_gfx::types::DepthFunctionType::LessEqual,
-            mask,
-            range: mln_util::range::Range::new(0.0, DEPTH_RANGE_SIZE),
-        }
-    }
-    fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) {}
-    fn stencil_mode_for_clipping(&self, _tile_id: &UnwrappedTileID) -> StencilMode {
-        StencilMode::disabled()
-    }
-    fn stencil_mode_for_3d(&mut self) -> StencilMode {
-        StencilMode::disabled()
-    }
-    fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
-        modes.fill(StencilMode::disabled());
-        true
-    }
-}
-
 /// Column-major matrix mapping the tile to the left or the right half of
 /// the viewport.
 fn half_matrix(right: bool) -> [f32; 16] {
@@ -234,51 +171,36 @@ fn half_matrix(right: bool) -> [f32; 16] {
     [1.0 / e, 0.0, 0.0, 0.0, 0.0, -2.0 / e, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, x, 1.0, 0.0, 1.0]
 }
 
-/// One opaque background drawable in a tile layer group, which keeps its
-/// uniform buffers from frame to frame, as a layer of the renderer does.
+/// One opaque tile of the background shader, whose uniform buffers stay from
+/// frame to frame, as a layer's of the renderer do.
 struct Scene {
-    /// Keeps the shader's group.
-    _registry: ShaderRegistry,
-    layer_group: LayerGroupBasePtr,
+    shader: ShaderProgramPtr,
+    vertices: BufferPtr,
+    indexes: BufferPtr,
+    uniform_buffers: RefCell<UniformBufferArray>,
+    bind_group: RefCell<BindGroup>,
 }
 
 impl Scene {
-    fn new(_backend: &Window) -> Scene {
+    fn new(backend: &Window) -> Scene {
+        let context = backend.get_context();
         let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
-        let layer_group = TileLayerGroup::new_ptr(0, "background");
         let shader = registry.shader("BackgroundShader", ProjectionVariant::Mercator).expect("BackgroundShader");
-
         let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
-        let passes = RenderPass::Opaque | RenderPass::Translucent;
-        let mut builder = DrawableBuilder::new();
-        builder.set_render_pass(passes);
-        builder.set_shader(Some(shader));
-        builder.set_depth_type(DepthMaskType::ReadWrite);
-        builder.set_color_mode(&ColorMode::unblended());
-        builder.set_vertex_attr_id(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE);
-        builder.set_raw_vertices(
-            bytemuck::cast_slice(&tile_vertices).to_vec(),
-            tile_vertices.len(),
-            AttributeDataType::Short2,
-        );
-        builder.set_segments(DrawMode::Triangles(), vec![0, 1, 2, 1, 2, 3], &[SegmentBase::with_lengths(0, 0, 4, 6)]);
-        builder.flush();
-
-        let tile_id = OverscaledTileID::from_zxy(0, 0, 0);
-        {
-            let mut group = layer_group.borrow_mut();
-            let tile_group = group.as_tile_layer_group_mut().expect("tile layer group");
-            for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.ubo_index = 0;
-                tile_group.add_drawable(passes, &tile_id, drawable);
-            }
+        let tile_indexes: [u16; 6] = [0, 1, 2, 1, 2, 3];
+        Scene {
+            shader,
+            vertices: Buffer::create(context, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices))
+                .expect("vertex buffer"),
+            indexes: Buffer::create(context, BufferUsage::Index, bytemuck::cast_slice(&tile_indexes))
+                .expect("index buffer"),
+            uniform_buffers: RefCell::new(UniformBufferArray::new()),
+            bind_group: RefCell::new(BindGroup::default()),
         }
-        Scene { _registry: registry, layer_group }
     }
 
-    /// Writes the background's color into the layer's uniform buffer: the
-    /// buffer the frames before used, once it exists.
+    /// Writes the background's color into the uniform buffer: the buffer the
+    /// frames before used, once it exists.
     fn set_color(&self, context: &dyn Context, color: Color) {
         let props = BackgroundPropsUBO {
             color: [color.r, color.g, color.b, color.a],
@@ -287,21 +209,16 @@ impl Scene {
             pad2: 0.0,
             pad3: 0.0,
         };
-        self.layer_group.borrow_mut().mutable_uniform_buffers().create_or_update_pod(
-            ID_BACKGROUND_PROPS_UBO,
-            &props,
-            context,
-        );
+        self.uniform_buffers.borrow_mut().create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props, context);
     }
 
-    /// Writes the half the background covers into the layer's storage
-    /// buffers: the buffers the frames before used, once they exist.
+    /// Writes the half the background covers into the storage buffers: the
+    /// buffers the frames before used, once they exist.
     fn set_half(&self, context: &dyn Context, right: bool) {
         let matrix = half_matrix(right);
         let drawable = [BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix })];
         let projection = [ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() }];
-        let mut group = self.layer_group.borrow_mut();
-        let buffers = group.mutable_uniform_buffers();
+        let mut buffers = self.uniform_buffers.borrow_mut();
         for (id, data) in [
             (ID_BACKGROUND_DRAWABLE_UBO, bytemuck::cast_slice::<_, u8>(&drawable)),
             (ID_PROJECTION_UBO, bytemuck::cast_slice::<_, u8>(&projection)),
@@ -310,6 +227,57 @@ impl Scene {
             context.write_storage_buffer(&mut buffer, data);
             buffers.set(id, buffer);
         }
+    }
+
+    /// Draws the tile into `render_pass`.
+    fn draw(&self, context: &dyn Context, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
+        let (size, targets) = render_pass.target().expect("a target");
+        let entries = self.uniform_buffers.borrow().entries();
+        let layer = self.bind_group.borrow_mut().get(context, "background", entries).expect("bind group");
+        let attribute = self.shader.attribute_id(VertexStep::Vertex, 0).expect("position attribute");
+        let color_mode = ColorMode::unblended();
+        let pipeline = context
+            .pipeline(&PipelineKey {
+                shader: self.shader.key().clone(),
+                state: PipelineState {
+                    vertex_buffers: vec![VertexBufferLayout {
+                        stride: 4,
+                        step: VertexStep::Vertex,
+                        attributes: vec![VertexAttribute {
+                            id: attribute as u32,
+                            format: AttributeDataType::Short2,
+                            offset: 0,
+                        }],
+                    }],
+                    primitive: DrawModeType::Triangles,
+                    cull: CullFaceMode::disabled(),
+                    blend: color_mode.blend_function,
+                    color_mask: color_mode.mask,
+                    depth: DepthState { compare: DepthFunctionType::LessEqual, write: true },
+                    stencil: StencilState::from(&StencilMode::disabled()),
+                },
+                targets,
+            })
+            .expect("pipeline");
+        render_pass
+            .encode(&[
+                RenderCommand::SetBindGroup { slot: 0, group: context.global_bind_group().expect("global group") },
+                RenderCommand::SetBindGroup { slot: 1, group: layer },
+                RenderCommand::SetGlobalIndex(0),
+                RenderCommand::SetVertexBuffer { slot: 0, buffer: self.vertices.id(), offset: 0 },
+                RenderCommand::SetIndexBuffer { buffer: self.indexes.id(), offset: 0 },
+                RenderCommand::SetViewport(Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: size.width as f32,
+                    height: size.height as f32,
+                    min_depth: 0.5,
+                    max_depth: 0.5,
+                }),
+                RenderCommand::SetPipeline(pipeline),
+                RenderCommand::DrawIndexed { indices: 0..6, base_vertex: 0, instances: 0..1 },
+            ])
+            .expect("draw");
     }
 }
 
@@ -342,14 +310,7 @@ fn render_frame(
     let renderable = &*image;
     context.begin_frame();
 
-    let size = renderable.size();
-    let mut parameters = TestPaintParameters {
-        context,
-        encoder: context.create_command_encoder(),
-        render_pass: None,
-        pass: RenderPass::Opaque,
-        scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
-    };
+    let encoder = context.create_command_encoder();
     if let Some(scene) = scene {
         if let Some(color) = change.color {
             scene.set_color(context, color);
@@ -357,25 +318,22 @@ fn render_frame(
         if let Some(right) = change.right {
             scene.set_half(context, right);
         }
-        scene.layer_group.borrow_mut().upload(context);
     }
-    parameters.render_pass = Some(parameters.encoder.create_render_pass(
-        "main buffer",
-        &RenderPassDescriptor {
-            target: renderable,
-            clear_color: Some(clear),
-            clear_depth: Some(1.0),
-            clear_stencil: Some(0),
-        },
-    ));
-    if let Some(scene) = scene {
-        for pass in [RenderPass::Opaque, RenderPass::Translucent] {
-            parameters.pass = pass;
-            scene.layer_group.borrow_mut().render(&mut parameters);
+    {
+        let render_pass = encoder.create_render_pass(
+            "main buffer",
+            &RenderPassDescriptor {
+                target: renderable,
+                clear_color: Some(clear),
+                clear_depth: Some(1.0),
+                clear_stencil: Some(0),
+            },
+        );
+        if let Some(scene) = scene {
+            scene.draw(context, &*render_pass);
         }
     }
-    parameters.render_pass = None;
-    backend.target.end_frame(&*parameters.encoder);
+    backend.target.end_frame(&*encoder);
     context.end_frame();
 
     let image = backend.take_readback();

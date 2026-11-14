@@ -2,25 +2,25 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use geometry::Point;
+use mln_gfx::color_mode::ColorMode;
+use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::draw_mode::DrawMode;
+use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
+use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE};
+use mln_gfx::shaders::shader_program::ShaderProgramPtr;
+use mln_gfx::texture2d::Texture2DPtr;
+use mln_gfx::types::DepthMaskType;
+use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
+use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::logging::{Event, Log};
 
-use crate::color_mode::ColorMode;
-use crate::cull_face_mode::CullFaceMode;
-use crate::draw_mode::DrawMode;
 use crate::drawable::{DrawPriority, DrawSegment, Drawable, Textures, UniqueDrawSegment, UniqueDrawable};
-use crate::drawable_tweaker::DrawableTweakerPtr;
-use crate::gfx_types::AttributeDataType;
-use crate::index_vector::{IndexVectorBase, IndexVectorBasePtr};
-use crate::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
-use crate::renderer::render_pass::RenderPass;
-use crate::shaders::segment::SegmentBase;
-use crate::shaders::shader_defines::{ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE};
-use crate::shaders::shader_program::ShaderProgramPtr;
-use crate::texture2d::Texture2DPtr;
-use crate::types::DepthMaskType;
-use crate::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
-use crate::vertex_vector::VertexVector;
+use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
+use crate::render_pass::RenderPass;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
@@ -43,11 +43,10 @@ pub(crate) struct LineLayoutVertex {
 
 /// Builds drawables: it takes their state, then their geometry, and
 /// [`flush`](Self::flush) makes a drawable of what it has so far.
-pub struct DrawableBuilder {
+pub(crate) struct DrawableBuilder {
     drawable_name: String,
     vertex_attr_id: usize,
     render_pass: RenderPass,
-    enabled: bool,
     enable_stencil: bool,
     enable_depth: bool,
     is_3d: bool,
@@ -58,7 +57,7 @@ pub struct DrawableBuilder {
     current_drawable: Option<UniqueDrawable>,
     drawables: Vec<UniqueDrawable>,
     textures: Textures,
-    tweakers: Vec<DrawableTweakerPtr>,
+    atlases: Option<Rc<DrawableAtlasesTweaker>>,
     vertex_attrs: Option<VertexAttributeArrayPtr>,
     instance_attrs: Option<VertexAttributeArrayPtr>,
     origin: Option<Point<f64>>,
@@ -78,7 +77,7 @@ pub struct DrawableBuilder {
     polyline_indexes: Vec<u16>,
 }
 
-pub type UniqueDrawableBuilder = Box<DrawableBuilder>;
+pub(crate) type UniqueDrawableBuilder = Box<DrawableBuilder>;
 
 impl Default for DrawableBuilder {
     fn default() -> Self {
@@ -88,12 +87,11 @@ impl Default for DrawableBuilder {
 
 impl DrawableBuilder {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         DrawableBuilder {
             drawable_name: String::new(),
             vertex_attr_id: 0,
             render_pass: RenderPass::Opaque,
-            enabled: true,
             enable_stencil: false,
             enable_depth: true,
             is_3d: false,
@@ -104,11 +102,11 @@ impl DrawableBuilder {
             current_drawable: None,
             drawables: Vec::new(),
             textures: Default::default(),
-            tweakers: Vec::new(),
+            atlases: None,
             vertex_attrs: None,
             instance_attrs: None,
             origin: None,
-            vertices: VertexVector::new(),
+            vertices: VertexVector::default(),
             raw_vertices: Vec::new(),
             raw_vertices_count: 0,
             raw_vertices_type: AttributeDataType::Invalid,
@@ -125,7 +123,7 @@ impl DrawableBuilder {
 
     /// A new builder in a box, as the layers keep them.
     #[must_use]
-    pub fn boxed() -> UniqueDrawableBuilder {
+    pub(crate) fn boxed() -> UniqueDrawableBuilder {
         Box::new(Self::new())
     }
 
@@ -166,27 +164,26 @@ impl DrawableBuilder {
 
     /// Makes a drawable of the geometry added since the last, if any, and
     /// starts the next.
-    pub fn flush(&mut self) {
+    pub(crate) fn flush(&mut self) {
         if self.cur_vertex_count() != 0 {
             if self.mode == Mode::Polylines {
                 self.setup_for_polylines();
             }
             let mut drawable =
                 self.current_drawable.take().unwrap_or_else(|| Box::new(Drawable::new(self.drawable_name.clone())));
-            drawable.enabled = self.enabled;
             drawable.enable_stencil = self.enable_stencil;
             drawable.render_pass = self.render_pass;
-            drawable.set_draw_priority(self.draw_priority);
+            drawable.draw_priority = self.draw_priority;
             drawable.sub_layer_index = self.sub_layer_index;
             drawable.enable_depth = self.enable_depth;
             drawable.depth_type = self.depth_type;
             drawable.is_3d = self.is_3d;
             drawable.set_color_mode(&self.color_mode);
-            drawable.set_cull_face_mode(&self.cull_face_mode);
+            drawable.set_cull_face_mode(self.cull_face_mode);
             drawable.set_shader(self.shader.clone());
             drawable.textures = self.textures.clone();
-            drawable.set_tweakers(self.tweakers.clone());
-            drawable.set_origin(self.origin);
+            drawable.atlases = self.atlases.clone();
+            drawable.origin = self.origin;
             let vertex_attrs = self.vertex_attrs.clone().unwrap_or_else(VertexAttributeArray::new_ptr);
             drawable.set_vertex_attributes(Some(vertex_attrs));
             if let Some(attrs) = &self.instance_attrs {
@@ -207,11 +204,11 @@ impl DrawableBuilder {
 
         if self.raw_vertices_count != 0 && self.raw_vertices.is_empty() {
             // The vertex data is in the vertex attributes (fills).
-            if drawable.get_vertex_attributes().is_some() && !self.segments.is_empty() {
+            if drawable.vertex_attributes.is_some() && !self.segments.is_empty() {
                 // The draw mode of the first segment; set_index_data below
                 // sets the segments.
                 let draw_mode = *self.segments[0].mode();
-                let attrs = drawable.get_vertex_attributes().cloned();
+                let attrs = drawable.vertex_attributes.clone();
                 drawable.update_vertex_attributes(
                     attrs,
                     self.raw_vertices_count,
@@ -249,93 +246,89 @@ impl DrawableBuilder {
     }
 
     /// Takes the drawables made so far.
-    pub fn clear_drawables(&mut self) -> Vec<UniqueDrawable> {
+    pub(crate) fn clear_drawables(&mut self) -> Vec<UniqueDrawable> {
         std::mem::take(&mut self.drawables)
     }
 
-    pub fn set_enabled(&mut self, value: bool) {
-        self.enabled = value;
-    }
-    pub fn set_render_pass(&mut self, value: RenderPass) {
+    pub(crate) fn set_render_pass(&mut self, value: RenderPass) {
         self.render_pass = value;
     }
-    pub fn set_draw_priority(&mut self, value: DrawPriority) {
+    pub(crate) fn set_draw_priority(&mut self, value: DrawPriority) {
         self.draw_priority = value;
         if let Some(drawable) = self.current_drawable.as_mut() {
-            drawable.set_draw_priority(value);
+            drawable.draw_priority = value;
         }
     }
-    pub fn set_sub_layer_index(&mut self, value: i32) {
+    pub(crate) fn set_sub_layer_index(&mut self, value: i32) {
         self.sub_layer_index = value;
     }
-    pub fn set_enable_depth(&mut self, value: bool) {
+    pub(crate) fn set_enable_depth(&mut self, value: bool) {
         self.enable_depth = value;
     }
-    pub fn set_depth_type(&mut self, value: DepthMaskType) {
+    pub(crate) fn set_depth_type(&mut self, value: DepthMaskType) {
         self.depth_type = value;
     }
     /// Makes the drawables 3D. They write depth unless the caller sets
     /// [`DepthMaskType::ReadOnly`] after this.
-    pub fn set_is_3d(&mut self, value: bool) {
+    pub(crate) fn set_is_3d(&mut self, value: bool) {
         self.is_3d = value;
         if value {
             self.depth_type = DepthMaskType::ReadWrite;
         }
     }
-    pub fn set_enable_stencil(&mut self, value: bool) {
+    pub(crate) fn set_enable_stencil(&mut self, value: bool) {
         self.enable_stencil = value;
     }
-    pub fn set_color_mode(&mut self, value: &ColorMode) {
+    pub(crate) fn set_color_mode(&mut self, value: &ColorMode) {
         self.color_mode = *value;
     }
-    pub fn set_cull_face_mode(&mut self, value: &CullFaceMode) {
-        self.cull_face_mode = *value;
+    pub(crate) fn set_cull_face_mode(&mut self, value: CullFaceMode) {
+        self.cull_face_mode = value;
     }
-    pub fn set_shader(&mut self, value: Option<ShaderProgramPtr>) {
+    pub(crate) fn set_shader(&mut self, value: Option<ShaderProgramPtr>) {
         self.shader = value;
     }
     /// Sets the name given to new drawables.
-    pub fn set_drawable_name(&mut self, value: String) {
+    pub(crate) fn set_drawable_name(&mut self, value: String) {
         self.drawable_name = value;
     }
     /// Sets the attribute id of the raw vertices.
-    pub fn set_vertex_attr_id(&mut self, id: usize) {
+    pub(crate) fn set_vertex_attr_id(&mut self, id: usize) {
         self.vertex_attr_id = id;
     }
-    pub fn set_texture(&mut self, texture: Option<Texture2DPtr>, id: usize) {
+    pub(crate) fn set_texture(&mut self, texture: Option<Texture2DPtr>, id: usize) {
         debug_assert!(id < self.textures.len());
         if let Some(slot) = self.textures.get_mut(id) {
             *slot = texture;
         }
     }
-    pub fn add_tweaker(&mut self, value: DrawableTweakerPtr) {
-        self.tweakers.push(value);
+    /// Sets the tweaker that gives the drawables the symbol atlases'
+    /// textures.
+    pub(crate) fn set_atlases(&mut self, value: Option<Rc<DrawableAtlasesTweaker>>) {
+        self.atlases = value;
     }
-    pub fn clear_tweakers(&mut self) {
-        self.tweakers.clear();
-    }
-    pub fn set_vertex_attributes(&mut self, attrs: Option<VertexAttributeArrayPtr>) {
+    pub(crate) fn set_vertex_attributes(&mut self, attrs: Option<VertexAttributeArrayPtr>) {
         self.vertex_attrs = attrs;
     }
-    pub fn set_instance_attributes(&mut self, attrs: Option<VertexAttributeArrayPtr>) {
+    pub(crate) fn set_instance_attributes(&mut self, attrs: Option<VertexAttributeArrayPtr>) {
         self.instance_attrs = attrs;
     }
 
     /// Takes `count` vertices of `type_` in `data`, or, with no `data`, a
     /// vertex count for vertices in the vertex attributes.
-    pub fn set_raw_vertices(&mut self, data: Vec<u8>, count: usize, type_: AttributeDataType) {
+    pub(crate) fn set_raw_vertices(&mut self, data: Vec<u8>, count: usize, type_: AttributeDataType) {
         self.raw_vertices = data;
         self.raw_vertices_count = count;
         self.raw_vertices_type = type_;
     }
 
     /// Sets indexes and segments
-    pub fn set_segments(&mut self, mode: DrawMode, indexes: Vec<u16>, segments: &[SegmentBase]) {
+    pub(crate) fn set_segments(&mut self, mode: DrawMode, indexes: Vec<u16>, segments: &[SegmentBase]) {
         self.set_segments_shared(mode, Some(Rc::new(RefCell::new(IndexVectorBase::new(indexes)))), segments);
     }
 
     /// Sets shared indexes and segments
-    pub fn set_segments_shared(
+    pub(crate) fn set_segments_shared(
         &mut self,
         mode: DrawMode,
         indexes: Option<IndexVectorBasePtr>,
@@ -347,7 +340,7 @@ impl DrawableBuilder {
         };
         #[cfg(debug_assertions)]
         {
-            use crate::gfx_types::DrawModeType;
+            use mln_gfx::DrawModeType;
             let vertex_count = self.cur_vertex_count();
             let shared = indexes.borrow();
             for seg in segments {
@@ -373,7 +366,7 @@ impl DrawableBuilder {
     }
 
     /// Add a triangle
-    pub fn add_triangle(&mut self, x0: i16, y0: i16, x1: i16, y1: i16, x2: i16, y2: i16) {
+    pub(crate) fn add_triangle(&mut self, x0: i16, y0: i16, x1: i16, y1: i16, x2: i16, y2: i16) {
         // check and set the current mode
         if !self.check_and_set_mode(Mode::Primitives) {
             return;
@@ -398,7 +391,7 @@ impl DrawableBuilder {
     }
 
     /// Add another triangle based on the previous two points
-    pub fn append_triangle(&mut self, x0: i16, y0: i16) {
+    pub(crate) fn append_triangle(&mut self, x0: i16, y0: i16) {
         // check and set the current mode
         if !self.check_and_set_mode(Mode::Primitives) {
             return;
@@ -413,7 +406,7 @@ impl DrawableBuilder {
     }
 
     /// Add a rectangle consisting of two triangles
-    pub fn add_quad(&mut self, x0: i16, y0: i16, x1: i16, y1: i16) {
+    pub(crate) fn add_quad(&mut self, x0: i16, y0: i16, x1: i16, y1: i16) {
         // check and set the current mode
         if !self.check_and_set_mode(Mode::Primitives) {
             return;
@@ -424,7 +417,7 @@ impl DrawableBuilder {
 
     /// Add a polyline. If the last point equals the first it will be
     /// closed, otherwise open
-    pub fn add_polyline(&mut self, coordinates: &GeometryCoordinates, options: &PolylineGeneratorOptions) {
+    pub(crate) fn add_polyline(&mut self, coordinates: &GeometryCoordinates, options: &PolylineGeneratorOptions) {
         fn segment(segment: &mut UniqueDrawSegment) -> &mut SegmentBase {
             segment.segment_mut()
         }
@@ -455,7 +448,7 @@ impl DrawableBuilder {
 
         let attrs = VertexAttributeArray::new_ptr();
         let vertices = std::mem::take(&mut self.polyline_vertices);
-        let verts: crate::vertex_vector::VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vertices));
+        let verts: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vertices));
 
         {
             let mut attrs = attrs.borrow_mut();
@@ -486,7 +479,7 @@ impl DrawableBuilder {
     }
 
     /// return the current vertex count
-    pub fn cur_vertex_count(&self) -> usize {
+    pub(crate) fn cur_vertex_count(&self) -> usize {
         self.raw_vertices_count.max(self.vertices.elements()).max(self.polyline_vertices.len())
     }
 }

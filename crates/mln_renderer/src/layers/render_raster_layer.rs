@@ -26,8 +26,8 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, LayerGroup,
-    LayerGroupBasePtr, ShaderProgramPtr, ShaderRegistry, TileLayerGroup, VertexAttributeArray,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry,
+    VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
@@ -46,8 +46,10 @@ use super::raster_layer_tweaker::RasterLayerTweaker;
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::drawable_builder::DrawableBuilder;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::layer_group::{LayerGroup, LayerGroupPtr};
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
     LayerPrepareParameters, RenderLayer, RenderLayerBase, activate_layer_group, change_layer_index,
@@ -79,7 +81,7 @@ pub(crate) struct RenderRasterLayer {
     textures: HashMap<SimpleIdentity, Texture2DPtr>,
 
     image_data: Option<Rc<ImageSourceRenderData>>,
-    image_layer_group: Option<LayerGroupBasePtr>,
+    image_layer_group: Option<LayerGroupPtr>,
 }
 
 impl RenderRasterLayer {
@@ -164,7 +166,7 @@ impl RenderRasterLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
         if self.image_layer_group.is_none() {
             // Set up a layer group
-            let group = LayerGroup::new_ptr(self.base.layer_index, self.get_id());
+            let group = LayerGroup::plain(self.base.layer_index, self.get_id());
             if let Some(tweaker) = &layer_tweaker {
                 changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&group), Rc::downgrade(tweaker)));
             }
@@ -182,7 +184,7 @@ impl RenderRasterLayer {
             builder.set_sub_layer_index(0);
             builder.set_depth_type(DepthMaskType::ReadOnly);
             builder.set_color_mode(&ColorMode::alpha_blended());
-            builder.set_cull_face_mode(&CullFaceMode::disabled());
+            builder.set_cull_face_mode(CullFaceMode::disabled());
 
             {
                 // buildVertexData(builder, nullptr, bucket): the bucket's own
@@ -202,13 +204,10 @@ impl RenderRasterLayer {
             // finish
             builder.flush();
 
-            let mut group = image_layer_group.borrow_mut();
-            let Some(layer_group) = group.as_layer_group_mut() else {
-                continue;
-            };
+            let mut layer_group = image_layer_group.borrow_mut();
             for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(OverscaledTileID::new(tile_id.canonical.z, tile_id.wrap, tile_id.canonical));
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
+                drawable.tile_id = Some(OverscaledTileID::new(tile_id.canonical.z, tile_id.wrap, tile_id.canonical));
+                drawable.layer_tweaker = layer_tweaker.clone();
                 layer_group.add_drawable(drawable);
             }
         }
@@ -397,16 +396,14 @@ impl RenderLayer for RenderRasterLayer {
 
         // Remove existing drawables that are no longer in the cover set
         if let Some(layer_group) = self.base.layer_group.clone() {
-            let mut group = layer_group.borrow_mut();
-            if let Some(tile_layer_group) = group.as_tile_layer_group_mut() {
-                let base = &self.base;
-                tile_layer_group.remove_drawables_if(|drawable| {
-                    drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
-                });
-            }
+            let mut tile_layer_group = layer_group.borrow_mut();
+            let base = &self.base;
+            tile_layer_group.remove_drawables_if(|drawable| {
+                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+            });
         } else {
             // Set up a tile layer group
-            let layer_group = TileLayerGroup::new_ptr(self.base.layer_index, self.get_id());
+            let layer_group = LayerGroup::tiles(self.base.layer_index, self.get_id());
             if let Some(tweaker) = &layer_tweaker {
                 changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(tweaker)));
             }
@@ -474,15 +471,13 @@ impl RenderLayer for RenderRasterLayer {
                 // Find the earliest time on existing drawables
                 let mut tile_update_time: Option<Instant> = None;
                 {
-                    let mut group = layer_group.borrow_mut();
-                    if let Some(tile_layer_group) = group.as_tile_layer_group_mut() {
-                        tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                            let create_time = drawable.create_time;
-                            if tile_update_time.is_none_or(|t| create_time < t) {
-                                tile_update_time = Some(create_time);
-                            }
-                        });
-                    }
+                    let mut tile_layer_group = layer_group.borrow_mut();
+                    tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
+                        let create_time = drawable.create_time;
+                        if tile_update_time.is_none_or(|t| create_time < t) {
+                            tile_update_time = Some(create_time);
+                        }
+                    });
                 }
 
                 if tile_update_time.is_some_and(|t| t < geometry_modified) {
@@ -494,7 +489,7 @@ impl RenderLayer for RenderRasterLayer {
             if !cleared {
                 // Update existing drawables
                 let mut geometry_changed = false;
-                let update_existing = |drawable: &mut mln_gfx::Drawable| {
+                let update_existing = |drawable: &mut crate::drawable::Drawable| {
                     // Only current drawables are updated, ones produced for
                     // a previous style retain the attribute values for that
                     // style.
@@ -528,7 +523,7 @@ impl RenderLayer for RenderRasterLayer {
             builder.set_sub_layer_index(0);
             builder.set_depth_type(DepthMaskType::ReadOnly);
             builder.set_color_mode(&ColorMode::alpha_blended());
-            builder.set_cull_face_mode(&CullFaceMode::disabled());
+            builder.set_cull_face_mode(CullFaceMode::disabled());
 
             self.set_textures(context, builder.as_mut(), bucket);
 
@@ -582,14 +577,11 @@ impl RenderLayer for RenderRasterLayer {
             // finish
             builder.flush();
             let drawables = builder.clear_drawables();
-            let mut group = layer_group.borrow_mut();
-            let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
-                continue;
-            };
+            let mut tile_layer_group = layer_group.borrow_mut();
             for mut drawable in drawables {
-                drawable.set_tile_id(tile_id);
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
+                drawable.tile_id = Some(tile_id);
+                drawable.layer_tweaker = layer_tweaker.clone();
+                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
             }
         }
     }

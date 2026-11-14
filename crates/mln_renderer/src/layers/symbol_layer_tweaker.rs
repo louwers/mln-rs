@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
-use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
     ID_SYMBOL_TILE_PROPS_UBO,
 };
 use mln_gfx::shaders::symbol_layer_ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
-use mln_gfx::{Drawable, LayerGroupBase, UniformBufferPtr};
 use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_properties::{
@@ -18,9 +17,11 @@ use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
 use mln_util::mat4::{Mat4, matrix};
 
-use super::render_symbol_layer::{SymbolDrawableData, SymbolType, get_screen_matrix};
-use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
+use super::render_symbol_layer::{SymbolType, get_screen_matrix};
+use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::drawable::Drawable;
+use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
@@ -51,7 +52,7 @@ macro_rules! const_or_default {
 }
 
 fn get_tex_size(drawable: &Drawable, tex_id: usize) -> [f32; 2] {
-    match drawable.get_texture(tex_id) {
+    match drawable.textures[tex_id].as_ref() {
         Some(tex) => {
             let size = tex.borrow().size();
             [size.width as f32, size.height as f32]
@@ -69,7 +70,7 @@ impl LayerTweaker for SymbolLayerTweaker {
         &mut self.base
     }
 
-    fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+    fn execute(&mut self, layer_group: &mut LayerGroup, parameters: &PaintParameters<'_>) {
         if layer_group.empty() {
             return;
         }
@@ -105,7 +106,7 @@ impl LayerTweaker for SymbolLayerTweaker {
             .set(ID_SYMBOL_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
         // Only enabled drawables draw, so only they get an entry.
-        let count = layer_group.get_drawable_count();
+        let count = layer_group.drawable_count();
         let mut drawable_ubo_vector = Vec::with_capacity(count);
         let mut tile_props_ubo_vector = Vec::with_capacity(count);
         let mut projection_ubo_vector = Vec::with_capacity(count);
@@ -122,24 +123,24 @@ impl LayerTweaker for SymbolLayerTweaker {
 
         let self_ptr: *const Self = self;
         let id = self.base.id.clone();
-        visit_layer_group_drawables(layer_group, |drawable| {
+        layer_group.visit_drawables(|drawable| {
             if !drawable.enabled {
                 return;
             }
-            let Some(tile_id) = drawable.get_tile_id() else {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
-            let Some(symbol_data) = drawable.get_data().and_then(|d| d.downcast_ref::<SymbolDrawableData>()).copied()
-            else {
+            let Some(crate::drawable::DrawableData::Symbol(symbol_data)) = &drawable.data else {
                 return;
             };
+            let symbol_data = *symbol_data;
             if !check_tweak_drawable_ptr(drawable, self_ptr) {
                 return;
             }
             let tile_id = tile_id.to_unwrapped();
             let is_text = symbol_data.symbol_type == SymbolType::Text;
 
-            let Some(binders_slot) = get_drawable_binders(drawable) else {
+            let Some(binders_slot) = drawable.binders.clone() else {
                 debug_assert!(false);
                 return;
             };
@@ -147,7 +148,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                 debug_assert!(false);
                 return;
             };
-            if get_drawable_render_tile(drawable).is_none() {
+            if drawable.render_tile.as_ref().map(DrawableRenderTile::tile).is_none() {
                 debug_assert!(false);
                 return;
             }
