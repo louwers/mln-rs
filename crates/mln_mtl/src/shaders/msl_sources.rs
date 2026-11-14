@@ -1096,13 +1096,13 @@ pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
     name: r"ClippingMaskProgram",
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     clippingMaskUBOCount = drawableReservedUBOCount
 };
 
-"#,
+",
     source: r"
 
 struct VertexStage {
