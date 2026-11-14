@@ -3,11 +3,14 @@
 //! [`clip_mask_and_background`] draws a clipping mask into the stencil
 //! buffer as an ordinary draw, then the background shader tested against
 //! it. The mask covers the left half, so the background colors only that
-//! half.
+//! half. [`invalid_calls`] checks the calls that every backend rejects.
+
+mod cases;
 
 use mln_util::Color;
 use mln_util::size::Size;
 
+pub use self::cases::*;
 use super::{
     BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Gpu, GpuError, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey,

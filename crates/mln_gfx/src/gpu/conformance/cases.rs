@@ -1,0 +1,188 @@
+//! Cases that draw a solid color with the background shader, and the calls
+//! every backend rejects.
+
+use mln_util::Color;
+
+use super::{EXTENT, SIZE, buffer, position_layout, tile_matrix, whole};
+use crate::color_mode::ColorMode;
+use crate::cull_face_mode::CullFaceMode;
+use crate::depth_mode::DepthMode;
+use crate::gfx_types::DrawModeType;
+use crate::gpu::{
+    BindGroupDesc, BindGroupEntry, BindGroupId, BufferId, BufferUsage, ColorAttachment, DepthState, Gpu, GpuError,
+    LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey, StencilState, TargetFormats, TextureDesc,
+    TextureFormat, TextureId, TextureUsage,
+};
+use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::shaders::layer_ubo::ProjectionUBO;
+use crate::shaders::shader_defines::{
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
+};
+use crate::shaders::shader_source::BuiltIn;
+use crate::stencil_mode::StencilMode;
+
+const BLACK: Color = Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+
+/// A color target of [`SIZE`], and what the background shader reads to
+/// cover it with one color.
+struct Solid {
+    target: TextureId,
+    quad: BufferId,
+    indices: BufferId,
+    group: BindGroupId,
+}
+
+/// A target of `format`, which the background shader covers with `color`,
+/// premultiplied.
+fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<Solid, GpuError> {
+    let target = target(gpu, format)?;
+    let e = EXTENT as i16;
+    let quad: [[i16; 2]; 4] = [[0, 0], [e, 0], [0, e], [e, e]];
+    let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&quad))?;
+    let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]))?;
+    let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
+    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
+    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
+    let props = bytemuck::bytes_of(&props);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let group = gpu.create_bind_group(&BindGroupDesc {
+        label: "background layer",
+        entries: &[
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
+            whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+        ],
+    })?;
+    Ok(Solid { target, quad, indices, group })
+}
+
+/// A render target of [`SIZE`] and `format`, which can be read back.
+fn target(gpu: &mut impl Gpu, format: TextureFormat) -> Result<TextureId, GpuError> {
+    gpu.create_texture(&TextureDesc {
+        label: "target",
+        size: SIZE,
+        format,
+        usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+    })
+}
+
+/// The background shader, unblended, drawing triangles into an
+/// [`Rgba8Unorm`](TextureFormat::Rgba8Unorm) target.
+fn background() -> PipelineKey {
+    let unblended = ColorMode::unblended();
+    PipelineKey {
+        shader: ShaderKey::new(BuiltIn::BackgroundShader, []),
+        state: PipelineState {
+            vertex_buffers: vec![position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
+            primitive: DrawModeType::Triangles,
+            cull: CullFaceMode::disabled(),
+            blend: unblended.blend_function,
+            color_mask: unblended.mask,
+            depth: DepthState::from(&DepthMode::disabled()),
+            stencil: StencilState::from(&StencilMode::disabled()),
+        },
+        targets: TargetFormats { color: TextureFormat::Rgba8Unorm, depth_stencil: None },
+    }
+}
+
+impl Solid {
+    /// A pass that clears the target to opaque black, binds what the
+    /// background shader reads and `pipeline`, and runs `commands`.
+    fn pass(&self, pipeline: crate::gpu::PipelineId, commands: impl IntoIterator<Item = RenderCommand>) -> Pass {
+        Pass {
+            label: "solid".to_owned(),
+            color: Some(ColorAttachment { texture: self.target, load: LoadOp::Clear(BLACK) }),
+            depth_stencil: None,
+            commands: [
+                RenderCommand::SetPipeline(pipeline),
+                RenderCommand::SetBindGroup { slot: 0, group: self.group },
+                RenderCommand::SetVertexBuffer { slot: 0, buffer: self.quad, offset: 0 },
+                RenderCommand::SetIndexBuffer { buffer: self.indices, offset: 0 },
+            ]
+            .into_iter()
+            .chain(commands)
+            .collect(),
+        }
+    }
+}
+
+const DRAW_QUAD: RenderCommand = RenderCommand::DrawIndexed { indices: 0..6, base_vertex: 0, instances: 0..1 };
+
+/// Whether `result` is the error of a call that breaks a rule.
+fn invalid<T>(result: &Result<T, GpuError>) -> bool {
+    matches!(result, Err(GpuError::Invalid(_)))
+}
+
+/// Checks that `gpu` rejects calls that break the rules of
+/// [`validation`](crate::gpu::validation), as [`GpuError::Invalid`], and
+/// takes the same calls without the fault. Returns the error of a call that
+/// should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let pipeline = gpu.create_pipeline(&background())?;
+    gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
+
+    // Bind groups bind uniform and storage buffers, over a range inside the
+    // buffer, from an aligned offset.
+    let alignment = u64::from(gpu.limits().buffer_offset_alignment.max(4));
+    let uniform = gpu.create_buffer(&crate::gpu::BufferDesc {
+        label: "uniform",
+        usage: BufferUsage::Uniform,
+        size: 2 * alignment,
+    })?;
+    let mut group = |buffer, offset, size| {
+        let entries = [BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer, offset, size }];
+        gpu.create_bind_group(&BindGroupDesc { label: "test", entries: &entries })
+    };
+    assert!(group(uniform, alignment, alignment).is_ok());
+    assert!(invalid(&group(uniform, alignment, alignment + 4)), "a range past the buffer");
+    assert!(invalid(&group(uniform, alignment, 0)), "an empty range");
+    assert!(invalid(&group(uniform, u64::MAX - alignment + 1, 2 * alignment)), "a range past u64::MAX");
+    if alignment > 4 {
+        assert!(invalid(&group(uniform, 4, 4)), "an unaligned offset");
+    }
+    assert!(invalid(&group(frame.quad, 0, 4)), "a vertex buffer");
+    assert!(invalid(&group(frame.indices, 0, 4)), "an index buffer");
+
+    // Draws read vertex and index buffers of those uses, inside them.
+    let with = |commands: &[RenderCommand]| frame.pass(pipeline, commands.iter().cloned());
+    let uniform_vertices = RenderCommand::SetVertexBuffer { slot: 0, buffer: uniform, offset: 0 };
+    assert!(invalid(&gpu.submit(&[with(&[uniform_vertices, DRAW_QUAD])])), "uniform buffer vertices");
+    let vertex_indices = RenderCommand::SetIndexBuffer { buffer: frame.quad, offset: 0 };
+    assert!(invalid(&gpu.submit(&[with(&[vertex_indices, DRAW_QUAD])])), "vertex buffer indices");
+    let past_vertices = RenderCommand::Draw { vertices: 0..5, instances: 0..1 };
+    assert!(invalid(&gpu.submit(&[with(&[past_vertices])])), "vertices past the buffer");
+    let past_indices = RenderCommand::DrawIndexed { indices: 0..7, base_vertex: 0, instances: 0..1 };
+    assert!(invalid(&gpu.submit(&[with(&[past_indices])])), "indices past the buffer");
+    let at_end = RenderCommand::SetVertexBuffer { slot: 0, buffer: frame.quad, offset: 16 };
+    assert!(invalid(&gpu.submit(&[with(&[at_end])])), "vertices from the end of the buffer");
+    let past_elements = [RenderCommand::SetGlobalIndex(1), DRAW_QUAD];
+    assert!(invalid(&gpu.submit(&[with(&past_elements)])), "a global index past the storage buffers' elements");
+    let mut no_vertices = frame.pass(pipeline, [DRAW_QUAD]);
+    no_vertices.commands.retain(|command| !matches!(command, RenderCommand::SetVertexBuffer { .. }));
+    assert!(invalid(&gpu.submit(&[no_vertices])), "a draw without its vertex buffer");
+
+    // A pipeline draws into attachments of its formats.
+    let srgb = target(gpu, TextureFormat::Rgba8UnormSrgb)?;
+    let mut srgb_pass = frame.pass(pipeline, [DRAW_QUAD]);
+    srgb_pass.color = Some(ColorAttachment { texture: srgb, load: LoadOp::Clear(BLACK) });
+    assert!(invalid(&gpu.submit(&[srgb_pass])), "an Rgba8Unorm pipeline in an Rgba8UnormSrgb pass");
+    let mut depth_key = background();
+    depth_key.targets.depth_stencil = Some(TextureFormat::Depth24PlusStencil8);
+    let depth_pipeline = gpu.create_pipeline(&depth_key)?;
+    assert!(invalid(&gpu.submit(&[frame.pass(depth_pipeline, [DRAW_QUAD])])), "a pipeline for a depth attachment");
+    let mut no_attachments = frame.pass(pipeline, []);
+    no_attachments.color = None;
+    assert!(invalid(&gpu.submit(&[no_attachments])), "a pass without attachments");
+
+    // The faults ran nothing, and the frame still draws.
+    gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
+    Ok(())
+}

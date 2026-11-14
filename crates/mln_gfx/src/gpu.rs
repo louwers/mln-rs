@@ -16,6 +16,7 @@
 
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
+pub mod validation;
 
 use std::ops::Range;
 
@@ -108,6 +109,23 @@ pub enum TextureFormat {
 }
 
 impl TextureFormat {
+    /// Every format.
+    pub const ALL: [TextureFormat; 13] = [
+        TextureFormat::R8Unorm,
+        TextureFormat::R16Float,
+        TextureFormat::R32Float,
+        TextureFormat::Rgba8Unorm,
+        TextureFormat::Rgba8UnormSrgb,
+        TextureFormat::Bgra8Unorm,
+        TextureFormat::Bgra8UnormSrgb,
+        TextureFormat::Rgb10a2Unorm,
+        TextureFormat::Rgba16Float,
+        TextureFormat::Rgba32Float,
+        TextureFormat::Depth32Float,
+        TextureFormat::Depth24PlusStencil8,
+        TextureFormat::Depth32FloatStencil8,
+    ];
+
     /// The bytes a texel of a color format takes in
     /// [`write_texture`](Gpu::write_texture)'s data; `None` for a depth
     /// format.
@@ -488,12 +506,16 @@ pub trait Gpu {
     fn create_pipeline(&mut self, key: &PipelineKey) -> Result<PipelineId, GpuError>;
     fn destroy_pipeline(&mut self, pipeline: PipelineId);
 
+    /// Makes a group of `desc`'s entries, which bind ranges of this
+    /// backend's uniform and storage buffers, and its sampled textures with
+    /// their samplers, as [`validation::check_bind_group`] checks.
     fn create_bind_group(&mut self, desc: &BindGroupDesc<'_>) -> Result<BindGroupId, GpuError>;
     fn destroy_bind_group(&mut self, group: BindGroupId);
 
     /// Runs `passes` in order. Fails, running none of them, if a pass names
-    /// a resource this backend doesn't have, or a draw lacks a binding its
-    /// pipeline's shader reads.
+    /// a resource this backend doesn't have, or breaks a rule that
+    /// [`validation::check_pass`] checks, such as a draw that lacks a
+    /// binding its pipeline's shader reads.
     fn submit(&mut self, passes: &[Pass]) -> Result<(), GpuError>;
 }
 

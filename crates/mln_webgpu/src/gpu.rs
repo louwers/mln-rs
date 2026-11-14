@@ -3,12 +3,15 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
     PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, TextureDesc, TextureFormat, TextureId, TextureRegion,
+    TextureUsage,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
+use mln_util::size::Size;
 use slotmap::SlotMap;
 
 use crate::Device;
@@ -24,6 +27,9 @@ struct Texture {
 struct Pipeline {
     pipeline: wgpu::RenderPipeline,
     shader: Rc<ShaderProgram>,
+    key: PipelineKey,
+    /// What the shader reads from the bind groups.
+    bindings: Vec<ShaderBinding>,
 }
 
 /// A resource a native bind group binds: wgpu bind groups are made per
@@ -376,6 +382,89 @@ fn texture_format(format: TextureFormat) -> wgpu::TextureFormat {
     }
 }
 
+/// The usage of a buffer of wgpu usage `usage`, as the checks see it.
+fn buffer_usage(usage: wgpu::BufferUsages) -> BufferUsage {
+    if usage.contains(wgpu::BufferUsages::VERTEX) {
+        BufferUsage::Vertex
+    } else if usage.contains(wgpu::BufferUsages::INDEX) {
+        BufferUsage::Index
+    } else if usage.contains(wgpu::BufferUsages::STORAGE) {
+        BufferUsage::Storage
+    } else {
+        BufferUsage::Uniform
+    }
+}
+
+/// What `shader` reads from the bind groups, by the shaders' ids.
+fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuError> {
+    let mut bindings = Vec::new();
+    for &group in shader.bind_group_order() {
+        if Some(group) == shader.index_group() {
+            continue;
+        }
+        for info in shader.binding_infos(group) {
+            let binding = match info.type_ {
+                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
+                    ShaderBinding::Buffer { id: info.binding, min_size: shader.buffer_size(group, info.binding) }
+                }
+                BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
+                    let sampler = info.type_ == BindingType::Sampler;
+                    let id = shader.texture_at(info.binding, sampler).ok_or_else(|| {
+                        GpuError::Invalid(format!(
+                            "{} reads binding {} with no texture id",
+                            shader.name(),
+                            info.binding
+                        ))
+                    })?;
+                    ShaderBinding::Texture { id: id as u32 }
+                }
+            };
+            if !bindings.contains(&binding) {
+                bindings.push(binding);
+            }
+        }
+    }
+    Ok(bindings)
+}
+
+impl Resources for WebGpu {
+    fn buffer_info(&self, id: BufferId) -> Option<BufferInfo> {
+        let buffer = self.buffers.get(id)?;
+        Some(BufferInfo { usage: buffer_usage(buffer.usage()), size: buffer.size() })
+    }
+
+    fn texture_info(&self, id: TextureId) -> Option<TextureInfo> {
+        let texture = &self.textures.get(id)?.texture;
+        let usage = texture.usage();
+        Some(TextureInfo {
+            format: TextureFormat::ALL.into_iter().find(|&format| texture_format(format) == texture.format()),
+            size: Size { width: texture.width(), height: texture.height() },
+            usage: TextureUsage {
+                sampled: usage.contains(wgpu::TextureUsages::TEXTURE_BINDING),
+                render_target: usage.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+                copy_src: usage.contains(wgpu::TextureUsages::COPY_SRC),
+            },
+        })
+    }
+
+    fn has_sampler(&self, id: SamplerId) -> bool {
+        self.samplers.contains_key(id)
+    }
+
+    fn pipeline_info(&self, id: PipelineId) -> Option<PipelineInfo<'_>> {
+        let pipeline = self.pipelines.get(id)?;
+        Some(PipelineInfo {
+            targets: pipeline.key.targets,
+            vertex_buffers: &pipeline.key.state.vertex_buffers,
+            bindings: &pipeline.bindings,
+        })
+    }
+
+    fn bind_group_entries(&self, id: BindGroupId) -> Option<&[BindGroupEntry]> {
+        self.bind_groups.get(id).map(Vec::as_slice)
+    }
+}
+
 impl Gpu for WebGpu {
     fn limits(&self) -> Limits {
         let limits = self.device.device().limits();
@@ -531,7 +620,8 @@ impl Gpu for WebGpu {
             texture_format(key.targets.color),
             key.targets.depth_stencil.map(texture_format),
         )?;
-        Ok(self.pipelines.insert(Pipeline { pipeline, shader }))
+        let bindings = shader_bindings(&shader)?;
+        Ok(self.pipelines.insert(Pipeline { pipeline, shader, key: key.clone(), bindings }))
     }
 
     fn destroy_pipeline(&mut self, pipeline: PipelineId) {
@@ -539,20 +629,7 @@ impl Gpu for WebGpu {
     }
 
     fn create_bind_group(&mut self, desc: &BindGroupDesc<'_>) -> Result<BindGroupId, GpuError> {
-        for entry in desc.entries {
-            match *entry {
-                BindGroupEntry::Buffer { buffer, .. } if !self.buffers.contains_key(buffer) => {
-                    return Err(GpuError::UnknownId("buffer"));
-                }
-                BindGroupEntry::Texture { texture, .. } if !self.textures.contains_key(texture) => {
-                    return Err(GpuError::UnknownId("texture"));
-                }
-                BindGroupEntry::Texture { sampler, .. } if !self.samplers.contains_key(sampler) => {
-                    return Err(GpuError::UnknownId("sampler"));
-                }
-                _ => {}
-            }
-        }
+        validation::check_bind_group(self, self.limits(), desc)?;
         Ok(self.bind_groups.insert(desc.entries.to_vec()))
     }
 
@@ -561,6 +638,9 @@ impl Gpu for WebGpu {
     }
 
     fn submit(&mut self, passes: &[Pass]) -> Result<(), GpuError> {
+        for pass in passes {
+            validation::check_pass(self, pass)?;
+        }
         let mut encoder =
             self.device.device().create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Gpu::submit") });
         for pass in passes {

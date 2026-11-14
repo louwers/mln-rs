@@ -1,5 +1,5 @@
 use mln_gfx::gpu::TextureId;
-use mln_gfx::gpu::conformance::{SIZE, clip_mask_and_background};
+use mln_gfx::gpu::conformance::{SIZE, clip_mask_and_background, invalid_calls};
 
 use crate::{Device, WebGpu};
 
@@ -40,4 +40,10 @@ fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     let mut gpu = WebGpu::new(&device);
     clip_mask_and_background(&mut gpu, |gpu, texture| read_back(&device, gpu, texture)).expect("the frame");
+}
+
+#[test]
+fn invalid_calls_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    invalid_calls(&mut WebGpu::new(&device)).expect("the valid calls");
 }

@@ -65,25 +65,63 @@ pub(crate) fn validated<T>(device: &wgpu::Device, create: impl FnOnce() -> T) ->
 /// doesn't parse goes as WGSL, for wgpu to report its error.
 #[cfg(not(target_family = "wasm"))]
 fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
-    use parking_lot::Mutex;
-
-    static PARSED: Mutex<Option<HashMap<String, wgpu::naga::Module>>> = Mutex::new(None);
-    let cached = PARSED.lock().get_or_insert_default().get(source).cloned();
-    let module = if let Some(module) = cached {
-        module
-    } else {
-        let Ok(module) = wgpu::naga::front::wgsl::parse_str(source) else {
-            return wgpu::ShaderSource::Wgsl(Cow::Borrowed(source));
-        };
-        PARSED.lock().get_or_insert_default().insert(source.to_owned(), module.clone());
-        module
-    };
-    wgpu::ShaderSource::Naga(Cow::Owned(module))
+    match parsed(source) {
+        Some(module) => wgpu::ShaderSource::Naga(Cow::Owned(module)),
+        None => wgpu::ShaderSource::Wgsl(Cow::Borrowed(source)),
+    }
 }
 
 #[cfg(target_family = "wasm")]
 fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
     wgpu::ShaderSource::Wgsl(Cow::Borrowed(source))
+}
+
+/// The module naga parses `source` to, parsed once a process; `None` for a
+/// source that doesn't parse.
+#[cfg(not(target_family = "wasm"))]
+fn parsed(source: &str) -> Option<wgpu::naga::Module> {
+    use parking_lot::Mutex;
+
+    static PARSED: Mutex<Option<HashMap<String, wgpu::naga::Module>>> = Mutex::new(None);
+    if let Some(module) = PARSED.lock().get_or_insert_default().get(source) {
+        return Some(module.clone());
+    }
+    let module = wgpu::naga::front::wgsl::parse_str(source).ok()?;
+    PARSED.lock().get_or_insert_default().insert(source.to_owned(), module.clone());
+    Some(module)
+}
+
+/// The bytes of each buffer that `sources` read, by group and binding: of a
+/// buffer that ends in an array of any length, up to its first element.
+#[cfg(not(target_family = "wasm"))]
+fn buffer_sizes(sources: &[&str]) -> Vec<((u32, u32), u64)> {
+    let mut sizes: Vec<((u32, u32), u64)> = Vec::new();
+    for module in sources.iter().filter_map(|source| parsed(source)) {
+        let mut layouter = wgpu::naga::proc::Layouter::default();
+        if layouter.update(module.to_ctx()).is_err() {
+            continue;
+        }
+        for (_, global) in module.global_variables.iter() {
+            let Some(binding) = &global.binding else { continue };
+            if !matches!(global.space, wgpu::naga::AddressSpace::Uniform | wgpu::naga::AddressSpace::Storage { .. }) {
+                continue;
+            }
+            let key = (binding.group, binding.binding);
+            let size = u64::from(layouter[global.ty].size);
+            match sizes.iter_mut().find(|(at, _)| *at == key) {
+                Some((_, known)) => *known = (*known).max(size),
+                None => sizes.push((key, size)),
+            }
+        }
+    }
+    sizes
+}
+
+/// None in a browser, where naga doesn't parse the sources; the browser's
+/// WebGPU keeps reads inside the bound ranges itself.
+#[cfg(target_family = "wasm")]
+fn buffer_sizes(_: &[&str]) -> Vec<((u32, u32), u64)> {
+    Vec::new()
 }
 
 fn is_space(b: u8) -> bool {
@@ -232,6 +270,8 @@ pub(crate) struct ShaderProgram {
     instance_attributes: VertexAttributeArray,
     texture_bindings: [Option<usize>; MAX_TEXTURE_COUNT_PER_SHADER],
     bindings_per_group: Vec<Vec<BindingInfo>>,
+    /// The bytes of each buffer the sources read (`buffer_sizes`).
+    buffer_sizes: Vec<((u32, u32), u64)>,
 }
 
 impl ShaderProgram {
@@ -305,6 +345,7 @@ impl ShaderProgram {
             instance_attributes: VertexAttributeArray::new(),
             texture_bindings: [None; MAX_TEXTURE_COUNT_PER_SHADER],
             bindings_per_group: groups.bindings,
+            buffer_sizes: buffer_sizes(&[vertex_source, fragment_source]),
         };
         for attr in attrs {
             program.init_attribute(attr);
@@ -336,6 +377,13 @@ impl ShaderProgram {
     /// The bindings of `group`, by binding.
     pub(crate) fn binding_infos(&self, group: u32) -> &[BindingInfo] {
         self.bind_group_order.iter().position(|&g| g == group).map_or(&[], |i| &self.bindings_per_group[i])
+    }
+
+    /// The bytes of the buffer at `binding` of `group` that the sources
+    /// read: of one that ends in an array of any length, up to its first
+    /// element. 0 where it isn't known, as in a browser.
+    pub(crate) fn buffer_size(&self, group: u32, binding: u32) -> u64 {
+        self.buffer_sizes.iter().find(|&&(at, _)| at == (group, binding)).map_or(0, |&(_, size)| size)
     }
 
     pub(crate) fn bind_group_layout(&self, group: u32) -> Option<&wgpu::BindGroupLayout> {
