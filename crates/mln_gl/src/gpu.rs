@@ -511,6 +511,12 @@ impl GlGpu {
 
     /// An import of the GL texture of `texture`, which this backend made.
     #[cfg(all(test, not(target_family = "wasm")))]
+    /// How many framebuffers the `GlGpu` made and keeps.
+    #[cfg(test)]
+    pub(crate) fn framebuffer_count(&self) -> usize {
+        self.framebuffers.len()
+    }
+
     pub(crate) fn import_again(&mut self, texture: TextureId) -> Option<TextureId> {
         let entry = self.textures.get(texture)?;
         let desc = TextureDesc { label: "imported", size: entry.size, format: entry.format, usage: entry.usage };

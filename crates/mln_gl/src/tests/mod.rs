@@ -5,3 +5,6 @@ mod glsl_compile_test;
 // `GlGpu` rejects.
 #[cfg(not(target_arch = "wasm32"))]
 mod gpu_test;
+// A borrowed ring's imports and framebuffers across frames.
+#[cfg(not(target_arch = "wasm32"))]
+mod borrowed_target_test;

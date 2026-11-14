@@ -69,13 +69,17 @@ fn host_texture(name: u32) -> Result<glow::NativeTexture, Error> {
 pub struct BorrowedTarget {
     backend: Rc<RendererBackend>,
     textures: RefCell<BorrowedTextures>,
-    /// The frame's textures, imported into the backend's `GlGpu`.
-    image: FrameImports,
-    /// The slot that `image` is of.
-    imported_slot: Cell<usize>,
+    /// Each slot's textures, imported into the backend's `GlGpu` at the
+    /// first frame drawn into the slot, until the ring's textures are
+    /// replaced or the target goes, so that the `GlGpu` keeps the slot's
+    /// framebuffer. Whether the depth and stencil texture is imported too,
+    /// rather than the target's own.
+    imports: RefCell<Vec<Option<(FrameImage, bool)>>>,
+    /// The slot of the frame begun, until it ends.
+    begun: Cell<Option<usize>>,
     /// The target's own depth and stencil texture, of the backend's
     /// `GlGpu`, where the host gave none.
-    depth_stencil: Cell<Option<(TextureId, Size)>>,
+    depth_stencil: Cell<Option<TextureId>>,
     selected: Cell<usize>,
     producer: SyncKind,
     /// The fence of each slot's last frame, which the host may wait on
@@ -99,8 +103,8 @@ impl BorrowedTarget {
         Ok(BorrowedTarget {
             backend,
             textures: RefCell::new(textures),
-            image: FrameImports::default(),
-            imported_slot: Cell::new(0),
+            imports: RefCell::new(vec![None; depth]),
+            begun: Cell::new(None),
             depth_stencil: Cell::new(None),
             selected: Cell::new(0),
             producer,
@@ -125,10 +129,18 @@ impl BorrowedTarget {
         }
     }
 
-    /// Destroys the target's own depth and stencil texture.
-    fn delete_depth_stencil(&self) {
-        if let Some((texture, _)) = self.depth_stencil.take() {
-            self.backend.gpu().destroy_texture(texture);
+    /// Forgets the slots' imports, and destroys the target's own depth and
+    /// stencil texture.
+    fn forget_imports(&self) {
+        let mut gpu = self.backend.gpu();
+        for (image, depth_imported) in self.imports.borrow_mut().iter_mut().filter_map(Option::take) {
+            let depth_stencil = image.depth_stencil.filter(|_| depth_imported);
+            for texture in [Some(image.color), depth_stencil].into_iter().flatten() {
+                gpu.destroy_texture(texture);
+            }
+        }
+        if let Some(texture) = self.depth_stencil.take() {
+            gpu.destroy_texture(texture);
         }
     }
 
@@ -183,20 +195,31 @@ impl BorrowedTarget {
             self.delete_fence(slot);
         }
         // A frame begun on the old ring draws into the new one.
-        self.image.release(&self.backend);
-        self.delete_depth_stencil();
+        self.begun.set(None);
+        self.forget_imports();
         *self.textures.borrow_mut() = textures;
         Ok(())
     }
 }
 
 impl BorrowedTarget {
-    /// The selected texture and its depth and stencil texture, the host's
+    /// The textures of `slot`, imported at its first frame.
+    fn slot_image(&self, slot: usize) -> Result<FrameImage, Error> {
+        if let Some(Some((image, _))) = self.imports.borrow().get(slot) {
+            return Ok(*image);
+        }
+        let imported = self.import(slot)?;
+        if let Some(entry) = self.imports.borrow_mut().get_mut(slot) {
+            *entry = Some(imported);
+        }
+        Ok(imported.0)
+    }
+
+    /// The texture at `slot` and its depth and stencil texture, the host's
     /// imported into the backend's `GlGpu` or the target's own, and whether
     /// the depth is imported.
-    fn import(&self) -> Result<(FrameImage, bool), Error> {
+    fn import(&self, slot: usize) -> Result<(FrameImage, bool), Error> {
         let textures = self.textures.borrow();
-        let slot = self.selected.get();
         let size = textures.size;
         let desc = |label, format| TextureDesc {
             label,
@@ -206,16 +229,17 @@ impl BorrowedTarget {
         };
         let color = host_texture(*textures.textures.get(slot).ok_or_else(|| Error::invalid_argument("no such slot"))?)?;
         let host_depth = textures.depth_textures.get(slot).map(|&depth| host_texture(depth)).transpose()?;
-        if host_depth.is_none() && self.depth_stencil.get().is_none_or(|(_, own_size)| own_size != size) {
-            self.delete_depth_stencil();
+        // Of the ring's size, which its textures keep until they are
+        // replaced.
+        if host_depth.is_none() && self.depth_stencil.get().is_none() {
             let depth = self.backend.gpu().create_texture(&desc("borrowed ring depth and stencil", DEPTH_STENCIL));
-            self.depth_stencil.set(Some((depth.map_err(|error| Error::native(error.to_string()))?, size)));
+            self.depth_stencil.set(Some(depth.map_err(|error| Error::native(error.to_string()))?));
         }
         let mut gpu = self.backend.gpu();
         let color = gpu.import_texture(color, &desc("borrowed texture", COLOR));
         let (depth_stencil, imported) = match (host_depth, self.depth_stencil.get()) {
             (Some(depth), _) => (gpu.import_texture(depth, &desc("borrowed depth", DEPTH_STENCIL)), true),
-            (None, Some((depth, _))) => (depth, false),
+            (None, Some(depth)) => (depth, false),
             (None, None) => return Err(Error::native("the ring has no depth and stencil texture")),
         };
         let targets = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
@@ -225,21 +249,18 @@ impl BorrowedTarget {
 
 impl FrameTarget for BorrowedTarget {
     fn begin_frame(&self) -> Option<FrameImage> {
-        // A slot was selected since the frame began.
-        if self.imported_slot.get() != self.selected.get() {
-            self.image.release(&self.backend);
-        }
-        self.imported_slot.set(self.selected.get());
-        self.image.get_or_import(|| {
-            self.import().inspect_err(|error| Log::error(Event::GraphicsBackend, error.message.clone())).ok()
-        })
+        let slot = self.selected.get();
+        self.begun.set(None);
+        let image =
+            self.slot_image(slot).inspect_err(|error| Log::error(Event::GraphicsBackend, error.message.clone())).ok()?;
+        self.begun.set(Some(slot));
+        Some(image)
     }
 
     fn end_frame(&self) -> Handoff {
-        if !self.image.release(&self.backend) {
+        let Some(slot) = self.begun.take() else {
             return Handoff::Dropped;
-        }
-        let slot = self.selected.get();
+        };
         self.delete_fence(slot);
         // Mesa marks a depth texture that a framebuffer rendered into as
         // compressed, for another context that samples it to decompress it
@@ -276,8 +297,7 @@ impl Drop for BorrowedTarget {
         for slot in 0..self.depth() {
             self.delete_fence(slot);
         }
-        self.image.release(&self.backend);
-        self.delete_depth_stencil();
+        self.forget_imports();
     }
 }
 
