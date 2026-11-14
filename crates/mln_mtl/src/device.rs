@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use mln_gfx::ExportKinds;
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use objc2::rc::Retained;
 use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
 
@@ -25,7 +26,7 @@ pub struct Device {
 impl Device {
     /// The library's device: the GPU at `adapter_index` in
     /// `MTLCopyAllDevices` order on macOS, or the system's default GPU when
-    /// `None`, with a command queue of its own.
+    /// `None`, with a command queue of its own. It logs the GPU it is on.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is
     /// no GPU at `adapter_index`, with
@@ -48,6 +49,7 @@ impl Device {
             }
         };
         let queue = device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
+        Log::info(Event::Render, format!("graphics device uses Metal device {}", device.name()));
         Ok(Device { device, queue, host_queue: false, export_kinds: Arc::default() })
     }
 

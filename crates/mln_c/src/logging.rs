@@ -231,10 +231,11 @@ mod tests {
     use crate::delivery::{mln_delivery_queue_dispatch, mln_delivery_queue_release};
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
-        MLN_LOG_EVENT_GENERAL, MLN_LOG_EVENT_TIMING, MLN_LOG_SEVERITY_FLAG_ERROR, MLN_LOG_SEVERITY_FLAG_INFO,
-        MLN_LOG_SEVERITY_FLAG_WARNING, MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_OK,
-        mln_delivery_queue,
+        MLN_LOG_EVENT_GENERAL, MLN_LOG_EVENT_RENDER, MLN_LOG_EVENT_TIMING, MLN_LOG_SEVERITY_FLAG_ERROR,
+        MLN_LOG_SEVERITY_FLAG_INFO, MLN_LOG_SEVERITY_FLAG_WARNING, MLN_STATUS_INVALID_ARGUMENT,
+        MLN_STATUS_INVALID_STATE, MLN_STATUS_OK, mln_delivery_queue,
     };
+    use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_release};
 
     const NULL_DIAGNOSTIC: *mut mln_diagnostic = core::ptr::null_mut();
 
@@ -510,5 +511,28 @@ mod tests {
         assert_eq!(probe.records().len(), 3);
         assert_eq!(clear(), MLN_STATUS_OK);
         assert!(!handled(EventSeverity::Warning));
+    }
+
+    #[test]
+    fn a_library_device_logs_the_gpu_it_is_on() {
+        let _state = LogState::take();
+        assert_eq!(set_async(0), MLN_STATUS_OK);
+        let probe = Probe::new("graphics device uses ", false);
+        assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
+        let mut device = 0;
+        // SAFETY: null options, a local handle and a null diagnostic.
+        if unsafe { mln_gpu_device_create(core::ptr::null(), &raw mut device, NULL_DIAGNOSTIC) } != MLN_STATUS_OK {
+            eprintln!("skipped: no GPU device");
+            return;
+        }
+        mln_gpu_device_release(device);
+        // Other tests' devices log on their own threads.
+        let here = std::thread::current().id();
+        let records: Vec<_> = probe.records().into_iter().filter(|seen| seen.thread == here).collect();
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(
+            (records[0].severity, records[0].event, records[0].code),
+            (MLN_LOG_SEVERITY_INFO, MLN_LOG_EVENT_RENDER, -1)
+        );
     }
 }

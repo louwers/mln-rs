@@ -431,9 +431,19 @@ impl FixtureLog {
 
     /// Counts the matching records, and marks them checked.
     pub(crate) fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
+        self.count_where(severity, event, code, |m| m == msg)
+    }
+
+    /// Counts the matching records whose message contains `msg` (C++'s
+    /// `count` with `substring`), and marks them checked.
+    pub(crate) fn count_containing(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
+        self.count_where(severity, event, code, |m| m.contains(msg))
+    }
+
+    fn count_where(&self, severity: EventSeverity, event: Event, code: i64, matches: impl Fn(&str) -> bool) -> usize {
         let mut count = 0;
         for ((s, e, c, m), checked) in self.messages.lock().iter_mut() {
-            if *s == severity && *e == event && *c == code && m == msg {
+            if *s == severity && *e == event && *c == code && matches(m) {
                 *checked = true;
                 count += 1;
             }

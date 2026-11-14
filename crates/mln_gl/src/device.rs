@@ -169,12 +169,32 @@ fn create_pbuffer(egl: &Egl, display: egl::Display, config: egl::Config) -> Resu
         .map_err(|e| format!("Could not create surface: {e}"))
 }
 
+/// The EGL platform of the library's display.
+#[derive(Clone, Copy)]
+enum EglPlatform {
+    /// Mesa's surfaceless platform, which needs no window system.
+    Surfaceless,
+    /// The default display.
+    Default,
+}
+
+impl EglPlatform {
+    /// The platform as a device's log record gives it.
+    fn name(self) -> &'static str {
+        match self {
+            EglPlatform::Surfaceless => "surfaceless",
+            EglPlatform::Default => "default",
+        }
+    }
+}
+
 /// The EGL library and its display (`EGLDisplayConfig`), which every
 /// library device of the process shares, and its config for each API. The
 /// display stays initialized.
 struct EglDisplay {
     egl: &'static Egl,
     display: egl::Display,
+    platform: EglPlatform,
     /// The display's config of each API, found when first asked.
     configs: [OnceLock<Result<egl::Config, String>>; 2],
 }
@@ -197,18 +217,19 @@ impl EglDisplay {
             egl.query_string(None, egl::EXTENSIONS).ok().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let surfaceless = client_extensions.split(' ').any(|e| e == "EGL_MESA_platform_surfaceless");
         // SAFETY: the default native display is valid on every platform.
-        let display = unsafe {
+        let (display, platform) = unsafe {
             match egl.upcast::<egl::EGL1_5>() {
                 Some(egl15) if surfaceless => egl15
                     .get_platform_display(PLATFORM_SURFACELESS_MESA, egl::DEFAULT_DISPLAY, &[egl::ATTRIB_NONE])
-                    .ok(),
+                    .ok()
+                    .map(|display| (display, EglPlatform::Surfaceless)),
                 _ => None,
             }
-            .or_else(|| egl.get_display(egl::DEFAULT_DISPLAY))
+            .or_else(|| egl.get_display(egl::DEFAULT_DISPLAY).map(|display| (display, EglPlatform::Default)))
         }
         .ok_or("Failed to obtain a valid EGL display.")?;
         egl.initialize(display).map_err(|e| format!("eglInitialize() failed: {e}"))?;
-        Ok(EglDisplay { egl, display, configs: [OnceLock::new(), OnceLock::new()] })
+        Ok(EglDisplay { egl, display, platform, configs: [OnceLock::new(), OnceLock::new()] })
     }
 
     /// The display's config of `api`, or why it has none.
@@ -455,7 +476,7 @@ impl std::fmt::Debug for Device {
 impl Device {
     /// The library's device on EGL's display: a share group of contexts of
     /// `options.api`, or one such context. On Windows, a share group of WGL's
-    /// desktop OpenGL contexts.
+    /// desktop OpenGL contexts. It logs the platform it is on.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when there
     /// is no EGL, or no display or config of the API for it, and on Windows
@@ -472,7 +493,9 @@ impl Device {
             if single_context {
                 return Err(Error::unsupported("the sessions of a WGL device have a context each"));
             }
-            crate::wgl::Group::library().map(|group| Device::of(Kind::Wgl(group)))
+            let group = crate::wgl::Group::library()?;
+            Log::info(Event::Render, "graphics device uses WGL");
+            Ok(Device::of(Kind::Wgl(group)))
         }
         #[cfg(not(windows))]
         Self::egl_library(api, single_context)
@@ -482,28 +505,31 @@ impl Device {
     fn egl_library(api: Api, single_context: bool) -> Result<Device, Error> {
         let display = EglDisplay::get().map_err(Error::unsupported)?;
         let config = display.config(api).map_err(Error::unsupported)?;
-        let EglDisplay { egl, display: egl_display, .. } = *display;
+        let EglDisplay { egl, display: egl_display, platform, .. } = *display;
         let context =
             create_context(egl, egl_display, config, None, api, api.context_attributes()).map_err(Error::native)?;
-        if !single_context {
-            return Ok(Device::of(Kind::Library(ShareGroup { display, config, api, root: context })));
-        }
-        let surface = match create_pbuffer(egl, egl_display, config) {
-            Ok(surface) => surface,
-            Err(e) => {
-                let _ = egl.destroy_context(egl_display, context);
-                return Err(Error::native(e));
-            }
+        let kind = if single_context {
+            let surface = match create_pbuffer(egl, egl_display, config) {
+                Ok(surface) => surface,
+                Err(e) => {
+                    let _ = egl.destroy_context(egl_display, context);
+                    return Err(Error::native(e));
+                }
+            };
+            Kind::Single(Arc::new(SingleContext {
+                display,
+                api,
+                context,
+                surface,
+                turn: Mutex::default(),
+                free: Condvar::new(),
+                users: AtomicU64::new(0),
+            }))
+        } else {
+            Kind::Library(ShareGroup { display, config, api, root: context })
         };
-        Ok(Device::of(Kind::Single(Arc::new(SingleContext {
-            display,
-            api,
-            context,
-            surface,
-            turn: Mutex::default(),
-            free: Condvar::new(),
-            users: AtomicU64::new(0),
-        }))))
+        Log::info(Event::Render, format!("graphics device uses the EGL {} platform", platform.name()));
+        Ok(Device::of(kind))
     }
 
     /// The host's share group, whose root is `context`, of `config` on

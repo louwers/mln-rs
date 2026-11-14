@@ -22,6 +22,7 @@
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
+use std::sync::Once;
 
 use glow::HasContext;
 use mln_gfx::backend::Type as BackendType;
@@ -125,6 +126,17 @@ pub(crate) struct Context {
     clip_masks: RefCell<ClipMasks>,
 }
 
+/// Logs the GPU that `gl`'s context renders on, once per process, as C++'s
+/// context does when it loads its extensions. The context must be current.
+fn log_gpu_identifier(gl: &Gl) {
+    static LOGGED: Once = Once::new();
+    LOGGED.call_once(|| {
+        // SAFETY: the context is current.
+        let renderer = unsafe { gl.get_parameter_string(glow::RENDERER) };
+        Log::info(Event::General, format!("GPU Identifier: {renderer}"));
+    });
+}
+
 /// The stencil mode that draws a clipping mask, writing `stencil_ref`.
 fn clip_mask_stencil_mode(stencil_ref: i32) -> StencilMode {
     StencilMode {
@@ -159,6 +171,7 @@ impl Context {
             // SAFETY: a capability of OpenGL 3.0.
             unsafe { gl.enable(glow::FRAMEBUFFER_SRGB) };
         }
+        log_gpu_identifier(gl);
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
