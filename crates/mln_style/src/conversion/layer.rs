@@ -1,3 +1,5 @@
+use mln_util::logging::{Event, Log};
+
 use super::{Convertible, Error};
 use crate::layer::{Layer, PropertyScope, layer_type_info};
 use crate::layermanager::LayerManager;
@@ -12,15 +14,61 @@ fn set_object_member(layer: &mut Box<dyn Layer>, value: &Convertible<'_>, member
     true
 }
 
-pub(crate) fn set_paint_properties(layer: &mut dyn Layer, value: &Convertible<'_>) -> Option<Error> {
+/// What converting a layer does with a layout or paint property that it can't
+/// set: the layer doesn't take the property, or the value doesn't fit it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InvalidProperty {
+    /// The conversion fails with the property's error.
+    Fail,
+    /// The conversion warns with the property's error and leaves the property
+    /// unset, as a style load does.
+    Skip,
+}
+
+/// Sets each member of the object `properties` (the layer's `layout` or
+/// `paint`) as a property of `layer`.
+fn set_properties(
+    layer: &mut dyn Layer,
+    properties: &Convertible<'_>,
+    scope: PropertyScope,
+    invalid: InvalidProperty,
+) -> Option<Error> {
+    properties.each_member(|name, value| {
+        let error = layer.set_property(name, value, Some(scope))?;
+        match invalid {
+            InvalidProperty::Fail => Some(error),
+            InvalidProperty::Skip => {
+                Log::warning(Event::ParseStyle, &error.message);
+                None
+            }
+        }
+    })
+}
+
+pub(crate) fn set_paint_properties(
+    layer: &mut dyn Layer,
+    value: &Convertible<'_>,
+    invalid: InvalidProperty,
+) -> Option<Error> {
     let paint_value = value.object_member("paint")?;
     if !paint_value.is_object() {
         return Some(Error::new(format!("layer '{}': paint must be an object", layer.get_id())));
     }
-    paint_value.each_member(|k, v| layer.set_property(k, v, Some(PropertyScope::Paint)))
+    set_properties(layer, &paint_value, PropertyScope::Paint, invalid)
 }
 
+/// Converts a [layer](https://maplibre.org/maplibre-style-spec/layers/). Fails
+/// on the first error, including a layout or paint property that the layer
+/// can't set.
 pub fn convert_layer(value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Layer>> {
+    convert_layer_with(value, error, InvalidProperty::Fail)
+}
+
+pub(crate) fn convert_layer_with(
+    value: &Convertible<'_>,
+    error: &mut Error,
+    invalid: InvalidProperty,
+) -> Option<Box<dyn Layer>> {
     if !value.is_object() {
         error.message = "layer must be an object".to_owned();
         return None;
@@ -68,14 +116,13 @@ pub fn convert_layer(value: &Convertible<'_>, error: &mut Error) -> Option<Box<d
             error.message = format!("layer '{id}': layout must be an object");
             return None;
         }
-        let error_ = layout_value.each_member(|k, v| layer.set_property(k, v, Some(PropertyScope::Layout)));
-        if let Some(error_) = error_ {
+        if let Some(error_) = set_properties(layer.as_mut(), &layout_value, PropertyScope::Layout, invalid) {
             *error = error_;
             return None;
         }
     }
 
-    if let Some(error_) = set_paint_properties(layer.as_mut(), value) {
+    if let Some(error_) = set_paint_properties(layer.as_mut(), value, invalid) {
         *error = error_;
         return None;
     }

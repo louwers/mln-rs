@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
+use feature::Value;
 use mln_util::logging::{Event, EventSeverity, Log};
 use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
 use crate::layer::FontStack;
 use crate::parser::Parser;
+use crate::style_property::Kind;
 
 fn fixtures_dir() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/style_parser")
@@ -354,4 +356,52 @@ fn deepest_admitted_style_parses_on_a_1_mib_stack() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+/// A layout or paint property that a layer can't set is skipped with a
+/// warning; the layer keeps its other properties. That holds for a layer that
+/// refers to another with `ref` too.
+#[test]
+fn invalid_properties_are_skipped() {
+    let log = FixtureLog::new();
+    let mut parser = Parser::default();
+    parser
+        .parse(
+            r#"{
+        "version": 8,
+        "sources": {"s": {"type": "geojson", "data": {"type": "FeatureCollection", "features": []}}},
+        "layers": [
+            {"id": "a", "type": "circle", "source": "s",
+             "layout": {"visibility": "maybe", "circle-sort-key": 1},
+             "paint": {"circle-color": "not a color", "circle-foo": 1, "circle-radius": 5}},
+            {"id": "b", "ref": "a", "paint": {"circle-opacity": "opaque", "circle-radius": 7}}
+        ]
+    }"#,
+        )
+        .unwrap();
+
+    let ids: Vec<_> = parser.layers.iter().map(|layer| layer.get_id()).collect();
+    assert_eq!(ids, ["a", "b"]);
+    let property = |layer: usize, name: &str| {
+        let property = parser.layers[layer].get_property(name);
+        (property.get_kind(), property.get_value().clone())
+    };
+    assert_eq!(property(0, "circle-radius"), (Kind::Constant, Value::Double(5.0)));
+    assert_eq!(property(0, "circle-sort-key"), (Kind::Constant, Value::Double(1.0)));
+    assert_eq!(property(0, "circle-color").0, Kind::Undefined);
+    assert_eq!(property(0, "visibility").0, Kind::Undefined);
+    assert_eq!(property(1, "circle-radius"), (Kind::Constant, Value::Double(7.0)));
+    assert_eq!(property(1, "circle-opacity").0, Kind::Undefined);
+
+    let mut warnings: Vec<_> = log.messages().into_iter().map(|message| message.msg).collect();
+    warnings.sort();
+    assert_eq!(
+        warnings,
+        [
+            "layer 'a' doesn't support property 'circle-foo'",
+            "value must be a number",
+            "value must be a valid color",
+            "value must be a valid enumeration value",
+        ],
+    );
 }

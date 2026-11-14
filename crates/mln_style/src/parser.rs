@@ -11,7 +11,7 @@ use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
-use crate::conversion::layer::{convert_layer, set_paint_properties};
+use crate::conversion::layer::{InvalidProperty, convert_layer_with, set_paint_properties};
 use crate::conversion::{Converter, convert, convert_source};
 use crate::expression::GlobalStateMap;
 use crate::layer::{FontStack, Layer};
@@ -418,14 +418,15 @@ fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack
         };
 
         let mut layer = reference.clone_ref(id);
-        // C++ ignores the returned error.
-        let _ = set_paint_properties(layer.as_mut(), &Convertible::from(value));
+        if let Some(error) = set_paint_properties(layer.as_mut(), &Convertible::from(value), InvalidProperty::Skip) {
+            Log::warning(Event::ParseStyle, &error.message);
+        }
         if let Some(entry) = layers_map.get_mut(id) {
             entry.layer = Some(layer);
         }
     } else {
         let mut error = Error::default();
-        let Some(converted) = convert_layer(&Convertible::from(value), &mut error) else {
+        let Some(converted) = convert_layer_with(&Convertible::from(value), &mut error, InvalidProperty::Skip) else {
             Log::warning(Event::ParseStyle, &error.message);
             return;
         };
