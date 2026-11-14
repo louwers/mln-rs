@@ -19,6 +19,7 @@ use mln_renderer::{
 };
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
+use mln_style::projection::Projection;
 use mln_style::source::Source;
 use mln_style::sprite::Sprite;
 use mln_style::{Style, StyleLoadError};
@@ -143,6 +144,8 @@ pub struct Map {
     /// The stats of the last frame the renderer finished.
     last_frame_stats: Option<Arc<RenderingStats>>,
     style: Style,
+    /// The style's projection as the transform last took it.
+    shared_projection: Option<Projection>,
     /// The state of the sources' features, which each update carries.
     feature_state: FeatureStateStore,
 
@@ -229,6 +232,7 @@ impl Map {
             rendering_stats_view: None,
             last_frame_stats: None,
             style,
+            shared_projection: None,
             feature_state: FeatureStateStore::default(),
             camera_mutated: false,
             // util::DEFAULT_PREFETCH_ZOOM_DELTA
@@ -595,7 +599,14 @@ impl Map {
     /// Gives the transform the style's current projection, which constrains
     /// the target of an animation it starts.
     fn share_projection_with_transform(&mut self) {
-        let projection = (self.mode != MapMode::Tile).then(|| Arc::clone(&self.style.impl_.get_projection().impl_));
+        let projection = self.style.impl_.get_projection();
+        // A change to the projection replaces its `impl_`, so the transform
+        // keeps its function while the `impl_` is the same.
+        if self.shared_projection.as_ref().is_some_and(|shared| Arc::ptr_eq(&shared.impl_, &projection.impl_)) {
+            return;
+        }
+        self.shared_projection = Some(projection.clone());
+        let projection = (self.mode != MapMode::Tile).then(|| Arc::clone(&projection.impl_));
         self.transform.set_projection_for_zoom(Some(Rc::new(move |zoom: f64| match &projection {
             Some(projection) => projection.evaluate(zoom as f32),
             None => ProjectionDefinition::new(ProjectionType::Mercator),
