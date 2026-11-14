@@ -15,11 +15,11 @@ use crate::error::Error;
 use crate::generated::types::{
     MLN_FEATURE_ID_TYPE_DOUBLE, MLN_FEATURE_ID_TYPE_INT, MLN_FEATURE_ID_TYPE_STRING, MLN_FEATURE_ID_TYPE_UINT,
     MLN_FEATURE_STATE_SELECTOR_FEATURE_ID, MLN_MAP_MODE_CONTINUOUS, MLN_MAP_MODE_STATIC, MLN_MAP_MODE_TILE,
-    MLN_MAP_OPTION_EVENT_MASK, MLN_MAP_OPTION_TILE_CACHE_ENABLED, MLN_TILE_LOD_MODE_DEFAULT,
-    MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view, mln_camera_bounds, mln_completion, mln_diagnostic,
-    mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds, mln_logical_extent, mln_map, mln_map_options,
-    mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime, mln_runtime_event_flags, mln_status,
-    mln_vec3,
+    MLN_MAP_OPTION_EVENT_MASK, MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED, MLN_MAP_OPTION_TILE_CACHE_ENABLED,
+    MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view, mln_camera_bounds, mln_completion,
+    mln_diagnostic, mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds, mln_logical_extent, mln_map,
+    mln_map_options, mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime, mln_runtime_event_flags,
+    mln_status, mln_vec3,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::runtime::{self, MapHandles};
@@ -126,7 +126,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
     let options = unsafe { abi::read_sized(options) }?;
     let fields = abi::Fields::new(
         options.fields,
-        MLN_MAP_OPTION_EVENT_MASK | MLN_MAP_OPTION_TILE_CACHE_ENABLED,
+        MLN_MAP_OPTION_EVENT_MASK | MLN_MAP_OPTION_TILE_CACHE_ENABLED | MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED,
         "mln_map_options.fields",
     )?;
     let event_mask = match fields.get(MLN_MAP_OPTION_EVENT_MASK, options.event_mask) {
@@ -167,6 +167,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         },
         event_mask,
         fallback_font_faces,
+        system_fonts: fields.get(MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED, options.system_fonts_enabled).unwrap_or(true),
         tile_cache_enabled: fields.get(MLN_MAP_OPTION_TILE_CACHE_ENABLED, options.tile_cache_enabled).unwrap_or(true),
     };
     Ok((options, extent.scale_factor))
@@ -828,6 +829,19 @@ pub(crate) mod tests {
         // SAFETY: the rejected calls left the user data with the caller.
         unsafe { (waiter.descriptor.release_user_data.unwrap())(waiter.descriptor.user_data) };
         release(runtime);
+    }
+
+    #[test]
+    fn system_fonts_are_on_unless_the_options_turn_them_off() {
+        let read = |options: mln_map_options| {
+            // SAFETY: local options without views.
+            let (options, _) = unsafe { map_options(&raw const options) }.unwrap();
+            options.system_fonts
+        };
+        assert!(read(options(1.0)));
+        let off = mln_map_options { fields: MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED, ..options(1.0) };
+        assert!(!read(off));
+        assert!(read(mln_map_options { system_fonts_enabled: true, ..off }));
     }
 
     #[test]

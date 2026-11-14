@@ -40,8 +40,14 @@ pub struct MapOptions {
     pub event_mask: EventMask,
     /// JSON text of the font faces that the map falls back to for glyphs
     /// that the style's fonts lack, as `Style::set_fallback_font_faces`
-    /// takes it.
+    /// takes it. Without it, the map falls back to the system's fonts
+    /// unless `system_fonts` is off.
     pub fallback_font_faces: Option<String>,
+    /// Whether the map falls back to the system's fonts
+    /// (`mln_system_fonts::fallback_font_faces`) for CJK and the scripts that
+    /// need complex shaping, when `fallback_font_faces` is `None`. On by
+    /// default. The first map that uses them waits for them to be found.
+    pub system_fonts: bool,
     /// Whether the map's render sessions keep tiles in memory after they
     /// leave the view, so they show again without loading. On by default.
     pub tile_cache_enabled: bool,
@@ -53,6 +59,7 @@ impl Default for MapOptions {
             map: mln_map::MapOptions::default(),
             event_mask: EventMask::default(),
             fallback_font_faces: None,
+            system_fonts: true,
             tile_cache_enabled: true,
         }
     }
@@ -1363,10 +1370,12 @@ pub(crate) fn create(
         Ok(map) => map,
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };
-    if let Some(json) = &options.fallback_font_faces
-        && let Err(error) = map.style_mut().set_fallback_font_faces(json)
-    {
-        return outbox.resolve(resolver, Err(error));
+    if let Some(json) = &options.fallback_font_faces {
+        if let Err(error) = map.style_mut().set_fallback_font_faces(json) {
+            return outbox.resolve(resolver, Err(error));
+        }
+    } else if options.system_fonts {
+        map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
     let _ = published.updates.set(map.update_reader());
     let flush_scheduled = Arc::new(AtomicBool::new(false));

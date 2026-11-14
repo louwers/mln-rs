@@ -49,13 +49,13 @@ use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
+use crate::Args;
 use crate::backend::{Kind, WindowTarget};
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
 use crate::settings::Settings;
 use crate::styles::{self, Style};
 use crate::ui::{Action, Controls, Shown};
-use crate::{Args, system_fonts};
 
 /// What the render thread starts with.
 pub(crate) struct Launch {
@@ -86,9 +86,9 @@ pub(crate) fn run(launch: Launch) {
     inbox.set_waker(run_loop.handle());
 
     // Finds the system fonts while the surface and the map get ready.
-    let font_discovery = (!args.no_system_fonts)
-        .then(|| mln_util::thread::builder("font discovery").spawn(system_fonts::fallback_font_faces).ok())
-        .flatten();
+    if !args.no_system_fonts {
+        mln_system_fonts::prefetch();
+    }
 
     let framebuffer_size = Size::new(size.width, size.height);
     // Vsync unless benchmarking.
@@ -209,15 +209,15 @@ pub(crate) fn run(launch: Launch) {
         style_reported: false,
     };
 
-    if let Some(font_discovery) = font_discovery {
-        let faces = font_discovery.join().unwrap_or_default();
+    if !args.no_system_fonts {
+        let faces = mln_system_fonts::fallback_font_faces();
         if faces.is_empty() {
             Log::info(Event::Setup, "No system fonts found for complex scripts or CJK");
         } else {
             let families: Vec<&str> = faces.iter().map(|face| face.family.as_str()).collect();
             Log::info(Event::Setup, format!("Falling back to system fonts: {}", families.join(", ")));
         }
-        view.map.style_mut().set_fallback_font_face_list(system_fonts::into_font_faces(faces));
+        view.map.style_mut().set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
     let style = view.style.clone();
     view.load_style(style);

@@ -19,7 +19,7 @@
 // view.rs), --quit-after SECONDS, --gesture-test (scripted input through the
 // view's handlers) and --no-system-fonts: without it, the map falls back to
 // system fonts for the scripts that its glyph PBFs can't shape, and for CJK
-// (system_fonts.rs).
+// (mln_system_fonts).
 
 mod backend;
 #[cfg(target_os = "linux")]
@@ -32,7 +32,6 @@ mod metal_overlay;
 mod overlay;
 mod settings;
 mod styles;
-mod system_fonts;
 mod ui;
 mod view;
 #[cfg(not(target_vendor = "apple"))]

@@ -1,0 +1,35 @@
+[package]
+name = "mln-rs-system-fonts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_system_fonts"
+# The doc comments have no examples to run.
+doctest = false
+
+[dependencies]
+mln_text.workspace = true
+mln_util.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+fontdb.workspace = true
+skrifa.workspace = true
+sys-locale.workspace = true
+
+# fontconfig, loaded at run time.
+[target.'cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))'.dependencies]
+libloading.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

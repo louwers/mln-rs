@@ -72,6 +72,7 @@ mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version
 mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.11" }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.11" }
 mln_style_types = { package = "mln-rs-style-types", path = "crates/mln_style_types", version = "=0.0.11" }
+mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.11" }
 mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.11" }
 mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.11" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.11" }
@@ -208,6 +209,7 @@ serde_json = { version = "1.0.154", features = [
   "preserve_order",
 ] }
 skrifa = { version = "0.49.0" }
+sys-locale = { version = "0.3.2" }
 # tools/render-test's --shuffle order for a --seed. tempfile already builds it.
 fastrand = { version = "2.5.0" }
 # Tests' temporary directories, which they don't share with test runs at the same time.
@@ -506,6 +508,7 @@ mln_storage = { workspace = true, features = ["sqlite"] }
 mln_storage_offline.workspace = true
 mln_style.workspace = true
 mln_style_types.workspace = true
+mln_system_fonts.workspace = true
 mln_text.workspace = true
 mln_tile.workspace = true
 mln_tile_id.workspace = true
