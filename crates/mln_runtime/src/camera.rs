@@ -99,42 +99,21 @@ pub(crate) fn camera_for(
 }
 
 pub(crate) fn set_viewport(map: &mut mln_map::Map, options: &ViewportOptions) {
-    if let Some(orientation) = options.north_orientation {
-        map.set_north_orientation(orientation);
-    }
-    if let Some(mode) = options.constrain_mode {
-        map.set_constrain_mode(mode);
-    }
-    if let Some(mode) = options.viewport_mode {
-        map.set_viewport_mode(mode);
-    }
-    if let Some(offset) = options.frustum_offset {
-        map.set_frustum_offset(&offset);
-    }
+    let mut viewport = map.snapshot().view.viewport;
+    viewport.north_orientation = options.north_orientation.unwrap_or(viewport.north_orientation);
+    viewport.constrain_mode = options.constrain_mode.unwrap_or(viewport.constrain_mode);
+    viewport.viewport_mode = options.viewport_mode.unwrap_or(viewport.viewport_mode);
+    viewport.frustum_offset = options.frustum_offset.unwrap_or(viewport.frustum_offset);
+    map.set_viewport(&viewport);
 }
 
 pub(crate) fn set_tile_options(map: &mut mln_map::Map, options: &TileOptions) {
-    if let Some(delta) = options.prefetch_zoom_delta {
-        map.set_prefetch_zoom_delta(delta);
-    }
-    if let Some(radius) = options.lod_min_radius {
-        map.set_tile_lod_min_radius(radius);
-    }
-    if let Some(scale) = options.lod_scale {
-        map.set_tile_lod_scale(scale);
-    }
-    // Degrees don't round-trip through radians exactly, so the threshold that
-    // a snapshot reports converts to another angle: sending it back keeps the
-    // map's, rather than changing it a little.
-    if let Some(threshold) = options.lod_pitch_threshold
-        && threshold != mln_math::rad2deg(map.get_tile_lod_pitch_threshold())
-    {
-        map.set_tile_lod_pitch_threshold(mln_math::deg2rad(threshold));
-    }
-    if let Some(shift) = options.lod_zoom_shift {
-        map.set_tile_lod_zoom_shift(shift);
-    }
-    if let Some(mode) = options.lod_mode {
-        map.set_tile_lod_mode(mode);
-    }
+    let mut tile = map.snapshot().tile;
+    tile.prefetch_zoom_delta = options.prefetch_zoom_delta.unwrap_or(tile.prefetch_zoom_delta);
+    tile.lod_min_radius = options.lod_min_radius.unwrap_or(tile.lod_min_radius);
+    tile.lod_scale = options.lod_scale.unwrap_or(tile.lod_scale);
+    tile.lod_pitch_threshold = options.lod_pitch_threshold.unwrap_or(tile.lod_pitch_threshold);
+    tile.lod_zoom_shift = options.lod_zoom_shift.unwrap_or(tile.lod_zoom_shift);
+    tile.lod_mode = options.lod_mode.unwrap_or(tile.lod_mode);
+    map.set_tile_settings(&tile);
 }

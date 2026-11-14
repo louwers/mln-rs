@@ -27,12 +27,12 @@ pub trait GestureCamera {
 
 impl GestureCamera for Map {
     fn viewport(&self) -> ScreenCoordinate {
-        let size = self.get_map_options().size;
+        let size = self.get_transform_state().get_size();
         ScreenCoordinate::new(f64::from(size.width), f64::from(size.height))
     }
 
     fn camera(&self) -> CameraOptions {
-        self.get_camera_options(None)
+        self.get_transform_state().get_camera_options(None)
     }
 
     fn zoom_range(&self) -> (f64, f64) {

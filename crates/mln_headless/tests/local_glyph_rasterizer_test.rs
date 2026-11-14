@@ -132,6 +132,9 @@ fn no_local_with_content_insets() {
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.get_size();
     test.map.style_mut().load_json(&mixed_json());
+    // The style's camera applies before the jump, as C++'s synchronous load
+    // applies it.
+    test.map.process_events();
 
     // Expected image was created using center offset as in the line below -
     // content insets, with no pitch defined, should produce the same output.
@@ -153,6 +156,9 @@ fn no_local_with_content_insets_and_pitch() {
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.get_size();
     test.map.style_mut().load_json(&mixed_json());
+    // The style's camera applies before the jump, as C++'s synchronous load
+    // applies it.
+    test.map.process_events();
 
     // Expected image was verified using no-padding render, offsetted to right
     // using bitmap editor.

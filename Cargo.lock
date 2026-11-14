@@ -2866,6 +2866,7 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
+ "mln-rs-math",
  "mln-rs-pixelmatch",
  "mln-rs-renderer",
  "mln-rs-storage",

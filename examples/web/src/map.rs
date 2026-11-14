@@ -234,7 +234,7 @@ impl WebMap {
     /// The camera as `[latitude, longitude, zoom, bearing, pitch]`, in
     /// degrees but for the zoom.
     pub fn camera(&self) -> Vec<f64> {
-        let camera = self.map.get_camera_options(None);
+        let camera = CameraOptions::from(self.map.snapshot().view.camera);
         let center = camera.center.unwrap_or_default();
         vec![
             center.latitude(),
@@ -310,7 +310,7 @@ impl WebMap {
         self.map.set_pixel_ratio(pixel_ratio as f32).map_err(js_error)?;
         self.pixel_ratio = pixel_ratio;
         self.frontend.renderer.set_pixel_ratio(pixel_ratio as f32);
-        let size = self.map.get_map_options().size;
+        let size = self.map.snapshot().view.extent.size;
         self.frontend.target.resize(physical(size, pixel_ratio));
         Ok(())
     }
@@ -479,7 +479,7 @@ impl WebMap {
     /// Whether the style loaded and every tile and resource the map needs
     /// is loaded.
     pub fn is_fully_loaded(&self) -> bool {
-        self.loaded && self.map.is_fully_loaded()
+        self.loaded && self.map.snapshot().fully_loaded
     }
 
     /// Draws the map's latest update again with the next frame and copies

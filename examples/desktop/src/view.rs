@@ -223,7 +223,7 @@ pub(crate) fn run(launch: Launch) {
 
     view.run();
 
-    let camera = view.map.get_camera_options(None);
+    let camera = CameraOptions::from(view.map.snapshot().view.camera);
     let center = camera.center.unwrap_or_default();
     Log::info(
         Event::General,
@@ -572,7 +572,7 @@ impl View {
         }
         input.time = Some(now.saturating_duration_since(self.start).as_secs_f64());
 
-        let camera = self.map.get_camera_options(None);
+        let camera = CameraOptions::from(self.map.snapshot().view.camera);
         let style = self.map.style();
         let attributions: Vec<String> = style
             .get_sources()
@@ -586,17 +586,17 @@ impl View {
             styles: &self.styles,
             style: &self.style,
             style_name: &style_name,
-            loading: !self.map.is_fully_loaded(),
+            loading: !self.map.snapshot().fully_loaded,
             bearing: camera.bearing.unwrap_or_default(),
             pitch: camera.pitch.unwrap_or_default(),
             attributions: &attributions,
-            debug: self.map.get_debug(),
+            debug: self.map.snapshot().debug,
             globe: {
                 let style = self.map.style();
                 let type_ = style.get_projection().get_type();
                 type_.is_constant() && type_.as_constant().from == ProjectionType::Globe
             },
-            free_bearing: self.map.is_globe_free_bearing(),
+            free_bearing: self.map.snapshot().globe_free_bearing,
             backend: self.backend().kind(),
             status: &status,
         };
@@ -967,7 +967,7 @@ impl View {
         for action in actions {
             self.apply(action, time);
         }
-        let camera = self.map.get_camera_options(None);
+        let camera = CameraOptions::from(self.map.snapshot().view.camera);
         let center = camera.center.unwrap_or_default();
         Log::info(
             Event::General,

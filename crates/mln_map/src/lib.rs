@@ -14,10 +14,10 @@ mod rendering_stats_view;
 pub mod transform;
 
 pub use map::Map;
-pub use map_event::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderFrameStatus, RenderMode};
+pub use map_event::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderFrameStatus};
 pub use map_options::MapOptions;
 pub use map_projection::MapProjection;
-pub use map_snapshot::MapSnapshot;
+pub use map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 pub use mln_map_types::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
     CameraUpdateMode, CameraVelocity, ConstrainMode, FreeCameraOptions, GesturePhase, LogicalExtent, MapDebugOptions,
@@ -25,7 +25,7 @@ pub use mln_map_types::{
     ProjectionMode, TileLodMode, TransformState, TransitionEnd, TransitionOutcome, Viewport, ViewportMode,
 };
 pub use mln_renderer::{
-    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, OverscaledTileID, RendererEvents,
+    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, OverscaledTileID, RenderMode, RendererEvents,
     RenderingStats, SourceLayerID, TileOperation, Update, UpdateReader,
 };
 pub use mln_style::StyleLoadError;

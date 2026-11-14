@@ -1563,10 +1563,6 @@ impl Transform {
         self.constrain_position(self.state.get_scale());
     }
 
-    pub(crate) fn get_north_orientation(&self) -> NorthOrientation {
-        self.state.get_north_orientation()
-    }
-
     /// Moves the state to the position nearest its own at `scale` that the
     /// constrain mode allows.
     fn constrain_position(&mut self, scale: f64) {
@@ -1603,6 +1599,7 @@ impl Transform {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn get_projection_mode(&self) -> ProjectionMode {
         ProjectionMode::default()
             .with_axonometric(self.state.get_axonometric())

@@ -76,6 +76,13 @@ impl Impl {
         }
         Ok(Impl { frontend, file_source: Some(file_source), map, run_loop: run_loop.clone() })
     }
+
+    /// Changes the map's tile settings.
+    fn set_tile(&mut self, change: impl FnOnce(&mut mln_map::TileSettings)) {
+        let mut tile = self.map.snapshot().tile;
+        change(&mut tile);
+        self.map.set_tile_settings(&tile);
+    }
 }
 
 impl TestRunnerImpl for Impl {
@@ -91,6 +98,8 @@ impl TestRunnerImpl for Impl {
         );
         self.map.set_debug(mln_map::MapDebugOptions(metadata.debug.0));
         style_ops::load_json(self.map.style_mut(), &metadata.document_json);
+        // C++ parses a style as it loads: the operations after it see it.
+        self.map.process_events();
         Ok(())
     }
 
@@ -186,11 +195,13 @@ impl TestRunnerImpl for Impl {
 
     fn load_style_json(&mut self, json: &str) -> Result<(), MapError> {
         style_ops::load_json(self.map.style_mut(), json);
+        self.map.process_events();
         Ok(())
     }
 
     fn load_style_url(&mut self, url: &str) -> Result<(), MapError> {
         style_ops::load_url(self.map.style_mut(), url);
+        self.map.process_events();
         Ok(())
     }
 
@@ -296,29 +307,32 @@ impl TestRunnerImpl for Impl {
 
     // conformance: setTileLod* (Map::setTileLod*, glfw ported them).
     fn set_tile_lod_min_radius(&mut self, value: f64) -> Result<(), MapError> {
-        self.map.set_tile_lod_min_radius(value);
+        self.set_tile(|tile| tile.lod_min_radius = value);
         Ok(())
     }
 
     fn set_tile_lod_scale(&mut self, value: f64) -> Result<(), MapError> {
-        self.map.set_tile_lod_scale(value);
+        self.set_tile(|tile| tile.lod_scale = value);
         Ok(())
     }
 
+    /// The runner gives the threshold in radians, as C++ takes it.
     fn set_tile_lod_pitch_threshold(&mut self, value: f64) -> Result<(), MapError> {
-        self.map.set_tile_lod_pitch_threshold(value);
+        self.set_tile(|tile| tile.lod_pitch_threshold = mln_math::rad2deg(value));
         Ok(())
     }
 
     fn set_tile_lod_zoom_shift(&mut self, value: f64) -> Result<(), MapError> {
-        self.map.set_tile_lod_zoom_shift(value);
+        self.set_tile(|tile| tile.lod_zoom_shift = value);
         Ok(())
     }
 
     fn set_tile_lod_mode(&mut self, mode: crate::parser::TileLodMode) -> Result<(), MapError> {
-        self.map.set_tile_lod_mode(match mode {
-            crate::parser::TileLodMode::Default => mln_map::TileLodMode::Default,
-            crate::parser::TileLodMode::Distance => mln_map::TileLodMode::Distance,
+        self.set_tile(|tile| {
+            tile.lod_mode = match mode {
+                crate::parser::TileLodMode::Default => mln_map::TileLodMode::Default,
+                crate::parser::TileLodMode::Distance => mln_map::TileLodMode::Distance,
+            };
         });
         Ok(())
     }

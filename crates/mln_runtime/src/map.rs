@@ -509,7 +509,7 @@ impl Map {
         // The scale factor that a session attached later renders at.
         self.shared.scale_factor.store(scale_factor.to_bits(), Ordering::SeqCst);
         self.command(move |map| {
-            if map.get_map_options().size != size {
+            if map.snapshot().view.extent.size != size {
                 map.set_size(size)?;
             }
             map.set_pixel_ratio(scale_factor as f32)
@@ -843,7 +843,8 @@ impl Map {
                     // on every frame. That changes nothing, so it publishes
                     // no update, which a demand sent before would draw.
                     let pixel_ratio = scale_factor as f32;
-                    if entry.core.get_map_options().size == size && entry.core.get_pixel_ratio() == pixel_ratio {
+                    let extent = entry.core.snapshot().view.extent;
+                    if extent.size == size && extent.scale_factor == f64::from(pixel_ratio) {
                         return Ok(());
                     }
                     entry.core.set_size(size)?;

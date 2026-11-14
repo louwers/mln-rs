@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions};
+use mln_map::{CameraOptions, Map, MapMode, MapOptions, TileSettings};
 use mln_storage::Resource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::geo::LatLng;
@@ -14,6 +14,11 @@ use crate::support::*;
 
 /// Parses the leading, optionally signed, decimal integer of `s`, as
 /// `std::stoi` does.
+fn set_prefetch_zoom_delta(map: &RefCell<Map>, prefetch_zoom_delta: u8) {
+    let tile = TileSettings { prefetch_zoom_delta, ..map.borrow().snapshot().tile };
+    map.borrow_mut().set_tile_settings(&tile);
+}
+
 fn stoi(s: &str) -> i32 {
     let trimmed = s.trim_start();
     let end = trimmed
@@ -90,11 +95,11 @@ fn prefetch_tiles() {
     };
 
     // Check defaults, should be 4.
-    assert_eq!(map.borrow().get_prefetch_zoom_delta(), 4);
+    assert_eq!(map.borrow().snapshot().tile.prefetch_zoom_delta, 4);
     check_tiles_for_zoom(&map, 12, &[13, 13, 13, 13, 13, 13, 13, 13, 13, 9]);
 
     // Setting it to 0 disables prefetching.
-    map.borrow_mut().set_prefetch_zoom_delta(0);
+    set_prefetch_zoom_delta(&map, 0);
 
     // No prefetching, raster tiles will use ideal
     // tiles instead of the actual zoom level, that is
@@ -102,14 +107,14 @@ fn prefetch_tiles() {
     // not the same.
     check_tiles_for_zoom(&map, 10, &[11, 11, 11, 11, 11, 11, 11, 11, 11]);
 
-    map.borrow_mut().set_prefetch_zoom_delta(5);
+    set_prefetch_zoom_delta(&map, 5);
     check_tiles_for_zoom(&map, 12, &[13, 13, 13, 13, 13, 13, 13, 13, 13, 8]);
 
     // Should clamp at `minzoom`.
-    map.borrow_mut().set_prefetch_zoom_delta(20);
+    set_prefetch_zoom_delta(&map, 20);
     check_tiles_for_zoom(&map, 10, &[11, 11, 11, 11, 11, 11, 11, 11, 11, 0]);
 
     // Disabled again.
-    map.borrow_mut().set_prefetch_zoom_delta(0);
+    set_prefetch_zoom_delta(&map, 0);
     check_tiles_for_zoom(&map, 13, &[14, 14, 14, 14, 14, 14, 14, 14, 14]);
 }

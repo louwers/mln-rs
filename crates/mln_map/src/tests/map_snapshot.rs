@@ -13,11 +13,11 @@ use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
 
-use crate::map_snapshot::{CameraBounds, FreeCamera};
+use crate::map_snapshot::{CameraBounds, FreeCamera, TileSettings};
 use crate::{
     AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
     FreeCameraOptions, GesturePhase, Map, MapDebugOptions, MapMode, MapOptions, MapProjection, MapView,
-    NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, ViewportMode,
+    NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, Viewport, ViewportMode,
 };
 
 fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
@@ -70,15 +70,20 @@ fn snapshot_reports_every_member() {
     })
     .unwrap();
     map.set_debug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION);
-    map.set_prefetch_zoom_delta(2);
-    map.set_tile_lod_min_radius(2.5);
-    map.set_tile_lod_scale(1.5);
-    map.set_tile_lod_pitch_threshold(mln_math::deg2rad(45.0));
-    map.set_tile_lod_zoom_shift(-0.5);
-    map.set_tile_lod_mode(TileLodMode::Distance);
-    map.set_north_orientation(NorthOrientation::Rightwards);
-    map.set_viewport_mode(ViewportMode::FlippedY);
-    map.set_frustum_offset(&insets(1.0, 2.0, 3.0, 4.0));
+    map.set_tile_settings(&TileSettings {
+        prefetch_zoom_delta: 2,
+        lod_min_radius: 2.5,
+        lod_scale: 1.5,
+        lod_pitch_threshold: 45.0,
+        lod_zoom_shift: -0.5,
+        lod_mode: TileLodMode::Distance,
+    });
+    map.set_viewport(&Viewport {
+        north_orientation: NorthOrientation::Rightwards,
+        viewport_mode: ViewportMode::FlippedY,
+        frustum_offset: insets(1.0, 2.0, 3.0, 4.0),
+        ..map.snapshot().view.viewport
+    });
     map.set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(0.25).with_y_skew(0.5));
     map.enable_rendering_stats_view(true);
     map.apply_camera_delta(&CameraDelta { phase: GesturePhase::Begin, ..CameraDelta::default() }).unwrap();
@@ -142,10 +147,10 @@ fn snapshot_reports_every_member() {
     assert_near(camera.pitch, 20.0);
     assert_near(camera.roll, 5.0);
     assert_near(camera.fov, 40.0);
-    assert_eq!(CameraOptions::from(camera), map.get_camera_options(None));
+    assert_eq!(CameraOptions::from(camera), CameraOptions::from(map.snapshot().view.camera));
     assert_eq!(view.extent.size, Size::new(512, 256));
     assert_eq!(view.extent.scale_factor, 2.0);
-    assert_eq!(view.projection_mode, map.get_projection_mode());
+    assert_eq!(view.projection_mode, map.snapshot().view.projection_mode);
     assert_eq!(view.viewport.north_orientation, NorthOrientation::Rightwards);
     assert_eq!(view.viewport.constrain_mode, ConstrainMode::WidthAndHeight);
     assert_eq!(view.viewport.viewport_mode, ViewportMode::FlippedY);
@@ -176,15 +181,15 @@ fn generation_grows_with_each_change() {
     };
 
     map.snapshot();
-    map.get_camera_options(None);
     assert_changed(&map, false, "reading");
 
     map.jump_to(&CameraOptions { zoom: Some(3.0), ..Default::default() });
     assert_changed(&map, true, "jump_to");
-    map.set_tile_lod_scale(2.0);
-    assert_changed(&map, true, "set_tile_lod_scale");
-    map.set_tile_lod_scale(2.0);
-    assert_changed(&map, false, "set_tile_lod_scale to the same value");
+    let tile = TileSettings { lod_scale: 2.0, ..map.snapshot().tile };
+    map.set_tile_settings(&tile);
+    assert_changed(&map, true, "set_tile_settings");
+    map.set_tile_settings(&tile);
+    assert_changed(&map, false, "set_tile_settings to the same settings");
     map.set_debug(MapDebugOptions::OVERDRAW);
     assert_changed(&map, true, "set_debug");
     map.set_bounds(&BoundOptions { min_pitch: Some(10.0), ..Default::default() }).unwrap();
@@ -241,7 +246,7 @@ fn update_generation_counts_the_updates_published() {
     let (_reader, wakes) = count_wakes(&map);
 
     map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
-    map.set_prefetch_zoom_delta(1);
+    map.set_tile_settings(&TileSettings { prefetch_zoom_delta: 1, ..map.snapshot().tile });
     let published = wakes.load(Ordering::SeqCst);
     assert!(published >= 2);
     assert_eq!(map.update_generation(), before + published);
@@ -343,6 +348,7 @@ fn projection_from_a_globe_view_matches_the_map() {
     let run_loop = RunLoop::new();
     let mut map = map(MapOptions { size: Size::new(400, 300), ..Default::default() }, &run_loop);
     map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
+    map.process_events();
     // The globe lets the zoom fall below 0 toward a pole, and the center past
     // Mercator's latitudes.
     map.jump_to(&CameraOptions {

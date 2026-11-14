@@ -1,13 +1,12 @@
 mod support;
 
-use std::f64::consts::PI;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, Geometry};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions};
+use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, TileSettings};
 use mln_storage::ResourceOptions;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
@@ -15,6 +14,13 @@ use mln_style::layers::circle_layer::CircleLayer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
 use mln_util::geo::LatLngBounds;
 use support::*;
+
+/// Changes the map's tile settings.
+fn set_tile(map: &mut Map, change: impl FnOnce(&mut TileSettings)) {
+    let mut tile = map.snapshot().tile;
+    change(&mut tile);
+    map.set_tile_settings(&tile);
+}
 
 struct TileLODTest {
     _run_loop: RunLoop,
@@ -104,7 +110,7 @@ fn pitch(pitch: f64) -> CameraOptions {
 fn disabled() {
     let mut test = TileLODTest::new(&zoom(10.0));
 
-    test.map.set_tile_lod_pitch_threshold(PI);
+    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = 180.0);
 
     test.check_image("disabled", 4);
 }
@@ -114,13 +120,13 @@ fn disabled() {
 fn zoom_shift() {
     let mut test = TileLODTest::new(&zoom(12.0));
 
-    test.map.set_tile_lod_zoom_shift(4.0);
+    set_tile(&mut test.map, |tile| tile.lod_zoom_shift = 4.0);
     test.render();
     assert_eq!(test.tile_count(), 64);
 
     test.tile_count.store(0, Ordering::SeqCst);
 
-    test.map.set_tile_lod_zoom_shift(-4.0);
+    set_tile(&mut test.map, |tile| tile.lod_zoom_shift = -4.0);
     test.render();
     assert_eq!(test.tile_count(), 4);
 }
@@ -131,10 +137,10 @@ fn pitch_threshold() {
     let mut test = TileLODTest::new(&zoom(10.0));
 
     let threshold = 45.0;
-    test.map.set_tile_lod_zoom_shift(4.0);
-    test.map.set_tile_lod_min_radius(1.0);
-    test.map.set_tile_lod_scale(1.0);
-    test.map.set_tile_lod_pitch_threshold(threshold / 180.0 * PI);
+    set_tile(&mut test.map, |tile| tile.lod_zoom_shift = 4.0);
+    set_tile(&mut test.map, |tile| tile.lod_min_radius = 1.0);
+    set_tile(&mut test.map, |tile| tile.lod_scale = 1.0);
+    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = threshold);
 
     test.map.jump_to(&pitch(threshold - 1.0));
     test.render();
@@ -150,11 +156,11 @@ fn pitch_threshold() {
 fn scale() {
     let mut test = TileLODTest::new(&zoom(0.0));
 
-    test.map.set_tile_lod_min_radius(1.0);
-    test.map.set_tile_lod_scale(0.4);
-    test.map.set_tile_lod_pitch_threshold(-1.0);
+    set_tile(&mut test.map, |tile| tile.lod_min_radius = 1.0);
+    set_tile(&mut test.map, |tile| tile.lod_scale = 0.4);
+    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = mln_math::rad2deg(-1.0));
 
-    test.map.set_tile_lod_zoom_shift(5.0);
+    set_tile(&mut test.map, |tile| tile.lod_zoom_shift = 5.0);
 
     test.check_image("scale", 112);
 }
@@ -164,11 +170,11 @@ fn scale() {
 fn radius() {
     let mut test = TileLODTest::new(&zoom(0.0));
 
-    test.map.set_tile_lod_min_radius(5.0);
-    test.map.set_tile_lod_scale(1.0);
-    test.map.set_tile_lod_pitch_threshold(-1.0);
+    set_tile(&mut test.map, |tile| tile.lod_min_radius = 5.0);
+    set_tile(&mut test.map, |tile| tile.lod_scale = 1.0);
+    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = mln_math::rad2deg(-1.0));
 
-    test.map.set_tile_lod_zoom_shift(5.0);
+    set_tile(&mut test.map, |tile| tile.lod_zoom_shift = 5.0);
 
     test.check_image("radius", 172);
 }

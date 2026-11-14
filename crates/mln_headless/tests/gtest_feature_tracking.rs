@@ -446,7 +446,7 @@ fn ndc_bound_tilt() {
     assert_eq!(0, test.count(Some("pt0"), None, None)); // out of view
 
     // tilt and the feature appears
-    let pitched = CameraOptions { pitch: Some(60.0), ..test.map.get_camera_options(None) };
+    let pitched = CameraOptions { pitch: Some(60.0), ..CameraOptions::from(test.map.snapshot().view.camera) };
     test.map.jump_to(&pitched);
     test.run(Some("NDCBoundTilt"), 0.01);
 
