@@ -169,15 +169,32 @@ fn create_pbuffer(egl: &Egl, display: egl::Display, config: egl::Config) -> Resu
         .map_err(|e| format!("Could not create surface: {e}"))
 }
 
+/// The EGL platform of the library's display.
+#[derive(Clone, Copy)]
+enum EglPlatform {
+    /// Mesa's surfaceless platform, which needs no window system.
+    Surfaceless,
+    /// The default display.
+    Default,
+}
+
+impl EglPlatform {
+    /// The platform as a device's log record gives it.
+    fn name(self) -> &'static str {
+        match self {
+            EglPlatform::Surfaceless => "surfaceless",
+            EglPlatform::Default => "default",
+        }
+    }
+}
+
 /// The EGL library and its display (`EGLDisplayConfig`), which every
 /// library device of the process shares, and its config for each API. The
 /// display stays initialized.
 struct EglDisplay {
     egl: &'static Egl,
     display: egl::Display,
-    /// The display's platform, as the log names it: `surfaceless` for
-    /// Mesa's, or `default`.
-    platform: &'static str,
+    platform: EglPlatform,
     /// The display's config of each API, found when first asked.
     configs: [OnceLock<Result<egl::Config, String>>; 2],
 }
@@ -205,10 +222,10 @@ impl EglDisplay {
                 Some(egl15) if surfaceless => egl15
                     .get_platform_display(PLATFORM_SURFACELESS_MESA, egl::DEFAULT_DISPLAY, &[egl::ATTRIB_NONE])
                     .ok()
-                    .map(|display| (display, "surfaceless")),
+                    .map(|display| (display, EglPlatform::Surfaceless)),
                 _ => None,
             }
-            .or_else(|| egl.get_display(egl::DEFAULT_DISPLAY).map(|display| (display, "default")))
+            .or_else(|| egl.get_display(egl::DEFAULT_DISPLAY).map(|display| (display, EglPlatform::Default)))
         }
         .ok_or("Failed to obtain a valid EGL display.")?;
         egl.initialize(display).map_err(|e| format!("eglInitialize() failed: {e}"))?;
@@ -511,7 +528,7 @@ impl Device {
         } else {
             Kind::Library(ShareGroup { display, config, api, root: context })
         };
-        Log::info(Event::Render, format!("graphics device uses the EGL {platform} platform"));
+        Log::info(Event::Render, format!("graphics device uses the EGL {} platform", platform.name()));
         Ok(Device::of(kind))
     }
 
