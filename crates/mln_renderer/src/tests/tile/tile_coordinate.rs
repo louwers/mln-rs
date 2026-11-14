@@ -1,8 +1,5 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use geometry::Point;
-use mln_map::transform::{Transform, TransformObserver};
+use mln_map::transform::{Transform, TransformEvent};
 use mln_map::{CameraChange, CameraChangeMode};
 use mln_map_types::tile_coordinate::TileCoordinate;
 use mln_map_types::{ConstrainMode, ViewportMode};
@@ -24,31 +21,10 @@ fn assert_near(actual: f64, expected: f64, abs_error: f64) {
     assert!((actual - expected).abs() <= abs_error, "|{actual} - {expected}| > {abs_error}");
 }
 
-struct Observer {
-    change_count: Rc<Cell<usize>>,
-}
-
-impl TransformObserver for Observer {
-    fn on_camera_will_change(&self, change: CameraChange) {
-        if change.mode == CameraChangeMode::Immediate {
-            assert_eq!(self.change_count.get(), 0);
-            self.change_count.set(self.change_count.get() + 1);
-        }
-    }
-
-    fn on_camera_did_change(&self, change: CameraChange) {
-        if change.mode == CameraChangeMode::Immediate {
-            assert_eq!(self.change_count.get(), 1);
-        }
-    }
-}
-
 // gtest: TileCoordinate.FromLatLng
 #[test]
 fn from_lat_lng() {
-    let change_count = Rc::new(Cell::new(0usize));
-    let observer = Rc::new(Observer { change_count: Rc::clone(&change_count) });
-    let mut transform = Transform::new(observer, ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
 
     let max = constants::TILE_SIZE_D;
     transform.resize(Size::new(max as u32, max as u32)).unwrap();
@@ -103,7 +79,18 @@ fn from_lat_lng() {
             assert_double_eq(zoomed.p.y, from_lat_lng.p.y);
         }
     }
-    assert_eq!(change_count.get(), 1);
+    // The resize made the one immediate camera change.
+    let immediate = |change: &CameraChange| change.mode == CameraChangeMode::Immediate;
+    let changes: Vec<_> = transform
+        .take_events()
+        .into_iter()
+        .filter_map(|event| match event {
+            TransformEvent::CameraWillChange(change) if immediate(&change) => Some('w'),
+            TransformEvent::CameraDidChange(change) if immediate(&change) => Some('d'),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(changes, ['w', 'd']);
 }
 
 // gtest: TileCoordinate.ToGeometryCoordinate

@@ -1115,7 +1115,13 @@ fn command_round_trip(cx: &Context) -> Metrics {
     let mut meter = Meter::new();
     for i in 0..cx.iterations(2000) {
         meter.time(|| {
-            scene.map().update_camera(jumps[i % 2].clone()).expect("a camera command").wait().expect("the jump");
+            scene
+                .map()
+                .update_camera(jumps[i % 2].clone())
+                .expect("a camera command")
+                .applied
+                .wait()
+                .expect("the jump");
         });
     }
     meter.finish()

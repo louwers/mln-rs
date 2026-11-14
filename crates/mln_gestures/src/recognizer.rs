@@ -3,18 +3,16 @@
 //! ([`GestureCamera`]).
 
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
-use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(test)]
 use mln_map::CameraError;
 use mln_map::{
     AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity,
-    GesturePhase, MomentumDecay, TransitionEnd, TransitionOutcome,
+    CommandEnd, GesturePhase, MomentumDecay, TransitionOutcome,
 };
 use mln_util::UnitBezier;
 use mln_util::geo::ScreenCoordinate;
-use parking_lot::Mutex;
 
 use crate::camera::GestureCamera;
 use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
@@ -438,11 +436,9 @@ pub struct GestureRecognizer {
     /// Whether the recognizer's gesture has begun in the camera and not
     /// ended: a pointer gesture, a scroll, or both.
     begun: bool,
-    /// The speed the recognizer's last glide had when something cancelled
-    /// it, which its momentum's end function reports.
-    cancelled_glide: Arc<Mutex<Option<CameraVelocity>>>,
     /// The glide that this gesture's press caught, which its release carries
-    /// (`carry_caught_glide`).
+    /// (`carry_caught_glide`), as [`camera_command_ended`](Self::camera_command_ended)
+    /// hears of it.
     caught_glide: Option<CameraVelocity>,
     /// The last tap, for double taps: where and when.
     last_tap: Option<(V2, f64, PointerKind)>,
@@ -466,7 +462,6 @@ impl GestureRecognizer {
             mode: Mode::Idle,
             tracking: Tracking::default(),
             begun: false,
-            cancelled_glide: Arc::default(),
             caught_glide: None,
             last_tap: None,
             scroll: None,
@@ -506,12 +501,27 @@ impl GestureRecognizer {
         std::mem::take(&mut self.events)
     }
 
+    /// Hears how a camera command ended: a host passes on each end that its
+    /// camera reports. A glide of the recognizer's that a press stopped
+    /// carries its speed into the press's release (`carry_caught_glide`),
+    /// if the end arrives before the release.
+    pub fn camera_command_ended(&mut self, end: &CommandEnd) {
+        if self.begun
+            && self.options.carry_caught_glide
+            && end.transition_id == Some(self.options.transition_id)
+            && end.end.outcome == TransitionOutcome::Cancelled
+            && end.end.velocity != CameraVelocity::default()
+        {
+            self.caught_glide = Some(end.end.velocity);
+        }
+    }
+
     /// A host's own eased step, such as the desktop app's `+` and `-`: it gets
     /// the phase the recognizer's own steps get (an update of a gesture under
     /// way, or a gesture of its own), and a step that zooms takes over a
     /// running notch ease. `delta.phase` is ignored.
     #[cfg(test)]
-    pub(crate) fn step(&mut self, camera: &mut dyn GestureCamera, delta: CameraDelta) -> Result<(), CameraError> {
+    pub(crate) fn step(&mut self, camera: &mut dyn GestureCamera, delta: &CameraDelta) -> Result<(), CameraError> {
         delta.validate()?;
         self.eased_step(camera, delta);
         Ok(())
@@ -520,11 +530,11 @@ impl GestureRecognizer {
     /// The same for a step to an absolute camera, such as resetting the
     /// bearing; one that sets the zoom stops a running notch ease.
     /// `update.phase` is ignored.
-    pub fn step_to(&mut self, camera: &mut dyn GestureCamera, update: CameraUpdate) {
+    pub fn step_to(&mut self, camera: &mut dyn GestureCamera, update: &CameraUpdate) {
         if update.camera.zoom.is_some() {
             self.stop_notch_ease();
         }
-        camera.update_camera(&CameraUpdate { phase: self.step_phase(), ..update });
+        camera.update_camera(&CameraUpdate { phase: self.step_phase(), ..*update });
     }
 
     /// Steps the eased zoom of wheel notches, and ends a scroll once it
@@ -601,17 +611,14 @@ impl GestureRecognizer {
     /// camera's animations, as GL JS and the MapLibre Native SDKs do on a
     /// press. Without `interrupt_animations`, it stops only the recognizer's
     /// own, and begins with `Update`, which keeps the others. A glide that
-    /// this stops is caught: the release may carry its speed.
-    ///
-    /// The camera ends a cancelled glide synchronously, within the call that
-    /// cancels it, so its end function has set `cancelled_glide` by the time
-    /// that call returns.
+    /// this stops is caught: the release may carry its speed, which the
+    /// glide's end reports (see [`Self::camera_command_ended`]).
     fn begin(&mut self, camera: &mut dyn GestureCamera) {
         if self.begun {
             return;
         }
         self.begun = true;
-        *self.cancelled_glide.lock() = None;
+        self.caught_glide = None;
         let phase = if self.options.interrupt_animations {
             GesturePhase::Begin
         } else {
@@ -619,13 +626,12 @@ impl GestureRecognizer {
             GesturePhase::Update
         };
         camera.apply_camera_delta(&CameraDelta { phase, ..CameraDelta::default() });
-        self.caught_glide = self.cancelled_glide.lock().take().filter(|_| self.options.carry_caught_glide);
     }
 
     /// One step of the gesture, at once.
-    fn update(&mut self, camera: &mut dyn GestureCamera, delta: CameraDelta) {
+    fn update(&mut self, camera: &mut dyn GestureCamera, delta: &CameraDelta) {
         self.begin(camera);
-        camera.apply_camera_delta(&CameraDelta { phase: GesturePhase::Update, ..delta });
+        camera.apply_camera_delta(&CameraDelta { phase: GesturePhase::Update, ..*delta });
     }
 
     /// Ends the gesture, with the momentum it continues with: the gesture
@@ -634,16 +640,8 @@ impl GestureRecognizer {
         if !std::mem::replace(&mut self.begun, false) {
             return;
         }
-        let cancelled_glide = Arc::clone(&self.cancelled_glide);
-        let animation = AnimationOptions {
-            transition_id: Some(self.options.transition_id),
-            transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {
-                if end.outcome == TransitionOutcome::Cancelled {
-                    *cancelled_glide.lock() = Some(end.velocity);
-                }
-            })),
-            ..AnimationOptions::default()
-        };
+        let animation =
+            AnimationOptions { transition_id: Some(self.options.transition_id), ..AnimationOptions::default() };
         let phase = GesturePhase::End;
         let momentum = momentum.copied();
         camera.apply_camera_delta(&CameraDelta { momentum, animation, phase, ..CameraDelta::default() });
@@ -675,10 +673,10 @@ impl GestureRecognizer {
     /// A step that zooms takes over a running notch ease, which would
     /// otherwise take the zoom back on its next frame: the levels the ease
     /// hasn't zoomed yet join the step's.
-    fn eased_step(&mut self, camera: &mut dyn GestureCamera, delta: CameraDelta) {
+    fn eased_step(&mut self, camera: &mut dyn GestureCamera, delta: &CameraDelta) {
         let phase = self.step_phase();
         let scale = delta.scale.map(|scale| scale * self.stop_notch_ease().exp2());
-        camera.apply_camera_delta(&CameraDelta { phase, scale, ..delta });
+        camera.apply_camera_delta(&CameraDelta { phase, scale, ..*delta });
     }
 
     /// Stops a running notch ease; returns the levels it hadn't zoomed yet.
@@ -780,7 +778,7 @@ impl GestureRecognizer {
                     let zoom = dy * self.options.tap_drag_zoom;
                     let delta =
                         CameraDelta { scale: Some(zoom.exp2()), anchor: Some(origin.into()), ..CameraDelta::default() };
-                    self.update(camera, delta);
+                    self.update(camera, &delta);
                     self.tracking.record(now, Step { zoom, around: Some(origin), ..Step::default() });
                 }
             }
@@ -812,7 +810,7 @@ impl GestureRecognizer {
                 let bearing = if self.options.rotate { delta.x * self.options.drag_rotate } else { 0.0 };
                 let pitch = if self.options.pitch { -delta.y * self.options.drag_pitch } else { 0.0 };
                 let step = CameraDelta { bearing: Some(bearing), pitch: Some(pitch), ..CameraDelta::default() };
-                self.update(camera, step);
+                self.update(camera, &step);
                 self.tracking.record(now, Step { bearing, pitch, ..Step::default() });
             }
             Mode::BoxZoom { .. } => {}
@@ -821,7 +819,7 @@ impl GestureRecognizer {
                 // turns to keep under it.
                 let step =
                     CameraDelta { offset: Some(delta.into()), anchor: Some(to.into()), ..CameraDelta::default() };
-                self.update(camera, step);
+                self.update(camera, &step);
                 self.tracking.record(now, Step { pan: delta, ..Step::default() });
             }
         }
@@ -857,7 +855,7 @@ impl GestureRecognizer {
         }
         if pinch.pitch == Some(true) {
             let pitch = f64::midpoint(va.y, vb.y) * -self.options.drag_pitch;
-            self.update(camera, CameraDelta { pitch: Some(pitch), ..CameraDelta::default() });
+            self.update(camera, &CameraDelta { pitch: Some(pitch), ..CameraDelta::default() });
             pinch.last = points;
             pinch.tap = false;
             self.tracking.record(now, Step { pitch, ..Step::default() });
@@ -894,7 +892,7 @@ impl GestureRecognizer {
         let anchored = zoom != 0.0 || bearing != 0.0 || pan != V2::ZERO;
         self.update(
             camera,
-            CameraDelta {
+            &CameraDelta {
                 offset: (pan != V2::ZERO).then_some(pan.into()),
                 scale: (zoom != 0.0).then_some(zoom.exp2()),
                 bearing: (bearing != 0.0).then_some(bearing),
@@ -1035,7 +1033,7 @@ impl GestureRecognizer {
             animation: self.animation(BOX_EASE, EASE),
             phase: GesturePhase::None,
         };
-        self.step_to(camera, update);
+        self.step_to(camera, &update);
     }
 
     /// Double-click, double-tap and two-finger-tap zoom: one level around a
@@ -1044,7 +1042,7 @@ impl GestureRecognizer {
         let animation = self.animation(STEP_EASE, EASE);
         let step =
             CameraDelta { scale: Some(delta.exp2()), anchor: Some(at.into()), animation, ..CameraDelta::default() };
-        self.eased_step(camera, step);
+        self.eased_step(camera, &step);
     }
 
     /// A scroll zooms: a wheel's notches by a fixed amount each, eased, and
@@ -1112,7 +1110,7 @@ impl GestureRecognizer {
     /// Zooms by `levels` at once, holding the ground under `at`.
     fn zoom(&mut self, camera: &mut dyn GestureCamera, levels: f64, at: V2) {
         let delta = CameraDelta { scale: Some(levels.exp2()), anchor: Some(at.into()), ..CameraDelta::default() };
-        self.update(camera, delta);
+        self.update(camera, &delta);
     }
 
     /// GL JS's `KeyboardHandler`: arrows pan, Shift-arrows rotate and tilt,
@@ -1145,7 +1143,7 @@ impl GestureRecognizer {
             (Key::Down, false) => step.offset = Some(ScreenCoordinate::new(0.0, -pan)),
             (Key::Escape, _) => return false,
         }
-        self.eased_step(camera, step);
+        self.eased_step(camera, &step);
         true
     }
 
@@ -1190,7 +1188,7 @@ impl GestureRecognizer {
         }
         self.update(
             camera,
-            CameraDelta {
+            &CameraDelta {
                 scale: (zoom != 0.0).then_some(scale),
                 bearing: (bearing != 0.0).then_some(bearing),
                 anchor: Some(center.into()),

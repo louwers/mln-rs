@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use geojson::GeoJson;
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
-use mln_map::transform::{NullTransformObserver, Transform};
+use mln_map::transform::Transform;
 use mln_map_types::{
     CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, TransformState, ViewportMode,
 };
@@ -92,8 +92,7 @@ fn tile_parameters<'a>(
 
 impl SourceTest {
     fn new() -> Self {
-        let mut transform =
-            Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
+        let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(Size::new(512, 512)).unwrap();
         transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
         SourceTest {

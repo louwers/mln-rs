@@ -131,6 +131,7 @@ fn zoom(map: &Map, zoom: f64) -> mln_runtime::Completion<mln_runtime::Applied> {
         camera: CameraOptions { zoom: Some(zoom), ..Default::default() },
         ..Default::default()
     })
+    .map(|command| command.applied)
     .unwrap()
 }
 
@@ -1184,7 +1185,7 @@ fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
             zoom: Some(10.0),
             ..CameraOptions::default()
         };
-        wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }));
+        wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }).map(|command| command.applied));
         let log = fall_back.then(|| {
             server.hold();
             EventLog::install(&runtime)
@@ -1265,10 +1266,13 @@ fn styled_query_session(
 ) -> (Map, RenderSession) {
     let map = map_in_mode(runtime, MapMode::Continuous);
     wait(map.set_style_json(style));
-    wait(map.update_camera(CameraUpdate {
-        camera: CameraOptions { zoom: Some(0.0), center: Some(LatLng::default()), ..Default::default() },
-        ..Default::default()
-    }));
+    wait(
+        map.update_camera(CameraUpdate {
+            camera: CameraOptions { zoom: Some(0.0), center: Some(LatLng::default()), ..Default::default() },
+            ..Default::default()
+        })
+        .map(|command| command.applied),
+    );
     let session = attach(&map);
     let loaded = eventually(|| {
         demand(&session, DemandMode::Force, 0);

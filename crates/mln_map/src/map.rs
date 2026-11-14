@@ -34,11 +34,11 @@ use mln_util::time::Instant;
 use mln_util::vectors::Vec3;
 
 use crate::feature_state::FeatureStateStore;
-use crate::map_event::{CameraChange, MapEvent, RenderFrameStatus, RenderMode};
+use crate::map_event::{MapEvent, RenderFrameStatus, RenderMode};
 use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
-use crate::transform::{Transform, TransformObserver};
+use crate::transform::{CameraCommandId, CommandEnd, Transform, TransformEvent};
 
 /// Receives the outcome of [`Map::render_still`]: `Ok` once a complete frame
 /// rendered, or why the image failed.
@@ -108,21 +108,6 @@ impl StyleObserver for StyleEvents {
     }
 }
 
-/// The transform's observer: queues the camera events for the map's owner.
-struct CameraEvents(EventQueue<MapEvent>);
-
-impl TransformObserver for CameraEvents {
-    fn on_camera_will_change(&self, change: CameraChange) {
-        self.0.push(MapEvent::CameraWillChange(change));
-    }
-    fn on_camera_is_changing(&self) {
-        self.0.push(MapEvent::CameraIsChanging);
-    }
-    fn on_camera_did_change(&self, change: CameraChange) {
-        self.0.push(MapEvent::CameraDidChange(change));
-    }
-}
-
 /// A map: its style, its camera, and the updates it publishes for its
 /// renderer.
 ///
@@ -175,6 +160,8 @@ pub struct Map {
     renderer_events: RendererEvents,
     /// What the map reports to its owner.
     events: EventQueue<MapEvent>,
+    /// The ends of the camera commands, for its owner.
+    command_ends: Vec<CommandEnd>,
 
     /// Declared after `style`, so the style and its requests go first.
     file_source: Option<Arc<dyn FileSource>>,
@@ -225,11 +212,7 @@ impl Map {
         let pixel_ratio = map_options.pixel_ratio;
         let mut style = Style::with_file_source(file_source.clone(), pixel_ratio, run_loop);
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
-        let mut transform = Transform::new(
-            Rc::new(CameraEvents(events.clone())),
-            map_options.constrain_mode,
-            map_options.viewport_mode,
-        );
+        let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
         let mut map = Map {
             updates: UpdateSlot::new(),
@@ -261,6 +244,7 @@ impl Map {
             style_events,
             renderer_events,
             events,
+            command_ends: Vec::new(),
             file_source,
             run_loop: run_loop.clone(),
         };
@@ -389,11 +373,36 @@ impl Map {
     /// events, oldest first.
     pub fn drain_events(&mut self) -> Vec<MapEvent> {
         self.process_events();
+        self.forward_camera_events();
         self.events.take()
     }
 
-    fn emit(&self, event: MapEvent) {
+    fn emit(&mut self, event: MapEvent) {
+        self.forward_camera_events();
         self.events.push(event);
+    }
+
+    /// Moves what the transform reported to the map's events, after the
+    /// events before it, and to its command ends.
+    fn forward_camera_events(&mut self) {
+        for event in self.transform.take_events() {
+            match event {
+                TransformEvent::CameraWillChange(change) => self.events.push(MapEvent::CameraWillChange(change)),
+                TransformEvent::CameraIsChanging => self.events.push(MapEvent::CameraIsChanging),
+                TransformEvent::CameraDidChange(change) => self.events.push(MapEvent::CameraDidChange(change)),
+                TransformEvent::CommandEnded(end) => self.command_ends.push(end),
+            }
+        }
+    }
+
+    /// Takes the ends of the camera commands that ended since the last call,
+    /// oldest first: each command's end comes once, unless the map drops
+    /// while the command runs (see [`close_camera`](Self::close_camera)).
+    /// They come with the camera events of the same calls, which
+    /// [`drain_events`](Self::drain_events) takes.
+    pub fn take_command_ends(&mut self) -> Vec<CommandEnd> {
+        self.forward_camera_events();
+        std::mem::take(&mut self.command_ends)
     }
 
     fn handle_style_event(&mut self, event: StyleEvent) {
@@ -613,6 +622,7 @@ impl Map {
         };
 
         self.updates.publish(Arc::new(params));
+        self.forward_camera_events();
     }
 
     /// Jumps the camera without handling the queued events first.
@@ -794,23 +804,36 @@ impl Map {
     /// Moves the camera relative to where it is, as a gesture does
     /// (maplibre-native-ffi's `mln_map_apply_camera_delta`): a pan, a zoom,
     /// turn and tilt around an anchor, a gesture phase, and the momentum a
-    /// gesture's end continues with. See [`CameraDelta`].
-    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<(), CameraError> {
+    /// gesture's end continues with. See [`CameraDelta`]. Returns the
+    /// command, whose end [`take_command_ends`](Self::take_command_ends)
+    /// reports.
+    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<CameraCommandId, CameraError> {
         self.process_events();
-        self.transform.apply_camera_delta(delta)?;
+        let command = self.transform.apply_camera_delta(delta)?;
         self.camera_mutated = true;
         self.on_update();
-        Ok(())
+        Ok(command)
     }
 
     /// Moves the camera to absolute values, by a jump, an ease or a flight,
     /// as a command or as part of a gesture (maplibre-native-ffi's
-    /// `mln_map_update_camera`). See [`CameraUpdate`].
-    pub fn update_camera(&mut self, update: &CameraUpdate) {
+    /// `mln_map_update_camera`). See [`CameraUpdate`]. Returns the command,
+    /// whose end [`take_command_ends`](Self::take_command_ends) reports.
+    pub fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {
         self.process_events();
         self.camera_mutated = true;
-        self.transform.update_camera(update);
+        let command = self.transform.update_camera(update);
         self.on_update();
+        command
+    }
+
+    /// Ends the running camera commands as closed, as when the map closes,
+    /// which [`take_command_ends`](Self::take_command_ends) reports. An
+    /// owner that waits for the commands' ends calls it before it drops the
+    /// map.
+    pub fn close_camera(&mut self) {
+        self.transform.close();
+        self.forward_camera_events();
     }
 
     /// On the globe, let drags and zooms around a point turn the bearing so

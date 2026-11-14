@@ -35,7 +35,7 @@ pub struct CameraFitOptions {
 
 /// Moves the camera to fit an area: [`CameraUpdate`](mln_map::CameraUpdate)'s
 /// counterpart for [`Map::fit_camera`](crate::Map::fit_camera).
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraFitUpdate {
     pub mode: CameraUpdateMode,
     pub fit: CameraFitOptions,

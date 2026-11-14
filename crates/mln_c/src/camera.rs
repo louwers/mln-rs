@@ -13,7 +13,7 @@ use ::mln_map::{
     FreeCameraOptions, GesturePhase, MapDebugOptions, NorthOrientation, ProjectionMode, TileLodMode, TransitionEnd,
     TransitionOutcome, ViewportMode,
 };
-use mln_runtime::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
+use mln_runtime::{Applied, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use mln_util::UnitBezier;
 use mln_util::constants::{MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D, TILE_SIZE_I};
 use mln_util::geo::{EdgeInsets, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -201,7 +201,7 @@ struct EndHandler {
 impl EndHandler {
     /// Checks a caller's handler: none when it has neither a callback nor a
     /// queue.
-    fn new(handler: &mln_camera_transition_handler) -> Result<Option<Arc<Self>>, Error> {
+    fn new(handler: &mln_camera_transition_handler) -> Result<Option<Self>, Error> {
         let Some(callback) = handler.callback else {
             if handler.queue != handles::NULL {
                 return Err(Error::invalid_argument("camera transition handler requires a callback"));
@@ -218,16 +218,7 @@ impl EndHandler {
             handler.release_user_data,
             handler.queue,
         )?;
-        Ok(Some(Arc::new(Self {
-            callback,
-            registration: Mutex::new(Some(registration)),
-            accepted: AtomicBool::new(false),
-        })))
-    }
-
-    fn end_fn(self: &Arc<Self>) -> Arc<dyn Fn(&TransitionEnd) + Send + Sync> {
-        let handler = Arc::clone(self);
-        Arc::new(move |end: &TransitionEnd| handler.end(end))
+        Ok(Some(Self { callback, registration: Mutex::new(Some(registration)), accepted: AtomicBool::new(false) }))
     }
 
     fn set_accepted(&self, accepted: bool) {
@@ -285,7 +276,7 @@ fn from_transition_end(end: &TransitionEnd) -> mln_camera_transition_end {
 /// register.
 struct Animation {
     options: AnimationOptions,
-    handler: Option<Arc<EndHandler>>,
+    handler: Option<EndHandler>,
 }
 
 impl Animation {
@@ -334,7 +325,6 @@ impl Animation {
                 velocity,
                 min_zoom,
                 easing: easing.map(|easing| UnitBezier::new(easing.x1, easing.y1, easing.x2, easing.y2)),
-                transition_end_fn: handler.as_ref().map(EndHandler::end_fn),
                 transition_id: fields.get(MLN_ANIMATION_OPTION_TRANSITION_ID, animation.transition_id),
             },
             handler,
@@ -343,23 +333,33 @@ impl Animation {
 }
 
 /// Sends a camera command, which takes `handler`'s user data from the caller
-/// once it is on its way. A handler that ends before `send` returns, on the
-/// map's thread, finds it accepted.
-fn send_with<T>(
-    handler: Option<&EndHandler>,
-    send: impl FnOnce() -> Result<T, mln_util::Error>,
-) -> Result<T, mln_util::Error> {
-    if let Some(handler) = handler {
+/// once it is on its way and gives the handler the command's end on the
+/// runtime's thread. `send` sends the command with the end callback it is
+/// given. A send that fails gives the user data back to the caller.
+fn send_with(
+    handler: Option<EndHandler>,
+    send: impl FnOnce(EndCallbackFn) -> Result<mln_runtime::Completion<Applied>, mln_util::Error>,
+) -> Result<mln_runtime::Completion<Applied>, mln_util::Error> {
+    let handler = handler.map(Arc::new);
+    if let Some(handler) = &handler {
         handler.set_accepted(true);
     }
-    // The command holds the handler too, and drops it when the send fails:
-    // the caller keeps it until it is given back.
-    let sent = send();
-    if let (Err(_), Some(handler)) = (&sent, handler) {
+    let ended = handler.clone();
+    // A command that drops without an end drops the accepted handler, which
+    // reports the change as cancelled.
+    let sent = send(Box::new(move |end| {
+        if let (Ok(end), Some(handler)) = (end, ended) {
+            handler.end(&end);
+        }
+    }));
+    if let (Err(_), Some(handler)) = (&sent, &handler) {
         handler.set_accepted(false);
     }
     sent
 }
+
+/// What [`send_with`] gives the command to call with its end.
+type EndCallbackFn = Box<dyn FnOnce(Result<TransitionEnd, mln_util::Error>) + Send>;
 
 fn update_mode(mode: u32) -> Option<CameraUpdateMode> {
     match mode {
@@ -614,7 +614,9 @@ pub(crate) unsafe extern "C" fn mln_map_update_camera(
         let Animation { options: animation, handler } = Animation::new(&update.animation)?;
         let update = CameraUpdate { mode, camera, animation, phase };
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, move |map| send_with(handler.as_deref(), || map.update_camera(update))) }
+        unsafe {
+            command(map, completion, move |map| send_with(handler, |on_end| map.update_camera_then(update, on_end)))
+        }
     })
 }
 
@@ -659,7 +661,9 @@ pub(crate) unsafe extern "C" fn mln_map_apply_camera_delta(
         };
         delta.validate().map_err(|error| Error::invalid_argument(error.to_string()))?;
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, move |map| send_with(handler.as_deref(), || map.apply_camera_delta(delta))) }
+        unsafe {
+            command(map, completion, move |map| send_with(handler, |on_end| map.apply_camera_delta_then(delta, on_end)))
+        }
     })
 }
 
@@ -910,7 +914,9 @@ unsafe fn fit_camera(
     let Animation { options: animation, handler } = Animation::new(&update.animation)?;
     let update = CameraFitUpdate { mode, fit, animation };
     // SAFETY: the caller's contract.
-    unsafe { command(map, completion, move |map| send_with(handler.as_deref(), || map.fit_camera(area, update))) }
+    unsafe {
+        command(map, completion, move |map| send_with(handler, |on_end| map.fit_camera_then(area, update, on_end)))
+    }
 }
 
 /// `mln_map_fit_camera_to_lat_lng_bounds()`.
@@ -1299,11 +1305,10 @@ mod tests {
         };
 
         let ended = EndHandler::new(&handler('e')).unwrap().unwrap();
-        let end_fn = ended.end_fn();
         ended.set_accepted(true);
-        end_fn(&TransitionEnd { outcome: TransitionOutcome::Replaced, ..TransitionEnd::default() });
-        end_fn(&TransitionEnd::default());
-        drop((ended, end_fn));
+        ended.end(&TransitionEnd { outcome: TransitionOutcome::Replaced, ..TransitionEnd::default() });
+        ended.end(&TransitionEnd::default());
+        drop(ended);
         assert_eq!(log.take(), "e3er");
 
         let dropped = EndHandler::new(&handler('d')).unwrap().unwrap();

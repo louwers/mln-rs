@@ -362,15 +362,8 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
 #[test]
 fn free_camera_options_place_the_camera_and_cancel_commands() {
     let test = MapTest::new();
-    let ended = Arc::new(OnceLock::new());
-    let record = Arc::clone(&ended);
-    let animation = AnimationOptions {
-        transition_end_fn: Some(Arc::new(move |end: &mln_map::TransitionEnd| {
-            record.set(end.outcome).expect("the ease ends once");
-        })),
-        ..AnimationOptions::new(Duration::from_secs(10))
-    };
-    test.map().update_camera(&mln_map::CameraUpdate {
+    let animation = AnimationOptions::new(Duration::from_secs(10));
+    let command = test.map().update_camera(&mln_map::CameraUpdate {
         mode: mln_map::CameraUpdateMode::Ease,
         camera: CameraOptions { zoom: Some(10.0), ..Default::default() },
         animation,
@@ -380,7 +373,9 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
 
     let position = [0.25, 0.25, 0.01];
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
-    assert_eq!(ended.get(), Some(&mln_map::TransitionOutcome::Cancelled));
+    let ends = test.map().take_command_ends();
+    let ended: Vec<_> = ends.iter().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
+    assert_eq!(ended, [mln_map::TransitionOutcome::Cancelled]);
     assert!(!test.map().in_transition());
     let placed = test.map().snapshot().free_camera.position;
     for (placed, wanted) in placed.iter().zip(position) {

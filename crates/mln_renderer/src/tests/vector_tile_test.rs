@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
-use mln_map::transform::{NullTransformObserver, Transform};
+use mln_map::transform::Transform;
 use mln_map_types::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_tile_id::OverscaledTileID;
@@ -42,7 +42,7 @@ impl VectorTileTest {
             // asynchronous stub answers only when the run loop runs.
             file_source: Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
             run_loop,
-            transform: Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default),
+            transform: Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default),
             transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
             thread_pool,
             tileset: Tileset { tiles: vec!["https://example.com".to_owned()], ..Default::default() },

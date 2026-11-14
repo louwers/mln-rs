@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
-use mln_map::transform::{NullTransformObserver, Transform};
+use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
@@ -94,8 +94,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn LayerProperties>]) -> Outcome {
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
     let run_loop = RunLoop::new();
     let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
-    let mut transform =
-        Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
 

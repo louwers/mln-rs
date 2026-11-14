@@ -5,7 +5,7 @@ use std::sync::Arc;
 use feature::Feature;
 use geo_types::Point;
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
-use mln_map::transform::{NullTransformObserver, Transform};
+use mln_map::transform::Transform;
 use mln_map_types::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
@@ -34,7 +34,7 @@ impl GeoJSONTileTest {
     fn new() -> Self {
         GeoJSONTileTest {
             run_loop: RunLoop::new(),
-            transform: Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default),
+            transform: Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default),
             thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
         }
     }

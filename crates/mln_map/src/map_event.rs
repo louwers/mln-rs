@@ -78,6 +78,7 @@ pub enum MapEvent {
     CameraIsChanging,
     /// A camera command ended.
     CameraDidChange(CameraChange),
+
     /// The style loaded and the map applied its default camera, unless a
     /// camera command came first.
     StyleLoaded,

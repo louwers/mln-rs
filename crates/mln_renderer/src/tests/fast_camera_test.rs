@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::{LocalObject, RunLoop, TaggedScheduler, scheduler};
-use mln_map::transform::{NullTransformObserver, Transform};
+use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::layer::{Layer, downcast_arc};
@@ -191,8 +191,7 @@ impl Scene {
         let raster_layers: Vec<Arc<dyn LayerProperties>> =
             vec![Arc::new(RasterLayerProperties::new(downcast_arc::<RasterLayerImpl>(&raster_layer.base_impl())))];
 
-        let mut transform =
-            Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
+        let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();
 
         let image_manager = ImageManager::on(Some(run_loop.scheduler()));

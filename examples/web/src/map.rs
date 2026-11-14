@@ -254,7 +254,7 @@ impl WebMap {
             animation: AnimationOptions::new(Duration::from_millis(500)),
             phase: GesturePhase::None,
         };
-        self.gestures.step_to(&mut self.map, update);
+        self.gestures.step_to(&mut self.map, &update);
     }
 
     /// Lets drags and zooms on the globe turn the bearing with the planet,
@@ -281,7 +281,7 @@ impl WebMap {
             animation: AnimationOptions::default(),
             phase: GesturePhase::None,
         };
-        self.gestures.step_to(&mut self.map, update);
+        self.gestures.step_to(&mut self.map, &update);
     }
 
     /// The attributions of the style's sources that have one, as HTML. A
@@ -336,6 +336,7 @@ impl WebMap {
         // The map samples its animations at this frame's time.
         self.map.set_frame_time(Some(start));
         self.gestures.frame(&mut self.map, now);
+        self.forward_command_ends();
         self.run_loop.run_once();
         self.handle_map_events();
         let update_tiles = ms(self.transport.take_receive_time());
@@ -418,22 +419,22 @@ impl WebMap {
             position: ScreenCoordinate::new(x, y),
             modifiers: modifiers_from_bits(modifiers),
         };
-        self.gestures.handle(&mut self.map, input, time)
+        self.gesture(input, time)
     }
 
     /// A pointer moved (see `pointer_down`).
     pub fn pointer_move(&mut self, id: u32, x: f64, y: f64, time: f64) -> bool {
-        self.gestures.handle(&mut self.map, Input::PointerMove { id, position: ScreenCoordinate::new(x, y) }, time)
+        self.gesture(Input::PointerMove { id, position: ScreenCoordinate::new(x, y) }, time)
     }
 
     /// A pointer went up (see `pointer_down`).
     pub fn pointer_up(&mut self, id: u32, x: f64, y: f64, time: f64) -> bool {
-        self.gestures.handle(&mut self.map, Input::PointerUp { id, position: ScreenCoordinate::new(x, y) }, time)
+        self.gesture(Input::PointerUp { id, position: ScreenCoordinate::new(x, y) }, time)
     }
 
     /// The browser took a pointer away (`pointercancel`).
     pub fn pointer_cancel(&mut self, id: u32, time: f64) -> bool {
-        self.gestures.handle(&mut self.map, Input::PointerCancel { id }, time)
+        self.gesture(Input::PointerCancel { id }, time)
     }
 
     /// A DOM `wheel` event, as the page classifies it (web/main.ts): at
@@ -445,7 +446,7 @@ impl WebMap {
         let delta = if kind == WHEEL_NOTCHES { WheelDelta::Notches(amount) } else { WheelDelta::Pixels(amount) };
         let input =
             Input::Wheel { position: ScreenCoordinate::new(x, y), delta, modifiers: modifiers_from_bits(modifiers) };
-        self.gestures.handle(&mut self.map, input, time)
+        self.gesture(input, time)
     }
 
     /// A DOM `keydown`, by its `key`: the arrows, `+`/`=`, `-`/`_` and
@@ -461,12 +462,12 @@ impl WebMap {
             "Escape" => Key::Escape,
             _ => return false,
         };
-        self.gestures.handle(&mut self.map, Input::Key { key, modifiers: modifiers_from_bits(modifiers) }, time)
+        self.gesture(Input::Key { key, modifiers: modifiers_from_bits(modifiers) }, time)
     }
 
     /// The canvas lost focus: every pointer is released.
     pub fn blur(&mut self, time: f64) -> bool {
-        self.gestures.handle(&mut self.map, Input::Blur, time)
+        self.gesture(Input::Blur, time)
     }
 
     /// The box a Shift-drag zooms to while it is drawn, as `[x0, y0, x1,
@@ -614,6 +615,22 @@ impl WebMap {
             backend,
             gpu_check: None,
         })
+    }
+
+    /// Feeds one input to the gesture recognizer; returns whether the map
+    /// used it.
+    fn gesture(&mut self, input: Input, time: f64) -> bool {
+        let used = self.gestures.handle(&mut self.map, input, time);
+        self.forward_command_ends();
+        used
+    }
+
+    /// Tells the gesture recognizer how the camera commands ended, so that a
+    /// press that catches a glide carries it into its release.
+    fn forward_command_ends(&mut self) {
+        for end in self.map.take_command_ends() {
+            self.gestures.camera_command_ended(&end);
+        }
     }
 
     /// Lets the map handle what its renderer and its style reported, and

@@ -282,10 +282,13 @@ fn a_command_group_holds_updates_back_until_it_ends() {
 
     let group = map.command_group().unwrap();
     let nested = map.command_group().unwrap();
-    let held = wait(map.update_camera(CameraUpdate {
-        camera: CameraOptions { zoom: Some(3.0), ..Default::default() },
-        ..CameraUpdate::default()
-    }));
+    let held = wait(
+        map.update_camera(CameraUpdate {
+            camera: CameraOptions { zoom: Some(3.0), ..Default::default() },
+            ..CameraUpdate::default()
+        })
+        .map(|command| command.applied),
+    );
     // The held change names the update that the outermost end shows.
     assert_eq!(before + 1, held.render_update_generation);
     assert_eq!(before, map.snapshot().unwrap().update_generation);
@@ -314,10 +317,12 @@ fn a_handle_that_discards_results_passes_on_only_failures() {
 fn the_camera_query_sees_the_commands_before_it() {
     let runtime = runtime();
     let map = map(&runtime);
-    let moved = map.update_camera(CameraUpdate {
-        camera: CameraOptions { zoom: Some(5.0), bearing: Some(30.0), ..Default::default() },
-        ..CameraUpdate::default()
-    });
+    let moved = map
+        .update_camera(CameraUpdate {
+            camera: CameraOptions { zoom: Some(5.0), bearing: Some(30.0), ..Default::default() },
+            ..CameraUpdate::default()
+        })
+        .map(|command| command.applied);
     let camera = wait(map.camera());
     assert_eq!(5.0, camera.camera.zoom);
     assert!((camera.camera.bearing - 30.0).abs() < 1e-9, "{}", camera.camera.bearing);

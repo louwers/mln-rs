@@ -38,18 +38,10 @@ pub struct CameraOptions {
     pub fov: Option<f64>,
 }
 
-/// [`AnimationOptions::transition_end_fn`].
-pub type TransitionEndFn = std::sync::Arc<dyn Fn(&TransitionEnd) + Send + Sync>;
-
 /// Various options for describing a transition between viewpoints with
 /// animation. All fields are optional; the default values depend on how
 /// this struct is used.
-///
-/// The callbacks are shared so the struct can be copied into the transition
-/// closures, as the C++ lambdas copy their `std::function`s, and are `Send +
-/// Sync` so a command can cross to the thread of the map it moves. They run
-/// on that thread.
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AnimationOptions {
     /// Time to animate to the viewpoint defined herein.
     pub duration: Option<Duration>,
@@ -67,12 +59,6 @@ pub struct AnimationOptions {
     pub max_duration: Option<Duration>,
     /// The easing timing curve of the transition.
     pub easing: Option<UnitBezier>,
-    /// Called once when every field of the command has ended, with how it
-    /// ended: completed, cancelled, replaced by later commands, or closed with
-    /// the map. Other commands may still be animating when this callback runs.
-    /// It replaces C++'s `transitionFinishFn`, which can't tell those apart;
-    /// maplibre-native-ffi's C API reports the same outcomes.
-    pub transition_end_fn: Option<TransitionEndFn>,
     /// Caller-chosen identity of the command, which
     /// `Map::cancel_transitions_with_id` matches. Several commands may share
     /// one.
@@ -115,8 +101,11 @@ pub struct CameraVelocity {
     pub pitch: f64,
 }
 
-/// The end of a camera command
-/// ([`AnimationOptions::transition_end_fn`]).
+/// How a camera command ended, once every field of it has: completed,
+/// cancelled, replaced by later commands, or closed with the map. Other
+/// commands may still be animating. It replaces C++'s `transitionFinishFn`,
+/// which can't tell those apart; maplibre-native-ffi's C API reports the
+/// same outcomes.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TransitionEnd {
     pub outcome: TransitionOutcome,
@@ -183,9 +172,8 @@ pub enum GesturePhase {
 ///
 /// The pan and the anchored change are separate camera commands, because an
 /// explicit center overrides an anchor; the anchored change reads the camera
-/// after the pan. Both end through the one
-/// [`AnimationOptions::transition_end_fn`], once both have ended.
-#[derive(Clone, Default)]
+/// after the pan. The delta's command ends once both have ended.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CameraDelta {
     /// Moves the map's content this far on the screen, as a drag does.
     pub offset: Option<ScreenCoordinate>,
@@ -205,8 +193,7 @@ pub struct CameraDelta {
     /// How the gesture keeps moving after this delta, which only a delta in
     /// the [`GesturePhase::End`] phase carries. Its parts' snaps apply only
     /// to the parts the gesture changed. With momentum, `animation` may set
-    /// only its transition id and end function, and the command ends when
-    /// the momentum does.
+    /// only its transition id, and the command ends when the momentum does.
     pub momentum: Option<crate::CameraMomentum>,
     pub animation: AnimationOptions,
     pub phase: GesturePhase,
@@ -225,7 +212,7 @@ pub enum CameraUpdateMode {
 /// Moves the camera to absolute values, as maplibre-native-ffi's
 /// `mln_camera_update` does: the counterpart of [`CameraDelta`] for
 /// commands and gestures that know where the camera should go.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CameraUpdate {
     pub mode: CameraUpdateMode,
     pub camera: CameraOptions,
@@ -248,9 +235,9 @@ pub enum CameraError {
     /// Only a delta in the end phase carries momentum.
     #[error("only a camera delta in the end phase carries momentum")]
     MomentumOutsideEnd,
-    /// A delta with momentum sets only its animation's transition id and end
-    /// function: the momentum, not an animation, moves the camera.
-    #[error("a camera delta with momentum sets only the transition ID and end function of its animation")]
+    /// A delta with momentum sets only its animation's transition id: the
+    /// momentum, not an animation, moves the camera.
+    #[error("a camera delta with momentum sets only the transition ID of its animation")]
     MomentumWithAnimation,
     /// An anchor combines with an offset and a scale, bearing or pitch only
     /// in an immediate delta: an anchored ease couples the center with its

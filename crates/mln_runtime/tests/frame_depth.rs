@@ -60,7 +60,7 @@ fn map_of(runtime: &Runtime) -> Map {
         padding: Some(EdgeInsets::new(6.0, 10.0, 0.0, 0.0).unwrap()),
         ..Default::default()
     };
-    wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }));
+    wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }).map(|command| command.applied));
     map
 }
 

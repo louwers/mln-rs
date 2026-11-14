@@ -2689,7 +2689,6 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-style-types",
  "mln-rs-util",
- "parking_lot",
 ]
 
 [[package]]

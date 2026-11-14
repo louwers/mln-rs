@@ -148,9 +148,9 @@ impl Default for MomentumSnap {
 /// and no velocities, anchors or snaps: a part moves only when its velocity
 /// is set, and settles only when its snap is.
 ///
-/// The momentum ends through its command's
-/// [`AnimationOptions::transition_end_fn`](crate::AnimationOptions::transition_end_fn),
-/// whose velocity says how fast a cancelled momentum still moved.
+/// The momentum's command ends when the momentum does, with a
+/// [`TransitionEnd`](crate::TransitionEnd) whose velocity says how fast a
+/// cancelled momentum still moved.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraMomentum {
     /// How fast the map's content moved on screen, in logical pixels per

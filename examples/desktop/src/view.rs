@@ -451,6 +451,7 @@ impl View {
         let now = Instant::now();
         let ms = self.ms(now);
         self.gestures_animating = self.gestures.frame(&mut self.map, ms);
+        self.forward_command_ends();
 
         // A perf probe: `MLN_PAN_PX=<px>` pans the map by that many pixels
         // every frame, reversing every 2 s (so it stays over the same area),
@@ -499,8 +500,17 @@ impl View {
     fn gesture(&mut self, input: Input, at: Instant) {
         let at = self.ms(at);
         self.gestures.handle(&mut self.map, input, at);
+        self.forward_command_ends();
         // The app has no use for clicks.
         self.gestures.take_events();
+    }
+
+    /// Tells the gesture recognizer how the camera commands ended, so that a
+    /// press that catches a glide carries it into its release.
+    fn forward_command_ends(&mut self) {
+        for end in self.map.take_command_ends() {
+            self.gestures.camera_command_ended(&end);
+        }
     }
 
     fn on_resize(&mut self, size: PhysicalSize<u32>) {
@@ -627,7 +637,7 @@ impl View {
                     animation: AnimationOptions::new(Duration::from_millis(500)),
                     phase: GesturePhase::None,
                 };
-                self.gestures.step_to(&mut self.map, north);
+                self.gestures.step_to(&mut self.map, &north);
             }
             Action::PickStyle(index) => {
                 if let Some(style) = self.styles.get(index).cloned() {

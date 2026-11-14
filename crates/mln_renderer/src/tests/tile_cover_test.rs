@@ -1,10 +1,8 @@
 // The gtest groups `TileCover`, `TileCoverStream` and `TileCount` are the
 // modules `tile_cover`, `tile_cover_stream` and `tile_count`.
 
-use std::rc::Rc;
-
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use mln_map::transform::{NullTransformObserver, Transform};
+use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
 use mln_style_types::{ProjectionDefinition, SourceType};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
@@ -56,7 +54,7 @@ fn polygon(rings: Vec<LineString<f64>>) -> Polygon<f64> {
 
 /// `Transform transform;`
 fn new_transform() -> Transform {
-    Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default)
+    Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default)
 }
 
 /// `Transform transform; transform.resize({width, height});`
