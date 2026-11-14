@@ -696,6 +696,11 @@ impl GlGpu {
                     Some(texture.object),
                     0,
                 );
+            } else {
+                // Desktop OpenGL 3.3 finds a framebuffer incomplete where a
+                // draw or read buffer has no attachment.
+                gl.draw_buffers(&[glow::NONE]);
+                gl.read_buffer(glow::NONE);
             }
             if let Some(texture) = depth_stencil.and_then(|id| self.textures.get(id)) {
                 let attachment =
