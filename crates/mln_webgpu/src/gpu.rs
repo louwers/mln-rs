@@ -31,8 +31,11 @@ const UNIFORM_ALIGNMENT: u64 = 256;
 /// buffer takes.
 struct Buffer {
     buffer: wgpu::Buffer,
+    usage: BufferUsage,
     /// Where the buffer starts in `buffer`.
     offset: u64,
+    /// The bytes of `buffer` from `offset` that the buffer takes, which
+    /// its writes and bindings stay in.
     size: u64,
     /// Of a buffer in a page, the end of the bytes written so far: those
     /// after it still hold the zeros it was made with. `None` for a buffer
@@ -489,19 +492,6 @@ fn texture_format(format: TextureFormat) -> wgpu::TextureFormat {
     }
 }
 
-/// The usage of a buffer of wgpu usage `usage`, as the checks see it.
-fn buffer_usage(usage: wgpu::BufferUsages) -> BufferUsage {
-    if usage.contains(wgpu::BufferUsages::VERTEX) {
-        BufferUsage::Vertex
-    } else if usage.contains(wgpu::BufferUsages::INDEX) {
-        BufferUsage::Index
-    } else if usage.contains(wgpu::BufferUsages::STORAGE) {
-        BufferUsage::Storage
-    } else {
-        BufferUsage::Uniform
-    }
-}
-
 /// What `shader` reads from the bind groups, by the shaders' ids.
 fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuError> {
     let mut bindings = Vec::new();
@@ -536,8 +526,9 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
 
 impl Resources for WebGpu {
     fn buffer_info(&self, id: BufferId) -> Option<BufferInfo> {
+        // A buffer in a shared page, not the page.
         let buffer = self.buffers.get(id)?;
-        Some(BufferInfo { usage: buffer_usage(buffer.usage()), size: buffer.size() })
+        Some(BufferInfo { usage: buffer.usage, size: buffer.size })
     }
 
     fn texture_info(&self, id: TextureId) -> Option<TextureInfo> {
@@ -595,7 +586,7 @@ impl Gpu for WebGpu {
                 } else {
                     (self.create_uniform_buffer(desc.label, size)?, 0, None)
                 };
-                return Ok(self.buffers.insert(Buffer { buffer, offset, size, written }));
+                return Ok(self.buffers.insert(Buffer { buffer, usage: desc.usage, offset, size, written }));
             }
         };
         let buffer = self.validated(desc.label, |device| {
@@ -606,7 +597,7 @@ impl Gpu for WebGpu {
                 mapped_at_creation: false,
             })
         })?;
-        Ok(self.buffers.insert(Buffer { buffer, offset: 0, size, written: None }))
+        Ok(self.buffers.insert(Buffer { buffer, usage: desc.usage, offset: 0, size, written: None }))
     }
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
