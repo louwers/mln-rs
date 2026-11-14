@@ -25,7 +25,7 @@ use crate::handles::{self, HandleKind, HandleTable};
 use crate::runtime::{self, MapHandles};
 use crate::{abi, buffer, geo, parse_thread, projection};
 
-abi::versioned!(mln_map_options, mln_map_snapshot, mln_feature_state_selector);
+abi::versioned!(mln_map_options(system_fonts_enabled), mln_map_snapshot, mln_feature_state_selector);
 
 pub(crate) struct MapObject {
     pub(crate) map: ::mln_runtime::Map,
@@ -842,6 +842,15 @@ pub(crate) mod tests {
         let off = mln_map_options { fields: MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED, ..options(1.0) };
         assert!(!read(off));
         assert!(read(mln_map_options { system_fonts_enabled: true, ..off }));
+    }
+
+    #[test]
+    fn a_caller_built_before_system_fonts_creates_a_map() {
+        let runtime = create();
+        let older = core::mem::offset_of!(mln_map_options, system_fonts_enabled) as u32;
+        let map = create_map(runtime, &mln_map_options { size: older, ..options(1.0) });
+        release_map(map);
+        release(runtime);
     }
 
     #[test]

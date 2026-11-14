@@ -22,14 +22,19 @@ pub(crate) unsafe trait Versioned: Copy {
     const FIRST_SIZE: usize = size_of::<Self>();
 }
 
+/// Implements [`Versioned`] for header structs. A struct that has grown since
+/// the headers first published it names the member that its first version
+/// ended before, as `mln_x(first_member_added)`, so that callers built against
+/// the older headers still pass their smaller `size`.
 macro_rules! versioned {
-    ($($ty:ident),+ $(,)?) => {$(
+    ($($ty:ident $(($added:ident))?),+ $(,)?) => {$(
         const _: () = assert!(core::mem::offset_of!($ty, size) == 0);
         // SAFETY: a bindgen struct of the headers, whose first field is
         // `size` (asserted above) and whose fields are integers, pointers and
         // nullable function pointers.
         unsafe impl $crate::abi::Versioned for $ty {
             const NAME: &'static str = stringify!($ty);
+            $(const FIRST_SIZE: usize = core::mem::offset_of!($ty, $added);)?
         }
     )+};
 }
