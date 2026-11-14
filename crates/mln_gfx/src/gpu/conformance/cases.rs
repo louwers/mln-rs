@@ -224,3 +224,30 @@ pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError
     second.submit(&[ours.pass(our_pipeline, [DRAW_QUAD])])?;
     Ok(())
 }
+
+/// The texel at `x`, `y` of `pixels`, a read back of a target of [`SIZE`].
+fn texel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * SIZE.width + x) * 4) as usize;
+    [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+}
+
+/// Checks that [`BlendFunction::Replace`](crate::color_mode::BlendFunction)
+/// writes a translucent color as it is, over opaque black. `read_back`
+/// returns a target's texels, as in
+/// [`clip_mask_and_background`](super::clip_mask_and_background). Returns
+/// the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn transparent_replace<G: Gpu>(
+    gpu: &mut G,
+    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
+) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 0.6])?;
+    let pipeline = gpu.create_pipeline(&background())?;
+    gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
+    let pixels = read_back(gpu, frame.target);
+    assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), [255, 0, 0, 153], "not blended with the black");
+    Ok(())
+}

@@ -4,7 +4,9 @@
 //! buffer as an ordinary draw, then the background shader tested against
 //! it. The mask covers the left half, so the background colors only that
 //! half. [`invalid_calls`] checks the calls that every backend rejects, and
-//! [`foreign_ids`] that a backend takes no other backend's ids.
+//! [`foreign_ids`] that a backend takes no other backend's ids. The other
+//! cases draw one color over the whole target, as [`transparent_replace`]
+//! does to check that `Replace` doesn't blend.
 
 mod cases;
 

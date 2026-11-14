@@ -509,21 +509,15 @@ impl ShaderProgram {
             })
             .collect();
 
-        // `Replace` keeps blending on, with the SrcAlpha / OneMinusSrcAlpha
-        // factors.
-        let blend = if state.blend == BlendFunction::Replace {
-            wgpu::BlendComponent {
-                operation: wgpu::BlendOperation::Add,
-                src_factor: wgpu::BlendFactor::SrcAlpha,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            }
-        } else {
-            wgpu::BlendComponent {
+        // `Replace` writes the fragment's color as it is.
+        let blend = (state.blend != BlendFunction::Replace).then(|| {
+            let component = wgpu::BlendComponent {
                 operation: webgpu_blend_operation(state.blend.equation()),
                 src_factor: webgpu_blend_factor(state.blend.src_factor()),
                 dst_factor: webgpu_blend_factor(state.blend.dst_factor()),
-            }
-        };
+            };
+            wgpu::BlendState { color: component, alpha: component }
+        });
         let mut write_mask = wgpu::ColorWrites::empty();
         write_mask.set(wgpu::ColorWrites::RED, state.color_mask.r);
         write_mask.set(wgpu::ColorWrites::GREEN, state.color_mask.g);
@@ -531,7 +525,7 @@ impl ShaderProgram {
         write_mask.set(wgpu::ColorWrites::ALPHA, state.color_mask.a);
         let targets = [Some(wgpu::ColorTargetState {
             format: color_format,
-            blend: Some(wgpu::BlendState { color: blend, alpha: blend }),
+            blend,
             write_mask,
         })];
 

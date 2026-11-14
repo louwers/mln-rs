@@ -1,5 +1,5 @@
 use mln_gfx::gpu::TextureId;
-use mln_gfx::gpu::conformance::{SIZE, clip_mask_and_background, foreign_ids, invalid_calls};
+use mln_gfx::gpu::conformance::{SIZE, clip_mask_and_background, foreign_ids, invalid_calls, transparent_replace};
 
 use crate::{Device, WebGpu};
 
@@ -52,4 +52,11 @@ fn invalid_calls_through_gpu() {
 fn foreign_ids_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     foreign_ids(&mut WebGpu::new(&device), &mut WebGpu::new(&device)).expect("the valid calls");
+}
+
+#[test]
+fn transparent_replace_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    let mut gpu = WebGpu::new(&device);
+    transparent_replace(&mut gpu, |gpu, texture| read_back(&device, gpu, texture)).expect("the frame");
 }
