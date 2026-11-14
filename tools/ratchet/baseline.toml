@@ -117,7 +117,6 @@
 "crates/mln_style/src/style_impl.rs" = 2
 "crates/mln_text/src/glyph_pbf.rs" = 1
 "crates/mln_text/src/harfbuzz_impl.rs" = 2
-"crates/mln_text/src/hb_ft.rs" = 2
 "crates/mln_text/src/icu/ushape.rs" = 1
 "crates/mln_text/src/shaping.rs" = 6
 "crates/mln_text/src/tagged_string.rs" = 4

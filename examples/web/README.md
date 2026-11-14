@@ -71,7 +71,7 @@ page (main thread, no wasm)
   (mln_webgpu), or WebGL2 (mln_gl, the `webgl` feature) for browsers without a
   working WebGPU.
 - Shaping font faces (complex scripts, right-to-left text) needs HarfRust,
-  skrifa and the FreeType port, a large share of the code, so it lives in a
+  skrifa and the glyph rasterizer, a large share of the code, so it lives in a
   second module, [crates/mln_web_shaper](../../crates/mln_web_shaper). The map
   worker loads it the first time a style declares `font-faces`. A panic there
   drops the affected text instead of stopping the map.

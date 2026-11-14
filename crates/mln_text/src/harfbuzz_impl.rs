@@ -1,12 +1,14 @@
 // The C++ shapes with HarfBuzz 8.2.0 built with HB_TINY on an hb-ft font
-// (`hb_ft_font_create`). The port shapes with HarfRust on:
-// - `HbFtFont` (crate::hb_ft): hb-ft's glyph mapping and advances on the
-//   ported FreeType face, at hb-ft's scale (26.6 at 24 px);
+// (`hb_ft_font_create`). The port shapes with HarfRust on the face's font,
+// with its own character map and advances, at 24 px in 26.6 (hb-ft's
+// scale), and:
 // - the font's tables, including the AAT ones (morx, kerx, trak and the
 //   rest) and `kern`, which HB_TINY compiles out: some system fonts, like
 //   Apple's Tibetan font Kailasa, shape only through `morx`;
 // - user features `frac=0`, `numr=0`, `dnom=0` (HB_NO_OT_SHAPE_FRACTIONS:
-//   HB_TINY never adds the automatic fraction features).
+//   HB_TINY never adds the automatic fraction features);
+// - no glyph extents, as hb-ft under HB_TINY gives none, which keeps
+//   HarfRust's fallback mark positioning from moving marks.
 // Unlike HB_TINY's HB_NO_VAR, a variable font shapes at regular weight
 // (`weight::at_regular_weight`), with its GSUB/GPOS feature variations.
 // HarfRust has no switch for some HB_TINY options (HB_NO_OT_SHAPE_FALLBACK,
@@ -17,16 +19,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use harfrust::font::{Blob, Font, TableFunction};
-use harfrust::{Buffer, Direction, Feature, Language, Script, ShapeOptions, ShapePlan, ShaperFont, Tag};
+use harfrust::{
+    Buffer, Direction, Feature, FontFuncs, GlyphExtents, GlyphId, Language, Script, ShapeOptions, ShapePlan,
+    ShaperFont, Tag,
+};
 use parking_lot::Mutex;
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
-use crate::freetype::{FreeTypeFace, FreeTypeLibrary};
+use crate::face::{Face, FreeTypeLibrary, SDF_FONT_SIZE};
 use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz::HBShapeAdjust;
-use crate::hb_ft::HbFtFont;
-use crate::weight;
 
 /// HarfBuzz's default language, which with `HB_NO_SETLOCALE` is "c".
 fn get_default_language() -> Language {
@@ -50,9 +52,7 @@ type ShapePlans = HashMap<([u8; 4], bool), Arc<ShapePlan>>;
 
 pub(crate) struct Impl {
     type_: GlyphIDType,
-    face: FreeTypeFace,
-    /// `hb_font_t *font` (its face: the `HB_TINY` view of the tables).
-    font: Option<Font>,
+    face: Face,
     /// HarfBuzz caches shape plans per segment properties (script and
     /// direction); so do we.
     plans: Mutex<ShapePlans>,
@@ -67,42 +67,20 @@ fn hb_tiny_features() -> [Feature; 3] {
     ]
 }
 
-/// A table of a font file, in the file's own bytes.
-struct TableBytes {
-    data: FontData,
-    range: std::ops::Range<usize>,
-}
+/// The font's own glyph mapping and advances, without glyph extents.
+struct NoGlyphExtents;
 
-impl AsRef<[u8]> for TableBytes {
-    fn as_ref(&self) -> &[u8] {
-        &self.data.as_bytes()[self.range.clone()]
+impl FontFuncs for NoGlyphExtents {
+    fn glyph_extents(&self, _font: &ShaperFont, _glyph: GlyphId) -> Option<GlyphExtents> {
+        None
     }
-}
-
-/// The tables of `face` as HarfBuzz (hb-ft's `_hb_ft_reference_table`, i.e.
-/// `FT_Load_Sfnt_Table`) sees them.
-fn shaping_font(face: &FreeTypeFace) -> Option<Font> {
-    let ft = face.get_face()?;
-    let data = face.data().clone();
-    // FT_Load_Sfnt_Table: the first non-empty directory entry per tag.
-    let tables: HashMap<[u8; 4], (usize, usize)> = ft.table_entries().into_iter().collect();
-    let table_fn = move |tag: Tag| -> Option<Blob> {
-        let &(offset, length) = tables.get(&tag.to_be_bytes())?;
-        let range = offset..offset + length;
-        data.as_bytes().get(range.clone())?;
-        let table: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(TableBytes { data: data.clone(), range });
-        Some(Blob::from(table))
-    };
-    Font::new(TableFunction::new(Arc::new(table_fn)), 0).map(weight::at_regular_weight)
 }
 
 impl Impl {
     /// A shaper for the font in `font_file_data`, whose glyphs have type
     /// `type_`.
-    pub(crate) fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, lib: &FreeTypeLibrary) -> Self {
-        let face = FreeTypeFace::from_memory(font_file_data, lib);
-        let font = if face.is_valid() { shaping_font(&face) } else { None };
-        Impl { type_, face, font, plans: Mutex::new(HashMap::new()) }
+    pub(crate) fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, _lib: &FreeTypeLibrary) -> Self {
+        Impl { type_, face: Face::from_memory(font_file_data), plans: Mutex::new(HashMap::new()) }
     }
 
     pub(crate) fn valid(&self) -> bool {
@@ -115,7 +93,7 @@ impl Impl {
 
     fn plan(
         &self,
-        font: &Font,
+        font: &harfrust::Font,
         script: [u8; 4],
         rtl: bool,
         language: &Language,
@@ -147,7 +125,7 @@ impl Impl {
         }
         // The C++ never checks `face.isValid()` here (font and buffer are
         // uninitialized then); callers only shape with valid shapers.
-        let Some(font) = &self.font else {
+        let Some(font) = self.face.font() else {
             return;
         };
 
@@ -218,10 +196,8 @@ impl Impl {
 
     /// One iteration of `createComplexGlyphIDs`' loop: `hb_buffer_reset`,
     /// direction, script, language, `hb_buffer_add_utf16`, `hb_shape`.
-    fn shape_part(&self, font: &Font, text: &[u16], script: [u8; 4], rtl: bool) -> Option<Buffer> {
-        let funcs = HbFtFont::new(&self.face);
-        let (x_scale, y_scale) = HbFtFont::scale(&self.face);
-        let shaper_font = ShaperFont::new(font).with_scale_separate(x_scale, y_scale).with_font_funcs(Some(&funcs));
+    fn shape_part(&self, font: &harfrust::Font, text: &[u16], script: [u8; 4], rtl: bool) -> Option<Buffer> {
+        let shaper_font = ShaperFont::new(font).with_scale(SDF_FONT_SIZE * 64).with_font_funcs(Some(&NoGlyphExtents));
         let language = get_default_language();
         let features = hb_tiny_features();
 

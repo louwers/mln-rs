@@ -1,6 +1,5 @@
 // Decodes WOFF and WOFF2 font files to the SFNT (TrueType or OpenType) font
-// they hold, as FreeType's `sfnt_open_font` does before it reads a face. The
-// wuff crate decodes both; WOFF's zlib streams inflate through flate2, which
+// they hold, before a face reads it. The wuff crate decodes both; WOFF's zlib streams inflate through flate2, which
 // the rest of the workspace uses too.
 
 use std::error::Error;

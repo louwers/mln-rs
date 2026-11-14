@@ -3135,6 +3135,7 @@ dependencies = [
 name = "mln-rs-text"
 version = "0.0.11"
 dependencies = [
+ "ab_glyph_rasterizer",
  "buffa",
  "flate2",
  "harfrust 0.15.0",
