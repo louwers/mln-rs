@@ -1,8 +1,7 @@
 use crate::types::{StencilFunctionType, StencilOpType};
 
-/// A stencil test, in C++'s variant order. `Never` and `Always` have no mask;
-/// the others carry one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A stencil test. `Never` and `Always` have no mask; the others carry one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Test {
     Never,
     Less { mask: u32 },
@@ -69,8 +68,8 @@ impl StencilMode {
     }
 }
 
-/// `Never`, zeros and `StencilOpType::Zero`, as C++ value-initializes a
-/// drawable's stencil mode.
+/// `Never`, zeros and `StencilOpType::Zero`: a drawable's stencil mode until
+/// it is set.
 impl Default for StencilMode {
     fn default() -> Self {
         StencilMode {

@@ -133,7 +133,6 @@
 "crates/mln_webgpu/src/drawable_builder.rs" = 1
 "crates/mln_webgpu/src/offscreen_texture.rs" = 1
 "crates/mln_webgpu/src/renderer_backend.rs" = 1
-"crates/mln_webgpu/src/shaders/shader_group.rs" = 2
 "crates/mln_webgpu/src/shaders/shader_source.rs" = 1
 "crates/mln_webgpu/src/upload_pass.rs" = 1
 "vendor/geojson-vt/src/lib.rs" = 2

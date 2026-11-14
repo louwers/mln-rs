@@ -2718,6 +2718,8 @@ dependencies = [
  "mln-rs-vec-map",
  "raw-window-handle",
  "serde",
+ "slotmap",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

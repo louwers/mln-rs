@@ -1,14 +1,15 @@
-// Logging: the C++ `Log::Warning`/`Log::Error` calls print to stderr here.
-
 use std::cell::Cell;
 use std::rc::Rc;
 
 use mln_gfx::attribute::AttributeBindingArray;
-use mln_gfx::color_mode::{BlendFunction, ColorMode};
+use mln_gfx::color_mode::ColorMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::drawable::{self, DrawSegment, DrawableBase, UniqueDrawSegment};
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::{
+    DepthState, PipelineState, StencilState, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
+};
 use mln_gfx::index_vector::{IndexBufferBase, IndexVectorBasePtr};
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -18,7 +19,6 @@ use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{BufferUsageType, DepthMaskType};
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::upload_pass::UploadPass as _;
-use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::IndexBuffer as GfxIndexBuffer;
 use mln_util::logging::{Event, Log};
@@ -27,96 +27,11 @@ use mln_util::time::Instant;
 use crate::bind_groups::{BindGroupKey, EntryResource, SharedBindGroup};
 use crate::context::Context;
 use crate::render_pass::RenderPass;
-use crate::shaders::shader_program::{BindingInfo, BindingType, ShaderProgram, VertexLayout, as_webgpu_shader};
+use crate::shaders::shader_program::{BindingInfo, BindingType, ShaderProgram, as_webgpu_shader};
 use crate::texture2d::Texture2D;
 use crate::uniform_buffer::UniformBuffer;
 use crate::upload_pass::UploadPass;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
-
-// Leaves out the reference, which draw() sets per draw rather than in the pipeline.
-fn hash_stencil_mode(mode: &StencilMode) -> u64 {
-    let mut h = hash(&[u64::from(mode.mask), mode.fail as u64, mode.depth_fail as u64, mode.pass as u64]);
-    h = hash(&[h, mode.test.func() as u64]);
-    if let Some(mask) = mode.test.masked() {
-        h = hash(&[h, u64::from(mask)]);
-    }
-    h
-}
-
-fn hash_pipeline_state(
-    vertex_layouts: &[VertexLayout],
-    color_mode: &ColorMode,
-    depth_mode: &DepthMode,
-    stencil_mode: &StencilMode,
-    draw_mode_type: DrawModeType,
-) -> u64 {
-    let mut h = 0u64;
-    // Hash vertex layouts
-    for layout in vertex_layouts {
-        h = hash(&[h, u64::from(layout.array_stride as u32)]);
-        h = hash(&[h, layout.step_mode as u64]);
-        h = hash(&[h, layout.attributes.len() as u64]);
-        for attr in layout.attributes.iter().take(16) {
-            h = hash(&[h, attr.format as u64, u64::from(attr.shader_location), u64::from(attr.offset as u32)]);
-        }
-    }
-    // Hash color mode
-    h = hash(&[
-        h,
-        u64::from(color_mode.mask.r),
-        u64::from(color_mode.mask.g),
-        u64::from(color_mode.mask.b),
-        u64::from(color_mode.mask.a),
-    ]);
-    match &color_mode.blend_function {
-        BlendFunction::Replace => h = hash(&[h, 0]),
-        f => {
-            h = hash(&[h, f.equation() as u64, f.src_factor() as u64, f.dst_factor() as u64]);
-        }
-    }
-    // Hash depth mode
-    h = hash(&[h, depth_mode.func as u64, depth_mode.mask as u64]);
-    // Hash stencil mode
-    h = hash(&[h, hash_stencil_mode(stencil_mode)]);
-    // Hash draw mode
-    hash(&[h, draw_mode_type as u64])
-}
-
-fn wgpu_vertex_format_of(type_: AttributeDataType) -> wgpu::VertexFormat {
-    use AttributeDataType as A;
-    use wgpu::VertexFormat as F;
-    match type_ {
-        A::Byte => F::Sint8,
-        A::Byte2 => F::Sint8x2,
-        A::Byte4 => F::Sint8x4,
-        A::UByte => F::Uint8,
-        A::UByte2 => F::Uint8x2,
-        A::UByte4 => F::Uint8x4,
-        A::UByte4Normalized => F::Unorm8x4,
-        A::Short => F::Sint16,
-        A::Short2 => F::Sint16x2,
-        A::Short4 => F::Sint16x4,
-        A::UShort => F::Uint16,
-        A::UShort2 => F::Uint16x2,
-        A::UShort4 => F::Uint16x4,
-        A::Int => F::Sint32,
-        A::Int2 => F::Sint32x2,
-        A::Int3 => F::Sint32x3,
-        A::Int4 => F::Sint32x4,
-        A::UInt => F::Uint32,
-        A::UInt2 => F::Uint32x2,
-        A::UInt3 => F::Uint32x3,
-        A::UInt4 => F::Uint32x4,
-        A::Float => F::Float32,
-        A::Float2 => F::Float32x2,
-        A::Float3 => F::Float32x3,
-        A::Float4 => F::Float32x4,
-        _ => {
-            debug_assert!(false, "Unsupported vertex attribute format");
-            F::Float32x2 // Default fallback
-        }
-    }
-}
 
 /// The uploaded buffer of an index vector.
 struct IndexBuffer {
@@ -150,11 +65,13 @@ struct DrawableImpl {
     uniform_buffers: UniformBufferArray,
     depth_mode: DepthMode,
     stencil_mode: StencilMode,
+    /// The stencil state the pipeline was made with, `None` until it is.
+    pipeline_stencil: Option<StencilState>,
     vertex_attr_id: usize,
-    stencil_mode_hash: u64,
-    stencil_mode_hash_valid: bool,
-    /// We don't own the pipeline - it's owned by the shader program's cache.
+    /// The pipeline, which the shader program's cache owns, and the target
+    /// formats it was made for.
     pipeline_state: Option<wgpu::RenderPipeline>,
+    pipeline_formats: Option<(wgpu::TextureFormat, Option<wgpu::TextureFormat>)>,
     bind_groups: Vec<BindGroupRecord>,
     /// The slot of the shader's index group, which [`bind_groups`] leaves
     /// out: a draw binds the context's table at its `ubo_index`.
@@ -194,10 +111,10 @@ impl Drawable {
                 uniform_buffers: UniformBufferArray::new(),
                 depth_mode: DepthMode::disabled(),
                 stencil_mode: StencilMode::default(),
+                pipeline_stencil: None,
                 vertex_attr_id: 0,
-                stencil_mode_hash: 0,
-                stencil_mode_hash_valid: false,
                 pipeline_state: None,
+                pipeline_formats: None,
                 bind_groups: Vec::new(),
                 index_slot: None,
                 bind_groups_shader: None,
@@ -213,20 +130,10 @@ impl Drawable {
     }
 
     pub(crate) fn set_stencil_mode_for_3d(&mut self, value: &StencilMode) {
-        let new_hash = hash_stencil_mode(value);
-        let m = &self.impl_.stencil_mode;
-        if !self.impl_.stencil_mode_hash_valid
-            || self.impl_.stencil_mode_hash != new_hash
-            || m.mask != value.mask
-            || m.fail != value.fail
-            || m.depth_fail != value.depth_fail
-            || m.pass != value.pass
-        {
+        if self.impl_.pipeline_stencil != Some(StencilState::from(value)) {
             self.impl_.pipeline_state = None;
-            self.impl_.stencil_mode_hash_valid = false;
         }
         self.impl_.stencil_mode = *value;
-        self.impl_.stencil_mode_hash = new_hash;
     }
 
     pub(crate) fn set_vertex_attr_id(&mut self, id: usize) {
@@ -345,15 +252,13 @@ impl Drawable {
     }
 
     /// Build the bind groups for this draw from the shader's metadata.
-    /// Returns false when the draw must be skipped (C++ `return`).
+    /// Returns false when the draw must be skipped.
     ///
-    /// C++ creates every bind group on every draw, with a `GlobalUBOIndex`
-    /// buffer of the drawable's. The port keeps the previous draw's bind
-    /// groups as they are while they bind what this draw would, and
-    /// otherwise reuses each one whose layout and bound buffers, samplers
-    /// and texture views (compared by identity) are unchanged, takes the
-    /// others from the bind groups drawables share, and leaves the index
-    /// group to the draw. A replaced resource stays alive until the
+    /// Keeps the previous draw's bind groups as they are while they bind
+    /// what this draw would, and otherwise reuses each one whose layout and
+    /// bound buffers, samplers and texture views (compared by identity) are
+    /// unchanged, takes the others from the bind groups drawables share, and
+    /// leaves the index group to the draw. A replaced resource stays alive until the
     /// drawable's next draw or its drop.
     fn build_bind_groups(
         &mut self,
@@ -373,22 +278,19 @@ impl Drawable {
         let global_buffers = render_pass.get_global_uniform_buffers();
         let textures = &self.base.textures;
 
-        for (slot, &group) in shader.get_bind_group_order().iter().enumerate() {
-            let Some(layout) = shader.get_bind_group_layout(group) else {
+        for (slot, &group) in shader.bind_group_order().iter().enumerate() {
+            let Some(layout) = shader.bind_group_layout(group) else {
                 Log::warning(
                     Event::Render,
-                    format!(
-                        "WebGPU: missing bind group layout for group {group} in shader '{}'",
-                        shader.get_shader_name()
-                    ),
+                    format!("WebGPU: missing bind group layout for group {group} in shader '{}'", shader.name()),
                 );
                 return false;
             };
-            if Some(group) == shader.get_index_group() {
+            if Some(group) == shader.index_group() {
                 self.impl_.index_slot = Some(slot as u32);
                 continue;
             }
-            let binding_infos = shader.get_binding_infos_for_group(group);
+            let binding_infos = shader.binding_infos(group);
 
             let mut resources: Vec<(u32, EntryResource)> = Vec::with_capacity(binding_infos.len());
             let mut valid_bindings = true;
@@ -430,9 +332,8 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        // The UBO's whole (256-byte aligned) slot, as C++
-                        // binds `getSize()`: some UBOs hold less data than
-                        // their shader struct.
+                        // The UBO's whole (256-byte aligned) slot: some
+                        // UBOs hold less data than their shader struct.
                         resources.push((binding_info.binding, EntryResource::Buffer(gpu_buffer, offset, size)));
                     }
                     BindingType::Sampler => {
@@ -547,7 +448,7 @@ impl Drawable {
         let global_buffers = render_pass.get_global_uniform_buffers();
         self.impl_.bind_groups.iter().all(|record| {
             let resources = &record.bind_group.key.resources;
-            let binding_infos = shader.get_binding_infos_for_group(record.group);
+            let binding_infos = shader.binding_infos(record.group);
             binding_infos.len() == resources.len()
                 && binding_infos.iter().zip(resources).all(|(info, (binding, resource))| {
                     info.binding == *binding && self.binds(info, resource, global_buffers.as_deref(), shader)
@@ -597,26 +498,15 @@ impl Drawable {
 }
 
 /// The texture of `textures` that `shader` samples at `binding`: the one
-/// whose sampler is at `binding` if `sampler_binding`, else the one whose
-/// texture is, at its sampler's binding or the next.
+/// whose sampler is there if `sampler_binding`, else the one whose texture
+/// is (see [`ShaderProgram::texture_at`]).
 fn texture_for_binding<'a>(
     textures: &'a [Option<Texture2DPtr>],
     shader: &ShaderProgram,
     binding: u32,
     sampler_binding: bool,
 ) -> Option<&'a Texture2DPtr> {
-    textures.iter().enumerate().find_map(|(tex_index, texture)| {
-        let texture = texture.as_ref()?;
-        let location = shader.get_sampler_location_of(tex_index)? as u32;
-        let matches = location == binding || (!sampler_binding && location + 1 == binding);
-        matches.then_some(texture)
-    })
-}
-
-impl ShaderProgram {
-    fn get_sampler_location_of(&self, id: usize) -> Option<usize> {
-        mln_gfx::shaders::shader_program_base::ShaderProgramBase::get_sampler_location(self, id)
-    }
+    textures.get(shader.texture_at(binding, sampler_binding)?)?.as_ref()
 }
 
 /// A vertex buffer slot of a draw. A draw reads the buffer from
@@ -625,13 +515,21 @@ struct UniqueBinding {
     vertex_resource: Rc<dyn mln_gfx::vertex_buffer::VertexBufferResource>,
     stride: u32,
     base_offset: u64,
-    step_mode: wgpu::VertexStepMode,
-    attributes: Vec<wgpu::VertexAttribute>,
+    step: VertexStep,
+    attributes: Vec<GpuVertexAttribute>,
 }
 
-fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexStepMode, out: &mut Vec<UniqueBinding>) {
-    for (attribute_index, binding) in source.iter().enumerate() {
+/// Adds the bindings of `source`, which is indexed by `shader`'s locations,
+/// to the slots in `out`.
+fn accumulate_bindings(
+    shader: &ShaderProgram,
+    source: &AttributeBindingArray,
+    step: VertexStep,
+    out: &mut Vec<UniqueBinding>,
+) {
+    for (location, binding) in source.iter().enumerate() {
         let Some(binding) = binding else { continue };
+        let Some(id) = shader.attribute_id(step, location) else { continue };
         let Some(resource) = &binding.vertex_buffer_resource else { continue };
         let Some(vertex_buffer_res) = resource.downcast_ref::<VertexBufferResource>() else {
             continue;
@@ -647,7 +545,7 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
         let pos = out.iter().position(|e| {
             std::ptr::addr_eq(Rc::as_ptr(&e.vertex_resource), Rc::as_ptr(resource))
                 && e.stride == binding.vertex_stride
-                && e.step_mode == step_mode
+                && e.step == step
                 && e.base_offset == binding_byte_offset
         });
         let entry = match pos {
@@ -656,17 +554,17 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
                     vertex_resource: Rc::clone(resource),
                     stride: binding.vertex_stride,
                     base_offset: binding_byte_offset,
-                    step_mode,
+                    step,
                     attributes: Vec::with_capacity(4),
                 });
                 out.last_mut().unwrap()
             }
             Some(i) => &mut out[i],
         };
-        entry.attributes.push(wgpu::VertexAttribute {
-            format: wgpu_vertex_format_of(binding.attribute.data_type),
-            offset: u64::from(binding.attribute.offset),
-            shader_location: attribute_index as u32,
+        entry.attributes.push(GpuVertexAttribute {
+            id,
+            format: binding.attribute.data_type,
+            offset: binding.attribute.offset,
         });
     }
 }
@@ -748,26 +646,24 @@ impl drawable::Drawable for Drawable {
             }
         }
 
-        let new_stencil_hash = hash_stencil_mode(&stencil_mode);
-        if !self.impl_.stencil_mode_hash_valid
-            || self.impl_.stencil_mode_hash != new_stencil_hash
+        let stencil = StencilState::from(&stencil_mode);
+        if self.impl_.pipeline_stencil != Some(stencil)
             || self.impl_.depth_mode.func != depth_mode.func
             || self.impl_.depth_mode.mask != depth_mode.mask
         {
             self.impl_.pipeline_state = None;
-            self.impl_.stencil_mode_hash_valid = true;
+            self.impl_.pipeline_stencil = Some(stencil);
         }
         self.impl_.depth_mode = depth_mode;
         self.impl_.stencil_mode = stencil_mode;
-        self.impl_.stencil_mode_hash = new_stencil_hash;
 
         let unique_bindings = self.impl_.vertex_slots.get_or_insert_with(|| {
             const MAX_VERTEX_BUFFER_SLOTS: usize = 8;
 
             let mut unique_bindings =
                 Vec::with_capacity(self.impl_.attribute_bindings.len() + self.impl_.instance_bindings.len());
-            accumulate_bindings(&self.impl_.attribute_bindings, wgpu::VertexStepMode::Vertex, &mut unique_bindings);
-            accumulate_bindings(&self.impl_.instance_bindings, wgpu::VertexStepMode::Instance, &mut unique_bindings);
+            accumulate_bindings(shader, &self.impl_.attribute_bindings, VertexStep::Vertex, &mut unique_bindings);
+            accumulate_bindings(shader, &self.impl_.instance_bindings, VertexStep::Instance, &mut unique_bindings);
 
             if unique_bindings.len() > MAX_VERTEX_BUFFER_SLOTS {
                 Log::warning(
@@ -782,45 +678,30 @@ impl drawable::Drawable for Drawable {
             unique_bindings
         });
 
+        let formats = context.get_backend().target_formats();
+        if self.impl_.pipeline_formats != Some(formats) {
+            self.impl_.pipeline_state = None;
+            self.impl_.pipeline_formats = Some(formats);
+        }
         if self.impl_.pipeline_state.is_none() {
-            // Create vertex layout from attribute bindings
-            let vertex_layouts: Vec<VertexLayout> = unique_bindings
-                .iter()
-                .map(|b| VertexLayout {
-                    array_stride: u64::from(b.stride),
-                    step_mode: b.step_mode,
-                    attributes: b.attributes.clone(),
-                })
-                .collect();
-            // Use the actual color mode from the drawable (like Metal does)
             let color_mode = self.base.color_mode;
-            let draw_mode_type = self.impl_.segments.first().map_or(DrawModeType::Triangles, |s| s.get_mode().type_);
-            // Compute pipeline state hash for caching
-            let cull_mode = self.base.cull_face_mode;
-            let pipeline_hash = hash(&[
-                hash_pipeline_state(&vertex_layouts, &color_mode, &depth_mode, &stencil_mode, draw_mode_type),
-                u64::from(cull_mode.enabled),
-                cull_mode.side as u64,
-                cull_mode.winding as u64,
-            ]);
-            self.impl_.pipeline_state = shader.get_render_pipeline(
-                &vertex_layouts,
-                &color_mode,
-                &depth_mode,
-                &stencil_mode,
-                draw_mode_type,
-                Some(pipeline_hash),
-                cull_mode,
-            );
-            if self.impl_.pipeline_state.is_none() {
-                Log::warning(
-                    Event::Render,
-                    format!(
-                        "WebGPU: skipping pipeline creation for drawable '{}' (shader='{}')",
-                        self.base.name,
-                        mln_gfx::shader::Shader::type_name(shader)
-                    ),
-                );
+            let state = PipelineState {
+                vertex_buffers: unique_bindings
+                    .iter()
+                    .map(|b| VertexBufferLayout { stride: b.stride, step: b.step, attributes: b.attributes.clone() })
+                    .collect(),
+                primitive: self.impl_.segments.first().map_or(DrawModeType::Triangles, |s| s.get_mode().type_),
+                cull: self.base.cull_face_mode,
+                blend: color_mode.blend_function,
+                color_mask: color_mode.mask,
+                depth: DepthState::from(&depth_mode),
+                stencil: StencilState::from(&stencil_mode),
+            };
+            match shader.render_pipeline(&state, formats.0, formats.1) {
+                Ok(pipeline) => self.impl_.pipeline_state = Some(pipeline),
+                Err(error) => {
+                    Log::warning(Event::Render, format!("WebGPU: drawable '{}': {error}", self.base.name));
+                }
             }
         }
 
@@ -931,7 +812,7 @@ impl drawable::Drawable for Drawable {
             if self.base.enable_stencil {
                 if let Some(tile_id) = self.base.tile_id {
                     let expected_stencil = parameters.stencil_mode_for_clipping(&tile_id.to_unwrapped());
-                    if hash_stencil_mode(&expected_stencil) != hash_stencil_mode(&self.impl_.stencil_mode) {
+                    if StencilState::from(&expected_stencil) != StencilState::from(&self.impl_.stencil_mode) {
                         debug_assert!(false, "stencil mismatch");
                         Log::warning(
                             Event::Render,

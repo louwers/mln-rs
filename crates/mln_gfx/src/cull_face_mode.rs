@@ -1,6 +1,6 @@
 use crate::types::{CullFaceSideType, CullFaceWindingType};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CullFaceMode {
     pub enabled: bool,
     pub side: CullFaceSideType,
