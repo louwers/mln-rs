@@ -81,7 +81,7 @@ import {
   type ToMap,
 } from "./protocol.ts";
 import { STYLES, type Style, styleFor } from "./styles.ts";
-import { wheelReader } from "./wheel.ts";
+import { wheelDelta } from "./wheel.ts";
 
 declare global {
   interface Window {
@@ -453,14 +453,13 @@ canvas.addEventListener("pointerup", (e) =>
 canvas.addEventListener("pointercancel", (e) =>
   send({ kind: "pointer_cancel", id: e.pointerId, time: time(e) }),
 );
-// readWheel (wheel.ts) reads the event's deltas first, `deltaMode` before
+// wheelDelta (wheel.ts) reads the event's deltas first, `deltaMode` before
 // `deltaY`, so that Firefox keeps a mouse wheel's lines.
-const readWheel = wheelReader();
 canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    const delta = readWheel(e, e.timeStamp);
+    const delta = wheelDelta(e);
     if (delta.amount !== 0)
       send({
         kind: "wheel",
