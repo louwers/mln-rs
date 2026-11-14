@@ -4,8 +4,9 @@
 // map without the collisions. The hash is only a cache key.
 
 use mln_gfx::UploadPass;
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
-use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -229,14 +230,15 @@ impl DashPatternTexture {
     /// uploaded for the first time.
     pub(crate) fn upload(&mut self, upload_pass: &dyn UploadPass) {
         if let DashTexture::Image(image) = &self.texture {
-            let temp_texture = upload_pass.get_context().create_texture_2d();
+            let context = upload_pass.get_context();
+            let temp_texture = context.create_texture_2d();
             {
                 let mut texture = temp_texture.borrow_mut();
-                // Texture2D::upload(const AlphaImage&)
-                texture.set_format(TexturePixelType::Alpha, TextureChannelDataType::UnsignedByte);
-                let data = if image.data.is_empty() { None } else { Some(image.data.as_slice()) };
-                texture.upload_data(data, image.size);
-                texture.set_sampler_configuration(SamplerState {
+                texture.set_format(TextureFormat::A8Unorm);
+                if let Err(error) = texture.upload_data(context, &image.data, image.size) {
+                    Log::error(Event::Render, format!("Uploading a dash pattern failed: {error}"));
+                }
+                texture.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
                     wrap_u: TextureWrapType::Repeat,
                     wrap_v: TextureWrapType::Clamp,
@@ -261,7 +263,7 @@ impl DashPatternTexture {
     pub(crate) fn get_size(&self) -> Size {
         match &self.texture {
             DashTexture::Image(image) => image.size,
-            DashTexture::Texture(texture) => texture.borrow().get_size(),
+            DashTexture::Texture(texture) => texture.borrow().size(),
         }
     }
 

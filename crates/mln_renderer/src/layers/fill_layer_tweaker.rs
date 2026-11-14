@@ -163,7 +163,7 @@ impl LayerTweaker for FillLayerTweaker {
 
             let mut texture_size = Size::new(0, 0);
             if let Some(tex) = drawable.get_texture(ID_FILL_IMAGE_TEXTURE) {
-                texture_size = tex.borrow().get_size();
+                texture_size = tex.borrow().size();
             }
 
             let ubo = &mut drawable_ubo_vector[i as usize];

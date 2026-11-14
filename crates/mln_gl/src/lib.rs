@@ -52,7 +52,6 @@ mod render_pass;
 mod renderer_backend;
 mod shaders;
 mod state;
-mod texture2d;
 mod types;
 mod upload_pass;
 mod vertex_array;

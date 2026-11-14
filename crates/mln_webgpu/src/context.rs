@@ -18,7 +18,6 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
-use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
@@ -31,7 +30,6 @@ use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
 use crate::render_pass::RenderPass;
 use crate::renderer_backend::BackendImpl;
-use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
 
 pub(crate) struct Context {
@@ -148,11 +146,6 @@ impl Context {
         OffscreenTexture::new(self.rc(), size, type_, depth, stencil)
     }
 
-    /// Creates a texture, of the concrete type.
-    pub(crate) fn create_webgpu_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
-        Rc::new(RefCell::new(Texture2D::new(self.rc())))
-    }
-
     /// Drops the placeholder vertex buffers (see
     /// `UploadPass::dummy_vertex_buffer`), which hold an `Rc` to this context
     /// (see the top of this file).
@@ -238,10 +231,6 @@ impl GfxContext for Context {
 
     fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr> {
         Some(Rc::new(RefCell::new(LayerGroup::new(layer_index, initial_capacity, name))))
-    }
-
-    fn create_texture_2d(&self) -> Texture2DPtr {
-        self.create_webgpu_texture_2d()
     }
 
     /// In WebGPU, buffers can't be bound globally to the render pass like in

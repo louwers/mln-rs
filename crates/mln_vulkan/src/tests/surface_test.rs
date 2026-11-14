@@ -46,7 +46,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::texture2d::Texture2D as _;
 use mln_gfx::types::{DepthMaskType, TextureChannelDataType, TexturePixelType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;

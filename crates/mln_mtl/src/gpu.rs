@@ -33,9 +33,9 @@ use objc2_metal::{
     MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
     MTLRenderPipelineReflection, MTLResource, MTLResourceOptions, MTLSamplerAddressMode, MTLSamplerDescriptor,
-    MTLSamplerMinMagFilter, MTLSamplerMipFilter, MTLScissorRect, MTLSize, MTLStencilDescriptor, MTLStencilOperation,
-    MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor,
-    MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLWinding,
+    MTLSamplerMinMagFilter, MTLSamplerMipFilter, MTLSamplerState, MTLScissorRect, MTLSize, MTLStencilDescriptor,
+    MTLStencilOperation, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLWinding,
 };
 
 use crate::Device;
@@ -55,8 +55,9 @@ const MAX_BUFFERS: usize = 31;
 const BUFFER_OFFSET_ALIGNMENT: u32 = 256;
 
 /// The formats that [`TextureFormat`]s map to, for an imported texture's.
-const TEXTURE_FORMATS: [TextureFormat; 13] = [
+const TEXTURE_FORMATS: [TextureFormat; 14] = [
     TextureFormat::R8Unorm,
+    TextureFormat::A8Unorm,
     TextureFormat::R16Float,
     TextureFormat::R32Float,
     TextureFormat::Rgba8Unorm,
@@ -290,6 +291,15 @@ impl MetalGpu {
     fn retire_later(&mut self, resource: impl Any) {
         self.retired.push_back((self.submitted, Box::new(resource)));
         self.retire();
+    }
+
+    /// The Metal texture of `texture`.
+    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<&ProtocolObject<dyn MTLTexture>> {
+        self.textures.get(texture).map(|texture| &*texture.texture)
+    }
+
+    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<&ProtocolObject<dyn MTLSamplerState>> {
+        self.samplers.get(sampler).map(|sampler| &**sampler)
     }
 
     /// The Metal buffer of `buffer`.
@@ -1118,6 +1128,7 @@ pub(crate) fn vertex_format(type_: AttributeDataType) -> Option<MTLVertexFormat>
 fn pixel_format(format: TextureFormat) -> MTLPixelFormat {
     match format {
         TextureFormat::R8Unorm => MTLPixelFormat::R8Unorm,
+        TextureFormat::A8Unorm => MTLPixelFormat::A8Unorm,
         TextureFormat::R16Float => MTLPixelFormat::R16Float,
         TextureFormat::R32Float => MTLPixelFormat::R32Float,
         TextureFormat::Rgba8Unorm => MTLPixelFormat::RGBA8Unorm,

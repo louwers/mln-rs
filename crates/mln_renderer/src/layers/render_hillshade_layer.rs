@@ -427,7 +427,7 @@ impl RenderLayer for RenderHillshadeLayer {
                     t.set_image(Some(Rc::new(dem_image)));
                     // Use Nearest filtering to match GL JS behavior - the
                     // Sobel kernel samples exact pixel values
-                    t.set_sampler_configuration(SamplerState {
+                    t.set_sampler(SamplerState {
                         filter: TextureFilterType::Nearest,
                         wrap_u: TextureWrapType::Clamp,
                         wrap_v: TextureWrapType::Clamp,
@@ -453,7 +453,7 @@ impl RenderLayer for RenderHillshadeLayer {
             }
             let render_target_texture =
                 self.bucket_render_targets.get(&bucket_id).expect("render target").0.borrow().get_texture();
-            render_target_texture.borrow_mut().set_sampler_configuration(SamplerState {
+            render_target_texture.borrow_mut().set_sampler(SamplerState {
                 filter: resampling_filter,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,

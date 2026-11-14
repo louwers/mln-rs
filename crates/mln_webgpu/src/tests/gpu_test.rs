@@ -8,7 +8,7 @@ use crate::{Device, WebGpu};
 
 /// The RGBA texels of `texture`.
 fn read_back(device: &Device, gpu: &WebGpu, texture: TextureId) -> Vec<u8> {
-    let texture = gpu.texture(texture).expect("the color texture");
+    let (texture, _) = gpu.native_texture(texture).expect("the color texture");
     let (device, queue) = (device.device(), device.queue());
     let row = SIZE.width * 4;
     let padded = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);

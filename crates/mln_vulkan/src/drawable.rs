@@ -237,9 +237,10 @@ impl Drawable {
             self.build_vulkan_input_bindings(upload_pass.vulkan_context());
         }
 
-        let textures_need_upload = self.base.textures.iter().flatten().any(|t| t.borrow().needs_upload());
-        if textures_need_upload {
-            self.upload_textures();
+        for texture in self.base.textures.iter().flatten() {
+            if let Err(error) = texture.borrow_mut().upload(&**upload_pass.vulkan_context()) {
+                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
+            }
         }
 
         self.base.attribute_update_time = Some(Instant::now());
@@ -398,12 +399,6 @@ impl Drawable {
             );
         }
         true
-    }
-
-    fn upload_textures(&self) {
-        for texture in self.base.textures.iter().flatten() {
-            texture.borrow_mut().upload();
-        }
     }
 }
 

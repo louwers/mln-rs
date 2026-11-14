@@ -15,11 +15,12 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mln_gfx::debug_group::DebugGroupTarget;
-use mln_gfx::gpu::BufferId;
+use mln_gfx::gpu::{BufferId, SamplerId, TextureId};
 use mln_gfx::render_pass::{self, RenderPassDescriptor};
 use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::range::Range;
+use objc2::Message;
 use objc2::rc::Retained;
 use objc2_foundation::{NSCopying, NSString};
 use objc2_metal::{
@@ -94,7 +95,7 @@ impl Default for State {
     }
 }
 
-fn same<T: objc2::Message + ?Sized>(a: Option<&Retained<T>>, b: Option<&Retained<T>>) -> bool {
+fn same<T: Message + ?Sized>(a: Option<&Retained<T>>, b: Option<&Retained<T>>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => std::ptr::addr_eq(Retained::as_ptr(a), Retained::as_ptr(b)),
         (None, None) => true,
@@ -331,6 +332,17 @@ impl RenderPass {
         if index < MAX_BINDS {
             self.state.borrow_mut().vertex_binds[index] = None;
         }
+    }
+
+    /// Binds `texture` of the backend's `Gpu`, sampled with `sampler`, to
+    /// the fragment functions at `location`.
+    pub(crate) fn bind_texture(&self, texture: TextureId, sampler: SamplerId, location: usize) {
+        let (texture, sampler) = {
+            let gpu = self.context.get_backend().gpu().borrow();
+            (gpu.native_texture(texture).map(Message::retain), gpu.native_sampler(sampler).map(Message::retain))
+        };
+        self.set_fragment_texture(texture.as_ref(), location);
+        self.set_fragment_sampler_state(sampler.as_ref(), location);
     }
 
     /// Binds each buffer of `array` at its id, to the vertex and fragment

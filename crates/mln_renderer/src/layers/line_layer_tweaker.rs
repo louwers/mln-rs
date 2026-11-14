@@ -260,7 +260,7 @@ impl LayerTweaker for LineLayerTweaker {
                 Some(LineType::Pattern) => {
                     let mut texture_size = Size::new(0, 0);
                     if let Some(texture) = drawable.get_texture(ID_LINE_IMAGE_TEXTURE) {
-                        texture_size = texture.borrow().get_size();
+                        texture_size = texture.borrow().size();
                     }
                     drawable_ubo_vector[i as usize].set(&LinePatternDrawableUBO {
                         matrix: cast_matrix(&matrix),

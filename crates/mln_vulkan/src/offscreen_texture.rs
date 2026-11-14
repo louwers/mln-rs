@@ -3,13 +3,13 @@
 //   (`Context::get_render_pass`).
 // - The framebuffer is destroyed when the frame that may use it is done.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context as _;
-use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
+use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
@@ -19,13 +19,13 @@ use mln_util::size::Size;
 use crate::context::{Context, RenderPassKey};
 use crate::draw_target::{DrawTarget, TargetResource};
 use crate::renderer_backend::BackendImpl;
-use crate::texture2d::{Texture2D, Texture2DUsage};
 
 pub(crate) struct OffscreenTextureResource {
     backend: Rc<BackendImpl>,
     context: Weak<Context>,
     extent: vk::Extent2D,
-    color_texture: Rc<RefCell<Texture2D>>,
+    /// A texture of the context's `Gpu`, which the renderer samples.
+    color_texture: Texture2DPtr,
     render_pass: Cell<vk::RenderPass>,
     framebuffer: Cell<vk::Framebuffer>,
 }
@@ -33,18 +33,18 @@ pub(crate) struct OffscreenTextureResource {
 impl OffscreenTextureResource {
     fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         debug_assert!(size.width != 0 && size.height != 0);
-        let color_texture = context.create_vulkan_texture_2d();
+        let color_texture = context.create_texture_2d();
         {
             let mut texture = color_texture.borrow_mut();
             texture.set_size(size);
-            texture.set_format(TexturePixelType::RGBA, type_);
-            texture.set_sampler_configuration(SamplerState {
+            texture.set_format(texture_format(TexturePixelType::RGBA, type_));
+            texture.set_render_target();
+            texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
                 ..SamplerState::default()
             });
-            texture.set_usage(Texture2DUsage::Attachment);
         }
         context.rendering_stats().num_frame_buffers += 1;
         OffscreenTextureResource {
@@ -58,14 +58,21 @@ impl OffscreenTextureResource {
     }
 
     pub(crate) fn read_still_image(&self) -> PremultipliedImage {
-        self.color_texture
-            .borrow_mut()
-            .read_image()
-            .unwrap_or_else(|| PremultipliedImage::new(Size::new(self.extent.width, self.extent.height)))
+        let size = Size::new(self.extent.width, self.extent.height);
+        let texture = self.color_texture.borrow().id();
+        let data = texture.zip(self.context.upgrade()).map(|(texture, context)| context.read_texture(texture));
+        match data {
+            Some(Ok(data)) => PremultipliedImage::from_vec(size, data),
+            Some(Err(error)) => {
+                Log::error(Event::Render, format!("Reading an offscreen texture failed: {error}"));
+                PremultipliedImage::new(size)
+            }
+            None => PremultipliedImage::new(size),
+        }
     }
 
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        Rc::<RefCell<Texture2D>>::clone(&self.color_texture)
+        Rc::clone(&self.color_texture)
     }
 
     /// Makes the render pass and the framebuffer over the color texture, if
@@ -77,18 +84,20 @@ impl OffscreenTextureResource {
         let Some(context) = self.context.upgrade() else {
             return;
         };
-        let texture = self.color_texture.borrow();
+        let created = self.color_texture.borrow_mut().create(&*context);
+        let native = created.ok().and_then(|texture| context.vulkan_gpu().native_texture(texture));
+        let Some((image_view, format, _)) = native else {
+            Log::error(Event::Render, "Vulkan offscreen texture creation failed");
+            return;
+        };
         let render_pass = context.get_render_pass(RenderPassKey {
-            color_format: texture.get_vulkan_format(),
+            color_format: format,
             depth_format: None,
             color_final_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             color_load: false,
             depth_final_layout: None,
         });
-        let attachments = [texture.get_vulkan_image_view()];
-        if attachments[0] == vk::ImageView::null() {
-            return;
-        }
+        let attachments = [image_view];
         let create_info = vk::FramebufferCreateInfo::default()
             .render_pass(render_pass)
             .attachments(&attachments)
@@ -108,7 +117,6 @@ impl OffscreenTextureResource {
 
 impl TargetResource for OffscreenTextureResource {
     fn bind(&self) {
-        self.color_texture.borrow_mut().create();
         self.create_render_pass();
     }
 

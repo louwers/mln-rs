@@ -569,7 +569,7 @@ impl RenderLayer for RenderHeatmapLayer {
         {
             let mut t = texture.borrow_mut();
             t.set_image(Some(Rc::clone(&self.color_ramp)));
-            t.set_sampler_configuration(SamplerState {
+            t.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,

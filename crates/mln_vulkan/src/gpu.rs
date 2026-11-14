@@ -438,6 +438,17 @@ impl VulkanGpu {
         self.backend.get_device()
     }
 
+    /// The view of the Vulkan image of `texture`, its format, and the id of
+    /// its allocation (`buffer_resource::unique_id`). Between commands, a
+    /// sampled texture is in `SHADER_READ_ONLY_OPTIMAL`.
+    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(vk::ImageView, vk::Format, u64)> {
+        self.textures.get(texture).map(|entry| (entry.image.image_view(), entry.vk_format, entry.image.id()))
+    }
+
+    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<vk::Sampler> {
+        self.samplers.get(sampler).copied()
+    }
+
     /// The Vulkan buffer of `buffer`, and the id of its allocation
     /// (`buffer_resource::unique_id`).
     pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(vk::Buffer, u64)> {
@@ -446,7 +457,7 @@ impl VulkanGpu {
 
     fn vk_format(&self, format: TextureFormat) -> vk::Format {
         match format {
-            TextureFormat::R8Unorm => vk::Format::R8_UNORM,
+            TextureFormat::R8Unorm | TextureFormat::A8Unorm => vk::Format::R8_UNORM,
             TextureFormat::R16Float => vk::Format::R16_SFLOAT,
             TextureFormat::R32Float => vk::Format::R32_SFLOAT,
             TextureFormat::Rgba8Unorm => vk::Format::R8G8B8A8_UNORM,
@@ -1337,7 +1348,6 @@ impl VulkanGpu {
     /// The texels of `texture`, a color texture that is
     /// [`copy_src`](TextureUsage::copy_src), in rows from the top with no
     /// padding, once the work submitted so far is done.
-    #[cfg(test)]
     pub(crate) fn read_texture(&mut self, texture: TextureId) -> Result<Vec<u8>, GpuError> {
         let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
         let bytes_per_texel =
@@ -1401,7 +1411,7 @@ impl VulkanGpu {
             (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::HOST_READ),
         );
         self.submit(&[])?;
-        let fence = self.in_flight.back().expect("the readback's submission").fence;
+        let fence = self.in_flight.back().ok_or(GpuError::Invalid("the readback wasn't submitted".to_owned()))?.fence;
         // SAFETY: the fence is this backend's, and its submission was made.
         unsafe { self.device().wait_for_fences(&[fence], true, u64::MAX) }.map_err(vk_error("reading back"))?;
         let mapped = staging.mapped_buffer();
@@ -1606,7 +1616,19 @@ impl Gpu for VulkanGpu {
             .initial_layout(vk::ImageLayout::UNDEFINED);
         let mut image = ImageAllocation::create(&self.backend, &image_info, MemoryLocation::GpuOnly, desc.label)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Vulkan couldn't make the texture", desc.label)))?;
-        if !image.create_view(vk_format, vk::ComponentMapping::default(), aspect, 1) {
+        // Alpha-only formats aren't core Vulkan: an `A8Unorm` texture is a
+        // red one whose view reads red as alpha.
+        let components = if format == TextureFormat::A8Unorm {
+            vk::ComponentMapping {
+                r: vk::ComponentSwizzle::ZERO,
+                g: vk::ComponentSwizzle::ZERO,
+                b: vk::ComponentSwizzle::ZERO,
+                a: vk::ComponentSwizzle::R,
+            }
+        } else {
+            vk::ComponentMapping::default()
+        };
+        if !image.create_view(vk_format, components, aspect, 1) {
             return Err(GpuError::Invalid(format!("{}: Vulkan couldn't make the texture's view", desc.label)));
         }
         self.backend.set_debug_name(image.image(), desc.label);

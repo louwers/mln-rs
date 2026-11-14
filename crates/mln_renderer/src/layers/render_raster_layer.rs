@@ -114,7 +114,7 @@ impl RenderRasterLayer {
             texture
         }));
 
-        texture.borrow_mut().set_sampler_configuration(self.sampler_state());
+        texture.borrow_mut().set_sampler(self.sampler_state());
 
         builder.set_texture(Some(Rc::clone(&texture)), ID_RASTER_IMAGE0_TEXTURE);
         builder.set_texture(Some(texture), ID_RASTER_IMAGE1_TEXTURE);
@@ -450,7 +450,7 @@ impl RenderLayer for RenderRasterLayer {
         // applied to the textures themselves.
         let sampler = self.sampler_state();
         for texture in self.textures.values() {
-            texture.borrow_mut().set_sampler_configuration(sampler);
+            texture.borrow_mut().set_sampler(sampler);
         }
 
         for tile in render_tiles.iter() {

@@ -16,6 +16,7 @@ use std::rc::Weak;
 
 use ash::vk;
 use mln_gfx::drawable::Textures;
+use mln_gfx::gpu::SamplerId;
 use mln_gfx::shaders::shader_defines::{
     ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO, LAYER_SSBO_START_ID,
 };
@@ -29,7 +30,6 @@ use crate::shaders::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::shaders::shader_program::ShaderProgram;
-use crate::texture2d::Texture2D;
 
 /// The most buffers a set has.
 const MAX_BUFFER_BINDINGS: usize = 8;
@@ -387,7 +387,7 @@ impl UniformDescriptorSet {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ImageBinding {
     pub(crate) image_id: u64,
-    pub(crate) sampler_id: u64,
+    pub(crate) sampler_id: Option<SamplerId>,
     pub(crate) image_view: vk::ImageView,
     pub(crate) image_layout: vk::ImageLayout,
     pub(crate) sampler: vk::Sampler,
@@ -395,7 +395,7 @@ pub(crate) struct ImageBinding {
 
 const NO_IMAGE: ImageBinding = ImageBinding {
     image_id: u64::MAX,
-    sampler_id: u64::MAX,
+    sampler_id: None,
     image_view: vk::ImageView::null(),
     image_layout: vk::ImageLayout::UNDEFINED,
     sampler: vk::Sampler::null(),
@@ -432,21 +432,21 @@ impl ImageDescriptorSet {
             let Some(index) = shader.get_sampler_location(id).filter(|&index| index < IMAGE_TEXTURE_COUNT) else {
                 continue;
             };
-            let mut texture = texture.borrow_mut();
-            let Some(texture) = texture.downcast_mut::<Texture2D>() else {
+            let binding = texture.borrow_mut().binding(context);
+            let Ok((texture, sampler_id)) = binding else {
                 continue;
             };
-            let image_view = texture.get_vulkan_image_view();
-            let sampler = texture.get_vulkan_sampler();
-            if image_view == vk::ImageView::null() || sampler == vk::Sampler::null() {
+            let gpu = context.vulkan_gpu();
+            let (Some((image_view, _, image_id)), Some(sampler)) =
+                (gpu.native_texture(texture), gpu.native_sampler(sampler_id))
+            else {
                 continue;
-            }
-            let (image_id, sampler_id) = texture.get_ids();
+            };
             bindings[index] = ImageBinding {
                 image_id,
-                sampler_id,
+                sampler_id: Some(sampler_id),
                 image_view,
-                image_layout: texture.get_vulkan_image_layout(),
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 sampler,
             };
         }

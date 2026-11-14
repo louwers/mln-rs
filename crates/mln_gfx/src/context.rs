@@ -4,6 +4,7 @@
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_util::logging::{Event, Log};
@@ -12,17 +13,18 @@ use mln_util::size::Size;
 use crate::backend::Type as BackendType;
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::UniqueDrawableBuilder;
-use crate::gpu::Gpu;
+use crate::gpu::{Gpu, GpuError, SamplerId};
 use crate::offscreen_texture::OffscreenTexture;
 use crate::projection_variant::ProjectionVariant;
+use crate::released::Released;
 use crate::render_pass::RenderPass;
 use crate::renderer::layer_group::LayerGroupBasePtr;
 use crate::rendering_stats::RenderingStats;
 use crate::shader_registry::ShaderRegistry;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
-use crate::texture2d::Texture2DPtr;
+use crate::texture2d::{SamplerState, Texture2D, Texture2DPtr};
 use crate::types::TextureChannelDataType;
-use crate::uniform_buffer::{Released, UniformBuffer, UniformBufferArray, UniformBufferPtr};
+use crate::uniform_buffer::{UniformBuffer, UniformBufferArray, UniformBufferPtr};
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
 /// The data members of `gfx::Context`.
@@ -31,6 +33,8 @@ pub struct ContextBase {
     stats: RefCell<RenderingStats>,
     global_uniform_buffers: RefCell<UniformBufferArray>,
     released: Rc<Released>,
+    /// The sampler of each state a texture is sampled with.
+    samplers: RefCell<HashMap<SamplerState, SamplerId>>,
 }
 
 impl ContextBase {
@@ -62,17 +66,23 @@ pub trait Context: Any {
     fn create_offscreen_texture(&self, size: Size, type_: TextureChannelDataType) -> Box<dyn OffscreenTexture>;
     fn create_command_encoder(&self) -> Box<dyn CommandEncoder>;
 
+    /// The rendering stats, which count the renderer's resources until it
+    /// releases them.
     fn rendering_stats(&self) -> RefMut<'_, RenderingStats> {
-        self.context_base().stats.borrow_mut()
+        let base = self.context_base();
+        let mut stats = base.stats.borrow_mut();
+        base.released.uncount(&mut stats);
+        stats
     }
     fn thread_safe_copy_rendering_stats(&self) -> RenderingStats {
-        self.context_base().stats.borrow().clone()
+        self.rendering_stats().clone()
     }
 
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr;
     fn create_drawable_builder(&self) -> UniqueDrawableBuilder;
 
-    /// The backend's [`Gpu`], which owns the renderer's uniform buffers.
+    /// The backend's [`Gpu`], which owns the renderer's uniform buffers and
+    /// textures.
     fn gpu(&self) -> RefMut<'_, dyn Gpu>;
 
     /// A uniform buffer holding `data`, or `None` if the backend can't make
@@ -99,10 +109,10 @@ pub trait Context: Any {
         write_buffer(self, slot, data, true);
     }
 
-    /// Destroys the buffers the renderer dropped. A backend calls this once
-    /// the commands that may use them are submitted.
+    /// Destroys the buffers and textures the renderer dropped. A backend
+    /// calls this once the commands that may use them are submitted.
     fn destroy_released(&self) {
-        self.context_base().released.destroy(&mut *self.gpu(), &mut self.rendering_stats());
+        self.context_base().released.destroy(&mut *self.gpu());
     }
     fn get_generic_shader(
         &self,
@@ -117,7 +127,21 @@ pub trait Context: Any {
         name: String,
     ) -> Option<LayerGroupBasePtr>;
     fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr>;
-    fn create_texture_2d(&self) -> Texture2DPtr;
+    /// A texture without a size, made by its first upload or `create`.
+    fn create_texture_2d(&self) -> Texture2DPtr {
+        Rc::new(RefCell::new(Texture2D::new(Rc::clone(&self.context_base().released))))
+    }
+
+    /// The sampler of `state`, made on first use.
+    fn sampler(&self, state: &SamplerState) -> Result<SamplerId, GpuError> {
+        let mut samplers = self.context_base().samplers.borrow_mut();
+        if let Some(&sampler) = samplers.get(state) {
+            return Ok(sampler);
+        }
+        let sampler = self.gpu().create_sampler(state)?;
+        samplers.insert(*state, sampler);
+        Ok(sampler)
+    }
 
     /// The buffers every drawable binds, at the ids they bind at.
     fn global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray> {

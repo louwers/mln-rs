@@ -53,7 +53,7 @@ macro_rules! const_or_default {
 fn get_tex_size(drawable: &dyn Drawable, tex_id: usize) -> [f32; 2] {
     match drawable.get_texture(tex_id) {
         Some(tex) => {
-            let size = tex.borrow().get_size();
+            let size = tex.borrow().size();
             [size.width as f32, size.height as f32]
         }
         None => [0.0, 0.0],

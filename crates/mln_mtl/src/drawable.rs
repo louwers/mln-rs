@@ -39,7 +39,6 @@ use crate::gpu::{map_cull_mode, map_winding_mode, primitive_type, vertex_format}
 use crate::mtl_fwd::{MTLBufferPtr, MTLDepthStencilStatePtr, MTLRenderPipelineStatePtr, MTLVertexDescriptorPtr};
 use crate::render_pass::{AttachmentFormats, RenderPass};
 use crate::shaders::shader_program::{ShaderProgram, as_mtl_shader};
-use crate::texture2d::Texture2D;
 use crate::upload_pass::UploadPass;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
@@ -259,10 +258,10 @@ impl Drawable {
             self.impl_.pipeline_state = None;
         }
 
-        let textures_need_upload = self.base.textures.iter().flatten().any(|t| t.borrow().needs_upload());
-        if textures_need_upload {
-            for texture in self.base.textures.iter().flatten() {
-                texture.borrow_mut().upload();
+        let context = mln_gfx::upload_pass::UploadPass::get_context(upload_pass);
+        for texture in self.base.textures.iter().flatten() {
+            if let Err(error) = texture.borrow_mut().upload(context) {
+                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
         }
 
@@ -289,7 +288,7 @@ impl Drawable {
         }
     }
 
-    fn bind_textures(&self, render_pass: &RenderPass, shader: &ShaderProgram) {
+    fn bind_textures(&self, context: &Context, render_pass: &RenderPass, shader: &ShaderProgram) {
         for (id, texture) in self.base.textures.iter().enumerate() {
             let Some(texture) = texture else { continue };
             let Some(location) =
@@ -297,24 +296,10 @@ impl Drawable {
             else {
                 continue;
             };
-            let mut texture = texture.borrow_mut();
-            if let Some(texture) = texture.downcast_mut::<Texture2D>() {
-                texture.bind(render_pass, location);
-            }
-        }
-    }
-
-    fn unbind_textures(&self, render_pass: &RenderPass, shader: &ShaderProgram) {
-        for (id, texture) in self.base.textures.iter().enumerate() {
-            let Some(texture) = texture else { continue };
-            let Some(location) =
-                mln_gfx::shaders::shader_program_base::ShaderProgramBase::get_sampler_location(shader, id)
-            else {
-                continue;
-            };
-            let texture = texture.borrow();
-            if let Some(texture) = texture.downcast_ref::<Texture2D>() {
-                texture.unbind(render_pass, location);
+            let binding = texture.borrow_mut().binding(context);
+            match binding {
+                Ok((texture, sampler)) => render_pass.bind_texture(texture, sampler, location),
+                Err(error) => Log::error(Event::Render, format!("Binding a texture failed: {error}")),
             }
         }
     }
@@ -371,7 +356,7 @@ impl drawable::Drawable for Drawable {
         let empty = context.get_empty_vertex_buffer();
         Self::bind_attribute_bindings(&self.impl_.attribute_bindings, render_pass, empty.as_ref());
         Self::bind_attribute_bindings(&self.impl_.instance_bindings, render_pass, empty.as_ref());
-        self.bind_textures(render_pass, shader);
+        self.bind_textures(context, render_pass, shader);
         render_pass.bind_uniform_buffers(&self.impl_.uniform_buffers);
 
         let Some(indexes) = self.impl_.indexes.clone() else {
@@ -492,8 +477,6 @@ impl drawable::Drawable for Drawable {
             stats.num_draw_calls += draw_calls;
             stats.total_draw_calls += draw_calls;
         }
-
-        self.unbind_textures(render_pass, shader);
     }
 
     fn update_vertex_attributes(

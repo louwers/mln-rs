@@ -16,7 +16,7 @@ use ash::vk;
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme};
 use mln_gfx::context::Context as _;
-use mln_gfx::texture2d::{self, SamplerState};
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
@@ -161,6 +161,9 @@ pub(crate) enum Texture2DUsage {
     Blit,
 }
 
+/// A texture of the context itself, outside its `Gpu`: the placeholder that
+/// unbound texture slots read, the copy that frames are read back from, and
+/// the textures of an overlay (`OverlayTarget`).
 pub struct Texture2D {
     context: Weak<Context>,
     backend: Rc<BackendImpl>,
@@ -168,14 +171,12 @@ pub struct Texture2D {
     pixel_format: TexturePixelType,
     channel_type: TextureChannelDataType,
     sampler_state: SamplerState,
-    image_data: Option<Rc<PremultipliedImage>>,
     texture_dirty: bool,
     sampler_state_dirty: bool,
     image_allocation: Option<Rc<ImageAllocation>>,
     image_layout: vk::ImageLayout,
     sampler: vk::Sampler,
     /// The id of `sampler` (`unique_id`).
-    sampler_id: u64,
     texture_usage: Texture2DUsage,
 }
 
@@ -239,13 +240,11 @@ impl Texture2D {
             pixel_format: TexturePixelType::RGBA,
             channel_type: TextureChannelDataType::UnsignedByte,
             sampler_state: SamplerState::default(),
-            image_data: None,
             texture_dirty: true,
             sampler_state_dirty: true,
             image_allocation: None,
             image_layout: vk::ImageLayout::UNDEFINED,
             sampler: vk::Sampler::null(),
-            sampler_id: 0,
             texture_usage: Texture2DUsage::ShaderInput,
         }
     }
@@ -269,12 +268,6 @@ impl Texture2D {
     #[must_use]
     pub fn get_vulkan_image_view(&self) -> vk::ImageView {
         self.image_allocation.as_ref().map_or(vk::ImageView::null(), |allocation| allocation.image_view())
-    }
-
-    /// The ids of the image and of the sampler (`unique_id`), 0 without one.
-    #[must_use]
-    pub(crate) fn get_ids(&self) -> (u64, u64) {
-        (self.image_allocation.as_ref().map_or(0, |allocation| allocation.id()), self.sampler_id)
     }
 
     /// The sampler of the current configuration.
@@ -402,7 +395,7 @@ impl Texture2D {
             let mut stats = context.rendering_stats();
             stats.num_created_textures += 1;
             stats.num_active_textures += 1;
-            stats.mem_textures += texture2d::Texture2D::get_data_size(self) as i32;
+            stats.mem_textures += self.get_data_size() as i32;
         }
         self.texture_dirty = false;
     }
@@ -431,7 +424,6 @@ impl Texture2D {
         match unsafe { self.backend.get_device().create_sampler(&create_info, None) } {
             Ok(sampler) => {
                 self.sampler = sampler;
-                self.sampler_id = unique_id();
             }
             Err(_) => Log::error(Event::Render, "Vulkan sampler creation failed"),
         }
@@ -448,7 +440,7 @@ impl Texture2D {
             {
                 let mut stats = context.rendering_stats();
                 stats.num_active_textures -= 1;
-                stats.mem_textures -= texture2d::Texture2D::get_data_size(self) as i32;
+                stats.mem_textures -= self.get_data_size() as i32;
             }
             context.enqueue_deletion(Box::new(move |_| drop(allocation)));
         }
@@ -666,7 +658,7 @@ impl Texture2D {
         if image == vk::Image::null() {
             return;
         }
-        texture2d::Texture2D::create(self);
+        self.create();
         let Some(target) = self.image_allocation.as_ref().map(|allocation| allocation.image()) else {
             return;
         };
@@ -703,7 +695,7 @@ impl Texture2D {
         if image == vk::Image::null() {
             return;
         }
-        texture2d::Texture2D::create(self);
+        self.create();
         let Some(target) = self.image_allocation.as_ref().map(|allocation| allocation.image()) else {
             return;
         };
@@ -736,8 +728,8 @@ impl Texture2D {
     /// or rendered to (`Attachment`).
     pub(crate) fn read_image(&mut self) -> Option<PremultipliedImage> {
         let allocation = self.image_allocation.clone()?;
-        let image_size = texture2d::Texture2D::get_data_size(self);
-        let row_size = self.size.width as usize * texture2d::Texture2D::get_pixel_stride(self);
+        let image_size = self.get_data_size();
+        let row_size = self.size.width as usize * self.get_pixel_stride();
         let mut data = vec![0u8; image_size];
 
         match self.texture_usage {
@@ -836,8 +828,8 @@ impl Drop for Texture2D {
     }
 }
 
-impl texture2d::Texture2D for Texture2D {
-    fn set_sampler_configuration(&mut self, sampler_state: SamplerState) {
+impl Texture2D {
+    pub fn set_sampler_configuration(&mut self, sampler_state: SamplerState) {
         if self.sampler_state == sampler_state {
             return;
         }
@@ -845,7 +837,7 @@ impl texture2d::Texture2D for Texture2D {
         self.sampler_state_dirty = true;
     }
 
-    fn set_format(&mut self, pixel_format: TexturePixelType, channel_type: TextureChannelDataType) {
+    pub fn set_format(&mut self, pixel_format: TexturePixelType, channel_type: TextureChannelDataType) {
         if pixel_format == self.pixel_format && channel_type == self.channel_type {
             return;
         }
@@ -855,7 +847,7 @@ impl texture2d::Texture2D for Texture2D {
         self.texture_dirty = true;
     }
 
-    fn set_size(&mut self, size: Size) {
+    pub fn set_size(&mut self, size: Size) {
         if size == self.size {
             return;
         }
@@ -864,23 +856,23 @@ impl texture2d::Texture2D for Texture2D {
         self.texture_dirty = true;
     }
 
-    fn set_image(&mut self, image: Option<Rc<PremultipliedImage>>) {
-        self.image_data = image;
-    }
-
-    fn get_format(&self) -> TexturePixelType {
+    #[must_use]
+    pub fn get_format(&self) -> TexturePixelType {
         self.pixel_format
     }
 
-    fn get_size(&self) -> Size {
+    #[must_use]
+    pub fn get_size(&self) -> Size {
         self.size
     }
 
-    fn get_data_size(&self) -> usize {
+    #[must_use]
+    pub fn get_data_size(&self) -> usize {
         self.get_pixel_stride() * self.size.width as usize * self.size.height as usize
     }
 
-    fn get_pixel_stride(&self) -> usize {
+    #[must_use]
+    pub fn get_pixel_stride(&self) -> usize {
         match self.channel_type {
             TextureChannelDataType::UnsignedByte => self.num_channels(),
             TextureChannelDataType::HalfFloat => 2 * self.num_channels(),
@@ -888,7 +880,8 @@ impl texture2d::Texture2D for Texture2D {
         }
     }
 
-    fn num_channels(&self) -> usize {
+    #[must_use]
+    pub fn num_channels(&self) -> usize {
         match self.pixel_format {
             TexturePixelType::RGBA => 4,
             TexturePixelType::Alpha | TexturePixelType::Stencil | TexturePixelType::Depth => 1,
@@ -896,18 +889,18 @@ impl texture2d::Texture2D for Texture2D {
         }
     }
 
-    fn create(&mut self) {
+    pub fn create(&mut self) {
         if self.texture_dirty {
             self.create_texture();
         }
     }
 
-    fn upload_data(&mut self, pixel_data: Option<&[u8]>, size: Size) {
+    pub fn upload_data(&mut self, pixel_data: Option<&[u8]>, size: Size) {
         self.set_size(size);
         self.upload_sub_region(pixel_data, size, 0, 0);
     }
 
-    fn upload_sub_region(&mut self, pixel_data: Option<&[u8]>, size: Size, x_offset: u16, y_offset: u16) {
+    pub fn upload_sub_region(&mut self, pixel_data: Option<&[u8]>, size: Size, x_offset: u16, y_offset: u16) {
         let Some(pixel_data) = pixel_data else {
             return;
         };
@@ -952,18 +945,5 @@ impl texture2d::Texture2D for Texture2D {
         let mut stats = context.rendering_stats();
         stats.num_texture_updates += 1;
         stats.texture_update_bytes += byte_size;
-    }
-
-    fn upload(&mut self) {
-        if let Some(image) = self.image_data.take()
-            && image.valid()
-        {
-            self.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
-            self.upload_data(Some(&image.data), image.size);
-        }
-    }
-
-    fn needs_upload(&self) -> bool {
-        self.image_data.is_some()
     }
 }

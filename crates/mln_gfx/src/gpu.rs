@@ -83,6 +83,10 @@ pub struct BufferDesc<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextureFormat {
     R8Unorm,
+    /// One 8-bit channel that shaders read as alpha, with red, green and
+    /// blue 0. WebGPU, which has no such format, stores it as `R8Unorm`,
+    /// which its shaders read as red.
+    A8Unorm,
     R16Float,
     R32Float,
     Rgba8Unorm,
@@ -121,7 +125,7 @@ impl TextureFormat {
     #[must_use]
     pub fn bytes_per_texel(self) -> Option<u32> {
         match self {
-            TextureFormat::R8Unorm => Some(1),
+            TextureFormat::R8Unorm | TextureFormat::A8Unorm => Some(1),
             TextureFormat::R16Float => Some(2),
             TextureFormat::R32Float
             | TextureFormat::Rgba8Unorm

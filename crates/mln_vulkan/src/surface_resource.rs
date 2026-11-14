@@ -30,7 +30,6 @@ use std::rc::{Rc, Weak};
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use mln_gfx::context::Context as _;
-use mln_gfx::texture2d::Texture2D as _;
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};

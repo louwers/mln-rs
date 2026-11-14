@@ -13,7 +13,7 @@
 // renderbuffers, draw scopes and vertex array state, and the debugging and
 // timestamp query extensions.
 
-use std::cell::{Cell, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, SamplerId, TextureId};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::scissor_rect::ScissorRect;
@@ -32,7 +32,6 @@ use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
@@ -48,7 +47,6 @@ use crate::offscreen_texture::OffscreenTexture;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::shader_program::ShaderProgram;
 use crate::state::State;
-use crate::texture2d::Texture2D;
 use crate::types::{BufferID, FramebufferID, Gl, ProgramID, RenderbufferID, ShaderID, TextureID, VertexArrayID};
 
 /// The objects whose owners are gone, deleted by `perform_cleanup` while the
@@ -272,6 +270,7 @@ impl Context {
         self.abandoned.borrow_mut().programs.push(program);
     }
 
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     pub(crate) fn abandon_texture(&self, texture: TextureID) {
         self.abandoned.borrow_mut().textures.push(texture);
     }
@@ -547,9 +546,21 @@ impl Context {
 
     // --- textures ---
 
-    /// Creates a texture, of the concrete type.
-    pub(crate) fn create_gl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
-        Rc::new(RefCell::new(Texture2D::new(self.weak())))
+    /// Binds `texture`, sampled with `sampler`, to texture unit `unit`.
+    pub(crate) fn bind_texture(&self, unit: u32, texture: TextureId, sampler: SamplerId) {
+        let (texture, sampler) = {
+            let gpu = self.gl_gpu();
+            (gpu.native_texture(texture), gpu.native_sampler(sampler))
+        };
+        let gl = self.gl();
+        self.state.bind_texture(gl, unit, texture);
+        self.state.bind_sampler(gl, unit, sampler);
+        self.rendering_stats().num_texture_bindings += 1;
+    }
+
+    /// The `Gpu` the renderer's uniform buffers and textures belong to.
+    pub(crate) fn gl_gpu(&self) -> Ref<'_, GlGpu> {
+        self.gpu.borrow()
     }
 }
 
@@ -565,6 +576,9 @@ impl GfxContext for Context {
     fn begin_frame(&self) {}
 
     fn end_frame(&self) {
+        // What draws on the context outside the frames samples with its
+        // textures' own parameters.
+        self.state.unbind_samplers(self.gl());
         self.log_errors();
     }
 
@@ -643,10 +657,6 @@ impl GfxContext for Context {
 
     fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr> {
         Some(Rc::new(RefCell::new(LayerGroup::new(layer_index, initial_capacity, name))))
-    }
-
-    fn create_texture_2d(&self) -> Texture2DPtr {
-        self.create_gl_texture_2d()
     }
 
     /// A drawable binds the global buffers its shader reads

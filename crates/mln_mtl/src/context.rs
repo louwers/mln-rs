@@ -19,7 +19,6 @@ use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{DepthMaskType, TextureChannelDataType};
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
@@ -37,7 +36,6 @@ use crate::offscreen_texture::OffscreenTexture;
 use crate::render_pass::RenderPass;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::shader_program::ShaderProgram;
-use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
 
 /// The resource options of every buffer (`MTL::ResourceStorageModeShared`).
@@ -119,11 +117,6 @@ impl Context {
                 None
             }
         }
-    }
-
-    /// Creates a texture, of the concrete type.
-    pub(crate) fn create_mtl_texture_2d(&self) -> Rc<RefCell<Texture2D>> {
-        Rc::new(RefCell::new(Texture2D::new(self.rc())))
     }
 
     pub(crate) fn create_offscreen_texture_with(
@@ -248,10 +241,6 @@ impl GfxContext for Context {
 
     fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr> {
         Some(Rc::new(RefCell::new(LayerGroup::new(layer_index, initial_capacity, name))))
-    }
-
-    fn create_texture_2d(&self) -> Texture2DPtr {
-        self.create_mtl_texture_2d()
     }
 
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {

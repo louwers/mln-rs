@@ -146,7 +146,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
 
             if has_pattern {
                 if let Some(tex) = parameters.pattern_atlas.borrow().texture() {
-                    tex.borrow_mut().set_sampler_configuration(SamplerState {
+                    tex.borrow_mut().set_sampler(SamplerState {
                         filter: TextureFilterType::Linear,
                         wrap_u: TextureWrapType::Clamp,
                         wrap_v: TextureWrapType::Clamp,

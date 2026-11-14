@@ -61,7 +61,7 @@ impl DrawableAtlasesTweaker {
         let glyph = atlases.glyph.borrow().clone();
         let icon = atlases.icon.borrow().clone();
         if let Some(glyph) = &glyph {
-            glyph.borrow_mut().set_sampler_configuration(SamplerState {
+            glyph.borrow_mut().set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
@@ -69,7 +69,7 @@ impl DrawableAtlasesTweaker {
             });
         }
         if let Some(icon) = &icon {
-            icon.borrow_mut().set_sampler_configuration(SamplerState {
+            icon.borrow_mut().set_sampler(SamplerState {
                 filter: if linear_filter_for_icons { TextureFilterType::Linear } else { TextureFilterType::Nearest },
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,

@@ -17,11 +17,11 @@ use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
 use mln_gfx::gpu::Gpu as _;
+use mln_gfx::released::Released;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
-use mln_gfx::uniform_buffer::Released;
 use mln_util::logging::{Event, Log};
 use objc2_metal::{MTLDevice, MTLGPUFamily};
 

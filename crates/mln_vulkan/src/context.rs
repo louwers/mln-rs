@@ -30,14 +30,13 @@ use ash::vk;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, GpuError, TextureId};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
-use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
@@ -401,9 +400,15 @@ impl Context {
         }
     }
 
-    /// The `Gpu` the renderer's uniform buffers belong to.
+    /// The `Gpu` the renderer's uniform buffers and textures belong to.
     pub(crate) fn vulkan_gpu(&self) -> Ref<'_, VulkanGpu> {
         self.gpu.borrow()
+    }
+
+    /// The texels of `texture`, a color texture of the `Gpu` that is a
+    /// render target, once the work submitted so far is done.
+    pub(crate) fn read_texture(&self, texture: TextureId) -> Result<Vec<u8>, GpuError> {
+        self.gpu.borrow_mut().read_texture(texture)
     }
 
     /// Runs `function` when the frame being recorded, or the last one, is
@@ -762,7 +767,7 @@ impl Context {
         let sampler = texture.get_vulkan_sampler();
         (image_view != vk::ImageView::null() && sampler != vk::Sampler::null()).then_some(ImageBinding {
             image_id: 0,
-            sampler_id: 0,
+            sampler_id: None,
             image_view,
             image_layout: texture.get_vulkan_image_layout(),
             sampler,
@@ -1146,10 +1151,6 @@ impl GfxContext for Context {
 
     fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr> {
         Some(Rc::new(RefCell::new(LayerGroup::new(layer_index, initial_capacity, name))))
-    }
-
-    fn create_texture_2d(&self) -> Texture2DPtr {
-        self.create_vulkan_texture_2d()
     }
 
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
