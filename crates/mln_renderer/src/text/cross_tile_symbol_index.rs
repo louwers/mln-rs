@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::rc::Rc;
 
 use geometry::Point;
+use glam::Vec2;
 use mln_map_types::{TileProjector, TransformState};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::EXTENT;
@@ -20,7 +21,6 @@ use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::RenderLayer;
 use crate::render_tile::RenderTile;
-use crate::util::vec2::Vec2f;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct IndexedSymbolInstance {
@@ -134,7 +134,7 @@ impl TileLayerIndex {
     }
 }
 
-fn is_in_viewport(projector: &TileProjector<'_>, point: Vec2f) -> bool {
+fn is_in_viewport(projector: &TileProjector<'_>, point: Vec2) -> bool {
     // buffer covers area of the next zoom level (current zoom - 1 covered area).
     const BUFFER: f64 = 1.0;
     const EDGE: f64 = 1.0 + BUFFER;

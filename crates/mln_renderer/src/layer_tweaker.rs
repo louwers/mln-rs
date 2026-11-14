@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
+use glam::Vec2;
 use mln_gfx::context::Context;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
@@ -24,7 +25,6 @@ use mln_util::mat4::{Mat4, matrix};
 use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
-use crate::util::vec2::Vec2f;
 
 pub(crate) type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
 
@@ -244,7 +244,7 @@ pub(crate) fn translate_vtx_matrix(
         0.0
     };
 
-    let translate = Vec2f::new(translation[0], translation[1]).rotate(angle);
+    let translate = Vec2::from_angle(angle).rotate(Vec2::new(translation[0], translation[1]));
 
     if in_viewport_pixel_units {
         matrix::translate(&mut vtx_matrix, tile_matrix, f64::from(translate.x), f64::from(translate.y), 0.0);

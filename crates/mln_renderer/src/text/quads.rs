@@ -1,3 +1,4 @@
+use glam::Vec2;
 use mln_math::{deg2radf, fmaxf, fminf};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::image::{ImageMap, ImagePosition, ImageStretches, RectU16};
@@ -7,39 +8,38 @@ use mln_text::glyph::{Shaping, WritingModeType};
 use mln_util::constants::ONE_EM;
 
 use crate::layout::symbol_instance::SymbolContent;
-use crate::util::vec2::Vec2f;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SymbolQuad {
-    pub(crate) tl: Vec2f,
-    pub(crate) tr: Vec2f,
-    pub(crate) bl: Vec2f,
-    pub(crate) br: Vec2f,
+    pub(crate) tl: Vec2,
+    pub(crate) tr: Vec2,
+    pub(crate) bl: Vec2,
+    pub(crate) br: Vec2,
     pub(crate) tex: RectU16,
-    pub(crate) pixel_offset_tl: Vec2f,
-    pub(crate) pixel_offset_br: Vec2f,
-    pub(crate) glyph_offset: Vec2f,
+    pub(crate) pixel_offset_tl: Vec2,
+    pub(crate) pixel_offset_br: Vec2,
+    pub(crate) glyph_offset: Vec2,
     pub(crate) writing_mode: WritingModeType,
     pub(crate) is_sdf: bool,
     pub(crate) section_index: usize,
-    pub(crate) min_font_scale: Vec2f,
+    pub(crate) min_font_scale: Vec2,
 }
 
 impl SymbolQuad {
     #[expect(clippy::too_many_arguments, reason = "each argument is a field of the quad")]
     #[must_use]
     pub(crate) fn new(
-        tl: Vec2f,
-        tr: Vec2f,
-        bl: Vec2f,
-        br: Vec2f,
+        tl: Vec2,
+        tr: Vec2,
+        bl: Vec2,
+        br: Vec2,
         tex: RectU16,
         writing_mode: WritingModeType,
-        glyph_offset: Vec2f,
+        glyph_offset: Vec2,
         is_sdf: bool,
-        pixel_offset_tl: Vec2f,
-        pixel_offset_br: Vec2f,
-        min_font_scale: Vec2f,
+        pixel_offset_tl: Vec2,
+        pixel_offset_br: Vec2,
+        min_font_scale: Vec2,
         section_index: usize,
     ) -> Self {
         SymbolQuad {
@@ -64,8 +64,8 @@ pub(crate) type SymbolQuads = Vec<SymbolQuad>;
 /// The border around an image in the atlas: its padding.
 const BORDER: u16 = ImagePosition::PADDING;
 
-fn matrix_multiply(m: &[f32; 4], p: Vec2f) -> Vec2f {
-    Vec2f::new(m[0] * p.x + m[1] * p.y, m[2] * p.x + m[3] * p.y)
+fn matrix_multiply(m: &[f32; 4], p: Vec2) -> Vec2 {
+    Vec2::new(m[0] * p.x + m[1] * p.y, m[2] * p.x + m[3] * p.y)
 }
 
 #[must_use]
@@ -203,12 +203,12 @@ pub(crate) fn get_icon_quads(
         let bottom_px =
             get_px_offset(bottom.fixed - fixed_offset_y, fixed_content_height, bottom.stretch, stretch_height);
 
-        let mut tl = Vec2f::new(left_em, top_em);
-        let mut tr = Vec2f::new(right_em, top_em);
-        let mut br = Vec2f::new(right_em, bottom_em);
-        let mut bl = Vec2f::new(left_em, bottom_em);
-        let pixel_offset_tl = Vec2f::new(left_px / pixel_ratio, top_px / pixel_ratio);
-        let pixel_offset_br = Vec2f::new(right_px / pixel_ratio, bottom_px / pixel_ratio);
+        let mut tl = Vec2::new(left_em, top_em);
+        let mut tr = Vec2::new(right_em, top_em);
+        let mut br = Vec2::new(right_em, bottom_em);
+        let mut bl = Vec2::new(left_em, bottom_em);
+        let pixel_offset_tl = Vec2::new(left_px / pixel_ratio, top_px / pixel_ratio);
+        let pixel_offset_br = Vec2::new(right_px / pixel_ratio, bottom_px / pixel_ratio);
 
         if let Some(matrix) = &matrix {
             tl = matrix_multiply(matrix, tl);
@@ -243,11 +243,11 @@ pub(crate) fn get_icon_quads(
             br,
             sub_rect,
             WritingModeType::None,
-            Vec2f::ZERO,
+            Vec2::ZERO,
             icon_type == SymbolContent::IconSDF,
             pixel_offset_tl,
             pixel_offset_br,
-            Vec2f::new(min_font_scale_x, min_font_scale_y),
+            Vec2::new(min_font_scale_x, min_font_scale_y),
             0,
         ));
     };
@@ -325,29 +325,26 @@ pub(crate) fn get_glyph_quads(
                 is_sdf = image.sdf;
             }
 
-            let glyph_offset = if along_line {
-                Vec2f::new(positioned_glyph.x + half_advance, positioned_glyph.y)
-            } else {
-                Vec2f::ZERO
-            };
+            let glyph_offset =
+                if along_line { Vec2::new(positioned_glyph.x + half_advance, positioned_glyph.y) } else { Vec2::ZERO };
 
             let mut built_in_offset = if along_line {
-                Vec2f::ZERO
+                Vec2::ZERO
             } else {
-                Vec2f::new(
+                Vec2::new(
                     positioned_glyph.x + half_advance + text_offset[0],
                     positioned_glyph.y + text_offset[1] - line_offset,
                 )
             };
 
-            let mut verticalized_label_offset = Vec2f::ZERO;
+            let mut verticalized_label_offset = Vec2::ZERO;
             if rotate_vertical_glyph {
                 // Vertical POI labels, that are rotated 90deg CW and whose
                 // glyphs must preserve upright orientation need to be rotated
                 // 90deg CCW. After quad is rotated, it is translated to the
                 // original built-in offset.
                 verticalized_label_offset = built_in_offset;
-                built_in_offset = Vec2f::ZERO;
+                built_in_offset = Vec2::ZERO;
             }
 
             // rectBuffer is in 1x logical units; only rect.w/h carry the texture
@@ -360,10 +357,10 @@ pub(crate) fn get_glyph_quads(
             let x2 = x1 + f32::from(rect.w) / texture_scale * positioned_glyph.scale / pixel_ratio;
             let y2 = y1 + f32::from(rect.h) / texture_scale * positioned_glyph.scale / pixel_ratio;
 
-            let mut tl = Vec2f::new(x1, y1);
-            let mut tr = Vec2f::new(x2, y1);
-            let mut bl = Vec2f::new(x1, y2);
-            let mut br = Vec2f::new(x2, y2);
+            let mut tl = Vec2::new(x1, y1);
+            let mut tr = Vec2::new(x2, y1);
+            let mut bl = Vec2::new(x1, y2);
+            let mut br = Vec2::new(x2, y2);
 
             if rotate_vertical_glyph {
                 // Vertical-supporting glyphs are laid out in 24x24 point boxes
@@ -378,7 +375,7 @@ pub(crate) fn get_glyph_quads(
                 // therefore, needs to be accounted for when glyph is rotated
                 // and translated.
 
-                let center = Vec2f::new(-half_advance, half_advance - Shaping::Y_OFFSET as f32);
+                let center = Vec2::new(-half_advance, half_advance - Shaping::Y_OFFSET as f32);
                 let vertical_rotation = -std::f32::consts::PI / 2.0;
 
                 // xHalfWidhtOffsetcorrection is a difference between full-width
@@ -387,13 +384,16 @@ pub(crate) fn get_glyph_quads(
                 let x_half_widht_offsetcorrection = ONE_EM / 2.0 - half_advance;
                 let y_image_offset_correction =
                     if positioned_glyph.image_id.is_some() { x_half_widht_offsetcorrection } else { 0.0 };
-                let x_offset_correction = Vec2f::new(
+                let x_offset_correction = Vec2::new(
                     5.0 - Shaping::Y_OFFSET as f32 - x_half_widht_offsetcorrection,
                     -y_image_offset_correction,
                 );
 
-                let transform = |p: Vec2f| {
-                    (p - center).rotate(vertical_rotation) + center + x_offset_correction + verticalized_label_offset
+                let transform = |p: Vec2| {
+                    Vec2::from_angle(vertical_rotation).rotate(p - center)
+                        + center
+                        + x_offset_correction
+                        + verticalized_label_offset
                 };
                 tl = transform(tl);
                 tr = transform(tr);
@@ -413,9 +413,9 @@ pub(crate) fn get_glyph_quads(
                 br = matrix_multiply(&matrix, br);
             }
 
-            let pixel_offset_tl = Vec2f::ZERO;
-            let pixel_offset_br = Vec2f::ZERO;
-            let min_font_scale = Vec2f::ZERO;
+            let pixel_offset_tl = Vec2::ZERO;
+            let pixel_offset_br = Vec2::ZERO;
+            let min_font_scale = Vec2::ZERO;
 
             quads.push(SymbolQuad::new(
                 tl,

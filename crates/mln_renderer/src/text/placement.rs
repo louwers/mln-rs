@@ -25,6 +25,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use geometry::Point;
+use glam::Vec2;
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, TransformState};
 use mln_math::{fmaxf, fminf};
 use mln_style::TransitionOptions;
@@ -64,7 +65,6 @@ use crate::text::collision_index::{
     CollisionBoundaries, CollisionIndex, IntersectStatus, OverlapMode, PlacedFeatureResult,
 };
 use crate::update_parameters::UpdateParameters;
-use crate::util::vec2::Vec2f;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct OpacityState {
@@ -247,13 +247,13 @@ fn translation_point(
     translate: &SymbolTranslate,
     state: &TransformState,
     screen_space: bool,
-) -> Vec2f {
+) -> Vec2 {
     // A screen-space symbol takes its translate in the screen matrix.
     if screen_space {
-        return Vec2f::ZERO;
+        return Vec2::ZERO;
     }
     let translation = RenderTile::tile_unit_translation(tile_id, translate.offset, translate.anchor, state);
-    Vec2f::new(translation[0], translation[1])
+    Vec2::new(translation[0], translation[1])
 }
 
 /// The projection without the horizon plane, so nothing on it counts as
@@ -296,8 +296,8 @@ pub(crate) struct PlacementContext {
     tile_projection: ProjectionData,
     // Labels collide where `*-translate` puts them, line labels' circles
     // included.
-    pub(crate) text_translation: Vec2f,
-    pub(crate) icon_translation: Vec2f,
+    pub(crate) text_translation: Vec2,
+    pub(crate) icon_translation: Vec2,
 
     pub(crate) collision_group: CollisionGroup,
     pub(crate) partially_evaluated_text_size: ZoomEvaluatedSize,
@@ -531,7 +531,7 @@ struct Intersection {
     /// Index of the symbol instance in the context's bucket.
     symbol_index: usize,
     /// The symbol's anchor point, for sorting.
-    anchor_point: Vec2f,
+    anchor_point: Vec2,
     status: IntersectStatus,
     /// less means more important
     priority: usize,
@@ -613,11 +613,11 @@ fn calculate_variable_layout_offset_unrotated(
     height: f32,
     offset: [f32; 2],
     text_box_scale: f32,
-) -> Vec2f {
+) -> Vec2 {
     let alignment = AnchorAlignment::get_anchor_alignment(anchor);
     let shift_x = -(alignment.horizontal_align - 0.5) * width;
     let shift_y = -(alignment.vertical_align - 0.5) * height;
-    Vec2f::new(shift_x + offset[0] * text_box_scale, shift_y + offset[1] * text_box_scale)
+    Vec2::new(shift_x + offset[0] * text_box_scale, shift_y + offset[1] * text_box_scale)
 }
 
 /// The variable anchor's shift as a screen-space offset, for the boxes that
@@ -635,9 +635,13 @@ fn calculate_variable_layout_offset(
     rotate_with_map: bool,
     pitch_with_map: bool,
     bearing: f32,
-) -> Vec2f {
+) -> Vec2 {
     let shift = calculate_variable_layout_offset_unrotated(anchor, width, height, offset, text_box_scale);
-    if rotate_with_map { shift.rotate(if pitch_with_map { bearing } else { -bearing }) } else { shift }
+    if rotate_with_map {
+        Vec2::from_angle(if pitch_with_map { bearing } else { -bearing }).rotate(shift)
+    } else {
+        shift
+    }
 }
 
 fn calculate_variable_render_shift(
@@ -647,11 +651,11 @@ fn calculate_variable_render_shift(
     text_offset: [f32; 2],
     text_box_scale: f32,
     render_text_size: f32,
-) -> Vec2f {
+) -> Vec2 {
     let alignment = AnchorAlignment::get_anchor_alignment(anchor);
     let shift_x = -(alignment.horizontal_align - 0.5) * width;
     let shift_y = -(alignment.vertical_align - 0.5) * height;
-    Vec2f::new(
+    Vec2::new(
         (shift_x / text_box_scale + text_offset[0]) * render_text_size,
         (shift_y / text_box_scale + text_offset[1]) * render_text_size,
     )
@@ -1018,7 +1022,7 @@ impl Placement {
         let mut placed = PlacedFeatureResult::default();
         let mut placed_vertical_text = PlacedFeatureResult::default();
         let mut placed_vertical_icon = PlacedFeatureResult::default();
-        let shift: Cell<Vec2f> = Cell::new(Vec2f::ZERO);
+        let shift: Cell<Vec2> = Cell::new(Vec2::ZERO);
         if let Some(horizontal_text_index) = symbol_instance.get_default_horizontal_placed_text_index() {
             let placed_symbol: &PlacedSymbol = &state.text.placed_symbols[horizontal_text_index];
             let font_size = evaluate_size_for_feature(&ctx.partially_evaluated_text_size, placed_symbol);
@@ -1341,7 +1345,7 @@ impl Placement {
         pos_matrix: &Mat4,
         variable_text_anchors: &[SymbolAnchorType],
         do_variable_icon_placement: bool,
-        shift: &Cell<Vec2f>,
+        shift: &Cell<Vec2>,
     ) -> PlacedFeatureResult {
         let bucket = ctx.get_bucket();
         let text_box = &text_collision_feature.boxes[0];
@@ -1731,14 +1735,14 @@ impl Placement {
             );
             // The shift follows the axes the collision box was projected
             // along, so the label lands in its own box.
-            let mut vec_east = Vec2f::new(1.0f32, 0.0);
-            let mut vec_south = Vec2f::new(0.0f32, 1.0);
+            let mut vec_east = Vec2::new(1.0f32, 0.0);
+            let mut vec_south = Vec2::new(0.0f32, 1.0);
             if pitch_with_map && !rotate_with_map {
                 let (east, south) = get_tile_skew_vectors(state);
-                vec_east = Vec2f::new(east[0] as f32, east[1] as f32);
-                vec_south = Vec2f::new(south[0] as f32, south[1] as f32);
+                vec_east = Vec2::new(east[0] as f32, east[1] as f32);
+                vec_south = Vec2::new(south[0] as f32, south[1] as f32);
             }
-            let mut placed_text_shifts: HashMap<usize, (usize, Vec2f)> = HashMap::new();
+            let mut placed_text_shifts: HashMap<usize, (usize, Vec2)> = HashMap::new();
 
             let (text_positions, text_placed_symbols) = bs.text.positions_and_symbols(layer_id);
             text_positions.clear();
@@ -1768,7 +1772,7 @@ impl Placement {
                         } else {
                             label_plane.project(tile_anchor)
                         };
-                        let projected_anchor = Vec2f::new(projected.point.x as f32, projected.point.y as f32);
+                        let projected_anchor = Vec2::new(projected.point.x as f32, projected.point.y as f32);
                         let perspective_ratio = 0.5
                             + 0.5
                                 * (state.get_camera_to_center_distance()
@@ -1801,16 +1805,16 @@ impl Placement {
                             )) as f32;
                             let tile_shift = vec_east * (shift.x * correction) + vec_south * (shift.y * correction);
                             let shifted = label_plane.project(tile_anchor + tile_shift).point;
-                            Vec2f::new(shifted.x as f32, shifted.y as f32)
+                            Vec2::new(shifted.x as f32, shifted.y as f32)
                         } else if rotate_with_map {
                             // Screen-space labels stay east-west aligned, so
                             // the shift follows the projected east vector.
-                            let east = label_plane.project(Vec2f::new(tile_anchor.x + 1.0, tile_anchor.y)).point;
+                            let east = label_plane.project(Vec2::new(tile_anchor.x + 1.0, tile_anchor.y)).point;
                             let to_east_x = east.x as f32 - projected_anchor.x;
                             let to_east_y = east.y as f32 - projected_anchor.y;
                             let angle = (to_east_y / to_east_x).atan()
                                 + if to_east_x < 0.0 { std::f32::consts::PI } else { 0.0 };
-                            let rotated = shift.rotate(angle);
+                            let rotated = Vec2::from_angle(angle).rotate(shift);
                             projected_anchor + rotated
                         } else {
                             projected_anchor + shift
@@ -2043,7 +2047,7 @@ impl Placement {
                 |icon_collision_box: &mut Option<crate::buckets::symbol_bucket::CollisionBuffer>,
                  feature: &CollisionFeature,
                  placed: bool,
-                 shift: Vec2f| {
+                 shift: Vec2| {
                     if feature.along_line {
                         return;
                     }
@@ -2059,8 +2063,8 @@ impl Placement {
                 |text_collision_box: &mut Option<crate::buckets::symbol_bucket::CollisionBuffer>,
                  feature: &CollisionFeature,
                  placed: bool|
-                 -> Vec2f {
-                    let mut shift = Vec2f::ZERO;
+                 -> Vec2 {
+                    let mut shift = Vec2::ZERO;
                     if feature.along_line {
                         return shift;
                     }
@@ -2111,7 +2115,7 @@ impl Placement {
                 if let Some(circles) = self.collision_circles.get(&(bucket.bucket_instance_id, symbol_index, is_text)) {
                     for circle in circles {
                         let dynamic_vertex =
-                            SymbolBucket::collision_dynamic_vertex(placed, !circle.is_circle(), Vec2f::ZERO);
+                            SymbolBucket::collision_dynamic_vertex(placed, !circle.is_circle(), Vec2::ZERO);
                         extend(dynamic_vertices, 4, dynamic_vertex);
                     }
                 } else {
@@ -2121,14 +2125,14 @@ impl Placement {
                     // vertex of the first call is used from then on.
                     static DYNAMIC_VERTEX: OnceLock<CollisionBoxDynamicVertex> = OnceLock::new();
                     let dynamic_vertex = *DYNAMIC_VERTEX.get_or_init(|| {
-                        SymbolBucket::collision_dynamic_vertex(placed, false /*not used*/, Vec2f::ZERO)
+                        SymbolBucket::collision_dynamic_vertex(placed, false /*not used*/, Vec2::ZERO)
                     });
                     extend(dynamic_vertices, 4 * feature.boxes.len(), dynamic_vertex);
                 }
             };
 
-            let mut text_shift = Vec2f::ZERO;
-            let mut vertical_text_shift = Vec2f::ZERO;
+            let mut text_shift = Vec2::ZERO;
+            let mut vertical_text_shift = Vec2::ZERO;
             if has_text_collision_box {
                 text_shift = update_text_collision_box(
                     text_collision_box,
@@ -2147,7 +2151,7 @@ impl Placement {
                     icon_collision_box,
                     symbol_instance.get_icon_collision_feature(),
                     opacity_state.icon.placed,
-                    if has_icon_text_fit { text_shift } else { Vec2f::ZERO },
+                    if has_icon_text_fit { text_shift } else { Vec2::ZERO },
                 );
                 if bucket.allow_vertical_placement
                     && let Some(vertical) = symbol_instance.get_vertical_icon_collision_feature()
@@ -2156,7 +2160,7 @@ impl Placement {
                         icon_collision_box,
                         vertical,
                         opacity_state.text.placed,
-                        if has_icon_text_fit { vertical_text_shift } else { Vec2f::ZERO },
+                        if has_icon_text_fit { vertical_text_shift } else { Vec2::ZERO },
                     );
                 }
             }
@@ -2334,7 +2338,7 @@ impl Placement {
         &self,
         box_: &CollisionBox,
         anchor: SymbolAnchorType,
-        shift: Vec2f,
+        shift: Vec2,
         anchors: &[SymbolAnchorType],
         pos_matrix: &Mat4,
         text_pixel_ratio: f32,
@@ -2352,7 +2356,7 @@ impl Placement {
                 // cut-offs in case the shift is lager than the buffer size).
                 let status = self.collision_index.intersects_tile_edges(
                     box_,
-                    Vec2f::ZERO,
+                    Vec2::ZERO,
                     pos_matrix,
                     text_pixel_ratio,
                     tile_borders,
@@ -2454,7 +2458,7 @@ impl Placement {
     fn tile_place_symbol_bucket(&mut self, params: &BucketPlacementData, seen: &mut BTreeSet<u32>) {
         /// Keeps the data necessary to find a feature location according to a tile.
         struct NeighborTileData {
-            shift: Vec2f,
+            shift: Vec2,
             matrix: Mat4,
             borders: CollisionBoundaries,
         }
@@ -2494,7 +2498,7 @@ impl Placement {
             self.collision_index.get_transform_state().get_bearing(),
         );
 
-        let neighbor_tile_data = |collision_index: &CollisionIndex, id: UnwrappedTileID, shift: Vec2f| {
+        let neighbor_tile_data = |collision_index: &CollisionIndex, id: UnwrappedTileID, shift: Vec2| {
             let m = collision_index.get_transform_state().get_projection_data(&id).fallback_matrix;
             let borders = collision_index.project_tile_boundaries(&m);
             NeighborTileData { shift, matrix: m, borders }
@@ -2509,28 +2513,28 @@ impl Placement {
             neighbor_tile_data(
                 &self.collision_index,
                 UnwrappedTileID::new(z, i64::from(x), i64::from(y.wrapping_sub(1))),
-                Vec2f::new(0.0, extent),
+                Vec2::new(0.0, extent),
             ), // top
             neighbor_tile_data(
                 &self.collision_index,
                 UnwrappedTileID::new(z, i64::from(x), i64::from(y.wrapping_add(1))),
-                Vec2f::new(0.0, -extent),
+                Vec2::new(0.0, -extent),
             ), // bottom
             neighbor_tile_data(
                 &self.collision_index,
                 UnwrappedTileID::new(z, i64::from(x.wrapping_sub(1)), i64::from(y)),
-                Vec2f::new(extent, 0.0),
+                Vec2::new(extent, 0.0),
             ), // left
             neighbor_tile_data(
                 &self.collision_index,
                 UnwrappedTileID::new(z, i64::from(x.wrapping_add(1)), i64::from(y)),
-                Vec2f::new(-extent, 0.0),
+                Vec2::new(-extent, 0.0),
             ), // right
         ];
 
         let tile_borders = self.tile_state().tile_borders.expect("tileBorders");
         let collision_index = &self.collision_index;
-        let collision_box_intersects_tile_edges = |collision_box: &CollisionBox, shift: Vec2f| -> IntersectStatus {
+        let collision_box_intersects_tile_edges = |collision_box: &CollisionBox, shift: Vec2| -> IntersectStatus {
             let mut intersects = collision_index.intersects_tile_edges(
                 collision_box,
                 shift,
@@ -2570,7 +2574,7 @@ impl Placement {
             }
 
             if let Some(text_collision_box) = symbol.get_text_collision_feature().boxes.first() {
-                let mut offset = Vec2f::ZERO;
+                let mut offset = Vec2::ZERO;
                 if let Some(variable_anchor) = variable_anchor {
                     let width = text_collision_box.x2 - text_collision_box.x1;
                     let height = text_collision_box.y2 - text_collision_box.y1;
@@ -2593,7 +2597,7 @@ impl Placement {
             }
 
             if let Some(icon_collision_box) = symbol.get_icon_collision_feature().boxes.first() {
-                let mut offset = Vec2f::ZERO;
+                let mut offset = Vec2::ZERO;
                 if let Some(variable_anchor) = variable_anchor
                     && variable_icon_placement
                 {

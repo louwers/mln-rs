@@ -142,6 +142,8 @@ mlt-core = { version = "0.22.1" }
 # The even-odd union that repairs the polygons of version 1 vector tiles,
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
+# 2D vector maths (mln_renderer's symbol layout, placement and collision).
+glam = { version = "0.34.3", default-features = false, features = ["std", "serde"] }
 # MVT decoding, instead of porting the C++ reader (vendor/vector-tile).
 fast-mvt = { version = "0.7.3", default-features = false, features = ["reader"] }
 # Glyph PBFs: fast-mvt's protobuf runtime, whose wire format functions read

@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
+use glam::Vec2;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::polyline_generator::PolylineGeneratorOptions;
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -51,7 +52,6 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem};
 use crate::tile_pyramid::TilePyramid;
 use crate::util::subdivision::subdivide_vertex_line;
-use crate::util::vec2::Vec2f;
 
 pub(crate) struct TileSourceRenderItem {
     render_tiles: Rc<Vec<RenderTile>>,
@@ -628,11 +628,12 @@ impl RenderTileSource {
             indices.sort_by(|&a, &b| {
                 let a = &tiles[a];
                 let b = &tiles[b];
-                let pa = Vec2f::new(a.id.canonical.x as f32, a.id.canonical.y as f32);
-                let pb = Vec2f::new(b.id.canonical.x as f32, b.id.canonical.y as f32);
+                let pa = Vec2::new(a.id.canonical.x as f32, a.id.canonical.y as f32);
+                let pb = Vec2::new(b.id.canonical.x as f32, b.id.canonical.y as f32);
 
-                let par = pa.rotate(source_bearing);
-                let pbr = pb.rotate(source_bearing);
+                let rotation = Vec2::from_angle(source_bearing);
+                let par = rotation.rotate(pa);
+                let pbr = rotation.rotate(pb);
 
                 // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
                 b.id.canonical.z.cmp(&a.id.canonical.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))
