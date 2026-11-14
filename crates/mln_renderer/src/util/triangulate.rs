@@ -28,7 +28,9 @@ pub(crate) fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(polygon: &[
         n_vertices += ring.as_ref().len() as u32;
     }
     let points = polygon.iter().flat_map(|ring| ring.as_ref().iter().map(|p| [p.x.into(), p.y.into()]));
-    let mut indices = Vec::new();
+    // Room for every triangle: earcut makes at most one per vertex and two
+    // per hole (for the bridge), and reserves less.
+    let mut indices = Vec::with_capacity(3 * (n_vertices as usize + 2 * hole_indices.len()));
     EARCUT.with_borrow_mut(|earcut| earcut.earcut(points, &hole_indices, &mut indices));
     indices
 }
