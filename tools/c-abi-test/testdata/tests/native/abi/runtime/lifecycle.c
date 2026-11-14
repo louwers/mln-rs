@@ -2,6 +2,7 @@
 // validation, stale and foreign handles, and release.
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -123,8 +124,11 @@ static void runtime_calls_reject_a_value_that_names_no_runtime(void) {
   mln_test_destroy_runtime(live);
 }
 
+// Short of the struct's first version, which ended before
+// system_fonts_enabled. Callers built against those headers declare its size.
 static void map_options_with_small_size(void* descriptor) {
-  ((mln_map_options*)descriptor)->size = sizeof(mln_map_options) - 1;
+  ((mln_map_options*)descriptor)->size =
+    offsetof(mln_map_options, system_fonts_enabled) - 1;
 }
 
 static void map_options_with_unknown_mode(void* descriptor) {
