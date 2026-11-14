@@ -25,10 +25,11 @@ const VIEWS = [
   { id: "raster-masking/overlapping-vector" },
   { id: "hillshade-accent-color/default" },
   // SwiftShader and lavapipe antialias the edges of the z1 coastlines
-  // differently: 0.5% of the pixels.
+  // differently: 0.5% of the pixels. With WebGL2, whose fill outlines are
+  // lines where the native WebGPU render's are triangles, 1.0%.
   {
     id: "combinations/color-relief--hillshade--vector-fill--color-relief--hillshade",
-    allowed: 0.01,
+    allowed: 0.015,
   },
   { id: "text-font/devanagari" },
   { id: "text-font/khmer" },

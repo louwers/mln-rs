@@ -474,6 +474,9 @@ impl RenderLayer for RenderFillLayer {
                     || self.unevaluated.get::<FillOutlineColor>().is_undefined());
             let data_driven_outline =
                 !evaluated.get::<FillOutlineColor>().is_constant() || !evaluated.get::<FillOpacity>().is_constant();
+            // The triangles the bucket built for the outline, if any, draw
+            // a constant outline; the basic lines draw every other.
+            let triangulated_outline = bucket.triangulate_outlines && !data_driven_outline;
 
             let fill_vertex_count = bucket.vertices.len();
 
@@ -543,7 +546,7 @@ impl RenderLayer for RenderFillLayer {
                     "a_pos",
                 );
 
-                let outline_triangulated_shader = if do_outline && !data_driven_outline {
+                let outline_triangulated_shader = if do_outline && triangulated_outline {
                     let outline_properties_as_uniforms: StringIDSetsPair = (
                         ["a_color", "a_opacity", "a_width"].iter().map(|s| (*s).to_owned()).collect(),
                         [
@@ -611,7 +614,7 @@ impl RenderLayer for RenderFillLayer {
                 {
                     builder.set_shader(fill_shader.clone());
                     if do_outline
-                        && data_driven_outline
+                        && !triangulated_outline
                         && let Some(outline) = outline_builder.as_mut()
                     {
                         outline.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));
@@ -628,7 +631,7 @@ impl RenderLayer for RenderFillLayer {
                 }
 
                 if do_outline && let Some(builder) = outline_builder.as_mut() {
-                    if !data_driven_outline {
+                    if triangulated_outline {
                         builder.set_sub_layer_index(if self.unevaluated.get::<FillOutlineColor>().is_undefined() {
                             2
                         } else {

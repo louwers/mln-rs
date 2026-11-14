@@ -87,6 +87,7 @@ fn parameters() -> WorkerParameters {
         dynamic_texture_atlas: Some(Arc::new(DynamicTextureAtlas::new())),
         font_faces: None,
         capture_rendered_features: true,
+        triangulate_fill_outlines: false,
         synchronous: true,
     }
 }
@@ -163,6 +164,7 @@ fn worker(parameters: WorkerParameters, replies: &Replies) -> GeometryTileWorker
         parameters.dynamic_texture_atlas,
         parameters.font_faces,
         parameters.capture_rendered_features,
+        parameters.triangulate_fill_outlines,
     )
 }
 

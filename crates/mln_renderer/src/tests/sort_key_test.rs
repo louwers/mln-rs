@@ -118,6 +118,7 @@ fn create_bucket(properties: Arc<dyn LayerProperties>, shape: Shape) -> BucketPt
         global_state: None,
         retain_features_by_id: false,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
+        triangulate_fill_outlines: false,
     };
     let mut glyph_dependencies = GlyphDependencies::default();
     let mut image_dependencies = ImageDependencies::new();

@@ -16,4 +16,5 @@ pub(crate) struct BucketParameters {
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) retain_features_by_id: bool,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) triangulate_fill_outlines: bool,
 }

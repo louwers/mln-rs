@@ -542,6 +542,7 @@ impl GeometryTile {
             dynamic_texture_atlas: Some(Arc::clone(&parameters.dynamic_texture_atlas)),
             font_faces: parameters.glyph_manager.get_font_faces(),
             capture_rendered_features: parameters.capture_rendered_features,
+            triangulate_fill_outlines: parameters.triangulate_fill_outlines,
             synchronous,
         };
         let inner = Rc::new_cyclic(|self_weak: &Weak<GeometryTileInner>| {

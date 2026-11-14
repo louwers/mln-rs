@@ -173,7 +173,9 @@ fn add_subdivided_polygon(
 ///
 /// Every ring keeps its outline: the tile's triangles cut every hole, so
 /// the earcut path's limit on holes doesn't apply. The C++ draws no outline
-/// of such a polygon and draws its triangles unchecked.
+/// of such a polygon and draws its triangles unchecked, and only on Metal
+/// and WebGPU: its OpenGL and Vulkan builds triangulate the polygon again,
+/// which the tile's triangles are there to spare.
 fn add_tessellated_polygon(
     geometry: &GeometryCollection,
     fill_vertices: &mut Vec<FillLayoutVertex>,
@@ -208,9 +210,9 @@ fn add_tessellated_polygon(
     true
 }
 
-/// Generates the fill triangles and outlines of `geometry`, the outlines both
-/// as triangles and as simple lines (the `MLN_TRIANGULATE_FILL_OUTLINES`
-/// variant the WebGPU fill bucket uses). C++ defaults
+/// Generates the fill triangles and outlines of `geometry`: the outlines as
+/// simple lines, and with `triangulate_outlines` as triangles too, into the
+/// line buffers (`MLN_TRIANGULATE_FILL_OUTLINES`). C++ defaults
 /// `subdivision_granularity` to 1.
 ///
 /// Without subdivision, a geometry that carries triangles is filled with
@@ -231,15 +233,23 @@ pub(crate) fn generate_fill_and_outline_buffers(
     basic_line_segments: &mut Vec<SegmentBase>,
     canonical: &CanonicalTileID,
     subdivision_granularity: u32,
+    triangulate_outlines: bool,
 ) -> Result<(), Error> {
-    let mut line_generator = PolylineGenerator::new(
-        line_vertices,
-        LineBucket::layout_vertex,
-        line_segments,
-        &SegmentBase::new,
-        get_segment,
-        line_indexes,
-    );
+    let mut line_generator = triangulate_outlines.then(|| {
+        PolylineGenerator::new(
+            line_vertices,
+            LineBucket::layout_vertex,
+            line_segments,
+            &SegmentBase::new,
+            get_segment,
+            line_indexes,
+        )
+    });
+    let mut triangulate_outline = |ring: &GeometryCoordinates, options: &PolylineGeneratorOptions| {
+        if let Some(line_generator) = &mut line_generator {
+            line_generator.generate(ring, options);
+        }
+    };
 
     let line_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
 
@@ -252,7 +262,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
             fill_segments,
             basic_line_indexes,
             basic_line_segments,
-            &mut |ring| line_generator.generate(ring, &line_options),
+            &mut |ring| triangulate_outline(ring, &line_options),
         )
     {
         return Ok(());
@@ -263,13 +273,16 @@ pub(crate) fn generate_fill_and_outline_buffers(
         limit_holes(&mut polygon, 500);
 
         if subdivision_granularity >= 2 {
-            for ring in polygon.iter() {
-                generate_outline(
-                    &mut |ring, options| line_generator.generate(ring, options),
-                    &subdivide_vertex_line(ring, subdivision_granularity, true),
-                    canonical,
-                    &line_options,
-                );
+            // The subdivided rings are for the triangulated outline only.
+            if triangulate_outlines {
+                for ring in polygon.iter() {
+                    generate_outline(
+                        &mut triangulate_outline,
+                        &subdivide_vertex_line(ring, subdivision_granularity, true),
+                        canonical,
+                        &line_options,
+                    );
+                }
             }
             add_subdivided_polygon(
                 &subdivide_polygon(&polygon, canonical, subdivision_granularity, true),
@@ -289,7 +302,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
             let base = fill_vertices.len();
             let n_vertices = add_ring_vertices(fill_vertices, ring);
             add_outline_indices(base, n_vertices, basic_line_segments, basic_line_indexes);
-            line_generator.generate(ring, &line_options);
+            triangulate_outline(ring, &line_options);
         }
 
         let indices: Vec<u32> = triangulate(&polygon[..]);

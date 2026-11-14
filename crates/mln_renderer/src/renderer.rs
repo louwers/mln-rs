@@ -145,6 +145,7 @@ impl Renderer {
         if style_changed {
             self.orchestrator.reset_dynamic_texture_atlas();
         }
+        self.orchestrator.set_backend_type(self.backend.get_context().backend_type());
         let start = Instant::now();
         let mut render_tree = self.orchestrator.create_render_tree(update_parameters)?;
         render_tree.prepare();

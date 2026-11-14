@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_actor::{TaggedScheduler, scheduler};
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_gfx::{Context, LayerGroupBase, LayerGroupBasePtr, ShaderRegistry};
 use mln_map_types::{MapMode, TransformState};
@@ -31,6 +32,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
+use crate::buckets::fill_bucket::FillBucket;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, DynamicTextureAtlasPtr};
 use crate::image_manager::ImageManager;
@@ -214,6 +216,9 @@ pub(crate) struct RenderOrchestrator {
     thread_pool: TaggedScheduler,
     /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).
     tile_worker_transport: Rc<dyn TileWorkerTransport>,
+    /// Whether the tiles' fill buckets build their outlines as triangles
+    /// too, for the renderer's backend (`set_backend_type`).
+    triangulate_fill_outlines: bool,
 
     global_state: Option<Arc<GlobalStateMap>>,
 
@@ -291,6 +296,7 @@ impl RenderOrchestrator {
             remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
             tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
+            triangulate_fill_outlines: false,
             thread_pool,
             global_state: None,
             layer_groups_by_layer_index: VecMap::new(),
@@ -310,6 +316,12 @@ impl RenderOrchestrator {
     /// pool).
     pub(crate) fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
         self.tile_worker_transport = transport;
+    }
+
+    /// Port-only: the renderer's backend, which C++ fixes when it is built.
+    /// The tiles created from now on build their buckets for it.
+    pub(crate) fn set_backend_type(&mut self, backend: BackendType) {
+        self.triangulate_fill_outlines = FillBucket::triangulates_outlines(backend);
     }
 
     /// Sets the queue the orchestrator and its parts push their events to.
@@ -408,6 +420,7 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             capture_rendered_features: update_parameters.capture_rendered_features,
+            triangulate_fill_outlines: self.triangulate_fill_outlines,
             image_manager: Rc::clone(&self.image_manager),
             glyph_manager: Rc::clone(&self.glyph_manager),
             dynamic_texture_atlas: Arc::clone(&self.dynamic_texture_atlas),
