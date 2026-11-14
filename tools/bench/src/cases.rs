@@ -1055,14 +1055,6 @@ fn style_add_remove_layers(cx: &Context) -> Metrics {
     meter.finish()
 }
 
-/// The center and zoom of the partitioned style's cases: the 100 points
-/// span four tiles.
-fn partitioned_scene(mode: Mode) -> Scene {
-    let mut scene = Scene::new(Size::new(512, 512), mode);
-    scene.jump(LatLng::new(0.045, 0.045).expect("a center"), 12.0);
-    scene
-}
-
 /// 1000 points, each with the properties maplibre-compose's fixtures give
 /// them, the second variant a little east of the first.
 fn points_geojson(variant: usize) -> String {
