@@ -32,7 +32,8 @@ pub(crate) fn compile(
     // its `#ifdef`s see the defines.
     let shader_prelude = source.wgsl.prelude.unwrap_or("");
     let assemble = |stage: Option<&str>| format!("{}\n{shader_prelude}{}", prelude(), stage.unwrap_or(""));
-    let defines: HashMap<String, bool> = key.defines().iter().map(|define| (define.clone(), true)).collect();
+    // WGSL reads no define's value.
+    let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
     let vertex_source = preprocess_wgsl(&assemble(source.wgsl.vertex), &defines);
     let fragment_source = preprocess_wgsl(&assemble(source.wgsl.fragment), &defines);
 

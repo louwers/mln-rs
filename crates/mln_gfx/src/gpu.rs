@@ -197,8 +197,9 @@ pub struct ShaderKey {
 }
 
 impl ShaderKey {
-    /// `program` with `defines` (names such as `PROJECTION_GLOBE` or
-    /// `HAS_UNIFORM_u_color`), in any order and with repeats.
+    /// `program` with `defines`, in any order and with repeats: names such
+    /// as `PROJECTION_GLOBE` or `HAS_UNIFORM_u_color`, or `NAME=value` for
+    /// a define with a value, such as `DEVICE_PIXEL_RATIO=2.0`.
     #[must_use]
     pub fn new(program: BuiltIn, defines: impl IntoIterator<Item = String>) -> ShaderKey {
         let mut defines: Vec<String> = defines.into_iter().collect();
@@ -216,6 +217,11 @@ impl ShaderKey {
     #[must_use]
     pub fn defines(&self) -> &[String] {
         &self.defines
+    }
+
+    /// Each define's name and value, `""` for one without a value.
+    pub fn define_values(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.defines.iter().map(|define| define.split_once('=').unwrap_or((define, "")))
     }
 }
 
@@ -495,6 +501,7 @@ mod tests {
         assert_eq!(key(&["B", "A", "B"]), key(&["A", "B"]));
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
         assert_ne!(key(&["A"]), ShaderKey::new(BuiltIn::LineShader, ["A".to_owned()]));
+        assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
     }
 
     #[test]
