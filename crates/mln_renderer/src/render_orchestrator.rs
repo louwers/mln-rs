@@ -608,6 +608,14 @@ impl RenderOrchestrator {
             }
         }
 
+        // The previous sources may hold the last references to replaced
+        // data, such as a GeoJSON source's index, which can take
+        // milliseconds to free. The workers drop them once this update has
+        // moved the render sources and their tiles to the new ones. Declared
+        // before the diff, which holds previous sources too, so that it
+        // drops after the diff.
+        let _previous_sources = (!Arc::ptr_eq(&self.source_impls, &update_parameters.sources))
+            .then(|| DropOnWorkers::new(Arc::clone(&self.source_impls), self.thread_pool.clone()));
         let source_diff = diff_sources(&self.source_impls, &update_parameters.sources);
         self.source_impls = Arc::clone(&update_parameters.sources);
 
@@ -1556,6 +1564,35 @@ impl RenderOrchestrator {
 
     pub(crate) fn get_tile_cache_enabled(&self) -> bool {
         self.tile_cache_enabled
+    }
+}
+
+impl RenderOrchestrator {
+    /// Drops `value` on the renderer's workers instead of this thread. The
+    /// orchestrator's drop waits for it.
+    pub(crate) fn drop_on_workers<T: Send + 'static>(&self, value: T) {
+        self.thread_pool.schedule(Box::new(move || drop(value)));
+    }
+}
+
+/// A value that [`RenderOrchestrator::drop_on_workers`] drops once this
+/// drops.
+struct DropOnWorkers<T: Send + 'static> {
+    value: Option<T>,
+    thread_pool: TaggedScheduler,
+}
+
+impl<T: Send + 'static> DropOnWorkers<T> {
+    fn new(value: T, thread_pool: TaggedScheduler) -> Self {
+        DropOnWorkers { value: Some(value), thread_pool }
+    }
+}
+
+impl<T: Send + 'static> Drop for DropOnWorkers<T> {
+    fn drop(&mut self) {
+        if let Some(value) = self.value.take() {
+            self.thread_pool.schedule(Box::new(move || drop(value)));
+        }
     }
 }
 

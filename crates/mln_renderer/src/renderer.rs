@@ -158,6 +158,13 @@ impl Renderer {
         handoff
     }
 
+    /// Port-only: drops `value` on the renderer's workers instead of this
+    /// thread, for data that would take a frame long to free, such as the
+    /// sources of an earlier update. The renderer's drop waits for it.
+    pub fn drop_on_workers<T: Send + 'static>(&self, value: T) {
+        self.orchestrator.drop_on_workers(value);
+    }
+
     /// Port-only: what the last frame that [`render`](Self::render) drew
     /// spent on each of its steps.
     #[must_use]
