@@ -9,9 +9,9 @@ use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::DrawModeType;
 use crate::gpu::{
-    BindGroupDesc, BindGroupEntry, BindGroupId, BufferId, BufferUsage, ColorAttachment, DepthState, Gpu, GpuError,
-    LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey, StencilState, TargetFormats, TextureDesc,
-    TextureFormat, TextureId, TextureUsage,
+    BindGroupDesc, BindGroupEntry, BindGroupId, BufferId, BufferUsage, ColorAttachment, DepthState,
+    DepthStencilAttachment, Gpu, GpuError, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey,
+    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage,
 };
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use crate::shaders::layer_ubo::ProjectionUBO;
@@ -20,6 +20,7 @@ use crate::shaders::shader_defines::{
 };
 use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::StencilMode;
+use crate::types::DepthFunctionType;
 
 const BLACK: Color = Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
 
@@ -35,12 +36,17 @@ struct Solid {
 /// A target of `format`, which the background shader covers with `color`,
 /// premultiplied.
 fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<Solid, GpuError> {
+    solid_at(gpu, format, color, tile_matrix(1.0))
+}
+
+/// [`solid`], drawn through `matrix` instead of over the whole target.
+fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
     let target = target(gpu, format)?;
     let e = EXTENT as i16;
     let quad: [[i16; 2]; 4] = [[0, 0], [e, 0], [0, e], [e, e]];
     let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&quad))?;
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]))?;
-    let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
+    let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
     let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
@@ -57,6 +63,12 @@ fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<S
         ],
     })?;
     Ok(Solid { target, quad, indices, group })
+}
+
+/// `matrix`, moving what it maps to clip space depth `z`.
+fn at_depth(mut matrix: [f32; 16], z: f32) -> [f32; 16] {
+    matrix[14] = z;
+    matrix
 }
 
 /// A render target of [`SIZE`] and `format`, which can be read back.
@@ -84,7 +96,7 @@ fn background() -> PipelineKey {
             depth: DepthState::from(&DepthMode::disabled()),
             stencil: StencilState::from(&StencilMode::disabled()),
         },
-        targets: TargetFormats { color: TextureFormat::Rgba8Unorm, depth_stencil: None },
+        targets: TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None },
     }
 }
 
@@ -300,6 +312,62 @@ pub fn topologies<G: Gpu>(
         for (x, y) in [(0, 0), (right, 0), (0, bottom), (right, bottom), (right / 2, bottom / 2)] {
             assert_eq!(texel(&pixels, x, y), red, "{primitive:?} covers ({x}, {y})");
         }
+    }
+    Ok(())
+}
+
+/// Checks that a pipeline draws into a pass with a depth attachment and no
+/// color one: a depth-only pass writes depth over the left half, nearer
+/// than the background, and a pass that loads it draws the background only
+/// where its depth test passes. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn depth_only<G: Gpu>(
+    gpu: &mut G,
+    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
+) -> Result<(), GpuError> {
+    let depth = gpu.create_texture(&TextureDesc {
+        label: "depth",
+        size: SIZE,
+        format: TextureFormat::Depth32Float,
+        usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+    })?;
+    let frame = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], at_depth(tile_matrix(1.0), 0.5))?;
+    let left = solid_at(gpu, TextureFormat::Rgba8Unorm, [0.0; 4], at_depth(tile_matrix(0.0), 0.25))?;
+
+    // The left half at depth 0.25, writing no color.
+    let mut depth_key = background();
+    depth_key.state.color_mask = ColorMode::disabled().mask;
+    depth_key.state.depth = DepthState { compare: DepthFunctionType::Always, write: true };
+    depth_key.targets = TargetFormats { color: None, depth_stencil: Some(TextureFormat::Depth32Float) };
+    let depth_pipeline = gpu.create_pipeline(&depth_key)?;
+    let mut depth_pass = left.pass(depth_pipeline, [DRAW_QUAD]);
+    depth_pass.label = "depth only".to_owned();
+    depth_pass.color = None;
+    depth_pass.depth_stencil =
+        Some(DepthStencilAttachment { texture: depth, depth: LoadOp::Clear(1.0), stencil: LoadOp::Clear(0) });
+
+    // The background at depth 0.5, where it is nearer than what the depth
+    // holds: the right half, which the depth-only pass left cleared.
+    let mut key = background();
+    key.state.depth = DepthState { compare: DepthFunctionType::Less, write: false };
+    key.targets.depth_stencil = Some(TextureFormat::Depth32Float);
+    let tested = gpu.create_pipeline(&key)?;
+    let mut color_pass = frame.pass(tested, [DRAW_QUAD]);
+    color_pass.depth_stencil =
+        Some(DepthStencilAttachment { texture: depth, depth: LoadOp::Load, stencil: LoadOp::Load });
+    gpu.submit(&[depth_pass, color_pass])?;
+
+    let pixels = read_back(gpu, frame.target);
+    let (red, black) = ([255, 0, 0, 255], [0, 0, 0, 255]);
+    for y in [0, SIZE.height / 2, SIZE.height - 1] {
+        assert_eq!(texel(&pixels, 0, y), black, "the depth-only pass's half is nearer");
+        assert_eq!(texel(&pixels, SIZE.width / 2 - 1, y), black);
+        assert_eq!(texel(&pixels, SIZE.width / 2, y), red, "the other half keeps the cleared depth");
+        assert_eq!(texel(&pixels, SIZE.width - 1, y), red);
     }
     Ok(())
 }

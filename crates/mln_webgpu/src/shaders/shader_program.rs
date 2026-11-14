@@ -251,7 +251,7 @@ pub(crate) fn vertex_format(type_: AttributeDataType) -> Option<wgpu::VertexForm
 
 /// What a pipeline of a program is made from: its fixed-function state, and
 /// the formats of the color and depth-stencil attachments it draws into.
-type PipelineCacheKey = (PipelineState, wgpu::TextureFormat, Option<wgpu::TextureFormat>);
+type PipelineCacheKey = (PipelineState, Option<wgpu::TextureFormat>, Option<wgpu::TextureFormat>);
 
 /// A WGSL program: its vertex and fragment modules, its bind group layouts
 /// as its sources declare them, and the pipelines made from it so far.
@@ -359,15 +359,16 @@ impl ShaderProgram {
     }
 
     /// The pipeline of this program with `state`, drawing into a `color`
-    /// attachment and a `depth_stencil` one, made on the first call with
-    /// them. Fails with [`GpuError::Unsupported`] for a primitive WebGPU
+    /// attachment and a `depth_stencil` one, either of which may be
+    /// absent, made on the first call with them. Fails with [`GpuError::Unsupported`] for a primitive WebGPU
     /// lacks: a line loop or a triangle fan.
     pub(crate) fn render_pipeline(
         &self,
         state: &PipelineState,
-        color: wgpu::TextureFormat,
+        color: impl Into<Option<wgpu::TextureFormat>>,
         depth_stencil: Option<wgpu::TextureFormat>,
     ) -> Result<wgpu::RenderPipeline, GpuError> {
+        let color = color.into();
         let key = (state.clone(), color, depth_stencil);
         if let Some(pipeline) = self.render_pipeline_cache.borrow().get(&key) {
             return Ok(pipeline.clone());
@@ -470,7 +471,7 @@ impl ShaderProgram {
     fn create_pipeline(
         &self,
         state: &PipelineState,
-        color_format: wgpu::TextureFormat,
+        color_format: Option<wgpu::TextureFormat>,
         depth_stencil_format: Option<wgpu::TextureFormat>,
     ) -> Result<wgpu::RenderPipeline, GpuError> {
         let attributes = state
@@ -526,7 +527,7 @@ impl ShaderProgram {
         write_mask.set(wgpu::ColorWrites::GREEN, state.color_mask.g);
         write_mask.set(wgpu::ColorWrites::BLUE, state.color_mask.b);
         write_mask.set(wgpu::ColorWrites::ALPHA, state.color_mask.a);
-        let targets = [Some(wgpu::ColorTargetState { format: color_format, blend, write_mask })];
+        let targets = [color_format.map(|format| wgpu::ColorTargetState { format, blend, write_mask })];
 
         let topology = to_primitive_topology(state.primitive)
             .ok_or_else(|| GpuError::Unsupported(format!("{:?} primitives", state.primitive)))?;

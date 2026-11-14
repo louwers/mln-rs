@@ -140,7 +140,9 @@ struct PassFormats {
 
 impl PassFormats {
     fn matches(self, targets: TargetFormats) -> bool {
-        self.has_color && self.color == Some(targets.color) && self.depth_stencil == targets.depth_stencil
+        self.has_color == targets.color.is_some()
+            && self.color == targets.color
+            && self.depth_stencil == targets.depth_stencil
     }
 }
 
@@ -439,7 +441,7 @@ mod tests {
         let size = Size { width: 4, height: 4 };
         let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
         let color = gpu.textures.insert(TextureInfo { format: Some(TextureFormat::Rgba8Unorm), size, usage });
-        let targets = TargetFormats { color: TextureFormat::Rgba8Unorm, depth_stencil: None };
+        let targets = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
         let layout = VertexBufferLayout {
             stride: 4,
             step: VertexStep::Vertex,

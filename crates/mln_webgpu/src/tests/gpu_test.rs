@@ -1,6 +1,6 @@
 use mln_gfx::gpu::TextureId;
 use mln_gfx::gpu::conformance::{
-    SIZE, clip_mask_and_background, foreign_ids, invalid_calls, topologies, transparent_replace,
+    SIZE, clip_mask_and_background, depth_only, foreign_ids, invalid_calls, topologies, transparent_replace,
 };
 
 use crate::{Device, WebGpu};
@@ -68,4 +68,11 @@ fn topologies_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     let mut gpu = WebGpu::new(&device);
     topologies(&mut gpu, |gpu, texture| read_back(&device, gpu, texture)).expect("the frames");
+}
+
+#[test]
+fn depth_only_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    let mut gpu = WebGpu::new(&device);
+    depth_only(&mut gpu, |gpu, texture| read_back(&device, gpu, texture)).expect("the frame");
 }

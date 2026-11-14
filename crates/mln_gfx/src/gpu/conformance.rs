@@ -90,8 +90,10 @@ pub fn clip_mask_and_background<G: Gpu>(
         format: TextureFormat::Depth24PlusStencil8,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
     })?;
-    let targets =
-        TargetFormats { color: TextureFormat::Rgba8Unorm, depth_stencil: Some(TextureFormat::Depth24PlusStencil8) };
+    let targets = TargetFormats {
+        color: Some(TextureFormat::Rgba8Unorm),
+        depth_stencil: Some(TextureFormat::Depth24PlusStencil8),
+    };
 
     let e = EXTENT as i16;
     let quad: [[i16; 2]; 4] = [[0, 0], [e, 0], [0, e], [e, e]];

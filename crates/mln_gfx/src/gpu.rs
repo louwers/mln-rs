@@ -305,7 +305,9 @@ pub struct PipelineState {
 /// The formats of the attachments a pipeline draws into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TargetFormats {
-    pub color: TextureFormat,
+    /// `None` for a pass without a color attachment, which only tests and
+    /// writes depth and stencil.
+    pub color: Option<TextureFormat>,
     pub depth_stencil: Option<TextureFormat>,
 }
 

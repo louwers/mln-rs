@@ -616,7 +616,7 @@ impl Gpu for WebGpu {
         };
         let pipeline = shader.render_pipeline(
             &key.state,
-            texture_format(key.targets.color),
+            key.targets.color.map(texture_format),
             key.targets.depth_stencil.map(texture_format),
         )?;
         let bindings = shader_bindings(&shader)?;
