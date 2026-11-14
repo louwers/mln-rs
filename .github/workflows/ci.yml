@@ -292,6 +292,11 @@ jobs:
       - name: Typecheck the page
         run: pnpm -C examples/web typecheck
 
+      # How the page reads a wheel event (web/wheel.ts), against each
+      # browser's events.
+      - name: Test the page's wheel reading
+        run: pnpm -C examples/web test
+
       # Each view's style, the page's frame (expected.png) and the native
       # render and diff (results/).
       - name: Upload the frames and diffs

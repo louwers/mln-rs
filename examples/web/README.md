@@ -80,11 +80,7 @@ which moves the camera and continues each release with the map's momentum.
 Each event's time travels as `performance.timeOrigin + timeStamp`, and the
 worker turns it into its own `performance.now()`, the clock it gives
 `WebMap::frame`, which also puts the map's animations on the frame clock.
-The page tells a mouse wheel's notches, which the recognizer eases, from a
-trackpad's continuous pixels, which it applies at once, by how browsers
-report each (`wheelDelta` in web/main.ts: Firefox's lines and Safari's
-4.000244 px steps; Chromium's notches pass as pixels); those rules aren't
-checked on real hardware yet. A ResizeObserver resizes the map with the
+The page tells a mouse wheel's notches, which the recognizer eases, from a trackpad's continuous pixels and pinches, which it applies at once, by how each browser reports them in its source (`wheelDelta` in web/wheel.ts: Firefox's lines, which it gives only to a page that reads `deltaMode` first, macOS's 4.000244 px steps, and Chromium's legacy `wheelDeltaY` of ±120 a notch). `pnpm test` runs those rules against each browser's events; no one has tried them with each browser's mouse and trackpad input yet. A ResizeObserver resizes the map with the
 window, and the map follows the window's pixel ratio. The canvas covers
 exactly the device pixels the map draws, as GL JS's does, so that the
 browser doesn't resample them at a fractional pixel ratio.

@@ -79,10 +79,9 @@ import {
   type Pixels,
   type StartTileWorker,
   type ToMap,
-  WHEEL_NOTCHES,
-  WHEEL_PIXELS,
 } from './protocol.ts';
 import { STYLES, type Style, styleFor } from './styles.ts';
+import { wheelDelta } from './wheel.ts';
 
 declare global {
   interface Window {
@@ -395,28 +394,12 @@ canvas.addEventListener('pointermove', (e) => {
 });
 canvas.addEventListener('pointerup', (e) => send({ kind: 'pointer_up', id: e.pointerId, ...at(e), time: time(e) }));
 canvas.addEventListener('pointercancel', (e) => send({ kind: 'pointer_cancel', id: e.pointerId, time: time(e) }));
-// A wheel event as the recognizer takes it (WebMap::wheel's `kind`):
-// WHEEL_NOTCHES and the notches for a mouse wheel's detents, which it eases,
-// or WHEEL_PIXELS and the pixels for continuous scrolling (a trackpad, a
-// precise wheel), which it applies at once. Positive scrolls down. A
-// trackpad pinch comes as pixels with Ctrl, which the recognizer zooms at
-// its pinch rate. Browsers don't say which device scrolled, so this takes
-// pixels as they come but for two cases that would zoom far too little:
-// - Firefox reports wheels in lines, 3 a notch, and pages.
-// - Safari reports a notch as 4.000244140625 px, and a faster turn as a
-//   whole multiple of it (GL JS's test): one notch per multiple.
-// Chromium reports a notch as about 100 px, which zooms by about a notch's
-// amount without the easing.
-const SAFARI_NOTCH = 4.000244140625;
-function wheelDelta(e: WheelEvent): { wheel: number; amount: number } {
-  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) return { wheel: WHEEL_NOTCHES, amount: e.deltaY / 3 };
-  if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) return { wheel: WHEEL_NOTCHES, amount: e.deltaY };
-  if (e.deltaY !== 0 && e.deltaY % SAFARI_NOTCH === 0) return { wheel: WHEEL_NOTCHES, amount: e.deltaY / SAFARI_NOTCH };
-  return { wheel: WHEEL_PIXELS, amount: e.deltaY };
-}
+// wheelDelta (wheel.ts) reads the event's deltas first, `deltaMode` before
+// `deltaY`, so that Firefox keeps a mouse wheel's lines.
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  if (e.deltaY !== 0) send({ kind: 'wheel', ...at(e), ...wheelDelta(e), modifiers: modifiers(e), time: time(e) });
+  const delta = wheelDelta(e);
+  if (delta.amount !== 0) send({ kind: 'wheel', ...at(e), ...delta, modifiers: modifiers(e), time: time(e) });
 }, { passive: false });
 canvas.addEventListener('keydown', (e) => {
   if (KEYS.has(e.key)) e.preventDefault();
