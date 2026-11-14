@@ -74,42 +74,103 @@ fn has_icon_image(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
     layout.get::<IconImage>().constant().is_none_or(|t| !t.empty())
 }
 
-fn get_char_glyph_id_type(
-    ch: u16,
-    stack: &[String],
-    faces: Option<&Arc<mln_text::glyph::FontFaces>>,
-    last_char_type: GlyphIDType,
-) -> GlyphIDType {
-    let Some(faces) = faces else {
-        return GlyphIDType::FontPBF;
-    };
+/// A run of UTF-16 code units, `first..=last`, that one font face draws.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GlyphTypeSpan {
+    first: u16,
+    last: u16,
+    type_: GlyphIDType,
+}
 
-    if i18n::is_variation_selector1(ch) {
-        return last_char_type;
-    }
+/// Which font face draws each UTF-16 code unit of one font stack's text. The
+/// faces that name one of the stack's fonts win, in the stack's order, then
+/// the fallback faces, which have no name. Code units that no face covers
+/// take their glyphs from PBFs.
+///
+/// The spans are sorted and disjoint, so a lookup is a binary search, and a
+/// stack that no face applies to has none.
+#[derive(Debug, Default)]
+struct GlyphTypeTable {
+    spans: Vec<GlyphTypeSpan>,
+}
 
-    for name in stack {
-        for face in faces.iter() {
-            if &face.name == name {
-                for range in &face.ranges {
-                    if u32::from(ch) >= range.0 && u32::from(ch) <= range.1 {
-                        return face.type_;
-                    }
-                }
+impl GlyphTypeTable {
+    fn new(stack: &[String], faces: &mln_text::glyph::FontFaces) -> Self {
+        let named = stack.iter().flat_map(|name| faces.iter().filter(move |face| face.name == *name));
+        let fallbacks = faces.iter().filter(|face| face.name.is_empty());
+        let candidates: Vec<&mln_text::glyph::FontFace> = named.chain(fallbacks).collect();
+        // The ranges as far as a UTF-16 code unit reaches.
+        let ranges = || {
+            candidates.iter().flat_map(|face| &face.ranges).filter_map(|&(first, last)| {
+                let first = u16::try_from(first).ok()?;
+                let last = u16::try_from(last).unwrap_or(u16::MAX);
+                (first <= last).then_some((first, last))
+            })
+        };
+        // Which face draws a code unit stays the same between consecutive
+        // bounds.
+        let mut bounds: Vec<u32> = ranges().flat_map(|(first, last)| [u32::from(first), u32::from(last) + 1]).collect();
+        bounds.sort_unstable();
+        bounds.dedup();
+        let mut spans: Vec<GlyphTypeSpan> = Vec::new();
+        for pair in bounds.windows(2) {
+            let (Ok(first), Ok(last)) = (u16::try_from(pair[0]), u16::try_from(pair[1] - 1)) else {
+                continue;
+            };
+            let unit = u32::from(first);
+            let Some(face) = candidates.iter().find(|face| face.ranges.iter().any(|r| unit >= r.0 && unit <= r.1))
+            else {
+                continue;
+            };
+            match spans.last_mut() {
+                Some(span) if span.type_ == face.type_ && u32::from(span.last) + 1 == unit => span.last = last,
+                _ => spans.push(GlyphTypeSpan { first, last, type_: face.type_ }),
             }
         }
+        GlyphTypeTable { spans }
     }
 
-    // A face without a name is a fallback for every font stack.
-    for face in faces.iter().filter(|face| face.name.is_empty()) {
-        for range in &face.ranges {
-            if u32::from(ch) >= range.0 && u32::from(ch) <= range.1 {
-                return face.type_;
-            }
+    /// The glyph type of `unit`. A variation selector keeps `previous`, the
+    /// type of the code unit before it, which is `FontPBF` when no face
+    /// applies.
+    fn get(&self, unit: u16, previous: GlyphIDType) -> GlyphIDType {
+        if self.spans.is_empty() {
+            return GlyphIDType::FontPBF;
+        }
+        if i18n::is_variation_selector1(unit) {
+            return previous;
+        }
+        let index = self.spans.partition_point(|span| span.last < unit);
+        match self.spans.get(index) {
+            Some(span) if span.first <= unit => span.type_,
+            _ => GlyphIDType::FontPBF,
         }
     }
+}
 
-    GlyphIDType::FontPBF
+/// The glyph type tables of the font stacks that one layout's text uses, a
+/// few at most, so it searches them in order.
+struct GlyphTypeTables {
+    faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    tables: Vec<(Vec<String>, GlyphTypeTable)>,
+}
+
+impl GlyphTypeTables {
+    fn new(faces: Option<Arc<mln_text::glyph::FontFaces>>) -> Self {
+        GlyphTypeTables { faces: faces.filter(|faces| !faces.is_empty()), tables: Vec::new() }
+    }
+
+    fn get(&mut self, stack: &[String]) -> &GlyphTypeTable {
+        let Some(faces) = &self.faces else {
+            static EMPTY: GlyphTypeTable = GlyphTypeTable { spans: Vec::new() };
+            return &EMPTY;
+        };
+        let index = self.tables.iter().position(|(known, _)| known.as_slice() == stack).unwrap_or_else(|| {
+            self.tables.push((stack.to_vec(), GlyphTypeTable::new(stack, faces)));
+            self.tables.len() - 1
+        });
+        &self.tables[index].1
+    }
 }
 
 #[must_use]
@@ -386,6 +447,7 @@ impl SymbolLayout {
             &context,
             passes,
         );
+        let mut glyph_type_tables = GlyphTypeTables::new(layout_parameters.font_faces.clone());
         for i in 0..feature_count {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
@@ -454,16 +516,12 @@ impl SymbolLayout {
                     let chars = &u16_string[..end];
                     let section_scale = section.font_scale.unwrap_or(1.0);
                     let section_font_stack = section.font_stack.clone().unwrap_or_else(|| base_font_stack.clone());
-                    let font_faces = layout_parameters.font_faces.as_ref();
+                    let glyph_types = glyph_type_tables.get(&section_font_stack);
 
                     let mut sub_string: Vec<u16> = Vec::new();
                     // `*u16Char` of an empty string is the terminating NUL.
-                    let mut sub_string_type = get_char_glyph_id_type(
-                        chars.first().copied().unwrap_or(0),
-                        &section_font_stack,
-                        font_faces,
-                        GlyphIDType::FontPBF,
-                    );
+                    let mut sub_string_type =
+                        glyph_types.get(chars.first().copied().unwrap_or(0), GlyphIDType::FontPBF);
 
                     let mut add_sub_string =
                         |sub_string: &mut Vec<u16>,
@@ -498,7 +556,7 @@ impl SymbolLayout {
                         };
 
                     for &ch in chars {
-                        let ch_type = get_char_glyph_id_type(ch, &section_font_stack, font_faces, sub_string_type);
+                        let ch_type = glyph_types.get(ch, sub_string_type);
                         if ch_type != sub_string_type {
                             add_sub_string(&mut sub_string, sub_string_type, false, &mut formatted_text);
                             sub_string.clear();
@@ -1894,5 +1952,66 @@ impl Layout for SymbolLayout {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
+
+    use super::GlyphTypeTable;
+
+    /// The faces' rule, read off them for each code unit.
+    fn scan(unit: u16, stack: &[String], faces: &FontFaces, previous: GlyphIDType) -> GlyphIDType {
+        if mln_util::i18n::is_variation_selector1(unit) {
+            return previous;
+        }
+        let covers =
+            |face: &FontFace| face.ranges.iter().any(|&(first, last)| (first..=last).contains(&u32::from(unit)));
+        let named = stack.iter().flat_map(|name| faces.iter().filter(move |face| face.name == *name));
+        let fallbacks = faces.iter().filter(|face| face.name.is_empty());
+        named.chain(fallbacks).find(|face| covers(face)).map_or(GlyphIDType::FontPBF, |face| face.type_)
+    }
+
+    fn face(name: &str, type_: u16, ranges: &[(u32, u32)]) -> FontFace {
+        let mut face = FontFace::new(name, "font.ttf", ranges.to_vec());
+        face.type_ = GlyphIDType(type_);
+        face
+    }
+
+    #[test]
+    fn glyph_type_table_matches_the_faces_for_every_code_unit() {
+        let faces: FontFaces = vec![
+            face("", 1, &[(0x3000, 0x30FF), (0x4E00, 0x9FFF)]),
+            face("Noto Sans", 2, &[(0x0600, 0x06FF), (0x4E00, 0x4FFF)]),
+            face("Open Sans", 3, &[(0x0000, 0x007F), (0x0500, 0x0650)]),
+            face("Noto Sans", 4, &[(0x0700, 0x07FF), (0xFE00, 0xFE00)]),
+            face("", 5, &[(0x0640, 0x0800), (0xF000, 0x1_0FFFF)]),
+            face("", 6, &[(0x0900, 0x0800), (0x1_0000, 0x1_0FFF)]),
+            face("", 1, &[(0x3100, 0x31FF)]),
+        ];
+        let stacks: [&[&str]; 5] =
+            [&[], &["Open Sans"], &["Noto Sans", "Open Sans"], &["Open Sans", "Noto Sans"], &["Missing", ""]];
+        for stack in stacks {
+            let stack: Vec<String> = stack.iter().map(|name| (*name).to_owned()).collect();
+            let table = GlyphTypeTable::new(&stack, &faces);
+            for unit in 0..=u16::MAX {
+                for previous in [GlyphIDType::FontPBF, GlyphIDType(7)] {
+                    assert_eq!(
+                        table.get(unit, previous),
+                        scan(unit, &stack, &faces, previous),
+                        "{unit:#06X} in {stack:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn glyph_type_table_is_empty_without_a_face_for_the_stack() {
+        let faces: FontFaces = vec![face("Noto Sans", 2, &[(0x0600, 0x06FF)])];
+        let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces);
+        assert_eq!(table.spans, Vec::new());
+        assert_eq!(table.get(0x0620, GlyphIDType::FontPBF), GlyphIDType::FontPBF);
     }
 }
