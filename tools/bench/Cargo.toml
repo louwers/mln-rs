@@ -28,6 +28,7 @@ mln_gfx.workspace = true
 mln_gl.workspace = true
 mln_headless.workspace = true
 mln_image.workspace = true
+mln_conversion.workspace = true
 mln_map.workspace = true
 mln_renderer.workspace = true
 # The device the headless frontend renders on.
