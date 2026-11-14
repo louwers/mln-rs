@@ -71,6 +71,14 @@ impl Calls {
 /// machine has no device of `backend`, such as no EGL.
 fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> Option<PremultipliedImage> {
     let _run_loop = RunLoop::new();
+    let (mut frontend, mut map) = session(backend, host, before)?;
+    Some(frontend.render(&mut map).expect("a frame").image)
+}
+
+/// A frontend on `backend` and a map of the style with `host`'s layer below
+/// the layer named `before`, or above every layer, on the thread's run loop.
+/// `None` where the machine has no device of `backend`.
+fn session(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> Option<(HeadlessFrontend, Map)> {
     let size = Size::new(SIDE, SIDE);
     let device = match Device::with_backend(backend, DeviceOptions::default()) {
         Ok(device) => device,
@@ -80,13 +88,13 @@ fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&
         }
         Err(error) => panic!("a {backend:?} device: {error}"),
     };
-    let mut frontend = HeadlessFrontend::with_device(device, size, 1.0, true, Arc::default()).expect("a frontend");
+    let frontend = HeadlessFrontend::with_device(device, size, 1.0, true, Arc::default()).expect("a frontend");
     let mut map =
         Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }).unwrap();
     frontend.attach(&map);
     map.style_mut().load_json(STYLE);
     map.style_mut().add_custom_layer("quad", host, before).expect("the custom layer");
-    Some(frontend.render(&mut map).expect("a frame").image)
+    Some((frontend, map))
 }
 
 fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
@@ -352,7 +360,15 @@ mod gl {
     use glow::HasContext as _;
     use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
+    use std::sync::OnceLock;
+
+    use khronos_egl as egl;
+    use mln_actor::RunLoop;
+
+    use mln_headless::HeadlessFrontend;
+    use mln_map::Map;
+
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check, session};
 
     const VERTEX: &str = "#version 300 es
 const vec2 corners[6] = vec2[6](
@@ -366,10 +382,23 @@ out vec4 color;
 void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 ";
 
+    /// The EGL context current on the thread, if any.
+    fn current_context() -> Option<usize> {
+        static EGL: OnceLock<egl::DynamicInstance<egl::EGL1_4>> = OnceLock::new();
+        // SAFETY: loads the system's EGL, which the OpenGL device loaded
+        // already.
+        let egl = EGL.get_or_init(|| unsafe { egl::DynamicInstance::<egl::EGL1_4>::load_required() }.expect("EGL"));
+        egl.get_current_context().map(|context| context.as_ptr() as usize)
+    }
+
     #[derive(Default)]
     struct Host {
         calls: Arc<Calls>,
         objects: Mutex<Option<(glow::NativeProgram, glow::NativeVertexArray)>>,
+        /// The context the host drew on.
+        context: Mutex<Option<usize>>,
+        /// Whether that context was current when the host deinitialized.
+        deinitialized_on_its_context: Mutex<Option<bool>>,
     }
 
     impl CustomLayerHost for Host {
@@ -380,6 +409,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 
         fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
             self.calls.render(parameters);
+            *self.context.lock() = current_context();
             let pass = parameters.pass.downcast_ref::<mln_gl::CustomLayerPass>().expect("an OpenGL pass");
             let gl = pass.gl();
             let mut objects = self.objects.lock();
@@ -415,6 +445,8 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
         fn deinitialize(&self) {
             // The program and vertex array go with the session's context.
             self.objects.lock().take();
+            let drawn_on = *self.context.lock();
+            *self.deinitialized_on_its_context.lock() = Some(drawn_on.is_some() && current_context() == drawn_on);
             self.calls.deinitializations.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -425,6 +457,50 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
             let host = Arc::new(Host::default());
             (Arc::<Host>::clone(&host), Arc::clone(&host.calls))
         });
+    }
+
+    /// Draws a frame with the host's layer, lets go of the layer with
+    /// `end`, which can drop the frontend, and checks that the host
+    /// deinitialized with the context it drew on current.
+    fn check_end(end: impl FnOnce(&mut Option<HeadlessFrontend>, &mut Map)) {
+        let _run_loop = RunLoop::new();
+        let host = Arc::new(Host::default());
+        let Some((frontend, mut map)) = session(BackendType::OpenGL, Arc::<Host>::clone(&host), None) else {
+            return;
+        };
+        let mut frontend = Some(frontend);
+        frontend.as_mut().unwrap().render(&mut map).expect("a frame");
+        assert_eq!(host.calls.renders.load(Ordering::Relaxed), 1);
+        end(&mut frontend, &mut map);
+        assert_eq!(host.calls.deinitializations.load(Ordering::Relaxed), 1);
+        assert_eq!(*host.deinitialized_on_its_context.lock(), Some(true), "the context was current");
+    }
+
+    #[test]
+    fn a_removed_layer_deinitializes_on_its_context() {
+        check_end(|frontend, map| {
+            map.style_mut().remove_layer("quad").expect("the layer");
+            frontend.as_mut().unwrap().render(map).expect("a frame");
+        });
+    }
+
+    #[test]
+    fn a_replaced_host_deinitializes_on_its_context() {
+        check_end(|frontend, map| {
+            map.style_mut().remove_layer("quad").expect("the layer");
+            map.style_mut().add_custom_layer("quad", Arc::new(Host::default()), None).expect("the new host");
+            frontend.as_mut().unwrap().render(map).expect("a frame");
+        });
+    }
+
+    #[test]
+    fn clearing_the_data_deinitializes_on_its_context() {
+        check_end(|frontend, _| frontend.as_ref().unwrap().with_renderer(|renderer| renderer.clear_data()));
+    }
+
+    #[test]
+    fn dropping_the_renderer_deinitializes_on_its_context() {
+        check_end(|frontend, _| drop(frontend.take()));
     }
 }
 
@@ -443,7 +519,15 @@ mod metal {
         MTLRenderCommandEncoder, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
     };
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
+    use std::sync::OnceLock;
+
+    use khronos_egl as egl;
+    use mln_actor::RunLoop;
+
+    use mln_headless::HeadlessFrontend;
+    use mln_map::Map;
+
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check, session};
 
     /// The quad of `QUAD_WGSL`, in MSL.
     const QUAD_MSL: &str = "

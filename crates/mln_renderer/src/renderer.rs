@@ -151,6 +151,11 @@ impl Renderer {
     /// `None` when nothing was drawn: there was nothing to draw, or the
     /// target had nothing to draw into.
     pub fn render(&mut self, update_parameters: &Arc<UpdateParameters>, target: &dyn FrameTarget) -> Option<Handoff> {
+        // Held from the update on: a custom layer that the update removes or
+        // gives a new host deinitializes on the backend, as on OpenGL with
+        // the context current.
+        let backend = Rc::clone(&self.backend);
+        let _hold = backend.hold();
         let style_changed = self.style_loaded && !update_parameters.style_loaded;
         self.style_loaded = update_parameters.style_loaded;
         if style_changed {
@@ -343,6 +348,8 @@ impl Renderer {
     }
 
     pub fn clear_data(&mut self) {
+        // The custom layers that go deinitialize on the backend.
+        let _hold = self.backend.hold();
         self.orchestrator.clear_data();
     }
 
@@ -355,10 +362,8 @@ impl Renderer {
         target: &dyn FrameTarget,
     ) -> Option<Handoff> {
         let start = Instant::now();
-        let backend = Rc::clone(&self.backend);
         let context = Rc::clone(&self.context);
         let context = &*context;
-        let _hold = backend.hold();
 
         let image = target.begin_frame()?;
         {

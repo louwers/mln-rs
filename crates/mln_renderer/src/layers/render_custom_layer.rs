@@ -54,7 +54,10 @@ impl Shared {
     }
 
     /// Lets go of the host: tells it the renderer stopped, once the GPU
-    /// finished its work, or that its graphics objects are lost.
+    /// finished its work, or that its graphics objects are lost. The
+    /// renderer calls it inside the backend's hold, so the host
+    /// deinitializes with what it drew with ready, such as OpenGL's context
+    /// current.
     fn end(&self, lost: bool) {
         let Some(host) = self.host.borrow_mut().take() else { return };
         let backend = self.backend.borrow_mut().take();

@@ -2757,6 +2757,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "glow",
+ "khronos-egl",
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-gfx",

@@ -131,6 +131,7 @@ naga.workspace = true
 
 [target.'cfg(all(unix, not(target_vendor = "apple")))'.dev-dependencies]
 glow.workspace = true
+khronos-egl.workspace = true
 mln_gl.workspace = true
 
 [lints]
