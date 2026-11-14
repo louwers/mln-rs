@@ -16,14 +16,13 @@ use crate::collator_expression::CollatorExpression;
 use crate::comparison::parse_comparison;
 use crate::compound_expression::{Op, parse_compound_expression};
 use crate::distance::Distance;
-use crate::expression::{EvaluationContext, Expr, Node};
+use crate::expression::{Dependency, EvaluationContext, Expr, Node};
 use crate::find_zoom_curve::{ZoomCurve, find_zoom_curve};
 use crate::format_expression::FormatExpression;
 use crate::image_expression::ImageExpression;
 use crate::in_::In;
 use crate::index_of::IndexOf;
 use crate::interpolate::parse_interpolate;
-use crate::is_constant::{is_feature_constant, is_global_property_constant, is_zoom_constant};
 use crate::let_::{Let, Var};
 use crate::literal::Literal;
 use crate::match_::parse_match;
@@ -114,14 +113,21 @@ impl Default for ParsingContext {
     }
 }
 
-// Port-only: unlike ffi patch 0093, "is-supported-script" isn't listed, so
-// `["is-supported-script", "<literal>"]` still folds into a constant, without
-// font faces. Left unfolded, a feature-independent use in a layout property
-// such as text-field wasn't a literal, and property conversion rejected it.
-// The patch's render tests, like styles in practice, pass a feature property,
-// which keeps the expression from folding anyway.
-const REQUIRED_PROPS: [&str; 6] =
-    ["zoom", "heatmap-density", "line-progress", "accumulated", "elevation", "global-state"];
+/// What an expression can read while it evaluates that keeps it from folding
+/// into a literal at parse time.
+///
+/// "is-supported-script" isn't among these, so `["is-supported-script",
+/// "<literal>"]` folds into a constant without font faces. Left unfolded, a
+/// feature-independent use in a layout property such as text-field isn't a
+/// literal, and property conversion rejects it. Styles in practice pass a
+/// feature property, which keeps the expression from folding anyway.
+const EVALUATION_INPUTS: Dependency = Dependency(
+    Dependency::FEATURE.0
+        | Dependency::ZOOM.0
+        | Dependency::ELEVATION.0
+        | Dependency::GLOBAL_STATE.0
+        | Dependency::PROPERTY_INPUT.0,
+);
 
 fn is_constant(expression: &Expr) -> bool {
     match expression.node() {
@@ -148,7 +154,7 @@ fn is_constant(expression: &Expr) -> bool {
         }
     });
 
-    children_constant && is_feature_constant(expression) && is_global_property_constant(expression, &REQUIRED_PROPS)
+    children_constant && !expression.has(EVALUATION_INPUTS)
 }
 
 type ParseFunction = fn(&Convertible<'_>, &mut ParsingContext) -> ParseResult;
@@ -263,8 +269,7 @@ impl ParsingContext {
         // If the expression is zoom-dependent, validate that we can resolve a
         // zoom curve or treat it as an error
         if let Some(p) = &parsed {
-            debug_assert_eq!(!p.has(crate::expression::Dependency::ZOOM), is_zoom_constant(p));
-            if p.has(crate::expression::Dependency::ZOOM) {
+            if p.has(Dependency::ZOOM) {
                 match find_zoom_curve(p) {
                     Some(ZoomCurve::Error(err)) => {
                         self.error(err.message);

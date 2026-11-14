@@ -18,7 +18,7 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_style::expression::{EvaluationContext, Image, Value, ValueConverter};
+use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
 use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_style::renderer::possibly_evaluated_property_value::{
@@ -132,16 +132,6 @@ impl BinderValue for Color {
             f32::from(pack_uint8_pair(255.0 * self.b, 255.0 * self.a)),
         ]
     }
-}
-
-/// True if `expression` reads `feature-state` anywhere.
-fn uses_feature_state(expression: &mln_style::expression::Expr) -> bool {
-    if expression.get_operator() == "feature-state" {
-        return true;
-    }
-    let mut found = false;
-    expression.each_child(&mut |child| found = found || uses_feature_state(child));
-    found
 }
 
 fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
@@ -671,7 +661,7 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
             PaintPropertyBinderKind::Constant { .. } => false,
             PaintPropertyBinderKind::SourceFunction { expression, .. }
             | PaintPropertyBinderKind::CompositeFunction { expression, .. } => {
-                uses_feature_state(expression.get_expression())
+                expression.get_expression().has(Dependency::FEATURE_STATE)
             }
         }
     }

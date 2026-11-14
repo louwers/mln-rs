@@ -5,7 +5,6 @@ use mln_vec_map::VecSet;
 use crate::expression::{
     Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs, global_state_refs_intersect,
 };
-use crate::is_constant::{is_feature_constant, is_runtime_constant, is_zoom_constant};
 use crate::parsing_context::ParsingContext;
 use crate::type_::Type;
 use crate::value::Value;
@@ -55,9 +54,8 @@ fn is_not_constant() {
     // A global-state expression with constant arguments must not be folded
     // into a literal at parse time.
     assert!(expr.literal_value().is_none());
-    assert!(is_feature_constant(&expr));
-    assert!(is_zoom_constant(&expr));
-    assert!(!is_runtime_constant(&expr));
+    assert!(!expr.has(Dependency::FEATURE));
+    assert!(!expr.has(Dependency::ZOOM));
 }
 
 // gtest: GlobalStateExpression.Evaluate
