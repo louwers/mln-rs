@@ -188,8 +188,6 @@ mod linux {
     const PERF_COUNT_HW_INSTRUCTIONS: u64 = 1;
     /// A hardware event's `config` names the PMU's type above these bits.
     const PERF_PMU_TYPE_SHIFT: u64 = 32;
-    const PERF_FORMAT_TOTAL_TIME_ENABLED: u64 = 1 << 0;
-    const PERF_FORMAT_TOTAL_TIME_RUNNING: u64 = 1 << 1;
     const FLAG_INHERIT: u64 = 1 << 1;
     const FLAG_EXCLUDE_KERNEL: u64 = 1 << 5;
     const FLAG_EXCLUDE_HV: u64 = 1 << 6;
@@ -204,7 +202,7 @@ mod linux {
             config,
             sample_period: 0,
             sample_type: 0,
-            read_format: PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING,
+            read_format: 0,
             flags: FLAG_INHERIT | FLAG_EXCLUDE_KERNEL | FLAG_EXCLUDE_HV,
             wakeup_events: 0,
             bp_type: 0,
@@ -219,17 +217,14 @@ mod linux {
         (fd >= 0).then(|| unsafe { File::from_raw_fd(fd as libc::c_int) })
     }
 
-    /// A counter's value, scaled up for the time the kernel had it off the
-    /// hardware to share it with other events, as `perf stat` does.
+    /// A counter's value: what it counted while it had the hardware, not
+    /// scaled up for the time the kernel shared it with other events, so
+    /// that the value only grows. Two events per PMU fit on any CPU with
+    /// perf events, unless other counters take its hardware.
     fn read(mut counter: &File) -> u64 {
-        let mut bytes = [0u8; 24];
+        let mut bytes = [0u8; 8];
         counter.read_exact(&mut bytes).expect("a perf event's value");
-        let [value, enabled, running] =
-            [0, 1, 2].map(|i| u64::from_ne_bytes(bytes[i * 8..i * 8 + 8].try_into().unwrap()));
-        if running == 0 || running == enabled {
-            return value;
-        }
-        (u128::from(value) * u128::from(enabled) / u128::from(running)) as u64
+        u64::from_ne_bytes(bytes)
     }
 
     /// The instruction and cycle counter of each kind of core.
