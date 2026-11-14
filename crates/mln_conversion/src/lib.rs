@@ -1,9 +1,11 @@
 //! The core of style conversion: `Error`, the type-erased `Convertible` view
-//! of a JSON-like value, its front ends over `serde_json` values and over
+//! of a JSON-like value, its front ends over `serde_json` values, over
+//! `serde_json_borrow` values (`borrowed_conversion.rs`) and over
 //! `feature::Value` (`value_conversion.rs`), and `get_json_type`.
 //!
 //! The typed converters (`Converter<T>`) live in `mln_style`.
 
+pub mod borrowed_conversion;
 mod conversion;
 pub mod get_json_type;
 mod json_conversion;
