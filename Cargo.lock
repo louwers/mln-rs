@@ -2641,6 +2641,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "serde",
  "serde_json",
+ "smallvec",
  "thiserror 2.0.21",
  "wasm-bindgen",
  "writeable",

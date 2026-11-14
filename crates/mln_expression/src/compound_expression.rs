@@ -11,6 +11,7 @@ use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
 use mln_conversion::Convertible;
 use mln_util::geometry::FeatureType;
 use mln_util::i18n;
+use smallvec::SmallVec;
 
 use crate::check_subtype::check_subtype;
 use crate::expression::{
@@ -47,8 +48,13 @@ impl SignatureBase {
 }
 
 /// Evaluates the arguments in order, stopping at the first error (both
-/// `Signature::applyImpl` and the varargs `apply`).
-fn eval_args(params: &EvaluationContext<'_>, args: &[Box<dyn Expression>]) -> Result<Vec<Value>, EvaluationError> {
+/// `Signature::applyImpl` and the varargs `apply`). Up to four stay on the
+/// stack, as C++ evaluates a signature's arguments into a tuple: a filter
+/// evaluates its expressions for every feature of every layer it filters.
+fn eval_args(
+    params: &EvaluationContext<'_>,
+    args: &[Box<dyn Expression>],
+) -> Result<SmallVec<[Value; 4]>, EvaluationError> {
     args.iter().map(|arg| arg.evaluate(params)).collect()
 }
 

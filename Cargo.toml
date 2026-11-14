@@ -210,6 +210,10 @@ serde_json = { version = "1.0.154", features = [
   "preserve_order",
 ] }
 skrifa = { version = "0.49.0" }
+# An expression's arguments, on the stack while it evaluates: a filter's
+# expression runs on every feature of every layer it filters. parking_lot
+# already builds it.
+smallvec = { version = "1.16.4" }
 sys-locale = { version = "0.3.2" }
 # tools/render-test's --shuffle order for a --seed. tempfile already builds it.
 fastrand = { version = "2.5.0" }

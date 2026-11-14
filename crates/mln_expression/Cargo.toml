@@ -31,6 +31,7 @@ mln_util.workspace = true
 mln_vec_map.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 
 # The locale services of the locale-sensitive expressions (src/locale): the
