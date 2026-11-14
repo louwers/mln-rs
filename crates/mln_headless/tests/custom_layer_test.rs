@@ -497,7 +497,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 
     #[test]
     fn clearing_the_data_deinitializes_on_its_context() {
-        check_end(|frontend, _| frontend.as_ref().unwrap().with_renderer(|renderer| renderer.clear_data()));
+        check_end(|frontend, _| frontend.as_ref().unwrap().with_renderer(mln_renderer::Renderer::clear_data));
     }
 
     #[test]
