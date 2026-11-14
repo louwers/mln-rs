@@ -9,8 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below.
-autotests = false
 
 [lib]
 name = "mln_gl"

@@ -1,40 +1,36 @@
-// The GL functions and the platform's context are shared (`Rc<BackendImpl>`)
-// by the backend and its context: resources reach them through the context,
-// as C++'s do through `Context& -> getBackend()`.
-//
-// What the backend draws into is a target built on it (`OffscreenTarget`,
-// `SurfaceTarget`, `CanvasTarget`).
-//
-// Not ported: `assumeFramebufferBinding`, `assumeViewport`,
-// `assumeScissorTest` and the checks that go with them, for hosts that bind
-// the framebuffer themselves, and `getExtensionFunctionPointer`: glow loads
-// the functions.
+// What a GL backend draws into is a target built on it (`OffscreenTarget`,
+// `SurfaceTarget`, `CanvasTarget`, `BorrowedTarget`, `ExportedTarget`).
 
+use std::cell::{Cell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::context::Context as GfxContext;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
 
-use crate::context::Context;
+use crate::context::{BackendImpl, Context};
+use crate::gpu::GlGpu;
+use crate::state::State;
 use crate::types::Gl;
 
-/// The platform's GL context, which a backend makes current around its
-/// frames (C++: the pure virtual `activate` and `deactivate`).
+/// The platform's GL context, which [`GlContext`] makes current around the
+/// calls that use it.
 pub(crate) trait PlatformContext {
     fn make_current(&self);
     fn done_current(&self);
 
-    /// Whether something else used the context since the backend's last
-    /// `make_current`, so that the GL state its context cached is gone.
-    /// Reading it clears it.
+    /// Whether something else used the context since the last
+    /// `make_current`, so that the GL state cached for it is gone. Reading
+    /// it clears it.
     fn take_state_lost(&self) -> bool {
         false
     }
 }
 
-/// The context state the backend and its `Context` share.
-pub(crate) struct BackendImpl {
+/// A GL context: the platform's, the functions that call it and the GL
+/// state last set on it. Each call that uses it makes it current for the
+/// call with [`enter`](Self::enter); calls inside it keep it current.
+pub(crate) struct GlContext {
     // Dropped before the platform's context, which its functions belong to.
     // An `Arc` for the code that draws beside the backend with a library
     // that wants one (a window's overlay); it stays on the context's thread.
@@ -42,41 +38,96 @@ pub(crate) struct BackendImpl {
     /// The context `gl` calls, for the calls that take a JS array.
     #[cfg(target_family = "wasm")]
     webgl2: web_sys::WebGl2RenderingContext,
+    state: State,
     platform: Box<dyn PlatformContext>,
+    /// How many calls have the context current.
+    depth: Cell<u32>,
 }
 
-impl BackendImpl {
-    #[must_use]
+/// Has the context current until it is dropped.
+pub(crate) struct Current(Rc<GlContext>);
+
+impl Drop for Current {
+    fn drop(&mut self) {
+        self.0.done_current();
+    }
+}
+
+impl GlContext {
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn new(gl: Gl, platform: Box<dyn PlatformContext>) -> Rc<GlContext> {
+        let gl = Arc::new(gl);
+        Rc::new(GlContext { gl, state: State::default(), platform, depth: Cell::new(0) })
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn new(webgl2: web_sys::WebGl2RenderingContext, platform: Box<dyn PlatformContext>) -> Rc<GlContext> {
+        #[expect(
+            clippy::arc_with_non_send_sync,
+            reason = "the backend lives on the browser's one thread, and the `Arc` only shares the WebGL2 context among its objects"
+        )]
+        let gl = Arc::new(glow::Context::from_webgl2_context(webgl2.clone()));
+        Rc::new(GlContext { gl, webgl2, state: State::default(), platform, depth: Cell::new(0) })
+    }
+
+    /// The GL functions, which call the context while it is current.
     pub(crate) fn gl(&self) -> &Gl {
         &self.gl
     }
 
     /// The GL functions, to share with code that draws on the context's
     /// thread.
-    #[must_use]
     pub(crate) fn gl_shared(&self) -> &Arc<Gl> {
         &self.gl
     }
 
     #[cfg(target_family = "wasm")]
-    #[must_use]
     pub(crate) fn webgl2(&self) -> &web_sys::WebGl2RenderingContext {
         &self.webgl2
     }
 
-    pub(crate) fn make_current(&self) {
-        self.platform.make_current();
+    /// The GL state last set on the context.
+    pub(crate) fn state(&self) -> &State {
+        &self.state
     }
 
-    /// Whether something else used the context since the last
-    /// `make_current`; reading it clears it.
-    #[must_use]
-    pub(crate) fn take_state_lost(&self) -> bool {
-        self.platform.take_state_lost()
+    /// Makes the context current until the returned guard drops.
+    pub(crate) fn enter(self: &Rc<Self>) -> Current {
+        self.make_current();
+        Current(Rc::clone(self))
     }
 
-    pub(crate) fn done_current(&self) {
-        self.platform.done_current();
+    /// Makes the context current, unless a call outside this one has it
+    /// current already. Where something else used the context since, the
+    /// cached GL state is forgotten.
+    fn make_current(&self) {
+        let depth = self.depth.get();
+        self.depth.set(depth + 1);
+        if depth == 0 {
+            self.platform.make_current();
+            if self.platform.take_state_lost() {
+                self.state.set_dirty();
+            }
+        }
+    }
+
+    /// Ends a [`make_current`](Self::make_current): the outermost one lets
+    /// go of the context.
+    fn done_current(&self) {
+        let depth = self.depth.get() - 1;
+        self.depth.set(depth);
+        if depth == 0 {
+            self.platform.done_current();
+        }
+    }
+
+    /// Makes the context current again, where a call has it current, for a
+    /// platform's context that is current on another surface now.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    pub(crate) fn make_current_again(&self) {
+        if self.depth.get() > 0 {
+            self.platform.make_current();
+        }
     }
 }
 
@@ -84,11 +135,11 @@ impl BackendImpl {
 pub struct RendererBackend {
     base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
+    context: Rc<GlContext>,
 }
 
 impl RendererBackend {
-    /// A backend on a context of `device`'s share group, which the backend
-    /// makes current around its frames.
+    /// A backend on a context of `device`'s share group.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes
     /// no context, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
@@ -102,71 +153,37 @@ impl RendererBackend {
     /// A backend on the functions of `platform`'s context.
     #[cfg(not(target_family = "wasm"))]
     pub(crate) fn from_parts(gl: Gl, platform: Box<dyn PlatformContext>) -> Self {
-        let gl = Arc::new(gl);
-        RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(BackendImpl { gl, platform }) }
+        Self::on(GlContext::new(gl, platform))
     }
 
     /// A backend on a canvas's WebGL2 context.
     #[cfg(target_family = "wasm")]
     pub(crate) fn from_parts(webgl2: web_sys::WebGl2RenderingContext, platform: Box<dyn PlatformContext>) -> Self {
-        #[expect(
-            clippy::arc_with_non_send_sync,
-            reason = "the backend lives on the browser's one thread, and the `Arc` only shares the WebGL2 context among its objects"
-        )]
-        let gl = Arc::new(glow::Context::from_webgl2_context(webgl2.clone()));
-        RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(BackendImpl { gl, webgl2, platform }) }
+        Self::on(GlContext::new(webgl2, platform))
     }
 
-    /// The backend's context, made on first use. Call inside a
-    /// `BackendScope`.
-    pub(crate) fn gl_context(&self) -> Option<Rc<Context>> {
-        let context = renderer_backend::RendererBackend::get_context(self);
-        context.downcast_ref::<Context>().map(Context::rc)
+    fn on(context: Rc<GlContext>) -> Self {
+        let impl_ = Rc::new(BackendImpl::new(GlGpu::on(Rc::clone(&context))));
+        RendererBackend { base: RendererBackendBase::new(), impl_, context }
     }
 
-    /// `GL_RENDERER`: the name of the GL implementation. Call inside a
-    /// `BackendScope`.
+    /// `GL_RENDERER`: the name of the GL implementation.
     pub fn get_renderer_name(&self) -> String {
         use glow::HasContext as _;
+        let _current = self.context.enter();
         // SAFETY: the context is current.
-        unsafe { self.gl().get_parameter_string(glow::RENDERER) }
+        unsafe { self.context.gl().get_parameter_string(glow::RENDERER) }
     }
 
-    pub(crate) fn gl(&self) -> &Gl {
-        self.impl_.gl()
+    /// The backend's context.
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn context(&self) -> &Rc<GlContext> {
+        &self.context
     }
 
-    /// Drops the context, deleting its objects with the context current
-    /// (`Context::release_resources`).
-    pub(crate) fn reset_context(&mut self) {
-        if let Some(context) = self.base.reset_context()
-            && let Some(context) = context.downcast_ref::<Context>()
-        {
-            self.impl_.make_current();
-            context.release_resources();
-            self.impl_.done_current();
-        }
-    }
-
-    /// Makes the backend's context current. Where another renderer used the
-    /// context since the backend's last frame, the context forgets the GL state
-    /// it cached.
-    pub(crate) fn activate(&self) {
-        self.impl_.make_current();
-        if self.impl_.take_state_lost()
-            && let Some(context) = self.base.existing_context()
-            && let Some(context) = context.downcast_ref::<Context>()
-        {
-            context.set_dirty_state();
-        }
-    }
-
-    pub(crate) fn deactivate(&self) {
-        self.impl_.done_current();
-    }
-
-    pub(crate) fn create_context(&self) -> Rc<Context> {
-        Context::new(Rc::clone(&self.impl_))
+    /// The `GlGpu` that owns the renderer's resources.
+    pub(crate) fn gpu(&self) -> RefMut<'_, GlGpu> {
+        self.impl_.gpu()
     }
 }
 
@@ -176,20 +193,25 @@ impl renderer_backend::RendererBackend for RendererBackend {
     }
 
     fn create_context(&self) -> Rc<dyn GfxContext> {
-        RendererBackend::create_context(self)
+        Context::new(Rc::clone(&self.impl_))
     }
 
+    /// Has the context current until `deactivate`, so that the calls in
+    /// between don't each make it current.
     fn activate(&self) {
-        RendererBackend::activate(self);
+        self.context.make_current();
     }
 
     fn deactivate(&self) {
-        RendererBackend::deactivate(self);
+        self.context.done_current();
     }
 }
 
 impl Drop for RendererBackend {
+    /// Drops the context, releasing the resources it caches first.
     fn drop(&mut self) {
-        self.reset_context();
+        if let Some(context) = self.base.reset_context() {
+            context.release_cached_resources();
+        }
     }
 }

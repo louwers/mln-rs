@@ -1,5 +1,4 @@
-// `Enum<T>::from` reads GL state back, which only the C++ tests of the state
-// values do.
+// The GL enums of the renderer's types.
 
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::types::{

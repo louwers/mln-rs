@@ -1,7 +1,5 @@
-// C++ wraps each piece of GL state in a `State<value::T>` that remembers the
-// value it last set, and the context has one member per piece. The port
-// keeps them in one struct of `Cached` values. Only the states the drawable
-// path sets are here.
+// The GL state that the backend sets, each piece with the value it last set,
+// so that a call that sets it again reaches GL only when the value changes.
 
 use std::cell::Cell;
 
@@ -27,7 +25,7 @@ pub(crate) type Rect = (i32, i32, i32, i32);
 /// What GL was last told about one piece of state.
 #[derive(Clone, Copy, Default, PartialEq)]
 enum Cached<T> {
-    /// Not known: C++'s dirty state, whose next set always reaches GL.
+    /// Not known, so the next set always reaches GL.
     #[default]
     Dirty,
     /// GL holds this value.

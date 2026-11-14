@@ -25,7 +25,6 @@
 "crates/mln_expression/src/parsing_context.rs" = 3
 "crates/mln_expression/src/step.rs" = 1
 "crates/mln_gfx/src/polyline_generator.rs" = 5
-"crates/mln_gl/src/context.rs" = 1
 "crates/mln_image/src/png_writer.rs" = 1
 "crates/mln_map/src/transform.rs" = 1
 "crates/mln_map_types/src/transform_state.rs" = 3
@@ -142,8 +141,8 @@
 "crates/mln_gfx/src/offscreen_target.rs" = 4
 "crates/mln_gfx/src/shader_group.rs" = 1
 "crates/mln_gfx/src/vertex_vector.rs" = 13
-"crates/mln_gl/src/borrowed_target.rs" = 10
-"crates/mln_gl/src/context.rs" = 6
+"crates/mln_gl/src/borrowed_target.rs" = 7
+"crates/mln_gl/src/context.rs" = 1
 "crates/mln_gl/src/exported_target.rs" = 9
 "crates/mln_gl/src/surface_target.rs" = 5
 "crates/mln_headless/src/headless_frontend.rs" = 12

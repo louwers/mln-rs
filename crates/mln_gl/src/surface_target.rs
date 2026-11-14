@@ -1,13 +1,10 @@
 // The target of a native window: frames presented to an EGL window surface
 // on a Wayland surface, an X11 window, an Android `ANativeWindow` or an
 // OpenHarmony window, from an OpenGL ES 3.0 context of the window's display.
-// After the
-// GLFW app's backend (platform/glfw/glfw_gl_backend.cpp), which gets its
-// context and its buffer swaps from GLFW; here they are EGL's.
 //
-// Port-only, as on the other window backends: an overlay that draws over each
-// frame before it is presented (an app's controls), and a copy of a
-// presented frame.
+// As on the other window backends, an overlay can draw over each frame
+// before it is presented (an app's controls), and a presented frame can be
+// copied.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_ulong, c_void};
@@ -15,11 +12,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use khronos_egl as egl;
+use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, TextureRegion};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-use mln_gfx::{BackendScope, ScopeType, Window};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
@@ -565,7 +562,7 @@ impl SurfaceTarget {
 
     /// Draws `overlay` over each frame from now on, or nothing.
     pub fn set_overlay(&self, overlay: Option<Overlay>) {
-        let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
+        let _current = self.backend.context().enter();
         *self.presentation.overlay.borrow_mut() = overlay;
     }
 
@@ -585,10 +582,12 @@ impl FrameTarget for SurfaceTarget {
     /// on the window's surface, and not when EGL makes no surface of the
     /// window or the window went away.
     fn begin_frame(&self) -> Option<FrameImage> {
+        let context = self.backend.context();
+        let _current = context.enter();
         if !self.window.presenting.replace(true) {
             // The context is current without a surface: make it current on
             // the window's.
-            self.backend.activate();
+            context.make_current_again();
         }
         if !self.in_frame.get() && !self.window.on_surface.get() {
             return None;
@@ -602,11 +601,11 @@ impl FrameTarget for SurfaceTarget {
     /// doesn't take, having gone away, is dropped.
     fn end_frame(&self) -> Handoff {
         self.in_frame.set(false);
-        let image = self.image.get();
-        let Some(context) = self.backend.gl_context().filter(|_| image.is_some()) else {
-            self.image.release(&self.backend);
+        let Some(image) = self.image.get() else {
             return Handoff::Dropped;
         };
+        let context = self.backend.context();
+        let _current = context.enter();
         let size = self.size.get();
         if let Some(overlay) = self.presentation.overlay.borrow_mut().as_mut() {
             let (gl, state) = (context.gl(), context.state());
@@ -614,13 +613,11 @@ impl FrameTarget for SurfaceTarget {
             state.set_scissor(gl, None);
             state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
             state.set_stencil_mode(gl, &StencilMode::disabled());
-            overlay(&OverlayTarget { gl: context.get_backend().gl_shared(), size });
+            overlay(&OverlayTarget { gl: context.gl_shared(), size });
             state.set_dirty();
         }
-        if self.presentation.readback_requested.replace(false)
-            && let Some(image) = image
-        {
-            match context.gl_gpu_mut().read_texels(image.color, TextureRegion::whole(image.size)) {
+        if self.presentation.readback_requested.replace(false) {
+            match self.backend.gpu().read_texels(image.color, TextureRegion::whole(image.size)) {
                 Ok(texels) => {
                     *self.presentation.readback.borrow_mut() = Some(PremultipliedImage::from_vec(image.size, texels));
                 }
@@ -638,7 +635,7 @@ impl Drop for SurfaceTarget {
         // surface, unless the window has this context's still.
         self.window.presenting.set(self.window.surface.get().is_some());
         {
-            let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
+            let _current = self.backend.context().enter();
             self.presentation.overlay.borrow_mut().take();
             self.image.release(&self.backend);
         }
