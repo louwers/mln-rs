@@ -1,4 +1,4 @@
-use mln_gfx::gpu::conformance::clip_mask_and_background;
+use mln_gfx::gpu::conformance::{clip_mask_and_background, vertex_layouts};
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_util::Color;
 use objc2_metal::MTLCommandBuffer;
@@ -45,6 +45,12 @@ fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     let mut gpu = MetalGpu::new(&device);
     clip_mask_and_background(&mut gpu, read_back).expect("the frame");
+}
+
+#[test]
+fn vertex_layouts_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    vertex_layouts(&mut MetalGpu::new(&device), read_back).expect("the frames");
 }
 
 #[test]

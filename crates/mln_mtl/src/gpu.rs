@@ -47,6 +47,9 @@ use crate::mtl_fwd::{
 use crate::shaders::msl_sources::PRELUDE;
 use crate::shaders::shader_source::{ShaderSource, shader_source};
 
+/// The entries of a stage's buffer argument table.
+const MAX_BUFFERS: usize = 31;
+
 /// The alignment Metal asks of a constant buffer's offset on a Mac with an
 /// Intel or AMD GPU, which Apple GPUs' 4 bytes divide.
 const BUFFER_OFFSET_ALIGNMENT: u32 = 256;
@@ -747,57 +750,58 @@ fn bind_vertex_buffers(
 }
 
 /// The vertex descriptor of `layouts` for `source`'s attributes, and the
-/// buffer index each layout's slot binds at.
+/// buffer index each layout's slot binds at, `None` for a slot without
+/// attributes.
+///
+/// The slots bind in order from the lowest buffer index of `source`'s
+/// attribute tables, which is past the indexes of the shader's own
+/// buffers. Which attributes a slot holds is the layouts' choice, not the
+/// tables' grouping of them.
 fn vertex_descriptor(
     source: &ShaderSource,
     layouts: &[VertexBufferLayout],
 ) -> Result<(MTLVertexDescriptorPtr, Vec<Option<usize>>), GpuError> {
     let descriptor = MTLVertexDescriptor::vertexDescriptor();
+    let first = source.attributes.iter().chain(source.instance_attributes).map(|info| info.buffer_index).min();
     let mut buffer_indices: Vec<Option<usize>> = Vec::with_capacity(layouts.len());
-    for layout in layouts {
+    for (slot, layout) in layouts.iter().enumerate() {
+        if layout.attributes.is_empty() {
+            buffer_indices.push(None);
+            continue;
+        }
         let infos = match layout.step {
             VertexStep::Vertex => source.attributes,
             VertexStep::Instance => source.instance_attributes,
         };
-        let mut buffer_index = None;
+        let buffer_index = first.map(|first| first + slot).filter(|&index| index < MAX_BUFFERS).ok_or_else(|| {
+            GpuError::Unsupported(format!("{}: vertex buffer slot {slot} past Metal's buffer indexes", source.name))
+        })?;
         for attribute in &layout.attributes {
             let info = infos.iter().find(|info| info.id == attribute.id as usize).ok_or_else(|| {
                 GpuError::Invalid(format!("{} has no {:?} attribute {}", source.name, layout.step, attribute.id))
             })?;
-            if buffer_index.is_some_and(|index| index != info.buffer_index) {
-                return Err(GpuError::Invalid(format!(
-                    "{} reads the attributes of one vertex buffer from two",
-                    source.name
-                )));
-            }
-            buffer_index = Some(info.buffer_index);
             let format = vertex_format(attribute.format)
                 .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
-            // SAFETY: the shaders' attribute and buffer indexes are below
-            // Metal's 31.
+            // SAFETY: the shaders' attribute indexes are below Metal's 31,
+            // and the buffer index below MAX_BUFFERS.
             unsafe {
                 let descriptor = descriptor.attributes().objectAtIndexedSubscript(info.index);
                 descriptor.setFormat(format);
                 descriptor.setOffset(attribute.offset as usize);
-                descriptor.setBufferIndex(info.buffer_index);
+                descriptor.setBufferIndex(buffer_index);
             }
         }
-        if let Some(index) = buffer_index {
-            if buffer_indices.contains(&Some(index)) {
-                return Err(GpuError::Invalid(format!("{} reads two vertex buffers as one", source.name)));
-            }
-            // SAFETY: as above.
-            unsafe {
-                let descriptor = descriptor.layouts().objectAtIndexedSubscript(index);
-                descriptor.setStride(layout.stride as usize);
-                descriptor.setStepFunction(match layout.step {
-                    VertexStep::Vertex => MTLVertexStepFunction::PerVertex,
-                    VertexStep::Instance => MTLVertexStepFunction::PerInstance,
-                });
-                descriptor.setStepRate(1);
-            }
+        // SAFETY: as above.
+        unsafe {
+            let descriptor = descriptor.layouts().objectAtIndexedSubscript(buffer_index);
+            descriptor.setStride(layout.stride as usize);
+            descriptor.setStepFunction(match layout.step {
+                VertexStep::Vertex => MTLVertexStepFunction::PerVertex,
+                VertexStep::Instance => MTLVertexStepFunction::PerInstance,
+            });
+            descriptor.setStepRate(1);
         }
-        buffer_indices.push(buffer_index);
+        buffer_indices.push(Some(buffer_index));
     }
     Ok((descriptor, buffer_indices))
 }
