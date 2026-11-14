@@ -1323,7 +1323,9 @@ pub(crate) struct MapEntry {
     pending_still: Option<PendingStill>,
     /// The render session that draws the map.
     session: Option<SessionLink>,
-    /// Whether a flush of the map's events is on its way.
+    /// Whether a flush is due: set when the map's waker runs, and while a
+    /// command runs, whose own flush follows; a flush clears it before it
+    /// takes the map's events.
     flush_scheduled: Arc<AtomicBool>,
     ends: Ends,
     /// The callbacks of the custom sources that commands added.
@@ -1396,7 +1398,7 @@ pub(crate) fn create(
     let run_loop = core.run_loop.clone();
     map.set_waker(Some(Arc::new(move || {
         if !scheduled.swap(true, Ordering::SeqCst) {
-            post(&run_loop, move |core, outbox| flush(core, id, outbox));
+            post(&run_loop, move |core, outbox| flush_if_due(core, id, outbox));
         }
     })));
     published.applied.store(1, Ordering::SeqCst);
@@ -1435,8 +1437,11 @@ pub(crate) fn apply_command<T>(
     apply: impl FnOnce(&mut MapEntry, &mut Outbox) -> T,
     after: impl FnOnce(&MapEntry, T, Applied, &mut Outbox),
 ) {
-    flush(core, id, outbox);
+    flush_if_due(core, id, outbox);
     let Some(entry) = core.maps.get_mut(&id) else { return };
+    // The flush after the command takes what the command reports, and what
+    // comes meanwhile, so the waker posts no flush of its own until then.
+    entry.flush_scheduled.store(true, Ordering::SeqCst);
     let value = apply(entry, outbox);
     entry.applied = sequence;
     flush(core, id, outbox);
@@ -1502,6 +1507,14 @@ fn load_style(
         },
         |_, (), _, _| {},
     );
+}
+
+/// Flushes the map `id` unless a flush ran since its waker last did, so
+/// that there is nothing to flush.
+fn flush_if_due(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
+    if core.maps.get(&id).is_some_and(|entry| entry.flush_scheduled.load(Ordering::SeqCst)) {
+        flush(core, id, outbox);
+    }
 }
 
 /// Handles what the map's style and renderer reported, publishes its state,
