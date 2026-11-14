@@ -19,22 +19,17 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::Texture2DPtr;
-use mln_gfx::types::{DepthFunctionType, DepthMaskType, StencilFunctionType, StencilOpType, TextureChannelDataType};
+use mln_gfx::types::{DepthMaskType, TextureChannelDataType};
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use objc2::rc::Retained;
-use objc2::runtime::NSObject;
-use objc2_foundation::{NSDictionary, NSString};
-use objc2_metal::{
-    MTLCompareFunction, MTLCompileOptions, MTLDepthStencilDescriptor, MTLDevice, MTLLanguageVersion, MTLLibrary,
-    MTLResourceOptions, MTLStencilDescriptor, MTLStencilOperation,
-};
+use objc2_metal::{MTLDepthStencilDescriptor, MTLDevice, MTLResourceOptions, MTLStencilDescriptor};
 
 use crate::buffer_resource::BufferResource;
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::DrawableBuilder;
+use crate::gpu::{self, map_depth_func, map_operation, map_stencil_func};
 use crate::layer_group::LayerGroup;
 use crate::mtl_fwd::{MTLBufferPtr, MTLDepthStencilStatePtr};
 use crate::offscreen_texture::OffscreenTexture;
@@ -57,45 +52,6 @@ pub(crate) struct Context {
     weak_self: Weak<Context>,
     global_uniform_buffers: RefCell<UniformBufferArray>,
     empty_vertex_buffer: RefCell<Option<MTLBufferPtr>>,
-}
-
-fn map_depth_func(func: DepthFunctionType) -> MTLCompareFunction {
-    match func {
-        DepthFunctionType::Never => MTLCompareFunction::Never,
-        DepthFunctionType::Less => MTLCompareFunction::Less,
-        DepthFunctionType::Equal => MTLCompareFunction::Equal,
-        DepthFunctionType::LessEqual => MTLCompareFunction::LessEqual,
-        DepthFunctionType::Greater => MTLCompareFunction::Greater,
-        DepthFunctionType::NotEqual => MTLCompareFunction::NotEqual,
-        DepthFunctionType::GreaterEqual => MTLCompareFunction::GreaterEqual,
-        DepthFunctionType::Always => MTLCompareFunction::Always,
-    }
-}
-
-fn map_stencil_func(func: StencilFunctionType) -> MTLCompareFunction {
-    match func {
-        StencilFunctionType::Never => MTLCompareFunction::Never,
-        StencilFunctionType::Less => MTLCompareFunction::Less,
-        StencilFunctionType::Equal => MTLCompareFunction::Equal,
-        StencilFunctionType::LessEqual => MTLCompareFunction::LessEqual,
-        StencilFunctionType::Greater => MTLCompareFunction::Greater,
-        StencilFunctionType::NotEqual => MTLCompareFunction::NotEqual,
-        StencilFunctionType::GreaterEqual => MTLCompareFunction::GreaterEqual,
-        StencilFunctionType::Always => MTLCompareFunction::Always,
-    }
-}
-
-fn map_operation(op: StencilOpType) -> MTLStencilOperation {
-    match op {
-        StencilOpType::Zero => MTLStencilOperation::Zero,
-        StencilOpType::Keep => MTLStencilOperation::Keep,
-        StencilOpType::Replace => MTLStencilOperation::Replace,
-        StencilOpType::Increment => MTLStencilOperation::IncrementClamp,
-        StencilOpType::Decrement => MTLStencilOperation::DecrementClamp,
-        StencilOpType::Invert => MTLStencilOperation::Invert,
-        StencilOpType::IncrementWrap => MTLStencilOperation::IncrementWrap,
-        StencilOpType::DecrementWrap => MTLStencilOperation::DecrementWrap,
-    }
 }
 
 impl Context {
@@ -151,51 +107,19 @@ impl Context {
         program_parameters: &ProgramParameters,
         additional_defines: &HashMap<String, String>,
     ) -> Option<ShaderProgram> {
-        let mut keys = Vec::new();
-        let mut values = Vec::new();
-        for (key, value) in program_parameters.get_defines().iter().chain(additional_defines.iter()) {
-            keys.push(NSString::from_str(key));
-            values.push(Retained::into_super(NSString::from_str(value)));
-        }
-        let failed = |message: String| {
-            Log::error(Event::Shader, message);
-            debug_assert!(false, "shader compile failed");
-            None
-        };
-
-        let key_refs: Vec<&NSString> = keys.iter().map(|k| &**k).collect();
-        let defines: Retained<NSDictionary<NSString, NSObject>> =
-            NSDictionary::from_retained_objects(&key_refs, &values);
-        let options = MTLCompileOptions::new();
-        // SAFETY: the dictionary maps strings to strings, as Metal expects.
-        unsafe { options.setPreprocessorMacros(Some(&defines)) };
-        // Fast math is Metal's default (C++ sets it too).
-        options.setLanguageVersion(MTLLanguageVersion::Version2_4);
-        // Lets the position outputs marked [[invariant]] be computed the
-        // same way in every shader.
-        options.setPreserveInvariance(true);
-
-        let library = match self
-            .backend
-            .get_device()
-            .newLibraryWithSource_options_error(&NSString::from_str(source), Some(&options))
-        {
-            Ok(library) => library,
-            Err(error) => return failed(format!("{name} compile failed: {}", error.localizedDescription())),
-        };
-        let Some(vertex_function) = library.newFunctionWithName(&NSString::from_str(vertex_name)) else {
-            return failed(format!("{name} missing vertex function {vertex_name}"));
-        };
-        // The fragment function is optional.
-        let mut fragment_function = None;
-        if !fragment_name.is_empty() {
-            match library.newFunctionWithName(&NSString::from_str(fragment_name)) {
-                Some(function) => fragment_function = Some(function),
-                None => return failed(format!("{name} missing fragment function {fragment_name}")),
+        let defines = program_parameters
+            .get_defines()
+            .iter()
+            .chain(additional_defines)
+            .map(|(key, value)| (key.as_str(), value.as_str()));
+        match gpu::compile(self.backend.get_device(), &name, source, vertex_name, fragment_name, defines) {
+            Ok((vertex, fragment)) => Some(ShaderProgram::new(name, Rc::clone(&self.backend), vertex, fragment)),
+            Err(error) => {
+                Log::error(Event::Shader, error.to_string());
+                debug_assert!(false, "shader compile failed");
+                None
             }
         }
-
-        Some(ShaderProgram::new(name, Rc::clone(&self.backend), vertex_function, fragment_function))
     }
 
     /// Creates a texture, of the concrete type.

@@ -10,51 +10,21 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use mln_gfx::color_mode::{BlendFunction, ColorMode};
+use mln_gfx::color_mode::ColorMode;
 use mln_gfx::shader::Shader;
 use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
-use mln_gfx::types::{ColorBlendEquationType, ColorBlendFactorType};
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use objc2_foundation::NSString;
-use objc2_metal::{
-    MTLBlendFactor, MTLBlendOperation, MTLColorWriteMask, MTLDevice, MTLRenderPipelineDescriptor, MTLVertexDescriptor,
-};
+use objc2_metal::{MTLDevice, MTLRenderPipelineDescriptor, MTLVertexDescriptor};
 
 use super::shader_source::{AttributeInfo, TextureInfo};
+use crate::gpu::set_color_target;
 use crate::mtl_fwd::{MTLFunctionPtr, MTLRenderPipelineStatePtr};
 use crate::render_pass::AttachmentFormats;
 use crate::renderer_backend::BackendImpl;
-
-fn metal_blend_operation(equation: ColorBlendEquationType) -> MTLBlendOperation {
-    match equation {
-        ColorBlendEquationType::Add => MTLBlendOperation::Add,
-        ColorBlendEquationType::Subtract => MTLBlendOperation::Subtract,
-        ColorBlendEquationType::ReverseSubtract => MTLBlendOperation::ReverseSubtract,
-    }
-}
-
-fn metal_blend_factor(factor: ColorBlendFactorType) -> MTLBlendFactor {
-    match factor {
-        ColorBlendFactorType::Zero => MTLBlendFactor::Zero,
-        ColorBlendFactorType::One => MTLBlendFactor::One,
-        ColorBlendFactorType::SrcColor => MTLBlendFactor::SourceColor,
-        ColorBlendFactorType::OneMinusSrcColor => MTLBlendFactor::OneMinusSourceColor,
-        ColorBlendFactorType::SrcAlpha => MTLBlendFactor::SourceAlpha,
-        ColorBlendFactorType::OneMinusSrcAlpha => MTLBlendFactor::OneMinusSourceAlpha,
-        ColorBlendFactorType::DstAlpha => MTLBlendFactor::DestinationAlpha,
-        ColorBlendFactorType::OneMinusDstAlpha => MTLBlendFactor::OneMinusDestinationAlpha,
-        ColorBlendFactorType::DstColor => MTLBlendFactor::DestinationColor,
-        ColorBlendFactorType::OneMinusDstColor => MTLBlendFactor::OneMinusDestinationColor,
-        ColorBlendFactorType::SrcAlphaSaturate => MTLBlendFactor::SourceAlphaSaturated,
-        ColorBlendFactorType::ConstantColor => MTLBlendFactor::BlendColor,
-        ColorBlendFactorType::OneMinusConstantColor => MTLBlendFactor::OneMinusBlendColor,
-        ColorBlendFactorType::ConstantAlpha => MTLBlendFactor::BlendAlpha,
-        ColorBlendFactorType::OneMinusConstantAlpha => MTLBlendFactor::OneMinusBlendAlpha,
-    }
-}
 
 pub(crate) struct ShaderProgram {
     shader_program_id: SimpleIdentity,
@@ -118,40 +88,7 @@ impl ShaderProgram {
         descriptor.setFragmentFunction(self.fragment_function.as_deref());
         descriptor.setVertexDescriptor(Some(vertex_descriptor));
 
-        // SAFETY: index 0 is in the attachment array's bounds.
-        let color = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
-        let blend_enabled = !matches!(color_mode.blend_function, BlendFunction::Replace);
-        let (operation, src_factor, dst_factor) = if blend_enabled {
-            let f = &color_mode.blend_function;
-            (
-                metal_blend_operation(f.equation()),
-                metal_blend_factor(f.src_factor()),
-                metal_blend_factor(f.dst_factor()),
-            )
-        } else {
-            (MTLBlendOperation::Add, MTLBlendFactor::One, MTLBlendFactor::One)
-        };
-        color.setPixelFormat(formats.color);
-        color.setBlendingEnabled(blend_enabled);
-        color.setRgbBlendOperation(operation);
-        color.setAlphaBlendOperation(operation);
-        color.setSourceRGBBlendFactor(src_factor);
-        color.setSourceAlphaBlendFactor(src_factor);
-        color.setDestinationRGBBlendFactor(dst_factor);
-        color.setDestinationAlphaBlendFactor(dst_factor);
-        let mask = color_mode.mask;
-        let mut write_mask = MTLColorWriteMask::None;
-        for (enabled, bit) in [
-            (mask.r, MTLColorWriteMask::Red),
-            (mask.g, MTLColorWriteMask::Green),
-            (mask.b, MTLColorWriteMask::Blue),
-            (mask.a, MTLColorWriteMask::Alpha),
-        ] {
-            if enabled {
-                write_mask |= bit;
-            }
-        }
-        color.setWriteMask(write_mask);
+        set_color_target(&descriptor, formats.color, color_mode.blend_function, color_mode.mask);
         if let Some(depth) = formats.depth {
             descriptor.setDepthAttachmentPixelFormat(depth);
         }
