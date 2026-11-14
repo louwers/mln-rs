@@ -25,6 +25,8 @@ use mln_util::size::Size;
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 fn main() -> ExitCode {
+    // Before any thread starts, so that the counters count them all.
+    mln_bench::meter::start_counters();
     match run(std::env::args().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

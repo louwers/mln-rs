@@ -13,6 +13,7 @@ use mln_util::size::Size;
 
 use crate::latency::{set_tile_latency, take_tile_requests};
 use crate::meter::{Meter, live_heap_mib, ms, process_cpu};
+use crate::runtime_scene::{RuntimeScene, jump};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
     basemap_center, basemap_mlt_style, basemap_north_west, basemap_point, basemap_south_east, basemap_style,
@@ -134,6 +135,9 @@ pub fn all() -> Vec<Case> {
     }
     cases.push(Case::new("Style/Replace600", style_replace));
     cases.push(Case::new("Runtime/Lifecycle", runtime_lifecycle));
+    cases.push(Case::new("Command/RoundTrip", command_round_trip));
+    cases.push(Case::new("Command/Burst", command_burst));
+    cases.push(Case::new("Memory/LeaveZoomRange", memory_leave_zoom_range));
     cases.push(Case::new("Style/Replace600/OnDemand", style_replace_on_demand));
     cases.push(Case::new("Style/AddLayer600", style_add_layer));
     cases.push(Case::new("Style/AddRemoveLayers", style_add_remove_layers));
@@ -981,6 +985,95 @@ fn runtime_lifecycle(cx: &Context) -> Metrics {
         });
     }
     meter.finish()
+}
+
+/// The two cameras the command cases jump between: the basemap's center,
+/// and a little north-east of it.
+fn two_jumps() -> [mln_map::CameraUpdate; 2] {
+    let center = basemap_center();
+    let nudged = LatLng::new(center.latitude() + 0.0005, center.longitude() + 0.0005).expect("a center");
+    [jump(center), jump(nudged)]
+}
+
+/// A camera jump sent to a runtime's settled map until its completion
+/// arrives, as maplibre-native-ffi's case of the name does; the map's
+/// session draws no frames meanwhile.
+fn command_round_trip(cx: &Context) -> Metrics {
+    let scene = RuntimeScene::basemap(cx);
+    let jumps = two_jumps();
+    let mut meter = Meter::new();
+    for i in 0..cx.iterations(2000) {
+        meter.time(|| {
+            scene.map().update_camera(jumps[i % 2].clone()).expect("a camera command").wait().expect("the jump");
+        });
+    }
+    meter.finish()
+}
+
+/// The camera jumps of [`command_burst`].
+const BURST: usize = 1000;
+
+/// 1000 camera jumps sent to a runtime's settled map without waiting for
+/// them, then a camera query, until the query's answer arrives, as
+/// maplibre-native-ffi's case of the name does; the map's session draws no
+/// frames meanwhile. `submit_ns` is the time that sending a jump takes.
+fn command_burst(cx: &Context) -> Metrics {
+    let scene = RuntimeScene::basemap(cx);
+    let jumps = two_jumps();
+    let mut meter = Meter::new();
+    let mut submit = Vec::new();
+    for _ in 0..cx.iterations(20) {
+        meter.time(|| {
+            let start = Instant::now();
+            for i in 0..BURST {
+                drop(scene.map().update_camera(jumps[i % 2].clone()).expect("a camera command"));
+            }
+            submit.push(start.elapsed().as_secs_f64() * 1e9 / BURST as f64);
+            scene.map().camera().expect("a camera query").wait().expect("the camera");
+        });
+    }
+    let mut metrics = meter.finish();
+    metrics.other("submit_ns", median(&submit));
+    metrics
+}
+
+/// A jump from zoom 15.5 to 14.5, out of the zoom range of every layer
+/// that draws a source, until a frame shows the view complete, on a map
+/// that keeps no tile that left the view, as maplibre-native-ffi's case of
+/// the name does. Untimed, the map settles there, and again back at zoom
+/// 15.5: `heap_mib` and `in_range_heap_mib` are the heap live then, above
+/// what it was at the start.
+fn memory_leave_zoom_range(cx: &Context) -> Metrics {
+    const IN_RANGE: f64 = 15.5;
+    const OUT_OF_RANGE: f64 = 14.5;
+    let center = basemap_center();
+    let start_heap = live_heap_mib();
+    let mut scene = basemap(cx, Mode::OnDemand);
+    scene.set_tile_cache_enabled(false);
+    let layers = scene.set_sourced_min_zoom(15.0);
+    scene.jump(center, IN_RANGE);
+    scene.settle();
+    let (mut out_of_range, mut in_range) = (Vec::new(), Vec::new());
+    let mut meter = Meter::new();
+    for _ in 0..cx.iterations(10) {
+        meter.start();
+        scene.jump(center, OUT_OF_RANGE);
+        scene.present_until_complete();
+        meter.stop();
+        scene.settle();
+        out_of_range.push(live_heap_mib() - start_heap);
+        scene.jump(center, IN_RANGE);
+        scene.settle();
+        in_range.push(live_heap_mib() - start_heap);
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Memory/LeaveZoomRange", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("heap_mib", median(&out_of_range));
+    metrics.other("in_range_heap_mib", median(&in_range));
+    metrics.other("layers", layers as f64);
+    metrics
 }
 
 /// As `Style/Replace600`, on a continuous map drawn on a 60 Hz display's

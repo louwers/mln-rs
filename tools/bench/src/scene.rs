@@ -521,6 +521,29 @@ impl Scene {
         }
     }
 
+    /// Sets the minimum zoom of every layer that draws a source, and returns
+    /// how many there are.
+    pub(crate) fn set_sourced_min_zoom(&mut self, min_zoom: f32) -> usize {
+        let ids: Vec<String> = self
+            .map
+            .style()
+            .get_layers()
+            .iter()
+            .filter(|layer| !layer.get_source_id().is_empty())
+            .map(|layer| layer.get_id())
+            .collect();
+        for id in &ids {
+            self.map.style_mut().get_layer_mut(id).expect("the layer").set_min_zoom(min_zoom);
+        }
+        ids.len()
+    }
+
+    /// Whether the renderer keeps tiles that left the view, to show them
+    /// again without loading; it does by default.
+    pub(crate) fn set_tile_cache_enabled(&self, enabled: bool) {
+        self.frontend.with_renderer(|renderer| renderer.set_tile_cache_enabled(enabled));
+    }
+
     /// The vertex and index buffers the GPU held after the last frame, in
     /// MiB.
     pub(crate) fn gpu_buffers_mib(&self) -> f64 {
