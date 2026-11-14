@@ -40,6 +40,9 @@ objc2-metal = { workspace = true, features = ["objc2-io-surface"] }
 objc2-quartz-core.workspace = true
 slotmap.workspace = true
 
+[target.'cfg(target_vendor = "apple")'.dev-dependencies]
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+
 # Compiles every MSL source extracted from include/mln/shaders/mtl/*.hpp
 # with the system's Metal compiler.
 [[test]]
