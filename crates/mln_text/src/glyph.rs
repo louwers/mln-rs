@@ -251,25 +251,42 @@ impl Shaping {
 pub type FontFaceRange = (u32, u32);
 
 /// The bytes of a font file that an app already holds, such as a
-/// memory-mapped file, shared without a copy. A font face's file can be
-/// TrueType or OpenType (a collection's first font), WOFF or WOFF2.
+/// memory-mapped file, shared without a copy, and which of its faces to use.
+/// A font face's file can be TrueType or OpenType, a collection of them, WOFF
+/// or WOFF2.
 #[derive(Clone)]
-pub struct FontData(Arc<dyn AsRef<[u8]> + Send + Sync>);
+pub struct FontData {
+    bytes: Arc<dyn AsRef<[u8]> + Send + Sync>,
+    face_index: u32,
+}
 
 impl FontData {
+    /// The file's first face.
     pub fn new(bytes: Arc<dyn AsRef<[u8]> + Send + Sync>) -> Self {
-        FontData(bytes)
+        FontData { bytes, face_index: 0 }
+    }
+
+    /// Face `index` of a collection, rather than its first.
+    #[must_use]
+    pub fn with_face_index(self, index: u32) -> Self {
+        FontData { face_index: index, ..self }
     }
 
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        (*self.0).as_ref()
+        (*self.bytes).as_ref()
+    }
+
+    /// Which face of a collection to use: 0 for a file of one face.
+    #[must_use]
+    pub fn face_index(&self) -> u32 {
+        self.face_index
     }
 
     /// The same bytes, for readers that take any shared bytes.
     #[must_use]
     pub(crate) fn shared(&self) -> Arc<dyn AsRef<[u8]> + Send + Sync> {
-        Arc::clone(&self.0)
+        Arc::clone(&self.bytes)
     }
 }
 
@@ -281,27 +298,27 @@ impl Default for FontData {
 
 impl From<Vec<u8>> for FontData {
     fn from(bytes: Vec<u8>) -> Self {
-        FontData(Arc::new(bytes))
+        FontData::new(Arc::new(bytes))
     }
 }
 
 impl From<Arc<Vec<u8>>> for FontData {
     fn from(bytes: Arc<Vec<u8>>) -> Self {
-        FontData(bytes)
+        FontData::new(bytes)
     }
 }
 
 impl std::fmt::Debug for FontData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Not the bytes: they may load on first access.
-        f.write_str("FontData")
+        f.debug_struct("FontData").field("face_index", &self.face_index).finish_non_exhaustive()
     }
 }
 
-/// Equal when both share the same bytes.
+/// Equal when both share the same bytes and use the same face.
 impl PartialEq for FontData {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(&self.bytes, &other.bytes) && self.face_index == other.face_index
     }
 }
 

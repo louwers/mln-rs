@@ -3102,6 +3102,7 @@ version = "0.0.11"
 dependencies = [
  "fontdb",
  "libloading",
+ "memmap2",
  "mln-rs-text",
  "mln-rs-util",
  "skrifa 0.49.0",

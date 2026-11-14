@@ -42,7 +42,7 @@ impl FreeTypeFace {
         let Ok(memory_file) = crate::woff::to_sfnt(font_data.into()) else {
             return FreeTypeFace { memory_file: FontData::default(), face: None, scaler: Arc::default() };
         };
-        let face = match ft::face::Face::open(memory_file.as_bytes()) {
+        let face = match ft::face::Face::open(memory_file.as_bytes(), memory_file.face_index()) {
             Ok(mut face) => {
                 Self::force_ucs2_charmap(&mut face);
                 face.set_char_size(SDF_FONT_SIZE * 64, 72);

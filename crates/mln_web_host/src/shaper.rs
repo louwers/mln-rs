@@ -26,7 +26,7 @@ extern "C" {
     type ShaperModule;
 
     #[wasm_bindgen(method, catch, js_name = openFace)]
-    fn open_face(this: &ShaperModule, type_: u16, data: &[u8]) -> Result<Option<Face>, JsValue>;
+    fn open_face(this: &ShaperModule, type_: u16, data: &[u8], face_index: u32) -> Result<Option<Face>, JsValue>;
 
     /// A font file it opened.
     type Face;
@@ -163,7 +163,7 @@ impl FontFaceEngine for ShaperModuleEngine {
 
     fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
         let opened = MODULE.with(|module| match &*module.borrow() {
-            Some(Module::Loaded(module)) => module.open_face(type_.0, data.as_bytes()),
+            Some(Module::Loaded(module)) => module.open_face(type_.0, data.as_bytes(), data.face_index()),
             _ => Err(JsValue::from_str("the shaper module isn't loaded")),
         });
         match opened {

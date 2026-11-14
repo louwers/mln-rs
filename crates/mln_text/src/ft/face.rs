@@ -8,8 +8,8 @@
 //   src/truetype/ttdriver.c (`tt_get_advances`), src/cff/cffdrivr.c
 //   (`cff_get_advances`), src/sfnt/ttmtx.c (`tt_face_get_metrics`).
 //
-// Only what the C++ core reaches is ported: face index 0, unhinted advances
-// at the default variation location. Comments starting "Not supported" name the rest.
+// Only what the map reaches is ported: unhinted advances at the default
+// variation location. Comments starting "Not supported" name the rest.
 
 use super::calc::{div_fix, mul_div};
 use super::cmap::{self, Bytes, CharMap, Encoding, LookupContext};
@@ -65,21 +65,27 @@ pub(crate) struct Face {
 pub(crate) struct OpenError(pub(crate) &'static str);
 
 impl Face {
-    /// `FT_New_Memory_Face(library, data, size, 0, &face)`.
-    pub(crate) fn open(data: &[u8]) -> Result<Face, OpenError> {
+    /// `FT_New_Memory_Face(library, data, size, index, &face)`: face `index`
+    /// of a collection, which must be 0 for a file of one face.
+    pub(crate) fn open(data: &[u8], index: u32) -> Result<Face, OpenError> {
         let b = Bytes(data);
-        // sfnt_open_font: a TrueType collection selects its first font.
         let mut sfnt_offset = 0usize;
         let mut format_tag = b.u32(0);
         if data.len() < 4 {
             return Err(OpenError("Unknown_File_Format"));
         }
         if format_tag == tag(*b"ttcf") {
-            if data.len() < 16 || b.u32(8) == 0 {
-                return Err(OpenError("Unknown_File_Format"));
+            let entry = 12 + 4 * index as usize;
+            if data.len() < 16 || index >= b.u32(8) || entry + 4 > data.len() {
+                return Err(OpenError("Invalid_Argument (no such face)"));
             }
-            sfnt_offset = b.u32(12) as usize;
+            sfnt_offset = b.u32(entry) as usize;
+            if sfnt_offset + 4 > data.len() {
+                return Err(OpenError("Invalid_Table"));
+            }
             format_tag = b.u32(sfnt_offset);
+        } else if index != 0 {
+            return Err(OpenError("Invalid_Argument (no such face)"));
         } else if format_tag == tag(*b"wOFF") || format_tag == tag(*b"wOF2") {
             // FreeType decodes these here (woff_open_font, woff2_open_font);
             // the port's callers decode them first, with crate::woff.

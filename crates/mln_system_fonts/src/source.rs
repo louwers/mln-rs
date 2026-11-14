@@ -1,9 +1,14 @@
 //! Where a system font's bytes come from, whether the map can draw a script
-//! with it, and its bytes, read the first time the map needs them.
+//! with it, and its bytes, mapped the first time the map needs them.
 
-use std::path::PathBuf;
+#![expect(unsafe_code, reason = "memory-mapping a font file is unsafe")]
+
+use std::collections::HashMap;
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+use memmap2::Mmap;
 use mln_text::glyph::FontData;
 use mln_util::logging::{Event, Log};
 use skrifa::raw::tables::cmap::Cmap;
@@ -36,21 +41,30 @@ impl Source {
         }
     }
 
-    /// The font file of the face alone.
-    fn load(&self) -> Option<Vec<u8>> {
-        match self {
-            Source::File { path, index } => sfnt::face(std::fs::read(path).ok()?, *index),
-        }
-    }
-
     /// The weight the map draws the font at, if it has a glyph for `probe`.
     pub(crate) fn drawn_weight(&self, probe: char) -> Option<u16> {
         drawn_weight(&self.tables(&[*b"cmap", *b"OS/2", *b"fvar"])?, probe)
     }
+}
 
-    /// The font's bytes, read the first time the map needs them.
-    pub(crate) fn data(self) -> FontData {
-        FontData::new(Arc::new(LazyFont { source: self, bytes: OnceLock::new() }))
+/// The font files of the chosen fonts, each shared by the faces that use it.
+#[derive(Default)]
+pub(crate) struct Files(HashMap<PathBuf, Arc<LazyFile>>);
+
+impl Files {
+    /// The bytes of `source`'s font, mapped the first time the map needs
+    /// them.
+    pub(crate) fn data(&mut self, source: &Source) -> FontData {
+        match source {
+            Source::File { path, index } => {
+                let file = self
+                    .0
+                    .entry(path.clone())
+                    .or_insert_with(|| Arc::new(LazyFile { path: path.clone(), map: OnceLock::new() }));
+                let file: Arc<LazyFile> = Arc::clone(file);
+                FontData::new(file).with_face_index(*index)
+            }
+        }
     }
 }
 
@@ -83,21 +97,31 @@ pub(crate) fn drawn_weight(tables: &[Table], probe: char) -> Option<u16> {
     )
 }
 
-/// A font's bytes, read the first time the map needs them.
-struct LazyFont {
-    source: Source,
-    bytes: OnceLock<Vec<u8>>,
+/// A font file, mapped the first time the map needs it. A map leaves the
+/// pages the map never reads on disk: a CJK font is tens of megabytes, and a
+/// map's labels use a few thousand of its glyphs.
+struct LazyFile {
+    path: PathBuf,
+    map: OnceLock<Option<Mmap>>,
 }
 
-impl AsRef<[u8]> for LazyFont {
+impl AsRef<[u8]> for LazyFile {
     fn as_ref(&self) -> &[u8] {
-        self.bytes.get_or_init(|| {
-            self.source.load().unwrap_or_else(|| {
-                Log::warning(Event::Glyph, format!("Couldn't read the system font {}", self.source.url()));
-                Vec::new()
-            })
-        })
+        self.map.get_or_init(|| map(&self.path)).as_deref().unwrap_or_default()
     }
+}
+
+/// The file at `path`, memory-mapped.
+fn map(path: &Path) -> Option<Mmap> {
+    let file = File::open(path)
+        .inspect_err(|error| Log::warning(Event::Glyph, format!("Couldn't open {}: {error}", path.display())))
+        .ok()?;
+    // SAFETY: the mapping is read-only, and system font files aren't changed
+    // in place: an update replaces a font by renaming a new file over it,
+    // which leaves the mapped file as it was.
+    unsafe { Mmap::map(&file) }
+        .inspect_err(|error| Log::warning(Event::Glyph, format!("Couldn't map {}: {error}", path.display())))
+        .ok()
 }
 
 #[cfg(test)]

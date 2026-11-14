@@ -21,6 +21,7 @@ mln_util.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 fontdb.workspace = true
+memmap2.workspace = true
 skrifa.workspace = true
 sys-locale.workspace = true
 

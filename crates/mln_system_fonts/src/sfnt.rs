@@ -1,11 +1,8 @@
-//! Font files of one face, from a collection's face or from the face's tables,
-//! since the map's font loader reads only a collection's first face.
+//! The tables of a font file's face.
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
-
-use skrifa::raw::{FileRef, FontRef};
 
 /// A table's tag and its bytes.
 pub(crate) type Table = ([u8; 4], Vec<u8>);
@@ -13,73 +10,6 @@ pub(crate) type Table = ([u8; 4], Vec<u8>);
 /// The largest table that `read_tables` reads, well above the `cmap` of a
 /// CJK font.
 const MAX_TABLE_LEN: u32 = 1 << 24;
-
-/// A font file with `tables`, in tag order, as the sfnt format requires.
-pub(crate) fn build(mut tables: Vec<Table>) -> Vec<u8> {
-    tables.sort_by_key(|(tag, _)| *tag);
-    let count = tables.len() as u16;
-    let cff = tables.iter().any(|(tag, _)| tag == b"CFF " || tag == b"CFF2");
-    // searchRange, entrySelector and rangeShift: the largest power of two
-    // at most `count`, for a binary search of the records.
-    let entry_selector = if count == 0 { 0 } else { 15 - count.leading_zeros() as u16 };
-    let search_range = (1u16 << entry_selector) * 16;
-    let header_len = 12 + 16 * tables.len();
-    let data_len: usize = tables.iter().map(|(_, data)| data.len().next_multiple_of(4)).sum();
-
-    let mut out = Vec::with_capacity(header_len + data_len);
-    out.extend_from_slice(if cff { b"OTTO" } else { &[0, 1, 0, 0] });
-    out.extend_from_slice(&count.to_be_bytes());
-    out.extend_from_slice(&search_range.to_be_bytes());
-    out.extend_from_slice(&entry_selector.to_be_bytes());
-    out.extend_from_slice(&(count * 16).saturating_sub(search_range).to_be_bytes());
-    let mut offset = header_len;
-    for (tag, data) in &tables {
-        out.extend_from_slice(tag);
-        out.extend_from_slice(&checksum(data).to_be_bytes());
-        out.extend_from_slice(&(offset as u32).to_be_bytes());
-        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        offset += data.len().next_multiple_of(4);
-    }
-    for (_, data) in &tables {
-        out.extend_from_slice(data);
-        out.resize(out.len().next_multiple_of(4), 0);
-    }
-    out
-}
-
-/// The sum of a table's big-endian 32-bit words, its last zero-padded.
-fn checksum(data: &[u8]) -> u32 {
-    data.chunks(4).fold(0u32, |sum, chunk| {
-        let mut word = [0; 4];
-        word[..chunk.len()].copy_from_slice(chunk);
-        sum.wrapping_add(u32::from_be_bytes(word))
-    })
-}
-
-/// Face `index` of the font file `data` as a file of its own: `data` itself
-/// when it holds one face. `None` when it holds no such face.
-pub(crate) fn face(data: Vec<u8>, index: u32) -> Option<Vec<u8>> {
-    let tables = match FileRef::new(&data).ok()? {
-        FileRef::Font(_) => return (index == 0).then_some(data),
-        FileRef::Collection(collection) => {
-            let font = collection.get(index).ok()?;
-            tables_of(&font)
-        }
-    };
-    Some(build(tables))
-}
-
-/// Every table of `font`.
-fn tables_of(font: &FontRef<'_>) -> Vec<Table> {
-    font.table_directory()
-        .table_records()
-        .iter()
-        .filter_map(|record| {
-            let tag = record.tag();
-            Some((tag.to_be_bytes(), font.table_data(tag)?.as_bytes().to_vec()))
-        })
-        .collect()
-}
 
 /// The tables `tags` of face `index` of the font file at `path`, which it
 /// reads without the rest of the file. A tag the face lacks is left out.
@@ -133,7 +63,49 @@ mod tests {
     use skrifa::MetadataProvider;
     use skrifa::raw::FontRef;
 
-    use super::{build, face, read_tables};
+    use super::{Table, read_tables};
+
+    /// A font file with `tables`, in tag order, as the sfnt format requires.
+    fn build(mut tables: Vec<Table>) -> Vec<u8> {
+        tables.sort_by_key(|(tag, _)| *tag);
+        let count = tables.len() as u16;
+        let cff = tables.iter().any(|(tag, _)| tag == b"CFF " || tag == b"CFF2");
+        // searchRange, entrySelector and rangeShift: the largest power of two
+        // at most `count`, for a binary search of the records.
+        let entry_selector = if count == 0 { 0 } else { 15 - count.leading_zeros() as u16 };
+        let search_range = (1u16 << entry_selector) * 16;
+        let header_len = 12 + 16 * tables.len();
+        let data_len: usize = tables.iter().map(|(_, data)| data.len().next_multiple_of(4)).sum();
+
+        let mut out = Vec::with_capacity(header_len + data_len);
+        out.extend_from_slice(if cff { b"OTTO" } else { &[0, 1, 0, 0] });
+        out.extend_from_slice(&count.to_be_bytes());
+        out.extend_from_slice(&search_range.to_be_bytes());
+        out.extend_from_slice(&entry_selector.to_be_bytes());
+        out.extend_from_slice(&(count * 16).saturating_sub(search_range).to_be_bytes());
+        let mut offset = header_len;
+        for (tag, data) in &tables {
+            out.extend_from_slice(tag);
+            out.extend_from_slice(&checksum(data).to_be_bytes());
+            out.extend_from_slice(&(offset as u32).to_be_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            offset += data.len().next_multiple_of(4);
+        }
+        for (_, data) in &tables {
+            out.extend_from_slice(data);
+            out.resize(out.len().next_multiple_of(4), 0);
+        }
+        out
+    }
+
+    /// The sum of a table's big-endian 32-bit words, its last zero-padded.
+    fn checksum(data: &[u8]) -> u32 {
+        data.chunks(4).fold(0u32, |sum, chunk| {
+            let mut word = [0; 4];
+            word[..chunk.len()].copy_from_slice(chunk);
+            sum.wrapping_add(u32::from_be_bytes(word))
+        })
+    }
 
     /// A font with a `cmap` that maps 'A' to glyph 1, and an `OS/2` of the
     /// given weight.
@@ -205,19 +177,6 @@ mod tests {
         assert_eq!(font.charmap().map('A').map(u32::from), Some(1));
         assert_eq!(weight(&data), 400);
         assert_eq!(&data[..4], &[0, 1, 0, 0]);
-    }
-
-    #[test]
-    fn a_collection_face_becomes_a_font_of_its_own() {
-        let data = collection(&[font(100), font(400)]);
-        let second = face(data.clone(), 1).expect("face 1");
-        assert_eq!(weight(&second), 400);
-        assert_eq!(weight(&face(data.clone(), 0).expect("face 0")), 100);
-        assert!(face(data, 2).is_none());
-
-        let single = font(700);
-        assert_eq!(face(single.clone(), 0), Some(single.clone()));
-        assert!(face(single, 1).is_none());
     }
 
     #[test]

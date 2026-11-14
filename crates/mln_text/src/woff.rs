@@ -28,14 +28,15 @@ pub(crate) fn is_woff(data: &[u8]) -> bool {
     matches!(data.get(..4), Some(b"wOFF" | b"wOF2"))
 }
 
-/// `data` as an SFNT font: decoded when it is a WOFF or WOFF2 file, else
-/// `data` itself, uncopied and unchecked.
+/// `data` as an SFNT font: decoded when it is a WOFF or WOFF2 file, with the
+/// same face, else `data` itself, uncopied and unchecked.
 pub(crate) fn to_sfnt(data: FontData) -> Result<FontData, WoffError> {
-    match data.as_bytes().get(..4) {
-        Some(b"wOFF") => decode_woff(data.as_bytes()).map(FontData::from),
-        Some(b"wOF2") => decode_woff2(data.as_bytes()).map(FontData::from),
-        _ => Ok(data),
-    }
+    let decoded = match data.as_bytes().get(..4) {
+        Some(b"wOFF") => decode_woff(data.as_bytes())?,
+        Some(b"wOF2") => decode_woff2(data.as_bytes())?,
+        _ => return Ok(data),
+    };
+    Ok(FontData::from(decoded).with_face_index(data.face_index()))
 }
 
 /// Decodes a WOFF2 file. A collection decodes to a TrueType collection.

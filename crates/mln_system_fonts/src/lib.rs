@@ -12,14 +12,10 @@
 //! browser draws CJK glyphs itself (`DefaultLocalGlyphRasterizer`).
 //!
 //! The fonts are found once per process, on a thread of their own. A font's
-//! bytes are read the first time the map needs them.
+//! file is memory-mapped the first time the map needs it.
 
-#[cfg(not(target_family = "wasm"))]
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
-#[cfg(not(target_family = "wasm"))]
-use mln_text::glyph::FontData;
 use mln_text::glyph::{FontFace, FontFaces};
 
 #[cfg(not(target_family = "wasm"))]
@@ -88,7 +84,7 @@ fn find() -> Vec<SystemFontFace> {
 /// languages.
 #[cfg(not(target_family = "wasm"))]
 fn find_with(finder: &Finder, preferred: &[String]) -> Vec<SystemFontFace> {
-    let mut data: HashMap<source::Source, FontData> = HashMap::new();
+    let mut files = source::Files::default();
     let mut faces = Vec::new();
     for script in scripts::SCRIPTS {
         let languages = languages::for_script(script, preferred);
@@ -96,7 +92,7 @@ fn find_with(finder: &Finder, preferred: &[String]) -> Vec<SystemFontFace> {
             continue;
         };
         let url = source.url();
-        let bytes = data.entry(source.clone()).or_insert_with(|| source.data()).clone();
+        let bytes = files.data(&source);
         faces.push(SystemFontFace { family, face: FontFace::fallback(&url, script.ranges.to_vec()).with_data(bytes) });
     }
     faces
@@ -171,8 +167,7 @@ mod tests {
             assert_eq!(face.name, "");
             assert!(face.url.starts_with("file://"));
             assert_ne!(face.type_, GlyphIDType::FontPBF);
-            // Face 0, as the map's font loader reads a collection.
-            let font = skrifa::FontRef::from_index(bytes, 0).expect("a font");
+            let font = skrifa::FontRef::from_index(bytes, face.data.as_ref().unwrap().face_index()).expect("a font");
             let covered =
                 font.charmap().mappings().any(|(c, _)| face.ranges.iter().any(|&(lo, hi)| c >= lo && c <= hi));
             assert!(covered, "{family} has no glyph in its ranges");

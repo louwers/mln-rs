@@ -137,6 +137,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 # crates/mln_gl's window backend: loads libwayland-egl at run time.
 libloading = { version = "0.8.9" }
+memmap2 = { version = "0.9.12" }
 # Polygon triangulation (mln_renderer's fills and fill extrusions), a port of
 # earcut.js, the triangulation GL JS uses.
 earcut = { version = "0.4.5" }

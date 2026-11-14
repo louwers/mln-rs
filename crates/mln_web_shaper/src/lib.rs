@@ -7,7 +7,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use mln_text::glyph::{GlyphID, GlyphIDType};
+use mln_text::glyph::{FontData, GlyphID, GlyphIDType};
 use mln_text::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
 use wasm_bindgen::prelude::*;
 
@@ -24,11 +24,12 @@ fn start() {
     std::panic::set_hook(Box::new(|info| error(&info.to_string())));
 }
 
-/// Opens the font in `data`; `undefined` unless `data` is a font. The face
-/// keeps `data` instead of copying it.
+/// Opens face `face_index` of the font in `data`; `undefined` unless `data`
+/// is a font with that face. The face keeps `data` instead of copying it.
 #[wasm_bindgen(js_name = openFace)]
 #[must_use]
-pub fn open_face(type_: u16, data: Vec<u8>) -> Option<Face> {
+pub fn open_face(type_: u16, data: Vec<u8>, face_index: u32) -> Option<Face> {
+    let data = FontData::from(data).with_face_index(face_index);
     let shaper = HBShaper::new(GlyphIDType(type_), data, &FreeTypeLibrary::new());
     shaper.valid().then_some(Face { shaper, type_: GlyphIDType(type_) })
 }

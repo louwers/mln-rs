@@ -84,7 +84,7 @@ impl PathSink for Collector {
 /// The hinting scaler of a face at `SDF_FONT_SIZE` (`FT_LOAD_DEFAULT`), on
 /// the face's own font data.
 pub(crate) fn new_scaler(data: &crate::glyph::FontData) -> Option<ScalerFont> {
-    let font = skrifa::Font::new(data.shared(), 0)?;
+    let font = skrifa::Font::new(data.shared(), data.face_index())?;
     Some(ScalerFont::hinted(font, SDF_FONT_SIZE as f32, HintOptions::auto_fallback()))
 }
 
