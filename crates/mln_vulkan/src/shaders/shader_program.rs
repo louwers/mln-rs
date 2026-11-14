@@ -211,22 +211,22 @@ impl ShaderProgram {
 }
 
 impl Drop for ShaderProgram {
+    /// Destroys the modules and pipelines through the context's deletion
+    /// queue, as buffers are, so a teardown destroys them only after it
+    /// waits for the queue.
     fn drop(&mut self) {
-        // SAFETY: pipelines don't need their modules once made.
-        unsafe {
-            self.backend.get_device().destroy_shader_module(self.vertex_shader, None);
-            self.backend.get_device().destroy_shader_module(self.fragment_shader, None);
-        }
+        let modules = [self.vertex_shader, self.fragment_shader];
         let pipelines: Vec<vk::Pipeline> = self.pipelines.borrow_mut().drain().map(|(_, pipeline)| pipeline).collect();
-        if pipelines.is_empty() {
-            return;
-        }
         let backend = Rc::clone(&self.backend);
         // SAFETY: the commands that use the pipelines have been waited for
         // when the deletion queue runs, or the context is gone.
         let destroy = move || unsafe {
+            let device = backend.get_device();
             for pipeline in pipelines {
-                backend.get_device().destroy_pipeline(pipeline, None);
+                device.destroy_pipeline(pipeline, None);
+            }
+            for module in modules {
+                device.destroy_shader_module(module, None);
             }
         };
         match self.context.upgrade() {
