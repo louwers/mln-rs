@@ -375,10 +375,10 @@ mod tests {
 
     /// A backend of a few resources, with ids from a map of its own.
     struct Fake {
-        buffers: slotmap::SlotMap<BufferId, BufferInfo>,
-        textures: slotmap::SlotMap<TextureId, TextureInfo>,
-        pipelines: slotmap::SlotMap<PipelineId, (TargetFormats, Vec<VertexBufferLayout>, Vec<ShaderBinding>)>,
-        groups: slotmap::SlotMap<BindGroupId, Vec<BindGroupEntry>>,
+        buffers: crate::gpu::SlotMap<BufferId, BufferInfo>,
+        textures: crate::gpu::SlotMap<TextureId, TextureInfo>,
+        pipelines: crate::gpu::SlotMap<PipelineId, (TargetFormats, Vec<VertexBufferLayout>, Vec<ShaderBinding>)>,
+        groups: crate::gpu::SlotMap<BindGroupId, Vec<BindGroupEntry>>,
     }
 
     impl Resources for Fake {
@@ -407,10 +407,10 @@ mod tests {
 
     fn fake() -> Fake {
         Fake {
-            buffers: slotmap::SlotMap::with_key(),
-            textures: slotmap::SlotMap::with_key(),
-            pipelines: slotmap::SlotMap::with_key(),
-            groups: slotmap::SlotMap::with_key(),
+            buffers: crate::gpu::SlotMap::with_key(),
+            textures: crate::gpu::SlotMap::with_key(),
+            pipelines: crate::gpu::SlotMap::with_key(),
+            groups: crate::gpu::SlotMap::with_key(),
         }
     }
 

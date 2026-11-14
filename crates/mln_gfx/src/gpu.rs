@@ -16,6 +16,7 @@
 
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
+mod ids;
 pub mod validation;
 
 use std::ops::Range;
@@ -23,6 +24,7 @@ use std::ops::Range;
 use mln_util::Color;
 use mln_util::size::Size;
 
+pub use self::ids::{BindGroupId, BufferId, Id, IdData, PipelineId, SamplerId, SlotMap, TextureId};
 use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
@@ -31,19 +33,6 @@ use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
-
-slotmap::new_key_type! {
-    /// A buffer a [`Gpu`] owns.
-    pub struct BufferId;
-    /// A texture a [`Gpu`] owns.
-    pub struct TextureId;
-    /// A sampler a [`Gpu`] owns.
-    pub struct SamplerId;
-    /// A render pipeline a [`Gpu`] owns.
-    pub struct PipelineId;
-    /// A bind group a [`Gpu`] owns.
-    pub struct BindGroupId;
-}
 
 /// Why a [`Gpu`] call failed.
 #[derive(Debug, thiserror::Error)]
@@ -473,6 +462,10 @@ pub struct Pass {
 
 /// A GPU backend. It owns what its `create_*` calls make, until the
 /// matching `destroy_*`.
+///
+/// An id names a resource of the backend that made it, which keeps it in a
+/// [`SlotMap`]. Another backend's id names nothing there: a call that names
+/// one fails with [`GpuError::UnknownId`], and destroying it does nothing.
 ///
 /// Destroying a resource frees it once the work submitted so far is done
 /// with it, so a caller may destroy what a submitted pass uses. Its id is

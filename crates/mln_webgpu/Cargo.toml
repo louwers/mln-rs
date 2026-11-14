@@ -25,7 +25,6 @@ mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
 pollster.workspace = true
-slotmap.workspace = true
 wgpu.workspace = true
 
 # The shaders natively go to wgpu as naga modules (shader_program.rs).

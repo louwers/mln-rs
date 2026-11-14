@@ -186,3 +186,41 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
     Ok(())
 }
+
+/// Checks that each of two backends takes only its own ids: every id here
+/// is of the first resource of its kind that a backend makes, which another
+/// backend's slot map would hand out alike. Returns the error of a call
+/// that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError> {
+    let theirs = solid(first, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let their_pipeline = first.create_pipeline(&background())?;
+    let ours = solid(second, TextureFormat::Rgba8Unorm, [0.0, 1.0, 0.0, 1.0])?;
+    let our_pipeline = second.create_pipeline(&background())?;
+
+    let unknown = |result: Result<(), GpuError>, what| matches!(result, Err(GpuError::UnknownId(kind)) if kind == what);
+    assert!(unknown(second.write_buffer(theirs.quad, 0, &[0; 4]), "buffer"), "a write to their buffer");
+    let entries =
+        [BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer: theirs.quad, offset: 0, size: 4 }];
+    let group = second.create_bind_group(&BindGroupDesc { label: "theirs", entries: &entries }).map(|_| ());
+    assert!(unknown(group, "buffer"), "a bind group of their buffer");
+    assert!(unknown(second.submit(&[ours.pass(their_pipeline, [DRAW_QUAD])]), "pipeline"), "their pipeline");
+    let mut their_group = ours.pass(our_pipeline, [DRAW_QUAD]);
+    their_group.commands[1] = RenderCommand::SetBindGroup { slot: 0, group: theirs.group };
+    assert!(unknown(second.submit(&[their_group]), "bind group"), "their bind group");
+    let mut their_target = ours.pass(our_pipeline, [DRAW_QUAD]);
+    their_target.color = Some(ColorAttachment { texture: theirs.target, load: LoadOp::Load });
+    assert!(unknown(second.submit(&[their_target]), "texture"), "their target");
+
+    // Destroying their ids destroys nothing of either.
+    second.destroy_buffer(theirs.quad);
+    second.destroy_bind_group(theirs.group);
+    second.destroy_pipeline(their_pipeline);
+    second.destroy_texture(theirs.target);
+    first.submit(&[theirs.pass(their_pipeline, [DRAW_QUAD])])?;
+    second.submit(&[ours.pass(our_pipeline, [DRAW_QUAD])])?;
+    Ok(())
+}

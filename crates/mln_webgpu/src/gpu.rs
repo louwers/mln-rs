@@ -6,13 +6,12 @@ use std::rc::Rc;
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, TextureDesc, TextureFormat, TextureId, TextureRegion,
-    TextureUsage,
+    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId,
+    TextureRegion, TextureUsage,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::size::Size;
-use slotmap::SlotMap;
 
 use crate::Device;
 use crate::bind_groups::IndexTable;

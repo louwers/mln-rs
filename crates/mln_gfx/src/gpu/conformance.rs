@@ -3,7 +3,8 @@
 //! [`clip_mask_and_background`] draws a clipping mask into the stencil
 //! buffer as an ordinary draw, then the background shader tested against
 //! it. The mask covers the left half, so the background colors only that
-//! half. [`invalid_calls`] checks the calls that every backend rejects.
+//! half. [`invalid_calls`] checks the calls that every backend rejects, and
+//! [`foreign_ids`] that a backend takes no other backend's ids.
 
 mod cases;
 

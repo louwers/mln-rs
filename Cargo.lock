@@ -3297,7 +3297,6 @@ dependencies = [
  "mln-rs-vec-map",
  "parking_lot",
  "pollster",
- "slotmap",
  "wgpu",
 ]
 
