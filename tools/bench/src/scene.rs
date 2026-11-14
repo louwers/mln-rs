@@ -160,22 +160,31 @@ pub(crate) fn prepare_basemap_mlt(fixtures: &Path) {
             entries.sort();
             entries
         };
-        for z in walk(&tiles) {
-            for x in walk(&z) {
-                for mvt in walk(&x) {
-                    let relative = mvt.strip_prefix(&tiles).expect("under the tiles").with_extension("mlt");
-                    let out = fixtures.join(BASEMAP_MLT_DIR).join(relative);
-                    let layers = mlt_core::mvt::mvt_to_tile_layers(std::fs::read(&mvt).expect("a basemap tile"))
-                        .expect("an MVT tile");
-                    let mut mlt = Vec::new();
-                    for layer in layers {
-                        mlt.extend(layer.encode(config).expect("an MLT layer"));
+        // mlt-core keeps its encoder's scratch in a pool per thread, which
+        // would stay on the bench's thread through every case after this
+        // one. A thread of its own takes its pool with it when it ends.
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                for z in walk(&tiles) {
+                    for x in walk(&z) {
+                        for mvt in walk(&x) {
+                            let relative = mvt.strip_prefix(&tiles).expect("under the tiles").with_extension("mlt");
+                            let out = fixtures.join(BASEMAP_MLT_DIR).join(relative);
+                            let layers =
+                                mlt_core::mvt::mvt_to_tile_layers(std::fs::read(&mvt).expect("a basemap tile"))
+                                    .expect("an MVT tile");
+                            let mut mlt = Vec::new();
+                            for layer in layers {
+                                mlt.extend(layer.encode(config).expect("an MLT layer"));
+                            }
+                            std::fs::create_dir_all(out.parent().expect("a directory"))
+                                .expect("the MLT tile directory");
+                            std::fs::write(&out, mlt).expect("an MLT tile");
+                        }
                     }
-                    std::fs::create_dir_all(out.parent().expect("a directory")).expect("the MLT tile directory");
-                    std::fs::write(&out, mlt).expect("an MLT tile");
                 }
-            }
-        }
+            });
+        });
     });
 }
 
