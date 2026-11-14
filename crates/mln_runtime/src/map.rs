@@ -1413,8 +1413,7 @@ pub(crate) fn create(
     resolver: Resolver<Applied>,
     outbox: &mut Outbox,
 ) {
-    let (file_sources, resource_options) = core.file_sources();
-    let mut map = match mln_map::Map::with_resource_options(options.map, file_sources, resource_options) {
+    let mut map = match mln_map::Map::with_file_source(Arc::clone(core.loader()), options.map) {
         Ok(map) => map,
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };

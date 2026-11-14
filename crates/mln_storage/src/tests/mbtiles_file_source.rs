@@ -8,7 +8,6 @@ use super::{cpp_path, req, temp_path};
 use crate::file_source::FileSource;
 use crate::mbtiles_file_source::MBTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 fn to_absolute_url(file_name: &str) -> String {
@@ -17,7 +16,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn mbtiles_file_source() -> MBTilesFileSource {
-    MBTilesFileSource::new(&ResourceOptions::default())
+    MBTilesFileSource::new()
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.

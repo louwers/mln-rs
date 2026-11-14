@@ -16,7 +16,7 @@ use std::sync::Arc;
 use mln_actor::{LocalObject, RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
-use mln_storage::{AsyncRequest, Callback, FileSource, Resource, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Resource, Response};
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::fill_layer::Impl as FillLayerImpl;
@@ -160,12 +160,6 @@ impl FileSource for Network {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_resource_options(&self, _options: ResourceOptions) {}
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        ResourceOptions::default()
     }
 }
 

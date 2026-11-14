@@ -6,10 +6,10 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
 use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
-use mln_storage::{FileSource, FileSourceManager, FileSourceType};
+use mln_storage::FileSource;
 use mln_util::image::PremultipliedImage;
 
-use crate::file_source::proxy_file_sources;
+use crate::file_source::proxy_loader;
 use crate::metadata::{MapMode, TestMetadata};
 use crate::runner::{
     CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
@@ -34,10 +34,9 @@ pub(crate) struct Impl {
 
 impl Impl {
     /// A frontend, file source and map for a test with `metadata`, loading
-    /// through `file_sources`.
+    /// through a [`proxy_loader`].
     pub(crate) fn new(
         metadata: &TestMetadata,
-        file_sources: &FileSourceManager,
         resource_options: &ResourceOptions,
         impl_options: ImplOptions,
     ) -> Result<Impl, String> {
@@ -52,8 +51,9 @@ impl Impl {
             let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)));
             frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
         }
-        let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
-        let mut map = Map::with_resource_options(
+        let file_source = proxy_loader(&resource_options);
+        let mut map = Map::with_file_source(
+            Arc::clone(&file_source),
             MapOptions {
                 map_mode: map_mode(metadata.map_mode),
                 size: metadata.size,
@@ -61,8 +61,6 @@ impl Impl {
                 cross_source_collisions: metadata.cross_source_collisions,
                 ..Default::default()
             },
-            file_sources,
-            &resource_options,
         )
         .map_err(|e| e.to_string())?;
         frontend.attach(&map);
@@ -70,7 +68,7 @@ impl Impl {
             map.set_bounds(&BoundOptions { max_pitch: Some(f64::from(max_pitch)), ..Default::default() })
                 .map_err(|e| e.to_string())?;
         }
-        Ok(Impl { frontend, file_source, map })
+        Ok(Impl { frontend, file_source: Some(file_source), map })
     }
 }
 
@@ -405,13 +403,11 @@ impl TestRunnerImpl for Impl {
 }
 
 /// The factory `TestRunner::run` uses for `maps[key]`. Creates the thread's
-/// `util::RunLoop` first, as `runRenderTests` does, and keeps it alive. Its
-/// maps share one set of [`proxy_file_sources`].
+/// `util::RunLoop` first, as `runRenderTests` does, and keeps it alive.
 pub fn factory() -> ImplFactory {
     let run_loop = RunLoop::new();
-    let file_sources = proxy_file_sources();
     Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions, impl_options: &ImplOptions| {
         let _ = &run_loop;
-        Ok(Box::new(Impl::new(metadata, &file_sources, resource_options, *impl_options)?))
+        Ok(Box::new(Impl::new(metadata, resource_options, *impl_options)?))
     })
 }

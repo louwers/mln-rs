@@ -8,7 +8,7 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapOptions};
 use mln_storage::response::{Reason, ResourceError};
-use mln_storage::{AsyncRequest, Callback, FileSource, Resource, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Resource, Response};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use parking_lot::Mutex;
@@ -51,12 +51,6 @@ impl FileSource for SyncFileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_resource_options(&self, _options: ResourceOptions) {}
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        ResourceOptions::default()
     }
 }
 

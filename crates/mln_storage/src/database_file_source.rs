@@ -13,19 +13,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use feature::Value;
-use mln_actor::{ActorRef, Thread, Timer, scheduler};
+use mln_actor::{ActorRef, Thread, Timer};
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
-use mln_util::logging::{Event, Log};
-use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource, FileSourceType, READ_ONLY_MODE_KEY};
-use crate::file_source_manager::FileSourceManager;
+use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{LoadingMethod, Resource, StoragePolicy};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 /// How long cache hits' `accessed` timestamps wait, so that the reads of a
@@ -51,8 +46,12 @@ impl DatabaseFileSourceThread {
         self_ref: ActorRef<DatabaseFileSourceThread>,
         online_file_source: Option<Arc<dyn FileSource>>,
         cache_path: &str,
+        read_only: bool,
     ) -> Self {
         let mut db = OfflineDatabase::new(cache_path);
+        if read_only {
+            db.reopen_database_read_only(true);
+        }
         let accessed_flush_scheduled = Arc::new(AtomicBool::new(false));
         let (scheduled, actor) = (Arc::clone(&accessed_flush_scheduled), self_ref.clone());
         db.set_accessed_callback(Box::new(move || {
@@ -109,12 +108,8 @@ impl DatabaseFileSourceThread {
         }
     }
 
-    /// `forward(resource, response, callback)`.
-    pub(crate) fn forward(&self, resource: &Resource, response: &Response, callback: Option<Box<dyn FnMut() + Send>>) {
+    pub(crate) fn put(&self, resource: &Resource, response: &Response) {
         self.db.borrow_mut().put(resource, response);
-        if let Some(mut callback) = callback {
-            callback();
-        }
     }
 
     pub(crate) fn reset_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
@@ -123,12 +118,6 @@ impl DatabaseFileSourceThread {
 
     pub(crate) fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().pack()));
-    }
-
-    /// `put(resource, response)`.
-    #[cfg(test)]
-    pub(crate) fn put(&self, resource: &Resource, response: &Response) {
-        self.db.borrow_mut().put(resource, response);
     }
 
     pub(crate) fn invalidate_ambient_cache(&self, callback: impl FnOnce(Result<(), DatabaseError>)) {
@@ -141,10 +130,6 @@ impl DatabaseFileSourceThread {
 
     pub(crate) fn set_maximum_ambient_cache_size(&self, size: u64, callback: impl FnOnce(Result<(), DatabaseError>)) {
         callback(into_result(self.db.borrow_mut().set_maximum_ambient_cache_size(size)));
-    }
-
-    pub(crate) fn reopen_database_read_only(&self, read_only: bool) {
-        self.db.borrow_mut().reopen_database_read_only(read_only);
     }
 
     /// The database. Borrow it only for the duration of one call: requests
@@ -175,9 +160,10 @@ fn into_result(error: Option<DatabaseError>) -> Result<(), DatabaseError> {
     error.map_or(Ok(()), Err)
 }
 
+/// The `Database` file source: the ambient cache and the offline regions,
+/// in an SQLite database.
 pub struct DatabaseFileSource {
     thread: Thread<DatabaseFileSourceThread>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl DatabaseFileSource {
@@ -187,16 +173,37 @@ impl DatabaseFileSource {
         crate::tests::pause(&self.thread.actor())
     }
 
-    /// A database at `resource_options`' cache path. Offline downloads go
-    /// through `file_sources`' network file source.
+    /// A database at `cache_path`, created if needed; `":memory:"` keeps it
+    /// in memory. Offline regions download through `network`, and can't
+    /// without one.
     #[must_use]
-    pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
-        let online_file_source = file_sources.get_file_source(FileSourceType::Network, resource_options);
-        let cache_path = resource_options.cache_path.clone();
+    pub fn new(cache_path: &str, network: Option<Arc<dyn FileSource>>) -> Self {
+        Self::open(cache_path, network, false)
+    }
+
+    /// The database at `cache_path`, opened read-only: it answers requests
+    /// but stores nothing.
+    #[must_use]
+    pub fn read_only(cache_path: &str, network: Option<Arc<dyn FileSource>>) -> Self {
+        Self::open(cache_path, network, true)
+    }
+
+    fn open(cache_path: &str, network: Option<Arc<dyn FileSource>>, read_only: bool) -> Self {
+        let cache_path = cache_path.to_owned();
         let thread = Thread::new("DatabaseFileSource", move |self_ref| {
-            DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path)
+            DatabaseFileSourceThread::new(self_ref, network, &cache_path, read_only)
         });
-        DatabaseFileSource { thread, resource_options: Mutex::new(resource_options.clone()) }
+        DatabaseFileSource { thread }
+    }
+
+    /// Stores a response to `resource`, unless the resource is volatile.
+    pub fn put(&self, resource: &Resource, response: &Response) {
+        if resource.storage_policy == StoragePolicy::Volatile {
+            return;
+        }
+        let resource = resource.clone();
+        let response = response.clone();
+        self.invoke(move |t| t.put(&resource, &response));
     }
 
     /// Switches to the database at `path`, creating it if needed. The
@@ -205,6 +212,18 @@ impl DatabaseFileSource {
     pub(crate) fn set_database_path(&self, path: &str, callback: Option<Box<dyn FnOnce() + Send>>) {
         let path = path.to_owned();
         self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.set_database_path(&path, callback));
+    }
+
+    /// Stores a response to `resource`, then runs `then` on this thread.
+    #[cfg(test)]
+    pub(crate) fn put_then(&self, resource: &Resource, response: &Response, then: Box<dyn FnOnce() + Send>) {
+        let mut then = mln_actor::scheduler::bind_once(&mln_actor::scheduler::get_current(), then);
+        let resource = resource.clone();
+        let response = response.clone();
+        self.invoke(move |t| {
+            t.put(&resource, &response);
+            then();
+        });
     }
 
     /// Deletes the database file and starts an empty one. The callback runs
@@ -217,14 +236,6 @@ impl DatabaseFileSource {
     /// runs on the database thread.
     pub fn pack_database(&self, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
         self.invoke(move |t| t.pack_database(callback));
-    }
-
-    /// `put(resource, response)`.
-    #[cfg(test)]
-    pub(crate) fn put(&self, resource: &Resource, response: &Response) {
-        let resource = resource.clone();
-        let response = response.clone();
-        self.invoke(move |t| t.put(&resource, &response));
     }
 
     /// Makes the ambient cache's resources revalidate with their server
@@ -267,43 +278,9 @@ impl FileSource for DatabaseFileSource {
         Box::new(req)
     }
 
-    fn forward(&self, res: &Resource, response: &Response, callback: Option<Box<dyn FnOnce() + Send>>) {
-        if res.storage_policy == StoragePolicy::Volatile {
-            return;
-        }
-
-        let wrapper: Option<Box<dyn FnMut() + Send>> = callback.map(|callback| -> Box<dyn FnMut() + Send> {
-            Box::new(scheduler::bind_once(&scheduler::get_current(), callback))
-        });
-        let res = res.clone();
-        let response = response.clone();
-        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.forward(&res, &response, wrapper));
-    }
-
     fn can_request(&self, resource: &Resource) -> bool {
         resource.has_loading_method(LoadingMethod::Cache)
             && !resource.url.starts_with(ASSET_PROTOCOL)
             && !resource.url.starts_with(FILE_PROTOCOL)
-    }
-
-    fn set_property(&self, key: &str, value: &Value) {
-        match value {
-            Value::Bool(read_only) if key == READ_ONLY_MODE_KEY => {
-                let read_only = *read_only;
-                self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.reopen_database_read_only(read_only));
-            }
-            _ => {
-                let message = format!("Resource provider does not support property {key}");
-                Log::error(Event::General, message);
-            }
-        }
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

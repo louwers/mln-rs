@@ -173,7 +173,7 @@ impl TileLoader {
             return loader;
         };
 
-        if file_source.supports_cache_only_requests() {
+        if file_source.supports_cache_only() {
             // When supported, the first request is always optional, even if
             // the TileLoader is marked as required. That way, we can let the
             // first optional request continue to load when the TileLoader is

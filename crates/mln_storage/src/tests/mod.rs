@@ -5,7 +5,6 @@
 mod asset_file_source;
 #[cfg(feature = "sqlite")]
 mod database_file_source;
-mod file_source_manager;
 mod http_file_source;
 mod local_file_source;
 // The C++ MainResourceLoader tests assume its Database file source.

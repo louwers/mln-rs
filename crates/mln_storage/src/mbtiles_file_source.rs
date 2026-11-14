@@ -15,7 +15,6 @@ use mln_util::chrono::Timestamp;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
 use mln_vec_map::VecMap;
-use parking_lot::Mutex;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value, json};
@@ -26,7 +25,6 @@ use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::local_file_request::path_from_utf8;
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 fn accepts_url(url: &str) -> bool {
@@ -220,17 +218,15 @@ impl MBTilesFileSourceThread {
 /// The `Mbtiles` file source: `mbtiles://` URLs with absolute paths.
 pub(crate) struct MBTilesFileSource {
     thread: Thread<MBTilesFileSourceThread>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl MBTilesFileSource {
     #[must_use]
-    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
+    pub(crate) fn new() -> Self {
         MBTilesFileSource {
             thread: Thread::new("MBTilesFileSource", |_| MBTilesFileSourceThread {
                 db_cache: RefCell::new(VecMap::new()),
             }),
-            resource_options: Mutex::new(resource_options.clone()),
         }
     }
 }
@@ -283,13 +279,5 @@ impl FileSource for MBTilesFileSource {
 
     fn can_request(&self, resource: &Resource) -> bool {
         accepts_url(&resource.url)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

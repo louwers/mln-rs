@@ -7,16 +7,13 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use feature::Value;
 use mln_actor::{AsyncTask, LocalObject};
 use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
-use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::Response;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,13 +36,11 @@ struct State {
     // gtests-core: the C++ `response` member (the responder for every kind;
     // by default `defaultResponse`, which dispatches to the per-kind ones).
     response: Option<Responder>,
-    properties: HashMap<String, Value>,
 }
 
 pub struct StubFileSource {
     type_: ResponseType,
     state: LocalObject<RefCell<State>>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 struct StubFileRequest {
@@ -81,11 +76,7 @@ impl StubFileSource {
             });
             state.borrow_mut().timer = Some(timer);
         }
-        StubFileSource {
-            type_,
-            state: LocalObject::from_rc(state),
-            resource_options: Mutex::new(ResourceOptions::default()),
-        }
+        StubFileSource { type_, state: LocalObject::from_rc(state) }
     }
 
     fn state(&self) -> Rc<RefCell<State>> {
@@ -208,21 +199,5 @@ impl FileSource for StubFileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_property(&self, key: &str, value: &Value) {
-        self.state().borrow_mut().properties.insert(key.to_owned(), value.clone());
-    }
-
-    fn get_property(&self, key: &str) -> Value {
-        self.state().borrow().properties.get(key).cloned().unwrap_or(Value::Null)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

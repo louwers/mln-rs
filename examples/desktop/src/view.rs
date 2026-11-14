@@ -37,7 +37,7 @@ use mln_map::{
     MapEvent, MapOptions, UpdateReader,
 };
 use mln_renderer::Renderer;
-use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{DatabaseFileSource, FileSource, Loader, OnlineFileSource, ResourceOptions};
 use mln_style::PropertyValue;
 use mln_style::projection::Projection;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -110,28 +110,26 @@ pub(crate) fn run(launch: Launch) {
     let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
     let resource_options = ResourceOptions { cache_path: cache_db, ..ResourceOptions::default() };
 
-    let file_sources = FileSourceManager::new();
-    let database_file_source = file_sources.get_file_source(FileSourceType::Database, &resource_options);
+    let online = Arc::new(OnlineFileSource::new());
     if !settings.online {
-        match file_sources.get_file_source(FileSourceType::Network, &resource_options) {
-            Some(online) => {
-                online.set_property("online-status", &feature::Value::Bool(false));
-                Log::warning(Event::Setup, "Application is offline.");
-            }
-            None => Log::warning(
-                Event::Setup,
-                "Network resource provider is not available, only local requests are supported.",
-            ),
-        }
+        online.set_online(false);
+        Log::warning(Event::Setup, "Application is offline.");
     }
+    let network: Arc<dyn FileSource> = online;
+    let database_file_source =
+        Arc::new(DatabaseFileSource::new(&resource_options.cache_path, Some(Arc::clone(&network))));
+    let loader = Loader::builder()
+        .asset_path(&resource_options.asset_path)
+        .network(network)
+        .database(Arc::clone(&database_file_source))
+        .build();
 
     let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None);
     let map_size = logical_size(size, pixel_ratio);
 
-    let mut map = match Map::with_resource_options(
+    let mut map = match Map::with_file_source(
+        Arc::new(loader),
         MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
-        &file_sources,
-        &resource_options,
     ) {
         Ok(map) => map,
         Err(e) => {
@@ -301,7 +299,7 @@ struct View {
     /// The controls' last frame, to tell whether a frame changed them.
     ui_shapes: Vec<egui::epaint::ClippedShape>,
     paint: Rc<RefCell<Paint>>,
-    database_file_source: Option<Arc<dyn FileSource>>,
+    database_file_source: Arc<DatabaseFileSource>,
     styles: Vec<Style>,
     style: Style,
     adapter: String,
@@ -690,12 +688,7 @@ impl View {
 
     /// Empties the cache database.
     fn reset_cache(&self) {
-        let database = self.database_file_source.as_deref();
-        let Some(database) = database.and_then(|source| source.downcast_ref::<DatabaseFileSource>()) else {
-            Log::warning(Event::Database, "There is no cache database to reset");
-            return;
-        };
-        database.reset_database(|result| match result {
+        self.database_file_source.reset_database(|result| match result {
             Ok(()) => Log::info(Event::Database, "Reset the cache"),
             Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
         });

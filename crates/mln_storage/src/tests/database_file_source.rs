@@ -3,23 +3,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use feature::Value;
 use mln_actor::RunLoop;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use super::{local_callback, req, temp_path};
 use crate::database_file_source::DatabaseFileSource;
-use crate::file_source::{FileSource, FileSourceType, READ_ONLY_MODE_KEY};
-use crate::file_source_manager::FileSourceManager;
+use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
-fn dbfs() -> Arc<dyn FileSource> {
-    FileSourceManager::new()
-        .get_file_source(FileSourceType::Database, &ResourceOptions::default())
-        .expect("database file source")
+fn dbfs() -> Arc<DatabaseFileSource> {
+    Arc::new(DatabaseFileSource::new(":memory:", None))
 }
 
 // gtest: DatabaseFileSource.VolatileResource
@@ -41,10 +36,10 @@ fn volatile_resource() {
 
     let (r, fs, res, stop) = (Rc::clone(&req), Arc::clone(&dbfs), Rc::clone(&resource), run_loop.clone());
     let forwarded = resource.borrow().clone();
-    dbfs.forward(
+    dbfs.put_then(
         &forwarded,
         &response,
-        Some(local_callback(move || {
+        local_callback(move || {
             let (r1, fs1, res1) = (Rc::clone(&r), Arc::clone(&fs), Rc::clone(&res));
             let request = res.borrow().clone();
             *r.borrow_mut() = Some(fs.request(
@@ -71,7 +66,7 @@ fn volatile_resource() {
                     ));
                 }),
             ));
-        })),
+        }),
     );
     run_loop.run();
 }
@@ -95,7 +90,7 @@ fn volatile_resource_is_not_stored() {
 
     // Forwarding a volatile response must not write it to the database, so
     // a regular request for the same resource finds nothing.
-    dbfs.forward(&resource, &response, None);
+    dbfs.put(&resource, &response);
     resource.storage_policy = StoragePolicy::Permanent;
     let req = req();
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
@@ -119,7 +114,7 @@ fn volatile_resource_is_not_stored() {
 // Not a C++ test: `canRequest`.
 #[test]
 fn can_request() {
-    let dbfs = DatabaseFileSource::new(&FileSourceManager::new(), &ResourceOptions::default());
+    let dbfs = DatabaseFileSource::new(":memory:", None);
     let cache_only = |url: &str| Resource::with_tile_data(Kind::Unknown, url, None, LoadingMethod::CacheOnly);
     assert!(dbfs.can_request(&cache_only("http://example.com")));
     assert!(!dbfs.can_request(&cache_only("asset://example.json")));
@@ -209,10 +204,7 @@ fn failed_accessed_flush_waits_for_next_read() {
     Log::set_observer(Box::new(FlushFailures { count: Arc::clone(&failures), marker }));
     let _remove_observer = RemoveObserver;
 
-    let source = DatabaseFileSource::new(
-        &FileSourceManager::new(),
-        &ResourceOptions { cache_path: (&path).into(), ..ResourceOptions::default() },
-    );
+    let source = DatabaseFileSource::new(&String::from(&path), None);
     let cached = cached_request(&run_loop, &source, &resource);
     assert!(cached.error.is_none());
     assert_eq!(response.data, cached.data);
@@ -244,10 +236,7 @@ fn maintain(operation: impl FnOnce(Box<dyn FnOnce(Result<(), DatabaseError>) + S
 fn cache_maintenance() {
     let run_loop = RunLoop::new();
     let path = temp_path("cache-maintenance.db");
-    let source = DatabaseFileSource::new(
-        &FileSourceManager::new(),
-        &ResourceOptions { cache_path: (&path).into(), ..ResourceOptions::default() },
-    );
+    let source = DatabaseFileSource::new(&String::from(&path), None);
     let resource =
         Resource::with_tile_data(Kind::Unknown, "https://example.com/maintained", None, LoadingMethod::CacheOnly);
     let mut response = Response::new();
@@ -274,7 +263,7 @@ fn cache_maintenance() {
     source.put(&resource, &response);
     assert!(not_found(cached_request(&run_loop, &source, &resource)));
 
-    source.set_property(READ_ONLY_MODE_KEY, &Value::Bool(true));
-    let error = maintain(|done| source.clear_ambient_cache(done)).unwrap_err();
+    let read_only = DatabaseFileSource::read_only(&String::from(&path), None);
+    let error = maintain(|done| read_only.clear_ambient_cache(done)).unwrap_err();
     assert_eq!("Cannot modify database in read-only mode", error.to_string());
 }

@@ -11,7 +11,7 @@ use mln_storage::file_source::Callback;
 use mln_storage::http_header_transform::HttpHeaders;
 use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
-use mln_storage::{AsyncRequest, FileSource, OnlineFileSource, Resource, ResourceError, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, FileSource, OnlineFileSource, Resource, ResourceError, Response};
 use mln_util::error::Error;
 use parking_lot::{Mutex, RwLock};
 
@@ -89,7 +89,7 @@ impl ResourceHooks {
 /// The runtime's network file source: the library's online file source,
 /// behind the host's resource provider.
 pub(crate) struct ProviderFileSource {
-    online: Arc<dyn FileSource>,
+    online: Arc<OnlineFileSource>,
     hooks: Arc<ResourceHooks>,
 }
 
@@ -103,8 +103,8 @@ enum Route<'a> {
 }
 
 impl ProviderFileSource {
-    pub(crate) fn new(options: &ResourceOptions, hooks: Arc<ResourceHooks>) -> Self {
-        ProviderFileSource { online: Arc::new(OnlineFileSource::new(options)), hooks }
+    pub(crate) fn new(online: Arc<OnlineFileSource>, hooks: Arc<ResourceHooks>) -> Self {
+        ProviderFileSource { online, hooks }
     }
 
     /// Who loads `resource`, when `provider` is the runtime's provider.
@@ -131,7 +131,7 @@ impl ProviderFileSource {
 /// it can't load at once, rather than sending it to the network.
 #[derive(Clone)]
 struct Native {
-    online: Arc<dyn FileSource>,
+    online: Arc<OnlineFileSource>,
     hooks: Arc<ResourceHooks>,
 }
 
@@ -244,41 +244,9 @@ impl FileSource for ProviderFileSource {
         Box::new(ProviderRequest { mailbox, shared })
     }
 
-    fn forward(&self, resource: &Resource, response: &Response, callback: Option<Box<dyn FnOnce() + Send>>) {
-        self.online.forward(resource, response, callback);
-    }
-
-    fn supports_cache_only_requests(&self) -> bool {
-        self.online.supports_cache_only_requests()
-    }
-
     fn can_request(&self, resource: &Resource) -> bool {
         let hooked = self.hooks.provider.read();
         matches!(Self::route(resource, hooked.as_deref()), Route::Provider(..)) || self.online.can_request(resource)
-    }
-
-    fn set_resource_transform(&self, transform: Option<mln_storage::resource_transform::ResourceTransform>) {
-        self.online.set_resource_transform(transform);
-    }
-
-    fn set_http_header_transform(&self, transform: mln_storage::http_header_transform::HttpHeaderTransform) {
-        self.online.set_http_header_transform(transform);
-    }
-
-    fn set_property(&self, key: &str, value: &feature::Value) {
-        self.online.set_property(key, value);
-    }
-
-    fn get_property(&self, key: &str) -> feature::Value {
-        self.online.get_property(key)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        self.online.set_resource_options(options);
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.online.get_resource_options()
     }
 }
 

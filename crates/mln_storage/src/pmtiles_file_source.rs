@@ -1,12 +1,8 @@
-// The work runs on the "PMTilesFileSource" thread (`util::Thread`) as in
-// C++: header, metadata and directories are read with range requests through
-// the ResourceLoader file source, whose callbacks come back to this thread.
-// `tasks` is keyed by a request id instead of the caller's `AsyncRequest*`;
-// as in C++, a sub-request replaces the previous one of the same caller and
-// nothing removes them when the caller cancels.
-//
-// The resource options are shared with the thread behind a mutex
-// (C++: in the thread object, read back with a blocking `ask`).
+// The work runs on the "PMTilesFileSource" thread: header, metadata and
+// directories are read with range requests through the file source that
+// loads the archives, whose callbacks come back to this thread. `tasks` is
+// keyed by a request id; a sub-request replaces the previous one of the same
+// caller and nothing removes them when the caller cancels.
 
 use std::cell::RefCell;
 use std::fmt::Write as _;
@@ -19,17 +15,14 @@ use mln_actor::{ActorRef, Thread};
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_vec_map::VecMap;
-use parking_lot::Mutex;
 use pmtiles::{Compression, DirEntry, Directory, Header, PmtError, TileCoord, TileId, TileType};
 use serde_json::{Value as Json, json};
 
 use crate::archive_tilejson::archive_tilejson;
 use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource, FileSourceType};
-use crate::file_source_manager::FileSourceManager;
+use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::resource::{Kind, LoadingMethod, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 // https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md#3-header
@@ -89,10 +82,8 @@ fn send(req: &ActorRef<FileSourceRequestState>, response: Response) {
 
 /// The members of `PMTilesFileSource::Impl`.
 struct State {
-    resource_options: Arc<Mutex<ResourceOptions>>,
-    file_sources: FileSourceManager,
-
-    file_source: RefCell<Option<Arc<dyn FileSource>>>,
+    /// Loads the archives' bytes.
+    file_source: Arc<dyn FileSource>,
     header_cache: RefCell<VecMap<String, Rc<Header>>>,
     metadata_cache: RefCell<VecMap<String, String>>,
     directory_cache: RefCell<VecMap<String, VecMap<String, Directory>>>,
@@ -101,19 +92,8 @@ struct State {
 }
 
 impl State {
-    fn get_file_source(&self) -> Arc<dyn FileSource> {
-        let mut file_source = self.file_source.borrow_mut();
-        Arc::clone(file_source.get_or_insert_with(|| {
-            let resource_options = self.resource_options.lock().clone();
-            self.file_sources
-                .get_file_source(FileSourceType::ResourceLoader, &resource_options)
-                .expect("ResourceLoader file source")
-        }))
-    }
-
     fn request(self: &Rc<Self>, req: u64, resource: &Resource, callback: impl FnMut(Response) + 'static) {
-        let file_source = self.get_file_source();
-        let request = file_source.request(resource, Box::new(callback));
+        let request = self.file_source.request(resource, Box::new(callback));
         let previous = self.tasks.borrow_mut().insert(req, request);
         drop(previous);
     }
@@ -657,23 +637,16 @@ static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 /// The `Pmtiles` file source: `pmtiles://` URLs of local or remote archives.
 pub(crate) struct PMTilesFileSource {
     thread: Thread<PMTilesFileSourceThread>,
-    resource_options: Arc<Mutex<ResourceOptions>>,
 }
 
 impl PMTilesFileSource {
-    /// A PMTiles file source that reads archives through `file_sources`'
-    /// `ResourceLoader`.
+    /// A PMTiles file source that reads archives through `archives`.
     #[must_use]
-    pub(crate) fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
-        let resource_options = Arc::new(Mutex::new(resource_options.clone()));
-        let ro = Arc::clone(&resource_options);
-        let file_sources = file_sources.clone();
+    pub(crate) fn new(archives: Arc<dyn FileSource>) -> Self {
         PMTilesFileSource {
             thread: Thread::new("PMTilesFileSource", move |_| PMTilesFileSourceThread {
                 state: Rc::new(State {
-                    resource_options: ro,
-                    file_sources,
-                    file_source: RefCell::new(None),
+                    file_source: archives,
                     header_cache: RefCell::new(VecMap::new()),
                     metadata_cache: RefCell::new(VecMap::new()),
                     directory_cache: RefCell::new(VecMap::new()),
@@ -681,7 +654,6 @@ impl PMTilesFileSource {
                     tasks: RefCell::new(VecMap::new()),
                 }),
             }),
-            resource_options,
         }
     }
 }
@@ -707,13 +679,5 @@ impl FileSource for PMTilesFileSource {
 
     fn can_request(&self, resource: &Resource) -> bool {
         accepts_url(&resource.url)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

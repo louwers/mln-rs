@@ -16,7 +16,7 @@ use mln_storage::DatabaseFileSource;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
-use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::thread::Joined;
@@ -274,15 +274,17 @@ pub(crate) struct RuntimeCore {
     pub(crate) maps: BTreeMap<MapId, MapEntry>,
     pub(crate) event_handler: Option<EventHandler>,
     hooks: Arc<ResourceHooks>,
-    file_sources: FileSourceManager,
     resource_options: ResourceOptions,
     /// The runtime's file sources, made at their first use and held for the
     /// runtime's life, so that each map, and each transform, finds the same
     /// ones. A runtime that never loads a resource starts none of their
     /// threads.
-    loader: OnceCell<Option<Arc<dyn FileSource>>>,
-    database: OnceCell<Option<Arc<dyn FileSource>>>,
-    network: OnceCell<Option<Arc<dyn FileSource>>>,
+    loader: OnceCell<Arc<dyn FileSource>>,
+    #[cfg(not(target_family = "wasm"))]
+    database: OnceCell<Arc<DatabaseFileSource>>,
+    /// The library's own network loading, behind the host's provider.
+    online: OnceCell<Arc<OnlineFileSource>>,
+    network: OnceCell<Arc<dyn FileSource>>,
     pub(crate) run_loop: RunLoopHandle,
     /// [`RuntimeShared::queued`].
     queued: Arc<AtomicUsize>,
@@ -294,23 +296,15 @@ pub(crate) struct RuntimeCore {
 
 impl RuntimeCore {
     fn new(resource_options: ResourceOptions, run_loop: RunLoopHandle, queued: Arc<AtomicUsize>) -> Self {
-        let hooks = Arc::new(ResourceHooks::default());
-        let file_sources = FileSourceManager::new();
-        let network_hooks = Arc::clone(&hooks);
-        file_sources.register_file_source_factory(
-            FileSourceType::Network,
-            Arc::new(move |_: &FileSourceManager, options: &ResourceOptions| {
-                Arc::new(ProviderFileSource::new(options, Arc::clone(&network_hooks)))
-            }),
-        );
         RuntimeCore {
             maps: BTreeMap::new(),
             event_handler: None,
-            hooks,
-            file_sources,
+            hooks: Arc::new(ResourceHooks::default()),
             resource_options,
             loader: OnceCell::new(),
+            #[cfg(not(target_family = "wasm"))]
             database: OnceCell::new(),
+            online: OnceCell::new(),
             network: OnceCell::new(),
             run_loop,
             queued,
@@ -352,23 +346,27 @@ impl RuntimeCore {
         }
     }
 
-    /// The manager that a map takes its file sources from, with the
-    /// runtime's file sources made.
-    pub(crate) fn file_sources(&self) -> (&FileSourceManager, &ResourceOptions) {
-        self.file_source(&self.network, FileSourceType::Network);
-        self.file_source(&self.database, FileSourceType::Database);
-        self.file_source(&self.loader, FileSourceType::ResourceLoader);
-        (&self.file_sources, &self.resource_options)
+    /// The loader that the runtime's maps share.
+    pub(crate) fn loader(&self) -> &Arc<dyn FileSource> {
+        self.loader.get_or_init(|| {
+            let builder =
+                Loader::builder().asset_path(&self.resource_options.asset_path).network(Arc::clone(self.network()));
+            #[cfg(not(target_family = "wasm"))]
+            let builder = builder.database(Arc::clone(self.database()));
+            Arc::new(builder.build())
+        })
     }
 
-    /// The runtime's file source of `type_` that `cell` holds, made at the
-    /// first call.
-    fn file_source<'a>(
-        &self,
-        cell: &'a OnceCell<Option<Arc<dyn FileSource>>>,
-        type_: FileSourceType,
-    ) -> Option<&'a Arc<dyn FileSource>> {
-        cell.get_or_init(|| self.file_sources.get_file_source(type_, &self.resource_options)).as_ref()
+    /// The library's own network loading.
+    fn online(&self) -> &Arc<OnlineFileSource> {
+        self.online.get_or_init(|| Arc::new(OnlineFileSource::new()))
+    }
+
+    /// The runtime's network: the host's resource provider, in front of the
+    /// library's own loading.
+    fn network(&self) -> &Arc<dyn FileSource> {
+        self.network
+            .get_or_init(|| Arc::new(ProviderFileSource::new(Arc::clone(self.online()), Arc::clone(&self.hooks))))
     }
 
     /// Sends `events` to the event handler.
@@ -383,15 +381,10 @@ impl RuntimeCore {
 
     /// The cache database, which every runtime but the browser build's has.
     #[cfg(not(target_family = "wasm"))]
-    pub(crate) fn database(&self) -> Result<&DatabaseFileSource, Error> {
-        self.file_source(&self.database, FileSourceType::Database)
-            .and_then(|database| database.downcast_ref::<DatabaseFileSource>())
-            .ok_or_else(|| Error::unsupported("the runtime has no cache database"))
-    }
-
-    fn network(&self) -> Result<&Arc<dyn FileSource>, Error> {
-        self.file_source(&self.network, FileSourceType::Network)
-            .ok_or_else(|| Error::unsupported("the runtime has no network file source"))
+    pub(crate) fn database(&self) -> &Arc<DatabaseFileSource> {
+        self.database.get_or_init(|| {
+            Arc::new(DatabaseFileSource::new(&self.resource_options.cache_path, Some(Arc::clone(self.network()))))
+        })
     }
 }
 
@@ -631,7 +624,7 @@ impl Runtime {
     ) -> Result<Completion<()>, Error> {
         let transform: ResourceTransform = Arc::new(transform);
         self.apply(move |core| {
-            core.network()?.set_resource_transform(Some(transform));
+            core.online().set_resource_transform(Some(transform));
             core.hooks.set_transform_set(true);
             Ok(())
         })
@@ -640,7 +633,7 @@ impl Runtime {
     /// Stops rewriting request URLs.
     pub fn clear_resource_transform(&self) -> Result<Completion<()>, Error> {
         self.apply(move |core| {
-            core.network()?.set_resource_transform(None);
+            core.online().set_resource_transform(None);
             core.hooks.set_transform_set(false);
             Ok(())
         })
@@ -666,7 +659,7 @@ impl Runtime {
             crate::resources::sanitize_headers(transform(kind, url))
         })));
         self.apply(move |core| {
-            core.network()?.set_http_header_transform(transform);
+            core.online().set_http_header_transform(transform);
             Ok(())
         })
     }
@@ -674,7 +667,7 @@ impl Runtime {
     /// Stops adding headers to HTTP requests.
     pub fn clear_http_header_transform(&self) -> Result<Completion<()>, Error> {
         self.apply(move |core| {
-            core.network()?.set_http_header_transform(HttpHeaderTransform::default());
+            core.online().set_http_header_transform(HttpHeaderTransform::default());
             Ok(())
         })
     }
@@ -692,11 +685,8 @@ impl Runtime {
     /// Runs a maintenance action on the cache database.
     #[cfg(not(target_family = "wasm"))]
     pub fn run_cache_database_operation(&self, operation: CacheDatabaseOperation) -> Result<Completion<()>, Error> {
-        self.command(move |core, outbox, resolver| {
-            let database = match core.database() {
-                Ok(database) => database,
-                Err(error) => return outbox.resolve(resolver, Err(error)),
-            };
+        self.command(move |core, _, resolver| {
+            let database = core.database();
             let reply = reply_on(core.run_loop.clone(), resolver);
             match operation {
                 CacheDatabaseOperation::Clear => database.clear_ambient_cache(reply),
@@ -722,9 +712,8 @@ impl Runtime {
     /// toward it.
     #[cfg(not(target_family = "wasm"))]
     pub fn set_maximum_ambient_cache_size(&self, size: u64) -> Result<Completion<()>, Error> {
-        self.command(move |core, outbox, resolver| match core.database() {
-            Ok(database) => database.set_maximum_ambient_cache_size(size, reply_on(core.run_loop.clone(), resolver)),
-            Err(error) => outbox.resolve(resolver, Err(error)),
+        self.command(move |core, _, resolver| {
+            core.database().set_maximum_ambient_cache_size(size, reply_on(core.run_loop.clone(), resolver));
         })
     }
 
@@ -787,10 +776,7 @@ impl Runtime {
         &self,
         command: impl FnOnce(&DatabaseFileSource, &RuntimeCore, Resolver<T>) + Send + 'static,
     ) -> Result<Completion<T>, Error> {
-        self.command(move |core, outbox, resolver| match core.database() {
-            Ok(database) => command(database, core, resolver),
-            Err(error) => outbox.resolve(resolver, Err(error)),
-        })
+        self.command(move |core, _, resolver| command(core.database(), core, resolver))
     }
 }
 

@@ -3,10 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use feature::Value;
-use mln_storage::file_source::READ_ONLY_MODE_KEY;
 use mln_storage::{
-    AsyncRequest, Callback, FileSource, FileSourceManager, FileSourceType, Kind, LoadingMethod, Resource,
+    AsyncRequest, Callback, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource,
     ResourceOptions, Response,
 };
 use mln_util::logging::{Event, Log};
@@ -54,25 +52,9 @@ impl Drop for PendingRequest {
 /// the `http://` URLs the cache stores.
 pub(crate) struct ProxyFileSource {
     default_resource_loader: Arc<dyn FileSource>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl ProxyFileSource {
-    /// A proxy over `default_resource_loader`. While offline, it makes
-    /// `file_sources`' database for these options read-only.
-    pub(crate) fn new(
-        default_resource_loader: Arc<dyn FileSource>,
-        file_sources: &FileSourceManager,
-        resource_options: &ResourceOptions,
-    ) -> Self {
-        if OFFLINE.load(Ordering::SeqCst)
-            && let Some(dbfs) = file_sources.get_file_source(FileSourceType::Database, resource_options)
-        {
-            dbfs.set_property(READ_ONLY_MODE_KEY, &Value::Bool(true));
-        }
-        ProxyFileSource { default_resource_loader, resource_options: Mutex::new(resource_options.clone()) }
-    }
-
     /// Flag to change the networking mode of the file source.
     pub(crate) fn set_offline(status: bool) {
         OFFLINE.store(status, Ordering::SeqCst);
@@ -178,30 +160,23 @@ impl FileSource for ProxyFileSource {
     fn can_request(&self, _resource: &Resource) -> bool {
         true
     }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
-    }
 }
 
-/// File sources whose `ResourceLoader` is a `ProxyFileSource` over the
-/// default one (`TestRunner::registerProxyFileSource()`).
+/// A `ProxyFileSource` over a loader for `resource_options`, whose cache
+/// database is read-only while offline (`TestRunner::registerProxyFileSource()`).
 #[must_use]
-pub fn proxy_file_sources() -> FileSourceManager {
-    let file_sources = FileSourceManager::new();
-    let resource_loader_factory = file_sources
-        .unregister_file_source_factory(FileSourceType::ResourceLoader)
-        .expect("default ResourceLoader factory");
-    file_sources.register_file_source_factory(
-        FileSourceType::ResourceLoader,
-        Arc::new(move |file_sources: &FileSourceManager, resource_options: &ResourceOptions| {
-            let file_source = resource_loader_factory(file_sources, resource_options);
-            Arc::new(ProxyFileSource::new(file_source, file_sources, resource_options))
-        }),
-    );
-    file_sources
+pub fn proxy_loader(resource_options: &ResourceOptions) -> Arc<dyn FileSource> {
+    let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new());
+    let cache_path = &resource_options.cache_path;
+    let database = if OFFLINE.load(Ordering::SeqCst) {
+        DatabaseFileSource::read_only(cache_path, Some(Arc::clone(&network)))
+    } else {
+        DatabaseFileSource::new(cache_path, Some(Arc::clone(&network)))
+    };
+    let loader = Loader::builder()
+        .asset_path(&resource_options.asset_path)
+        .network(network)
+        .database(Arc::new(database))
+        .build();
+    Arc::new(ProxyFileSource { default_resource_loader: Arc::new(loader) })
 }

@@ -13,11 +13,10 @@ use crate::file_source::FileSource;
 use crate::http_file_source::{HTTPFileSource, same_origin};
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 fn http_file_source() -> HTTPFileSource {
-    HTTPFileSource::new(&ResourceOptions::default())
+    HTTPFileSource::new()
 }
 
 fn data(res: &Response) -> &[u8] {

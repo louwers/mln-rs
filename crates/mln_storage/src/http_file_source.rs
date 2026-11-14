@@ -41,7 +41,6 @@ use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
 use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 /// The part of `HTTPRequest` that lives on the requesting thread.
@@ -339,18 +338,18 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
 pub(crate) struct HTTPFileSource {
     transport: Arc<dyn HttpTransport>,
     header_transform: Mutex<HttpHeaderTransform>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl HTTPFileSource {
     /// An HTTP file source over the platform's HTTP stack.
     #[must_use]
-    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
-        HTTPFileSource {
-            transport: default_transport(),
-            header_transform: Mutex::new(HttpHeaderTransform::default()),
-            resource_options: Mutex::new(resource_options.clone()),
-        }
+    pub(crate) fn new() -> Self {
+        HTTPFileSource { transport: default_transport(), header_transform: Mutex::new(HttpHeaderTransform::default()) }
+    }
+
+    /// Sets the headers to add to requests.
+    pub(crate) fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
+        *self.header_transform.lock() = transform;
     }
 
     /// `request(const Resource&, Callback)`. The callback runs on the
@@ -378,17 +377,5 @@ impl FileSource for HTTPFileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        *self.header_transform.lock() = transform;
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

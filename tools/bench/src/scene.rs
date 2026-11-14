@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use feature::{Value, ValueObject};
@@ -17,13 +17,14 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_renderer::query::SourceQueryOptions;
 use mln_runtime::Device;
-use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{FileSource, ResourceOptions};
 use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 /// A display's refresh period at 60 Hz, the clock continuous cases draw on.
 pub(crate) const REFRESH: Duration = Duration::from_nanos(16_666_667);
@@ -224,24 +225,28 @@ impl Observer {
     }
 }
 
-/// The file sources every scene shares: the render suite's proxy over its
-/// cache database, with the tile latency of [`crate::latency`].
-fn file_sources() -> FileSourceManager {
-    static FILE_SOURCES: OnceLock<FileSourceManager> = OnceLock::new();
-    FILE_SOURCES
-        .get_or_init(|| {
-            let file_sources = render_test::file_source::proxy_file_sources();
-            crate::latency::register(&file_sources);
-            file_sources
-        })
-        .clone()
+/// The file source of the scenes over `resource_options`' cache database:
+/// the render suite's proxy, with the tile latency of [`crate::latency`].
+/// The scenes alive at once share it, as a host's maps share their runtime's.
+fn shared_file_source(resource_options: &ResourceOptions) -> Arc<dyn FileSource> {
+    static SHARED: Mutex<Vec<(ResourceOptions, Weak<dyn FileSource>)>> = Mutex::new(Vec::new());
+    let mut shared = SHARED.lock();
+    shared.retain(|(_, file_source)| file_source.strong_count() > 0);
+    let live = shared
+        .iter()
+        .find(|(options, _)| options == resource_options)
+        .and_then(|(_, file_source)| file_source.upgrade());
+    live.unwrap_or_else(|| {
+        let file_source = crate::latency::delayed(render_test::file_source::proxy_loader(resource_options));
+        shared.push((resource_options.clone(), Arc::downgrade(&file_source)));
+        file_source
+    })
 }
 
 pub struct Scene {
     frontend: HeadlessFrontend,
     map: Map,
     observer: Observer,
-    _file_source: Option<Arc<dyn FileSource>>,
 }
 
 impl Scene {
@@ -254,7 +259,6 @@ impl Scene {
 
     /// A map whose renderer shares `glyph_cache`.
     pub(crate) fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
-        let file_sources = file_sources();
         // MLN_BENCH_CACHE_DB names the render suite's cache database where
         // the binary runs without its checkout, as on an Android device.
         let cache = std::env::var_os("MLN_BENCH_CACHE_DB").map_or_else(
@@ -265,16 +269,13 @@ impl Scene {
             ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
         let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache)
             .expect("a headless frontend");
-        let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
+        let file_source = shared_file_source(&resource_options);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
-        let map = Map::with_resource_options(
-            MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() },
-            &file_sources,
-            &resource_options,
-        )
-        .expect("the map");
+        let map =
+            Map::with_file_source(file_source, MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() })
+                .expect("the map");
         frontend.attach(&map);
-        Scene { frontend, map, observer: Observer::default(), _file_source: file_source }
+        Scene { frontend, map, observer: Observer::default() }
     }
 
     /// Starts loading a style; it loads while the scene renders.

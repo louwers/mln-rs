@@ -1,18 +1,11 @@
-// The requests run on the "LocalFileSource" thread (`util::Thread`) as in
-// C++. The resource options are kept next to the thread behind a
-// mutex (C++ keeps them in the thread object and reads them back with a
-// blocking `ask`); the values returned are the same.
-
 use mln_actor::{ActorRef, Thread};
 use mln_util::constants::FILE_PROTOCOL;
-use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::local_file_request::request_local_file;
 use crate::resource::Resource;
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 fn accepts_url(url: &str) -> bool {
@@ -63,16 +56,12 @@ impl LocalFileSourceThread {
 /// `mln_storage::android::APP_ASSETS` are the app's assets.
 pub(crate) struct LocalFileSource {
     thread: Thread<LocalFileSourceThread>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl LocalFileSource {
     #[must_use]
-    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
-        LocalFileSource {
-            thread: Thread::new("LocalFileSource", |_| LocalFileSourceThread),
-            resource_options: Mutex::new(resource_options.clone()),
-        }
+    pub(crate) fn new() -> Self {
+        LocalFileSource { thread: Thread::new("LocalFileSource", |_| LocalFileSourceThread) }
     }
 }
 
@@ -87,13 +76,5 @@ impl FileSource for LocalFileSource {
 
     fn can_request(&self, resource: &Resource) -> bool {
         accepts_url(&resource.url)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

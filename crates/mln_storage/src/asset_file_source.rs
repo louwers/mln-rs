@@ -1,18 +1,11 @@
-// The requests run on the "AssetFileSource" thread (`util::Thread`) as in
-// C++. The resource options are kept next to the thread behind a
-// mutex (C++ keeps them in the thread object and reads them back with a
-// blocking `ask`); the values returned are the same.
-
 use mln_actor::{ActorRef, Thread};
 use mln_util::constants::ASSET_PROTOCOL;
-use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::local_file_request::request_local_file;
 use crate::resource::Resource;
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
 fn accepts_url(url: &str) -> bool {
@@ -50,23 +43,19 @@ impl AssetFileSourceThread {
     }
 }
 
-/// The `Asset` file source: `asset://` URLs, relative to the resource
-/// options' asset path. On Android, the files under
+/// The `Asset` file source: `asset://` URLs, relative to an asset directory. On Android, the files under
 /// `mln_storage::android::APP_ASSETS` are the app's assets, and a query or
 /// fragment ends the URL's path.
 pub(crate) struct AssetFileSource {
     thread: Thread<AssetFileSourceThread>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl AssetFileSource {
     #[must_use]
-    pub(crate) fn new(resource_options: &ResourceOptions) -> Self {
-        let root = resource_options.asset_path.clone();
-        AssetFileSource {
-            thread: Thread::new("AssetFileSource", move |_| AssetFileSourceThread { root }),
-            resource_options: Mutex::new(resource_options.clone()),
-        }
+    /// Loads `asset://` URLs from the directory `asset_path`.
+    pub(crate) fn new(asset_path: &str) -> Self {
+        let root = asset_path.to_owned();
+        AssetFileSource { thread: Thread::new("AssetFileSource", move |_| AssetFileSourceThread { root }) }
     }
 }
 
@@ -81,13 +70,5 @@ impl FileSource for AssetFileSource {
 
     fn can_request(&self, resource: &Resource) -> bool {
         accepts_url(&resource.url)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }

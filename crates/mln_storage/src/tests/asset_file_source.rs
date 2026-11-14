@@ -11,14 +11,10 @@ use crate::asset_file_source::AssetFileSource;
 use crate::async_request::AsyncRequest;
 use crate::file_source::FileSource;
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 fn asset_file_source() -> AssetFileSource {
-    AssetFileSource::new(&ResourceOptions {
-        asset_path: cpp_path("test/fixtures/storage/assets").to_str().unwrap().to_owned(),
-        ..ResourceOptions::default()
-    })
+    AssetFileSource::new(cpp_path("test/fixtures/storage/assets").to_str().unwrap())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.

@@ -7,7 +7,6 @@ use super::{cpp_path, req, temp_path};
 use crate::file_source::FileSource;
 use crate::local_file_source::LocalFileSource;
 use crate::resource::{Kind, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 /// A `file://` URL for `path`, percent-encoding everything but unreserved
@@ -42,7 +41,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn local_file_source() -> LocalFileSource {
-    LocalFileSource::new(&ResourceOptions::default())
+    LocalFileSource::new()
 }
 
 /// Requests `resource`, runs the loop until the response and returns it

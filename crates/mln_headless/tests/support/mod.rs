@@ -29,7 +29,7 @@ use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, Response};
 use mln_style::custom_tile_loader::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
@@ -327,17 +327,11 @@ impl Drop for FakeFileRequest {
 pub(crate) struct FakeFileSource {
     requests: LocalObject<FakeRequests>,
     next_id: Mutex<u64>,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl FakeFileSource {
-    /// A file source with the default resource options.
     pub(crate) fn new() -> Self {
-        FakeFileSource {
-            requests: LocalObject::new(RefCell::new(Vec::new())),
-            next_id: Mutex::new(0),
-            resource_options: Mutex::new(ResourceOptions::default()),
-        }
+        FakeFileSource { requests: LocalObject::new(RefCell::new(Vec::new())), next_id: Mutex::new(0) }
     }
 
     fn list(&self) -> Rc<FakeRequests> {
@@ -391,14 +385,6 @@ impl FileSource for FakeFileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
     }
 }
 

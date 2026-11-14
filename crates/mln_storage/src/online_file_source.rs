@@ -17,10 +17,9 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
-use feature::Value;
 use mln_actor::{ActorRef, AsyncTask, Mailbox, Thread, Timer, scheduler};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{
@@ -28,22 +27,17 @@ use mln_util::constants::{
 };
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
-use parking_lot::Mutex;
 
 use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
+use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::http_file_source::HTTPFileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::http_timeout::{error_retry_timeout, expiration_timeout};
 use crate::network_status::{NetworkStatus, Status};
 use crate::resource::{Priority, RequestOrder, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::resource_transform::{ResourceTransform, TransformResult};
 use crate::response::{Reason, ResourceError, Response};
-
-/// For testing only
-pub(crate) const ONLINE_STATUS_KEY: &str = "online-status";
 
 struct OnlineFileRequest {
     id: u64,
@@ -145,8 +139,6 @@ impl PendingRequests {
 
 /// The members of `OnlineFileSourceThread`.
 struct ThreadState {
-    resource_options: RefCell<ResourceOptions>,
-
     /// The lifetime of a request is:
     ///
     /// 1. Waiting for timeout (revalidation or retry)
@@ -513,10 +505,9 @@ impl OnlineFileRequest {
 }
 
 impl OnlineFileSourceThread {
-    fn new(resource_options: ResourceOptions) -> Self {
-        let http_file_source = HTTPFileSource::new(&resource_options);
+    fn new() -> Self {
+        let http_file_source = HTTPFileSource::new();
         let state = Rc::new(ThreadState {
-            resource_options: RefCell::new(resource_options),
             all_requests: RefCell::new(VecSet::new()),
             pending_requests: RefCell::new(PendingRequests::default()),
             active_requests: RefCell::new(VecSet::new()),
@@ -576,10 +567,6 @@ impl OnlineFileSourceThread {
         self.state.http_file_source.set_http_header_transform(transform);
     }
 
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.state.resource_options.borrow_mut() = options;
-    }
-
     fn set_online_status(&self, status: bool) {
         self.state.online.set(status);
         if status {
@@ -600,25 +587,58 @@ impl Drop for OnlineFileSourceThread {
     }
 }
 
-/// The `Network` file source.
+/// The `Network` file source: HTTP(S) requests, revalidated when they
+/// expire and retried with a backoff after errors, with at most
+/// [`maximum_concurrent_requests`](Self::maximum_concurrent_requests) in
+/// flight.
 pub struct OnlineFileSource {
-    cached_resource_options: Mutex<ResourceOptions>,
-    cached_maximum_concurrent_requests: Mutex<u32>,
+    maximum_concurrent_requests: AtomicU32,
     thread: Thread<OnlineFileSourceThread>,
 }
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
+impl Default for OnlineFileSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OnlineFileSource {
     #[must_use]
-    pub fn new(resource_options: &ResourceOptions) -> Self {
-        let ro = resource_options.clone();
-        let thread = Thread::new("OnlineFileSource", move |_| OnlineFileSourceThread::new(ro));
-        OnlineFileSource {
-            cached_resource_options: Mutex::new(resource_options.clone()),
-            cached_maximum_concurrent_requests: Mutex::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
-            thread,
-        }
+    pub fn new() -> Self {
+        let thread = Thread::new("OnlineFileSource", move |_| OnlineFileSourceThread::new());
+        OnlineFileSource { maximum_concurrent_requests: AtomicU32::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS), thread }
+    }
+
+    /// The most transfers in flight at once; the requests beyond wait.
+    #[must_use]
+    pub fn maximum_concurrent_requests(&self) -> u32 {
+        self.maximum_concurrent_requests.load(Ordering::Relaxed)
+    }
+
+    /// Sets the most transfers in flight at once.
+    pub fn set_maximum_concurrent_requests(&self, maximum: u32) {
+        self.maximum_concurrent_requests.store(maximum, Ordering::Relaxed);
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_maximum_concurrent_requests(maximum));
+    }
+
+    /// Takes the source offline or back online. Offline, every transfer
+    /// fails with a connection error; back online, the requests that failed
+    /// that way retry at once.
+    pub fn set_online(&self, online: bool) {
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_online_status(online));
+    }
+
+    /// Rewrites the URLs of requests before they load, or stops rewriting
+    /// them for `None`.
+    pub fn set_resource_transform(&self, transform: Option<ResourceTransform>) {
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_transform(transform));
+    }
+
+    /// Sets the headers to add to each transfer.
+    pub fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_http_header_transform(transform));
     }
 
     /// Holds the online thread until the guard drops (`crate::tests::pause`).
@@ -653,56 +673,6 @@ impl FileSource for OnlineFileSource {
         resource.has_loading_method(crate::resource::LoadingMethod::Network)
             && !resource.url.starts_with(ASSET_PROTOCOL)
             && !resource.url.starts_with(FILE_PROTOCOL)
-    }
-
-    fn set_property(&self, key: &str, value: &Value) {
-        if key == MAX_CONCURRENT_REQUESTS_KEY {
-            if let Value::Uint(maximum) = value {
-                debug_assert!(*maximum < u64::from(u32::MAX));
-                let maximum = *maximum as u32;
-                self.thread
-                    .actor()
-                    .invoke(move |t: &OnlineFileSourceThread| t.set_maximum_concurrent_requests(maximum));
-                *self.cached_maximum_concurrent_requests.lock() = maximum;
-            } else {
-                Log::error(Event::General, "Invalid max-concurrent-requests property value type.");
-            }
-        } else if key == ONLINE_STATUS_KEY {
-            // For testing only
-            if let Value::Bool(status) = value {
-                let status = *status;
-                self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_online_status(status));
-            }
-        } else {
-            Log::error(Event::General, format!("Resource provider does not support property {key}"));
-        }
-    }
-
-    fn get_property(&self, key: &str) -> Value {
-        if key == MAX_CONCURRENT_REQUESTS_KEY {
-            Value::Uint(u64::from(*self.cached_maximum_concurrent_requests.lock()))
-        } else {
-            Log::error(Event::General, format!("Resource provider does not support property {key}"));
-            Value::Null
-        }
-    }
-
-    fn set_resource_transform(&self, transform: Option<ResourceTransform>) {
-        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_transform(transform));
-    }
-
-    fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_http_header_transform(transform));
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        let o = options.clone();
-        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_options(o));
-        *self.cached_resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.cached_resource_options.lock().clone()
     }
 }
 

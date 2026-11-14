@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use feature::Value;
 use mln_actor::{RunLoop, Timer};
 use mln_test_server::{HttpServer, closed_port_url};
 use mln_util::chrono::{Timestamp, now};
@@ -17,12 +16,11 @@ use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
-use crate::file_source::{FileSource, MAX_CONCURRENT_REQUESTS_KEY};
+use crate::file_source::FileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
-use crate::resource_options::ResourceOptions;
 use crate::resource_transform::FinishedCallback;
 use crate::response::{Reason, ResourceError, Response};
 
@@ -30,7 +28,7 @@ use crate::response::{Reason, ResourceError, Response};
 const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 fn online_file_source() -> Rc<OnlineFileSource> {
-    Rc::new(OnlineFileSource::new(&ResourceOptions::default()))
+    Rc::new(OnlineFileSource::new())
 }
 
 fn data(res: &Response) -> &[u8] {
@@ -556,7 +554,7 @@ fn low_high_priority_requests() {
     let response_counter = Rc::new(Cell::new(0usize));
 
     NetworkStatus::set(Status::Offline);
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    fs.set_maximum_concurrent_requests(1);
     // After DefaultFileSource was split, OnlineFileSource lives on a separate
     // thread. Pause OnlineFileSource, so that messages are queued for
     // processing.
@@ -623,7 +621,7 @@ fn low_high_priority_requests_many() {
     let correct_regular = Rc::new(Cell::new(0));
 
     NetworkStatus::set(Status::Offline);
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    fs.set_maximum_concurrent_requests(1);
     let paused = fs.pause();
 
     let collector: Rc<RefCell<Vec<Req>>> = Rc::new(RefCell::new(Vec::new()));
@@ -698,7 +696,7 @@ fn pending_requests_start_by_order() {
     let answered: Rc<RefCell<Vec<usize>>> = Rc::default();
 
     NetworkStatus::set(Status::Offline);
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
+    fs.set_maximum_concurrent_requests(1);
     let paused = fs.pause();
 
     // The first request starts at once; the others wait for it.
@@ -744,10 +742,10 @@ fn maximum_concurrent_requests() {
     let _run_loop = RunLoop::new();
     let fs = online_file_source();
 
-    assert_eq!(fs.get_property(MAX_CONCURRENT_REQUESTS_KEY), Value::Uint(20));
+    assert_eq!(fs.maximum_concurrent_requests(), 20);
 
-    fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(10));
-    assert_eq!(fs.get_property(MAX_CONCURRENT_REQUESTS_KEY), Value::Uint(10));
+    fs.set_maximum_concurrent_requests(10);
+    assert_eq!(fs.maximum_concurrent_requests(), 10);
 }
 
 // gtest: OnlineFileSource.RequestSameUrlMultipleTimes

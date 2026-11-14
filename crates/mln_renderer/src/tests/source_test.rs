@@ -11,7 +11,7 @@ use mln_map_types::{
 };
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, FileSource, Kind, RequestOrder, Resource, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, RequestOrder, Resource, Response};
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
@@ -387,12 +387,6 @@ impl FileSource for PendingTileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
-    }
-
-    fn set_resource_options(&self, _options: ResourceOptions) {}
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        ResourceOptions::default()
     }
 }
 

@@ -17,10 +17,8 @@ use std::rc::Rc;
 use std::rc::Weak;
 use std::sync::Arc;
 
-use feature::Value;
 use mln_actor::{LocalObject, RunLoop};
 use mln_renderer::util::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
-use mln_storage::file_source::MAX_CONCURRENT_REQUESTS_KEY;
 use mln_storage::offline::{
     OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
 };
@@ -155,6 +153,8 @@ struct Inner {
     definition: OfflineRegionDefinition,
     offline_database: Rc<RefCell<OfflineDatabase>>,
     online_file_source: Arc<dyn FileSource>,
+    /// The most requests the download has in flight at once.
+    maximum_concurrent_requests: Cell<u32>,
     status: RefCell<OfflineRegionStatus>,
     observer: RefCell<Rc<dyn OfflineRegionObserver>>,
 
@@ -214,6 +214,7 @@ impl OfflineDownload {
             definition,
             offline_database,
             online_file_source,
+            maximum_concurrent_requests: Cell::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             status: RefCell::new(OfflineRegionStatus::default()),
             observer: RefCell::new(Rc::new(NullObserver)),
             requests: RefCell::new(VecMap::new()),
@@ -234,6 +235,12 @@ impl OfflineDownload {
     #[must_use]
     pub(crate) fn downgrade(&self) -> WeakOfflineDownload {
         WeakOfflineDownload { inner: Rc::downgrade(&self.inner) }
+    }
+
+    /// Sets the most requests the download has in flight at once.
+    #[cfg(test)]
+    pub(crate) fn set_maximum_concurrent_requests(&self, maximum: u32) {
+        self.inner.maximum_concurrent_requests.set(maximum);
     }
 
     pub fn set_observer(&self, observer: Option<Rc<dyn OfflineRegionObserver>>) {
@@ -598,13 +605,8 @@ impl Inner {
             self.mark_pending_used_resources();
         }
 
-        let mut max_concurrent_requests = DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
-        if let Value::Uint(max_requests) = self.online_file_source.get_property(MAX_CONCURRENT_REQUESTS_KEY) {
-            max_concurrent_requests = max_requests as u32;
-        }
-
         loop {
-            if self.requests.borrow().len() >= max_concurrent_requests as usize {
+            if self.requests.borrow().len() >= self.maximum_concurrent_requests.get() as usize {
                 break;
             }
             let Some(resource) = self.resources_remaining.borrow_mut().pop_front() else {

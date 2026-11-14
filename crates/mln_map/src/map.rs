@@ -17,7 +17,7 @@ use mln_renderer::{
     FeatureInfo, LayerFeaturesMap, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, UpdateParameters,
     UpdateReader, UpdateSlot,
 };
-use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{FileSource, Loader, ResourceOptions};
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
 use mln_style::source::Source;
 use mln_style::sprite::Sprite;
@@ -182,24 +182,17 @@ pub struct Map {
 }
 
 impl Map {
-    /// A map with a `ResourceLoader` of its own for the default
+    /// A map with a [`Loader`] of its own for the default
     /// `ResourceOptions`.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
     pub fn new(map_options: MapOptions) -> Result<Map, Error> {
-        Self::with_resource_options(map_options, &FileSourceManager::new(), &ResourceOptions::default())
+        Self::with_resource_options(map_options, &ResourceOptions::default())
     }
 
-    /// A map whose file source is `file_sources`' `ResourceLoader` for
-    /// `resource_options`, or none when `file_sources` has no
-    /// `ResourceLoader` factory.
-    pub fn with_resource_options(
-        map_options: MapOptions,
-        file_sources: &FileSourceManager,
-        resource_options: &ResourceOptions,
-    ) -> Result<Map, Error> {
-        let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, resource_options);
-        Self::create(file_source, &map_options)
+    /// A map with a [`Loader`] of its own for `resource_options`.
+    pub fn with_resource_options(map_options: MapOptions, resource_options: &ResourceOptions) -> Result<Map, Error> {
+        Self::create(Some(Arc::new(Loader::new(resource_options))), &map_options)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/

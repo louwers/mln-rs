@@ -6,25 +6,21 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use feature::Value;
 use mln_actor::{AsyncTask, LocalObject, RunLoop};
-use mln_storage::file_source::MAX_CONCURRENT_REQUESTS_KEY;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
     OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
-use mln_storage::online_file_source::OnlineFileSource;
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, FileSource, Kind, LoadingMethod, Resource, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, LoadingMethod, Resource, Response};
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::Scheme;
-use parking_lot::Mutex;
 
 use super::cpp_path;
 use crate::offline_download::{OfflineDownload, WeakOfflineDownload};
@@ -413,8 +409,6 @@ impl Drop for FakeFileRequest {
 struct FakeOnlineFileSource {
     requests: LocalObject<RefCell<Vec<FakeRequestEntry>>>,
     next_id: std::sync::atomic::AtomicU64,
-    online_fs: OnlineFileSource,
-    resource_options: Mutex<ResourceOptions>,
 }
 
 impl FakeOnlineFileSource {
@@ -422,8 +416,6 @@ impl FakeOnlineFileSource {
         FakeOnlineFileSource {
             requests: LocalObject::new(RefCell::new(Vec::new())),
             next_id: std::sync::atomic::AtomicU64::new(0),
-            online_fs: OnlineFileSource::new(&ResourceOptions::default()),
-            resource_options: Mutex::new(ResourceOptions::default()),
         }
     }
 
@@ -467,18 +459,6 @@ impl FileSource for FakeOnlineFileSource {
     fn can_request(&self, _resource: &Resource) -> bool {
         true
     }
-
-    fn get_property(&self, property: &str) -> Value {
-        self.online_fs.get_property(property)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock() = options;
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().clone()
-    }
 }
 
 // gtest: OfflineDownload.DoesNotFloodTheFileSourceWithRequests
@@ -499,10 +479,10 @@ fn does_not_flood_the_file_source_with_requests() {
     file_source.respond(Kind::Style, &test.response("style.json"));
     test.run_loop.run_once();
 
-    let Value::Uint(max) = file_source.get_property(MAX_CONCURRENT_REQUESTS_KEY) else {
-        panic!("max-concurrent-requests is not a uint");
-    };
-    assert_eq!(max as usize, file_source.requests().borrow().len());
+    assert_eq!(
+        mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize,
+        file_source.requests().borrow().len()
+    );
 }
 
 // gtest: OfflineDownload.GetStatusNoResources
@@ -896,9 +876,9 @@ fn no_freezing_on_cached_tiles_and_new_style() {
     let download =
         test.download_with_zoom(region.id, STYLE_URL, 1.0, 1.0, true, Arc::<StubFileSource>::clone(&test.file_source));
 
-    test.file_source.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(2));
+    download.set_maximum_concurrent_requests(2);
     test.respond_with(Kind::Style, "inline_source.style.json", |_| {});
-    // Number of resources must exceed MAX_CONCURRENT_REQUESTS_KEY
+    // Number of resources must exceed the maximum concurrent requests
     put_tile(&test, 0, 0, 1);
     put_tile(&test, 0, 1, 1);
     put_tile(&test, 1, 0, 1);
@@ -1451,7 +1431,6 @@ fn pausing_from_an_error_stops_the_refresh() {
     let test = &refreshed.test;
     // One request at a time, so that work the pause failed to stop would
     // still be queued when the download resumes.
-    test.file_source.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
     *refreshed.style.borrow_mut() = with_data("not JSON");
 
     // The observer pauses the download when it reports the invalid style.
@@ -1461,6 +1440,7 @@ fn pausing_from_an_error_stops_the_refresh() {
         Rc::clone(&test.db),
         Arc::<StubFileSource>::clone(&test.file_source),
     );
+    download.set_maximum_concurrent_requests(1);
     let (weak, stop) = (download.downgrade(), test.run_loop.clone());
     let observer = MockObserver {
         response_error_fn: Some(Box::new(move |_| {

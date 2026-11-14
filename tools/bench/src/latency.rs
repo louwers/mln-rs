@@ -12,9 +12,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mln_actor::timer::Timer;
-use mln_storage::{
-    AsyncRequest, Callback, FileSource, FileSourceManager, FileSourceType, Kind, Resource, ResourceOptions, Response,
-};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, Response};
 use mln_util::chrono::Timestamp;
 
 /// How long a tile stays fresh: a tile server's `Cache-Control: max-age`.
@@ -35,17 +33,9 @@ pub(crate) fn take_tile_requests() -> usize {
     TILE_REQUESTS.swap(0, Ordering::SeqCst)
 }
 
-/// Wraps the `ResourceLoader` factory of `file_sources`. Must run before
-/// the first map asks it for its file source.
-pub(crate) fn register(file_sources: &FileSourceManager) {
-    let inner =
-        file_sources.unregister_file_source_factory(FileSourceType::ResourceLoader).expect("a ResourceLoader factory");
-    file_sources.register_file_source_factory(
-        FileSourceType::ResourceLoader,
-        Arc::new(move |file_sources: &FileSourceManager, resource_options: &ResourceOptions| {
-            Arc::new(Delayed { inner: inner(file_sources, resource_options) })
-        }),
-    );
+/// `inner`, with the tile latency.
+pub(crate) fn delayed(inner: Arc<dyn FileSource>) -> Arc<dyn FileSource> {
+    Arc::new(Delayed { inner })
 }
 
 struct Delayed {
@@ -100,19 +90,11 @@ impl FileSource for Delayed {
         Box::new(DelayedRequest { _timer: timer, _request: request })
     }
 
-    fn supports_cache_only_requests(&self) -> bool {
-        self.inner.supports_cache_only_requests()
+    fn supports_cache_only(&self) -> bool {
+        self.inner.supports_cache_only()
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
         self.inner.can_request(resource)
-    }
-
-    fn set_resource_options(&self, options: ResourceOptions) {
-        self.inner.set_resource_options(options);
-    }
-
-    fn get_resource_options(&self) -> ResourceOptions {
-        self.inner.get_resource_options()
     }
 }
