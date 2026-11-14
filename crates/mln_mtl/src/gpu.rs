@@ -10,8 +10,8 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, DepthState, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, StencilState, TextureDesc, TextureFormat, TextureId,
-    TextureRegion, VertexBufferLayout, VertexStep,
+    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, StencilState, TextureDesc, TextureFormat,
+    TextureId, TextureRegion, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::texture2d::SamplerState;
@@ -35,7 +35,6 @@ use objc2_metal::{
     MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor,
     MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLWinding,
 };
-use slotmap::SlotMap;
 
 use crate::Device;
 use crate::buffer_resource::new_metal_buffer;

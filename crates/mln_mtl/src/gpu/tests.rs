@@ -8,7 +8,7 @@ use super::*;
 /// The RGBA texels of `texture`, once the work submitted before is done.
 fn read_back(gpu: &mut MetalGpu, texture: TextureId) -> Vec<u8> {
     gpu.wait_until_completed();
-    let texture = &gpu.textures[texture].texture;
+    let texture = &gpu.textures.get(texture).expect("the texture").texture;
     let (width, height) = (texture.width(), texture.height());
     let (row, length) = (width * 4, width * 4 * height);
     let buffer = gpu
