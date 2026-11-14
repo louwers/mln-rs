@@ -27,6 +27,7 @@ impl AsyncTask {
     /// blocking `RunLoop::run` wakes up.
     pub fn send(&self) {
         self.handle.pending.store(true, Ordering::SeqCst);
+        self.handle.core.async_pending.store(true, Ordering::SeqCst);
         self.handle.core.wake();
     }
 
@@ -57,6 +58,7 @@ pub struct AsyncTaskSender {
 impl AsyncTaskSender {
     pub fn send(&self) {
         self.pending.store(true, Ordering::SeqCst);
+        self.core.async_pending.store(true, Ordering::SeqCst);
         self.core.wake();
     }
 }

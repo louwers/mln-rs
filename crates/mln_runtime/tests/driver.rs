@@ -522,8 +522,83 @@ fn the_driver_wake_runs_with_the_session_unlocked() {
     wait_release(&driver, &session);
 }
 
+thread_local! {
+    /// The driver work that `a_service_from_the_driver_wake_is_never_busy`'s
+    /// wake services.
+    static FROM_WAKE: RefCell<Option<DriverWork>> = const { RefCell::new(None) };
+}
+
+/// Stops the wake and drops the driver work before the thread's locals go,
+/// so that a failing test fails with its own message.
+struct FromWakeGuard(Arc<AtomicBool>);
+
+impl Drop for FromWakeGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+        drop(FROM_WAKE.try_with(|slot| slot.borrow_mut().take()));
+    }
+}
+
 #[test]
-fn work_sent_inside_a_service_leaves_the_wake_for_later_work() {
+fn a_service_from_the_driver_wake_is_never_busy() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let host = std::thread::current().id();
+    let busy = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&busy);
+    let active = Arc::new(AtomicBool::new(true));
+    let live = Arc::clone(&active);
+    // The host services from the wake whenever it comes on its own thread,
+    // until the test ends.
+    let wake: Wake = Arc::new(move || {
+        if live.load(Ordering::SeqCst) && std::thread::current().id() == host {
+            let status = FROM_WAKE.with(|driver| driver.borrow().as_ref().map(DriverWork::service));
+            if let Some(Err(error)) = status
+                && error.kind == ErrorKind::Busy
+            {
+                counted.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    });
+    let cell = Arc::new(OnceLock::<RenderSession>::new());
+    let reader = Arc::clone(&cell);
+    let demanded = Arc::new(AtomicBool::new(false));
+    let once = Arc::clone(&demanded);
+    // The first frame demands another from inside the service, which used to
+    // wake the driver there.
+    let frame_wake: Wake = Arc::new(move || {
+        if let Some(session) = reader.get()
+            && !once.swap(true, Ordering::SeqCst)
+        {
+            session.demand_frame(FrameDemand::new(DemandMode::Force, 2)).unwrap();
+        }
+    });
+    let options = AttachOptions { driver_work_wake: Some(wake), frame_wake: Some(frame_wake), ..caller_options() };
+    let (session, driver) = attach(&map, options);
+    cell.set(session.clone()).unwrap();
+    FROM_WAKE.with(|slot| *slot.borrow_mut() = Some(driver));
+    let guard = FromWakeGuard(Arc::clone(&active));
+    let mut tokens = Vec::new();
+    for token in [1, 3, 4, 5] {
+        session.demand_frame(FrameDemand::new(DemandMode::Force, token)).unwrap();
+        let want = if token == 1 { 2 } else { tokens.len() + 1 };
+        let deadline = std::time::Instant::now() + TIMEOUT;
+        while tokens.len() < want {
+            assert!(std::time::Instant::now() < deadline, "frames stopped at {tokens:?}");
+            FROM_WAKE.with(|driver| driver.borrow().as_ref().map(DriverWork::service)).unwrap().unwrap();
+            tokens.extend(session.drain_frame_results().unwrap().iter().filter_map(|result| result.token));
+        }
+    }
+    assert_eq!(vec![1, 2, 3, 4, 5], tokens);
+    assert_eq!(0, busy.load(Ordering::SeqCst), "a service from the wake was busy");
+    active.store(false, Ordering::SeqCst);
+    let driver = FROM_WAKE.with(|slot| slot.borrow_mut().take()).unwrap();
+    wait_release(&driver, &session);
+    drop(guard);
+}
+
+#[test]
+fn work_sent_inside_a_service_runs_there_without_a_wake() {
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");
     let (wake, wakes) = counter();
@@ -551,10 +626,11 @@ fn work_sent_inside_a_service_leaves_the_wake_for_later_work() {
     let results = session.drain_frame_results().unwrap();
     let tokens: Vec<_> = results.iter().map(|result| result.token.unwrap()).collect();
     assert_eq!(vec![1, 2], tokens);
-    // The demand that the service ran took the wake, which the host gets
-    // again for work that comes after the service.
+    // The service ran the demand sent inside it without a wake, and the host
+    // gets the wake for work that comes after the service.
+    assert_eq!(0, wakes.load(Ordering::SeqCst), "a wake inside the service");
     session.demand_frame(FrameDemand::new(DemandMode::Force, 3)).unwrap();
-    assert!(wakes.load(Ordering::SeqCst) >= 2, "no wake for work after the service");
+    assert!(wakes.load(Ordering::SeqCst) >= 1, "no wake for work after the service");
     assert_eq!(3, take_one(&driver, &session).token.unwrap());
     wait_release(&driver, &session);
 }
