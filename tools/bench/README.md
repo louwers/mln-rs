@@ -54,7 +54,7 @@ mise run bench:compare main         # this checkout, uncommitted changes include
 | `Style/Replace600/OnDemand`                         | as `Style/Replace600`, on a continuous map drawn on a 60 Hz display's clock, until it settles complete                                                                                                                                                  |
 | `Style/AddLayer600`                                 | a circle layer added over `Style/Replace600`'s first style until the continuous map settles complete, then removed until it settles, as maplibre-compose's overlay-update case does                                                                     |
 | `GeoJson/Replace1000`                               | replacing a GeoJSON source's 1000 points under one circle layer with the other variant, until the continuous map settles with every tile showing the new points, on the display's clock                                                                 |
-| `Load/JumpWarm`, `Load/JumpCold`                    | a jump between two views that share no tile until a frame shows the new view complete, on the display's clock; cold drops the loaded tiles first                                                                                                        |
+| `Load/JumpWarm`, `Load/JumpCold`                    | a jump between two views that share no tile until a frame shows the new view complete, on the display's clock; cold drops the loaded tiles and glyphs first                                                                                             |
 
 In `Frame/Paced`, refreshes are absolute deadlines, and at each refresh with no
 frame in flight the camera moves to where the flight will be at the next

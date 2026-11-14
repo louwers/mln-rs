@@ -883,8 +883,8 @@ fn frame_add_images(cx: &Context) -> Metrics {
 /// From a jump between two views of the basemap that share no tile until
 /// the first frame that shows the new view complete has finished on the
 /// GPU, with frames on the display's clock. Both views load once before;
-/// `cold` drops the loaded tiles before each jump, so it parses and lays
-/// them out again.
+/// `cold` drops the loaded tiles and glyphs before each jump, so it parses
+/// them again and lays the tiles out again.
 fn load_jump(cx: &Context, cold: bool) -> Metrics {
     let views = [basemap_south_east(), basemap_north_west()];
     let mut scene = basemap(cx, Mode::OnDemand);
