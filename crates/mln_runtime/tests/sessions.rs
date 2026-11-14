@@ -1251,8 +1251,20 @@ const QUERY_STYLE: &str = r#"{
 /// A session of a map at zoom 0 around (0, 0) that has drawn `QUERY_STYLE`
 /// with every source loaded.
 fn query_session(runtime: &Runtime) -> (Map, RenderSession) {
+    styled_query_session(runtime, QUERY_STYLE, |session| {
+        wait(session.query_source_features("points", SourceQueryOptions::default())).len() == 2
+    })
+}
+
+/// A session of a map at zoom 0 around (0, 0) that has drawn `style`, once
+/// `ready` holds for it.
+fn styled_query_session(
+    runtime: &Runtime,
+    style: &str,
+    ready: impl Fn(&RenderSession) -> bool,
+) -> (Map, RenderSession) {
     let map = map_in_mode(runtime, MapMode::Continuous);
-    wait(map.set_style_json(QUERY_STYLE));
+    wait(map.set_style_json(style));
     wait(map.update_camera(CameraUpdate {
         camera: CameraOptions { zoom: Some(0.0), center: Some(LatLng::default()), ..Default::default() },
         ..Default::default()
@@ -1261,11 +1273,45 @@ fn query_session(runtime: &Runtime) -> (Map, RenderSession) {
     let loaded = eventually(|| {
         demand(&session, DemandMode::Force, 0);
         let result = take_one(&session);
-        result.mode == mln_map::RenderMode::Full
-            && wait(session.query_source_features("points", SourceQueryOptions::default())).len() == 2
+        result.mode == mln_map::RenderMode::Full && ready(&session)
     });
     assert!(loaded, "the sources never loaded");
     (map, session)
+}
+
+/// Two fill layers of different sources and two of one source, all drawing
+/// the whole view, in the order back, middle, front, top.
+const OVERLAPPING_STYLE: &str = r##"{
+  "version": 8,
+  "sources": {
+    "back": {"type": "geojson", "data": {"type": "Feature", "properties": {"name": "back"},
+      "geometry": {"type": "Polygon", "coordinates": [[[-170, -80], [170, -80], [170, 80], [-170, 80], [-170, -80]]]}}},
+    "front": {"type": "geojson", "data": {"type": "Feature", "properties": {"name": "front"},
+      "geometry": {"type": "Polygon", "coordinates": [[[-170, -80], [170, -80], [170, 80], [-170, 80], [-170, -80]]]}}}
+  },
+  "layers": [
+    {"id": "back", "type": "fill", "source": "back", "paint": {"fill-color": "#0000ff"}},
+    {"id": "middle", "type": "fill", "source": "front", "paint": {"fill-color": "#00ff00"}},
+    {"id": "front", "type": "fill", "source": "front", "paint": {"fill-color": "#ff0000"}},
+    {"id": "top", "type": "fill", "source": "back", "paint": {"fill-color": "#ffff00"}}
+  ]
+}"##;
+
+#[test]
+fn rendered_queries_return_the_front_layer_first() {
+    let runtime = runtime();
+    let layers = |session: &RenderSession, options| -> Vec<String> {
+        let center = RenderedQueryGeometry::Point(ScreenCoordinate::new(32.0, 32.0));
+        wait(session.query_rendered_features(center, options)).into_iter().map(|feature| feature.layer).collect()
+    };
+    let (_map, session) = styled_query_session(&runtime, OVERLAPPING_STYLE, |session| {
+        layers(session, RenderedQueryOptions::default()).len() == 4
+    });
+
+    assert_eq!(["top", "front", "middle", "back"], layers(&session, RenderedQueryOptions::default()).as_slice());
+    // The order of the requested layers doesn't matter.
+    let back_then_front = RenderedQueryOptions::new(Some(vec!["back".into(), "front".into()]), None);
+    assert_eq!(["front", "back"], layers(&session, back_then_front).as_slice());
 }
 
 #[test]

@@ -1472,6 +1472,7 @@ impl RenderSession {
 
     /// The features that the session drew in an area of the screen, in its
     /// last frame. A feature that several layers draw appears once for each.
+    /// The topmost layer's features come first, and the bottom layer's last.
     /// A box covers only its part inside the target, so one past every edge
     /// covers the whole target.
     ///

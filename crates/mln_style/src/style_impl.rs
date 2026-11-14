@@ -463,13 +463,24 @@ impl Impl {
             }
         }
 
-        for layer in std::mem::take(&mut parser.layers) {
-            // The parser drops duplicate layer ids, so this cannot fail for
-            // a source-less M1 style. A layer incompatible with its source is
-            // logged and skipped (C++ throws).
-            if let Err(error) = self.add_layer(layer, None) {
+        // The parser drops duplicate layer ids, so the layers go in at once
+        // without `add_layer`'s lookup. A layer incompatible with its source
+        // is logged and skipped (C++ throws).
+        let global_state = Arc::clone(&self.global_state);
+        let sources = &self.sources;
+        let existing = self.layers.size();
+        self.layers.extend(std::mem::take(&mut parser.layers).into_iter().filter_map(|mut layer| {
+            if let Err(error) = check_layer_source(sources, &*layer) {
                 Log::error(Event::ParseStyle, error.to_string());
+                return None;
             }
+            layer.reevaluate_visibility(&global_state);
+            Some(layer)
+        }));
+        // An update for each layer, as `add_layer` publishes.
+        let observer = self.observer();
+        for _ in existing..self.layers.size() {
+            observer.on_update();
         }
 
         self.name = parser.name.clone();
@@ -674,36 +685,21 @@ impl Impl {
 
     /// Adds a layer before the layer `before`, or on top. See
     /// [`Style::add_layer`](crate::Style::add_layer).
-    pub(crate) fn add_layer(&mut self, layer: Box<dyn Layer>, before: Option<&str>) -> Result<&mut dyn Layer, Error> {
-        // TODO: verify source
-        if let Some(source) = self.sources.get(&layer.get_source_id())
-            && !source.supports_layer_type(layer.base_impl().get_type_info())
-        {
-            let message =
-                format!("Layer '{}' is not compatible with source '{}'", layer.get_id(), layer.get_source_id());
-            return Err(Error::invalid_argument(message));
-        }
-
-        if self.layers.get(&layer.get_id()).is_some() {
-            return Err(Error::already_exists(format!("Layer {} already exists", layer.get_id())));
-        }
-
-        let id = layer.get_id();
-        self.layers.add(layer, before);
+    pub(crate) fn add_layer(
+        &mut self,
+        mut layer: Box<dyn Layer>,
+        before: Option<&str>,
+    ) -> Result<&mut dyn Layer, Error> {
+        check_layer_source(&self.sources, &*layer)?;
         // The global state is not available while the layer itself is parsed.
-        let global_state = Arc::clone(&self.global_state);
-        let changed = {
-            let result = self.layers.get_mut(&id).expect("layer just added");
-            let before_impl = result.base_impl();
-            result.reevaluate_visibility(&global_state);
-            !Arc::ptr_eq(&before_impl, &result.base_impl())
-        };
-        if changed {
-            self.layers.update(&id);
-        }
-        self.observer().on_update();
-
-        Ok(self.layers.get_mut(&id).expect("layer just added"))
+        layer.reevaluate_visibility(&self.global_state);
+        let observer = self.observer();
+        let result = self
+            .layers
+            .add_unique(layer, before)
+            .map_err(|layer| Error::already_exists(format!("Layer {} already exists", layer.get_id())))?;
+        observer.on_update();
+        Ok(result)
     }
 
     /// Moves the layer `id` below the layer `before`, or above every layer,
@@ -946,6 +942,20 @@ impl Impl {
     pub(crate) fn on_projection_changed(&mut self) {
         self.observer().on_update();
     }
+}
+
+/// Fails when `layer`'s source is in `sources` and doesn't support the
+/// layer's type.
+fn check_layer_source(sources: &CollectionWithPersistentOrder<dyn Source>, layer: &dyn Layer) -> Result<(), Error> {
+    // TODO: verify source
+    let impl_ = layer.base_impl_ref();
+    if let Some(source) = sources.get(&impl_.source)
+        && !source.supports_layer_type(impl_.get_type_info())
+    {
+        let message = format!("Layer '{}' is not compatible with source '{}'", impl_.id, impl_.source);
+        return Err(Error::invalid_argument(message));
+    }
+    Ok(())
 }
 
 /// Equality on state values that, unlike the exact-type variant equality,

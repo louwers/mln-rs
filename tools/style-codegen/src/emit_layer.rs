@@ -392,6 +392,10 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     w.line("        Arc::<Impl>::clone(&self.base_impl)");
     w.line("    }");
     w.blank();
+    w.line("    fn base_impl_ref(&self) -> &dyn layer::Impl {");
+    w.line("        &*self.base_impl");
+    w.line("    }");
+    w.blank();
     w.line("    fn mutate_base_impl(&mut self, f: &mut dyn FnMut(&mut ImplBase)) {");
     w.line("        let mut impl_ = self.mutable_impl();");
     w.line("        f(&mut impl_.base);");
