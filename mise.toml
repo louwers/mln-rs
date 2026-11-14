@@ -15,6 +15,8 @@ lockfile_mode = "merge"
 idiomatic_version_file_enable_tools = ["rust"]
 
 [tools]
+# just, for the justfile: each recipe runs the task of its name.
+"aqua:casey/just" = "1.59.0"
 # The test runner, which ends a test that hangs (.config/nextest.toml).
 "github:nextest-rs/nextest" = { version = "0.9.151", version_prefix = "cargo-nextest-" }
 # Cargo subcommands: the tests' coverage, the packages' licenses

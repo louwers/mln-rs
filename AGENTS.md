@@ -13,7 +13,8 @@ A Rust port of MapLibre Native's map rendering core.
 ## Dev tool commands
 
 `mise install` installs the tools that mise.toml pins. `mise tasks` lists
-every task. The common ones:
+every task, and `just <task>` runs one too (the justfile forwards to it).
+The common ones:
 
 - `mise run test`: every test, including the render suite.
 - `mise run fmt`: format with the pinned nightly rustfmt.
