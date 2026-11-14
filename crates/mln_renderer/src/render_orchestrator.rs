@@ -692,20 +692,25 @@ impl RenderOrchestrator {
             let has_render_source = source_impl
                 .as_ref()
                 .is_some_and(|source_impl| self.render_sources.contains_key(&source_impl.base().id));
+            // The id of the source whose layers this pass takes, if it has a
+            // render source.
+            let render_source_id =
+                source_impl.as_ref().filter(|_| has_render_source).map(|source_impl| source_impl.base().id.as_str());
 
             for (index, layer_ptr) in self.ordered_layers.iter().enumerate() {
                 let layer = layer_ptr.borrow();
-                let base_impl = Arc::clone(&layer.base().base_impl);
+                let base_impl = &layer.base().base_impl;
                 let layer_info = base_impl.get_type_info();
-                let layer_is_visible = base_impl.visibility != mln_style_types::VisibilityType::None;
-                let zoom_fits_layer = layer.supports_zoom(self.zoom_history.last_zoom);
                 render_tree_parameters.has_3d |= layer_info.pass3d == layer_type_info::Pass3D::Required;
 
                 if layer_info.source != layer_type_info::Source::NotRequired {
+                    // Every source's pass sees every layer, so the cheap
+                    // source check goes before anything else is read.
                     if let Some(source_impl) = &source_impl
-                        && has_render_source
-                        && base_impl.source == source_impl.base().id
+                        && render_source_id == Some(base_impl.source.as_str())
                     {
+                        let layer_is_visible = base_impl.visibility != mln_style_types::VisibilityType::None;
+                        let zoom_fits_layer = layer.supports_zoom(self.zoom_history.last_zoom);
                         let layer_id = layer.get_id().to_owned();
                         // A global state change requires a relayout of
                         // this layer's source if one of the changed state
@@ -752,13 +757,16 @@ impl RenderOrchestrator {
 
                 // Handle layers without source.
                 let is_first_source = source_index == 0;
-                if layer_is_visible && zoom_fits_layer && is_first_source {
+                if is_first_source
+                    && base_impl.visibility != mln_style_types::VisibilityType::None
+                    && layer.supports_zoom(self.zoom_history.last_zoom)
+                {
                     // On the globe the background is a sphere mesh, not the
                     // backdrop, so it stays a layer.
                     if self.background_layer_as_color
                         && render_tree_parameters.sky.is_none()
                         && !update_parameters.transform_state.is_globe_rendering()
-                        && Arc::ptr_eq(&base_impl, &self.layer_impls[0])
+                        && Arc::ptr_eq(base_impl, &self.layer_impls[0])
                     {
                         let solid_background = layer.get_solid_background();
                         if let Some(solid_background) = solid_background {
