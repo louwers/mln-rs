@@ -176,9 +176,54 @@ mod tests {
     // font it chose, and pass with none; `--nocapture` lists them.
 
     use mln_text::glyph::GlyphIDType;
+    use mln_text::{FreeTypeLibrary, HBShaper};
     use skrifa::MetadataProvider;
 
-    use super::{Finder, SystemFontFace, fallback_font_faces, find_with, scan};
+    use super::{Finder, SystemFontFace, fallback_font_faces, find_with, scan, scripts};
+
+    /// Text of the script of `probe` that its font's shaping rules change:
+    /// a conjunct, a split or reordered vowel, or a stack.
+    fn shaped_sample(probe: char) -> Option<&'static str> {
+        Some(match probe {
+            '\u{0915}' => "क्ष",
+            '\u{0995}' => "ক্ষ",
+            '\u{0A15}' => "ਕ੍ਰ",
+            '\u{0A95}' => "ક્ષ",
+            '\u{0B15}' => "କ୍ଷ",
+            '\u{0B95}' => "கொ",
+            '\u{0C15}' => "క్క",
+            '\u{0C95}' => "ಕ್ಕ",
+            '\u{0D15}' => "ക്ക",
+            '\u{0D9A}' => "කො",
+            '\u{0F40}' => "སྒྲ",
+            '\u{1000}' => "ကြ",
+            '\u{1780}' => "ក្ក",
+            _ => return None,
+        })
+    }
+
+    /// Each font for a script that needs shaping shapes it: its rules
+    /// substitute, reorder or position the glyphs of a sample, which the
+    /// map's shaper would otherwise draw one after another as the font maps
+    /// them.
+    fn check_shaping(faces: &[SystemFontFace]) {
+        for script in scripts::SCRIPTS.iter().filter(|script| script.needs_shaping) {
+            let Some(face) = faces.iter().find(|face| face.face.ranges == script.ranges) else { continue };
+            let sample = shaped_sample(script.probe).expect("a sample for each script that needs shaping");
+            let data = face.face.data.clone().unwrap();
+            let font = skrifa::FontRef::from_index(data.as_bytes(), data.face_index()).unwrap();
+            let nominal: Vec<u16> =
+                sample.chars().map(|c| font.charmap().map(c).map_or(0, |glyph| glyph.to_u32() as u16)).collect();
+            let shaper = HBShaper::new(face.face.type_, data, &FreeTypeLibrary::new());
+            let text: Vec<u16> = sample.encode_utf16().collect();
+            let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
+            shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
+            let shaped: Vec<u16> = ids.iter().map(|id| id.code).collect();
+            let moved = adjusts.iter().any(|adjust| adjust.x_offset != 0.0 || adjust.y_offset != 0.0);
+            println!("{}: {sample} {nominal:?} -> {shaped:?}{}", face.family, if moved { " moved" } else { "" });
+            assert!(shaped != nominal || moved, "{} doesn't shape {sample}", face.family);
+        }
+    }
 
     fn check(faces: &[SystemFontFace]) {
         for face in faces {
@@ -201,6 +246,7 @@ mod tests {
         let faces = fallback_font_faces();
         println!("found {} fallback faces in {:?}", faces.len(), started.elapsed());
         check(faces);
+        check_shaping(faces);
     }
 
     #[test]
@@ -208,5 +254,6 @@ mod tests {
         let faces = find_with(&Finder::Scan(scan::Scan::new()), &["ko-KR".to_owned()]);
         println!("the scan found {} fallback faces", faces.len());
         check(&faces);
+        check_shaping(&faces);
     }
 }
