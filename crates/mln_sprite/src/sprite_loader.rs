@@ -11,7 +11,7 @@ use std::sync::Arc;
 use mln_actor::TaggedScheduler;
 use mln_actor::scheduler::Respond;
 use mln_image::decoder;
-use mln_storage::{AsyncRequest, Data, FileSource, Resource, Response};
+use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
 use mln_util::error::Error;
@@ -27,8 +27,8 @@ struct SpriteData {
     load: u64,
     image: Option<Data>,
     json: Option<Data>,
-    json_request: Option<Box<dyn AsyncRequest>>,
-    sprite_request: Option<Box<dyn AsyncRequest>>,
+    json_request: Option<Request>,
+    sprite_request: Option<Request>,
 }
 
 struct Inner {

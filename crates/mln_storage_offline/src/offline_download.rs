@@ -17,7 +17,7 @@ use std::rc::Rc;
 use std::rc::Weak;
 use std::sync::Arc;
 
-use mln_actor::{LocalObject, RunLoop};
+use mln_actor::scheduler;
 use mln_renderer::util::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
 use mln_storage::offline::{
     OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
@@ -25,7 +25,7 @@ use mln_storage::offline::{
 use mln_storage::offline_database::OfflineDatabase;
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
-use mln_storage::{AsyncRequest, FileSource, Kind, LoadingMethod, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::parser::Parser;
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::{GeoJSONSource, TileSource};
@@ -111,35 +111,17 @@ fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size
     result
 }
 
-/// A task of [`invoke_cancellable`], until it runs or is cancelled.
-type CancellableTask = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
-
-/// A queued task. Dropping it cancels the task if it has not run.
-struct WorkRequest {
-    task: CancellableTask,
-}
-
-impl AsyncRequest for WorkRequest {}
-
-impl Drop for WorkRequest {
-    fn drop(&mut self) {
-        self.task.borrow_mut().take();
-    }
-}
-
-/// Runs `f` on the current `RunLoop` unless the returned request is dropped
-/// first. The task stays on this thread (a `LocalObject`); the loop gets a
-/// `Send` handle to it.
-fn invoke_cancellable(f: impl FnOnce() + 'static) -> Box<dyn AsyncRequest> {
-    let task: CancellableTask = Rc::new(RefCell::new(Some(Box::new(f))));
-    let handle = LocalObject::from_rc(Rc::clone(&task));
-    RunLoop::get().invoke(move || {
-        let task = handle.get().and_then(|task| task.borrow_mut().take());
-        if let Some(task) = task {
-            task();
+/// Runs `f` on this thread's `RunLoop` unless the returned request is
+/// dropped first.
+fn invoke_cancellable(f: impl FnOnce() + 'static) -> Request {
+    let mut f = Some(f);
+    let (request, responder) = Request::new(&scheduler::get_current(), move |_| {
+        if let Some(f) = f.take() {
+            f();
         }
     });
-    Box::new(WorkRequest { task })
+    responder.send(Response::new());
+    request
 }
 
 /// The default observer (`std::make_unique<OfflineRegionObserver>()`).
@@ -158,7 +140,7 @@ struct Inner {
     status: RefCell<OfflineRegionStatus>,
     observer: RefCell<Rc<dyn OfflineRegionObserver>>,
 
-    requests: RefCell<VecMap<u64, Option<Box<dyn AsyncRequest>>>>,
+    requests: RefCell<VecMap<u64, Option<Request>>>,
     next_request_id: Cell<u64>,
     required_source_urls: RefCell<HashSet<String>>,
     resources_remaining: RefCell<VecDeque<Resource>>,
@@ -284,7 +266,7 @@ impl Inner {
     }
 
     /// `*it = request` (if the entry still exists).
-    fn set_request(&self, id: u64, request: Box<dyn AsyncRequest>) {
+    fn set_request(&self, id: u64, request: Request) {
         let previous = {
             let mut requests = self.requests.borrow_mut();
             match requests.get_mut(&id) {

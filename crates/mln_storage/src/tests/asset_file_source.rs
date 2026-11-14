@@ -8,13 +8,16 @@ use parking_lot::Mutex;
 
 use super::{cpp_path, req};
 use crate::asset_file_source::AssetFileSource;
-use crate::async_request::AsyncRequest;
-use crate::file_source::FileSource;
+use crate::file_source::{FileSource, FileSourceExt};
+use crate::request::Request;
 use crate::resource::{Kind, Resource};
 use crate::response::{Reason, Response};
 
 fn asset_file_source() -> AssetFileSource {
-    AssetFileSource::new(cpp_path("test/fixtures/storage/assets").to_str().unwrap())
+    AssetFileSource::new(
+        cpp_path("test/fixtures/storage/assets").to_str().unwrap(),
+        mln_actor::scheduler::get_background(),
+    )
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.
@@ -44,7 +47,7 @@ fn data(res: &Response) -> &[u8] {
 struct WorkerChain {
     fs: Arc<AssetFileSource>,
     num_requests: Cell<u32>,
-    request: RefCell<Option<Box<dyn AsyncRequest>>>,
+    request: RefCell<Option<Request>>,
     end_callback: Box<dyn Fn()>,
     failures: Arc<Mutex<Vec<String>>>,
 }

@@ -72,6 +72,8 @@ impl<O: 'static> Thread<O> {
 
 impl<O: 'static> Drop for Thread<O> {
     /// Waits for the queue up to here, stops the loop and joins the thread.
+    /// Dropped on its own thread, by the last of its owners there, it only
+    /// stops the loop, which ends once the task that drops it returns.
     fn drop(&mut self) {
         let Backing::Spawned { thread, running } = &mut self.backing else {
             return;
@@ -79,6 +81,10 @@ impl<O: 'static> Drop for Thread<O> {
         let (stoppable_tx, stoppable_rx) = mpsc::channel::<()>();
         // `running.wait()`.
         let run_loop = running.lock().recv().expect("thread failed to start");
+        if thread.as_ref().is_some_and(|thread| thread.thread().id() == std::thread::current().id()) {
+            run_loop.stop();
+            return;
+        }
         run_loop.invoke(move || {
             let _ = stoppable_tx.send(());
         });
@@ -124,5 +130,25 @@ mod tests {
         }
         drop(thread);
         assert_eq!(total.load(Ordering::SeqCst), 100);
+    }
+    /// The last owner of a thread may be a message on that thread.
+    #[test]
+    fn a_thread_dropped_on_itself_ends_without_waiting_for_itself() {
+        let total = Arc::new(AtomicUsize::new(0));
+        let thread = Arc::new(Mutex::new(Some(Thread::new("Test", {
+            let total = Arc::clone(&total);
+            move |_| Counter { count: Cell::new(7), total }
+        }))));
+        let (done, finished) = mpsc::channel();
+        let owner = Arc::clone(&thread);
+        let actor = thread.lock().as_ref().unwrap().actor();
+        actor.invoke(move |_: &Counter| {
+            drop(owner.lock().take());
+            done.send(()).unwrap();
+        });
+        finished.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        while total.load(Ordering::SeqCst) != 7 {
+            std::thread::yield_now();
+        }
     }
 }

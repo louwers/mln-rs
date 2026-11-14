@@ -1,11 +1,8 @@
-// C++ drives a curl multi handle from the requesting thread's RunLoop (socket
-// watches and a timer). Here the file source hands each request to its
-// `HttpTransport`, which finishes it from whatever thread the transfer ends
-// on, and the result goes back to the requesting thread through a mailbox,
-// where `handleResult` runs the callback as in C++. Dropping the request
-// cancels it: the mailbox closes, so the callback never runs, and the
-// transport's cancel handler (`TransferRequest::set_cancel_handler`) stops
-// an in-flight transfer if it has one.
+// The file source hands each request to its `HttpTransport`, which finishes
+// it from whatever thread the transfer ends on, and the response goes to the
+// request's responder. Dropping the request cancels it: the transport's
+// cancel handler (`TransferRequest::set_cancel_handler`) stops an in-flight
+// transfer if it has one.
 //
 // Request headers as in C++: `Range` for data ranges, `If-None-Match` from
 // the prior etag, else `If-Modified-Since` from the prior modification date,
@@ -27,87 +24,17 @@
 // read in the three formats of RFC 9110 only, where libcurl's `curl_getdate`
 // also takes other zones and free-form dates.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_util::chrono::parse_http_date;
 use mln_util::http_header::{CacheControl, parse_retry_headers};
 use parking_lot::Mutex;
 
-use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource};
+use crate::file_source::FileSource;
 use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
+use crate::request::Responder;
 use crate::resource::{Kind, Resource};
 use crate::response::{Reason, ResourceError, Response};
-
-/// The part of `HTTPRequest` that lives on the requesting thread.
-pub(crate) struct HTTPRequestState {
-    callback: RefCell<Callback>,
-}
-
-impl HTTPRequestState {
-    /// The callback half of `handleResult(CURLcode)`.
-    fn handle_result(&self, response: Response) {
-        // Calling `callback` may result in deleting `this`; the mailbox keeps
-        // the state alive while this message runs.
-        (self.callback.borrow_mut())(response);
-    }
-}
-
-/// `HTTPRequest`
-struct HTTPRequest {
-    mailbox: Arc<Mailbox>,
-    cancellation: Arc<Cancellation>,
-}
-
-impl AsyncRequest for HTTPRequest {}
-
-impl Drop for HTTPRequest {
-    fn drop(&mut self) {
-        self.mailbox.close();
-        self.cancellation.cancel();
-    }
-}
-
-/// Whether a request was dropped, and what stops its transfer then.
-#[derive(Default)]
-struct Cancellation {
-    cancelled: AtomicBool,
-    handler: Mutex<Option<Box<dyn FnOnce() + Send>>>,
-}
-
-impl Cancellation {
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        let handler = self.handler.lock().take();
-        if let Some(handler) = handler {
-            handler();
-        }
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-    }
-
-    #[cfg(any(target_vendor = "apple", target_os = "android"))]
-    fn set_handler(&self, handler: Box<dyn FnOnce() + Send>) {
-        *self.handler.lock() = Some(handler);
-        // `cancel` may have run before the handler was there.
-        if self.is_cancelled() {
-            let handler = self.handler.lock().take();
-            if let Some(handler) = handler {
-                handler();
-            }
-        }
-    }
-
-    fn clear_handler(&self) {
-        drop(self.handler.lock().take());
-    }
-}
 
 /// The value of `line` if it is the header `name`, matched as an
 /// ASCII-case-insensitive prefix.
@@ -128,8 +55,7 @@ pub(crate) struct Transfer {
 pub(crate) struct TransferRequest {
     resource: Resource,
     headers: HttpHeaders,
-    reply: ActorRef<HTTPRequestState>,
-    cancellation: Arc<Cancellation>,
+    responder: Responder,
 }
 
 impl TransferRequest {
@@ -151,7 +77,7 @@ impl TransferRequest {
     /// transfer any more: a transport can skip it.
     #[must_use]
     pub(crate) fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
+        self.responder.is_cancelled()
     }
 
     /// Sets what stops the transfer when the request is dropped before it
@@ -160,7 +86,7 @@ impl TransferRequest {
     /// already dropped; `finish` discards it.
     #[cfg(any(target_vendor = "apple", target_os = "android"))]
     pub(crate) fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) {
-        self.cancellation.set_handler(Box::new(handler));
+        self.responder.on_cancel(handler);
     }
 
     /// Finishes the request with the transfer's result (a transfer that
@@ -169,24 +95,20 @@ impl TransferRequest {
     /// `handleResult(CURLcode)` do, and hands it to the requesting thread,
     /// unless the request was dropped. Any thread may call it.
     pub(crate) fn finish(self, transfer: Result<Transfer, Box<ResourceError>>) {
-        self.cancellation.clear_handler();
-        let response = build_response(&self.resource, transfer);
+        self.responder.on_cancel(|| {});
         if !self.is_cancelled() {
-            self.reply.invoke(move |request: &HTTPRequestState| request.handle_result(response));
+            self.responder.send(build_response(&self.resource, transfer));
         }
     }
 }
 
 #[cfg(all(test, not(any(target_family = "wasm", target_vendor = "apple", target_os = "android"))))]
 impl TransferRequest {
-    /// A request for `resource` whose response goes nowhere (tests).
-    pub(crate) fn unanswered(resource: Resource) -> TransferRequest {
-        TransferRequest {
-            resource,
-            headers: HttpHeaders::new(),
-            reply: ActorRef::new(&Mailbox::new()),
-            cancellation: Arc::default(),
-        }
+    /// A request for `resource` whose response goes nowhere, until the
+    /// returned request drops (tests).
+    pub(crate) fn unanswered(resource: Resource) -> (TransferRequest, crate::request::Request) {
+        let (request, responder) = crate::request::Request::direct(|_| {});
+        (TransferRequest { resource, headers: HttpHeaders::new(), responder }, request)
     }
 }
 
@@ -351,28 +273,13 @@ impl HTTPFileSource {
     pub(crate) fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
         *self.header_transform.lock() = transform;
     }
-
-    /// `request(const Resource&, Callback)`. The callback runs on the
-    /// calling thread's `RunLoop`.
-    pub(crate) fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), state);
-        let cancellation = Arc::new(Cancellation::default());
-        let header_transform = self.header_transform.lock().clone();
-        let headers = header_transform.headers(resource.kind, &resource.url);
-        self.transport.start(TransferRequest {
-            resource: resource.clone(),
-            headers,
-            reply: ActorRef::new(&mailbox),
-            cancellation: Arc::clone(&cancellation),
-        });
-        Box::new(HTTPRequest { mailbox, cancellation })
-    }
 }
 
 impl FileSource for HTTPFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        HTTPFileSource::request(self, resource, callback)
+    fn load(&self, resource: &Resource, responder: Responder) {
+        let header_transform = self.header_transform.lock().clone();
+        let headers = header_transform.headers(resource.kind, &resource.url);
+        self.transport.start(TransferRequest { resource: resource.clone(), headers, responder });
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

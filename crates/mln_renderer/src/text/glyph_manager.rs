@@ -30,7 +30,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::{AsyncTask, AsyncTaskSender};
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_text::HBShapeAdjust;
 use mln_text::glyph::{
     FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, Glyphs, HBShapeRequests,
@@ -89,7 +89,7 @@ struct GlyphRequest {
     /// The last request failed: its requestors got the range's glyphs as
     /// missing, and the next requestor that needs the range requests it again.
     failed: bool,
-    req: Option<Box<dyn AsyncRequest>>,
+    req: Option<Request>,
     requestors: HashMap<GlyphRequestorKey, (Weak<dyn GlyphRequestor>, Rc<GlyphDependencies>)>,
     glyphs: Option<Arc<GlyphCacheRange>>,
 }

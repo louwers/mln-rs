@@ -12,7 +12,7 @@ use mln_util::chrono::{Timestamp, now};
 
 use super::{local_callback, req, serial, temp_path};
 use crate::database_file_source::DatabaseFileSource;
-use crate::file_source::FileSource;
+use crate::file_source::FileSourceExt;
 use crate::loader::Loader;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
@@ -802,7 +802,7 @@ fn cached_resource_low_priority() {
     dbfs.put(&resource2, &response);
 
     online_fs.set_maximum_concurrent_requests(1);
-    let paused = fs.pause();
+    let paused = dbfs.pause();
     NetworkStatus::set(Status::Offline);
 
     // Ensure that the online requests for new resources are processed first.
@@ -897,9 +897,7 @@ fn cached_resource_low_priority() {
     // would go to request 3. The loader sends a request to the database, and
     // to the network once the database answers: the pauses wait for each
     // thread in turn to finish what it was sent.
-    drop(fs.pause());
     drop(dbfs.pause());
-    drop(fs.pause());
     drop(online_fs.pause());
     NetworkStatus::set(Status::Online);
 

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use mln_actor::{LocalObject, RunLoop, TaggedScheduler, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
-use mln_storage::{AsyncRequest, Callback, FileSource, Resource, Response};
+use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::layer::{Layer, downcast_arc};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::fill_layer::Impl as FillLayerImpl;
@@ -57,19 +57,8 @@ fn read_file(relative: &str) -> Vec<u8> {
 /// network answers, and the frame it got a slot in.
 struct Pending {
     tile: String,
-    callback: RefCell<Option<Callback>>,
-    cancelled: Cell<bool>,
+    responder: Responder,
     in_flight_since: Cell<Option<usize>>,
-}
-
-struct PendingRequest(Rc<Pending>);
-
-impl AsyncRequest for PendingRequest {}
-
-impl Drop for PendingRequest {
-    fn drop(&mut self) {
-        self.0.cancelled.set(true);
-    }
 }
 
 /// The open requests, in the order they were made, and the frames ended.
@@ -108,7 +97,7 @@ impl Network {
             let mut requests = requests.borrow_mut();
             let frame = requests.frame;
             requests.frame += 1;
-            requests.open.retain(|pending| !pending.cancelled.get());
+            requests.open.retain(|pending| !pending.responder.is_cancelled());
             for pending in requests.open.iter().take(SLOTS) {
                 if pending.in_flight_since.get().is_none() {
                     pending.in_flight_since.set(Some(frame));
@@ -122,16 +111,13 @@ impl Network {
         };
         for pending in answered {
             // An earlier answer in the batch may have cancelled it.
-            if pending.cancelled.get() {
+            if pending.responder.is_cancelled() {
                 continue;
             }
-            let Some(mut callback) = pending.callback.borrow_mut().take() else {
-                continue;
-            };
             let mut response = Response::new();
             let data = if pending.tile.starts_with("vector") { &self.vector_tile } else { &self.raster_tile };
             response.data = Some(Arc::clone(data));
-            callback(response);
+            pending.responder.send(response);
         }
     }
 
@@ -139,23 +125,17 @@ impl Network {
     fn open_requests(&self) -> Vec<String> {
         let requests = self.requests();
         let requests = requests.borrow();
-        requests.open.iter().filter(|pending| !pending.cancelled.get()).map(|p| p.tile.clone()).collect()
+        requests.open.iter().filter(|pending| !pending.responder.is_cancelled()).map(|p| p.tile.clone()).collect()
     }
 }
 
 impl FileSource for Network {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder) {
         let data = resource.tile_data.as_ref().expect("only tiles are requested");
         let source = resource.url.split('/').next().unwrap_or_default();
         let tile = format!("{source}/{}/{}/{}", data.z, data.x, data.y);
-        let pending = Rc::new(Pending {
-            tile,
-            callback: RefCell::new(Some(callback)),
-            cancelled: Cell::new(false),
-            in_flight_since: Cell::new(None),
-        });
-        self.requests().borrow_mut().open.push_back(Rc::clone(&pending));
-        Box::new(PendingRequest(pending))
+        let pending = Rc::new(Pending { tile, responder, in_flight_since: Cell::new(None) });
+        self.requests().borrow_mut().open.push_back(pending);
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

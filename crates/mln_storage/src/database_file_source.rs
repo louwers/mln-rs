@@ -1,6 +1,5 @@
-// The database runs on its own thread (`util::Thread<DatabaseFileSourceThread>`
-// "DatabaseFileSource"); requests reach it as actor messages and the
-// response goes back to the requesting thread's `FileSourceRequest`.
+// The database runs on its own thread ("DatabaseFileSource"); requests reach
+// it as actor messages and the response goes to the request's responder.
 //
 // The offline region API needs `OfflineDownload`, which parses styles and so
 // sits above this crate: mln_storage_offline adds it to `DatabaseFileSource`
@@ -16,10 +15,9 @@ use std::time::Duration;
 use mln_actor::{ActorRef, Thread, Timer};
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 
-use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource};
-use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
+use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
+use crate::request::Responder;
 use crate::resource::{LoadingMethod, Resource, StoragePolicy};
 use crate::response::{Reason, ResourceError, Response};
 
@@ -79,7 +77,7 @@ impl DatabaseFileSourceThread {
         });
     }
 
-    pub(crate) fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
+    pub(crate) fn request(&self, resource: &Resource, responder: &Responder) {
         let mut offline_response =
             if resource.storage_policy == StoragePolicy::Volatile { None } else { self.db.borrow_mut().get(resource) };
         match &mut offline_response {
@@ -96,8 +94,7 @@ impl DatabaseFileSourceThread {
                 }
             }
         }
-        let response = offline_response.expect("response");
-        req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
+        responder.send(offline_response.expect("response"));
     }
 
     #[cfg(test)]
@@ -270,12 +267,13 @@ impl DatabaseFileSource {
 }
 
 impl FileSource for DatabaseFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let req = FileSourceRequest::new(callback);
-        let req_ref = req.actor();
+    fn load(&self, resource: &Resource, responder: Responder) {
         let resource = resource.clone();
-        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| t.request(&resource, &req_ref));
-        Box::new(req)
+        self.thread.actor().invoke(move |t: &DatabaseFileSourceThread| {
+            if !responder.is_cancelled() {
+                t.request(&resource, &responder);
+            }
+        });
     }
 
     fn can_request(&self, resource: &Resource) -> bool {

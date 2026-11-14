@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
@@ -63,7 +63,7 @@ struct Inner {
     url: Option<String>,
     /// The style's tileset members, which win over those of the TileJSON at `url`.
     style_tileset: PartialTileset,
-    req: RefCell<Option<Box<dyn AsyncRequest>>>,
+    req: RefCell<Option<Request>>,
 }
 
 /// A vector, raster or raster-dem source: the TileJSON at its URL, the tileset members the style

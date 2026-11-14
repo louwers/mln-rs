@@ -1,17 +1,13 @@
 //! How a runtime loads resources: a host's resource provider in front of the
 //! network, and the transforms of request URLs and headers.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{ActorRef, Mailbox, scheduler};
-use mln_storage::file_source::Callback;
 use mln_storage::http_header_transform::HttpHeaders;
 use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
-use mln_storage::{AsyncRequest, FileSource, OnlineFileSource, Resource, ResourceError, Response};
+use mln_storage::{FileSource, OnlineFileSource, Resource, ResourceError, Responder, Response};
 use mln_util::error::Error;
 use parking_lot::{Mutex, RwLock};
 
@@ -136,10 +132,10 @@ struct Native {
 }
 
 impl Native {
-    fn request(&self, resource: &Resource, callback: Callback, declined: bool) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder, declined: bool) {
         match self.unsupported_scheme(&resource.url) {
-            Some(scheme) => respond_later(unsupported_scheme(scheme, &resource.url, declined), callback),
-            None => self.online.request(resource, callback),
+            Some(scheme) => responder.send(unsupported_scheme(scheme, &resource.url, declined)),
+            None => self.online.load(resource, responder),
         }
     }
 
@@ -192,56 +188,46 @@ fn unsupported_scheme(scheme: &str, url: &str, declined: bool) -> Response {
     Response { error: Some(Box::new(ResourceError::new(Reason::Other, message))), ..Response::default() }
 }
 
-/// A request that answers with `response` on the requesting thread, once
-/// the request has been returned.
-fn respond_later(response: Response, callback: Callback) -> Box<dyn AsyncRequest> {
-    let target = Rc::new(Immediate(RefCell::new(Some(callback))));
-    let mailbox = Mailbox::with_target(&scheduler::get_current(), target);
-    ActorRef::<Immediate>::new(&mailbox).invoke(move |target| {
-        let callback = target.0.borrow_mut().take();
-        if let Some(mut callback) = callback {
-            callback(response);
-        }
-    });
-    Box::new(ImmediateRequest(mailbox))
-}
-
-struct Immediate(RefCell<Option<Callback>>);
-
-/// Dropping it cancels the answer.
-struct ImmediateRequest(Arc<Mailbox>);
-
-impl AsyncRequest for ImmediateRequest {}
-
-impl Drop for ImmediateRequest {
-    fn drop(&mut self) {
-        self.0.close();
-    }
-}
-
 impl FileSource for ProviderFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder) {
         let hooked = self.hooks.provider.read();
         let provider = match Self::route(resource, hooked.as_deref()) {
             Route::Provider(provider) => provider,
             Route::Native { declined } => {
                 drop(hooked);
-                return self.native().request(resource, callback, declined);
+                return self.native().load(resource, responder, declined);
             }
         };
-        let target = Rc::new(ProviderTarget {
-            callback: RefCell::new(Some(callback)),
+        let shared = Arc::new(RequestShared {
+            state: Mutex::new(RequestState::default()),
             native: self.native(),
             resource: resource.clone(),
-            request: RefCell::new(None),
+            responder: responder.clone(),
         });
-        let mailbox = Mailbox::with_target(&scheduler::get_current(), target);
-        let shared =
-            Arc::new(RequestShared { state: Mutex::new(RequestState::default()), target: ActorRef::new(&mailbox) });
+        let cancelled = Arc::downgrade(&shared);
+        responder.on_cancel(move || {
+            if let Some(shared) = cancelled.upgrade() {
+                shared.cancel();
+            }
+        });
         let request = ResourceRequest { resource: resource.clone(), shared: Some(Arc::clone(&shared)) };
+        shared.state.lock().in_call = true;
         provider.request(request);
         drop(hooked);
-        Box::new(ProviderRequest { mailbox, shared })
+        // An answer that came during the call goes out now, so that the
+        // requester never sees it before the provider's call has returned.
+        let deferred = {
+            let mut state = shared.state.lock();
+            state.in_call = false;
+            state.deferred.take()
+        };
+        if let Some(answer) = deferred {
+            answer(&shared);
+        }
+    }
+
+    fn supports_cache_only(&self) -> bool {
+        self.online.supports_cache_only()
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
@@ -250,16 +236,45 @@ impl FileSource for ProviderFileSource {
     }
 }
 
-/// The requesting side of a provider's request, on the requesting thread.
-struct ProviderTarget {
-    callback: RefCell<Option<Callback>>,
-    native: Native,
-    resource: Resource,
-    /// The library's request, once the provider passed through.
-    request: RefCell<Option<Box<dyn AsyncRequest>>>,
+#[derive(Default)]
+struct RequestState {
+    /// The requester dropped the request.
+    cancelled: bool,
+    /// The provider answered or passed through.
+    answered: bool,
+    on_cancel: Option<Box<dyn FnOnce() + Send>>,
+    /// The provider's `request` call is running.
+    in_call: bool,
+    /// The answer given during that call, which goes out once it returns.
+    deferred: Option<Answer>,
 }
 
-impl ProviderTarget {
+/// What a provider's answer does with the request.
+type Answer = Box<dyn FnOnce(&RequestShared) + Send>;
+
+/// A provider's request, which its [`ResourceRequest`] and the requester's
+/// cancellation share.
+struct RequestShared {
+    state: Mutex<RequestState>,
+    native: Native,
+    resource: Resource,
+    responder: Responder,
+}
+
+impl RequestShared {
+    /// The requester dropped the request: the host's cancel callback runs
+    /// unless the provider answered.
+    fn cancel(&self) {
+        let on_cancel = {
+            let mut state = self.state.lock();
+            state.cancelled = true;
+            if state.answered { None } else { state.on_cancel.take() }
+        };
+        if let Some(on_cancel) = on_cancel {
+            on_cancel();
+        }
+    }
+
     fn respond(&self, mut response: Response) {
         // A revalidation withholds the cached copy from the requester until
         // the answer, so a "not modified" answer delivers that copy, as the
@@ -274,54 +289,11 @@ impl ProviderTarget {
                 response.etag.clone_from(&self.resource.prior_etag);
             }
         }
-        let callback = self.callback.borrow_mut().take();
-        if let Some(mut callback) = callback {
-            callback(response);
-        }
+        self.responder.send(response);
     }
 
     fn pass_through(&self) {
-        let callback = self.callback.borrow_mut().take();
-        if let Some(callback) = callback {
-            let request = self.native.request(&self.resource, callback, true);
-            *self.request.borrow_mut() = Some(request);
-        }
-    }
-}
-
-#[derive(Default)]
-struct RequestState {
-    /// The requester dropped the request.
-    cancelled: bool,
-    /// The provider answered or passed through.
-    answered: bool,
-    on_cancel: Option<Box<dyn FnOnce() + Send>>,
-}
-
-struct RequestShared {
-    state: Mutex<RequestState>,
-    target: ActorRef<ProviderTarget>,
-}
-
-/// What the requester holds: dropping it cancels the provider's request.
-struct ProviderRequest {
-    mailbox: Arc<Mailbox>,
-    shared: Arc<RequestShared>,
-}
-
-impl AsyncRequest for ProviderRequest {}
-
-impl Drop for ProviderRequest {
-    fn drop(&mut self) {
-        let on_cancel = {
-            let mut state = self.shared.state.lock();
-            state.cancelled = true;
-            if state.answered { None } else { state.on_cancel.take() }
-        };
-        self.mailbox.close();
-        if let Some(on_cancel) = on_cancel {
-            on_cancel();
-        }
+        self.native.load(&self.resource, self.responder.clone(), true);
     }
 }
 
@@ -382,23 +354,31 @@ impl ResourceRequest {
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) when
     /// the library cancelled the request.
     pub fn pass_through(mut self) -> Result<(), Error> {
-        self.answer(ProviderTarget::pass_through)
+        self.answer(RequestShared::pass_through)
     }
 
-    fn answer(&mut self, answer: impl FnOnce(&ProviderTarget) + Send + 'static) -> Result<(), Error> {
+    fn answer(&mut self, answer: impl FnOnce(&RequestShared) + Send + 'static) -> Result<(), Error> {
         let Some(shared) = self.shared.take() else {
             return Err(Error::invalid_state("the request was answered"));
         };
-        let on_cancel = {
+        let (on_cancel, answer) = {
             let mut state = shared.state.lock();
             if state.cancelled {
                 return Err(Error::invalid_state("the library cancelled the request"));
             }
             state.answered = true;
-            state.on_cancel.take()
+            let answer = if state.in_call {
+                state.deferred = Some(Box::new(answer));
+                None
+            } else {
+                Some(answer)
+            };
+            (state.on_cancel.take(), answer)
         };
         drop(on_cancel);
-        shared.target.invoke(answer);
+        if let Some(answer) = answer {
+            answer(&shared);
+        }
         Ok(())
     }
 }

@@ -1,10 +1,9 @@
-use mln_actor::{ActorRef, Thread};
+use mln_actor::SchedulerPtr;
 use mln_util::constants::FILE_PROTOCOL;
 
-use crate::async_request::AsyncRequest;
-use crate::file_source::{Callback, FileSource};
-use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
-use crate::local_file_request::request_local_file;
+use crate::file_source::FileSource;
+use crate::local_file_request::local_file_response;
+use crate::request::Responder;
 use crate::resource::Resource;
 use crate::response::{Reason, ResourceError, Response};
 
@@ -30,48 +29,44 @@ fn path_from_file_url(url: &str) -> Vec<u8> {
     path
 }
 
-pub(crate) struct LocalFileSourceThread;
-
-impl LocalFileSourceThread {
-    #[expect(clippy::unused_self, reason = "the file source's actor calls it on its thread's object")]
-    pub(crate) fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
-        if !accepts_url(&resource.url) {
-            let mut response = Response::new();
-            response.error = Some(Box::new(ResourceError::new(Reason::Other, "Invalid file URL")));
-            req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
-            return;
-        }
-
-        let path = path_from_file_url(&resource.url);
-        #[cfg(target_os = "android")]
-        if let Some(name) = crate::android::app_asset_name(&path) {
-            crate::android::request_asset(name, req, resource.data_range);
-            return;
-        }
-        request_local_file(&path, req, resource.data_range);
+/// The file at a `file://` URL, or its error.
+fn file_response(resource: &Resource) -> Response {
+    if !accepts_url(&resource.url) {
+        let mut response = Response::new();
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Invalid file URL")));
+        return response;
     }
+    let path = path_from_file_url(&resource.url);
+    #[cfg(target_os = "android")]
+    if let Some(name) = crate::android::app_asset_name(&path) {
+        return crate::android::asset_response(name, resource.data_range);
+    }
+    local_file_response(&path, resource.data_range)
 }
 
-/// The `FileSystem` file source: `file://` URLs. On Android, the files under
-/// `mln_storage::android::APP_ASSETS` are the app's assets.
+/// The `FileSystem` file source: `file://` URLs, read on a thread pool. On
+/// Android, the files under `mln_storage::android::APP_ASSETS` are the app's
+/// assets.
 pub(crate) struct LocalFileSource {
-    thread: Thread<LocalFileSourceThread>,
+    pool: SchedulerPtr,
 }
 
 impl LocalFileSource {
+    /// Reads files on `pool`.
     #[must_use]
-    pub(crate) fn new() -> Self {
-        LocalFileSource { thread: Thread::new("LocalFileSource", |_| LocalFileSourceThread) }
+    pub(crate) fn new(pool: SchedulerPtr) -> Self {
+        LocalFileSource { pool }
     }
 }
 
 impl FileSource for LocalFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let req = FileSourceRequest::new(callback);
-        let req_ref = req.actor();
+    fn load(&self, resource: &Resource, responder: Responder) {
         let resource = resource.clone();
-        self.thread.actor().invoke(move |t: &LocalFileSourceThread| t.request(&resource, &req_ref));
-        Box::new(req)
+        self.pool.schedule(Box::new(move || {
+            if !responder.is_cancelled() {
+                responder.send(file_response(&resource));
+            }
+        }));
     }
 
     fn can_request(&self, resource: &Resource) -> bool {

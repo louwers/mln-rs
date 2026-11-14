@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_storage::response::Reason;
-use mln_storage::{AsyncRequest, Data, FileSource, LoadingMethod, Resource, Response, StoragePolicy};
+use mln_storage::{Data, FileSource, FileSourceExt, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::tileset::Tileset;
@@ -117,7 +117,7 @@ struct State {
     necessity: TileNecessity,
     resource: Resource,
     file_source: Option<Arc<dyn FileSource>>,
-    request: Option<Box<dyn AsyncRequest>>,
+    request: Option<Request>,
     /// The last response was an error: nothing requests the tile again until
     /// `retry_failed_load`.
     failed: bool,

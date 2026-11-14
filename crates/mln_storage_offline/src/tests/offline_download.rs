@@ -15,7 +15,7 @@ use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, FileSource, Kind, LoadingMethod, Resource, Response};
+use mln_storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response};
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
@@ -385,75 +385,47 @@ fn exclude_ideographs() {
     test.run_loop.run();
 }
 
-struct FakeFileRequest {
-    id: u64,
-    requests: Rc<RefCell<Vec<FakeRequestEntry>>>,
-}
-
 struct FakeRequestEntry {
-    id: u64,
     resource: Resource,
-    callback: Rc<RefCell<Callback>>,
-}
-
-impl AsyncRequest for FakeFileRequest {}
-
-impl Drop for FakeFileRequest {
-    fn drop(&mut self) {
-        self.requests.borrow_mut().retain(|entry| entry.id != self.id);
-    }
+    responder: Responder,
 }
 
 /// Records the requests; `respond` answers the first of a kind. Requests
 /// come from the thread that created it.
 struct FakeOnlineFileSource {
     requests: LocalObject<RefCell<Vec<FakeRequestEntry>>>,
-    next_id: std::sync::atomic::AtomicU64,
 }
 
 impl FakeOnlineFileSource {
     fn new() -> Self {
-        FakeOnlineFileSource {
-            requests: LocalObject::new(RefCell::new(Vec::new())),
-            next_id: std::sync::atomic::AtomicU64::new(0),
-        }
+        FakeOnlineFileSource { requests: LocalObject::new(RefCell::new(Vec::new())) }
     }
 
+    /// The requests that weren't cancelled.
     fn requests(&self) -> Rc<RefCell<Vec<FakeRequestEntry>>> {
-        // LocalObject<RefCell<..>> holds an Rc<RefCell<..>>.
-        self.requests.get().expect("FakeOnlineFileSource used from another thread")
+        let requests = self.requests.get().expect("FakeOnlineFileSource used from another thread");
+        requests.borrow_mut().retain(|entry| !entry.responder.is_cancelled());
+        requests
     }
 
     fn respond(&self, kind: Kind, response: &Response) -> bool {
-        let callback = self
+        let responder = self
             .requests()
             .borrow()
             .iter()
             .find(|entry| entry.resource.kind == kind)
-            .map(|entry| Rc::clone(&entry.callback));
-
-        let request_found = callback.is_some();
-
-        if let Some(callback) = callback {
-            // Copy the callback, in case calling it deallocates the
-            // AsyncRequest.
-            (callback.borrow_mut())(response.clone());
+            .map(|entry| entry.responder.clone());
+        let request_found = responder.is_some();
+        if let Some(responder) = responder {
+            responder.send_now(response.clone());
         }
-
         request_found
     }
 }
 
 impl FileSource for FakeOnlineFileSource {
-    fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let requests = self.requests();
-        requests.borrow_mut().push(FakeRequestEntry {
-            id,
-            resource: resource.clone(),
-            callback: Rc::new(RefCell::new(callback)),
-        });
-        Box::new(FakeFileRequest { id, requests })
+    fn load(&self, resource: &Resource, responder: Responder) {
+        self.requests().borrow_mut().push(FakeRequestEntry { resource: resource.clone(), responder });
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

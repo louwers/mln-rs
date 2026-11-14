@@ -6,7 +6,7 @@ use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
 use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
-use mln_storage::FileSource;
+use mln_storage::{FileSource, FileSourceExt};
 use mln_util::image::PremultipliedImage;
 
 use crate::file_source::proxy_loader;

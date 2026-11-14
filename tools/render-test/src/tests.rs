@@ -686,9 +686,21 @@ fn argument_parsing() {
 // waited for.
 #[test]
 fn pending_requests_leave_when_answered_or_cancelled() {
-    use crate::file_source::{PendingRequest, ProxyFileSource, answered, track};
-    struct Request;
-    impl mln_storage::AsyncRequest for Request {}
+    use mln_storage::{FileSource, FileSourceExt, Resource, Responder};
+
+    use crate::file_source::{ProxyFileSource, answered, track};
+    /// Never answers.
+    struct Unanswered;
+    impl FileSource for Unanswered {
+        fn load(&self, _resource: &Resource, responder: Responder) {
+            std::mem::forget(responder);
+        }
+
+        fn can_request(&self, _resource: &Resource) -> bool {
+            true
+        }
+    }
+    let _run_loop = mln_actor::RunLoop::new();
     let is_pending = |url: &str| ProxyFileSource::pending_requests().iter().any(|(pending, _)| pending == url);
 
     let number = track("http://tiles/answered.mvt");
@@ -696,7 +708,8 @@ fn pending_requests_leave_when_answered_or_cancelled() {
     answered(number);
     assert!(!is_pending("http://tiles/answered.mvt"));
 
-    let request = PendingRequest { number: track("http://tiles/cancelled.mvt"), _request: Box::new(Request) };
+    let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered) };
+    let request = proxy.request(&Resource::style("http://tiles/cancelled.mvt"), |_| {});
     assert!(is_pending("http://tiles/cancelled.mvt"));
     drop(request);
     assert!(!is_pending("http://tiles/cancelled.mvt"));

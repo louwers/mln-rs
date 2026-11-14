@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use mln_storage::{
-    AsyncRequest, Callback, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource,
-    ResourceOptions, Response,
+    DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Request, Resource, ResourceOptions,
+    Responder, Response,
 };
 use mln_util::logging::{Event, Log};
 use parking_lot::Mutex;
@@ -33,25 +33,11 @@ pub(crate) fn answered(number: u64) {
     PENDING.lock().remove(&number);
 }
 
-/// A request passed on, which leaves `PENDING` when it is cancelled.
-pub(crate) struct PendingRequest {
-    pub(crate) number: u64,
-    pub(crate) _request: Box<dyn AsyncRequest>,
-}
-
-impl AsyncRequest for PendingRequest {}
-
-impl Drop for PendingRequest {
-    fn drop(&mut self) {
-        answered(self.number);
-    }
-}
-
 /// A file source that loads everything cache-only from the database while
 /// offline and maps the test URLs (`local://`, `http://localhost:2900/`) to
 /// the `http://` URLs the cache stores.
 pub(crate) struct ProxyFileSource {
-    default_resource_loader: Arc<dyn FileSource>,
+    pub(crate) default_resource_loader: Arc<dyn FileSource>,
 }
 
 impl ProxyFileSource {
@@ -102,7 +88,7 @@ fn replace_prefix(s: &mut String, prefix: &str) -> bool {
 }
 
 impl FileSource for ProxyFileSource {
-    fn request(&self, resource: &Resource, mut callback: Callback) -> Box<dyn AsyncRequest> {
+    fn load(&self, resource: &Resource, responder: Responder) {
         let mut transformed = resource.clone();
 
         // If offline, force always loading the resource from the cache so we
@@ -132,29 +118,32 @@ impl FileSource for ProxyFileSource {
 
         let number = track(&transformed.url);
         let logged = transformed.clone();
-        let request = self.default_resource_loader.request(
-            &transformed,
-            Box::new(move |response: Response| {
-                answered(number);
-                if logged.loading_method == LoadingMethod::CacheOnly && response.no_content {
-                    match (&logged.tile_data, logged.kind) {
-                        (Some(tile_data), Kind::Tile) => Log::info(
-                            Event::Database,
-                            format!("Resource not found in cache: {}({})", logged.url, tile_data.url_template),
-                        ),
-                        _ => Log::info(Event::Database, format!("Resource not found in cache: {}", logged.url)),
-                    }
+        let outer = responder.clone();
+        let (request, inner) = Request::direct(move |response: Response| {
+            answered(number);
+            if logged.loading_method == LoadingMethod::CacheOnly && response.no_content {
+                match (&logged.tile_data, logged.kind) {
+                    (Some(tile_data), Kind::Tile) => Log::info(
+                        Event::Database,
+                        format!("Resource not found in cache: {}({})", logged.url, tile_data.url_template),
+                    ),
+                    _ => Log::info(Event::Database, format!("Resource not found in cache: {}", logged.url)),
                 }
+            }
 
-                let size = response.data.as_ref().map_or(0, |data| data.len());
-                if ACTIVE.load(Ordering::SeqCst) {
-                    REQUEST_COUNT.fetch_add(1, Ordering::SeqCst);
-                    TRANSFERRED_SIZE.fetch_add(size, Ordering::SeqCst);
-                }
-                callback(response);
-            }),
-        );
-        Box::new(PendingRequest { number, _request: request })
+            let size = response.data.as_ref().map_or(0, |data| data.len());
+            if ACTIVE.load(Ordering::SeqCst) {
+                REQUEST_COUNT.fetch_add(1, Ordering::SeqCst);
+                TRANSFERRED_SIZE.fetch_add(size, Ordering::SeqCst);
+            }
+            outer.send(response);
+        });
+        // A request that is cancelled leaves `PENDING` too.
+        responder.on_cancel(move || {
+            answered(number);
+            drop(request);
+        });
+        self.default_resource_loader.load(&transformed, inner);
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

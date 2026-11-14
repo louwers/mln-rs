@@ -5,7 +5,7 @@ use mln_actor::RunLoop;
 use mln_util::tileset::Scheme;
 
 use super::{cpp_path, req, temp_path};
-use crate::file_source::FileSource;
+use crate::file_source::{FileSource, FileSourceExt};
 use crate::mbtiles_file_source::MBTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
 use crate::response::{Reason, Response};
@@ -16,7 +16,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn mbtiles_file_source() -> MBTilesFileSource {
-    MBTilesFileSource::new()
+    MBTilesFileSource::new(mln_actor::scheduler::get_background())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.

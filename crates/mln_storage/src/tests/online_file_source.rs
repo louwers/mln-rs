@@ -16,7 +16,7 @@ use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
-use crate::file_source::FileSource;
+use crate::file_source::{FileSource, FileSourceExt};
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
@@ -708,7 +708,7 @@ fn pending_requests_start_by_order() {
             resource
         })
         .collect();
-    let mut requests: Vec<Option<Box<dyn crate::AsyncRequest>>> = resources
+    let mut requests: Vec<Option<crate::Request>> = resources
         .iter()
         .enumerate()
         .map(|(index, resource)| {

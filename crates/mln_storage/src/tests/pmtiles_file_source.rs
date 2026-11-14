@@ -7,7 +7,7 @@ use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::tileset::Scheme;
 
 use super::{cpp_path, req};
-use crate::file_source::FileSource;
+use crate::file_source::{FileSource, FileSourceExt};
 use crate::loader::Loader;
 use crate::pmtiles_file_source::PMTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
@@ -20,7 +20,10 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn pmtiles_file_source() -> Rc<PMTilesFileSource> {
-    Rc::new(PMTilesFileSource::new(Arc::new(Loader::new(&ResourceOptions::default()))))
+    Rc::new(PMTilesFileSource::new(
+        Arc::new(Loader::new(&ResourceOptions::default())),
+        mln_actor::scheduler::get_background(),
+    ))
 }
 
 fn tile(url: &str, z: i8) -> Resource {

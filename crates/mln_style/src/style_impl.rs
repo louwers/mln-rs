@@ -36,7 +36,7 @@ use std::sync::Arc;
 use feature::Value;
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_sprite::{SpriteLoader, SpriteLoaderObserver};
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
@@ -213,7 +213,7 @@ pub struct Impl {
     // so the sprite loader (and its requests) goes before the file source;
     // Rust drops fields in declaration order.
     sprite_loader: SpriteLoader,
-    style_request: Option<Box<dyn AsyncRequest>>,
+    style_request: Option<Request>,
     /// Responses to `style_request` waiting for `process_style_responses`.
     style_responses: Rc<RefCell<VecDeque<Response>>>,
     /// Whether a response to `style_request` has brought a style, which a

@@ -13,13 +13,11 @@
 pub mod android;
 mod archive_tilejson;
 mod asset_file_source;
-mod async_request;
 #[cfg(feature = "sqlite")]
 pub mod database_file_source;
 #[cfg(target_family = "wasm")]
 mod fetch_transport;
 pub mod file_source;
-mod file_source_request;
 mod http_file_source;
 pub mod http_header_transform;
 mod http_timeout;
@@ -44,6 +42,7 @@ pub mod online_file_source;
 mod pmtiles_file_source;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
 mod redirect;
+pub mod request;
 pub mod resource;
 mod resource_options;
 pub mod resource_transform;
@@ -53,16 +52,16 @@ pub mod stub_file_source;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 mod ureq_transport;
 
-pub use async_request::AsyncRequest;
 #[cfg(feature = "sqlite")]
 pub use database_file_source::DatabaseFileSource;
 #[cfg(target_family = "wasm")]
 pub use fetch_transport::set_fetch_preloads;
-pub use file_source::{Callback, FileSource};
+pub use file_source::{FileSource, FileSourceExt};
 pub use loader::{Loader, LoaderBuilder};
 #[cfg(feature = "sqlite")]
 pub use offline_database::OfflineDatabase;
 pub use online_file_source::OnlineFileSource;
+pub use request::{Callback, Request, Responder};
 pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy};
 pub use resource_options::ResourceOptions;
 pub use response::{Data, ResourceError, Response};

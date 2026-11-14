@@ -6,7 +6,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_image::decoder;
-use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_storage::{FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::LatLng;
 use mln_util::error::Error;
@@ -68,7 +68,7 @@ impl source_impl::Impl for Impl {
 struct Inner {
     base: SourceBase,
     url: RefCell<Option<String>>,
-    req: RefCell<Option<Box<dyn AsyncRequest>>>,
+    req: RefCell<Option<Request>>,
     /// Port-only: counts the URLs and images set, so that an image that
     /// decodes after another was set (a decoder that answers later, see
     /// `on_image_response`) is dropped, as a cancelled request's response.
