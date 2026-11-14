@@ -213,6 +213,11 @@ impl Dependency {
     pub const ELEVATION: Dependency = Dependency(1 << 7);
     /// Global state ("global-state")
     pub const GLOBAL_STATE: Dependency = Dependency(1 << 8);
+    /// Feature state ("feature-state"). Always set along with `FEATURE`.
+    pub const FEATURE_STATE: Dependency = Dependency(1 << 9);
+    /// Inputs that only some properties provide while they evaluate:
+    /// "heatmap-density", "line-progress" and "accumulated".
+    pub const PROPERTY_INPUT: Dependency = Dependency(1 << 10);
 
     /// Whether the two sets share an input.
     #[must_use]
@@ -250,6 +255,8 @@ impl fmt::Display for Dependency {
             (Dependency::OVERRIDE, "Override"),
             (Dependency::ELEVATION, "Elevation"),
             (Dependency::GLOBAL_STATE, "GlobalState"),
+            (Dependency::FEATURE_STATE, "FeatureState"),
+            (Dependency::PROPERTY_INPUT, "PropertyInput"),
         ] {
             if self.intersects(dep) {
                 if any {
