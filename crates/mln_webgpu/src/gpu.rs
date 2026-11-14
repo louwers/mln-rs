@@ -767,7 +767,10 @@ impl Gpu for WebGpu {
         for pass in passes {
             self.encode(&mut encoder, pass)?;
         }
-        self.submit_native(encoder.finish());
+        // wgpu reports what it rejects in the passes when they finish. The
+        // writes stay for the next submit.
+        let command_buffer = self.validated("submit", |_| encoder.finish())?;
+        self.submit_native(command_buffer);
         Ok(())
     }
 }
