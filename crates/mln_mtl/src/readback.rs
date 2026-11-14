@@ -1,6 +1,5 @@
-// Port-only: offscreen and surface targets read their image back through a
-// blit into shared memory (C++ reads the texture with `getBytes`, which on
-// macOS needs a synchronized managed texture).
+// Readbacks blit a texture into shared memory, which reads private textures
+// too, where `getBytes` would need a synchronized managed texture.
 
 use mln_gfx::gpu::TextureRegion;
 use mln_util::size::Size;

@@ -1,5 +1,4 @@
-// What a custom layer's host gets of an OpenGL frame (C++: the base
-// `style::CustomLayerRenderParameters`, with the context current).
+// What a custom layer's host gets of an OpenGL frame: the context, current.
 
 use std::sync::Arc;
 

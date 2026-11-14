@@ -1,10 +1,7 @@
-// Debug groups are no-ops in C++ ("handled at the render pass level"); the
-// names are tracked for `visitDebugGroups` only.
-//
-// wgpu vs. Dawn: a render pass is recorded on the encoder through
-// `wgpu::RenderPass::forget_lifetime`, so passes are owned objects; wgpu then
-// rejects `finish()` while a pass is still open, as WebGPU requires (the
-// renderer drops its pass before `present`).
+// Only render passes record debug groups. A render pass is recorded on the
+// encoder through `wgpu::RenderPass::forget_lifetime`, so passes are owned
+// objects; wgpu then rejects `finish()` while a pass is still open, as
+// WebGPU requires (the renderer drops its pass before `present`).
 
 use std::any::Any;
 use std::cell::{RefCell, RefMut};
@@ -55,7 +52,6 @@ impl CommandEncoder {
         if let Some(resource) = resource {
             resource.frame_submitted();
         }
-        // C++ also updates context.setCurrentCommandEncoder.
         *self.encoder.borrow_mut() = Some(new_encoder(&self.context));
     }
 }

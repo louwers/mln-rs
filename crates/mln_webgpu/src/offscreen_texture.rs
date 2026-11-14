@@ -1,6 +1,6 @@
-// Port-only: after a read, the frame after it is copied out as soon as it
-// is submitted, so that a host reading frames back finds the next one's
-// copy started (C++ submits the copy at each read).
+// After a read, the frame after it is copied out as soon as it is
+// submitted, so that a host reading frames back finds the next one's copy
+// started.
 //
 // There is no size-changed callback (`handleResize` / `setSizeListener`):
 // an offscreen texture keeps its size, and a render target of another size
@@ -85,7 +85,6 @@ impl OffscreenTextureResource {
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             (texture, view)
         });
-        // Port-only: the C++ WebGPU backend only decrements this count.
         context.rendering_stats_mut().num_frame_buffers += 1;
         OffscreenTextureResource {
             context,
