@@ -99,11 +99,11 @@ impl SurfaceState {
     }
 
     /// The depth and stencil textures for a drawable of `size`. Intel and
-    /// AMD GPUs take one texture for both.
+    /// AMD GPUs and the simulator take one texture for both.
     fn depth_stencil_for(&self, size: (usize, usize)) -> Option<(MTLTexturePtr, MTLTexturePtr)> {
         let mut depth_stencil = self.depth_stencil.borrow_mut();
         if depth_stencil.as_ref().is_none_or(|d| d.size != size) {
-            *depth_stencil = if cfg!(target_arch = "x86_64") {
+            *depth_stencil = if cfg!(target_arch = "x86_64") || cfg!(target_abi = "sim") {
                 self.texture_2d(MTLPixelFormat::Depth32Float_Stencil8, size.0, size.1).map(|texture| DepthStencil {
                     size,
                     depth: texture.clone(),

@@ -194,7 +194,7 @@ impl Resource {
 
     /// The depth and stencil textures of the ring's size: the host's of the
     /// selected slot, which holds both, or the target's own. Intel and AMD
-    /// GPUs take one texture for both.
+    /// GPUs and the simulator take one texture for both.
     fn depth_stencil(&self) -> Option<(MTLTexturePtr, MTLTexturePtr)> {
         if let Some(depth) = self.textures.borrow().depth_textures.get(self.selected.get()) {
             return Some((depth.clone(), depth.clone()));
@@ -202,7 +202,7 @@ impl Resource {
         let size = self.textures.borrow().size;
         let mut depth = self.depth.borrow_mut();
         if depth.as_ref().is_none_or(|(made, _, _)| *made != size) {
-            *depth = if cfg!(target_arch = "x86_64") {
+            *depth = if cfg!(target_arch = "x86_64") || cfg!(target_abi = "sim") {
                 self.texture_2d(MTLPixelFormat::Depth32Float_Stencil8, size)
                     .map(|texture| (size, texture.clone(), texture))
             } else {
