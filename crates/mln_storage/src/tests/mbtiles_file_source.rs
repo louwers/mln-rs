@@ -10,7 +10,6 @@ use crate::mbtiles_file_source::MBTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
-use crate::sqlite3::{Database, OpenFlag};
 
 fn to_absolute_url(file_name: &str) -> String {
     let path = cpp_path("test/fixtures/storage/mbtiles").join(file_name);
@@ -101,9 +100,9 @@ fn not_a_database() {
 #[test]
 fn bad_metadata_zooms() {
     let path = temp_path("mbtiles_bad_metadata.mbtiles");
-    Database::open(&path, OpenFlag::ReadWriteCreate)
+    rusqlite::Connection::open(&*path)
         .and_then(|db| {
-            db.exec(
+            db.execute_batch(
                 "CREATE TABLE metadata (name TEXT, value TEXT); INSERT INTO metadata VALUES ('minzoom', 'zero'), \
                  ('maxzoom', '7'), ('bounds', '1,2,3'); CREATE TABLE tiles (zoom_level INTEGER, tile_column \
                  INTEGER, tile_row INTEGER, tile_data BLOB); INSERT INTO tiles VALUES (2, 0, 0, x''), (5, 0, 0, x'');",
@@ -124,8 +123,8 @@ fn bad_metadata_zooms() {
 #[test]
 fn no_metadata() {
     let path = temp_path("mbtiles_no_metadata.mbtiles");
-    Database::open(&path, OpenFlag::ReadWriteCreate)
-        .and_then(|db| db.exec("CREATE TABLE tiles (zoom_level INTEGER);"))
+    rusqlite::Connection::open(&*path)
+        .and_then(|db| db.execute_batch("CREATE TABLE tiles (zoom_level INTEGER);"))
         .expect("create the database");
 
     let mbtiles = mbtiles_file_source();

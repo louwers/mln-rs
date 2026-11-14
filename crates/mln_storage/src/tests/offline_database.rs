@@ -13,6 +13,7 @@ use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::tileset::Scheme;
+use rusqlite::{Connection, OpenFlags, ffi};
 
 use super::{
     FixtureLog, Message, TempPath, copy_file, cpp_path, delete_file, error, file_size, random_string, temp_path,
@@ -25,7 +26,6 @@ use crate::offline::{
 use crate::offline_database::OfflineDatabase;
 use crate::resource::{Kind, LoadingMethod, Resource, TileData};
 use crate::response::{Reason, ResourceError, Response};
-use crate::sqlite3::{Database, OpenFlag, Query, Statement, result_code};
 
 fn fixture(name: &str) -> PathBuf {
     cpp_path(&format!("test/fixtures/offline_database/{name}"))
@@ -48,13 +48,12 @@ fn delete_database_files(filename: &str) {
     delete_file(&format!("{filename}-journal"));
 }
 
+fn open_read_only(path: &str) -> Connection {
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap()
+}
+
 fn query_pragma_i32(path: &str, sql: &str) -> i32 {
-    let db = Database::open(path, OpenFlag::ReadOnly).unwrap();
-    let conn = db.conn();
-    let mut stmt = Statement::new(&conn, sql).unwrap();
-    let mut query = Query::new(&mut stmt);
-    query.run().unwrap();
-    query.get_i32(0).unwrap()
+    open_read_only(path).query_row(sql, [], |row| row.get(0)).unwrap()
 }
 
 fn database_page_count(path: &str) -> i32 {
@@ -66,12 +65,7 @@ fn database_user_version(path: &str) -> i32 {
 }
 
 fn database_journal_mode(path: &str) -> String {
-    let db = Database::open(path, OpenFlag::ReadOnly).unwrap();
-    let conn = db.conn();
-    let mut stmt = Statement::new(&conn, "pragma journal_mode").unwrap();
-    let mut query = Query::new(&mut stmt);
-    query.run().unwrap();
-    query.get_string(0).unwrap()
+    open_read_only(path).query_row("pragma journal_mode", [], |row| row.get(0)).unwrap()
 }
 
 fn database_sync_mode(path: &str) -> i32 {
@@ -79,16 +73,9 @@ fn database_sync_mode(path: &str) -> i32 {
 }
 
 fn database_table_columns(path: &str, name: &str) -> Vec<String> {
-    let db = Database::open(path, OpenFlag::ReadOnly).unwrap();
-    let conn = db.conn();
-    let sql = format!("pragma table_info({name})");
-    let mut stmt = Statement::new(&conn, &sql).unwrap();
-    let mut query = Query::new(&mut stmt);
-    let mut columns = Vec::new();
-    while query.run().unwrap() {
-        columns.push(query.get_string(1).unwrap());
-    }
-    columns
+    let conn = open_read_only(path);
+    let mut stmt = conn.prepare(&format!("pragma table_info({name})")).unwrap();
+    stmt.query_map([], |row| row.get(1)).unwrap().collect::<Result<_, _>>().unwrap()
 }
 
 fn database_auto_vacuum(path: &str) -> i32 {
@@ -186,9 +173,9 @@ fn schema_version() {
     delete_database_files(&filename);
 
     {
-        let db = Database::open(&filename, OpenFlag::ReadWriteCreate).unwrap();
-        db.set_busy_timeout(1000).unwrap();
-        db.exec("PRAGMA user_version = 1").unwrap();
+        let db = Connection::open(&*filename).unwrap();
+        db.busy_timeout(std::time::Duration::from_secs(1)).unwrap();
+        db.execute_batch("PRAGMA user_version = 1").unwrap();
     }
 
     {
@@ -225,8 +212,8 @@ fn invalid() {
     // changes between SQLite versions.
     assert_eq!(
         1,
-        log.count(&error(result_code::NOT_A_DB, "Can't open database: file is encrypted or is not a database"), true)
-            + log.count(&error(result_code::NOT_A_DB, "Can't open database: file is not a database"), true)
+        log.count(&error(ffi::SQLITE_NOTADB, "Can't open database: file is encrypted or is not a database"), true)
+            + log.count(&error(ffi::SQLITE_NOTADB, "Can't open database: file is not a database"), true)
     );
     assert_eq!(1, log.count(&removing(), false));
 
@@ -1479,7 +1466,7 @@ fn corrupt_database_on_open() {
     let mut db = OfflineDatabase::new(&filename);
     assert_eq!(
         1,
-        log.count(&error(result_code::CORRUPT, "Can't open database: database disk image is malformed"), true)
+        log.count(&error(ffi::SQLITE_CORRUPT, "Can't open database: database disk image is malformed"), true)
     );
     assert_eq!(1, log.count(&removing(), false));
     check_log_empty(&log);
@@ -1517,7 +1504,7 @@ fn corrupt_database_on_query() {
     assert!(db.get(&fixture::tile()).is_none());
     assert_eq!(
         1,
-        log.count(&error(result_code::CORRUPT, "Can't read resource: database disk image is malformed"), true)
+        log.count(&error(ffi::SQLITE_CORRUPT, "Can't read resource: database disk image is malformed"), true)
     );
     assert_eq!(1, log.count(&removing(), false));
     check_log_empty(&log);
@@ -1683,36 +1670,14 @@ fn merge_database_with_multiple_regions_with_overlap() {
         assert_eq!(2, db.list_regions().unwrap().len());
     }
 
-    let db = Database::open(&filename, OpenFlag::ReadOnly).unwrap();
-    let conn = db.conn();
-    {
-        let mut stmt = Statement::new(
-            &conn,
-            "SELECT COUNT(*) \
-             FROM region_tiles \
-             JOIN tiles WHERE tile_id = id",
-        )
-        .unwrap();
-        let mut query = Query::new(&mut stmt);
-        query.run().unwrap();
+    let conn = open_read_only(&filename);
+    let count = |sql: &str| conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
 
-        // Ensure multiple entries for tiles shared between regions
-        assert_eq!(5, query.get_i32(0).unwrap());
-    }
-    {
-        let mut stmt = Statement::new(
-            &conn,
-            "SELECT COUNT(*) \
-             FROM region_resources \
-             JOIN resources WHERE resource_id = id",
-        )
-        .unwrap();
-        let mut query = Query::new(&mut stmt);
-        query.run().unwrap();
+    // Ensure multiple entries for tiles shared between regions
+    assert_eq!(5, count("SELECT COUNT(*) FROM region_tiles JOIN tiles WHERE tile_id = id"));
 
-        // Ensure multiple entries for resources shared between regions
-        assert_eq!(593, query.get_i32(0).unwrap());
-    }
+    // Ensure multiple entries for resources shared between regions
+    assert_eq!(593, count("SELECT COUNT(*) FROM region_resources JOIN resources WHERE resource_id = id"));
 }
 
 // C++ skips this one on Windows (`#ifndef WIN32`), which can't open a folder
@@ -1754,7 +1719,7 @@ fn merge_database_with_invalid_db() {
         1,
         log.count(
             &error(
-                result_code::CORRUPT,
+                ffi::SQLITE_CORRUPT,
                 &format!("Can't attach database ({filename_sideload}) for merge: database disk image is malformed")
             ),
             false
@@ -1769,7 +1734,7 @@ fn change_path() {
     let new_path = temp_path("test.db");
     let mut db = OfflineDatabase::new(":memory:");
     db.change_path(&new_path);
-    Database::open(&new_path, OpenFlag::ReadOnly).unwrap();
+    open_read_only(&new_path);
     delete_file(&new_path);
 }
 
@@ -1883,21 +1848,15 @@ fn geometry_region_round_trip() {
 }
 
 fn cached_accessed(filename: &str, table: &str) -> i64 {
-    let db = Database::open(filename, OpenFlag::ReadOnly).unwrap();
-    let conn = db.conn();
-    let sql = format!("SELECT accessed FROM {table}");
-    let mut stmt = Statement::new(&conn, &sql).unwrap();
-    let mut query = Query::new(&mut stmt);
-    assert!(query.run().unwrap());
-    query.get_i64(0).unwrap()
+    open_read_only(filename).query_row(&format!("SELECT accessed FROM {table}"), [], |row| row.get(0)).unwrap()
 }
 
 fn cache_sql(filename: &str, sql: &str) {
-    Database::open(filename, OpenFlag::ReadWriteCreate).unwrap().exec(sql).unwrap();
+    Connection::open(filename).unwrap().execute_batch(sql).unwrap();
 }
 
 fn constraint_warning(msg: &str) -> Message {
-    warning(i64::from(result_code::CONSTRAINT), msg)
+    warning(i64::from(ffi::SQLITE_CONSTRAINT), msg)
 }
 
 // gtest: OfflineDatabase.BatchedReadTouchesDeduplicateAndSkipMisses

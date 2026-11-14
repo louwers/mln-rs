@@ -17,6 +17,8 @@ use mln_util::constants::MBTILES_PROTOCOL;
 use mln_util::url::percent_decode;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
+use rusqlite::types::ValueRef;
+use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value, json};
 
 use crate::archive_tilejson::archive_tilejson;
@@ -27,7 +29,6 @@ use crate::local_file_request::path_from_utf8;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
-use crate::sqlite3::{Database, OpenFlag, Query, Statement};
 
 fn accepts_url(url: &str) -> bool {
     url.starts_with(MBTILES_PROTOCOL)
@@ -53,6 +54,22 @@ fn db_path(path: &[u8]) -> &[u8] {
     }
 }
 
+fn open_read_only(path: &std::path::Path) -> Result<Connection, String> {
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)
+        .map_err(|e| e.to_string())
+}
+
+/// A metadata value as text. The MBTiles spec makes values TEXT, but a
+/// file's metadata table may store numbers.
+fn metadata_text(value: ValueRef<'_>) -> String {
+    match value {
+        ValueRef::Null => String::new(),
+        ValueRef::Integer(i) => i.to_string(),
+        ValueRef::Real(r) => r.to_string(),
+        ValueRef::Text(t) | ValueRef::Blob(t) => String::from_utf8_lossy(t).into_owned(),
+    }
+}
+
 fn error_response(reason: Reason, message: impl Into<String>) -> Response {
     let mut response = Response::new();
     response.error = Some(Box::new(ResourceError::new(reason, message)));
@@ -62,7 +79,7 @@ fn error_response(reason: Reason, message: impl Into<String>) -> Response {
 pub(crate) struct MBTilesFileSourceThread {
     // Multiple databases open simultaneously, to effectively support
     // multiple .mbtiles maps
-    db_cache: RefCell<VecMap<Vec<u8>, Database>>,
+    db_cache: RefCell<VecMap<Vec<u8>, Connection>>,
 }
 
 impl MBTilesFileSourceThread {
@@ -79,20 +96,18 @@ impl MBTilesFileSourceThread {
     fn tilejson(resource: &Resource) -> Result<Response, String> {
         let path = url_to_path(&resource.url);
         let path = path_from_utf8(&path)?;
-        let db =
-            Database::open(path.to_str().ok_or("Invalid UTF-8 in path")?, OpenFlag::ReadOnly).map_err(|e| e.message)?;
-        let conn = db.conn();
+        let conn = open_read_only(&path)?;
 
         // The metadata table's rows as strings, and the members of its `json`
         // row (such as `vector_layers`) on their own.
         let mut rows = Map::new();
         let mut json = Map::new();
         {
-            let mut meta = Statement::new(&conn, "SELECT name, value FROM metadata").map_err(|e| e.message)?;
-            let mut q = Query::new(&mut meta);
-            while q.run().map_err(|e| e.message)? {
-                let name = q.get_string(0).map_err(|e| e.message)?;
-                let value = q.get_string(1).map_err(|e| e.message)?;
+            let mut meta = conn.prepare("SELECT name, value FROM metadata").map_err(|e| e.to_string())?;
+            let mut query = meta.query([]).map_err(|e| e.to_string())?;
+            while let Some(row) = query.next().map_err(|e| e.to_string())? {
+                let name = metadata_text(row.get_ref(0).map_err(|e| e.to_string())?);
+                let value = metadata_text(row.get_ref(1).map_err(|e| e.to_string())?);
                 if name == "json" {
                     if let Ok(Value::Object(members)) = serde_json::from_str(&value) {
                         json = members;
@@ -109,16 +124,14 @@ impl MBTilesFileSourceThread {
         let (mut minzoom, mut maxzoom) = (zoom("minzoom"), zoom("maxzoom"));
         if minzoom.is_none() || maxzoom.is_none() {
             // The tiles' own zoom range, where the metadata has no valid one.
-            let mut zooms =
-                Statement::new(&conn, "SELECT MIN(zoom_level), MAX(zoom_level) FROM tiles").map_err(|e| e.message)?;
-            let mut q = Query::new(&mut zooms);
-            if q.run().map_err(|e| e.message)? {
-                let zoom = |i| {
-                    Ok::<_, String>(q.get_optional_i64(i).map_err(|e| e.message)?.and_then(|z| u8::try_from(z).ok()))
-                };
-                minzoom = minzoom.or(zoom(0)?);
-                maxzoom = maxzoom.or(zoom(1)?);
-            }
+            let (min, max) = conn
+                .query_row("SELECT MIN(zoom_level), MAX(zoom_level) FROM tiles", [], |row| {
+                    Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?))
+                })
+                .map_err(|e| e.to_string())?;
+            let zoom = |z: Option<i64>| z.and_then(|z| u8::try_from(z).ok());
+            minzoom = minzoom.or(zoom(min));
+            maxzoom = maxzoom.or(zoom(max));
         }
 
         // The tile request carries the tile's coordinates in a query parameter
@@ -181,19 +194,15 @@ impl MBTilesFileSourceThread {
         let mut db_cache = self.db_cache.borrow_mut();
         if !db_cache.contains_key(&path) {
             let file = path_from_utf8(&path)?;
-            let db = Database::open(file.to_str().ok_or("Invalid UTF-8 in path")?, OpenFlag::ReadOnly)
-                .map_err(|e| e.message)?;
-            db_cache.insert(path.clone(), db);
+            db_cache.insert(path.clone(), open_read_only(&file)?);
         }
-        let db = &db_cache[&path];
-        let conn = db.conn();
-        let mut stmt = Statement::new(&conn, &sql).map_err(|e| e.message)?;
-        let mut q = Query::new(&mut stmt);
-        while q.run().map_err(|e| e.message)? {
-            // `q.get<std::optional<std::string>>(0)`.
-            let data = q.get_optional_bytes(0).map_err(|e| e.message)?;
+        let conn = &db_cache[&path];
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let data = row.get_ref(0).and_then(|value| Ok(value.as_bytes_or_null()?)).map_err(|e| e.to_string())?;
             if let Some(data) = data {
-                let mut data = data;
+                let mut data = data.to_vec();
                 response.no_content = false;
                 // `Timestamp::max()`.
                 response.expires = Some(Timestamp::from_secs(i64::MAX));

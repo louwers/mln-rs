@@ -1,9 +1,8 @@
 // Failures are `DatabaseError`s, returned through `Result` and handled by
 // `handle_error`. `put_region_resource(s)` handle their errors themselves.
 //
-// Prepared statements are rusqlite's per-connection statement cache
-// (`prepare_cached`) instead of the `statements` map; both are dropped with
-// the connection.
+// Statements come from rusqlite's per-connection statement cache
+// (`prepare_cached`), so they are dropped with the connection.
 //
 // Port-only (maplibre/maplibre-native#4748): a cache hit queues its row's
 // `accessed` timestamp instead of writing it in a transaction of its own.
@@ -20,7 +19,8 @@ use mln_util::compression::{compress, decompress};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::logging::{Event, EventSeverity, Log};
-use rusqlite::params;
+use rusqlite::types::FromSqlError;
+use rusqlite::{Connection, OpenFlags, Row, ffi, params};
 
 use crate::merge_sideloaded::MERGE_SIDELOADED_DATABASE_SQL;
 use crate::offline::{
@@ -30,10 +30,6 @@ use crate::offline::{
 use crate::offline_schema::OFFLINE_DATABASE_SCHEMA;
 use crate::resource::{Kind, Resource, TileData};
 use crate::response::Response;
-use crate::sqlite3::{
-    Database, OpenFlag, SqliteError, Transaction, TransactionMode, extended_result_code, get_bool, get_bytes, get_i64,
-    get_optional_bytes, get_optional_i64, get_optional_string, result_code,
-};
 
 /// The most rows whose `accessed` timestamp waits to be written. Reads of
 /// other rows while the queue is full don't update their timestamps.
@@ -42,8 +38,9 @@ pub(crate) const MAX_PENDING_ACCESSED: usize = 4096;
 /// Why a database operation failed.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum DatabaseError {
-    #[error(transparent)]
-    Sqlite(#[from] SqliteError),
+    /// SQLite failed with the extended result `code`.
+    #[error("{message}")]
+    Sqlite { code: i32, message: String },
     /// A file operation failed with the OS error `code`.
     #[error("{message}")]
     Io { code: i32, message: String },
@@ -61,7 +58,15 @@ pub enum DatabaseError {
 
 impl From<rusqlite::Error> for DatabaseError {
     fn from(e: rusqlite::Error) -> Self {
-        DatabaseError::Sqlite(e.into())
+        let code = e.sqlite_error().map_or(ffi::SQLITE_ERROR, |error| error.extended_code);
+        DatabaseError::Sqlite { code, message: e.to_string() }
+    }
+}
+
+impl From<FromSqlError> for DatabaseError {
+    /// A column of an unexpected type, as rusqlite reports it.
+    fn from(e: FromSqlError) -> Self {
+        DatabaseError::Sqlite { code: ffi::SQLITE_ERROR, message: e.to_string() }
     }
 }
 
@@ -152,7 +157,7 @@ impl DatabaseSizeChangeStats {
 
 pub struct OfflineDatabase {
     path: String,
-    db: Option<Database>,
+    db: Option<Connection>,
 
     maximum_ambient_cache_size: u64,
     current_ambient_cache_size: Option<u64>,
@@ -218,21 +223,16 @@ impl OfflineDatabase {
     fn initialize(&mut self) -> DbResult<()> {
         assert!(self.db.is_none());
 
+        let flags = if self.read_only {
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI
+        } else {
+            OpenFlags::default()
+        };
+        let db = self.db.insert(Connection::open_with_flags(&self.path, flags)?);
+        db.busy_timeout(std::time::Duration::from_millis(i32::MAX as u64))?;
+        exec(db, "PRAGMA foreign_keys = ON")?;
         if self.read_only {
-            let db = Database::open(&self.path, OpenFlag::ReadOnly)?;
-            self.db = Some(db);
-            let db = self.db.as_ref().unwrap();
-            db.set_busy_timeout(i64::MAX)?;
-            db.exec("PRAGMA foreign_keys = ON")?;
             return Ok(());
-        }
-
-        let db = Database::open(&self.path, OpenFlag::ReadWriteCreate)?;
-        self.db = Some(db);
-        {
-            let db = self.db.as_ref().unwrap();
-            db.set_busy_timeout(i64::MAX)?;
-            db.exec("PRAGMA foreign_keys = ON")?;
         }
 
         let user_version = self.get_pragma_i64("PRAGMA user_version")?;
@@ -309,7 +309,7 @@ impl OfflineDatabase {
         if self.read_only || self.db.is_none() {
             return false;
         }
-        match self.with_transaction(TransactionMode::Immediate, Self::apply_pending_accessed) {
+        match self.with_transaction(Begin::Immediate, Self::apply_pending_accessed) {
             Ok(()) => {
                 self.discard_pending_accessed();
                 true
@@ -331,10 +331,9 @@ impl OfflineDatabase {
     /// Runs the `accessed` updates in the open transaction.
     fn apply_pending_accessed(&mut self) -> DbResult<()> {
         self.get_db()?;
-        let Some(db) = &self.db else {
+        let Some(conn) = &self.db else {
             return Ok(());
         };
-        let conn = db.conn();
         for (sql, pending) in [
             ("UPDATE resources SET accessed = MAX(accessed, ?1) WHERE id = ?2", &self.pending_resource_accessed),
             ("UPDATE tiles SET accessed = MAX(accessed, ?1) WHERE id = ?2", &self.pending_tile_accessed),
@@ -377,11 +376,11 @@ impl OfflineDatabase {
 
     fn handle_error(&mut self, error: &DatabaseError, action: &str) {
         match error {
-            DatabaseError::Sqlite(ex) => {
-                if ex.code == result_code::NOT_A_DB
-                    || ex.code == result_code::CORRUPT
-                    || (ex.code == result_code::READ_ONLY
-                        && ex.extended_code == extended_result_code::READ_ONLY_DB_MOVED)
+            DatabaseError::Sqlite { code, message } => {
+                let primary_code = code & 0xff;
+                if primary_code == ffi::SQLITE_NOTADB
+                    || primary_code == ffi::SQLITE_CORRUPT
+                    || *code == ffi::SQLITE_READONLY_DBMOVED
                 {
                     // The database was corruped, moved away, or deleted.
                     // We're going to start fresh with a clean slate for the
@@ -389,8 +388,8 @@ impl OfflineDatabase {
                     Log::record(
                         EventSeverity::Error,
                         Event::Database,
-                        i64::from(ex.code),
-                        &format!("Can't {action}: {}", ex.message),
+                        i64::from(primary_code),
+                        &format!("Can't {action}: {message}"),
                     );
                     if let Err(io_ex) = self.remove_existing() {
                         self.handle_error(&io_ex, action);
@@ -401,8 +400,8 @@ impl OfflineDatabase {
                     Log::record(
                         EventSeverity::Warning,
                         Event::Database,
-                        i64::from(ex.code),
-                        &format!("Can't {action}: {}", ex.message),
+                        i64::from(primary_code),
+                        &format!("Can't {action}: {message}"),
                     );
                 }
             }
@@ -432,7 +431,7 @@ impl OfflineDatabase {
 
         self.discard_pending_accessed();
         let filename = match &self.db {
-            Some(db) => db.get_filename(),
+            Some(db) => db.path().unwrap_or("").to_owned(),
             None => self.path.clone(),
         };
         self.db = None;
@@ -445,7 +444,7 @@ impl OfflineDatabase {
 
     fn remove_old_cache_table(&mut self) -> DbResult<()> {
         self.check_flags()?;
-        self.get_db()?.exec("DROP TABLE IF EXISTS http_cache")?;
+        exec(self.get_db()?, "DROP TABLE IF EXISTS http_cache")?;
         if self.autopack {
             self.vacuum()?;
         }
@@ -457,12 +456,12 @@ impl OfflineDatabase {
 
         self.vacuum()?;
         let db = self.get_db()?;
-        db.exec("PRAGMA journal_mode = DELETE")?;
-        db.exec("PRAGMA synchronous = FULL")?;
-        self.with_transaction(TransactionMode::Deferred, |this| {
+        exec(db, "PRAGMA journal_mode = DELETE")?;
+        exec(db, "PRAGMA synchronous = FULL")?;
+        self.with_transaction(Begin::Deferred, |this| {
             let db = this.get_db()?;
-            db.exec(OFFLINE_DATABASE_SCHEMA)?;
-            db.exec("PRAGMA user_version = 6")?;
+            exec(db, OFFLINE_DATABASE_SCHEMA)?;
+            exec(db, "PRAGMA user_version = 6")?;
             Ok(())
         })
     }
@@ -470,7 +469,7 @@ impl OfflineDatabase {
     fn migrate_to_version3(&mut self) -> DbResult<()> {
         self.check_flags()?;
         self.vacuum()?;
-        self.get_db()?.exec("PRAGMA user_version = 3")?;
+        exec(self.get_db()?, "PRAGMA user_version = 3")?;
         Ok(())
     }
 
@@ -484,19 +483,19 @@ impl OfflineDatabase {
     fn migrate_to_version5(&mut self) -> DbResult<()> {
         self.check_flags()?;
         let db = self.get_db()?;
-        db.exec("PRAGMA journal_mode = DELETE")?;
-        db.exec("PRAGMA synchronous = FULL")?;
-        db.exec("PRAGMA user_version = 5")?;
+        exec(db, "PRAGMA journal_mode = DELETE")?;
+        exec(db, "PRAGMA synchronous = FULL")?;
+        exec(db, "PRAGMA user_version = 5")?;
         Ok(())
     }
 
     fn migrate_to_version6(&mut self) -> DbResult<()> {
         self.check_flags()?;
-        self.with_transaction(TransactionMode::Deferred, |this| {
+        self.with_transaction(Begin::Deferred, |this| {
             let db = this.get_db()?;
-            db.exec("ALTER TABLE resources ADD COLUMN must_revalidate INTEGER NOT NULL DEFAULT 0")?;
-            db.exec("ALTER TABLE tiles ADD COLUMN must_revalidate INTEGER NOT NULL DEFAULT 0")?;
-            db.exec("PRAGMA user_version = 6")?;
+            exec(db, "ALTER TABLE resources ADD COLUMN must_revalidate INTEGER NOT NULL DEFAULT 0")?;
+            exec(db, "ALTER TABLE tiles ADD COLUMN must_revalidate INTEGER NOT NULL DEFAULT 0")?;
+            exec(db, "PRAGMA user_version = 6")?;
             Ok(())
         })
     }
@@ -504,15 +503,15 @@ impl OfflineDatabase {
     fn vacuum(&mut self) -> DbResult<()> {
         self.check_flags()?;
         if self.get_pragma_i64("PRAGMA auto_vacuum")? == 2 {
-            self.get_db()?.exec("PRAGMA incremental_vacuum")?;
+            exec(self.get_db()?, "PRAGMA incremental_vacuum")?;
         } else {
             // A database without pages, such as a new one in memory, takes
             // the setting with its first table, and has nothing to vacuum.
             let empty = self.get_pragma_i64("PRAGMA page_count")? == 0;
             let db = self.get_db()?;
-            db.exec("PRAGMA auto_vacuum = INCREMENTAL")?;
+            exec(db, "PRAGMA auto_vacuum = INCREMENTAL")?;
             if !empty {
-                db.exec("VACUUM")?;
+                exec(db, "VACUUM")?;
             }
         }
         Ok(())
@@ -526,7 +525,7 @@ impl OfflineDatabase {
     }
 
     /// `getStatement`'s `if (!db) initialize();`.
-    fn get_db(&mut self) -> DbResult<&Database> {
+    fn get_db(&mut self) -> DbResult<&Connection> {
         if self.db.is_none() {
             self.initialize()?;
         }
@@ -536,7 +535,7 @@ impl OfflineDatabase {
     /// Runs `sql`, a statement that returns no rows, with `params` bound;
     /// returns the number of rows changed.
     fn execute(&mut self, sql: &str, params: impl rusqlite::Params) -> DbResult<u64> {
-        let conn = self.get_db()?.conn();
+        let conn = self.get_db()?;
         let mut stmt = conn.prepare_cached(sql)?;
         Ok(stmt.execute(params)? as u64)
     }
@@ -547,9 +546,9 @@ impl OfflineDatabase {
         &mut self,
         sql: &str,
         params: impl rusqlite::Params,
-        f: impl FnOnce(&rusqlite::Row<'_>) -> DbResult<T>,
+        f: impl FnOnce(&Row<'_>) -> DbResult<T>,
     ) -> DbResult<Option<T>> {
-        let conn = self.get_db()?.conn();
+        let conn = self.get_db()?;
         let mut stmt = conn.prepare_cached(sql)?;
         let mut rows = stmt.query(params)?;
         match rows.next()? {
@@ -560,21 +559,31 @@ impl OfflineDatabase {
 
     /// The row id of the last statement's insert.
     fn last_insert_row_id(&mut self) -> DbResult<i64> {
-        let conn = self.get_db()?.conn();
+        let conn = self.get_db()?;
         Ok(conn.last_insert_rowid())
     }
 
     /// Runs `f` in a transaction that commits after `f` succeeds and rolls
     /// back when `f` fails.
-    fn with_transaction<T>(&mut self, mode: TransactionMode, f: impl FnOnce(&mut Self) -> DbResult<T>) -> DbResult<T> {
-        let mut transaction = Transaction::new(self.get_db()?, mode)?;
-        let value = f(self)?;
-        transaction.commit()?;
-        Ok(value)
+    fn with_transaction<T>(&mut self, begin: Begin, f: impl FnOnce(&mut Self) -> DbResult<T>) -> DbResult<T> {
+        exec(self.get_db()?, begin.sql())?;
+        match f(self) {
+            Ok(value) => {
+                exec(self.get_db()?, "COMMIT TRANSACTION")?;
+                Ok(value)
+            }
+            Err(e) => {
+                // `f`'s error is the one to report, not a failed rollback's.
+                if let Some(db) = &self.db {
+                    let _ = exec(db, "ROLLBACK TRANSACTION");
+                }
+                Err(e)
+            }
+        }
     }
 
     fn get_pragma_i64(&mut self, sql: &str) -> DbResult<i64> {
-        Ok(self.query_row(sql, [], |row| Ok(get_i64(row, 0)?))?.unwrap_or(0))
+        Ok(self.query_row(sql, [], |row| Ok(row.get(0)?))?.unwrap_or(0))
     }
 
     /// `get(const Resource&)`.
@@ -638,8 +647,7 @@ impl OfflineDatabase {
             }
 
             self.pending_applied_for_eviction = false;
-            let result =
-                self.with_transaction(TransactionMode::Immediate, |this| this.put_internal(resource, response, true))?;
+            let result = self.with_transaction(Begin::Immediate, |this| this.put_internal(resource, response, true))?;
             if self.pending_applied_for_eviction {
                 self.discard_pending_accessed();
             }
@@ -709,30 +717,25 @@ impl OfflineDatabase {
 
     /// Reads `etag, expires, must_revalidate, modified, data, compressed,
     /// id` of the first row, as getResource/getTile do.
-    fn read_response(row: &rusqlite::Row<'_>) -> DbResult<(Response, u64, i64)> {
+    fn read_response(row: &Row<'_>) -> DbResult<(Response, u64, i64)> {
         let mut response = Response::new();
         let mut size = 0u64;
 
-        response.etag = get_optional_string(row, 0)?;
-        response.expires = get_optional_i64(row, 1)?.map(Timestamp::from_secs);
-        response.must_revalidate = get_bool(row, 2)?;
-        response.modified = get_optional_i64(row, 3)?.map(Timestamp::from_secs);
+        response.etag = row.get(0)?;
+        response.expires = row.get::<_, Option<i64>>(1)?.map(Timestamp::from_secs);
+        response.must_revalidate = row.get(2)?;
+        response.modified = row.get::<_, Option<i64>>(3)?.map(Timestamp::from_secs);
 
-        let data = get_optional_bytes(row, 4)?;
-        match data {
+        match row.get_ref(4)?.as_bytes_or_null()? {
             None => response.no_content = true,
             Some(data) => {
-                if get_bool(row, 5)? {
-                    let decompressed = decompress(&data).map_err(DatabaseError::Runtime)?;
-                    response.data = Some(Arc::new(decompressed));
-                } else {
-                    response.data = Some(Arc::new(data.clone()));
-                }
                 size = data.len() as u64;
+                let data = if row.get(5)? { decompress(data).map_err(DatabaseError::Runtime)? } else { data.to_vec() };
+                response.data = Some(Arc::new(data));
             }
         }
 
-        Ok((response, size, get_i64(row, 6)?))
+        Ok((response, size, row.get(6)?))
     }
 
     fn get_resource(&mut self, resource: &Resource) -> DbResult<Option<(Response, u64)>> {
@@ -764,13 +767,13 @@ impl OfflineDatabase {
 
     /// Reads `length(data), must_revalidate, expires`, as hasResource/hasTile
     /// do.
-    fn read_size_and_usable(row: &rusqlite::Row<'_>) -> DbResult<Option<(i64, bool)>> {
-        let Some(size) = get_optional_i64(row, 0)? else {
+    fn read_size_and_usable(row: &Row<'_>) -> DbResult<Option<(i64, bool)>> {
+        let Some(size) = row.get(0)? else {
             return Ok(None);
         };
         let mut response = Response::new();
-        response.must_revalidate = get_bool(row, 1)?;
-        response.expires = get_optional_i64(row, 2)?.map(Timestamp::from_secs);
+        response.must_revalidate = row.get(1)?;
+        response.expires = row.get::<_, Option<i64>>(2)?.map(Timestamp::from_secs);
         Ok(Some((size, response.is_usable())))
     }
 
@@ -1085,12 +1088,12 @@ impl OfflineDatabase {
     pub fn list_regions(&mut self) -> Result<OfflineRegions, DatabaseError> {
         let result = (|| -> DbResult<OfflineRegions> {
             let rows = {
-                let conn = self.get_db()?.conn();
+                let conn = self.get_db()?;
                 let mut stmt = conn.prepare_cached("SELECT id, definition, description FROM regions")?;
                 let mut rows = stmt.query([])?;
                 let mut result = Vec::new();
                 while let Some(row) = rows.next()? {
-                    result.push((get_i64(row, 0)?, get_bytes(row, 1)?, get_bytes(row, 2)?));
+                    result.push((row.get(0)?, text_or_blob(row, 1)?, text_or_blob(row, 2)?));
                 }
                 result
             };
@@ -1115,7 +1118,7 @@ impl OfflineDatabase {
             let row = self.query_row(
                 "SELECT definition, description FROM regions WHERE id = ?1",
                 params![region_id],
-                |row| Ok((get_bytes(row, 0)?, get_bytes(row, 1)?)),
+                |row| Ok((text_or_blob(row, 0)?, text_or_blob(row, 1)?)),
             )?;
             let Some((definition, description)) = row else {
                 return Ok(None);
@@ -1161,14 +1164,14 @@ impl OfflineDatabase {
 
         match self.execute("ATTACH DATABASE ?1 AS side", params![side_database_path]) {
             Ok(_) => {}
-            Err(DatabaseError::Sqlite(ex)) => {
+            Err(e @ DatabaseError::Sqlite { code, .. }) => {
                 Log::record(
                     EventSeverity::Error,
                     Event::Database,
-                    i64::from(ex.code),
-                    &format!("Can't attach database ({side_database_path}) for merge: {}", ex.message),
+                    i64::from(code & 0xff),
+                    &format!("Can't attach database ({side_database_path}) for merge: {e}"),
                 );
-                return Err(DatabaseError::Sqlite(ex));
+                return Err(e);
             }
             Err(e) => return Err(e),
         }
@@ -1183,13 +1186,13 @@ impl OfflineDatabase {
                 return Err(DatabaseError::Runtime("Merge database has incorrect user_version".to_owned()));
             }
 
-            self.with_transaction(TransactionMode::Deferred, |this| {
-                this.get_db()?.exec(MERGE_SIDELOADED_DATABASE_SQL)?;
+            self.with_transaction(Begin::Deferred, |this| {
+                exec(this.get_db()?, MERGE_SIDELOADED_DATABASE_SQL)?;
                 Ok(())
             })?;
 
             let rows = {
-                let conn = self.get_db()?.conn();
+                let conn = self.get_db()?;
                 let mut stmt = conn.prepare_cached(
                     "SELECT DISTINCT r.id, r.definition, r.description \
                      FROM side.regions sr \
@@ -1198,7 +1201,7 @@ impl OfflineDatabase {
                 let mut rows = stmt.query([])?;
                 let mut result = Vec::new();
                 while let Some(row) = rows.next()? {
-                    result.push((get_i64(row, 0)?, get_bytes(row, 1)?, get_bytes(row, 2)?));
+                    result.push((row.get(0)?, text_or_blob(row, 1)?, text_or_blob(row, 2)?));
                 }
                 result
             };
@@ -1210,7 +1213,7 @@ impl OfflineDatabase {
                     metadata: description,
                 });
             }
-            self.get_db()?.exec("DETACH DATABASE side")?;
+            exec(self.get_db()?, "DETACH DATABASE side")?;
             Ok(result)
         })();
 
@@ -1218,7 +1221,7 @@ impl OfflineDatabase {
             // `catch (const std::runtime_error& ex)`: everything but the
             // logic errors, which propagate (side stays attached).
             Err(e) if !matches!(e, DatabaseError::Logic(_)) => {
-                self.get_db()?.exec("DETACH DATABASE side")?;
+                exec(self.get_db()?, "DETACH DATABASE side")?;
                 Log::error(Event::Database, e.to_string());
                 Err(e)
             }
@@ -1299,7 +1302,7 @@ impl OfflineDatabase {
             if self.db.is_none() {
                 self.initialize()?;
             }
-            self.with_transaction(TransactionMode::Deferred, |this| {
+            self.with_transaction(Begin::Deferred, |this| {
                 this.put_region_resource_internal(region_id, resource, response)
             })
         })();
@@ -1321,8 +1324,6 @@ impl OfflineDatabase {
             if self.db.is_none() {
                 self.initialize()?;
             }
-            let mut transaction = Transaction::new(self.get_db()?, TransactionMode::Deferred)?;
-
             // Accumulate all statistics locally first before adding them to
             // the OfflineRegionStatus object to ensure correctness when the
             // transaction fails.
@@ -1331,18 +1332,18 @@ impl OfflineDatabase {
             let mut completed_tile_count = 0u64;
             let mut completed_tile_size = 0u64;
 
-            for (resource, response) in resources {
-                let resource_size = self.put_region_resource_internal(region_id, resource, response)?;
-                completed_resource_count += 1;
-                completed_resource_size += resource_size;
-                if resource.kind == Kind::Tile {
-                    completed_tile_count += 1;
-                    completed_tile_size += resource_size;
+            self.with_transaction(Begin::Deferred, |this| {
+                for (resource, response) in resources {
+                    let resource_size = this.put_region_resource_internal(region_id, resource, response)?;
+                    completed_resource_count += 1;
+                    completed_resource_size += resource_size;
+                    if resource.kind == Kind::Tile {
+                        completed_tile_count += 1;
+                        completed_tile_size += resource_size;
+                    }
                 }
-            }
-
-            // Commit the completed batch
-            transaction.commit()?;
+                Ok(())
+            })?;
 
             status.completed_resource_count += completed_resource_count;
             status.completed_resource_size += completed_resource_size;
@@ -1406,7 +1407,7 @@ impl OfflineDatabase {
             // `query.run(); query.get<std::string>(0)`: no row reads as "".
             let definition = self
                 .query_row("SELECT definition FROM regions WHERE id = ?1", params![region_id], |row| {
-                    Ok(get_bytes(row, 0)?)
+                    text_or_blob(row, 0)
                 })?
                 .unwrap_or_default();
 
@@ -1437,12 +1438,12 @@ impl OfflineDatabase {
     fn get_completed_resource_count_and_size(&mut self, region_id: i64) -> DbResult<(i64, i64)> {
         Ok(self
             .query_row(
-                "SELECT COUNT(*), SUM(LENGTH(data)) \
+                "SELECT COUNT(*), IFNULL(SUM(LENGTH(data)), 0) \
                  FROM region_resources, resources \
                  WHERE region_id = ?1 \
                  AND resource_id = resources.id ",
                 params![region_id],
-                |row| Ok((get_i64(row, 0)?, get_i64(row, 1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?
             .unwrap_or_default())
     }
@@ -1450,12 +1451,12 @@ impl OfflineDatabase {
     fn get_completed_tile_count_and_size(&mut self, region_id: i64) -> DbResult<(i64, i64)> {
         Ok(self
             .query_row(
-                "SELECT COUNT(*), SUM(LENGTH(data)) \
+                "SELECT COUNT(*), IFNULL(SUM(LENGTH(data)), 0) \
                  FROM region_tiles, tiles \
                  WHERE region_id = ?1 \
                  AND tile_id = tiles.id ",
                 params![region_id],
-                |row| Ok((get_i64(row, 0)?, get_i64(row, 1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?
             .unwrap_or_default())
     }
@@ -1514,9 +1515,9 @@ impl OfflineDatabase {
                    ORDER BY accessed ASC LIMIT ?1 \
                  ) ",
                 params![50],
-                |row| Ok(get_i64(row, 0)?),
+                |row| Ok(row.get::<_, Option<i64>>(0)?),
             )?;
-            let Some(accessed) = accessed else {
+            let Some(accessed) = accessed.flatten() else {
                 return Ok(false);
             };
 
@@ -1603,12 +1604,11 @@ impl OfflineDatabase {
                      WHERE resource_id IS NULL \
                  ) ",
                 [],
-                |row| Ok(get_i64(row, 0)?),
+                |row| Ok(row.get::<_, Option<i64>>(0)?),
             );
             match size {
-                Ok(size) => self.current_ambient_cache_size = Some(size.unwrap_or(0) as u64),
-                Err(DatabaseError::Sqlite(ex)) => {
-                    let e = DatabaseError::Sqlite(ex);
+                Ok(size) => self.current_ambient_cache_size = Some(size.flatten().unwrap_or(0) as u64),
+                Err(e @ DatabaseError::Sqlite { .. }) => {
                     self.handle_error(&e, "cannot get current ambient cache size");
                     return Ok(Some(e));
                 }
@@ -1661,7 +1661,7 @@ impl OfflineDatabase {
             if self.db.is_none() {
                 self.initialize()?;
             }
-            self.with_transaction(TransactionMode::Deferred, |this| {
+            self.with_transaction(Begin::Deferred, |this| {
                 for resource in resources {
                     this.mark_used(region_id, resource)?;
                 }
@@ -1714,6 +1714,42 @@ impl OfflineDatabase {
         }
         Ok(())
     }
+}
+
+/// How a transaction takes its locks.
+#[derive(Clone, Copy)]
+enum Begin {
+    Deferred,
+    Immediate,
+}
+
+impl Begin {
+    fn sql(self) -> &'static str {
+        match self {
+            Begin::Deferred => "BEGIN DEFERRED TRANSACTION",
+            Begin::Immediate => "BEGIN IMMEDIATE TRANSACTION",
+        }
+    }
+}
+
+/// Runs every statement of `sql` to completion, as `sqlite3_exec` does.
+/// rusqlite's `execute_batch` steps each statement only once, which leaves
+/// e.g. `PRAGMA incremental_vacuum` after freeing one page.
+fn exec(conn: &Connection, sql: &str) -> rusqlite::Result<()> {
+    use rusqlite::fallible_iterator::FallibleIterator as _;
+
+    let mut batch = rusqlite::Batch::new(conn, sql);
+    while let Some(mut stmt) = batch.next()? {
+        let mut rows = stmt.raw_query();
+        while rows.next()?.is_some() {}
+    }
+    Ok(())
+}
+
+/// The bytes of a TEXT or BLOB column, such as a region's definition and
+/// metadata; empty for NULL.
+fn text_or_blob(row: &Row<'_>, index: usize) -> DbResult<Vec<u8>> {
+    Ok(row.get_ref(index)?.as_bytes_or_null()?.unwrap_or_default().to_vec())
 }
 
 /// The metadata as a blob to bind. Empty metadata is stored as NULL, as C++

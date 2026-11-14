@@ -18,8 +18,6 @@ mod offline;
 mod offline_database;
 mod online_file_source;
 mod pmtiles_file_source;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
