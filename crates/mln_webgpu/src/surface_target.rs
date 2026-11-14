@@ -17,30 +17,32 @@
 // - Single-threaded (the renderer runs on one thread): the spin lock,
 //   `frameInProgress` (never set in C++) and `isShuttingDown` atomics are
 //   plain cells, and `waitForFrame` always succeeds immediately as in C++.
-// - Port-only: `request_readback` copies the next presented frame into a
-//   `PremultipliedImage` (the surface is configured with COPY_SRC when the
-//   surface supports it), so a frame can be checked without screenshots.
-//   The copy is mapped asynchronously: natively `swap` waits for it, and in
-//   the browser, where nothing can wait for the GPU, `take_readback` returns
-//   it once the event loop has mapped it.
+// - Port-only: `request_readback` reads the next presented frame back
+//   through the backend's `WebGpu` into a `PremultipliedImage` (the
+//   surface is configured with COPY_SRC when the surface supports it), so a
+//   frame can be checked without screenshots. Natively `swap` waits for the
+//   copy, and in the browser, where nothing can wait for the GPU,
+//   `take_readback` returns it once the event loop has mapped it.
 // - Port-only: `set_overlay` draws over each frame before it is presented,
 //   such as an app's controls over the map.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, RefMut};
 use std::rc::Rc;
 use std::time::Duration;
 
 use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
+use mln_gfx::gpu::{Gpu as _, ReadbackId, TextureRegion};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
+use crate::WebGpu;
 use crate::command_encoder::CommandEncoder;
 use crate::draw_target::{DrawTarget, TargetResource};
-use crate::renderer_backend::RendererBackend;
+use crate::renderer_backend::{BackendImpl, RendererBackend};
 
 const MAX_CONSECUTIVE_ERRORS: i32 = 3;
 
@@ -119,19 +121,14 @@ struct SurfaceState {
     /// When `swap` last ran.
     last_swap_time: Cell<Instant>,
 
+    /// The backend whose `WebGpu` reads frames back.
+    backend: Rc<BackendImpl>,
     readback_requested: Cell<bool>,
-    /// The copy of the frame `request_readback` asked for, until mapped.
-    pending_readback: RefCell<Option<PendingReadback>>,
+    /// The readback of the frame that `request_readback` asked for, and
+    /// its size, until it has the texels.
+    pending_readback: Cell<Option<(ReadbackId, Size)>>,
     readback: RefCell<Option<PremultipliedImage>>,
     overlay: RefCell<Option<Overlay>>,
-}
-
-/// Port-only: a frame copied into a buffer, waiting to be mapped.
-struct PendingReadback {
-    buffer: wgpu::Buffer,
-    bytes_per_row: u32,
-    size: Size,
-    mapped: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
 impl SurfaceState {
@@ -194,13 +191,11 @@ impl SurfaceState {
                             size: self.last_configured_size.get(),
                         });
                     }
-                    if self.readback_requested.get() {
-                        self.readback_requested.set(false);
-                        *self.pending_readback.borrow_mut() = self.copy_texture(&current.texture.texture);
-                        // Natively this waits for the copy; in the browser it
-                        // returns at once and the event loop maps it later.
-                        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-                        self.finish_readback();
+                    if self.readback_requested.replace(false) {
+                        self.read_back(&current.texture.texture);
+                        // Natively this waits for the copy; in the browser the
+                        // event loop maps it later.
+                        self.finish_readback(true);
                     }
                     drop(current.view);
                     self.queue.present(current.texture);
@@ -368,81 +363,52 @@ impl SurfaceState {
         *self.depth_stencil.borrow_mut() = Some((texture, view));
     }
 
-    /// Port-only: copies the swapchain texture into a buffer and starts
-    /// mapping it (`finish_readback` makes the image).
-    fn copy_texture(&self, texture: &wgpu::Texture) -> Option<PendingReadback> {
-        if !self.surface_usage.get().contains(wgpu::TextureUsages::COPY_SRC) {
-            Log::warning(Event::Render, "WebGPU: the surface does not support readback (no COPY_SRC)");
-            return None;
-        }
-        let (width, height) = (texture.width(), texture.height());
-        let bytes_per_row =
-            (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Surface readback"),
-            size: u64::from(bytes_per_row) * u64::from(height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder =
-            self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Surface readback") });
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        );
-        self.queue.submit([encoder.finish()]);
-        let (tx, mapped) = std::sync::mpsc::channel();
-        buffer.map_async(wgpu::MapMode::Read, .., move |result| {
-            let _ = tx.send(result);
-        });
-        Some(PendingReadback { buffer, bytes_per_row, size: Size::new(width, height), mapped })
+    fn gpu(&self) -> RefMut<'_, WebGpu> {
+        self.backend.gpu().borrow_mut()
     }
 
-    /// Port-only: turns the pending copy into an RGBA image once it is
-    /// mapped (drops it if mapping failed).
-    fn finish_readback(&self) {
-        let mut pending = self.pending_readback.borrow_mut();
-        let Some(readback) = pending.take() else {
+    /// Port-only: starts reading `texture`, the swapchain's, back
+    /// (`finish_readback` makes the image).
+    fn read_back(&self, texture: &wgpu::Texture) {
+        if !self.surface_usage.get().contains(wgpu::TextureUsages::COPY_SRC) {
+            Log::warning(Event::Render, "WebGPU: the surface does not support readback (no COPY_SRC)");
             return;
-        };
-        match readback.mapped.try_recv() {
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                *pending = Some(readback);
-                return;
-            }
-            Ok(Ok(())) => {}
-            Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
         }
-        let PendingReadback { buffer, bytes_per_row, size, .. } = readback;
-        let (width, height) = (size.width, size.height);
-        let bgra =
-            matches!(self.swap_chain_format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
-        let mut image = PremultipliedImage::new(size);
-        {
-            let Ok(mapped) = buffer.get_mapped_range(..) else {
-                return;
-            };
-            for y in 0..height as usize {
-                let src = &mapped[y * bytes_per_row as usize..][..width as usize * 4];
-                let dst = &mut image.data[y * width as usize * 4..][..width as usize * 4];
-                dst.copy_from_slice(src);
-                if bgra {
-                    for px in dst.as_chunks_mut::<4>().0 {
-                        px.swap(0, 2);
-                    }
+        let size = Size::new(texture.width(), texture.height());
+        let mut gpu = self.gpu();
+        let imported = gpu.import_texture(texture);
+        let readback = gpu.read_texture(imported, TextureRegion::whole(size));
+        gpu.destroy_texture(imported);
+        match readback {
+            Ok(readback) => {
+                if let Some((stale, _)) = self.pending_readback.replace(Some((readback, size))) {
+                    gpu.destroy_readback(stale);
                 }
             }
+            Err(error) => Log::error(Event::Render, format!("WebGPU: reading the frame back failed: {error}")),
         }
-        buffer.unmap();
-        *self.readback.borrow_mut() = Some(image);
+    }
+
+    /// Port-only: turns the pending readback into an RGBA image once it has
+    /// the texels, waiting for them with `wait` where the platform can.
+    fn finish_readback(&self, wait: bool) {
+        let Some((readback, size)) = self.pending_readback.take() else {
+            return;
+        };
+        let texels = self.gpu().take_readback(readback, wait);
+        let mut texels = match texels {
+            Ok(Some(texels)) => texels,
+            Ok(None) => return self.pending_readback.set(Some((readback, size))),
+            Err(error) => {
+                return Log::error(Event::Render, format!("WebGPU: reading the frame back failed: {error}"));
+            }
+        };
+        if matches!(self.swap_chain_format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {
+            for texel in texels.as_chunks_mut::<4>().0 {
+                texel.swap(0, 2);
+            }
+        }
+        *self.readback.borrow_mut() = Some(PremultipliedImage::from_vec(size, texels));
     }
 }
 
@@ -598,8 +564,9 @@ impl SurfaceTarget {
             vsync_present_mode: Cell::new(present_mode),
             framebuffer_size: Cell::new(framebuffer_size),
             last_swap_time: Cell::new(Instant::now()),
+            backend: Rc::clone(backend.backend_impl()),
             readback_requested: Cell::new(false),
-            pending_readback: RefCell::new(None),
+            pending_readback: Cell::new(None),
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
@@ -637,7 +604,7 @@ impl SurfaceTarget {
     /// event loop).
     #[must_use]
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
-        self.state.finish_readback();
+        self.state.finish_readback(false);
         self.state.readback.borrow_mut().take()
     }
 
@@ -673,6 +640,9 @@ impl Drop for SurfaceTarget {
         self.state.current.borrow_mut().take();
         self.state.depth_stencil.borrow_mut().take();
         self.state.overlay.borrow_mut().take();
+        if let Some((readback, _)) = self.state.pending_readback.take() {
+            self.state.gpu().destroy_readback(readback);
+        }
         self.state.process_events();
         self.state.surface.borrow_mut().take();
     }

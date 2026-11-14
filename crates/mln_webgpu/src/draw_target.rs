@@ -13,9 +13,8 @@ pub(crate) trait TargetResource: Any {
     /// Makes the attachments before a pass draws into them.
     fn bind(&self) {}
 
-    /// Records commands at the end of the frame that is about to be
-    /// submitted, after its passes, into the same submission.
-    fn finish_frame(&self, _encoder: &mut wgpu::CommandEncoder) {}
+    /// Runs once the frame's commands are submitted.
+    fn frame_submitted(&self) {}
 
     /// The color attachment view for render passes targeting this resource.
     fn get_color_texture_view(&self) -> Option<wgpu::TextureView>;

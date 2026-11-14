@@ -48,6 +48,9 @@ ids! {
     PipelineId;
     /// A bind group a [`Gpu`](super::Gpu) owns.
     BindGroupId;
+    /// A copy of a texture's texels out of a [`Gpu`](super::Gpu), which
+    /// [`take_readback`](super::Gpu::take_readback) reads.
+    ReadbackId;
 }
 
 /// The tag of the next map. 0 is no map's, so a default id names nothing.

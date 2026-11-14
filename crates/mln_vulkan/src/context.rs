@@ -28,7 +28,7 @@ use std::rc::{Rc, Weak};
 use ash::vk;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
-use mln_gfx::gpu::{Gpu, GpuError, TextureId};
+use mln_gfx::gpu::Gpu;
 use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::logging::{Event, Log};
@@ -328,12 +328,6 @@ impl Context {
 
     pub(crate) fn vulkan_gpu_mut(&self) -> RefMut<'_, VulkanGpu> {
         self.gpu.borrow_mut()
-    }
-
-    /// The texels of `texture`, a color texture of the `Gpu` that is a
-    /// render target, once the work submitted so far is done.
-    pub(crate) fn read_texture(&self, texture: TextureId) -> Result<Vec<u8>, GpuError> {
-        self.gpu.borrow_mut().read_texture(texture)
     }
 
     /// Runs `function` when the frame being recorded, or the last one, is

@@ -87,6 +87,12 @@ impl RendererBackend {
 
     /// The backend's context, made on first use. Call inside a
     /// `BackendScope`.
+    /// The device state that the backend's contexts share, with its
+    /// `WebGpu`.
+    pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
+        &self.impl_
+    }
+
     pub(crate) fn webgpu_context(&self) -> Option<Rc<Context>> {
         let context = renderer_backend::RendererBackend::get_context(self);
         context.downcast_ref::<Context>().map(Context::rc)

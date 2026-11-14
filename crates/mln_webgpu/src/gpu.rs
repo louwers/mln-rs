@@ -1,22 +1,24 @@
 //! The [`Gpu`] interface on wgpu.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
 
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat,
-    TextureId, TextureRegion, TextureUsage,
+    PipelineId, PipelineKey, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc,
+    TextureFormat, TextureId, TextureRegion, TextureUsage,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::size::Size;
 
-use crate::Device;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::{self, BindingInfo, BindingType, ShaderProgram, validated};
 use crate::writes::Writes;
+use crate::{CustomLayerEncoder, CustomLayerPass, Device};
 
 /// The size of the buffers that small uniform and storage buffers share.
 const UNIFORM_PAGE: u64 = 16 << 10;
@@ -53,6 +55,20 @@ struct Pipeline {
     key: PipelineKey,
     /// What the shader reads from the bind groups.
     bindings: Vec<ShaderBinding>,
+}
+
+/// A texture's texels, copied into a buffer that the CPU maps.
+struct Readback {
+    buffer: wgpu::Buffer,
+    /// The bytes in each row of `buffer`, which WebGPU pads, and of the
+    /// texels.
+    padded_bytes_per_row: usize,
+    bytes_per_row: usize,
+    rows: usize,
+    #[cfg_attr(target_family = "wasm", expect(dead_code, reason = "a browser can't wait for a submission"))]
+    submission: wgpu::SubmissionIndex,
+    /// How the map ended, once it has.
+    mapped: Arc<OnceLock<Result<(), wgpu::BufferAsyncError>>>,
 }
 
 /// A resource a native bind group binds: wgpu bind groups are made per
@@ -98,6 +114,7 @@ pub struct WebGpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bind_groups: SlotMap<BindGroupId, Vec<BindGroupEntry>>,
     native_groups: HashMap<NativeGroupKey, wgpu::BindGroup>,
+    readbacks: SlotMap<ReadbackId, Readback>,
 }
 
 impl WebGpu {
@@ -115,6 +132,7 @@ impl WebGpu {
             pipelines: SlotMap::with_key(),
             bind_groups: SlotMap::with_key(),
             native_groups: HashMap::new(),
+            readbacks: SlotMap::with_key(),
         }
     }
 
@@ -132,9 +150,30 @@ impl WebGpu {
     }
 
     /// Submits `command_buffer` after the copies of the writes made so far.
-    pub(crate) fn submit_native(&mut self, command_buffer: wgpu::CommandBuffer) {
+    pub(crate) fn submit_native(&mut self, command_buffer: wgpu::CommandBuffer) -> wgpu::SubmissionIndex {
         let writes = self.writes.encode(self.device.device(), self.device.queue());
-        self.device.queue().submit(writes.into_iter().chain([command_buffer]));
+        self.device.queue().submit(writes.into_iter().chain([command_buffer]))
+    }
+
+    /// Blocks until the GPU has finished `submission`, or everything
+    /// submitted with `None`.
+    #[cfg(not(target_family = "wasm"))]
+    fn wait_for(&self, submission: Option<&wgpu::SubmissionIndex>) -> Result<(), GpuError> {
+        /// How long the wait goes on asking after waits that reported a
+        /// timeout.
+        const WAIT_AGAIN_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+        let device = self.device.device();
+        let wait = || device.poll(wgpu::PollType::Wait { submission_index: submission.cloned(), timeout: None });
+        // A wait without a timeout can still report one: PowerVR's Vulkan
+        // driver on Android ends the wait shortly before the fence value
+        // that wgpu reads afterwards shows the submission finished. Waiting
+        // again returns at once then, so this asks until the value caught up.
+        let start = mln_util::time::Instant::now();
+        let mut waited = wait();
+        while matches!(waited, Err(wgpu::PollError::Timeout)) && start.elapsed() < WAIT_AGAIN_LIMIT {
+            waited = wait();
+        }
+        waited.map(drop).map_err(|error| GpuError::Invalid(format!("waiting for the GPU: {error}")))
     }
 
     /// `size` bytes of a page that small uniform and storage buffers share,
@@ -263,6 +302,16 @@ impl WebGpu {
 
     /// Records `pass` into `encoder`.
     fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, pass: &Pass) -> Result<(), GpuError> {
+        let mut render_pass = self.begin_pass(encoder, pass)?;
+        self.encode_commands(&mut render_pass, &pass.label, &pass.commands)
+    }
+
+    /// Begins `pass` on `encoder`, without its commands.
+    fn begin_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pass: &Pass,
+    ) -> Result<wgpu::RenderPass<'static>, GpuError> {
         let view = |textures: &SlotMap<TextureId, Texture>, id| {
             textures.get(id).map(|texture| texture.view.clone()).ok_or(GpuError::UnknownId("texture"))
         };
@@ -277,7 +326,7 @@ impl WebGpu {
                 Ok((texture.view.clone(), texture.texture.format().has_stencil_aspect(), attachment))
             })
             .transpose()?;
-        let mut render_pass = encoder
+        let render_pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(&pass.label),
                 color_attachments: &[color.as_ref().map(|(view, load)| wgpu::RenderPassColorAttachment {
@@ -321,7 +370,7 @@ impl WebGpu {
                 multiview_mask: None,
             })
             .forget_lifetime();
-        self.encode_commands(&mut render_pass, &pass.label, &pass.commands)
+        Ok(render_pass)
     }
 
     /// Records `commands` into `render_pass`, of `size` and over attachments
@@ -814,6 +863,143 @@ impl Gpu for WebGpu {
         // wgpu reports what it rejects in the passes when they finish. The
         // writes stay for the next submit.
         let command_buffer = self.validated("submit", |_| encoder.finish())?;
+        self.submit_native(command_buffer);
+        Ok(())
+    }
+
+    /// Copies into a buffer that is mapped once the copy is done.
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
+        let readback = validation::check_readback(self, texture, region)?;
+        let texture = &self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?.texture;
+        let padded_bytes_per_row = readback.bytes_per_row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize);
+        let (width, rows) = (region.size.width, region.size.height);
+        let buffer = self.validated("readback", |device| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("readback"),
+                size: (padded_bytes_per_row * rows as usize) as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            })
+        })?;
+        let mut encoder =
+            self.device.device().create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: region.x, y: region.y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row as u32),
+                    rows_per_image: Some(rows),
+                },
+            },
+            wgpu::Extent3d { width, height: rows, depth_or_array_layers: 1 },
+        );
+        let submission = self.submit_native(encoder.finish());
+        let mapped = Arc::new(OnceLock::new());
+        let map_ended = Arc::clone(&mapped);
+        buffer.map_async(wgpu::MapMode::Read, .., move |result| {
+            let _ = map_ended.set(result);
+        });
+        Ok(self.readbacks.insert(Readback {
+            buffer,
+            padded_bytes_per_row,
+            bytes_per_row: readback.bytes_per_row,
+            rows: rows as usize,
+            submission,
+            mapped,
+        }))
+    }
+
+    /// Polls the device for the map, or on a browser leaves it to the
+    /// browser's event loop, which can't wait.
+    fn take_readback(&mut self, readback: ReadbackId, wait: bool) -> Result<Option<Vec<u8>>, GpuError> {
+        let entry = self.readbacks.get(readback).ok_or(GpuError::UnknownId("readback"))?;
+        let mapped = Arc::clone(&entry.mapped);
+        if mapped.get().is_none() {
+            #[cfg(not(target_family = "wasm"))]
+            if wait {
+                if let Err(error) = self.wait_for(Some(&entry.submission)) {
+                    self.readbacks.remove(readback);
+                    return Err(error);
+                }
+            } else {
+                let _ = self.device.device().poll(wgpu::PollType::Poll);
+            }
+            #[cfg(target_family = "wasm")]
+            let _ = wait;
+        }
+        let Some(mapped) = mapped.get() else {
+            return Ok(None);
+        };
+        let Readback { buffer, padded_bytes_per_row, bytes_per_row, rows, .. } =
+            self.readbacks.remove(readback).ok_or(GpuError::UnknownId("readback"))?;
+        if let Err(error) = mapped {
+            return Err(GpuError::Invalid(format!("mapping a readback: {error}")));
+        }
+        let texels = {
+            let range = buffer
+                .get_mapped_range(..)
+                .map_err(|error| GpuError::Invalid(format!("a readback's range: {error}")))?;
+            let mut texels = Vec::with_capacity(bytes_per_row * rows);
+            for row in range.chunks(padded_bytes_per_row).take(rows) {
+                texels.extend_from_slice(&row[..bytes_per_row]);
+            }
+            texels
+        };
+        buffer.unmap();
+        Ok(Some(texels))
+    }
+
+    fn destroy_readback(&mut self, readback: ReadbackId) {
+        self.readbacks.remove(readback);
+    }
+
+    fn finish(&mut self) -> Result<(), GpuError> {
+        #[cfg(not(target_family = "wasm"))]
+        return self.wait_for(None);
+        #[cfg(target_family = "wasm")]
+        Ok(())
+    }
+
+    /// Lends a command encoder of its own, which is submitted after `f`
+    /// returns. A pass that a custom layer draws into has a color
+    /// attachment.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError> {
+        if let Some(pass) = pass {
+            validation::check_pass(self, pass)?;
+        }
+        let (device, queue) = (self.device.device().clone(), self.device.queue().clone());
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("custom layer") });
+        if let Some(pass) = pass {
+            let format = |texture| self.textures.get(texture).map(|texture: &Texture| texture.texture.format());
+            let color_format = pass.color.and_then(|attachment| format(attachment.texture)).ok_or_else(|| {
+                GpuError::Unsupported(format!("{}: a custom layer's pass without a color attachment", pass.label))
+            })?;
+            let depth_stencil_format = pass.depth_stencil.and_then(|attachment| format(attachment.texture));
+            let mut render_pass = self.begin_pass(&mut encoder, pass)?;
+            self.encode_commands(&mut render_pass, &pass.label, &pass.commands)?;
+            let mut lent = CustomLayerPass {
+                device,
+                queue,
+                pass: render_pass,
+                color_format,
+                depth_stencil_format,
+                sample_count: 1,
+            };
+            f(&mut lent);
+        } else {
+            let mut lent = CustomLayerEncoder { device, queue, encoder };
+            f(&mut lent);
+            encoder = lent.encoder;
+        }
+        let command_buffer = self.validated("custom layer", |_| encoder.finish())?;
         self.submit_native(command_buffer);
         Ok(())
     }

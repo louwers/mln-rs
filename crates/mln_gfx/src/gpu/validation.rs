@@ -1,10 +1,11 @@
 //! The checks of [`Gpu`](super::Gpu) calls that every backend makes alike.
 //!
 //! A backend tells the checks what it knows of its resources through
-//! [`Resources`]. It runs [`check_bind_group`] in `create_bind_group`, and
-//! [`check_pass`] on each pass of a `submit` before it records any, so
-//! that what reaches its API names live resources of the right usage,
-//! within their ranges, and every binding a draw's shader reads.
+//! [`Resources`]. It runs [`check_bind_group`] in `create_bind_group`,
+//! [`check_pass`] on each pass of a `submit` before it records any, and
+//! [`check_readback`] in `read_texture`, so that what reaches its API names
+//! live resources of the right usage, within their ranges, and every
+//! binding a draw's shader reads.
 
 use std::ops::Range;
 
@@ -12,7 +13,8 @@ use mln_util::size::Size;
 
 use super::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferId, BufferUsage, GpuError, Limits, Pass, PipelineId,
-    RenderCommand, SamplerId, TargetFormats, TextureFormat, TextureId, TextureUsage, VertexBufferLayout, VertexStep,
+    RenderCommand, SamplerId, TargetFormats, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout,
+    VertexStep,
 };
 use crate::vertex_attribute::VertexAttribute;
 
@@ -111,6 +113,47 @@ pub fn check_bind_group(resources: &impl Resources, limits: Limits, desc: &BindG
         }
     }
     Ok(())
+}
+
+/// A texture that a readback copies out of, and the region it copies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Readback {
+    pub format: TextureFormat,
+    /// The bytes in each row of the region.
+    pub bytes_per_row: usize,
+    pub region: TextureRegion,
+}
+
+impl Readback {
+    /// The bytes of the region's texels.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bytes_per_row * self.region.size.height as usize
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Checks that `texture` is a live [`copy_src`](TextureUsage::copy_src)
+/// texture of a color format, and that `region` is inside it and not empty.
+pub fn check_readback(
+    resources: &impl Resources,
+    texture: TextureId,
+    region: TextureRegion,
+) -> Result<Readback, GpuError> {
+    let info = resources.texture_info(texture).ok_or(GpuError::UnknownId("texture"))?;
+    let format = info.format.ok_or_else(|| GpuError::Invalid("a readback of a texture of no known format".into()))?;
+    if !info.usage.copy_src {
+        return Err(GpuError::Invalid(format!("a readback of a {format:?} texture that isn't copy_src")));
+    }
+    if region.size.width == 0 || region.size.height == 0 {
+        return Err(GpuError::Invalid(format!("a readback of an empty region, {region:?}")));
+    }
+    let bytes_per_row = region.bytes_per_row(info.size, format)?;
+    Ok(Readback { format, bytes_per_row, region })
 }
 
 /// The entry that the bind groups in `bound` give `binding`: where two
@@ -498,5 +541,28 @@ mod tests {
         assert!(check_pass(&gpu, &pass(wrong_use)).is_err(), "a uniform buffer as vertices");
         let indexed = RenderCommand::DrawIndexed { indices: 0..3, base_vertex: 0, instances: 0..1 };
         assert!(check_pass(&gpu, &pass([setup, vec![indexed]].concat())).is_err(), "no index buffer");
+    }
+
+    #[test]
+    fn readbacks_copy_a_region_of_a_color_texture() {
+        let mut gpu = fake();
+        let size = Size { width: 4, height: 2 };
+        let copy_src = TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() };
+        let color = gpu.textures.insert(TextureInfo { format: Some(TextureFormat::Rgba8Unorm), size, usage: copy_src });
+        let depth =
+            gpu.textures.insert(TextureInfo { format: Some(TextureFormat::Depth32Float), size, usage: copy_src });
+        let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
+        let target = gpu.textures.insert(TextureInfo { format: Some(TextureFormat::Rgba8Unorm), size, usage });
+        let region = TextureRegion { x: 1, y: 1, size: Size { width: 3, height: 1 } };
+        let readback = check_readback(&gpu, color, region).unwrap();
+        assert_eq!((readback.bytes_per_row, readback.len()), (12, 12));
+        let past = TextureRegion { x: 2, ..region };
+        assert!(matches!(check_readback(&gpu, color, past), Err(GpuError::Invalid(_))), "past the edge");
+        let empty = TextureRegion { size: Size { width: 0, height: 1 }, ..region };
+        assert!(matches!(check_readback(&gpu, color, empty), Err(GpuError::Invalid(_))), "empty");
+        assert!(matches!(check_readback(&gpu, depth, region), Err(GpuError::Invalid(_))), "depth");
+        assert!(matches!(check_readback(&gpu, target, region), Err(GpuError::Invalid(_))), "not copy_src");
+        gpu.textures.remove(color);
+        assert!(matches!(check_readback(&gpu, color, region), Err(GpuError::UnknownId("texture"))));
     }
 }
