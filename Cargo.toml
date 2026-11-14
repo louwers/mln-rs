@@ -305,6 +305,12 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
   "CFCGTypes",
 ] }
 # Apple platforms: the IOSurfaces of the Metal backend's exported rings.
+objc2-core-text = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "objc2-core-graphics",
+  "CTFont",
+  "CTFontDescriptor",
+] }
 objc2-io-surface = { version = "0.3.2", default-features = false, features = [
   "std",
   "bitflags",

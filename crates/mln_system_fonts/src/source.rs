@@ -24,6 +24,9 @@ use crate::sfnt::{self, Table};
 pub(crate) enum Source {
     /// Face `index` of the font file at `path`.
     File { path: PathBuf, index: u32 },
+    /// A font that CoreText holds.
+    #[cfg(target_vendor = "apple")]
+    CoreText(crate::apple::Font),
 }
 
 impl Source {
@@ -32,6 +35,8 @@ impl Source {
         match self {
             Source::File { path, index: 0 } => format!("file://{}", path.display()),
             Source::File { path, index } => format!("file://{}#{index}", path.display()),
+            #[cfg(target_vendor = "apple")]
+            Source::CoreText(font) => format!("font://{}", font.name()),
         }
     }
 
@@ -39,6 +44,8 @@ impl Source {
     fn tables(&self, tags: &[[u8; 4]]) -> Option<Vec<Table>> {
         match self {
             Source::File { path, index } => sfnt::read_tables(path, *index, tags).ok(),
+            #[cfg(target_vendor = "apple")]
+            Source::CoreText(font) => Some(font.tables(tags)),
         }
     }
 
@@ -50,7 +57,11 @@ impl Source {
 
 /// The font files of the chosen fonts, each shared by the faces that use it.
 #[derive(Default)]
-pub(crate) struct Files(HashMap<PathBuf, Arc<LazyFile>>);
+pub(crate) struct Files {
+    files: HashMap<PathBuf, Arc<LazyFile>>,
+    #[cfg(target_vendor = "apple")]
+    fonts: HashMap<crate::apple::Font, Arc<LazyTables>>,
+}
 
 impl Files {
     /// The bytes of `source`'s font, mapped the first time the map needs
@@ -59,11 +70,20 @@ impl Files {
         match source {
             Source::File { path, index } => {
                 let file = self
-                    .0
+                    .files
                     .entry(path.clone())
                     .or_insert_with(|| Arc::new(LazyFile { path: path.clone(), map: OnceLock::new() }));
                 let file: Arc<LazyFile> = Arc::clone(file);
                 FontData::new(file).with_face_index(*index)
+            }
+            #[cfg(target_vendor = "apple")]
+            Source::CoreText(font) => {
+                let tables = self
+                    .fonts
+                    .entry(font.clone())
+                    .or_insert_with(|| Arc::new(LazyTables { font: font.clone(), file: OnceLock::new() }));
+                let tables: Arc<LazyTables> = Arc::clone(tables);
+                FontData::new(tables)
             }
         }
     }
@@ -108,6 +128,21 @@ struct LazyFile {
 impl AsRef<[u8]> for LazyFile {
     fn as_ref(&self) -> &[u8] {
         self.map.get_or_init(|| map(&self.path)).as_deref().unwrap_or_default()
+    }
+}
+
+/// A font file made of a CoreText font's tables the first time the map needs
+/// it.
+#[cfg(target_vendor = "apple")]
+struct LazyTables {
+    font: crate::apple::Font,
+    file: OnceLock<Vec<u8>>,
+}
+
+#[cfg(target_vendor = "apple")]
+impl AsRef<[u8]> for LazyTables {
+    fn as_ref(&self) -> &[u8] {
+        self.file.get_or_init(|| self.font.file())
     }
 }
 

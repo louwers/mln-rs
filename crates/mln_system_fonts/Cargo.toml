@@ -33,6 +33,15 @@ libloading.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
 
+# CoreText.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2-core-foundation = { workspace = true, features = [
+  "CFArray",
+  "CFData",
+  "CFString",
+] }
+objc2-core-text = { workspace = true }
+
 [dev-dependencies]
 tempfile.workspace = true
 
