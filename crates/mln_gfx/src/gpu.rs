@@ -171,6 +171,27 @@ pub struct TextureRegion {
     pub size: Size,
 }
 
+impl TextureRegion {
+    /// The bytes in each row of `data` that
+    /// [`write_texture`](Gpu::write_texture) writes to this region of a
+    /// texture of `size` and `format`. Fails for a depth format, a region
+    /// past the texture's edges, or `data` of another length.
+    pub fn write_bytes_per_row(&self, size: Size, format: TextureFormat, data: &[u8]) -> Result<usize, GpuError> {
+        let bytes_per_texel =
+            format.bytes_per_texel().ok_or_else(|| GpuError::Invalid(format!("{format:?} textures take no writes")))?;
+        let past = |start: u32, length: u32, limit: u32| u64::from(start) + u64::from(length) > u64::from(limit);
+        if past(self.x, self.size.width, size.width) || past(self.y, self.size.height, size.height) {
+            return Err(GpuError::Invalid(format!("a write to {self:?} of a texture of {size:?}")));
+        }
+        let bytes_per_row = self.size.width as usize * bytes_per_texel as usize;
+        let expected = bytes_per_row * self.size.height as usize;
+        if data.len() != expected {
+            return Err(GpuError::Invalid(format!("a write of {} bytes to a region of {expected}", data.len())));
+        }
+        Ok(bytes_per_row)
+    }
+}
+
 /// Whether a vertex buffer advances per vertex or per instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum VertexStep {
@@ -525,6 +546,17 @@ mod tests {
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
         assert_ne!(key(&["A"]), ShaderKey::new(BuiltIn::LineShader, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
+    }
+
+    #[test]
+    fn texture_writes_fit_their_region_and_texture() {
+        let size = Size { width: 4, height: 2 };
+        let region = TextureRegion { x: 1, y: 0, size: Size { width: 3, height: 2 } };
+        assert_eq!(region.write_bytes_per_row(size, TextureFormat::Rgba8Unorm, &[0; 24]).ok(), Some(12));
+        assert!(region.write_bytes_per_row(size, TextureFormat::Rgba8Unorm, &[0; 20]).is_err());
+        assert!(region.write_bytes_per_row(size, TextureFormat::Depth32Float, &[0; 24]).is_err());
+        let past = TextureRegion { x: 2, ..region };
+        assert!(past.write_bytes_per_row(size, TextureFormat::Rgba8Unorm, &[0; 24]).is_err());
     }
 
     #[test]
