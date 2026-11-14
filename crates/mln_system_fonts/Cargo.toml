@@ -42,6 +42,12 @@ objc2-core-foundation = { workspace = true, features = [
 ] }
 objc2-core-text = { workspace = true }
 
+# DirectWrite.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Graphics_DirectWrite"] }
+# For the code that windows' #[implement] generates.
+windows-core.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 

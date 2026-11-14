@@ -3112,6 +3112,8 @@ dependencies = [
  "skrifa 0.49.0",
  "sys-locale",
  "tempfile",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

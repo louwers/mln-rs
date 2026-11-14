@@ -8,7 +8,7 @@
 //! languages, and gives the map that font for the script's code points only.
 //! It asks the platform's font matcher where it has one: fontconfig on Linux
 //! and the BSDs, `AFontMatcher` on Android 10 and later, CoreText on Apple's
-//! platforms. Elsewhere, or
+//! platforms and DirectWrite on Windows. Elsewhere, or
 //! without it, it scans the system's font files
 //! for families known to draw each script. The browser build finds none: the
 //! browser draws CJK glyphs itself (`DefaultLocalGlyphRasterizer`).
@@ -35,6 +35,8 @@ mod source;
 pub mod android;
 #[cfg(target_vendor = "apple")]
 mod apple;
+#[cfg(windows)]
+mod directwrite;
 #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
 mod fontconfig;
 
@@ -128,6 +130,8 @@ fn pick(script: &scripts::Script, candidates: Vec<(String, source::Source)>) -> 
 enum Finder {
     #[cfg(target_vendor = "apple")]
     CoreText,
+    #[cfg(windows)]
+    DirectWrite(directwrite::DirectWrite),
     #[cfg(target_os = "android")]
     Android(android::FontMatcher),
     #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
@@ -140,6 +144,10 @@ impl Finder {
     fn new() -> Finder {
         #[cfg(target_vendor = "apple")]
         return Finder::CoreText;
+        #[cfg(windows)]
+        if let Some(fallback) = directwrite::DirectWrite::new() {
+            return Finder::DirectWrite(fallback);
+        }
         #[cfg(target_os = "android")]
         if let Some(matcher) = android::FontMatcher::new() {
             return Finder::Android(matcher);
@@ -158,6 +166,8 @@ impl Finder {
         match self {
             #[cfg(target_vendor = "apple")]
             Finder::CoreText => apple::candidates(script, languages),
+            #[cfg(windows)]
+            Finder::DirectWrite(fallback) => fallback.candidates(script, languages),
             #[cfg(target_os = "android")]
             Finder::Android(matcher) => matcher.candidates(script, languages),
             #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
