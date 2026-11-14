@@ -110,7 +110,10 @@ metrics only; `--verbose` also shows the others.
 - In `Style/AddLayer600`: **`frames`**, frames drawn per change until the map
   settles complete; in `Style/AddRemoveLayers`, `frames` per iteration.
 - In `GeoJson/Replace1000`: **`update_frame_ms`**, the longest frame of a
-  replacement, which is the frame that swaps the old data for the new.
+  replacement, which is the frame that swaps the old data for the new, and
+  **`ready_ms`**, the time from the result of the first frame after the command
+  until a query of the rendered features shows the new points; the query runs
+  between frames.
 - In `Command/Burst`: `submit_ns`, the time that sending one jump takes.
 - In `Memory/LeaveZoomRange`: **`heap_mib`** and `in_range_heap_mib`, the heap
   live once the map settled out of range and back in range, above what it was
