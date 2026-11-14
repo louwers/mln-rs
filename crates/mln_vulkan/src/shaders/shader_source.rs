@@ -67,6 +67,8 @@ pub(crate) struct GlslShaderSource {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AttributeInfo {
     pub(crate) index: usize,
+    /// The format of the input, which the tests check the GLSL against.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests check the GLSL's inputs against it"))]
     pub(crate) data_type: AttributeDataType,
     pub(crate) id: usize,
 }

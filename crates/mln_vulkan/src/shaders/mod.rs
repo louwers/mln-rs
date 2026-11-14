@@ -19,6 +19,4 @@ pub(crate) mod compiler;
 #[rustfmt::skip]
 pub(crate) mod glsl_sources;
 pub(crate) mod layout;
-pub(crate) mod shader_group;
-pub(crate) mod shader_program;
 pub(crate) mod shader_source;

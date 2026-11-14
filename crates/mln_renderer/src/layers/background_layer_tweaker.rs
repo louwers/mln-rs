@@ -109,7 +109,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
 
         let self_ptr: *const Self = self;
-        let check = |d: &dyn mln_gfx::Drawable| match d
+        let check = |d: &mln_gfx::Drawable| match d
             .get_layer_tweaker()
             .and_then(|slot| slot.downcast_ref::<crate::layer_tweaker::LayerTweakerPtr>())
         {
@@ -180,7 +180,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
                     BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix: cast_matrix(&matrix) });
             }
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 

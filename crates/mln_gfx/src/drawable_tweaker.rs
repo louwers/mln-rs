@@ -8,9 +8,9 @@ use crate::paint_parameters::PaintParameters;
 /// mutable state in cells.
 pub trait DrawableTweaker {
     /// Called as the drawable gets added to the layer
-    fn init(&self, drawable: &mut dyn Drawable);
+    fn init(&self, drawable: &mut Drawable);
     /// Called just before rendering
-    fn execute(&self, drawable: &mut dyn Drawable, parameters: &mut dyn PaintParameters);
+    fn execute(&self, drawable: &mut Drawable, parameters: &mut dyn PaintParameters);
 }
 
 pub type DrawableTweakerPtr = Rc<dyn DrawableTweaker>;

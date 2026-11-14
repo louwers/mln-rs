@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
-use mln_gfx::{AttributeDataType, ColorMode, Context, DepthMaskType, DrawMode, ShaderProgramBasePtr, ShaderRegistry};
+use mln_gfx::{
+    AttributeDataType, ColorMode, Context, DepthMaskType, DrawMode, DrawableBuilder, ShaderProgramPtr, ShaderRegistry,
+    TileLayerGroup,
+};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -50,8 +53,8 @@ fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     unevaluated: BackgroundPaintProperties::Unevaluated,
-    plain_shader: Option<ShaderProgramBasePtr>,
-    pattern_shader: Option<ShaderProgramBasePtr>,
+    plain_shader: Option<ShaderProgramPtr>,
+    pattern_shader: Option<ShaderProgramPtr>,
 }
 
 impl RenderBackgroundLayer {
@@ -145,7 +148,7 @@ impl RenderLayer for RenderBackgroundLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &dyn Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -190,14 +193,7 @@ impl RenderLayer for RenderBackgroundLayer {
         }
 
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -222,12 +218,10 @@ impl RenderLayer for RenderBackgroundLayer {
         }
 
         if !has_pattern && self.plain_shader.is_none() {
-            self.plain_shader =
-                context.get_generic_shader(shaders, BACKGROUND_PLAIN_SHADER_NAME, self.base.projection_variant);
+            self.plain_shader = shaders.shader(BACKGROUND_PLAIN_SHADER_NAME, self.base.projection_variant);
         }
         if has_pattern && self.pattern_shader.is_none() {
-            self.pattern_shader =
-                context.get_generic_shader(shaders, BACKGROUND_PATTERN_SHADER_NAME, self.base.projection_variant);
+            self.pattern_shader = shaders.shader(BACKGROUND_PATTERN_SHADER_NAME, self.base.projection_variant);
         }
 
         let layer_tweaker = self.base.layer_tweaker.clone().expect("layer tweaker");
@@ -274,7 +268,7 @@ impl RenderLayer for RenderBackgroundLayer {
             // We actually need to build things, so set up a builder if we
             // haven't already
             let builder = builder.get_or_insert_with(|| {
-                let mut b = context.create_drawable_builder();
+                let mut b = DrawableBuilder::boxed();
                 b.set_render_pass(draw_passes);
                 b.set_shader(cur_shader.clone());
                 b.set_depth_type(DepthMaskType::ReadWrite);
@@ -298,7 +292,7 @@ impl RenderLayer for RenderBackgroundLayer {
                 builder.set_raw_vertices(vertices_copy, vertex_count, AttributeDataType::Short2);
                 builder.set_segments(DrawMode::Triangles(), indexes.clone(), &segs);
             }
-            builder.flush(context);
+            builder.flush();
 
             for mut drawable in builder.clear_drawables() {
                 drawable.set_tile_id(*tile_id);

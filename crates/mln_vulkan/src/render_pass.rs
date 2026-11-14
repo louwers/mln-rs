@@ -11,7 +11,9 @@ use std::rc::Rc;
 use ash::vk;
 use mln_gfx::context::Context as _;
 use mln_gfx::debug_group::DebugGroupTarget;
+use mln_gfx::gpu::{GpuError, RenderCommand, TargetFormats};
 use mln_gfx::render_pass::{self, RenderPassDescriptor};
+use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
@@ -83,29 +85,6 @@ impl RenderPass {
         pass
     }
 
-    /// The command buffer the pass records into.
-    #[must_use]
-    pub(crate) fn get_command_buffer(&self) -> vk::CommandBuffer {
-        self.command_buffer
-    }
-
-    /// The render pass of the draw target, which pipelines are made for.
-    #[must_use]
-    pub(crate) fn get_vulkan_render_pass(&self) -> vk::RenderPass {
-        self.render_pass
-    }
-
-    /// The extent of the draw target's attachments.
-    pub(crate) fn get_extent(&self) -> vk::Extent2D {
-        self.extent
-    }
-
-    /// Whether draws can be recorded.
-    #[must_use]
-    pub(crate) fn is_encoding(&self) -> bool {
-        self.encoding
-    }
-
     pub(crate) fn end_encoding(&mut self) {
         if std::mem::take(&mut self.encoding) {
             // SAFETY: the command buffer is in this render pass.
@@ -133,6 +112,25 @@ impl DebugGroupTarget for RenderPass {
 }
 
 impl render_pass::RenderPass for RenderPass {
+    fn target(&self) -> Option<(Size, TargetFormats)> {
+        if !self.encoding {
+            return None;
+        }
+        let (color, depth_stencil) = self.context.render_pass_formats(self.render_pass)?;
+        let gpu = self.context.vulkan_gpu();
+        let depth_stencil = match depth_stencil {
+            Some(format) => Some(gpu.texture_format(format)?),
+            None => None,
+        };
+        let targets = TargetFormats { color: Some(gpu.texture_format(color)?), depth_stencil };
+        Some((Size::new(self.extent.width, self.extent.height), targets))
+    }
+
+    fn encode(&self, commands: &[RenderCommand]) -> Result<(), GpuError> {
+        let (_, targets) = self.target().ok_or_else(|| GpuError::Invalid("a render pass that didn't begin".into()))?;
+        self.context.vulkan_gpu_mut().encode_into(self.command_buffer, commands, targets, self.extent)
+    }
+
     fn add_debug_signpost(&self, name: &str) {
         self.context.get_backend().insert_debug_label(self.command_buffer, name);
     }
@@ -155,9 +153,8 @@ impl render_pass::RenderPass for RenderPass {
         }
     }
 
-    /// Lends the command buffer inside the pass, then binds the global
-    /// uniform buffers again over what the host bound. Each draw binds its
-    /// own pipeline, sets and buffers, and sets its dynamic state.
+    /// Lends the command buffer inside the pass. Each command list after it
+    /// binds its own pipeline, sets and buffers, and sets its dynamic state.
     fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         if !self.encoding {
             return false;
@@ -175,7 +172,6 @@ impl render_pass::RenderPass for RenderPass {
             extent: self.extent,
         };
         f(&mut pass);
-        self.context.bind_global_uniform_buffers(self);
         true
     }
 }

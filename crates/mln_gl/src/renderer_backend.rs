@@ -15,13 +15,8 @@ use std::sync::Arc;
 
 use mln_gfx::context::Context as GfxContext;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_util::logging::{Event, Log};
 
 use crate::context::Context;
-use crate::shaders::shader_group::ShaderGroup;
-use crate::shaders::shader_source::{REGISTERED_SHADERS, shader_source};
 use crate::types::Gl;
 
 /// The platform's GL context, which a backend makes current around its
@@ -173,31 +168,11 @@ impl RendererBackend {
     pub(crate) fn create_context(&self) -> Rc<Context> {
         Context::new(Rc::clone(&self.impl_))
     }
-
-    /// Registers one shader group per built-in shader. A duplicate
-    /// registration is an error, which C++ throws and this logs.
-    #[expect(clippy::unused_self, reason = "each backend registers its shaders through its own `init_shaders`")]
-    pub(crate) fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
-        for &shader_id in REGISTERED_SHADERS {
-            let Some(source) = shader_source(shader_id) else {
-                continue;
-            };
-            let group = Rc::new(ShaderGroup::new(shader_id, program_parameters.clone()));
-            if !registry.register_shader_group(group, source.name) {
-                Log::error(Event::Shader, format!("Failed to register {} with shader registry!", source.name));
-                debug_assert!(false, "duplicate shader group");
-            }
-        }
-    }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
-    }
-
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
-        RendererBackend::init_shaders(self, registry, parameters);
     }
 
     fn create_context(&self) -> Rc<dyn GfxContext> {

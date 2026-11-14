@@ -7,24 +7,20 @@
 //!
 //! The WGSL is in `shaders::wgsl_sources`.
 
-mod bind_groups;
 mod borrowed_target;
 mod command_encoder;
 mod context;
 mod custom_layer;
 mod device;
 mod draw_target;
-mod drawable;
-mod drawable_builder;
 mod gpu;
-mod layer_group;
+mod index_table;
 mod offscreen_target;
 mod offscreen_texture;
 mod render_pass;
 mod renderer_backend;
 mod shaders;
 mod surface_target;
-mod tile_layer_group;
 mod writes;
 
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, depth_stencil_format};

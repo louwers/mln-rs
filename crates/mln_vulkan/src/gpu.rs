@@ -23,7 +23,6 @@ use crate::buffer_resource::BufferAllocation;
 use crate::context::{build_descriptor_set_layout, build_pipeline_layout};
 use crate::descriptor_set::DescriptorPoolGrowable;
 use crate::device::Device;
-use crate::pipeline::PipelineInfo;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::compiler::{self, Stage};
 use crate::shaders::layout::{
@@ -32,6 +31,7 @@ use crate::shaders::layout::{
 };
 use crate::shaders::shader_source::{AttributeInfo, TextureInfo, shader_source};
 use crate::texture2d::{ImageAllocation, transition_image};
+use crate::vk_state;
 
 /// The sets each descriptor pool starts with room for.
 const DESCRIPTOR_POOL_SIZE: u32 = 256;
@@ -445,16 +445,6 @@ impl VulkanGpu {
         self.textures.get(texture).map(|entry| (entry.image.image_view(), entry.vk_format, entry.image.id()))
     }
 
-    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<vk::Sampler> {
-        self.samplers.get(sampler).copied()
-    }
-
-    /// The Vulkan buffer of `buffer`, and the id of its allocation
-    /// (`buffer_resource::unique_id`).
-    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(vk::Buffer, u64)> {
-        self.buffers.get(buffer).map(|entry| (entry.allocation.buffer(), entry.allocation.id()))
-    }
-
     fn vk_format(&self, format: TextureFormat) -> vk::Format {
         match format {
             TextureFormat::R8Unorm | TextureFormat::A8Unorm => vk::Format::R8_UNORM,
@@ -699,34 +689,7 @@ impl VulkanGpu {
         if let Some(depth_ref) = &depth_ref {
             subpass = subpass.depth_stencil_attachment(depth_ref);
         }
-        // Every pass waits for what the commands before it wrote, and the
-        // commands after it for what it wrote: a pass may sample or load
-        // what an earlier one drew, or draw over what an earlier one
-        // sampled.
-        let attachment_stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-            | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
-            | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
-        let attachment_writes =
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE;
-        let attachment_access =
-            attachment_writes | vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ;
-        let shader_stages = vk::PipelineStageFlags::VERTEX_SHADER | vk::PipelineStageFlags::FRAGMENT_SHADER;
-        let dependencies = [
-            vk::SubpassDependency::default()
-                .src_subpass(vk::SUBPASS_EXTERNAL)
-                .dst_subpass(0)
-                .src_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
-                .dst_stage_mask(attachment_stages | shader_stages)
-                .src_access_mask(attachment_writes | vk::AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ),
-            vk::SubpassDependency::default()
-                .src_subpass(0)
-                .dst_subpass(vk::SUBPASS_EXTERNAL)
-                .src_stage_mask(attachment_stages)
-                .dst_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
-                .src_access_mask(attachment_writes)
-                .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ | vk::AccessFlags::TRANSFER_READ),
-        ];
+        let dependencies = subpass_dependencies();
         let subpasses = [subpass];
         let create_info = vk::RenderPassCreateInfo::default()
             .attachments(&attachments)
@@ -771,7 +734,7 @@ impl VulkanGpu {
                 ),
             );
             for attribute in &layout.attributes {
-                let format = PipelineInfo::vulkan_format(attribute.format);
+                let format = vk_state::format(attribute.format);
                 if format == vk::Format::UNDEFINED {
                     return Err(GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)));
                 }
@@ -787,22 +750,17 @@ impl VulkanGpu {
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(&input_bindings)
             .vertex_attribute_descriptions(&input_attributes);
-        // Vulkan has no line loops; the drawable path's mapping draws them
-        // as strips, which leave the loop open.
+        // Vulkan has no line loops; a strip would leave the loop open.
         if state.primitive == DrawModeType::LineLoop {
             return Err(GpuError::Unsupported(format!("{:?} primitives", state.primitive)));
         }
-        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(PipelineInfo::vulkan_primitive_topology(state.primitive));
+        let input_assembly_state =
+            vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk_state::primitive_topology(state.primitive));
         let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
 
         let raster_state = vk::PipelineRasterizationStateCreateInfo::default()
-            .cull_mode(if state.cull.enabled {
-                PipelineInfo::vulkan_cull_mode(state.cull.side)
-            } else {
-                vk::CullModeFlags::NONE
-            })
-            .front_face(PipelineInfo::vulkan_front_face(state.cull.winding))
+            .cull_mode(if state.cull.enabled { vk_state::cull_mode(state.cull.side) } else { vk::CullModeFlags::NONE })
+            .front_face(vk_state::front_face(state.cull.winding))
             .polygon_mode(vk::PolygonMode::FILL)
             .line_width(1.0);
         let multisample_state =
@@ -811,19 +769,19 @@ impl VulkanGpu {
         let has_depth_stencil = key.targets.depth_stencil.is_some();
         let stencil = &state.stencil;
         let stencil_op = vk::StencilOpState::default()
-            .compare_op(PipelineInfo::vulkan_stencil_compare_op(stencil.test.func()))
+            .compare_op(vk_state::stencil_compare_op(stencil.test.func()))
             .compare_mask(stencil.test.masked().unwrap_or(0xFF))
             .write_mask(stencil.write_mask)
-            .pass_op(PipelineInfo::vulkan_stencil_op(stencil.pass))
-            .fail_op(PipelineInfo::vulkan_stencil_op(stencil.fail))
-            .depth_fail_op(PipelineInfo::vulkan_stencil_op(stencil.depth_fail));
+            .pass_op(vk_state::stencil_op(stencil.pass))
+            .fail_op(vk_state::stencil_op(stencil.fail))
+            .depth_fail_op(vk_state::stencil_op(stencil.depth_fail));
         let depth = &state.depth;
         // Vulkan writes depth only where it tests it.
         let depth_test = has_depth_stencil && (depth.write || depth.compare != DepthFunctionType::Always);
         let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(depth_test)
             .depth_write_enable(has_depth_stencil && depth.write)
-            .depth_compare_op(PipelineInfo::vulkan_depth_compare_op(depth.compare))
+            .depth_compare_op(vk_state::depth_compare_op(depth.compare))
             .stencil_test_enable(has_depth_stencil && !stencil.is_disabled())
             .front(stencil_op)
             .back(stencil_op)
@@ -843,9 +801,9 @@ impl VulkanGpu {
                 color_mask |= bit;
             }
         }
-        let blend_op = PipelineInfo::vulkan_blend_op(blend.equation());
-        let src_factor = PipelineInfo::vulkan_blend_factor(blend.src_factor());
-        let dst_factor = PipelineInfo::vulkan_blend_factor(blend.dst_factor());
+        let blend_op = vk_state::blend_op(blend.equation());
+        let src_factor = vk_state::blend_factor(blend.src_factor());
+        let dst_factor = vk_state::blend_factor(blend.dst_factor());
         let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::default()
             .blend_enable(!matches!(blend, BlendFunction::Replace))
             .color_blend_op(blend_op)
@@ -1152,19 +1110,51 @@ impl VulkanGpu {
             .clear_values(&clear_values);
         let device = self.backend.get_device();
         self.backend.begin_debug_label(command_buffer, &pass.label, [0.0, 0.0, 0.0, 0.0]);
-        // SAFETY: the command buffer is recording outside a render pass,
-        // the framebuffer is of the render pass, and the dynamic state set
-        // is dynamic in every pipeline.
+        // SAFETY: the command buffer is recording outside a render pass, and
+        // the framebuffer is of the render pass.
+        unsafe { device.cmd_begin_render_pass(command_buffer, &begin_info, vk::SubpassContents::INLINE) };
+        self.set_pass_defaults(command_buffer, extent);
+        let result = self.encode_commands(command_buffer, &pass.label, &pass.commands, extent);
+        // SAFETY: the render pass begun above.
+        unsafe { self.device().cmd_end_render_pass(command_buffer) };
+        self.backend.end_debug_label(command_buffer);
+        result
+    }
+
+    /// Records `commands` into `command_buffer`, inside a render pass of
+    /// `extent` over attachments of `targets`, as the commands of a pass of
+    /// their own.
+    ///
+    /// The old frame submission encodes the renderer's commands into the
+    /// render pass it has begun with this, until frames go through
+    /// [`Gpu::submit`].
+    pub(crate) fn encode_into(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+        commands: &[RenderCommand],
+        targets: TargetFormats,
+        extent: vk::Extent2D,
+    ) -> Result<(), GpuError> {
+        validation::check_commands(self, "render pass", targets, commands)?;
+        self.set_pass_defaults(command_buffer, extent);
+        self.encode_commands(command_buffer, "render pass", commands, extent)
+    }
+
+    /// Sets the dynamic state a pass starts with, over `extent`.
+    fn set_pass_defaults(&self, command_buffer: vk::CommandBuffer, extent: vk::Extent2D) {
+        let device = self.backend.get_device();
+        let full = vk::Rect2D { offset: vk::Offset2D::default(), extent };
+        // SAFETY: the command buffer is recording inside a render pass, and
+        // the state set is dynamic in every pipeline.
         unsafe {
-            device.cmd_begin_render_pass(command_buffer, &begin_info, vk::SubpassContents::INLINE);
             device.cmd_set_viewport(
                 command_buffer,
                 0,
                 &[vk::Viewport {
                     x: 0.0,
                     y: 0.0,
-                    width: size.width as f32,
-                    height: size.height as f32,
+                    width: extent.width as f32,
+                    height: extent.height as f32,
                     min_depth: 0.0,
                     max_depth: 1.0,
                 }],
@@ -1183,19 +1173,37 @@ impl VulkanGpu {
                 &0u32.to_ne_bytes(),
             );
         }
-        let result = self.encode_commands(command_buffer, pass, extent);
-        // SAFETY: the render pass begun above.
-        unsafe { self.device().cmd_end_render_pass(command_buffer) };
-        self.backend.end_debug_label(command_buffer);
-        result
     }
 
-    /// Records the commands of `pass`, inside its render pass over
-    /// attachments of `extent`.
+    /// The format a texture of `format` has, `None` for a format no
+    /// texture has.
+    pub(crate) fn texture_format(&self, format: vk::Format) -> Option<TextureFormat> {
+        const FORMATS: [TextureFormat; 14] = [
+            TextureFormat::R8Unorm,
+            TextureFormat::A8Unorm,
+            TextureFormat::R16Float,
+            TextureFormat::R32Float,
+            TextureFormat::Rgba8Unorm,
+            TextureFormat::Rgba8UnormSrgb,
+            TextureFormat::Bgra8Unorm,
+            TextureFormat::Bgra8UnormSrgb,
+            TextureFormat::Rgb10a2Unorm,
+            TextureFormat::Rgba16Float,
+            TextureFormat::Rgba32Float,
+            TextureFormat::Depth32Float,
+            TextureFormat::Depth24PlusStencil8,
+            TextureFormat::Depth32FloatStencil8,
+        ];
+        FORMATS.into_iter().find(|&candidate| self.vk_format(candidate) == format)
+    }
+
+    /// Records `commands`, which the checks passed, inside a render pass of
+    /// `extent`.
     fn encode_commands(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        pass: &Pass,
+        label: &str,
+        commands: &[RenderCommand],
         extent: vk::Extent2D,
     ) -> Result<(), GpuError> {
         let mut pipeline: Option<Rc<Pipeline>> = None;
@@ -1207,7 +1215,7 @@ impl VulkanGpu {
             let range = self.backend.get_device_properties().limits.line_width_range;
             (range[0], range[1])
         };
-        for command in &pass.commands {
+        for command in commands {
             let device = self.backend.get_device();
             // SAFETY (each command): the command buffer is recording inside
             // the pass's render pass; what a command names is live, and a
@@ -1311,7 +1319,7 @@ impl VulkanGpu {
                 RenderCommand::Draw { .. } | RenderCommand::DrawIndexed { .. } => {
                     let entry = pipeline
                         .as_ref()
-                        .ok_or_else(|| GpuError::Invalid(format!("{}: a draw before a pipeline", pass.label)))?;
+                        .ok_or_else(|| GpuError::Invalid(format!("{label}: a draw before a pipeline")))?;
                     if sets_dirty {
                         self.bind_descriptor_sets(command_buffer, entry, &bound, &mut current_sets)?;
                         sets_dirty = false;
@@ -1472,6 +1480,37 @@ impl Resources for VulkanGpu {
     fn bind_group_entries(&self, id: BindGroupId) -> Option<&[BindGroupEntry]> {
         self.bind_groups.get(id).map(Vec::as_slice)
     }
+}
+
+/// The subpass dependencies of every render pass: each waits for what the
+/// commands before it wrote, and the commands after it for what it wrote, as
+/// a pass may sample or load what an earlier one drew, or draw over what an
+/// earlier one sampled. Render passes are compatible, so that a pipeline
+/// fits each of a format's, only where their dependencies are the same.
+pub(crate) fn subpass_dependencies() -> [vk::SubpassDependency; 2] {
+    let attachment_stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+        | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+        | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
+    let attachment_writes = vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE;
+    let attachment_access =
+        attachment_writes | vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ;
+    let shader_stages = vk::PipelineStageFlags::VERTEX_SHADER | vk::PipelineStageFlags::FRAGMENT_SHADER;
+    [
+        vk::SubpassDependency::default()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
+            .dst_subpass(0)
+            .src_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
+            .dst_stage_mask(attachment_stages | shader_stages)
+            .src_access_mask(attachment_writes | vk::AccessFlags::TRANSFER_WRITE)
+            .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ),
+        vk::SubpassDependency::default()
+            .src_subpass(0)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .src_stage_mask(attachment_stages)
+            .dst_stage_mask(attachment_stages | shader_stages | vk::PipelineStageFlags::TRANSFER)
+            .src_access_mask(attachment_writes)
+            .dst_access_mask(attachment_access | vk::AccessFlags::SHADER_READ | vk::AccessFlags::TRANSFER_READ),
+    ]
 }
 
 impl Gpu for VulkanGpu {

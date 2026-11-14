@@ -1,88 +1,8 @@
-//! Bind groups that drawables share.
-//!
-//! Drawables of a layer bind the same layer buffers, so they share their bind
-//! groups, and a render pass skips setting a group the previous draw set.
-//! What tells the draws apart, `globalIndex`, is in a group of its own: one
-//! table of indices for every drawable, bound at the draw's dynamic offset.
-
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::{Rc, Weak};
+//! The table of `globalIndex` values: what tells a layer's draws apart is in
+//! a group of its own, one table of indices bound at the draw's dynamic
+//! offset.
 
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
-
-/// A resource a bind group entry binds. wgpu handles compare by identity.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) enum EntryResource {
-    /// A buffer, and the offset and size bound.
-    Buffer(wgpu::Buffer, u64, u64),
-    Sampler(wgpu::Sampler),
-    TextureView(wgpu::TextureView),
-}
-
-/// What a bind group is created from: its layout and the resource of each
-/// binding.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) struct BindGroupKey {
-    pub(crate) layout: wgpu::BindGroupLayout,
-    pub(crate) resources: Vec<(u32, EntryResource)>,
-}
-
-type Entries = RefCell<HashMap<BindGroupKey, Weak<SharedBindGroup>>>;
-
-/// A bind group of a [`BindGroupCache`], and what it was created from.
-/// Dropping the last `Rc` takes it out of the cache.
-pub(crate) struct SharedBindGroup {
-    pub(crate) handle: wgpu::BindGroup,
-    pub(crate) key: BindGroupKey,
-    cache: Weak<Entries>,
-}
-
-impl Drop for SharedBindGroup {
-    fn drop(&mut self) {
-        let Some(cache) = self.cache.upgrade() else {
-            return;
-        };
-        // The cache drops no bind group while it borrows its map, so the
-        // borrow succeeds. The entry may be a newer bind group's if a dead
-        // one was replaced, so remove it only if it's dead.
-        if let Ok(mut entries) = cache.try_borrow_mut()
-            && entries.get(&self.key).is_some_and(|entry| entry.strong_count() == 0)
-        {
-            entries.remove(&self.key);
-        }
-    }
-}
-
-/// Bind groups by what they are created from, each kept while something
-/// holds its `Rc`, so the cache keeps no resource alive itself.
-#[derive(Default)]
-pub(crate) struct BindGroupCache {
-    entries: Rc<Entries>,
-}
-
-impl BindGroupCache {
-    /// The live bind group created from `key`, or a new one `create` makes.
-    pub(crate) fn get_or_create(
-        &self,
-        key: BindGroupKey,
-        create: impl FnOnce(&BindGroupKey) -> wgpu::BindGroup,
-    ) -> Rc<SharedBindGroup> {
-        if let Some(shared) = self.entries.borrow().get(&key).and_then(Weak::upgrade) {
-            return shared;
-        }
-        let handle = create(&key);
-        let shared = Rc::new(SharedBindGroup { handle, key: key.clone(), cache: Rc::downgrade(&self.entries) });
-        self.entries.borrow_mut().insert(key, Rc::downgrade(&shared));
-        shared
-    }
-
-    /// How many bind groups are live.
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        self.entries.borrow().len()
-    }
-}
 
 /// The size of WGSL's `GlobalIndexUBO`: a `u32`, padded by a `vec3<u32>`.
 const INDEX_ENTRY_SIZE: u64 = 32;
@@ -184,61 +104,6 @@ mod tests {
     fn device() -> (wgpu::Device, wgpu::Queue) {
         let device = crate::Device::new(None).expect("a WebGPU device");
         (device.device().clone(), device.queue().clone())
-    }
-
-    fn uniform_buffer(device: &wgpu::Device) -> wgpu::Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: 256,
-            usage: wgpu::BufferUsages::UNIFORM,
-            mapped_at_creation: false,
-        })
-    }
-
-    #[test]
-    fn bind_groups_are_shared_while_held() {
-        let (device, _) = device();
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-        let key = |buffer: &wgpu::Buffer| BindGroupKey {
-            layout: layout.clone(),
-            resources: vec![(0, EntryResource::Buffer(buffer.clone(), 0, 256))],
-        };
-        let create = |key: &BindGroupKey| {
-            let EntryResource::Buffer(buffer, _, _) = &key.resources[0].1 else { unreachable!() };
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &key.layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
-            })
-        };
-        let (a, b) = (uniform_buffer(&device), uniform_buffer(&device));
-        let cache = BindGroupCache::default();
-
-        let first = cache.get_or_create(key(&a), create);
-        let again = cache.get_or_create(key(&a), |_| panic!("the bind group is live"));
-        assert!(Rc::ptr_eq(&first, &again));
-        let other = cache.get_or_create(key(&b), create);
-        assert_ne!(first.handle, other.handle);
-        assert_eq!(cache.len(), 2);
-
-        drop((first, again));
-        assert_eq!(cache.len(), 1, "a bind group no one holds leaves the cache");
-        let made = cache.get_or_create(key(&a), create);
-        assert_eq!(cache.len(), 2);
-        drop((made, other));
-        assert_eq!(cache.len(), 0);
     }
 
     #[test]

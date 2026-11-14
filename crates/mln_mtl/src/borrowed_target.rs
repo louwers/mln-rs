@@ -168,7 +168,7 @@ struct Resource {
     backend: Rc<BackendImpl>,
     textures: RefCell<BorrowedTextures>,
     selected: Cell<usize>,
-    depth: RefCell<Option<(Size, MTLTexturePtr, MTLTexturePtr)>>,
+    depth: RefCell<Option<(Size, MTLTexturePtr)>>,
     command_buffer: RefCell<Option<MTLCommandBufferPtr>>,
     render_pass_descriptor: RefCell<Option<MTLRenderPassDescriptorPtr>>,
     /// What the next frame drawn into each slot waits for, which the
@@ -192,30 +192,19 @@ impl Resource {
         self.backend.get_device().newTextureWithDescriptor(&descriptor)
     }
 
-    /// The depth and stencil textures of the ring's size: the host's of the
-    /// selected slot, which holds both, or the target's own. Intel and AMD
-    /// GPUs and the simulator take one texture for both.
-    fn depth_stencil(&self) -> Option<(MTLTexturePtr, MTLTexturePtr)> {
+    /// The depth and stencil texture of the ring's size: the host's of the
+    /// selected slot, or the target's own. Each holds both, in one texture
+    /// whose format a pipeline's formats name.
+    fn depth_stencil(&self) -> Option<MTLTexturePtr> {
         if let Some(depth) = self.textures.borrow().depth_textures.get(self.selected.get()) {
-            return Some((depth.clone(), depth.clone()));
+            return Some(depth.clone());
         }
         let size = self.textures.borrow().size;
         let mut depth = self.depth.borrow_mut();
-        if depth.as_ref().is_none_or(|(made, _, _)| *made != size) {
-            *depth = if cfg!(target_arch = "x86_64") || cfg!(target_abi = "sim") {
-                self.texture_2d(MTLPixelFormat::Depth32Float_Stencil8, size)
-                    .map(|texture| (size, texture.clone(), texture))
-            } else {
-                match (
-                    self.texture_2d(MTLPixelFormat::Depth32Float, size),
-                    self.texture_2d(MTLPixelFormat::Stencil8, size),
-                ) {
-                    (Some(depth), Some(stencil)) => Some((size, depth, stencil)),
-                    _ => None,
-                }
-            };
+        if depth.as_ref().is_none_or(|(made, _)| *made != size) {
+            *depth = self.texture_2d(MTLPixelFormat::Depth32Float_Stencil8, size).map(|texture| (size, texture));
         }
-        depth.as_ref().map(|(_, depth, stencil)| (depth.clone(), stencil.clone()))
+        depth.as_ref().map(|(_, texture)| texture.clone())
     }
 }
 
@@ -236,9 +225,9 @@ impl TargetResource for Resource {
         let texture = self.textures.borrow().textures.get(self.selected.get()).cloned();
         // SAFETY: index 0 is in the attachment array's bounds.
         unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) }.setTexture(texture.as_deref());
-        if let Some((depth, stencil)) = self.depth_stencil() {
-            descriptor.depthAttachment().setTexture(Some(&depth));
-            descriptor.stencilAttachment().setTexture(Some(&stencil));
+        if let Some(depth_stencil) = self.depth_stencil() {
+            descriptor.depthAttachment().setTexture(Some(&depth_stencil));
+            descriptor.stencilAttachment().setTexture(Some(&depth_stencil));
         }
         *self.render_pass_descriptor.borrow_mut() = Some(descriptor);
     }

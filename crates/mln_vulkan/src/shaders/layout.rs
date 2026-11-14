@@ -73,6 +73,7 @@ pub(crate) const IMAGE_TEXTURE_COUNT: usize = MAX_TEXTURE_COUNT_PER_SHADER;
 pub(crate) const IMAGE_SAMPLER_START: usize = MAX_TEXTURE_COUNT_PER_SHADER;
 
 /// The binding in the global set of the uniform buffer `id`.
+#[cfg(test)]
 #[must_use]
 pub(crate) const fn global_uniform_binding(id: usize) -> Option<u32> {
     if id < GLOBAL_UNIFORM_COUNT { Some(id as u32) } else { None }
@@ -85,6 +86,7 @@ pub(crate) const fn layer_storage_binding(id: usize) -> Option<u32> {
 }
 
 /// The binding in the layer set of the uniform buffer `id`.
+#[cfg(test)]
 #[must_use]
 pub(crate) const fn layer_uniform_binding(id: usize) -> Option<u32> {
     if id >= DRAWABLE_RESERVED_UBO_COUNT && id < MAX_UBO_COUNT_PER_SHADER {
@@ -95,6 +97,7 @@ pub(crate) const fn layer_uniform_binding(id: usize) -> Option<u32> {
 }
 
 /// The binding in the drawable set of the uniform buffer `id`.
+#[cfg(test)]
 #[must_use]
 pub(crate) const fn drawable_uniform_binding(id: usize) -> Option<u32> {
     if id >= LAYER_SSBO_START_ID && id < MAX_UBO_COUNT_PER_SHADER {

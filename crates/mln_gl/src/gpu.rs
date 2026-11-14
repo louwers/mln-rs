@@ -63,11 +63,11 @@ struct Texture {
 }
 
 /// A uniform block of a program.
-struct Block {
+pub(crate) struct Block {
     /// The block's binding point: its uniform or storage buffer id.
-    id: usize,
+    pub(crate) id: usize,
     /// `GL_UNIFORM_BLOCK_DATA_SIZE`
-    size: usize,
+    pub(crate) size: usize,
     /// The size of an element of a storage buffer bound here, or 0 if the
     /// block reads a uniform buffer only.
     element_size: usize,
@@ -75,15 +75,15 @@ struct Block {
 
 /// A linked program and where it reads what the bind groups and vertex
 /// buffers give it.
-struct Program {
+pub(crate) struct Program {
     name: &'static str,
     object: ProgramID,
-    blocks: Vec<Block>,
+    pub(crate) blocks: Vec<Block>,
     /// The ids of the textures it samples. A texture's sampler reads the
     /// texture unit of its id.
-    textures: Vec<usize>,
+    pub(crate) textures: Vec<usize>,
     /// The location of each per-vertex attribute, by id.
-    vertex_locations: Vec<(u32, u32)>,
+    pub(crate) vertex_locations: Vec<(u32, u32)>,
     /// The location of each per-instance attribute, by id.
     instance_locations: Vec<(u32, u32)>,
 }
@@ -294,7 +294,7 @@ fn buffer_target(usage: BufferUsage) -> u32 {
 /// elements.
 pub struct GlGpu {
     /// The GL state the context last set, which a renderer backend's
-    /// drawable path shares.
+    /// context shares.
     state: Rc<State>,
     desktop: bool,
     limits: Limits,
@@ -343,7 +343,7 @@ impl GlGpu {
 
     /// A backend on a renderer backend's context, which must be current
     /// whenever this backend is called, sharing the cache of the GL state
-    /// that the context's drawable path sets. Its objects go with
+    /// that the context sets. Its objects go with
     /// [`release`](Self::release), not with the backend.
     pub(crate) fn hosted(
         gl: Arc<Gl>,
@@ -433,48 +433,9 @@ impl GlGpu {
         result
     }
 
-    /// The GL buffer of `buffer`, `None` for a storage buffer, which has
-    /// one only once a uniform block reads it.
-    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<BufferID> {
-        self.buffers.get(buffer)?.object
-    }
-
-    /// The GL buffer of `buffer`, and the range of it that a uniform block
-    /// of `block_size` bytes reads: the first `size` bytes of a uniform
-    /// buffer, or the element `index` of a storage buffer of `element_size`
-    /// byte elements, uploaded if they changed. `None` for a storage buffer
-    /// read as one block. The context must be current.
-    pub(crate) fn uniform_block_range(
-        &mut self,
-        buffer: BufferId,
-        size: usize,
-        index: u32,
-        element_size: usize,
-        block_size: usize,
-    ) -> Option<(BufferID, usize, usize)> {
-        let entry = self.buffers.get(buffer)?;
-        let Some(elements) = &entry.elements else {
-            debug_assert!(block_size <= size, "uniform buffer smaller than its block");
-            return Some((entry.object?, 0, size));
-        };
-        if element_size == 0 || elements.data.len() < element_size {
-            debug_assert!(false, "a shader reads a buffer of elements as one block");
-            return None;
-        }
-        let count = elements.data.len() / element_size;
-        let (object, stride) = self.element_buffer(buffer, element_size).ok()?;
-        debug_assert!((index as usize) < count, "drawable UBO index out of range");
-        let index = (index as usize).min(count - 1);
-        Some((object, index * stride as usize, block_size.max(1)))
-    }
-
     /// The GL texture of `texture`.
     pub(crate) fn native_texture(&self, texture: TextureId) -> Option<TextureID> {
         self.textures.get(texture).map(|texture| texture.object)
-    }
-
-    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<SamplerID> {
-        self.samplers.get(sampler).copied()
     }
 
     /// Deletes this backend's objects, leaving it with none. The context
@@ -778,18 +739,33 @@ impl GlGpu {
         Ok(pointers)
     }
 
+    /// The program of `key`, compiled on first use.
+    pub(crate) fn program(&mut self, key: &ShaderKey) -> Result<Rc<Program>, GpuError> {
+        if let Some(program) = self.programs.get(key) {
+            return Ok(Rc::clone(program));
+        }
+        let program = Rc::new(self.current(|gpu| gpu.compile(key))?);
+        self.programs.insert(key.clone(), Rc::clone(&program));
+        Ok(program)
+    }
+
     /// Checks what `pass` names and binds, without drawing: the shared
     /// checks, then what GL adds to them, a global index inside the bound
     /// elements of a storage buffer and vertices from the start of their
     /// buffers.
     fn check(&self, pass: &Pass) -> Result<(), GpuError> {
         validation::check_pass(self, pass)?;
+        self.check_gl(&pass.label, &pass.commands)
+    }
+
+    /// The checks GL adds to the shared ones of `commands`.
+    fn check_gl(&self, label: &str, commands: &[RenderCommand]) -> Result<(), GpuError> {
         let mut state = PassState::default();
-        for command in &pass.commands {
+        for command in commands {
             if state.set(command) {
                 continue;
             }
-            let pipeline = self.draw_pipeline(pass, state.pipeline)?;
+            let pipeline = self.draw_pipeline(label, state.pipeline)?;
             if state.groups_dirty {
                 self.bindings(&pipeline.program, &state.bound, state.global_index)?;
                 state.groups_dirty = false;
@@ -803,8 +779,8 @@ impl GlGpu {
         Ok(())
     }
 
-    fn draw_pipeline(&self, pass: &Pass, pipeline: Option<PipelineId>) -> Result<&Pipeline, GpuError> {
-        let id = pipeline.ok_or_else(|| GpuError::Invalid(format!("{}: a draw before a pipeline", pass.label)))?;
+    fn draw_pipeline(&self, label: &str, pipeline: Option<PipelineId>) -> Result<&Pipeline, GpuError> {
+        let id = pipeline.ok_or_else(|| GpuError::Invalid(format!("{label}: a draw before a pipeline")))?;
         self.pipelines.get(id).ok_or(GpuError::UnknownId("pipeline"))
     }
 
@@ -937,6 +913,30 @@ impl GlGpu {
             (depth, stencil)
         });
         self.state.clear(gl, clear_color, clear_depth, clear_stencil);
+        self.encode_commands(&pass.label, size, &pass.commands)
+    }
+
+    /// Records `commands` into the bound framebuffer, of `size` and with
+    /// attachments of `targets`, as the commands of a pass of their own.
+    ///
+    /// The old frame submission encodes the renderer's commands into the
+    /// framebuffer it has bound with this, until frames go through
+    /// [`Gpu::submit`].
+    pub(crate) fn encode_into(
+        &mut self,
+        size: Size,
+        targets: TargetFormats,
+        commands: &[RenderCommand],
+    ) -> Result<(), GpuError> {
+        validation::check_commands(self, "render pass", targets, commands)?;
+        self.check_gl("render pass", commands)?;
+        self.current(|gpu| gpu.encode_commands("render pass", size, commands))
+    }
+
+    /// Records `commands`, which the checks passed, into the bound
+    /// framebuffer of `size`.
+    fn encode_commands(&mut self, label: &str, size: Size, commands: &[RenderCommand]) -> Result<(), GpuError> {
+        let gl = &self.gl;
         let height = size.height as i32;
         // A rectangle counted from the top, from the bottom as GL counts it.
         let flipped = |x: i32, y: i32, width: i32, rect_height: i32| -> Rect {
@@ -946,7 +946,7 @@ impl GlGpu {
         self.state.set_scissor(gl, None);
 
         let mut state = PassState::default();
-        for command in &pass.commands {
+        for command in commands {
             match *command {
                 RenderCommand::SetViewport(viewport) => self.state.set_viewport(
                     &self.gl,
@@ -972,15 +972,15 @@ impl GlGpu {
             if state.set(command) {
                 continue;
             }
-            self.draw(pass, &mut state, command)?;
+            self.draw(label, &mut state, command)?;
         }
         Ok(())
     }
 
     /// Sets the pipeline state, bindings and vertex attributes of a draw
     /// and draws.
-    fn draw(&mut self, pass: &Pass, state: &mut PassState, command: &RenderCommand) -> Result<(), GpuError> {
-        let pipeline = self.draw_pipeline(pass, state.pipeline)?;
+    fn draw(&mut self, label: &str, state: &mut PassState, command: &RenderCommand) -> Result<(), GpuError> {
+        let pipeline = self.draw_pipeline(label, state.pipeline)?;
         let program = Rc::clone(&pipeline.program);
         let fixed = &pipeline.state;
         let gl = &self.gl;
@@ -1371,13 +1371,7 @@ impl Gpu for GlGpu {
     }
 
     fn create_pipeline(&mut self, key: &PipelineKey) -> Result<PipelineId, GpuError> {
-        let program = if let Some(program) = self.programs.get(&key.shader) {
-            Rc::clone(program)
-        } else {
-            let program = Rc::new(self.current(|gpu| gpu.compile(&key.shader))?);
-            self.programs.insert(key.shader.clone(), Rc::clone(&program));
-            program
-        };
+        let program = self.program(&key.shader)?;
         for (step, locations) in
             [(VertexStep::Vertex, &program.vertex_locations), (VertexStep::Instance, &program.instance_locations)]
         {

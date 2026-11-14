@@ -33,9 +33,9 @@ use objc2_metal::{
     MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
     MTLRenderPipelineReflection, MTLResource, MTLResourceOptions, MTLSamplerAddressMode, MTLSamplerDescriptor,
-    MTLSamplerMinMagFilter, MTLSamplerMipFilter, MTLSamplerState, MTLScissorRect, MTLSize, MTLStencilDescriptor,
-    MTLStencilOperation, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
-    MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLWinding,
+    MTLSamplerMinMagFilter, MTLSamplerMipFilter, MTLScissorRect, MTLSize, MTLStencilDescriptor, MTLStencilOperation,
+    MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor,
+    MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLWinding,
 };
 
 use crate::Device;
@@ -259,8 +259,7 @@ impl MetalGpu {
     /// Takes a texture made elsewhere, such as a drawable's, as a texture
     /// of this backend. Destroying it drops this backend's reference.
     pub fn import_texture(&mut self, texture: &ProtocolObject<dyn MTLTexture>) -> TextureId {
-        let pixel_format = texture.pixelFormat();
-        let format = TEXTURE_FORMATS.into_iter().find(|&format| self::pixel_format(format) == pixel_format);
+        let format = texture_format(texture.pixelFormat());
         self.textures.insert(Texture { texture: texture.retain(), format })
     }
 
@@ -295,15 +294,6 @@ impl MetalGpu {
     /// The Metal texture of `texture`.
     pub(crate) fn native_texture(&self, texture: TextureId) -> Option<&ProtocolObject<dyn MTLTexture>> {
         self.textures.get(texture).map(|texture| &*texture.texture)
-    }
-
-    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<&ProtocolObject<dyn MTLSamplerState>> {
-        self.samplers.get(sampler).map(|sampler| &**sampler)
-    }
-
-    /// The Metal buffer of `buffer`.
-    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<&ProtocolObject<dyn MTLBuffer>> {
-        self.buffers.get(buffer).map(|buffer| &**buffer)
     }
 
     fn buffer(&self, id: BufferId) -> Result<&ProtocolObject<dyn MTLBuffer>, GpuError> {
@@ -489,17 +479,46 @@ impl MetalGpu {
             .renderCommandEncoderWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no render encoder", pass.label)))?;
         encoder.setLabel(Some(&NSString::from_str(&pass.label)));
-        let result = self.encode_commands(&encoder, pass, size);
+        let result = self.encode_commands(&encoder, &pass.label, &pass.commands, size);
         encoder.endEncoding();
         result
     }
 
-    /// Encodes the commands of `pass`, which the shared validation passed,
-    /// whose attachments have `size`.
+    /// Encodes `commands` into `encoder`, whose attachments have `size` and
+    /// `targets`, as the commands of a pass of their own.
+    ///
+    /// The old frame submission encodes the renderer's commands into the
+    /// render command encoder it has open with this, until frames go through
+    /// [`Gpu::submit`].
+    pub(crate) fn encode_into(
+        &self,
+        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+        (width, height): (usize, usize),
+        targets: TargetFormats,
+        commands: &[RenderCommand],
+    ) -> Result<(), GpuError> {
+        validation::check_commands(self, "render pass", targets, commands)?;
+        encoder.setViewport(MTLViewport {
+            originX: 0.0,
+            originY: 0.0,
+            width: width as f64,
+            height: height as f64,
+            znear: 0.0,
+            zfar: 1.0,
+        });
+        encoder.setScissorRect(MTLScissorRect { x: 0, y: 0, width, height });
+        encoder.setStencilReferenceValue(0);
+        encoder.setBlendColorRed_green_blue_alpha(0.0, 0.0, 0.0, 0.0);
+        self.encode_commands(encoder, "render pass", commands, (width, height))
+    }
+
+    /// Encodes `commands`, which the shared validation passed, into an
+    /// encoder whose attachments have `size`.
     fn encode_commands(
         &self,
         encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
-        pass: &Pass,
+        label: &str,
+        commands: &[RenderCommand],
         (width, height): (usize, usize),
     ) -> Result<(), GpuError> {
         let mut pipeline: Option<&Pipeline> = None;
@@ -511,7 +530,7 @@ impl MetalGpu {
         // buffers.
         let mut groups_dirty = true;
         let mut vertex_buffers_dirty = true;
-        for command in &pass.commands {
+        for command in commands {
             match command {
                 RenderCommand::SetPipeline(id) => {
                     let entry = self.pipelines.get(*id).ok_or(GpuError::UnknownId("pipeline"))?;
@@ -581,8 +600,8 @@ impl MetalGpu {
                 // Metal draws no wide lines.
                 RenderCommand::SetLineWidth(_) => {}
                 RenderCommand::Draw { .. } | RenderCommand::DrawIndexed { .. } => {
-                    let pipeline = pipeline
-                        .ok_or_else(|| GpuError::Invalid(format!("{}: a draw before a pipeline", pass.label)))?;
+                    let pipeline =
+                        pipeline.ok_or_else(|| GpuError::Invalid(format!("{label}: a draw before a pipeline")))?;
                     if groups_dirty {
                         self.bind_resources(encoder, pipeline, &bound, global_index)?;
                         groups_dirty = false;
@@ -1146,6 +1165,12 @@ pub(crate) fn vertex_format(type_: AttributeDataType) -> Option<MTLVertexFormat>
         A::Float4 => F::Float4,
         _ => return None,
     })
+}
+
+/// The format of textures of `pixel_format`, `None` for a format the
+/// interface has no name for.
+pub(crate) fn texture_format(pixel_format: MTLPixelFormat) -> Option<TextureFormat> {
+    TEXTURE_FORMATS.into_iter().find(|&format| self::pixel_format(format) == pixel_format)
 }
 
 fn pixel_format(format: TextureFormat) -> MTLPixelFormat {
