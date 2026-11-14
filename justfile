@@ -100,10 +100,6 @@ fmt *args:
 generate-c-abi *args:
     mise run generate:c-abi "$@"
 
-# `mise run generate:icu-tables`
-generate-icu-tables *args:
-    mise run generate:icu-tables "$@"
-
 # `mise run generate:style`
 generate-style-code *args:
     mise run generate:style "$@"

@@ -115,11 +115,15 @@ run = 'eval "set -- ${usage_args:-}"; cargo doc --no-deps --workspace "$@"'
 description = "Regenerate the C library's bindings (crates/mln_c/src/generated) from its headers"
 run = "cargo run -q -p mln-rs-c-abi-gen"
 
-# crates/mln_text/tools/gen_icu_tables.py says where to get the sources.
-[tasks."generate:icu-tables"]
-description = "Regenerate the Unicode bidi table from ICU 78.3's sources"
-usage = '''arg "<icu_common>" help="The icu/source/common directory of ICU 78.3's sources"'''
-run = 'python3 -I crates/mln_text/tools/gen_icu_tables.py "$usage_icu_common" > crates/mln_text/src/icu/ubidi_props_data.rs'
+# The Unicode version is unicode-bidi's (its char_data's UNICODE_VERSION):
+# bump it with the crate.
+[tasks."generate:bidi-mirroring"]
+description = "Regenerate mln_text's Bidi_Mirroring_Glyph table from the Unicode Character Database"
+run = '''
+set -o pipefail
+curl -fsSL https://www.unicode.org/Public/16.0.0/ucd/BidiMirroring.txt |
+    python3 -I crates/mln_text/tools/gen_bidi_mirroring.py > crates/mln_text/src/bidi_mirroring.rs
+'''
 
 # style-codegen's generated_code_test checks that the code is up to date.
 [tasks."generate:style"]

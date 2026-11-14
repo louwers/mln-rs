@@ -225,8 +225,8 @@ thiserror = "2.0.21"
 wasmparser = { version = "0.263.0", default-features = false, features = [
   "std",
 ] }
-# Candidate for ICU's ubidi (platform/default/src/mln/text/bidi.cpp); kept only
-# if //difftest/shaping shows it matches ICU on the test corpus.
+# The Unicode bidi algorithm (mln_text's bidi.rs). mln_text's mirroring table
+# comes from the same Unicode version (`mise run generate:bidi-mirroring`).
 unicode-bidi = { version = "0.3.18" }
 # General_Category (mln_text's script runs, mln_util's i18n), in the Unicode
 # version of harfrust's own tables.

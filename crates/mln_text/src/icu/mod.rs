@@ -1,17 +1,11 @@
-//! The parts of ICU (icu4c 78.3, the system ICU the Linux C++ build links)
-//! that platform/default/src/mln/text/bidi.cpp needs beyond what the
-//! `unicode-bidi` crate provides: `Bidi_Mirroring_Glyph` (`u_charMirror`,
-//! from ICU's compiled-in Bidi property data, `ubidi_props.cpp`) and Arabic
-//! letter shaping (`u_shapeArabic`, `ushape.cpp`). Only the code paths for
-//! the options bidi.cpp passes are ported.
+//! ICU's Arabic letter shaping (`u_shapeArabic`, icu4c 78.3's `ushape.cpp`),
+//! for the BiDi module. Only the code paths for the options it passes are
+//! ported.
 //!
 //! Copyright © 2016 and later Unicode, Inc. and others; portions copyright
 //! International Business Machines Corporation and others. Under ICU's
 //! license (LICENSE-ICU).
 
-pub(crate) mod ubidi_props;
-#[rustfmt::skip]
-mod ubidi_props_data;
 pub(crate) mod ushape;
 
 /// ICU's `UErrorCode`, limited to the values this module produces.
