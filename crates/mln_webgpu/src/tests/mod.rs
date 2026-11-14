@@ -9,5 +9,5 @@ mod shared_device_test;
 // TileLayerGroup with the UBOs background_layer_tweaker.cpp sets, rendered
 // into the offscreen target and read back.
 mod background_test;
-// A clipping mask and a stencil-tested background drawn through `Gpu`.
+// mln_gfx::gpu::conformance's frame through `WebGpu`.
 mod gpu_test;

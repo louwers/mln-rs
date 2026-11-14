@@ -14,6 +14,9 @@
 //! `ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE`). Each backend maps them to its own
 //! slots, groups, descriptor sets or shader locations.
 
+#[cfg(feature = "gpu-conformance")]
+pub mod conformance;
+
 use std::ops::Range;
 
 use mln_util::Color;

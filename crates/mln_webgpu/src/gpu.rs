@@ -87,6 +87,11 @@ impl WebGpu {
         self.textures.insert(Texture { texture: texture.clone(), view })
     }
 
+    #[cfg(test)]
+    pub(crate) fn texture(&self, texture: TextureId) -> Option<&wgpu::Texture> {
+        self.textures.get(texture).map(|texture| &texture.texture)
+    }
+
     /// Runs `create` in a validation error scope, as the error of the call
     /// that `what` names.
     fn validated<T>(&self, what: &str, create: impl FnOnce(&wgpu::Device) -> T) -> Result<T, GpuError> {

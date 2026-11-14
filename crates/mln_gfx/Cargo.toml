@@ -30,6 +30,11 @@ serde.workspace = true
 slotmap.workspace = true
 thiserror.workspace = true
 
+[features]
+# `gpu::conformance`, the frames that the backends' tests draw through their
+# `Gpu`.
+gpu-conformance = []
+
 # gtests-core: test/renderer/backend_scope.test.cpp (OpenGL-only in C++; the
 # BackendScope logic it tests is backend-independent).
 [[test]]
