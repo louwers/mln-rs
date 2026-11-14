@@ -4,6 +4,7 @@
 // arguments and unpacks the values the way `fromExpressionValue<T>` does.
 // The registry keeps the C++ definition order, which is the overload order.
 
+use std::hash::{Hash, Hasher};
 use std::sync::LazyLock;
 
 use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
@@ -624,6 +625,14 @@ impl Expression for CompoundExpression {
     fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression)) {
         for e in &self.args {
             visit(&**e);
+        }
+    }
+
+    fn hash_structure(&self, mut state: &mut dyn Hasher) {
+        self.get_kind().hash(&mut state);
+        self.signature.name.hash(&mut state);
+        for e in &self.args {
+            e.hash_structure(state);
         }
     }
 

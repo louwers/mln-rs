@@ -1,3 +1,4 @@
+use std::hash::Hasher;
 use std::sync::{Arc, OnceLock};
 
 use feature::Value;
@@ -14,12 +15,15 @@ pub struct Filter {
     /// [`Filter::property_keys`], found on first use.
     #[serde(skip)]
     property_keys: OnceLock<Option<Box<[String]>>>,
+    /// [`Filter::expression_hash`], found on first use.
+    #[serde(skip)]
+    expression_hash: OnceLock<u64>,
 }
 
 impl Filter {
     #[must_use]
     pub fn new(expression: Option<Arc<dyn Expression>>, legacy_filter: Option<Value>) -> Self {
-        Filter { expression, legacy_filter, property_keys: OnceLock::new() }
+        Filter { expression, legacy_filter, property_keys: OnceLock::new(), expression_hash: OnceLock::new() }
     }
 
     pub(crate) fn is_set(&self) -> bool {
@@ -48,6 +52,19 @@ impl Filter {
             feature_property_keys(&**expression).map(Vec::into_boxed_slice)
         });
         keys.as_deref()
+    }
+
+    /// Port-only: a hash of the expression's structure
+    /// ([`Expression::hash_structure`]), so that filters whose expressions
+    /// are equal hash alike, whether or not they share them.
+    pub fn expression_hash(&self) -> u64 {
+        *self.expression_hash.get_or_init(|| {
+            let mut state = std::hash::DefaultHasher::new();
+            if let Some(expression) = &self.expression {
+                expression.hash_structure(&mut state);
+            }
+            state.finish()
+        })
     }
 
     pub(crate) fn serialize(&self) -> Value {
