@@ -24,6 +24,7 @@ pub mod color_ramp_property_value;
 pub mod conversion;
 mod conversion_impl;
 pub mod custom_tile_loader;
+pub mod evaluated;
 pub mod expression;
 pub mod filter;
 pub mod format_section_override;
@@ -33,14 +34,12 @@ pub mod layer_impl;
 pub mod layer_properties;
 mod layermanager;
 pub mod layers;
-mod layout_property;
 pub mod light;
 mod light_impl;
 #[rustfmt::skip]
 mod light_properties;
 pub mod map;
 pub mod observer;
-mod paint_property;
 pub mod parser;
 pub mod projection;
 mod projection_impl;
@@ -68,13 +67,9 @@ pub use layer::{Layer, LayerTypeInfo};
 pub use layers::background_layer::BackgroundLayer;
 // The property macros, at the root so that the generated code and the
 // macros themselves name them as `crate::name!`.
-pub(crate) use layout_property::{data_driven_layout_property, layout_properties, layout_property};
-pub(crate) use paint_property::{
-    __constant_feature_evaluation, __cross_faded_feature_evaluation, __data_driven_feature_evaluation,
-    __data_driven_possibly_evaluated_hooks, color_ramp_property, cross_faded_data_driven_paint_property,
-    cross_faded_paint_property, data_driven_paint_property, paint_property,
+pub(crate) use properties::{
+    __possibly_evaluated_methods, __property_data_driven, __property_evaluation, __property_value, properties,
 };
-pub(crate) use properties::{__possibly_evaluated_feature_methods, __properties_field_impls, paint_properties};
 pub use property_value::PropertyValue;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};

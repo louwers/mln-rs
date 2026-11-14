@@ -7,12 +7,8 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::symbol_layer_ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::symbol_layer_properties::{
-    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOpacity, IconTranslate, IconTranslateAnchor,
-    SymbolLayerProperties, SymbolScreenSpace, TextColor, TextHaloBlur, TextHaloColor, TextHaloWidth, TextOpacity,
-    TextTranslate, TextTranslateAnchor,
-};
-use mln_style::properties::Property;
+use mln_style::layers::SymbolLayoutProperties;
+use mln_style::layers::symbol_layer_properties::SymbolLayerProperties;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
 use mln_util::mat4::{Mat4, matrix};
 
@@ -43,12 +39,6 @@ impl SymbolLayerTweaker {
             tile_props_uniform_buffer: None,
         }
     }
-}
-
-macro_rules! const_or_default {
-    ($evaluated:expr, $p:ty) => {
-        $evaluated.get::<$p>().constant_or(&<$p>::default_value())
-    };
 }
 
 fn get_tex_size(drawable: &Drawable, tex_id: usize) -> [f32; 2] {
@@ -85,17 +75,17 @@ impl LayerTweaker for SymbolLayerTweaker {
         let zoom = state.get_zoom() as f32;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let props_ubo = SymbolEvaluatedPropsUBO {
-                text_fill_color: const_or_default!(evaluated, TextColor).to_float_array(),
-                text_halo_color: const_or_default!(evaluated, TextHaloColor).to_float_array(),
-                text_opacity: const_or_default!(evaluated, TextOpacity),
-                text_halo_width: const_or_default!(evaluated, TextHaloWidth),
-                text_halo_blur: const_or_default!(evaluated, TextHaloBlur),
+                text_fill_color: evaluated.text_color.uniform().to_float_array(),
+                text_halo_color: evaluated.text_halo_color.uniform().to_float_array(),
+                text_opacity: *evaluated.text_opacity.uniform(),
+                text_halo_width: *evaluated.text_halo_width.uniform(),
+                text_halo_blur: *evaluated.text_halo_blur.uniform(),
                 pad1: 0.0,
-                icon_fill_color: const_or_default!(evaluated, IconColor).to_float_array(),
-                icon_halo_color: const_or_default!(evaluated, IconHaloColor).to_float_array(),
-                icon_opacity: const_or_default!(evaluated, IconOpacity),
-                icon_halo_width: const_or_default!(evaluated, IconHaloWidth),
-                icon_halo_blur: const_or_default!(evaluated, IconHaloBlur),
+                icon_fill_color: evaluated.icon_color.uniform().to_float_array(),
+                icon_halo_color: evaluated.icon_halo_color.uniform().to_float_array(),
+                icon_opacity: *evaluated.icon_opacity.uniform(),
+                icon_halo_width: *evaluated.icon_halo_width.uniform(),
+                icon_halo_blur: *evaluated.icon_halo_blur.uniform(),
                 pad2: 0.0,
             };
             context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);
@@ -112,11 +102,11 @@ impl LayerTweaker for SymbolLayerTweaker {
         let mut projection_ubo_vector = Vec::with_capacity(count);
 
         let cam_dist = state.get_camera_to_center_distance();
-        let screen_space_prop = symbol_layer_properties.layer_impl().layout.get::<SymbolScreenSpace>();
+        let screen_space_prop = &symbol_layer_properties.layer_impl().layout.symbol_screen_space;
         let is_screen_space = if screen_space_prop.is_constant() {
             *screen_space_prop.as_constant()
         } else {
-            SymbolScreenSpace::default_value()
+            SymbolLayoutProperties::Defaults::symbol_screen_space()
         };
 
         let pitched_scale = state.get_projection().circle_radius_correction(state) as f32;
@@ -158,11 +148,10 @@ impl LayerTweaker for SymbolLayerTweaker {
             };
             let paint_properties = paint_properties.read();
 
-            let translate = if is_text { evaluated.get::<TextTranslate>() } else { evaluated.get::<IconTranslate>() };
-            let anchor =
-                if is_text { *evaluated.get::<TextTranslateAnchor>() } else { *evaluated.get::<IconTranslateAnchor>() };
+            let translate = if is_text { &evaluated.text_translate } else { &evaluated.icon_translate };
+            let anchor = if is_text { &evaluated.text_translate_anchor } else { &evaluated.icon_translate_anchor };
             let mut projection: ProjectionData = if is_screen_space {
-                Projection::Mercator.get_projection_data(state, &tile_id, &get_screen_matrix(*translate))
+                Projection::Mercator.get_projection_data(state, &tile_id, &get_screen_matrix(*(*translate).uniform()))
             } else {
                 const NEAR_CLIPPED: bool = false;
                 const IN_VIEWPORT_PIXEL_UNITS: bool = false;
@@ -170,7 +159,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                     &tile_id,
                     parameters,
                     [0.0, 0.0],
-                    anchor,
+                    *anchor.uniform(),
                     NEAR_CLIPPED,
                     IN_VIEWPORT_PIXEL_UNITS,
                     drawable,
@@ -184,7 +173,7 @@ impl LayerTweaker for SymbolLayerTweaker {
             let tile_translation: [f32; 2] = if is_screen_space {
                 [0.0, 0.0]
             } else {
-                RenderTile::tile_unit_translation(&tile_id, *translate, anchor, state)
+                RenderTile::tile_unit_translation(&tile_id, *(*translate).uniform(), *anchor.uniform(), state)
             };
             projection.translate = [0.0, 0.0];
             let matrix = projection.fallback_matrix;

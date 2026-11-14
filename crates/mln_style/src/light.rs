@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
 
-pub use crate::light_impl::{Impl, LightAnchor, LightColor, LightIntensity, LightPosition, LightProperties};
+pub use crate::light_impl::{Impl, LightProperties};
 use crate::property_table::{self, SetPropertyError};
 use crate::style_property::StyleProperty;
 

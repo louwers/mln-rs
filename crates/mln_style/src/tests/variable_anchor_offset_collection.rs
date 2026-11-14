@@ -3,6 +3,7 @@ use mln_style_types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCo
 
 use super::util::parse_json;
 use crate::conversion::{Converter, Error, convert_layer, convert_property_value};
+use crate::expression::EvaluationContext;
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 
@@ -128,9 +129,18 @@ fn expression() {
             &mut error,
         );
 
-        assert_eq!(left(0.0, 0.0), expr.evaluate_zoom(0.0));
-        assert_eq!(left(0.0, 0.0), expr.evaluate_zoom(4.0));
-        assert_eq!(left(10.0, 20.0), expr.evaluate_zoom(5.0));
+        assert_eq!(
+            left(0.0, 0.0),
+            expr.evaluate(&EvaluationContext::new(0.0), VariableAnchorOffsetCollection::default())
+        );
+        assert_eq!(
+            left(0.0, 0.0),
+            expr.evaluate(&EvaluationContext::new(4.0), VariableAnchorOffsetCollection::default())
+        );
+        assert_eq!(
+            left(10.0, 20.0),
+            expr.evaluate(&EvaluationContext::new(5.0), VariableAnchorOffsetCollection::default())
+        );
     }
 
     // interpolate expression
@@ -140,7 +150,7 @@ fn expression() {
                 [10, 20]]]]"#,
             &mut error,
         );
-        let result = expr.evaluate_zoom(0.5);
+        let result = expr.evaluate(&EvaluationContext::new(0.5), VariableAnchorOffsetCollection::default());
         assert_eq!(left(5.0, 10.0), result);
     }
 

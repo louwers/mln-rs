@@ -5,9 +5,10 @@ use mln_util::Color;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
+use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs};
 use crate::properties::PropertyValueLike;
-use crate::renderer::property_evaluator::Evaluator;
+use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::serialization::shared_expression;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
@@ -114,12 +115,9 @@ impl ColorRampPropertyValue {
 impl PropertyValueLike for ColorRampPropertyValue {
     type Type = Color;
 
-    /// The batch-evaluation no-op: C++ returns `Color{}` whatever the
-    /// evaluator. `ColorRampProperty` evaluates with
-    /// `PropertyEvaluator<Color>(parameters, ColorRampProperty::defaultValue())`,
-    /// whose `undefined()` is that same `Color{}`.
-    fn evaluate<E: Evaluator<Color>>(&self, evaluator: &E) -> E::ResultType {
-        evaluator.undefined()
+    /// The default: a layer builds its ramp from the expression itself.
+    fn evaluate(&self, _: Evaluation, _: &PropertyEvaluationParameters, default: Color) -> Evaluated<Color> {
+        Evaluated::Constant(default)
     }
 
     fn is_undefined(&self) -> bool {

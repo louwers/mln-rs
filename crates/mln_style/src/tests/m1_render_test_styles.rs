@@ -80,7 +80,7 @@ fn transition_and_evaluate(
     now: Instant,
     transition: TransitionOptions,
 ) -> (BackgroundPaintProperties::Unevaluated, BackgroundPaintProperties::PossiblyEvaluated) {
-    let unevaluated = impl_.paint.transitioned(&TransitionParameters::new(Some(now), transition), unevaluated);
+    let mut unevaluated = impl_.paint.transitioned(&TransitionParameters::new(Some(now), transition), unevaluated);
     zoom_history.update(zoom, Some(now));
     let parameters = PropertyEvaluationParameters::with_zoom_history(*zoom_history, Some(now), Duration::ZERO);
     let evaluated = unevaluated.evaluate(&parameters);
@@ -121,10 +121,10 @@ fn lerp_color_f32(a: Color, b: Color, t: f32) -> Color {
 
 fn assert_background(evaluated: &BackgroundPaintProperties::PossiblyEvaluated, color: Color, opacity: f32) {
     // Bit-exact, as the renderer consumes these values.
-    assert_eq!(evaluated.background_color, color);
-    assert_eq!(evaluated.background_opacity.to_bits(), opacity.to_bits());
-    assert!(evaluated.background_pattern.from.empty());
-    assert!(evaluated.background_pattern.to.empty());
+    assert_eq!(*evaluated.background_color.uniform(), color);
+    assert_eq!(evaluated.background_opacity.uniform().to_bits(), opacity.to_bits());
+    assert!(evaluated.background_pattern.faded().from.empty());
+    assert!(evaluated.background_pattern.faded().to.empty());
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn background_color_transition() {
     let t1 = t0 + Duration::from_millis(16);
     let expected_at = |now: Instant| lerp_color_f32(lerp_color_f32(red, red, ease(t0, now)), white, ease(t1, now));
 
-    let (unevaluated, evaluated) =
+    let (mut unevaluated, evaluated) =
         transition_and_evaluate(&impl1, unevaluated, &mut zoom_history, zoom, t1, style.get_transition_options());
     // The transition has just begun.
     assert_background(&evaluated, expected_at(t1), 1.0);

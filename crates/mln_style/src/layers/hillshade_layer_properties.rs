@@ -5,70 +5,24 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
 use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
-use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType};
-use mln_util::Color;
 use mln_vec_map::VecSet;
 use std::sync::Arc;
 
-crate::paint_property!(
-    /// The `hillshade-accent-color` paint property.
-    pub struct HillshadeAccentColor: Color = Color::black()
-);
-
-crate::paint_property!(
-    /// The `hillshade-exaggeration` paint property.
-    pub struct HillshadeExaggeration: f32 = 0.5_f32
-);
-
-crate::paint_property!(
-    /// The `hillshade-highlight-color` paint property.
-    pub struct HillshadeHighlightColor: Vec<Color> = vec![Color::white()]
-);
-
-crate::paint_property!(
-    /// The `hillshade-illumination-altitude` paint property.
-    pub struct HillshadeIlluminationAltitude: Vec<f32> = vec![45.0_f32]
-);
-
-crate::paint_property!(
-    /// The `hillshade-illumination-anchor` paint property.
-    pub struct HillshadeIlluminationAnchor: HillshadeIlluminationAnchorType = HillshadeIlluminationAnchorType::Viewport
-);
-
-crate::paint_property!(
-    /// The `hillshade-illumination-direction` paint property.
-    pub struct HillshadeIlluminationDirection: Vec<f32> = vec![335.0_f32]
-);
-
-crate::paint_property!(
-    /// The `hillshade-method` paint property.
-    pub struct HillshadeMethod: HillshadeMethodType = HillshadeMethodType::Standard
-);
-
-crate::paint_property!(
-    /// The `hillshade-shadow-color` paint property.
-    pub struct HillshadeShadowColor: Vec<Color> = vec![Color::black()]
-);
-
-crate::paint_property!(
-    /// The `resampling` paint property.
-    pub struct Resampling: ResamplingType = ResamplingType::Linear
-);
-
-crate::paint_properties!(
+crate::properties!(
     /// The properties, in field order.
     #[expect(non_snake_case, reason = "named for the C++ `HillshadePaintProperties` type list")]
-    pub mod HillshadePaintProperties {
-        hillshade_accent_color: HillshadeAccentColor,
-        hillshade_exaggeration: HillshadeExaggeration,
-        hillshade_highlight_color: HillshadeHighlightColor,
-        hillshade_illumination_altitude: HillshadeIlluminationAltitude,
-        hillshade_illumination_anchor: HillshadeIlluminationAnchor,
-        hillshade_illumination_direction: HillshadeIlluminationDirection,
-        hillshade_method: HillshadeMethod,
-        hillshade_shadow_color: HillshadeShadowColor,
-        resampling: Resampling,
+    pub mod HillshadePaintProperties: paint {
+        hillshade_accent_color: constant Color = Color::black(),
+        hillshade_exaggeration: constant f32 = 0.5_f32,
+        hillshade_highlight_color: constant Vec<Color> = vec![Color::white()],
+        hillshade_illumination_altitude: constant Vec<f32> = vec![45.0_f32],
+        hillshade_illumination_anchor: constant HillshadeIlluminationAnchorType = HillshadeIlluminationAnchorType::Viewport,
+        hillshade_illumination_direction: constant Vec<f32> = vec![335.0_f32],
+        hillshade_method: constant HillshadeMethodType = HillshadeMethodType::Standard,
+        hillshade_shadow_color: constant Vec<Color> = vec![Color::black()],
+        resampling: constant ResamplingType = ResamplingType::Linear,
     }
+    use mln_style_types::HillshadeIlluminationAnchorType, mln_style_types::HillshadeMethodType, mln_style_types::ResamplingType, mln_util::Color;
 );
 
 /// The evaluated properties of a hillshade layer.

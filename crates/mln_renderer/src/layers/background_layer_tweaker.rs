@@ -11,7 +11,6 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::{BackgroundColor, BackgroundOpacity, BackgroundPattern};
 use mln_style_types::TranslateAnchorType;
 use mln_util::constants::TILE_SIZE_D;
 
@@ -56,15 +55,15 @@ impl LayerTweaker for BackgroundLayerTweaker {
         let evaluated = background_layer_properties(&properties);
         let crossfade = *background_crossfade(&properties);
         let state = parameters.state;
-        let has_pattern = !evaluated.get::<BackgroundPattern>().to.empty();
+        let has_pattern = !evaluated.background_pattern.faded().to.empty();
         // conformance: background-pattern.
         let image_pos_a = if has_pattern {
-            parameters.pattern_atlas.borrow().get_pattern(evaluated.get::<BackgroundPattern>().from.id())
+            parameters.pattern_atlas.borrow().get_pattern(evaluated.background_pattern.faded().from.id())
         } else {
             None
         };
         let image_pos_b = if has_pattern {
-            parameters.pattern_atlas.borrow().get_pattern(evaluated.get::<BackgroundPattern>().to.id())
+            parameters.pattern_atlas.borrow().get_pattern(evaluated.background_pattern.faded().to.id())
         } else {
             None
         };
@@ -90,13 +89,13 @@ impl LayerTweaker for BackgroundLayerTweaker {
                 scale_a: crossfade.from_scale,
                 scale_b: crossfade.to_scale,
                 mix: crossfade.t,
-                opacity: *evaluated.get::<BackgroundOpacity>(),
+                opacity: *evaluated.background_opacity.uniform(),
             };
             layer_group.mutable_uniform_buffers().create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props_ubo, context);
         } else {
             let props_ubo = BackgroundPropsUBO {
-                color: evaluated.get::<BackgroundColor>().to_float_array(),
-                opacity: *evaluated.get::<BackgroundOpacity>(),
+                color: evaluated.background_color.uniform().to_float_array(),
+                opacity: *evaluated.background_opacity.uniform(),
                 pad1: 0.0,
                 pad2: 0.0,
                 pad3: 0.0,

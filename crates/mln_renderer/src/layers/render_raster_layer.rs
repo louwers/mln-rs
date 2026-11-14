@@ -32,9 +32,7 @@ use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
-use mln_style::layers::raster_layer_properties::{
-    RasterLayerProperties, RasterOpacity, RasterPaintProperties, RasterResampling, Resampling,
-};
+use mln_style::layers::raster_layer_properties::{RasterLayerProperties, RasterPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
@@ -129,8 +127,8 @@ impl RenderRasterLayer {
     fn sampler_state(&self) -> SamplerState {
         let evaluated = get_evaluated::<RasterLayerProperties>(&self.base.evaluated_properties);
         // GL JS draws Nearest when either property asks for it.
-        let nearest = *evaluated.get::<RasterResampling>() == RasterResamplingType::Nearest
-            || *evaluated.get::<Resampling>() == ResamplingType::Nearest;
+        let nearest = *evaluated.raster_resampling.uniform() == RasterResamplingType::Nearest
+            || *evaluated.resampling.uniform() == ResamplingType::Nearest;
         SamplerState {
             filter: if nearest { TextureFilterType::Nearest } else { TextureFilterType::Linear },
             wrap_u: TextureWrapType::Clamp,
@@ -266,8 +264,11 @@ impl RenderLayer for RenderRasterLayer {
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes =
-            if *properties.evaluated.get::<RasterOpacity>() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
+        self.base.passes = if *properties.evaluated.raster_opacity.uniform() > 0.0 {
+            RenderPass::Translucent
+        } else {
+            RenderPass::None
+        };
         properties.base.render_passes = self.base.passes.underlying_type();
         self.base.evaluated_properties = Arc::new(properties);
 

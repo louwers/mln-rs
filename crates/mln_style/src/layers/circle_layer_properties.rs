@@ -5,95 +5,34 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::circle_layer_impl::Impl as CircleLayerImpl;
 use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
-use mln_style_types::{AlignmentType, CirclePitchScaleType, TranslateAnchorType};
-use mln_util::Color;
 use mln_vec_map::VecSet;
 use std::sync::Arc;
 
-crate::data_driven_layout_property!(
-    /// The `circle-sort-key` layout property.
-    pub struct CircleSortKey: f32 = 0.0_f32, name = "circle-sort-key"
-);
-
-crate::data_driven_paint_property!(
-    /// The `circle-blur` paint property.
-    pub struct CircleBlur: f32 = 0.0_f32
-);
-
-crate::data_driven_paint_property!(
-    /// The `circle-color` paint property.
-    pub struct CircleColor: Color = Color::black()
-);
-
-crate::data_driven_paint_property!(
-    /// The `circle-opacity` paint property.
-    pub struct CircleOpacity: f32 = 1.0_f32
-);
-
-crate::paint_property!(
-    /// The `circle-pitch-alignment` paint property.
-    pub struct CirclePitchAlignment: AlignmentType = AlignmentType::Viewport
-);
-
-crate::paint_property!(
-    /// The `circle-pitch-scale` paint property.
-    pub struct CirclePitchScale: CirclePitchScaleType = CirclePitchScaleType::Map
-);
-
-crate::data_driven_paint_property!(
-    /// The `circle-radius` paint property.
-    pub struct CircleRadius: f32 = 5.0_f32
-);
-
-crate::data_driven_paint_property!(
-    /// The `circle-stroke-color` paint property.
-    pub struct CircleStrokeColor: Color = Color::black()
-);
-
-crate::data_driven_paint_property!(
-    /// The `circle-stroke-opacity` paint property.
-    pub struct CircleStrokeOpacity: f32 = 1.0_f32
-);
-
-crate::data_driven_paint_property!(
-    /// The `circle-stroke-width` paint property.
-    pub struct CircleStrokeWidth: f32 = 0.0_f32
-);
-
-crate::paint_property!(
-    /// The `circle-translate` paint property.
-    pub struct CircleTranslate: [f32; 2] = [0.0_f32, 0.0_f32]
-);
-
-crate::paint_property!(
-    /// The `circle-translate-anchor` paint property.
-    pub struct CircleTranslateAnchor: TranslateAnchorType = TranslateAnchorType::Map
-);
-
-crate::layout_properties!(
+crate::properties!(
     /// The properties, in field order.
     #[expect(non_snake_case, reason = "named for the C++ `CircleLayoutProperties` type list")]
-    pub mod CircleLayoutProperties {
-        circle_sort_key: CircleSortKey,
+    pub mod CircleLayoutProperties: layout {
+        circle_sort_key: data_driven f32 = 0.0_f32,
     }
 );
 
-crate::paint_properties!(
+crate::properties!(
     /// The properties, in field order.
     #[expect(non_snake_case, reason = "named for the C++ `CirclePaintProperties` type list")]
-    pub mod CirclePaintProperties {
-        circle_blur: CircleBlur,
-        circle_color: CircleColor,
-        circle_opacity: CircleOpacity,
-        circle_pitch_alignment: CirclePitchAlignment,
-        circle_pitch_scale: CirclePitchScale,
-        circle_radius: CircleRadius,
-        circle_stroke_color: CircleStrokeColor,
-        circle_stroke_opacity: CircleStrokeOpacity,
-        circle_stroke_width: CircleStrokeWidth,
-        circle_translate: CircleTranslate,
-        circle_translate_anchor: CircleTranslateAnchor,
+    pub mod CirclePaintProperties: paint {
+        circle_blur: data_driven f32 = 0.0_f32,
+        circle_color: data_driven Color = Color::black(),
+        circle_opacity: data_driven f32 = 1.0_f32,
+        circle_pitch_alignment: constant AlignmentType = AlignmentType::Viewport,
+        circle_pitch_scale: constant CirclePitchScaleType = CirclePitchScaleType::Map,
+        circle_radius: data_driven f32 = 5.0_f32,
+        circle_stroke_color: data_driven Color = Color::black(),
+        circle_stroke_opacity: data_driven f32 = 1.0_f32,
+        circle_stroke_width: data_driven f32 = 0.0_f32,
+        circle_translate: constant [f32; 2] = [0.0_f32, 0.0_f32],
+        circle_translate_anchor: constant TranslateAnchorType = TranslateAnchorType::Map,
     }
+    use mln_style_types::AlignmentType, mln_style_types::CirclePitchScaleType, mln_style_types::TranslateAnchorType, mln_util::Color;
 );
 
 /// The evaluated properties of a circle layer.

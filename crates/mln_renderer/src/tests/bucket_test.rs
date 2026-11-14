@@ -9,19 +9,15 @@ use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
+use mln_style::evaluated::Evaluated;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::fill_extrusion_layer_properties::{
-    FillExtrusionLayoutProperties, FillExtrusionRoundedCornerDistance,
-};
-use mln_style::layers::fill_layer_properties::{
-    FillColor, FillLayerProperties, FillLayoutProperties, FillPaintProperties,
-};
+use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
+use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{FillLayer, LineLayer};
 use mln_style::property_value::PropertyValue;
-use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use mln_style::{CrossfadeParameters, PropertyEvaluationParameters};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
@@ -149,8 +145,9 @@ fn fill_bucket() {
 /// The vertices of a fill-extrusion bucket holding `polygon` extruded with
 /// `fill-extrusion-rounded-corner-distance` set to `distance`.
 fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> usize {
-    let mut layout = FillExtrusionLayoutProperties::PossiblyEvaluated::default();
-    *layout.get_mut::<FillExtrusionRoundedCornerDistance>() = distance;
+    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(distance),
+    };
     let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
     bucket
         .add_feature(
@@ -182,10 +179,21 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let json = serde_json::json!({"type": "fill", "id": "fill", "source": "s", "paint": {"fill-color": fill_color}});
     let mut error = ConversionError::default();
     let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
-    let mut evaluated = FillPaintProperties::PossiblyEvaluated::default();
-    *evaluated.get_mut::<FillColor>() = PossiblyEvaluatedPropertyValue::Expression(
-        layer.downcast_ref::<FillLayer>().expect("fill layer").impl_().paint.fill_color.value.as_expression().clone(),
-    );
+    let evaluated = FillPaintProperties::PossiblyEvaluated {
+        fill_color: Evaluated::PerFeature {
+            expression: layer
+                .downcast_ref::<FillLayer>()
+                .expect("fill layer")
+                .impl_()
+                .paint
+                .fill_color
+                .value
+                .as_expression()
+                .clone(),
+            default: FillPaintProperties::Defaults::fill_color(),
+        },
+        ..FillPaintProperties::PossiblyEvaluated::default()
+    };
     let properties: Arc<dyn LayerProperties> = Arc::new(FillLayerProperties::with_evaluated(
         downcast_arc(&layer.base_impl()),
         CrossfadeParameters::default(),

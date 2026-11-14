@@ -27,11 +27,6 @@ pub(crate) fn snake(s: &str) -> String {
     s.replace('-', "_")
 }
 
-#[must_use]
-pub(crate) fn is_overridable(property: &Property) -> bool {
-    ["text-color"].contains(&property.name.as_str())
-}
-
 /// The evaluated type of a property, as a type the generator can print both as
 /// C++ (for error messages) and as Rust.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -212,26 +207,6 @@ pub(crate) fn evaluated_type_unnamed(type_: &str) -> EvaluatedType {
         units: None,
         light: false,
     })
-}
-
-/// The expression type of an overridable property's values, as a Rust `Type`
-/// expression.
-#[must_use]
-pub(crate) fn expression_type_rust(type_: &str, value: Option<&str>) -> String {
-    match type_ {
-        "boolean" => "Type::Boolean".into(),
-        "number" | "enum" => "Type::Number".into(),
-        "numberArray" => "Type::array(Type::Number)".into(),
-        "colorArray" => "Type::array(Type::Color)".into(),
-        "image" => "Type::Image".into(),
-        "string" => "Type::String".into(),
-        "color" => "Type::Color".into(),
-        "padding" => "Type::Padding".into(),
-        "variableAnchorOffsetCollection" => "Type::VariableAnchorOffsetCollection".into(),
-        "formatted" => "Type::Formatted".into(),
-        "array" => format!("Type::array({})", expression_type_rust(value.expect("array value type"), None)),
-        other => panic!("unknown type {other} for expressionType"),
-    }
 }
 
 /// `property['property-type']` is data-driven for `convert<>` and the layout

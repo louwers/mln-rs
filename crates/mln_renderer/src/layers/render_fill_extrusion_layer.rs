@@ -24,11 +24,7 @@ use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
-use mln_style::layers::fill_extrusion_layer_properties::{
-    FillExtrusionBase, FillExtrusionColor, FillExtrusionHeight, FillExtrusionLayerProperties, FillExtrusionOpacity,
-    FillExtrusionPaintProperties, FillExtrusionPattern, FillExtrusionTranslate, FillExtrusionTranslateAnchor,
-};
-use mln_style::properties::Property;
+use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayerProperties, FillExtrusionPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
 use mln_util::hash::HashSet;
@@ -72,20 +68,24 @@ fn capture_rendered_features(
     let tile_id = tile.get_overscaled_tile_id();
 
     // fill-extrusion-opacity does not support data-driven expressions
-    if *evaluated.get::<FillExtrusionOpacity>() == 0.0 {
+    if *evaluated.fill_extrusion_opacity.uniform() == 0.0 {
         return;
     }
 
-    let color = evaluated.get::<FillExtrusionColor>();
+    let color = &evaluated.fill_extrusion_color;
     let color_is_constant = color.is_constant();
     if color_is_constant && binders.fill_extrusion_color.uniform_value(color).a == 0.0 {
         return;
     }
 
-    let translation = evaluated.get::<FillExtrusionTranslate>();
-    let translation_anchor = *evaluated.get::<FillExtrusionTranslateAnchor>();
-    let base = f64::from(evaluated.get::<FillExtrusionBase>().constant_or(&FillExtrusionBase::default_value()));
-    let height = f64::from(evaluated.get::<FillExtrusionHeight>().constant_or(&FillExtrusionHeight::default_value()));
+    let translation = evaluated.fill_extrusion_translate.uniform();
+    let translation_anchor = &evaluated.fill_extrusion_translate_anchor;
+    let base = f64::from(
+        evaluated.fill_extrusion_base.constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_base()),
+    );
+    let height = f64::from(
+        evaluated.fill_extrusion_height.constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_height()),
+    );
     let zoom_fraction = state.get_zoom_fraction();
     let buffer = &binders.interleaved_vertex_buffer;
     let vertices = bucket.vertices.data();
@@ -115,7 +115,7 @@ fn capture_rendered_features(
                 state,
                 transform_params,
                 *translation,
-                translation_anchor,
+                *translation_anchor.uniform(),
                 /*near_clipped=*/ true,
             )
         });
@@ -151,7 +151,7 @@ fn read_paint_properties(
         buffer,
         shared,
         &["a_base"],
-        evaluated.get::<FillExtrusionBase>().is_constant(),
+        evaluated.fill_extrusion_base.is_constant(),
         properties_as_uniforms,
         &mut id,
     );
@@ -161,7 +161,7 @@ fn read_paint_properties(
         buffer,
         shared,
         &["a_color"],
-        evaluated.get::<FillExtrusionColor>().is_constant(),
+        evaluated.fill_extrusion_color.is_constant(),
         properties_as_uniforms,
         &mut id,
     );
@@ -171,7 +171,7 @@ fn read_paint_properties(
         buffer,
         shared,
         &["a_height"],
-        evaluated.get::<FillExtrusionHeight>().is_constant(),
+        evaluated.fill_extrusion_height.is_constant(),
         properties_as_uniforms,
         &mut id,
     );
@@ -181,7 +181,7 @@ fn read_paint_properties(
         buffer,
         shared,
         &["a_pattern_to", "a_pattern_from"],
-        evaluated.get::<FillExtrusionPattern>().is_constant(),
+        evaluated.fill_extrusion_pattern.is_constant(),
         properties_as_uniforms,
         &mut id,
     );
@@ -261,7 +261,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.get::<FillExtrusionOpacity>() > 0.0 {
+        self.base.passes = if *properties.evaluated.fill_extrusion_opacity.uniform() > 0.0 {
             RenderPass::Translucent
         } else {
             RenderPass::None
@@ -300,8 +300,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&self.base.evaluated_properties);
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
-            *evaluated.get::<FillExtrusionTranslate>(),
-            *evaluated.get::<FillExtrusionTranslateAnchor>(),
+            *evaluated.fill_extrusion_translate.uniform(),
+            *evaluated.fill_extrusion_translate_anchor.uniform(),
             transform_state.get_bearing() as f32,
             pixels_to_tile_units,
         );
@@ -380,8 +380,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
             });
         }
 
-        let has_pattern = !self.unevaluated.get::<FillExtrusionPattern>().is_undefined();
-        let opaque = *evaluated.get::<FillExtrusionOpacity>() >= 1.0;
+        let has_pattern = !self.unevaluated.fill_extrusion_pattern.is_undefined();
+        let opaque = *evaluated.fill_extrusion_opacity.uniform() >= 1.0;
 
         let mut depth_builder: Option<UniqueDrawableBuilder> = None;
         let mut color_builder: Option<UniqueDrawableBuilder> = None;

@@ -25,8 +25,7 @@ use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use mln_style::layers::heatmap_layer_properties::{
-    HeatmapColor, HeatmapLayerProperties, HeatmapOpacity, HeatmapPaintProperties, HeatmapRadius, HeatmapWeight,
-    default_heatmap_color,
+    HeatmapLayerProperties, HeatmapPaintProperties, default_heatmap_color,
 };
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_tile_id::OverscaledTileID;
@@ -122,7 +121,7 @@ impl RenderHeatmapLayer {
     }
 
     fn update_color_ramp(&mut self) {
-        let mut color_value = self.unevaluated.get::<HeatmapColor>().get_value().clone();
+        let mut color_value = self.unevaluated.heatmap_color.get_value().clone();
         if color_value.is_undefined() {
             color_value = default_heatmap_color();
         }
@@ -215,7 +214,7 @@ impl RenderLayer for RenderHeatmapLayer {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.unevaluated.get::<HeatmapColor>().get_value();
+        let ramp_value = self.unevaluated.heatmap_color.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -234,7 +233,7 @@ impl RenderLayer for RenderHeatmapLayer {
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.get::<HeatmapOpacity>() > 0.0 {
+        self.base.passes = if *properties.evaluated.heatmap_opacity.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
@@ -405,7 +404,7 @@ impl RenderLayer for RenderHeatmapLayer {
                     buffer,
                     &shared,
                     &["a_weight"],
-                    evaluated.get::<HeatmapWeight>().is_constant(),
+                    evaluated.heatmap_weight.is_constant(),
                     pau,
                     &mut id,
                 );
@@ -415,7 +414,7 @@ impl RenderLayer for RenderHeatmapLayer {
                     buffer,
                     &shared,
                     &["a_radius"],
-                    evaluated.get::<HeatmapRadius>().is_constant(),
+                    evaluated.heatmap_radius.is_constant(),
                     pau,
                     &mut id,
                 );

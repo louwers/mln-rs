@@ -1,10 +1,9 @@
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::expression::EvaluationContext;
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::property_evaluator::PropertyEvaluator;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Impl {
@@ -31,8 +30,13 @@ impl Impl {
     /// when the style does not set one.
     #[must_use]
     pub fn evaluate(&self, zoom: f32) -> ProjectionDefinition {
-        let parameters = PropertyEvaluationParameters::new(zoom);
-        let definition = self.type_.evaluate(&PropertyEvaluator::new(&parameters, Projection::get_default_type()));
+        let definition = match &self.type_ {
+            PropertyValue::Undefined => Projection::get_default_type(),
+            PropertyValue::Constant(definition) => *definition,
+            PropertyValue::Expression(expression) => {
+                expression.evaluate(&EvaluationContext::new(zoom), Projection::get_default_type())
+            }
+        };
         definition.at_zoom(f64::from(zoom))
     }
 }

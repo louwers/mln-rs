@@ -4,10 +4,8 @@ use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPr
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_properties::{
-    HeatmapIntensity, HeatmapLayerProperties, HeatmapRadius, HeatmapWeight,
-};
-use mln_style::properties::Property;
+use mln_style::layers::HeatmapPaintProperties;
+use mln_style::layers::heatmap_layer_properties::HeatmapLayerProperties;
 use mln_style_types::TranslateAnchorType;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
@@ -56,9 +54,9 @@ impl LayerTweaker for HeatmapLayerTweaker {
 
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             let evaluated_props_ubo = HeatmapEvaluatedPropsUBO {
-                weight: evaluated.get::<HeatmapWeight>().constant_or(&HeatmapWeight::default_value()),
-                radius: evaluated.get::<HeatmapRadius>().constant_or(&HeatmapRadius::default_value()),
-                intensity: *evaluated.get::<HeatmapIntensity>(),
+                weight: evaluated.heatmap_weight.constant_or(&HeatmapPaintProperties::Defaults::heatmap_weight()),
+                radius: evaluated.heatmap_radius.constant_or(&HeatmapPaintProperties::Defaults::heatmap_radius()),
+                intensity: *evaluated.heatmap_intensity.uniform(),
                 padding: 0.0,
             };
             context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &evaluated_props_ubo);

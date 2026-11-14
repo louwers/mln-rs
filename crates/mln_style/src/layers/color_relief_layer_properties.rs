@@ -5,33 +5,18 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
 use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
-use mln_style_types::ResamplingType;
 use mln_vec_map::VecSet;
 use std::sync::Arc;
 
-crate::color_ramp_property!(
-    /// The `color-relief-color` paint property.
-    pub struct ColorReliefColor
-);
-
-crate::paint_property!(
-    /// The `color-relief-opacity` paint property.
-    pub struct ColorReliefOpacity: f32 = 1.0_f32
-);
-
-crate::paint_property!(
-    /// The `resampling` paint property.
-    pub struct Resampling: ResamplingType = ResamplingType::Linear
-);
-
-crate::paint_properties!(
+crate::properties!(
     /// The properties, in field order.
     #[expect(non_snake_case, reason = "named for the C++ `ColorReliefPaintProperties` type list")]
-    pub mod ColorReliefPaintProperties {
-        color_relief_color: ColorReliefColor,
-        color_relief_opacity: ColorReliefOpacity,
-        resampling: Resampling,
+    pub mod ColorReliefPaintProperties: paint {
+        color_relief_color: color_ramp Color = Color::default(),
+        color_relief_opacity: constant f32 = 1.0_f32,
+        resampling: constant ResamplingType = ResamplingType::Linear,
     }
+    use mln_style_types::ResamplingType, mln_util::Color;
 );
 
 /// The evaluated properties of a color-relief layer.

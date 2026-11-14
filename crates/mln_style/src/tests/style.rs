@@ -16,7 +16,6 @@ use super::util::{FixtureLog, parse_json, read_file};
 use crate::image;
 use crate::layer::Layer;
 use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
-use crate::layers::line_layer_properties::LineColor;
 use crate::observer::{Observer, SourceObserver};
 use crate::projection::Projection;
 use crate::property_value::PropertyValue;
@@ -206,8 +205,8 @@ fn layer_transition_refreshes_immutable_collection() {
     assert_eq!(1, after.len());
     assert!(Arc::ptr_eq(&style.get_layer("line").unwrap().base_impl(), &after[0]));
     let impl_ = after[0].downcast_ref::<LineLayerImpl>().unwrap();
-    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.get::<LineColor>().options.duration);
-    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.get::<LineColor>().options.delay);
+    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
 }
 
 #[derive(Default)]

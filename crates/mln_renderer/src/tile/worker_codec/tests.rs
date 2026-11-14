@@ -537,7 +537,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     use std::time::Duration;
 
     use mln_style::layer_properties::get_evaluated;
-    use mln_style::layers::fill_layer_properties::{FillColor, FillLayerProperties};
+    use mln_style::layers::fill_layer_properties::FillLayerProperties;
     use mln_style::map::zoom_history::ZoomHistory;
     use mln_util::time::Instant;
 
@@ -553,7 +553,7 @@ fn properties_cross_while_a_paint_property_transitions() {
         .transition_with_impl(&TransitionParameters::new(Some(start), transition), convert(&constant).base_impl());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
-    assert!(!get_evaluated::<FillLayerProperties>(&transitioning).get::<FillColor>().is_constant());
+    assert!(!get_evaluated::<FillLayerProperties>(&transitioning).fill_color.is_constant());
 
     let mut codec = ThroughCodec::new();
     codec.send(&set_layers(std::slice::from_ref(&transitioning), 1));

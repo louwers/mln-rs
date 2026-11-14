@@ -15,10 +15,7 @@ use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
-use mln_style::layers::fill_layer_properties::{
-    FillAntialias, FillColor, FillLayerProperties, FillOpacity, FillOutlineColor, FillPaintProperties, FillPattern,
-    FillTranslate, FillTranslateAnchor,
-};
+use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 
@@ -88,13 +85,13 @@ fn capture_rendered_features(
     state: &TransformState,
     transform_params: &TransformParameters,
 ) {
-    let alpha = evaluated.get::<FillOpacity>();
+    let alpha = &evaluated.fill_opacity;
     let alpha_is_constant = alpha.is_constant();
     if alpha_is_constant && binders.fill_opacity.uniform_value(alpha) == 0.0 {
         return;
     }
 
-    let color = evaluated.get::<FillColor>();
+    let color = &evaluated.fill_color;
     let color_is_constant = color.is_constant();
     if color_is_constant && binders.fill_color.uniform_value(color).a == 0.0 {
         return;
@@ -109,8 +106,8 @@ fn capture_rendered_features(
         tile.get_overscaled_tile_id(),
         state,
         transform_params,
-        *evaluated.get::<FillTranslate>(),
-        *evaluated.get::<FillTranslateAnchor>(),
+        *evaluated.fill_translate.uniform(),
+        *evaluated.fill_translate_anchor.uniform(),
         |vertex_offset| {
             if !alpha_is_constant {
                 let opacity = binders.fill_opacity.get_vertex_value(buffer, vertex_offset);
@@ -150,7 +147,7 @@ fn read_fill_attributes(
         buffer,
         shared,
         &["a_color"],
-        evaluated.get::<FillColor>().is_constant(),
+        evaluated.fill_color.is_constant(),
         pau,
         &mut id,
     );
@@ -160,7 +157,7 @@ fn read_fill_attributes(
         buffer,
         shared,
         &["a_opacity"],
-        evaluated.get::<FillOpacity>().is_constant(),
+        evaluated.fill_opacity.is_constant(),
         pau,
         &mut id,
     );
@@ -170,7 +167,7 @@ fn read_fill_attributes(
         buffer,
         shared,
         &["a_outline_color"],
-        evaluated.get::<FillOutlineColor>().is_constant(),
+        evaluated.fill_outline_color.is_constant(),
         pau,
         &mut id,
     );
@@ -180,7 +177,7 @@ fn read_fill_attributes(
         buffer,
         shared,
         &["a_pattern_to", "a_pattern_from"],
-        evaluated.get::<FillPattern>().is_constant(),
+        evaluated.fill_pattern.is_constant(),
         pau,
         &mut id,
     );
@@ -238,15 +235,15 @@ impl RenderLayer for RenderFillLayer {
         );
         let evaluated = &mut properties.evaluated;
 
-        if self.unevaluated.get::<FillOutlineColor>().is_undefined() {
-            *evaluated.get_mut::<FillOutlineColor>() = evaluated.get::<FillColor>().clone();
+        if self.unevaluated.fill_outline_color.is_undefined() {
+            evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
 
         self.base.passes = RenderPass::Translucent;
 
-        if self.unevaluated.get::<FillPattern>().is_undefined()
-            && evaluated.get::<FillColor>().constant_or(&Color::default()).a >= 1.0
-            && evaluated.get::<FillOpacity>().constant_or(&0.0) >= 1.0
+        if self.unevaluated.fill_pattern.is_undefined()
+            && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
+            && evaluated.fill_opacity.constant_or(&0.0) >= 1.0
         {
             // Supply both - evaluated based on opaquePassCutoff in render().
             self.base.passes |= RenderPass::Opaque;
@@ -281,8 +278,8 @@ impl RenderLayer for RenderFillLayer {
         let evaluated = get_evaluated::<FillLayerProperties>(&self.base.evaluated_properties);
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
-            *evaluated.get::<FillTranslate>(),
-            *evaluated.get::<FillTranslateAnchor>(),
+            *evaluated.fill_translate.uniform(),
+            *evaluated.fill_translate_anchor.uniform(),
             transform_state.get_bearing() as f32,
             pixels_to_tile_units,
         );
@@ -455,9 +452,8 @@ impl RenderLayer for RenderFillLayer {
 
             // Outline always occurs in translucent pass, defaults to fill
             // color. Outline does not default to fill in the pattern case
-            let do_outline = *evaluated.get::<FillAntialias>()
-                && (self.unevaluated.get::<FillPattern>().is_undefined()
-                    || self.unevaluated.get::<FillOutlineColor>().is_undefined());
+            let do_outline = *evaluated.fill_antialias.uniform()
+                && (self.unevaluated.fill_pattern.is_undefined() || self.unevaluated.fill_outline_color.is_undefined());
 
             let fill_vertex_count = bucket.vertices.len();
 
@@ -488,7 +484,7 @@ impl RenderLayer for RenderFillLayer {
                 }
             };
 
-            if self.unevaluated.get::<FillPattern>().is_undefined() {
+            if self.unevaluated.fill_pattern.is_undefined() {
                 // Simple fill
                 let fill_shader = fill_shader_group.shader(&properties_as_uniforms, self.base.projection_variant);
 
@@ -502,8 +498,8 @@ impl RenderLayer for RenderFillLayer {
                     let mut builder = DrawableBuilder::boxed();
                     // Only write opaque fills to the depth buffer, matching
                     // `fillRenderPass` in legacy rendering
-                    let opaque = evaluated.get::<FillColor>().constant_or(&Color::default()).a >= 1.0
-                        && evaluated.get::<FillOpacity>().constant_or(&0.0) >= 1.0;
+                    let opaque = evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
+                        && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
 
                     common_init(builder.as_mut());
                     builder.set_depth_type(if opaque { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly });
@@ -516,11 +512,7 @@ impl RenderLayer for RenderFillLayer {
                     let mut builder = DrawableBuilder::boxed();
                     common_init(builder.as_mut());
                     builder.set_depth_type(DepthMaskType::ReadOnly);
-                    builder.set_sub_layer_index(if self.unevaluated.get::<FillOutlineColor>().is_undefined() {
-                        2
-                    } else {
-                        0
-                    });
+                    builder.set_sub_layer_index(if self.unevaluated.fill_outline_color.is_undefined() { 2 } else { 0 });
                     builder.set_color_mode(&ColorMode::alpha_blended());
                     builder.set_render_pass(RenderPass::Translucent);
                     outline_builder = Some(builder);

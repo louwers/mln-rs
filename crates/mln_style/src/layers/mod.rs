@@ -48,9 +48,7 @@ pub mod symbol_layer_impl;
 pub mod symbol_layer_properties;
 
 pub use background_layer::BackgroundLayer;
-pub use background_layer_properties::{
-    BackgroundColor, BackgroundLayerProperties, BackgroundOpacity, BackgroundPaintProperties, BackgroundPattern,
-};
+pub use background_layer_properties::{BackgroundLayerProperties, BackgroundPaintProperties};
 pub use circle_layer::CircleLayer;
 pub use circle_layer_properties::{CircleLayerProperties, CircleLayoutProperties, CirclePaintProperties};
 pub use color_relief_layer::ColorReliefLayer;

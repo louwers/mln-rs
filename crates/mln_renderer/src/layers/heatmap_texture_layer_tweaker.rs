@@ -3,7 +3,7 @@ use std::sync::Arc;
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::shader_defines::ID_HEATMAP_TEXTURE_PROPS_UBO;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_properties::{HeatmapLayerProperties, HeatmapOpacity};
+use mln_style::layers::heatmap_layer_properties::HeatmapLayerProperties;
 use mln_util::mat4::{Mat4, matrix};
 
 use super::cast_matrix;
@@ -46,7 +46,7 @@ impl LayerTweaker for HeatmapTextureLayerTweaker {
 
         let props_ubo = HeatmapTexturePropsUBO {
             matrix: cast_matrix(&m),
-            opacity: *evaluated.get::<HeatmapOpacity>(),
+            opacity: *evaluated.heatmap_opacity.uniform(),
             pad1: 0.0,
             pad2: 0.0,
             pad3: 0.0,

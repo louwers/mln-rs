@@ -7,12 +7,12 @@ use mln_util::geometry::FeatureType;
 use mln_vec_map::VecSet;
 
 use super::util::{StubGeometryTileFeature, property_map};
+use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::dsl::{get, get_str, image, interpolate, linear, literal, literal_str, number, step, zoom};
 use crate::expression::{Dependency, EvaluationContext, Image, Value};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::property_evaluator::PropertyEvaluator;
 
 fn one_integer() -> StubGeometryTileFeature {
     StubGeometryTileFeature::new(property_map(&[("property", MbglValue::Uint(1))]))
@@ -36,7 +36,7 @@ fn empty_tile_feature() -> StubGeometryTileFeature {
 
 fn evaluate(value: &PropertyValue<f32>, zoom: f32) -> f32 {
     let parameters = PropertyEvaluationParameters::new(zoom);
-    value.evaluate(&PropertyEvaluator::new(&parameters, 0.0))
+    *Evaluated::new(value, Evaluation::Plain, &parameters, 0.0).uniform()
 }
 
 fn num(v: f64) -> crate::expression::Expr {
@@ -76,10 +76,10 @@ fn expression() {
 fn defaults() {
     let no_default = PropertyExpression::<f32>::from_expr(number(get_str("property"), None), None);
     let with_default = PropertyExpression::<f32>::from_expr(number(get_str("property"), None), Some(0.0));
-    assert_eq!(1.0_f32, with_default.evaluate_feature(&one_integer(), 2.0));
-    assert_eq!(1.0_f32, with_default.evaluate_feature(&one_double(), 2.0));
-    assert_eq!(0.0_f32, with_default.evaluate_feature(&one_string(), 2.0));
-    assert_eq!(2.0_f32, no_default.evaluate_feature(&one_string(), 2.0));
+    assert_eq!(1.0_f32, with_default.evaluate(&EvaluationContext::from_feature(Some(&one_integer())), 2.0));
+    assert_eq!(1.0_f32, with_default.evaluate(&EvaluationContext::from_feature(Some(&one_double())), 2.0));
+    assert_eq!(0.0_f32, with_default.evaluate(&EvaluationContext::from_feature(Some(&one_string())), 2.0));
+    assert_eq!(2.0_f32, no_default.evaluate(&EvaluationContext::from_feature(Some(&one_string())), 2.0));
 
     assert_eq!(Dependency::FEATURE, no_default.get_dependencies());
 }
@@ -98,7 +98,7 @@ fn zoom_interpolation() {
             interpolate(linear(), zoom(), vec![(0.0, inner(24.0)), (1.5, inner(36.0)), (3.0, inner(48.0))]),
             Some(0.0),
         )
-        .evaluate_zoom_feature(2.0, &one_integer(), -1.0),
+        .evaluate(&EvaluationContext::with_zoom_feature(2.0, Some(&one_integer())), -1.0),
         "Should interpolate between stops"
     );
 
@@ -108,7 +108,7 @@ fn zoom_interpolation() {
             interpolate(linear(), zoom(), vec![(5.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
-        .evaluate_zoom_feature(0.0, &one_integer(), -1.0),
+        .evaluate(&EvaluationContext::with_zoom_feature(0.0, Some(&one_integer())), -1.0),
         "Use first stop output for input values from -inf to first stop"
     );
 
@@ -118,7 +118,7 @@ fn zoom_interpolation() {
             interpolate(linear(), zoom(), vec![(0.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
-        .evaluate_zoom_feature(20.0, &one_integer(), -1.0),
+        .evaluate(&EvaluationContext::with_zoom_feature(20.0, Some(&one_integer())), -1.0),
         "Use last stop output for input values from last stop to +inf"
     );
 
@@ -128,7 +128,7 @@ fn zoom_interpolation() {
             interpolate(linear(), zoom(), vec![(0.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
-        .evaluate_zoom_feature(10.0, &one_integer(), -1.0),
+        .evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&one_integer())), -1.0),
         "Should interpolate TO the last stop."
     );
 
@@ -138,7 +138,7 @@ fn zoom_interpolation() {
             interpolate(linear(), zoom(), vec![(0.0, inner(33.0)), (10.0, inner(66.0))]),
             Some(0.0),
         )
-        .evaluate_zoom_feature(0.0, &one_integer(), -1.0),
+        .evaluate(&EvaluationContext::with_zoom_feature(0.0, Some(&one_integer())), -1.0),
         "Should interpolate TO the first stop"
     );
 }
@@ -155,22 +155,22 @@ fn issue8460() {
         Some(0.0),
     );
 
-    assert_near(0.0, fn1.evaluate_zoom_feature(15.0, &one_integer(), -1.0), 0.00);
-    assert_near(300.0, fn1.evaluate_zoom_feature(15.1, &one_integer(), -1.0), 0.01);
-    assert_near(600.0, fn1.evaluate_zoom_feature(15.2, &one_integer(), -1.0), 0.00);
-    assert_near(600.0, fn1.evaluate_zoom_feature(16.0, &one_integer(), -1.0), 0.00);
+    assert_near(0.0, fn1.evaluate(&EvaluationContext::with_zoom_feature(15.0, Some(&one_integer())), -1.0), 0.00);
+    assert_near(300.0, fn1.evaluate(&EvaluationContext::with_zoom_feature(15.1, Some(&one_integer())), -1.0), 0.01);
+    assert_near(600.0, fn1.evaluate(&EvaluationContext::with_zoom_feature(15.2, Some(&one_integer())), -1.0), 0.00);
+    assert_near(600.0, fn1.evaluate(&EvaluationContext::with_zoom_feature(16.0, Some(&one_integer())), -1.0), 0.00);
 
     let fn2 = PropertyExpression::<f32>::from_expr(
         interpolate(linear(), zoom(), vec![(15.0, inner(0.0)), (15.2, inner(300.0)), (18.0, inner(600.0))]),
         Some(0.0),
     );
 
-    assert_near(0.0, fn2.evaluate_zoom_feature(15.0, &one_integer(), -1.0), 0.00);
-    assert_near(150.0, fn2.evaluate_zoom_feature(15.1, &one_integer(), -1.0), 0.01);
-    assert_near(300.0, fn2.evaluate_zoom_feature(15.2, &one_integer(), -1.0), 0.00);
-    assert_near(385.71, fn2.evaluate_zoom_feature(16.0, &one_integer(), -1.0), 0.01);
-    assert_near(600.0, fn2.evaluate_zoom_feature(18.0, &one_integer(), -1.0), 0.00);
-    assert_near(600.0, fn2.evaluate_zoom_feature(19.0, &one_integer(), -1.0), 0.00);
+    assert_near(0.0, fn2.evaluate(&EvaluationContext::with_zoom_feature(15.0, Some(&one_integer())), -1.0), 0.00);
+    assert_near(150.0, fn2.evaluate(&EvaluationContext::with_zoom_feature(15.1, Some(&one_integer())), -1.0), 0.01);
+    assert_near(300.0, fn2.evaluate(&EvaluationContext::with_zoom_feature(15.2, Some(&one_integer())), -1.0), 0.00);
+    assert_near(385.71, fn2.evaluate(&EvaluationContext::with_zoom_feature(16.0, Some(&one_integer())), -1.0), 0.01);
+    assert_near(600.0, fn2.evaluate(&EvaluationContext::with_zoom_feature(18.0, Some(&one_integer())), -1.0), 0.00);
+    assert_near(600.0, fn2.evaluate(&EvaluationContext::with_zoom_feature(19.0, Some(&one_integer())), -1.0), 0.00);
 }
 
 // gtest: PropertyExpression.ImageExpression
@@ -183,36 +183,54 @@ fn image_expression() {
     // evaluation test without available images
     {
         let prop_expr = PropertyExpression::<Image>::from_expr(image(literal_str("airport-11")), None);
-        let evaluated_image = prop_expr.evaluate_feature_images(&empty_tile_feature(), &empty_set, Image::default());
+        let evaluated_image = prop_expr.evaluate(
+            &EvaluationContext::from_feature(Some(&empty_tile_feature())).with_available_images(Some(&empty_set)),
+            Image::default(),
+        );
         assert!(!evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "airport-11");
 
         assert_eq!(Dependency::IMAGE, prop_expr.get_dependencies());
 
         let dd_prop_expr = PropertyExpression::<Image>::from_expr(image(get(literal_str("image_name"))), None);
-        let evaluated_image = dd_prop_expr.evaluate_feature_images(&one_image(), &empty_set, Image::default());
+        let evaluated_image = dd_prop_expr.evaluate(
+            &EvaluationContext::from_feature(Some(&one_image())).with_available_images(Some(&empty_set)),
+            Image::default(),
+        );
         assert!(!evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "maki-11");
 
-        let evaluated_image = dd_prop_expr.evaluate_feature_images(&empty_tile_feature(), &empty_set, Image::default());
+        let evaluated_image = dd_prop_expr.evaluate(
+            &EvaluationContext::from_feature(Some(&empty_tile_feature())).with_available_images(Some(&empty_set)),
+            Image::default(),
+        );
         assert!(!evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "");
     }
     // evaluation test with available images
     {
         let prop_expr = PropertyExpression::<Image>::from_expr(image(literal_str("airport-11")), None);
-        let evaluated_image =
-            prop_expr.evaluate_feature_images(&empty_tile_feature(), &available_images, Image::default());
+        let evaluated_image = prop_expr.evaluate(
+            &EvaluationContext::from_feature(Some(&empty_tile_feature()))
+                .with_available_images(Some(&available_images)),
+            Image::default(),
+        );
         assert!(evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "airport-11");
         assert_eq!(Dependency::IMAGE, prop_expr.get_dependencies());
         let dd_prop_expr = PropertyExpression::<Image>::from_expr(image(get(literal_str("image_name"))), None);
-        let evaluated_image = dd_prop_expr.evaluate_feature_images(&one_image(), &available_images, Image::default());
+        let evaluated_image = dd_prop_expr.evaluate(
+            &EvaluationContext::from_feature(Some(&one_image())).with_available_images(Some(&available_images)),
+            Image::default(),
+        );
         assert!(evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "maki-11");
         assert_eq!(Dependency::IMAGE | Dependency::FEATURE, dd_prop_expr.get_dependencies());
-        let evaluated_image =
-            dd_prop_expr.evaluate_feature_images(&empty_tile_feature(), &available_images, Image::default());
+        let evaluated_image = dd_prop_expr.evaluate(
+            &EvaluationContext::from_feature(Some(&empty_tile_feature()))
+                .with_available_images(Some(&available_images)),
+            Image::default(),
+        );
         assert!(!evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "");
     }
@@ -220,12 +238,18 @@ fn image_expression() {
     {
         let expr = step(zoom(), image(literal_str("airport-11")), 18.0, image(literal_str("bicycle-15")));
         let prop_expr = PropertyExpression::<Image>::from_expr(expr, None);
-        let evaluated_image =
-            prop_expr.evaluate_zoom_feature_images(0.0, &empty_tile_feature(), &available_images, Image::default());
+        let evaluated_image = prop_expr.evaluate(
+            &EvaluationContext::with_zoom_feature(0.0, Some(&empty_tile_feature()))
+                .with_available_images(Some(&available_images)),
+            Image::default(),
+        );
         assert!(evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "airport-11");
-        let evaluated_image =
-            prop_expr.evaluate_zoom_feature_images(18.0, &empty_tile_feature(), &available_images, Image::default());
+        let evaluated_image = prop_expr.evaluate(
+            &EvaluationContext::with_zoom_feature(18.0, Some(&empty_tile_feature()))
+                .with_available_images(Some(&available_images)),
+            Image::default(),
+        );
         assert!(evaluated_image.is_available());
         assert_eq!(evaluated_image.id(), "bicycle-15");
         assert_eq!(Dependency::IMAGE | Dependency::ZOOM, prop_expr.get_dependencies());

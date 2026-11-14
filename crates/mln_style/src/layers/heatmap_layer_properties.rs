@@ -11,41 +11,17 @@ use mln_conversion::{Convertible, Error};
 use mln_vec_map::VecSet;
 use std::sync::Arc;
 
-crate::color_ramp_property!(
-    /// The `heatmap-color` paint property.
-    pub struct HeatmapColor
-);
-
-crate::paint_property!(
-    /// The `heatmap-intensity` paint property.
-    pub struct HeatmapIntensity: f32 = 1.0_f32
-);
-
-crate::paint_property!(
-    /// The `heatmap-opacity` paint property.
-    pub struct HeatmapOpacity: f32 = 1.0_f32
-);
-
-crate::data_driven_paint_property!(
-    /// The `heatmap-radius` paint property.
-    pub struct HeatmapRadius: f32 = 30.0_f32
-);
-
-crate::data_driven_paint_property!(
-    /// The `heatmap-weight` paint property.
-    pub struct HeatmapWeight: f32 = 1.0_f32
-);
-
-crate::paint_properties!(
+crate::properties!(
     /// The properties, in field order.
     #[expect(non_snake_case, reason = "named for the C++ `HeatmapPaintProperties` type list")]
-    pub mod HeatmapPaintProperties {
-        heatmap_color: HeatmapColor,
-        heatmap_intensity: HeatmapIntensity,
-        heatmap_opacity: HeatmapOpacity,
-        heatmap_radius: HeatmapRadius,
-        heatmap_weight: HeatmapWeight,
+    pub mod HeatmapPaintProperties: paint {
+        heatmap_color: color_ramp Color = Color::default(),
+        heatmap_intensity: constant f32 = 1.0_f32,
+        heatmap_opacity: constant f32 = 1.0_f32,
+        heatmap_radius: data_driven f32 = 30.0_f32,
+        heatmap_weight: data_driven f32 = 1.0_f32,
     }
+    use mln_util::Color;
 );
 
 /// The evaluated properties of a heatmap layer.

@@ -5,69 +5,24 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor};
-use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_vec_map::VecSet;
 use std::sync::Arc;
 
-crate::paint_property!(
-    /// The `raster-brightness-max` paint property.
-    pub struct RasterBrightnessMax: f32 = 1.0_f32
-);
-
-crate::paint_property!(
-    /// The `raster-brightness-min` paint property.
-    pub struct RasterBrightnessMin: f32 = 0.0_f32
-);
-
-crate::paint_property!(
-    /// The `raster-contrast` paint property.
-    pub struct RasterContrast: f32 = 0.0_f32
-);
-
-crate::paint_property!(
-    /// The `raster-fade-duration` paint property.
-    pub struct RasterFadeDuration: f32 = 300.0_f32
-);
-
-crate::paint_property!(
-    /// The `raster-hue-rotate` paint property.
-    pub struct RasterHueRotate: f32 = 0.0_f32
-);
-
-crate::paint_property!(
-    /// The `raster-opacity` paint property.
-    pub struct RasterOpacity: f32 = 1.0_f32
-);
-
-crate::paint_property!(
-    /// The `raster-resampling` paint property.
-    pub struct RasterResampling: RasterResamplingType = RasterResamplingType::Linear
-);
-
-crate::paint_property!(
-    /// The `raster-saturation` paint property.
-    pub struct RasterSaturation: f32 = 0.0_f32
-);
-
-crate::paint_property!(
-    /// The `resampling` paint property.
-    pub struct Resampling: ResamplingType = ResamplingType::Linear
-);
-
-crate::paint_properties!(
+crate::properties!(
     /// The properties, in field order.
     #[expect(non_snake_case, reason = "named for the C++ `RasterPaintProperties` type list")]
-    pub mod RasterPaintProperties {
-        raster_brightness_max: RasterBrightnessMax,
-        raster_brightness_min: RasterBrightnessMin,
-        raster_contrast: RasterContrast,
-        raster_fade_duration: RasterFadeDuration,
-        raster_hue_rotate: RasterHueRotate,
-        raster_opacity: RasterOpacity,
-        raster_resampling: RasterResampling,
-        raster_saturation: RasterSaturation,
-        resampling: Resampling,
+    pub mod RasterPaintProperties: paint {
+        raster_brightness_max: constant f32 = 1.0_f32,
+        raster_brightness_min: constant f32 = 0.0_f32,
+        raster_contrast: constant f32 = 0.0_f32,
+        raster_fade_duration: constant f32 = 300.0_f32,
+        raster_hue_rotate: constant f32 = 0.0_f32,
+        raster_opacity: constant f32 = 1.0_f32,
+        raster_resampling: constant RasterResamplingType = RasterResamplingType::Linear,
+        raster_saturation: constant f32 = 0.0_f32,
+        resampling: constant ResamplingType = ResamplingType::Linear,
     }
+    use mln_style_types::RasterResamplingType, mln_style_types::ResamplingType;
 );
 
 /// The evaluated properties of a raster layer.

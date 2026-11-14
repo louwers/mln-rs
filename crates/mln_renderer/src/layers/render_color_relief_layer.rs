@@ -34,9 +34,7 @@ use mln_style::expression::{
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
-use mln_style::layers::color_relief_layer_properties::{
-    ColorReliefColor, ColorReliefLayerProperties, ColorReliefOpacity, ColorReliefPaintProperties, Resampling,
-};
+use mln_style::layers::color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefPaintProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
@@ -136,7 +134,7 @@ impl RenderColorReliefLayer {
 
     fn update_color_ramp(&mut self) {
         // Get the color property value, using default if undefined
-        let mut color_value = self.unevaluated.get::<ColorReliefColor>().get_value().clone();
+        let mut color_value = self.unevaluated.color_relief_color.get_value().clone();
         if color_value.is_undefined() {
             color_value = ColorRampPropertyValue::default();
             if color_value.is_undefined() {
@@ -281,7 +279,7 @@ impl RenderLayer for RenderColorReliefLayer {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.unevaluated.get::<ColorReliefColor>().get_value();
+        let ramp_value = self.unevaluated.color_relief_color.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -300,7 +298,7 @@ impl RenderLayer for RenderColorReliefLayer {
             self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
         );
 
-        self.base.passes = if *properties.evaluated.get::<ColorReliefOpacity>() > 0.0 {
+        self.base.passes = if *properties.evaluated.color_relief_opacity.uniform() > 0.0 {
             RenderPass::Translucent
         } else {
             RenderPass::None
@@ -457,7 +455,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         let evaluated = get_evaluated::<ColorReliefLayerProperties>(&self.base.evaluated_properties);
         let dem_sampler = SamplerState {
-            filter: match *evaluated.get::<Resampling>() {
+            filter: match *evaluated.resampling.uniform() {
                 ResamplingType::Linear => TextureFilterType::Linear,
                 ResamplingType::Nearest => TextureFilterType::Nearest,
             },

@@ -4,14 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use geometry::Point;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorDistances, PolylineGeneratorOptions, dist};
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_style::expression::{Image, Value};
+use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::line_layer_properties::{
-    LineBlur, LineCap, LineColor, LineFloorWidth, LineGapWidth, LineJoin, LineLayerProperties, LineLayoutProperties,
-    LineMiterLimit, LineOffset, LineOpacity, LinePaintProperties, LinePattern, LineRoundLimit, LineTranslate,
-    LineWidth,
-};
-use mln_style::properties::Property;
+use mln_style::layers::line_layer_properties::{LineLayerProperties, LineLayoutProperties, LinePaintProperties};
 use mln_style_types::image::ImagePositions;
 use mln_style_types::{LineCapType, LineJoinType};
 use mln_tile_id::CanonicalTileID;
@@ -36,14 +31,14 @@ use crate::util::subdivision::subdivide_vertex_line;
 
 crate::paint_property_binders!(
     pub struct LineBinders for LinePaintProperties::PossiblyEvaluated {
-        line_blur: LineBlur => PaintPropertyBinder<f32>,
-        line_color: LineColor => PaintPropertyBinder<Color>,
-        line_floor_width: LineFloorWidth => PaintPropertyBinder<f32>,
-        line_gap_width: LineGapWidth => PaintPropertyBinder<f32>,
-        line_offset: LineOffset => PaintPropertyBinder<f32>,
-        line_opacity: LineOpacity => PaintPropertyBinder<f32>,
-        line_pattern: LinePattern => CrossFadedPaintPropertyBinder<Image>,
-        line_width: LineWidth => PaintPropertyBinder<f32>,
+        line_blur => PaintPropertyBinder<f32>,
+        line_color => PaintPropertyBinder<Color>,
+        line_floor_width => PaintPropertyBinder<f32>,
+        line_gap_width => PaintPropertyBinder<f32>,
+        line_offset => PaintPropertyBinder<f32>,
+        line_opacity => PaintPropertyBinder<f32>,
+        line_pattern => CrossFadedPaintPropertyBinder<Image>,
+        line_width => PaintPropertyBinder<f32>,
     }
 );
 
@@ -220,16 +215,24 @@ impl LineBucket {
             }
         }
 
-        options.join_type = self.layout.evaluate_canonical::<LineJoin>(self.zoom, feature, canonical);
+        options.join_type = self.layout.line_join.evaluate(
+            &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        );
         options.miter_limit = if options.join_type == LineJoinType::Bevel {
             1.05
         } else {
-            self.layout.evaluate_canonical::<LineMiterLimit>(self.zoom, feature, canonical)
+            self.layout.line_miter_limit.evaluate(
+                &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+            )
         };
-        let cap = self.layout.evaluate_canonical::<LineCap>(self.zoom, feature, canonical);
+        let cap = self.layout.line_cap.evaluate(
+            &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        );
         options.begin_cap = cap;
         options.end_cap = if options.type_ == FeatureType::Polygon { LineCapType::Butt } else { cap };
-        options.round_limit = self.layout.evaluate_canonical::<LineRoundLimit>(self.zoom, feature, canonical);
+        options.round_limit = self.layout.line_round_limit.evaluate(
+            &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        );
         options.overscaling = self.overscaling;
 
         let mut generator = PolylineGenerator::new(
@@ -311,20 +314,20 @@ impl Bucket for LineBucket {
     fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
         let evaluated = get_evaluated::<LineLayerProperties>(&layer.base().evaluated_properties);
         let binders = self.paint_property_binders.get(layer.get_id());
-        let translate = evaluated.get::<LineTranslate>();
+        let translate = evaluated.line_translate.uniform();
         let offset = get_or_max(
-            evaluated.get::<LineOffset>().constant(),
-            LineOffset::default_value(),
+            evaluated.line_offset.constant(),
+            LinePaintProperties::Defaults::line_offset(),
             binders.and_then(|b| b.read().line_offset.statistics.max()),
         );
         let mut line_width = get_or_max(
-            evaluated.get::<LineWidth>().constant(),
-            LineWidth::default_value(),
+            evaluated.line_width.constant(),
+            LinePaintProperties::Defaults::line_width(),
             binders.and_then(|b| b.read().line_width.statistics.max()),
         );
         let gap_width = get_or_max(
-            evaluated.get::<LineGapWidth>().constant(),
-            LineGapWidth::default_value(),
+            evaluated.line_gap_width.constant(),
+            LinePaintProperties::Defaults::line_gap_width(),
             binders.and_then(|b| b.read().line_gap_width.statistics.max()),
         );
         if gap_width != 0.0 {

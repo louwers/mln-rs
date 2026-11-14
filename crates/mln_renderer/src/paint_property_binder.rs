@@ -1,9 +1,9 @@
 // The C++ class hierarchy (`PaintPropertyBinder<T, UniformValueType,
 // PossiblyEvaluatedType, As...>` with Constant / SourceFunction /
 // CompositeFunction / ConstantCrossFaded / CompositeCrossFaded subclasses)
-// becomes two enums: `PaintPropertyBinder<T>` for the
-// `PossiblyEvaluatedPropertyValue<T>` properties and
-// `CrossFadedPaintPropertyBinder<T>` for the `Faded<T>` (pattern) ones.
+// becomes two enums: `PaintPropertyBinder<T>` for the data-driven
+// properties and `CrossFadedPaintPropertyBinder<T>` for the cross-faded
+// (pattern) ones.
 // `PaintPropertyBinders<TypeList<Ps...>>` is generated per layer type by
 // `paint_property_binders!` (circle, fill, line).
 //
@@ -18,12 +18,9 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
+use mln_style::evaluated::{Evaluated, Faded};
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
-use mln_style::renderer::cross_faded_property_evaluator::Faded;
-use mln_style::renderer::possibly_evaluated_property_value::{
-    PossiblyEvaluatedFadedPropertyValue, PossiblyEvaluatedPropertyValue,
-};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileFeature, GeometryTileLayer};
@@ -216,12 +213,13 @@ pub(crate) struct PaintPropertyBinder<T> {
 }
 
 impl<T: BinderValue> PaintPropertyBinder<T> {
-    pub(crate) fn create(value: &PossiblyEvaluatedPropertyValue<T>, zoom: f32, default_value: T) -> Self {
+    pub(crate) fn create(value: &Evaluated<T>, zoom: f32) -> Self {
         let kind = match value {
-            PossiblyEvaluatedPropertyValue::Constant(constant) => {
+            Evaluated::Constant(constant) | Evaluated::CrossFaded(Faded { to: constant, .. }) => {
                 PaintPropertyBinderKind::Constant { constant: constant.clone() }
             }
-            PossiblyEvaluatedPropertyValue::Expression(expression) => {
+            Evaluated::PerFeature { expression, default } => {
+                let default_value = default.clone();
                 if expression.is_zoom_constant() {
                     PaintPropertyBinderKind::SourceFunction {
                         expression: expression.clone(),
@@ -392,7 +390,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
     }
 
     /// The property's value as a uniform.
-    pub(crate) fn uniform_value(&self, current_value: &PossiblyEvaluatedPropertyValue<T>) -> T {
+    pub(crate) fn uniform_value(&self, current_value: &Evaluated<T>) -> T {
         match &self.kind {
             PaintPropertyBinderKind::Constant { constant } => current_value.constant_or(constant),
             // Uniform values for vertex attribute arrays are unused.
@@ -477,19 +475,20 @@ const PATTERN_ZOOM_INTERPOLATED_SIZE: usize = 16;
 
 impl CrossFadedPaintPropertyBinder<Image> {
     #[must_use]
-    pub(crate) fn create(value: &PossiblyEvaluatedFadedPropertyValue<Image>, zoom: f32, default_value: Image) -> Self {
+    pub(crate) fn create(value: &Evaluated<Image>, zoom: f32) -> Self {
         let kind = match value {
-            PossiblyEvaluatedFadedPropertyValue::Constant(constant) => {
+            Evaluated::Constant(constant) => CrossFadedPaintPropertyBinderKind::Constant {
+                constant: Faded { from: constant.clone(), to: constant.clone() },
+            },
+            Evaluated::CrossFaded(constant) => {
                 CrossFadedPaintPropertyBinderKind::Constant { constant: constant.clone() }
             }
-            PossiblyEvaluatedFadedPropertyValue::Expression(expression) => {
-                CrossFadedPaintPropertyBinderKind::Composite {
-                    expression: expression.clone(),
-                    default_value,
-                    zoom_range: Range::new(zoom, zoom + 1.0),
-                    populated_count: 0,
-                }
-            }
+            Evaluated::PerFeature { expression, default } => CrossFadedPaintPropertyBinderKind::Composite {
+                expression: expression.clone(),
+                default_value: default.clone(),
+                zoom_range: Range::new(zoom, zoom + 1.0),
+                populated_count: 0,
+            },
         };
         CrossFadedPaintPropertyBinder { kind, has_interleaved_buffer: false, vertex_offset: usize::MAX }
     }
@@ -750,7 +749,7 @@ macro_rules! paint_property_binders {
     (
         $(#[$meta:meta])*
         pub struct $name:ident for $props:path {
-            $($field:ident: $prop:ty => $binder:ty),+ $(,)?
+            $($field:ident => $binder:ty),+ $(,)?
         }
         $($(#[$update_meta:meta])+ fn update_vertex_vectors;)?
     ) => {
@@ -765,11 +764,7 @@ macro_rules! paint_property_binders {
             pub(crate) fn new(properties: &$props, z: f32) -> Self {
                 let mut result = $name {
                     interleaved_vertex_buffer: Default::default(),
-                    $($field: <$binder>::create(
-                        properties.get::<$prop>(),
-                        z,
-                        <$prop as mln_style::properties::Property>::default_value(),
-                    ),)+
+                    $($field: <$binder>::create(&properties.$field, z),)+
                 };
                 $($crate::paint_property_binder::PaintPropertyBinderBase::set_interleaved(
                     &mut result.$field, &mut result.interleaved_vertex_buffer);)+

@@ -12,19 +12,11 @@ use mln_expression::Value;
 use mln_expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
+use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::symbol_layer_properties::{
-    IconAnchor, IconIgnorePlacement, IconImage, IconOffset, IconPadding, IconPitchAlignment, IconRotate,
-    IconRotationAlignment, IconSize, IconTextFit, IconTextFitPadding, SymbolLayoutProperties, SymbolPlacement,
-    SymbolSortKey, SymbolSpacing, SymbolZOrder, TextAnchor, TextField, TextFont, TextIgnorePlacement, TextJustify,
-    TextLetterSpacing, TextLineHeight, TextMaxAngle, TextMaxWidth, TextOffset, TextPadding, TextPitchAlignment,
-    TextRadialOffset, TextRotate, TextRotationAlignment, TextSize, TextTransform, TextVariableAnchor,
-    TextVariableAnchorOffset, TextWritingMode,
-};
-use mln_style::properties::Property;
+use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property_value::PropertyValue;
-use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use mln_style_types::image::{ImageMap, ImagePositions, ImageType};
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
@@ -66,13 +58,13 @@ use crate::text::quads::{SymbolQuad, SymbolQuads};
 /// Whether `text-field` is set: a constant that is not empty, or an
 /// expression.
 fn has_text_field(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
-    layout.get::<TextField>().constant().is_none_or(|t| !t.empty())
+    layout.text_field.constant().is_none_or(|t| !t.empty())
 }
 fn has_text_font(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
-    layout.get::<TextFont>().constant().is_none_or(|t| !t.is_empty())
+    layout.text_font.constant().is_none_or(|t| !t.is_empty())
 }
 fn has_icon_image(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
-    layout.get::<IconImage>().constant().is_none_or(|t| !t.empty())
+    layout.icon_image.constant().is_none_or(|t| !t.empty())
 }
 
 /// A run of UTF-16 code units that one font face draws.
@@ -195,23 +187,29 @@ fn create_layout(
     evaluation_parameters.global_state = global_state;
     let mut layout = unevaluated.evaluate(&evaluation_parameters);
 
-    let placement = *layout.get::<SymbolPlacement>();
-    if *layout.get::<IconRotationAlignment>() == AlignmentType::Auto {
-        *layout.get_mut::<IconRotationAlignment>() =
-            if placement == SymbolPlacementType::Point { AlignmentType::Viewport } else { AlignmentType::Map };
+    let placement = layout.symbol_placement.clone();
+    if *layout.icon_rotation_alignment.uniform() == AlignmentType::Auto {
+        layout.icon_rotation_alignment = Evaluated::Constant(if *placement.uniform() == SymbolPlacementType::Point {
+            AlignmentType::Viewport
+        } else {
+            AlignmentType::Map
+        });
     }
 
-    if *layout.get::<TextRotationAlignment>() == AlignmentType::Auto {
-        *layout.get_mut::<TextRotationAlignment>() =
-            if placement == SymbolPlacementType::Point { AlignmentType::Viewport } else { AlignmentType::Map };
+    if *layout.text_rotation_alignment.uniform() == AlignmentType::Auto {
+        layout.text_rotation_alignment = Evaluated::Constant(if *placement.uniform() == SymbolPlacementType::Point {
+            AlignmentType::Viewport
+        } else {
+            AlignmentType::Map
+        });
     }
 
     // If unspecified `*-pitch-alignment` inherits `*-rotation-alignment`
-    if *layout.get::<TextPitchAlignment>() == AlignmentType::Auto {
-        *layout.get_mut::<TextPitchAlignment>() = *layout.get::<TextRotationAlignment>();
+    if *layout.text_pitch_alignment.uniform() == AlignmentType::Auto {
+        layout.text_pitch_alignment = layout.text_rotation_alignment.clone();
     }
-    if *layout.get::<IconPitchAlignment>() == AlignmentType::Auto {
-        *layout.get_mut::<IconPitchAlignment>() = *layout.get::<IconRotationAlignment>();
+    if *layout.icon_pitch_alignment.uniform() == AlignmentType::Auto {
+        layout.icon_pitch_alignment = layout.icon_rotation_alignment.clone();
     }
 
     layout
@@ -372,10 +370,10 @@ impl SymbolLayout {
             allow_vertical_placement: false,
             icons_in_text: false,
             placement_modes: Vec::new(),
-            text_size: leader.layout.get::<TextSize>().clone(),
-            icon_size: leader.layout.get::<IconSize>().clone(),
-            text_radial_offset: leader.layout.get::<TextRadialOffset>().clone(),
-            text_variable_anchor_offset: leader.layout.get::<TextVariableAnchorOffset>().clone(),
+            text_size: leader.layout.text_size.clone(),
+            icon_size: leader.layout.icon_size.clone(),
+            text_radial_offset: leader.layout.text_radial_offset.clone(),
+            text_variable_anchor_offset: leader.layout.text_variable_anchor_offset.clone(),
             layout,
             features: Vec::new(),
             bidi: BiDi::new(),
@@ -399,19 +397,19 @@ impl SymbolLayout {
             return Ok(this);
         }
 
-        let has_symbol_sort_key = !leader.layout.get::<SymbolSortKey>().is_undefined();
-        let symbol_z_order = *layout.get::<SymbolZOrder>();
-        this.sort_features_by_key = symbol_z_order != SymbolZOrderType::ViewportY && has_symbol_sort_key;
-        let z_order_by_viewport_y = symbol_z_order == SymbolZOrderType::ViewportY
-            || (symbol_z_order == SymbolZOrderType::Auto && !this.sort_features_by_key);
+        let has_symbol_sort_key = !leader.layout.symbol_sort_key.is_undefined();
+        let symbol_z_order = &layout.symbol_z_order;
+        this.sort_features_by_key = *symbol_z_order.uniform() != SymbolZOrderType::ViewportY && has_symbol_sort_key;
+        let z_order_by_viewport_y = *symbol_z_order.uniform() == SymbolZOrderType::ViewportY
+            || (*symbol_z_order.uniform() == SymbolZOrderType::Auto && !this.sort_features_by_key);
         this.sort_features_by_y = z_order_by_viewport_y
             && (OverlapMode::text(&layout) != OverlapMode::Never
                 || OverlapMode::icon(&layout) != OverlapMode::Never
-                || *layout.get::<TextIgnorePlacement>()
-                || *layout.get::<IconIgnorePlacement>());
-        let sort_features = this.sort_features_by_key && !layout.get::<SymbolSortKey>().is_constant();
-        if *layout.get::<SymbolPlacement>() == SymbolPlacementType::Point {
-            let modes = layout.get::<TextWritingMode>().clone();
+                || *layout.text_ignore_placement.uniform()
+                || *layout.icon_ignore_placement.uniform());
+        let sort_features = this.sort_features_by_key && !layout.symbol_sort_key.is_constant();
+        if *layout.symbol_placement.uniform() == SymbolPlacementType::Point {
+            let modes = layout.text_writing_mode.uniform().clone();
             // Remove duplicates and preserve order.
             let mut seen: Vec<TextWritingModeType> = Vec::new();
             let mut placement_modes = Vec::new();
@@ -473,18 +471,18 @@ impl SymbolLayout {
             ft.index = i;
 
             if has_text {
-                let formatted = match layout.get::<TextField>() {
-                    PossiblyEvaluatedPropertyValue::Constant(constant) => constant.clone(),
-                    PossiblyEvaluatedPropertyValue::Expression(expression) => expression.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
-                            .with_available_images(Some(layout_parameters.available_images))
-                            .with_canonical_tile_id(Some(&canonical_id))
-                            .with_font_faces(layout_parameters.font_faces.as_deref()),
-                        TextField::default_value(),
-                    ),
-                };
-                let text_transform = layout.evaluate_canonical::<TextTransform>(zoom, &ft, &canonical_id);
-                let base_font_stack: Vec<String> = layout.evaluate_canonical::<TextFont>(zoom, &ft, &canonical_id);
+                let formatted = layout.text_field.evaluate(
+                    &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
+                        .with_available_images(Some(layout_parameters.available_images))
+                        .with_canonical_tile_id(Some(&canonical_id))
+                        .with_font_faces(layout_parameters.font_faces.as_deref()),
+                );
+                let text_transform = layout.text_transform.evaluate(
+                    &EvaluationContext::with_zoom_feature(zoom, Some(&ft)).with_canonical_tile_id(Some(&canonical_id)),
+                );
+                let base_font_stack: Vec<String> = layout.text_font.evaluate(
+                    &EvaluationContext::with_zoom_feature(zoom, Some(&ft)).with_canonical_tile_id(Some(&canonical_id)),
+                );
 
                 let mut formatted_text = TaggedString::default();
                 let mut section_table: VecMap<usize, usize> = VecMap::new();
@@ -571,8 +569,8 @@ impl SymbolLayout {
                     add_sub_string(&mut sub_string, sub_string_type, true, &mut formatted_text);
                 }
 
-                let can_verticalize_text = *layout.get::<TextRotationAlignment>() == AlignmentType::Map
-                    && *layout.get::<SymbolPlacement>() != SymbolPlacementType::Point
+                let can_verticalize_text = *layout.text_rotation_alignment.uniform() == AlignmentType::Map
+                    && *layout.symbol_placement.uniform() != SymbolPlacementType::Point
                     && formatted_text.allows_vertical_writing_mode();
                 let allows_vertical = formatted_text.allows_vertical_writing_mode();
 
@@ -606,11 +604,10 @@ impl SymbolLayout {
             }
 
             if has_icon {
-                let icon = layout.evaluate_images_canonical::<IconImage>(
-                    zoom,
-                    &ft,
-                    layout_parameters.available_images,
-                    &canonical_id,
+                let icon = layout.icon_image.evaluate(
+                    &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
+                        .with_available_images(Some(layout_parameters.available_images))
+                        .with_canonical_tile_id(Some(&canonical_id)),
                 );
                 // An empty icon name means no icon, so it is not an image
                 // dependency.
@@ -622,7 +619,10 @@ impl SymbolLayout {
 
             if ft.formatted_text.is_some() || ft.icon.is_some() {
                 if this.sort_features_by_key {
-                    ft.sort_key = layout.evaluate_canonical::<SymbolSortKey>(zoom, &ft, &canonical_id);
+                    ft.sort_key = layout.symbol_sort_key.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
+                            .with_canonical_tile_id(Some(&canonical_id)),
+                    );
                 }
                 if sort_features {
                     let lower_bound = this.features.partition_point(|f| f.sort_key < ft.sort_key);
@@ -640,7 +640,7 @@ impl SymbolLayout {
             this.features.reverse();
         }
 
-        if *layout.get::<SymbolPlacement>() == SymbolPlacementType::Line {
+        if *layout.symbol_placement.uniform() == SymbolPlacementType::Line {
             merge_lines(&mut this.features);
         }
 
@@ -687,8 +687,9 @@ impl SymbolLayout {
         let canonical = &self.canonical_id;
         // If style specifies text-variable-anchor-offset, just return it
         if !self.text_variable_anchor_offset.is_undefined() {
-            let variable_anchor_offset =
-                self.layout.evaluate_canonical::<TextVariableAnchorOffset>(zoom, feature, canonical);
+            let variable_anchor_offset = self.layout.text_variable_anchor_offset.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+            );
             if variable_anchor_offset.is_empty() {
                 return None;
             }
@@ -711,17 +712,22 @@ impl SymbolLayout {
             return Some(VariableAnchorOffsetCollection::new(anchor_offsets));
         }
 
-        let variable_text_anchor: Vec<TextVariableAnchorType> =
-            self.layout.evaluate_canonical::<TextVariableAnchor>(zoom, feature, canonical);
+        let variable_text_anchor: Vec<TextVariableAnchorType> = self.layout.text_variable_anchor.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        );
         if variable_text_anchor.is_empty() {
             return None;
         }
         let variable_text_offset = if self.text_radial_offset.is_undefined() {
-            let text_offset = self.layout.evaluate_canonical::<TextOffset>(zoom, feature, canonical);
+            let text_offset = self.layout.text_offset.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+            );
             [text_offset[0] * ONE_EM, text_offset[1] * ONE_EM]
         } else {
             [
-                self.layout.evaluate_canonical::<TextRadialOffset>(zoom, feature, canonical) * ONE_EM,
+                self.layout.text_radial_offset.evaluate(
+                    &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+                ) * ONE_EM,
                 Self::INVALID_OFFSET_VALUE,
             ]
         };
@@ -758,36 +764,46 @@ impl SymbolLayout {
         let canonical = self.canonical_id;
         let layout = Arc::clone(&self.layout);
 
-        let icon_offset = layout.evaluate_canonical::<IconOffset>(zoom, feature, &canonical);
+        let icon_offset = layout.icon_offset.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+        );
 
         // To reduce the number of labels that jump around when zooming we
         // need to use a text-size value that is the same for all zoom
         // levels. This calculates text-size at a high zoom level so that all
         // tiles can use the same value when calculating anchor positions.
-        let text_max_size = layout.evaluate_canonical::<TextSize>(18.0, feature, &canonical);
+        let text_max_size = layout.text_size.evaluate(
+            &EvaluationContext::with_zoom_feature(18.0, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+        );
 
         let font_scale = layout_text_size / glyph_size;
         let text_box_scale = self.tile_pixel_ratio * font_scale;
         let text_max_box_scale = self.tile_pixel_ratio * text_max_size / glyph_size;
         let icon_box_scale = self.tile_pixel_ratio * layout_icon_size;
-        let symbol_spacing = self.tile_pixel_ratio * *layout.get::<SymbolSpacing>();
-        let text_padding = *layout.get::<TextPadding>() * self.tile_pixel_ratio;
-        let icon_padding = layout.evaluate_canonical::<IconPadding>(zoom, feature, &canonical) * self.tile_pixel_ratio;
-        let text_max_angle = (*layout.get::<TextMaxAngle>()).to_radians_cpp();
-        let icon_rotation = layout.evaluate_canonical::<IconRotate>(zoom, feature, &canonical);
-        let text_rotation = layout.evaluate_canonical::<TextRotate>(zoom, feature, &canonical);
+        let symbol_spacing = self.tile_pixel_ratio * *layout.symbol_spacing.uniform();
+        let text_padding = *layout.text_padding.uniform() * self.tile_pixel_ratio;
+        let icon_padding = layout.icon_padding.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+        ) * self.tile_pixel_ratio;
+        let text_max_angle = (layout.text_max_angle).uniform().to_radians_cpp();
+        let icon_rotation = layout.icon_rotate.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+        );
+        let text_rotation = layout.text_rotate.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+        );
         let variable_anchor_offsets = self.get_text_variable_anchor_offset(feature);
 
-        let text_placement = if *layout.get::<TextRotationAlignment>() == AlignmentType::Map {
-            *layout.get::<SymbolPlacement>()
+        let text_placement = if *layout.text_rotation_alignment.uniform() == AlignmentType::Map {
+            *layout.symbol_placement.uniform()
         } else {
             SymbolPlacementType::Point
         };
 
         let text_repeat_distance = symbol_spacing / 2.0;
-        // `layout->evaluate(zoom, feature)`: C++ calls the overload without
-        // a canonical tile ID.
-        let evaluated_layout_properties = layout.evaluate_all(zoom, feature, &canonical);
+        let evaluated_layout_properties = layout.evaluate_all(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+        );
         let indexed_feature = IndexedSubfeature {
             index: feature.index,
             source_layer_name: self.source_layer.name.clone(),
@@ -798,7 +814,7 @@ impl SymbolLayout {
             overlap_mode: OverlapMode::Never,
         };
 
-        let icon_text_fit = *evaluated_layout_properties.get::<IconTextFit>();
+        let icon_text_fit = evaluated_layout_properties.icon_text_fit;
         let has_icon_text_fit = icon_text_fit != IconTextFitType::None;
         // Adjust shaped icon size when icon-text-fit is used.
         let mut vertically_shaped_icon: Option<PositionedIcon> = None;
@@ -811,7 +827,7 @@ impl SymbolLayout {
                 vertical.fit_icon_to_text(
                     &shaped_text_orientations.vertical,
                     icon_text_fit,
-                    layout.get::<IconTextFitPadding>(),
+                    layout.icon_text_fit_padding.uniform(),
                     &icon_offset,
                     font_scale,
                 );
@@ -822,7 +838,7 @@ impl SymbolLayout {
                 icon.fit_icon_to_text(
                     shaped_text,
                     icon_text_fit,
-                    layout.get::<IconTextFitPadding>(),
+                    layout.icon_text_fit_padding.uniform(),
                     &icon_offset,
                     font_scale,
                 );
@@ -914,8 +930,8 @@ impl SymbolLayout {
         let (text_left, text_right) = (text_shaping.left, text_shaping.right);
         let (icon_left, icon_right) = shaped_icon.as_ref().map_or((0.0, 0.0), |icon| (icon.left(), icon.right()));
 
-        let placement = *layout.get::<SymbolPlacement>();
-        if placement == SymbolPlacementType::Line {
+        let placement = &layout.symbol_placement;
+        if *placement.uniform() == SymbolPlacementType::Line {
             let clipped_lines = clip_lines(&feature.geometry, 0, 0, EXTENT as i16, EXTENT as i16);
             for line in clipped_lines.iter() {
                 let anchors: Anchors = get_anchors(
@@ -941,7 +957,7 @@ impl SymbolLayout {
                     }
                 }
             }
-        } else if placement == SymbolPlacementType::LineCenter {
+        } else if *placement.uniform() == SymbolPlacementType::LineCenter {
             // No clipping, multiple lines per feature are allowed
             // "lines" with only one point are ignored as in clipLines
             for line in feature.geometry.iter() {
@@ -1494,8 +1510,8 @@ impl Layout for SymbolLayout {
         let layout = Arc::clone(&self.layout);
         let zoom = self.zoom;
         let canonical = self.canonical_id;
-        let is_point_placement = *layout.get::<SymbolPlacement>() == SymbolPlacementType::Point;
-        let text_along_line = *layout.get::<TextRotationAlignment>() == AlignmentType::Map && !is_point_placement;
+        let is_point_placement = *layout.symbol_placement.uniform() == SymbolPlacementType::Point;
+        let text_along_line = *layout.text_rotation_alignment.uniform() == AlignmentType::Map && !is_point_placement;
 
         let mut features = std::mem::take(&mut self.features);
         for (feature_index, feature) in features.iter_mut().enumerate() {
@@ -1506,34 +1522,52 @@ impl Layout for SymbolLayout {
             let mut shaped_text_orientations = ShapedTextOrientations::default();
             let mut shaped_icon: Option<PositionedIcon> = None;
             let mut text_offset = [0.0_f32, 0.0_f32];
-            let layout_text_size = layout.evaluate_canonical::<TextSize>(zoom + 1.0, feature, &canonical);
-            let layout_text_size_at_bucket_zoom_level =
-                layout.evaluate_canonical::<TextSize>(zoom, feature, &canonical);
-            let layout_icon_size = layout.evaluate_canonical::<IconSize>(zoom + 1.0, feature, &canonical);
+            let layout_text_size = layout.text_size.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(feature))
+                    .with_canonical_tile_id(Some(&canonical)),
+            );
+            let layout_text_size_at_bucket_zoom_level = layout.text_size.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+            );
+            let layout_icon_size = layout.icon_size.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(feature))
+                    .with_canonical_tile_id(Some(&canonical)),
+            );
 
             // if feature has text, shape the text
             if feature.formatted_text.is_some() && layout_text_size > 0.0 {
-                let line_height = *layout.get::<TextLineHeight>() * ONE_EM;
+                let line_height = *layout.text_line_height.uniform() * ONE_EM;
                 let raw_text = feature.formatted_text.as_ref().expect("text").raw_text().to_vec();
                 let spacing = if i18n::allows_letter_spacing(&raw_text) {
-                    layout.evaluate_canonical::<TextLetterSpacing>(zoom, feature, &canonical) * ONE_EM
+                    layout.text_letter_spacing.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    ) * ONE_EM
                 } else {
                     0.0
                 };
                 let max_width = if is_point_placement {
-                    layout.evaluate_canonical::<TextMaxWidth>(zoom, feature, &canonical) * ONE_EM
+                    layout.text_max_width.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    ) * ONE_EM
                 } else {
                     0.0
                 };
 
                 let variable_anchor_offsets = self.get_text_variable_anchor_offset(feature);
-                let text_anchor = layout.evaluate_canonical::<TextAnchor>(zoom, feature, &canonical);
+                let text_anchor = layout.text_anchor.evaluate(
+                    &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+                );
                 if variable_anchor_offsets.as_ref().is_none_or(VariableAnchorOffsetCollection::is_empty) {
                     // Layers with variable anchors use the
                     // `text-radial-offset` property and the [x, y] offset
                     // vector is calculated at placement time instead of
                     // layout time
-                    let radial_offset = layout.evaluate_canonical::<TextRadialOffset>(zoom, feature, &canonical);
+                    let radial_offset = layout.text_radial_offset.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    );
                     if radial_offset > 0.0 {
                         // The style spec says don't use `text-offset` and
                         // `text-radial-offset` together but doesn't actually
@@ -1541,14 +1575,20 @@ impl Layout for SymbolLayout {
                         // the radial offset.
                         text_offset = evaluate_radial_offset(text_anchor, radial_offset * ONE_EM);
                     } else {
-                        let offset = layout.evaluate_canonical::<TextOffset>(zoom, feature, &canonical);
+                        let offset = layout.text_offset.evaluate(
+                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                                .with_canonical_tile_id(Some(&canonical)),
+                        );
                         text_offset = [offset[0] * ONE_EM, offset[1] * ONE_EM];
                     }
                 }
                 let mut text_justify = if text_along_line {
                     TextJustifyType::Center
                 } else {
-                    layout.evaluate_canonical::<TextJustify>(zoom, feature, &canonical)
+                    layout.text_justify.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical)),
+                    )
                 };
 
                 let bidi = &mut self.bidi;
@@ -1688,14 +1728,20 @@ impl Layout for SymbolLayout {
                 if let Some(position) = image_positions.get(icon.id()) {
                     shaped_icon = Some(PositionedIcon::shape_icon(
                         position,
-                        &layout.evaluate_canonical::<IconOffset>(zoom, feature, &canonical),
-                        layout.evaluate_canonical::<IconAnchor>(zoom, feature, &canonical),
+                        &layout.icon_offset.evaluate(
+                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                                .with_canonical_tile_id(Some(&canonical)),
+                        ),
+                        layout.icon_anchor.evaluate(
+                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                                .with_canonical_tile_id(Some(&canonical)),
+                        ),
                     ));
                 }
                 if image.sdf {
                     icon_type = SymbolContent::IconSDF;
                 }
-                if image.pixel_ratio != self.pixel_ratio || layout.get::<IconRotate>().constant_or(&1.0) != 0.0 {
+                if image.pixel_ratio != self.pixel_ratio || layout.icon_rotate.constant_or(&1.0) != 0.0 {
                     self.icons_need_linear = true;
                 }
             }

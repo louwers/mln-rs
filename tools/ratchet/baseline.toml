@@ -105,7 +105,6 @@
 "crates/mln_style/src/layers/raster_layer_properties.rs" = 1
 "crates/mln_style/src/layers/symbol_layer_impl.rs" = 1
 "crates/mln_style/src/layers/symbol_layer_properties.rs" = 1
-"crates/mln_style/src/properties.rs" = 2
 "crates/mln_style/src/property_value.rs" = 3
 "crates/mln_style/src/source_impl.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1
@@ -212,7 +211,6 @@
 "crates/mln_storage/src/stub_file_source.rs" = 19
 "crates/mln_storage_offline/src/database_file_source.rs" = 11
 "crates/mln_storage_offline/src/offline_download.rs" = 57
-"crates/mln_style/src/properties.rs" = 3
 "crates/mln_style/src/source.rs" = 5
 "crates/mln_style/src/sources/geojson_source.rs" = 9
 "crates/mln_style/src/sources/image_source.rs" = 10

@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
 use crate::property_expression::PropertyExpression;
-use crate::renderer::property_evaluator::Evaluator;
 
 /// A style property's value: undefined (the default), a constant or an
 /// expression.
@@ -89,15 +88,6 @@ impl<T> PropertyValue<T> {
         match self {
             PropertyValue::Expression(e) => e,
             _ => panic!("PropertyValue::as_expression_mut on a non-expression value"),
-        }
-    }
-
-    /// `evaluate(evaluator)`: visits the alternative with the evaluator.
-    pub(crate) fn evaluate<E: Evaluator<T>>(&self, evaluator: &E) -> E::ResultType {
-        match self {
-            PropertyValue::Undefined => evaluator.undefined(),
-            PropertyValue::Constant(t) => evaluator.constant(t),
-            PropertyValue::Expression(e) => evaluator.expression(e),
         }
     }
 

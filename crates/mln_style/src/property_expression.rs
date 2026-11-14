@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
-use mln_expression::expression::FeatureState;
 use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -247,94 +244,6 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
             }
             _ => self.evaluate_context(context, final_default_value),
         }
-    }
-
-    /// `evaluate(float zoom)`.
-    pub fn evaluate_zoom(&self, zoom: f32) -> T
-    where
-        T: Default,
-    {
-        debug_assert!(!self.is_zoom_constant() || self.get_dependencies().intersects(Dependency::GLOBAL_STATE));
-        debug_assert!(self.is_feature_constant());
-        self.evaluate(&EvaluationContext::new(zoom), T::default())
-    }
-
-    pub fn evaluate_feature(&self, feature: &dyn GeometryTileFeature, final_default_value: T) -> T {
-        debug_assert!(self.is_zoom_constant());
-        debug_assert!(!self.is_feature_constant());
-        self.evaluate(&EvaluationContext::from_feature(Some(feature)), final_default_value)
-    }
-
-    pub(crate) fn evaluate_feature_images(
-        &self,
-        feature: &dyn GeometryTileFeature,
-        available_images: &VecSet<String>,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::from_feature(Some(feature)).with_available_images(Some(available_images)),
-            final_default_value,
-        )
-    }
-
-    pub fn evaluate_zoom_feature(&self, zoom: f32, feature: &dyn GeometryTileFeature, final_default_value: T) -> T {
-        self.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(feature)), final_default_value)
-    }
-
-    pub(crate) fn evaluate_zoom_feature_images(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        available_images: &VecSet<String>,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_available_images(Some(available_images)),
-            final_default_value,
-        )
-    }
-
-    pub(crate) fn evaluate_zoom_feature_images_canonical(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        available_images: &VecSet<String>,
-        canonical: &CanonicalTileID,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                .with_available_images(Some(available_images))
-                .with_canonical_tile_id(Some(canonical)),
-            final_default_value,
-        )
-    }
-
-    pub(crate) fn evaluate_zoom_feature_canonical(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        canonical: &CanonicalTileID,
-        final_default_value: T,
-    ) -> T {
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-            final_default_value,
-        )
-    }
-
-    pub(crate) fn evaluate_zoom_feature_state(
-        &self,
-        zoom: f32,
-        feature: &dyn GeometryTileFeature,
-        state: &FeatureState,
-        final_default_value: T,
-    ) -> T {
-        debug_assert!(!self.is_feature_constant());
-        self.evaluate(
-            &EvaluationContext::with_zoom_feature_state(zoom, Some(feature), Some(state)),
-            final_default_value,
-        )
     }
 
     pub(crate) fn possible_outputs(&self) -> Vec<Option<T>> {

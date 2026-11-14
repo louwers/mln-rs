@@ -9,8 +9,6 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::{DepthMaskType, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::light::{LightAnchor, LightPosition};
-use mln_style::sky::{SkyAtmosphereBlend, SkyColor, SkyHorizonBlend, SkyHorizonColor};
 use mln_style_types::LightAnchorType;
 use mln_util::Color;
 use mln_util::geo::WrapMode;
@@ -62,10 +60,10 @@ fn make_fullscreen_layer_group(
 }
 
 fn sun_position(light: &EvaluatedLight, state: &TransformState, blend: f32) -> [f32; 4] {
-    let position = light.get::<LightPosition>().get_cartesian();
+    let position = light.light_position.uniform().get_cartesian();
     let mut sun: Vec4 = [-f64::from(position[0]), -f64::from(position[1]), -f64::from(position[2]), 0.0];
 
-    if *light.get::<LightAnchor>() == LightAnchorType::Map {
+    if *light.light_anchor.uniform() == LightAnchorType::Map {
         let mut m: Mat4 = [0.0; 16];
         matrix::identity(&mut m);
         let a = m;
@@ -151,12 +149,12 @@ impl SkyPass {
                 ];
 
                 let props = SkyPropsUBO {
-                    sky_color: color_components(evaluated.get::<SkyColor>()),
-                    horizon_color: color_components(evaluated.get::<SkyHorizonColor>()),
+                    sky_color: color_components(evaluated.sky_color.uniform()),
+                    horizon_color: color_components(evaluated.sky_horizon_color.uniform()),
                     horizon,
                     horizon_normal: normal,
                     viewport_size: [viewport_size.width as f32, viewport_size.height as f32],
-                    sky_horizon_blend: *evaluated.get::<SkyHorizonBlend>() * viewport_size.height as f32 * 0.5,
+                    sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
                     sky_blend: projection_transition as f32,
                 };
                 let mut group = sky_layer_group.borrow_mut();
@@ -167,7 +165,7 @@ impl SkyPass {
             sky_layer_group.borrow_mut().clear_drawables();
         }
 
-        let atmosphere_blend = *evaluated.get::<SkyAtmosphereBlend>() * projection_transition as f32;
+        let atmosphere_blend = *evaluated.sky_atmosphere_blend.uniform() * projection_transition as f32;
         if !state.is_globe_rendering() || atmosphere_blend <= 0.0 {
             if let Some(atmosphere_layer_group) = &self.atmosphere_layer_group {
                 atmosphere_layer_group.borrow_mut().clear_drawables();

@@ -8,8 +8,8 @@ use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::layer_properties::LayerProperties;
-use mln_style::layers::circle_layer_properties::{CircleLayerProperties, CircleSortKey};
-use mln_style::properties::Property;
+use mln_style::layers::CircleLayoutProperties;
+use mln_style::layers::circle_layer_properties::CircleLayerProperties;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
@@ -64,11 +64,11 @@ impl CircleLayout {
             (*group[0]).downcast_ref::<CircleLayerProperties>().expect("CircleLayout: not circle layer properties");
         let leader_impl = leader_layer_properties.layer_impl();
         let unevaluated_layout = &leader_impl.layout;
-        let sort_features_by_key = !unevaluated_layout.get::<CircleSortKey>().is_undefined();
+        let sort_features_by_key = !unevaluated_layout.circle_sort_key.is_undefined();
         let mut evaluation_parameters = PropertyEvaluationParameters::new(zoom);
         evaluation_parameters.global_state = parameters.global_state.clone();
         let layout = unevaluated_layout.evaluate(&evaluation_parameters);
-        let sort_key_property = layout.get::<CircleSortKey>();
+        let sort_key_property = &layout.circle_sort_key;
         let constant_sort_key = if sort_features_by_key { sort_key_property.constant() } else { None };
         let source_layer_id = leader_impl.source_layer.clone();
         let bucket_leader_id = leader_impl.id.clone();
@@ -102,7 +102,7 @@ impl CircleLayout {
             }
 
             if !sort_features_by_key {
-                features.push(CircleFeature { i, sort_key: CircleSortKey::default_value() });
+                features.push(CircleFeature { i, sort_key: CircleLayoutProperties::Defaults::circle_sort_key() });
                 continue;
             }
 
@@ -111,7 +111,7 @@ impl CircleLayout {
                 continue;
             }
 
-            let sort_key = sort_key_property.evaluate_feature(&*feature, zoom, CircleSortKey::default_value());
+            let sort_key = sort_key_property.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(&*feature)));
             feature.check()?;
             let circle_feature = CircleFeature { i, sort_key };
             // std::lower_bound: the first feature whose key is not less.

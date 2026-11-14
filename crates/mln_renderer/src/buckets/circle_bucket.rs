@@ -8,11 +8,7 @@ use std::sync::atomic::Ordering;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::circle_layer_properties::{
-    CircleBlur, CircleColor, CircleLayerProperties, CircleOpacity, CirclePaintProperties, CircleRadius,
-    CircleStrokeColor, CircleStrokeOpacity, CircleStrokeWidth, CircleTranslate,
-};
-use mln_style::properties::Property;
+use mln_style::layers::circle_layer_properties::{CircleLayerProperties, CirclePaintProperties};
 use mln_style_types::image::ImagePositions;
 use mln_util::Color;
 use mln_vec_map::VecMap;
@@ -27,13 +23,13 @@ use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
-        circle_blur: CircleBlur => PaintPropertyBinder<f32>,
-        circle_color: CircleColor => PaintPropertyBinder<Color>,
-        circle_opacity: CircleOpacity => PaintPropertyBinder<f32>,
-        circle_radius: CircleRadius => PaintPropertyBinder<f32>,
-        circle_stroke_color: CircleStrokeColor => PaintPropertyBinder<Color>,
-        circle_stroke_opacity: CircleStrokeOpacity => PaintPropertyBinder<f32>,
-        circle_stroke_width: CircleStrokeWidth => PaintPropertyBinder<f32>,
+        circle_blur => PaintPropertyBinder<f32>,
+        circle_color => PaintPropertyBinder<Color>,
+        circle_opacity => PaintPropertyBinder<f32>,
+        circle_radius => PaintPropertyBinder<f32>,
+        circle_stroke_color => PaintPropertyBinder<Color>,
+        circle_stroke_opacity => PaintPropertyBinder<f32>,
+        circle_stroke_width => PaintPropertyBinder<f32>,
     }
 );
 
@@ -124,16 +120,16 @@ impl Bucket for CircleBucket {
         let evaluated = get_evaluated::<CircleLayerProperties>(&layer.base().evaluated_properties);
         let binders = self.paint_property_binders.get(layer.get_id());
         let radius = get_radius_or_width(
-            evaluated.get::<CircleRadius>().constant(),
-            CircleRadius::default_value(),
+            evaluated.circle_radius.constant(),
+            CirclePaintProperties::Defaults::circle_radius(),
             binders.and_then(|b| b.read().circle_radius.statistics.max()),
         );
         let stroke = get_radius_or_width(
-            evaluated.get::<CircleStrokeWidth>().constant(),
-            CircleStrokeWidth::default_value(),
+            evaluated.circle_stroke_width.constant(),
+            CirclePaintProperties::Defaults::circle_stroke_width(),
             binders.and_then(|b| b.read().circle_stroke_width.statistics.max()),
         );
-        let translate = evaluated.get::<CircleTranslate>();
+        let translate = evaluated.circle_translate.uniform();
         // util::length(a, b) = std::sqrt(a * a + b * b), in float
         radius + stroke + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }

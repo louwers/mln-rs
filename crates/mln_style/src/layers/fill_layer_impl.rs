@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
 use crate::layer::{self, ImplBase, LayerTypeInfo};
-use crate::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties, FillPattern};
+use crate::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
@@ -52,7 +52,7 @@ impl layer::Impl for Impl {
         self.filter != impl_.filter
             || self.visibility != impl_.visibility
             || self.layout != impl_.layout
-            || self.paint.get::<FillPattern>().value != impl_.paint.get::<FillPattern>().value
+            || self.paint.fill_pattern.value != impl_.paint.fill_pattern.value
             || self.paint.has_data_driven_property_difference(&impl_.paint)
     }
 

@@ -4,10 +4,7 @@ use std::sync::atomic::Ordering;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::fill_layer_properties::{
-    FillColor, FillLayerProperties, FillLayoutProperties, FillOpacity, FillOutlineColor, FillPaintProperties,
-    FillPattern, FillTranslate,
-};
+use mln_style::layers::fill_layer_properties::{FillLayerProperties, FillLayoutProperties, FillPaintProperties};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -31,10 +28,10 @@ use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
     pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
-        fill_color: FillColor => PaintPropertyBinder<Color>,
-        fill_opacity: FillOpacity => PaintPropertyBinder<f32>,
-        fill_outline_color: FillOutlineColor => PaintPropertyBinder<Color>,
-        fill_pattern: FillPattern => CrossFadedPaintPropertyBinder<Image>,
+        fill_color => PaintPropertyBinder<Color>,
+        fill_opacity => PaintPropertyBinder<f32>,
+        fill_outline_color => PaintPropertyBinder<Color>,
+        fill_pattern => CrossFadedPaintPropertyBinder<Image>,
     }
 );
 
@@ -204,7 +201,7 @@ impl Bucket for FillBucket {
 
     fn get_query_radius(&self, layer: &dyn RenderLayer) -> f32 {
         let evaluated = get_evaluated::<FillLayerProperties>(&layer.base().evaluated_properties);
-        let translate = evaluated.get::<FillTranslate>();
+        let translate = evaluated.fill_translate.uniform();
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 

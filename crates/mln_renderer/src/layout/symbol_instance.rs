@@ -113,7 +113,7 @@ impl SymbolInstanceSharedData {
         shaped_text_orientations: &ShapedTextOrientations,
         shaped_icon: Option<&PositionedIcon>,
         vertically_shaped_icon: Option<&PositionedIcon>,
-        layout: &SymbolLayoutProperties::Evaluated,
+        layout: &SymbolLayoutProperties::Values,
         text_placement: SymbolPlacementType,
         text_offset: [f32; 2],
         image_map: &ImageMap,

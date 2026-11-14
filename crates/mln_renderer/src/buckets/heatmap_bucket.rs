@@ -9,9 +9,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_properties::{
-    HeatmapLayerProperties, HeatmapPaintProperties, HeatmapRadius, HeatmapWeight,
-};
+use mln_style::layers::heatmap_layer_properties::{HeatmapLayerProperties, HeatmapPaintProperties};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -31,8 +29,8 @@ use crate::render_layer::RenderLayer;
 
 crate::paint_property_binders!(
     pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
-        heatmap_radius: HeatmapRadius => PaintPropertyBinder<f32>,
-        heatmap_weight: HeatmapWeight => PaintPropertyBinder<f32>,
+        heatmap_radius => PaintPropertyBinder<f32>,
+        heatmap_weight => PaintPropertyBinder<f32>,
     }
     #[expect(dead_code, reason = "the heatmap bucket doesn't rewrite its vertices on a feature state change")]
     fn update_vertex_vectors;
