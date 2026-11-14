@@ -152,7 +152,7 @@ struct FrameSync {
     timeline: bool,
 }
 
-fn build_descriptor_set_layout(
+pub(crate) fn build_descriptor_set_layout(
     backend: &BackendImpl,
     type_: DescriptorSetType,
 ) -> Result<vk::DescriptorSetLayout, String> {
@@ -197,7 +197,7 @@ fn build_descriptor_set_layout(
     Ok(layout)
 }
 
-fn build_pipeline_layout(
+pub(crate) fn build_pipeline_layout(
     backend: &BackendImpl,
     layouts: &[vk::DescriptorSetLayout],
     push_constant_size: u32,

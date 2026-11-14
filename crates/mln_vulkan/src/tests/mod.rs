@@ -10,3 +10,6 @@ mod surface_test;
 // DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
 // rendered into the offscreen target and read back.
 mod background_test;
+// mln_gfx::gpu::conformance's frame through `VulkanGpu`, and its shaders
+// and texture writes.
+mod gpu_test;

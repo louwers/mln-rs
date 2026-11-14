@@ -51,7 +51,7 @@ use crate::shaders::layout::{
 };
 use crate::shaders::shader_source::{AttributeInfo, ShaderSource, shader_source};
 
-const ALL_BUILT_INS: &[BuiltIn] = &[
+pub(super) const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::ClippingMaskProgram,
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
@@ -110,7 +110,7 @@ fn stage_source(source: &ShaderSource, stage: Stage) -> &'static str {
 
 /// The `<name>`s of the `HAS_UNIFORM_u_<name>` the shader tests: its
 /// data-driven properties.
-fn uniform_properties(source: &ShaderSource) -> BTreeSet<String> {
+pub(super) fn uniform_properties(source: &ShaderSource) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
     for text in [source.glsl.vertex, source.glsl.fragment] {

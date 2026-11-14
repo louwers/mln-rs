@@ -3226,6 +3226,7 @@ dependencies = [
  "mln-rs-util",
  "naga",
  "parking_lot",
+ "slotmap",
  "windows",
 ]
 
