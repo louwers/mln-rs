@@ -1,8 +1,3 @@
-// The C++ pass keeps the descriptor (with a `Renderable&`); drawables read
-// `getDescriptor().renderable` for its size (and pass it, unused, to
-// `getRenderPipeline`). The port keeps the size and an identity of the
-// draw target instead of the reference.
-//
 // Drawables encode through a `StateFilter`, which drops the commands that set
 // state the pass already has, as the Metal backend's render pass does.
 
@@ -27,8 +22,6 @@ use crate::draw_target::as_webgpu;
 pub(crate) struct RenderPass {
     context: Rc<Context>,
     renderable_size: Size,
-    /// Address of the renderable's resource (`clipMaskRenderable` compares it).
-    renderable_id: usize,
     encoder: RefCell<Option<wgpu::RenderPass<'static>>>,
     /// The state `encoder` has, as far as [`StateFilter`] knows it.
     state: RefCell<PassState>,
@@ -56,7 +49,6 @@ impl RenderPass {
         let mut pass = RenderPass {
             context: Rc::clone(&context),
             renderable_size: descriptor.target.size(),
-            renderable_id: 0,
             encoder: RefCell::new(None),
             state: RefCell::new(PassState::default()),
             global_uniform_buffers_bound: Cell::new(false),
@@ -79,7 +71,6 @@ impl RenderPass {
             Log::error(Event::Render, "WebGPU: The pass's draw target is not a WebGPU one");
             return pass;
         };
-        pass.renderable_id = std::ptr::from_ref(target) as usize;
         let renderable_resource = target.resource();
         renderable_resource.bind();
 
@@ -124,8 +115,7 @@ impl RenderPass {
                 },
                 store: wgpu::StoreOp::Store,
             }),
-            // C++ uses Undefined load/store ops without a stencil clear; in
-            // wgpu `None` (read-only stencil aspect) is the equivalent.
+            // Without a stencil clear the stencil aspect is read-only.
             stencil_ops: descriptor
                 .clear_stencil
                 .map(|s| wgpu::Operations { load: wgpu::LoadOp::Clear(s as u32), store: wgpu::StoreOp::Store }),
@@ -179,10 +169,6 @@ impl RenderPass {
 
     pub(crate) fn get_renderable_size(&self) -> Size {
         self.renderable_size
-    }
-
-    pub(crate) fn get_renderable_id(&self) -> usize {
-        self.renderable_id
     }
 
     /// Sets whether the global uniform buffers are bound; the array is the

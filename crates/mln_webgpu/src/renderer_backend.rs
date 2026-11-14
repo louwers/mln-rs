@@ -1,7 +1,5 @@
-// The C++ backend stores raw `WGPUDevice`/`WGPUQueue`/instance handles in its
-// `Impl` and every resource reaches them through `Context& -> getBackend()`.
-// Here the `Impl` is shared (`Rc<BackendImpl>`) by the backend and the
-// context, and resources hold an `Rc<Context>`.
+// The backend and the context share the device and queue (`Rc<BackendImpl>`),
+// and resources hold an `Rc<Context>`.
 //
 // What the backend draws into is a target built on it (`OffscreenTarget`,
 // `SurfaceTarget`), whose draw targets give the render passes their views.
@@ -24,7 +22,6 @@ use crate::writes::Writes;
 pub(crate) struct BackendImpl {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    /// `None` for no format, C++'s `Undefined`.
     depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
     color_format: Cell<Option<wgpu::TextureFormat>>,
     writes: RefCell<Writes>,
@@ -66,21 +63,27 @@ impl BackendImpl {
         self.color_format.get()
     }
 
-    /// Port-only: writes `data` at `offset` in `buffer` ahead of the next
+    /// The formats of the color and depth-stencil attachments of the pass
+    /// being recorded: what its pipelines must draw into.
+    pub(crate) fn target_formats(&self) -> (wgpu::TextureFormat, Option<wgpu::TextureFormat>) {
+        (self.color_format.get().unwrap_or(wgpu::TextureFormat::Bgra8Unorm), self.depth_stencil_format.get())
+    }
+
+    /// Writes `data` at `offset` in `buffer` ahead of the next
     /// [`submit`](Self::submit)'s commands, as `Queue::write_buffer` does,
     /// but small writes are gathered and copied into place together.
     pub(crate) fn write_buffer(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
         self.writes.borrow_mut().write(&self.device, &self.queue, buffer, offset, data);
     }
 
-    /// Port-only: [`write_buffer`](Self::write_buffer) where the bytes after
+    /// [`write_buffer`](Self::write_buffer) where the bytes after
     /// `data` up to `padded` bytes from `offset` already hold zeros
     /// (`Writes::write_padded`).
     pub(crate) fn write_buffer_padded(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8], padded: u64) {
         self.writes.borrow_mut().write_padded(&self.device, &self.queue, buffer, offset, data, padded);
     }
 
-    /// Port-only: `size` bytes (a multiple of 256) of a new uniform buffer,
+    /// `size` bytes (a multiple of 256) of a new uniform buffer,
     /// zero filled: the buffer and their offset in it. Small ones are taken
     /// in turn from a shared page, so that UBOs made together sit together
     /// and their writes join one copy. A page is freed with the last of its
@@ -110,7 +113,7 @@ impl BackendImpl {
         (buffer.clone(), offset)
     }
 
-    /// Port-only: writes the bytes of `data` at `offset` in `buffer`
+    /// Writes the bytes of `data` at `offset` in `buffer`
     /// straight from the JS array they're in (`Writes::write_from_host`).
     /// `offset` is a multiple of 4; a length that isn't is padded with
     /// zeros.
@@ -136,7 +139,7 @@ impl BackendImpl {
         }
     }
 
-    /// Port-only: submits `command_buffer` after the copies of the writes
+    /// Submits `command_buffer` after the copies of the writes
     /// gathered by [`write_buffer`](Self::write_buffer).
     pub(crate) fn submit(&self, command_buffer: wgpu::CommandBuffer) {
         let writes = self.writes.borrow_mut().encode(&self.device, &self.queue);
@@ -151,8 +154,8 @@ pub struct RendererBackend {
     device: Device,
 }
 
-/// The shader types registered by `initShaders`, in the C++ order, with the
-/// instanced fill extrusion shaders after their plain ones, as on Metal.
+/// The shader types `init_shaders` registers, with the instanced fill
+/// extrusion shaders after their plain ones.
 const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
@@ -227,9 +230,8 @@ impl RendererBackend {
 
     /// Registers one shader group per built-in shader.
     ///
-    /// C++ registers all 31 types; a type whose WGSL is not part of this
-    /// build is skipped.
-    /// A duplicate registration is an error, as in C++ (which throws).
+    /// A type whose WGSL is not part of this build is skipped. A duplicate
+    /// registration is an error.
     #[expect(clippy::unused_self, reason = "each backend registers its shaders through its own `init_shaders`")]
     pub(crate) fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
         for &shader_id in REGISTERED_SHADERS {
