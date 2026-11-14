@@ -1,0 +1,108 @@
+# release-plz (https://release-plz.dev) prepares each release: every night,
+# .github/workflows/release-pr.yml runs `release-plz release-pr`, which opens
+# a pull request with the next version and its changelog, or updates the one
+# it opened. Merging it releases that version (.github/workflows/release.yml,
+# RELEASING.md).
+
+[workspace]
+# The next version. cargo-semver-checks compares each library with its release
+# on crates.io: a change that breaks one's API bumps the minor version (0.1.3
+# to 0.2.0), and any other change the patch (0.1.3 to 0.1.4). Every package
+# inherits the workspace's version, so all of them take the largest bump. From
+# 0.0.x, release-plz bumps only the patch. The checks build for Linux, so a
+# break in code that only other targets build needs the version set by hand
+# (RELEASING.md).
+semver_check = true
+# One changelog, mln-rs's (below).
+changelog_update = false
+# Only the workspace's packages change in Cargo.lock.
+dependencies_update = false
+# The release workflow publishes the packages, tags the commit and creates
+# the GitHub release.
+publish = false
+git_tag_enable = false
+git_release_enable = false
+pr_name = "Release{% if version %} v{{ version }}{% endif %}"
+# The pull request's description: the packages whose API cargo-semver-checks
+# found broken, and mln-rs's changelog. Its reports would often run past the
+# 65,536 characters GitHub allows, and release-plz would cut them off.
+pr_body = """
+{%- set breaking %}{% for release in releases %}{% if release.semver_check == "incompatible" %}
+- `{{ release.package }}`{% endif %}{% endfor %}{% endset -%}
+{% for release in releases %}{% if release.package == "mln-rs" %}Releases mln-rs and its mln-rs-* packages at {{ release.next_version }}.{% endif %}{% endfor %}
+{% if breaking %}
+cargo-semver-checks found API breaking changes in:
+{{ breaking }}
+{% else %}
+cargo-semver-checks found no API breaking changes.
+{% endif %}
+{%- for release in releases %}{% if release.changelog %}
+## {{ release.title }}
+
+{{ release.changelog }}
+{%- endif %}{% endfor %}
+"""
+
+[[package]]
+name = "mln-rs"
+changelog_update = true
+# The commits of every published package: mln-rs re-exports the libraries.
+changelog_include = [
+  "mln-rs-actor",
+  "mln-rs-conversion",
+  "mln-rs-expression",
+  "mln-rs-feature",
+  "mln-rs-geojson-vt",
+  "mln-rs-geometry",
+  "mln-rs-gestures",
+  "mln-rs-gfx",
+  "mln-rs-gl",
+  "mln-rs-headless",
+  "mln-rs-image",
+  "mln-rs-kdbush",
+  "mln-rs-map",
+  "mln-rs-map-types",
+  "mln-rs-math",
+  "mln-rs-mtl",
+  "mln-rs-pixelmatch",
+  "mln-rs-polylabel",
+  "mln-rs-render-test",
+  "mln-rs-renderer",
+  "mln-rs-runtime",
+  "mln-rs-shelf-pack",
+  "mln-rs-sprite",
+  "mln-rs-storage",
+  "mln-rs-storage-offline",
+  "mln-rs-style",
+  "mln-rs-style-codegen",
+  "mln-rs-style-types",
+  "mln-rs-supercluster",
+  "mln-rs-system-fonts",
+  "mln-rs-text",
+  "mln-rs-tile",
+  "mln-rs-tile-id",
+  "mln-rs-util",
+  "mln-rs-vec-map",
+  "mln-rs-vulkan",
+  "mln-rs-web-host",
+  "mln-rs-webgpu",
+]
+
+# Each release's commits, newest first, by their subjects with links to their
+# pull requests: the commits aren't conventional commits, which release-plz's
+# default groups by type. release-plz gives the commits package by package, so
+# each one's commit time goes first in its message, for the body to sort by.
+[changelog]
+header = "# Changelog"
+# The body says where its blank lines go.
+trim = false
+commit_preprocessors = [
+  { pattern = "^", replace_command = 'message=$(cat); git show -s --format="%ct %s" "$COMMIT_SHA" 2>/dev/null || echo "0 $message"' },
+]
+body = '''
+
+## [{{ version }}]({{ remote.link }}/compare/v{{ previous.version }}...v{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for commit in commits | sort(attribute="message") | reverse %}
+- {{ commit.message | trim | split(pat=" ") | slice(start=1) | join(sep=" ") | replace_regex(from=" \(#([0-9]+)\)$", to=" ([#$1](" ~ remote.link ~ "/pull/$1))") }}
+{%- endfor %}
+'''

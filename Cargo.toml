@@ -22,8 +22,9 @@ members = [
 exclude = ["patches/*"]
 
 [workspace.package]
-# Every package is published at this version. To release, bump it here and
-# in the in-repo [workspace.dependencies] below (RELEASING.md).
+# Every package is published at this version. The release pull request
+# bumps it here and in the in-repo [workspace.dependencies] below
+# (RELEASING.md).
 version = "0.0.11"
 edition = "2024"
 # The oldest Rust the packages build with (mlt-core 0.22 needs 1.98). CI's

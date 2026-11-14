@@ -145,7 +145,7 @@ usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet/ratchet.py, 
 run = 'eval "set -- ${usage_args:-}"; python3 -I tools/ratchet/ratchet.py "$@"'
 
 [tasks.release]
-description = "Publish the crates from main at the version in Cargo.toml (RELEASING.md)"
+description = "Run the release workflow on main again, to finish a release that failed part way (RELEASING.md)"
 run = "gh workflow run release.yml --repo louwers/mln-rs --ref main"
 
 [tasks.udeps]

@@ -22,7 +22,9 @@
     ],
   },
   "excludes": [
-    // Generated code stays as its generator writes it.
+    // Generated code stays as its generator writes it, and the changelog as
+    // release-plz writes it (release-plz.toml).
+    "CHANGELOG.md",
     "crates/mln_c/src/generated/**",
     "crates/mln_style/src/layers/*_layer_properties.rs",
     "crates/mln_style/src/layers/background_layer.rs",
