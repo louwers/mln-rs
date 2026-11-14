@@ -339,6 +339,38 @@ fn layer_mut_guard_notifies_once_per_change() {
     assert!(!Arc::ptr_eq(&before, &style.get_layer_impls()));
 }
 
+#[test]
+fn layer_changes_leave_earlier_snapshots_unchanged() {
+    // Not a C++ test: the collection changes its impls in place unless a
+    // snapshot shares them.
+    let mut style = stub_style();
+    let observer = Rc::new(CountingObserver::default());
+    style.set_observer(Some(Rc::<CountingObserver>::clone(&observer)));
+    style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    let without_layers = observer.updates.replace(0);
+    style.load_json(
+        r#"{"version":8,"sources":{},"layers":[{"id":"a","type":"background"},{"id":"b","type":"background"}]}"#,
+    );
+    // An update for each layer.
+    assert_eq!(without_layers + 2, observer.updates.replace(0));
+    let ids = |impls: &[Arc<dyn crate::layer::Impl>]| impls.iter().map(|impl_| impl_.id.clone()).collect::<Vec<_>>();
+    let loaded = style.get_layer_impls();
+    assert_eq!(["a", "b"], *ids(&loaded));
+
+    style.add_layer(Box::new(LineLayer::new("c", "source")), Some("b")).unwrap();
+    let error = style.add_layer(Box::new(LineLayer::new("a", "source")), Some("b")).err().unwrap();
+    assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
+    assert_eq!("Layer a already exists", error.message);
+    assert_eq!(1, observer.updates.get());
+    let added = style.get_layer_impls();
+    assert_eq!(["a", "c", "b"], *ids(&added));
+
+    assert!(style.remove_layer("a").is_some());
+    assert_eq!(["c", "b"], *ids(&style.get_layer_impls()));
+    assert_eq!(["a", "b"], *ids(&loaded));
+    assert_eq!(["a", "c", "b"], *ids(&added));
+}
+
 // gtest: Style.GlobalState
 #[test]
 fn global_state() {
