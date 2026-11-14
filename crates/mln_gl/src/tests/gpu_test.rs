@@ -3,7 +3,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, invalid_calls, topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, depth_only, foreign_ids, invalid_calls, topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState, Gpu, GpuError,
@@ -68,6 +68,14 @@ fn depth_only_through_gpu() {
         return;
     };
     depth_only(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
+}
+
+#[test]
+fn foreign_ids_through_gpu() {
+    let (Some(mut first), Some(mut second)) = (gpu(), gpu()) else {
+        return;
+    };
+    foreign_ids(&mut first, &mut second).expect("the valid calls");
 }
 
 #[test]
