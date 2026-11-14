@@ -301,12 +301,6 @@ impl WebGpu {
         Ok(group)
     }
 
-    /// Records `pass` into `encoder`.
-    fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, pass: &Pass) -> Result<(), GpuError> {
-        let mut render_pass = self.begin_pass(encoder, pass)?;
-        self.encode_commands(&mut render_pass, &pass.label, &pass.commands)
-    }
-
     /// Begins `pass` on `encoder`, without its commands.
     fn begin_pass(
         &self,
@@ -838,7 +832,8 @@ impl Gpu for WebGpu {
         let mut encoder =
             self.device.device().create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Gpu::submit") });
         for pass in passes {
-            self.encode(&mut encoder, pass)?;
+            let mut render_pass = self.begin_pass(&mut encoder, pass)?;
+            self.encode_commands(&mut render_pass, &pass.label, &pass.commands)?;
         }
         // wgpu reports what it rejects in the passes when they finish. The
         // writes stay for the next submit.
