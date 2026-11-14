@@ -1323,9 +1323,11 @@ pub(crate) struct MapEntry {
     pending_still: Option<PendingStill>,
     /// The render session that draws the map.
     session: Option<SessionLink>,
-    /// Flushes the map once the runtime's loop has run the tasks it has: the
-    /// map's waker sends it, and sends before it runs make one flush.
-    _flush_task: AsyncTask,
+    /// Flushes the map after the runtime's loop has run the tasks queued on
+    /// it. The map's waker sends it, and each flush withdraws the send, so
+    /// it is pending while the map has reported something that no flush has
+    /// taken.
+    flush_task: AsyncTask,
     ends: Ends,
     /// The callbacks of the custom sources that commands added.
     pub(crate) callback_sources: CallbackSources,
@@ -1394,7 +1396,7 @@ pub(crate) fn create(
     let _ = published.updates.set(map.update_reader());
     let flush_task = async_task(move |core, outbox| flush(core, id, outbox));
     let flush_sender = flush_task.sender();
-    map.set_waker(Some(Arc::new(move || flush_sender.send())));
+    map.set_reports_waker(Some(Arc::new(move || flush_sender.send())));
     published.applied.store(1, Ordering::SeqCst);
     core.maps.insert(
         id,
@@ -1406,7 +1408,7 @@ pub(crate) fn create(
             pending_style: None,
             pending_still: None,
             session: None,
-            _flush_task: flush_task,
+            flush_task,
             ends: Ends::default(),
             callback_sources: CallbackSources::default(),
             geojson_updates: GeoJsonUpdates::default(),
@@ -1431,7 +1433,12 @@ pub(crate) fn apply_command<T>(
     apply: impl FnOnce(&mut MapEntry, &mut Outbox) -> T,
     after: impl FnOnce(&MapEntry, T, Applied, &mut Outbox),
 ) {
-    flush(core, id, outbox);
+    // What the runtime's calls change, a flush in the same task takes. What
+    // came since then, the map reported: the report sent the flush task, or
+    // is queued with its waker still on its way.
+    if core.maps.get(&id).is_some_and(|entry| entry.flush_task.is_pending() || entry.core.has_reports()) {
+        flush(core, id, outbox);
+    }
     let Some(entry) = core.maps.get_mut(&id) else { return };
     let value = apply(entry, outbox);
     entry.applied = sequence;
@@ -1506,6 +1513,9 @@ fn load_style(
 /// to.
 pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     let Some(entry) = core.maps.get_mut(&id) else { return };
+    // The flush takes what the map reported so far, and what it reports from
+    // now on sends the task again.
+    entry.flush_task.cancel();
     let events = entry.core.drain_events();
     // The sources that left the style, by a command or a style load, let go
     // of what they held before anything reports the change.

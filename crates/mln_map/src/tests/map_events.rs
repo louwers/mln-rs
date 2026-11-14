@@ -95,6 +95,26 @@ fn the_waker_runs_when_the_map_has_events() {
 }
 
 #[test]
+fn the_reports_waker_runs_for_reports_only() {
+    let _loop = RunLoop::new();
+    let mut map = map(MapOptions::default());
+    map.drain_events();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&wakes);
+    map.set_reports_waker(Some(Arc::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    })));
+
+    // The map's own call reports its events, which its owner drains.
+    map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
+    assert_eq!(wakes.load(Ordering::SeqCst), 0);
+    assert!(!map.drain_events().is_empty());
+
+    report(&map, RendererEvent::Invalidate);
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn missing_images_reach_the_owner() {
     let _loop = RunLoop::new();
     let mut map = map(MapOptions::default());
