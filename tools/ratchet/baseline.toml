@@ -136,16 +136,13 @@
 "crates/mln_c/src/web.rs" = 5
 "crates/mln_expression/src/image_expression.rs" = 3
 "crates/mln_expression/src/parsing_context.rs" = 11
-"crates/mln_gfx/src/backend_scope.rs" = 4
-"crates/mln_gfx/src/context.rs" = 9
-"crates/mln_gfx/src/offscreen_target.rs" = 4
 "crates/mln_gfx/src/shader_group.rs" = 1
 "crates/mln_gfx/src/vertex_vector.rs" = 13
 "crates/mln_gl/src/borrowed_target.rs" = 7
-"crates/mln_gl/src/context.rs" = 1
 "crates/mln_gl/src/exported_target.rs" = 9
+"crates/mln_gl/src/renderer_backend.rs" = 2
 "crates/mln_gl/src/surface_target.rs" = 5
-"crates/mln_headless/src/headless_frontend.rs" = 12
+"crates/mln_headless/src/headless_frontend.rs" = 14
 "crates/mln_map/src/transform.rs" = 3
 "crates/mln_mtl/src/borrowed_target.rs" = 14
 "crates/mln_mtl/src/exported_target.rs" = 8
@@ -154,6 +151,7 @@
 "crates/mln_renderer/src/bucket_geometry.rs" = 2
 "crates/mln_renderer/src/drawable.rs" = 10
 "crates/mln_renderer/src/drawable_builder.rs" = 4
+"crates/mln_renderer/src/gfx/context.rs" = 7
 "crates/mln_renderer/src/gfx/drawable_atlases_tweaker.rs" = 4
 "crates/mln_renderer/src/gfx/dynamic_texture.rs" = 4
 "crates/mln_renderer/src/globe_depth_pass.rs" = 2
@@ -230,9 +228,8 @@
 "crates/mln_util/src/serialization/payload.rs" = 6
 "crates/mln_util/src/serialization/shared.rs" = 3
 "crates/mln_vulkan/src/borrowed_target.rs" = 15
-"crates/mln_vulkan/src/context.rs" = 2
 "crates/mln_vulkan/src/exported_target.rs" = 8
-"crates/mln_vulkan/src/renderer_backend.rs" = 2
+"crates/mln_vulkan/src/renderer_backend.rs" = 4
 "crates/mln_vulkan/src/surface_resource.rs" = 24
 "crates/mln_web_host/src/pump.rs" = 3
 "crates/mln_web_host/src/shaper.rs" = 6

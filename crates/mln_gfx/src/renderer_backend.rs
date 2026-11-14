@@ -1,71 +1,21 @@
 use std::any::Any;
-use std::cell::OnceCell;
-use std::rc::Rc;
+use std::cell::RefMut;
 
-use mln_util::identity::SimpleIdentity;
+use crate::gpu::Gpu;
 
-use crate::backend_scope::BackendScope;
-use crate::context::Context;
-
-/// The data members of `gfx::RendererBackend`.
-pub struct RendererBackendBase {
-    pub(crate) unique_id: SimpleIdentity,
-    context: OnceCell<Rc<dyn Context>>,
-}
-
-impl Default for RendererBackendBase {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl RendererBackendBase {
-    #[must_use]
-    pub fn new() -> Self {
-        RendererBackendBase { unique_id: SimpleIdentity::new(), context: OnceCell::new() }
-    }
-
-    /// Takes the context, for a backend to drop as it is dropped. Returns the
-    /// context, so a backend can release what it caches before dropping it.
-    pub fn reset_context(&mut self) -> Option<Rc<dyn Context>> {
-        self.context.take()
-    }
-
-    /// Port-only: the context, if the backend has made it.
-    #[must_use]
-    pub fn existing_context(&self) -> Option<&Rc<dyn Context>> {
-        self.context.get()
-    }
-}
-
-/// A renderer's device-side state: its context and shaders. What it draws
-/// into is a `FrameTarget` built on it.
+/// What a renderer draws with on a device: the backend's [`Gpu`]. What it
+/// draws into is a `FrameTarget` built on it.
 pub trait RendererBackend: Any {
-    fn renderer_backend_base(&self) -> &RendererBackendBase;
+    /// The backend's [`Gpu`], which owns the renderer's resources and runs
+    /// its frames.
+    fn gpu(&self) -> RefMut<'_, dyn Gpu>;
 
-    /// Returns the device's context, created on first use (`std::call_once`).
-    /// Must be called inside a `BackendScope`.
-    fn get_context(&self) -> &dyn Context {
-        &**self.get_context_ptr()
+    /// Keeps what the backend's calls need ready across many of them, such
+    /// as OpenGL's context current, until the hold drops, as when a panic
+    /// unwinds. Holds nest. A backend that needs nothing holds nothing.
+    fn hold(&self) -> Hold<'_> {
+        Hold::default()
     }
-
-    /// The context as a shared pointer (the C++ context is owned by the
-    /// backend; passes and resources in the port hold `Rc`s instead of
-    /// references).
-    fn get_context_ptr(&self) -> &Rc<dyn Context> {
-        debug_assert!(BackendScope::exists());
-        self.renderer_backend_base().context.get_or_init(|| self.create_context())
-    }
-
-    fn unique_id(&self) -> SimpleIdentity {
-        self.renderer_backend_base().unique_id
-    }
-
-    /// Called when the backend's GL context needs to be made active or
-    /// inactive (protected + `friend class BackendScope` in C++).
-    fn create_context(&self) -> Rc<dyn Context>;
-    fn activate(&self);
-    fn deactivate(&self);
 }
 
 impl dyn RendererBackend {
@@ -73,5 +23,28 @@ impl dyn RendererBackend {
     pub fn downcast_ref<T: RendererBackend>(&self) -> Option<&T> {
         let any: &dyn Any = self;
         any.downcast_ref()
+    }
+}
+
+/// What a backend keeps ready while a [`RendererBackend::hold`] lasts,
+/// released when it drops.
+#[derive(Default)]
+#[must_use = "the hold ends when dropped"]
+pub struct Hold<'a> {
+    release: Option<Box<dyn FnOnce() + 'a>>,
+}
+
+impl<'a> Hold<'a> {
+    /// A hold that `release` ends.
+    pub fn new(release: impl FnOnce() + 'a) -> Hold<'a> {
+        Hold { release: Some(Box::new(release)) }
+    }
+}
+
+impl Drop for Hold<'_> {
+    fn drop(&mut self) {
+        if let Some(release) = self.release.take() {
+            release();
+        }
     }
 }

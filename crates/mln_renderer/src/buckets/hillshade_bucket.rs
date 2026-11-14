@@ -12,7 +12,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use geometry::Point;
-use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
@@ -24,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::geometry::dem_data::DEMData;
+use crate::gfx::context::Context;
 use crate::tile_mask::TileMask;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -223,7 +223,7 @@ impl Bucket for HillshadeBucket {
         &mut self.base
     }
 
-    fn upload(&self, _context: &dyn Context) {
+    fn upload(&self, _context: &Context) {
         if !self.has_data() {
             return;
         }

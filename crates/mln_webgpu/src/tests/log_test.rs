@@ -3,7 +3,7 @@ use std::sync::mpsc::{Sender, channel};
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use crate::Device;
-use crate::surface_target::backend_type_to_string;
+use crate::device::backend_type_to_string;
 
 struct Recorder(Sender<(EventSeverity, Event, i64, String)>);
 

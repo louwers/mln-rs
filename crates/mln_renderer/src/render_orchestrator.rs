@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_actor::{TaggedScheduler, scheduler};
+use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
-use mln_gfx::{Context, ShaderRegistry};
 use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::{Dependency, GlobalStateMap};
@@ -32,6 +32,7 @@ use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, DynamicTextureAtlasPtr};
 use crate::image_manager::ImageManager;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
@@ -1197,7 +1198,7 @@ impl RenderOrchestrator {
     pub(crate) fn update_layers(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,

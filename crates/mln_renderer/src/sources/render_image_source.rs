@@ -6,7 +6,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::Context;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
@@ -23,6 +22,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::bucket::Bucket;
 use crate::buckets::raster_bucket::RasterBucket;
+use crate::gfx::context::Context;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::render_tree::RenderItem;
 use crate::tile_parameters::TileParameters;
@@ -175,7 +175,7 @@ impl ImageSourceRenderData {
 }
 
 impl RenderItem for ImageSourceRenderData {
-    fn upload(&self, context: &dyn Context) {
+    fn upload(&self, context: &Context) {
         if let Some(bucket) = &self.bucket
             && bucket.needs_upload()
         {
@@ -188,7 +188,7 @@ impl RenderItem for ImageSourceRenderData {
 struct ImageSourceRenderItem(Rc<ImageSourceRenderData>);
 
 impl RenderItem for ImageSourceRenderItem {
-    fn upload(&self, context: &dyn Context) {
+    fn upload(&self, context: &Context) {
         self.0.upload(context);
     }
 }

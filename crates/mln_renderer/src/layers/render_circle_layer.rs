@@ -7,7 +7,7 @@ use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
+    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::downcast_arc;
@@ -34,6 +34,7 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -504,7 +505,7 @@ impl RenderLayer for RenderCircleLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

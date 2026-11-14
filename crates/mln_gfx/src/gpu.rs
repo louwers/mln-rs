@@ -26,6 +26,7 @@ use mln_util::Color;
 use mln_util::size::Size;
 
 pub use self::ids::{BindGroupId, BufferId, Id, IdData, PipelineId, ReadbackId, SamplerId, SlotMap, TextureId};
+use crate::backend::Type as BackendType;
 use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
@@ -60,6 +61,8 @@ pub struct Limits {
     pub buffer_offset_alignment: u32,
     /// The widest and tallest texture.
     pub max_texture_size: u32,
+    /// Whether passes draw into textures of `Rgba16Float`.
+    pub half_float_render_targets: bool,
 }
 
 /// How a buffer is bound.
@@ -520,6 +523,9 @@ pub struct Pass {
 /// every earlier `submit` read what was there before, and those of every
 /// later one read what the write wrote.
 pub trait Gpu {
+    /// The backend this is.
+    fn backend_type(&self) -> BackendType;
+
     fn limits(&self) -> Limits;
 
     fn create_buffer(&mut self, desc: &BufferDesc<'_>) -> Result<BufferId, GpuError>;

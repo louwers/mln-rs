@@ -80,11 +80,24 @@ fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static>
     }
 }
 
+/// The name of `backend` in a device's log record.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn backend_type_to_string(backend: wgpu::Backend) -> &'static str {
+    match backend {
+        wgpu::Backend::Noop => "Null",
+        wgpu::Backend::BrowserWebGpu => "WebGPU",
+        wgpu::Backend::Dx12 => "D3D12",
+        wgpu::Backend::Metal => "Metal",
+        wgpu::Backend::Vulkan => "Vulkan",
+        wgpu::Backend::Gl => "OpenGL",
+    }
+}
+
 impl Device {
     /// The library's device, on the adapter at `adapter_index` in
     /// [`wgpu::Instance::enumerate_adapters`] order, or on the
-    /// high-performance adapter when `None`. Its uncaptured errors are
-    /// logged.
+    /// high-performance adapter when `None`. It logs the adapter it is on,
+    /// and its uncaptured errors.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is
     /// no adapter at `adapter_index`, with
@@ -113,6 +126,11 @@ impl Device {
 
         let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
             .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
+        let info = adapter.get_info();
+        Log::info(
+            Event::Render,
+            format!("graphics device uses WebGPU adapter {} on {}", info.name, backend_type_to_string(info.backend)),
+        );
         Ok(Device::library(instance, adapter, device, queue))
     }
 

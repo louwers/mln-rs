@@ -10,9 +10,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
+use mln_gfx::ShaderRegistry;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
-use mln_gfx::{Context, ShaderRegistry};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
 use mln_style::layer::layer_type_info;
@@ -29,6 +29,7 @@ use mln_util::vectors::{Vec2, Vec3, Vec4};
 
 use crate::bucket::BucketPtr;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::gfx::context::Context;
 use crate::layer_group::LayerGroupPtr;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::line_atlas::LineAtlas;
@@ -544,7 +545,7 @@ pub trait RenderLayer {
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

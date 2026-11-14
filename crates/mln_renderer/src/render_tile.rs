@@ -6,7 +6,6 @@
 use std::rc::Rc;
 
 use glam::Vec2;
-use mln_gfx::Context;
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
 use mln_style::layer;
 use mln_style_types::TranslateAnchorType;
@@ -16,6 +15,7 @@ use mln_util::mat4::Mat4;
 
 use crate::bucket::BucketPtr;
 use crate::buckets::debug_bucket::DebugBucket; // layers: debug
+use crate::gfx::context::Context;
 use crate::render_layer::LayerRenderData;
 use crate::render_source::SourcePrepareParameters;
 use crate::tile::tile::Tile;
@@ -119,7 +119,7 @@ impl RenderTile {
         self.needs_rendering
     }
 
-    pub(crate) fn upload(&self, context: &dyn Context) {
+    pub(crate) fn upload(&self, context: &Context) {
         self.render_data().upload(context);
     }
 

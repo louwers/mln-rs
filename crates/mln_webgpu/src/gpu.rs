@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
@@ -600,6 +601,10 @@ pub(crate) fn from_wgpu_format(format: wgpu::TextureFormat) -> Option<TextureFor
 }
 
 impl Gpu for WebGpu {
+    fn backend_type(&self) -> BackendType {
+        BackendType::WebGPU
+    }
+
     fn limits(&self) -> Limits {
         let limits = self.device.device().limits();
         Limits {
@@ -607,6 +612,7 @@ impl Gpu for WebGpu {
                 .min_uniform_buffer_offset_alignment
                 .max(limits.min_storage_buffer_offset_alignment),
             max_texture_size: limits.max_texture_dimension_2d,
+            half_float_render_targets: true,
         }
     }
 

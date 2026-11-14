@@ -616,11 +616,7 @@ impl LocalTarget {
         producer: SyncKind,
     ) -> Result<LocalTarget, Error> {
         let backend = Backend::new(&device)?;
-        let frames = {
-            let scoped = backend.as_dyn();
-            let _scope = mln_gfx::BackendScope::new(&*scoped, mln_gfx::ScopeType::Explicit);
-            Frames::Exported(backend.exported(&device, ring, kind, size, producer)?)
-        };
+        let frames = Frames::Exported(backend.exported(&device, ring, kind, size, producer)?);
         Ok(LocalTarget { device, backend, frames, window: None })
     }
 

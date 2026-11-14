@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, Pass};
+use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
-use mln_gfx::{BackendScope, FrameTarget, Handoff, RendererBackend, ScissorRect, ScopeType, ShaderRegistry};
+use mln_gfx::{FrameTarget, Handoff, RendererBackend, ScissorRect, ShaderRegistry};
 use mln_map_types::{MapDebugOptions, MapView};
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
@@ -21,6 +22,7 @@ use mln_util::time::Instant;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame_projection::{self, FrameProjection};
+use crate::gfx::context::{Context, Stats};
 use crate::layer_tweaker::to_projection_ubo;
 use crate::paint_parameters::{PaintParameters, RecordedPass};
 use crate::render_orchestrator::RenderOrchestrator;
@@ -58,16 +60,19 @@ pub struct RenderTimings {
 }
 
 pub struct Renderer {
-    /// Dropped by hand in `drop`, inside a `BackendScope`: its layer groups,
-    /// atlases and tiles release graphics objects, which some backends (GL)
-    /// can only do with their context active. A safe `Drop` runs before the
-    /// fields drop, so it can't wrap their drops in the scope otherwise.
+    /// Dropped by hand in `drop`, inside the backend's hold: its custom
+    /// layers' hosts free their graphics objects as the layers go, which on
+    /// GL needs the context current. A safe `Drop` runs before the fields
+    /// drop, so it can't wrap their drops in the hold otherwise.
     orchestrator: ManuallyDrop<RenderOrchestrator>,
     backend: Rc<dyn RendererBackend>,
+    /// What the renderer keeps over the backend's `Gpu`, which goes after
+    /// the resources that `drop` drops first.
+    context: Rc<Context>,
     pixel_ratio: f32,
-    /// Dropped in `drop` inside the `BackendScope`, after the orchestrator.
+    /// Dropped in `drop` inside the hold, after the orchestrator.
     static_data: Option<RenderStaticData>,
-    /// Kept across frames; dropped in `drop` inside the `BackendScope`.
+    /// Kept across frames; dropped in `drop` inside the hold.
     clip_masks: ClipMasks,
     render_state: RenderState,
     frame_count: u64,
@@ -94,6 +99,7 @@ impl Renderer {
     ) -> Self {
         Renderer {
             orchestrator: ManuallyDrop::new(RenderOrchestrator::new(true, local_font_family, glyph_cache)),
+            context: Rc::new(Context::new(Rc::clone(&backend))),
             backend,
             pixel_ratio,
             static_data: None,
@@ -111,8 +117,6 @@ impl Renderer {
     /// renderer makes its shaders and drawables again, and keeps its
     /// tiles. The host sizes the backend's framebuffer for the new ratio.
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
-        let backend = Rc::clone(&self.backend);
-        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
         if pixel_ratio == self.pixel_ratio {
             return;
         }
@@ -312,10 +316,30 @@ impl Renderer {
         self.orchestrator.visit_render_layers(|layer| layer.lose_context());
     }
 
+    /// Destroys what the renderer released and waits for the GPU, so that
+    /// its work finishes before the app goes to the background, and lets go
+    /// of what the orchestrator caches.
     pub fn reduce_memory_use(&mut self) {
-        let _guard = BackendScope::new(&*self.backend, ScopeType::Explicit);
-        self.backend.get_context().reduce_memory_usage();
+        let _hold = self.backend.hold();
+        self.context.destroy_released();
+        if let Err(error) = self.context.gpu().finish() {
+            Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
+        }
         self.orchestrator.reduce_memory_use();
+    }
+
+    /// The rendering stats, which count the renderer's resources until it
+    /// releases them.
+    #[must_use]
+    pub fn rendering_stats(&self) -> RenderingStats {
+        self.context.stats().get()
+    }
+
+    /// The rendering stats, to read after the renderer goes: what it
+    /// releases as it goes comes off them.
+    #[must_use]
+    pub fn stats(&self) -> Rc<Stats> {
+        Rc::clone(self.context.stats())
     }
 
     pub fn clear_data(&mut self) {
@@ -332,10 +356,11 @@ impl Renderer {
     ) -> Option<Handoff> {
         let start = Instant::now();
         let backend = Rc::clone(&self.backend);
-        let context = backend.get_context();
+        let context = Rc::clone(&self.context);
+        let context = &*context;
+        let _hold = backend.hold();
 
         let image = target.begin_frame()?;
-        context.begin_frame();
         {
             let mut stats = context.rendering_stats();
             stats.num_draw_calls = 0;
@@ -378,7 +403,6 @@ impl Renderer {
         let mut parameters = PaintParameters::new(
             context,
             self.pixel_ratio,
-            &*backend,
             render_tree_parameters.debug_options,
             &render_tree_parameters.transform_params,
             static_data,
@@ -652,17 +676,19 @@ impl Renderer {
             Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
         }
         let handoff = target.end_frame();
+        // The frame read back counts as a framebuffer, as C++'s headless
+        // backend's offscreen texture does.
+        context.rendering_stats().num_frame_buffers = i32::from(handoff == Handoff::ReadBack);
         let submitted = Instant::now();
         context.rendering_stats().rendering_time = (submitted - start_rendering).as_secs_f64();
 
         context.destroy_released();
-        context.end_frame();
         self.clip_masks = std::mem::take(&mut parameters.clip_masks);
 
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
 
-        let mut stats = context.thread_safe_copy_rendering_stats();
+        let mut stats = context.stats().get();
         stats.frame_rendered_features = orchestrator.move_frame_rendered_features();
         let stats = Arc::new(stats);
         drop(parameters);
@@ -698,16 +724,16 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        // `gfx::BackendScope guard{impl->backend}; impl.reset();`
         let backend = Rc::clone(&self.backend);
-        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
+        let _hold = backend.hold();
         // SAFETY: `orchestrator` is dropped once, here, and nothing reads it
         // afterwards: the remaining fields' drops don't touch it.
-        #[expect(unsafe_code, reason = "drops the orchestrator inside the backend scope; see its field")]
+        #[expect(unsafe_code, reason = "drops the orchestrator inside the backend's hold; see its field")]
         unsafe {
             ManuallyDrop::drop(&mut self.orchestrator);
         }
         self.clip_masks = ClipMasks::default();
         self.static_data = None;
+        self.context.destroy_released();
     }
 }

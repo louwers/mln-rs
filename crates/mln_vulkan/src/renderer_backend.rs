@@ -11,12 +11,11 @@ use std::rc::Rc;
 use ash::vk;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
-use mln_gfx::context::Context as GfxContext;
-use mln_gfx::renderer_backend::{self, RendererBackendBase};
+use mln_gfx::gpu::Gpu;
+use mln_gfx::renderer_backend;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 
-use crate::context::Context;
 use crate::device::Device;
 use crate::gpu::VulkanGpu;
 
@@ -227,11 +226,12 @@ impl Drop for BackendImpl {
 
 /// A renderer's device and context.
 pub struct RendererBackend {
-    base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
     /// The context, made with the backend so that failing to make it is the
     /// backend's error.
-    context: Rc<Context>,
+    /// The backend's `Gpu`, which owns the renderer's resources and
+    /// submits its frames.
+    gpu: RefCell<VulkanGpu>,
 }
 
 impl RendererBackend {
@@ -260,7 +260,7 @@ impl RendererBackend {
     fn with_frames(device: &Device, max_frames: u32) -> Result<Self, Error> {
         let impl_ = Rc::new(BackendImpl::new(device, max_frames)?);
         let gpu = VulkanGpu::on(Rc::clone(&impl_)).map_err(|error| Error::native(error.to_string()))?;
-        Ok(RendererBackend { base: RendererBackendBase::new(), impl_, context: Rc::new(Context::new(gpu)) })
+        Ok(RendererBackend { impl_, gpu: RefCell::new(gpu) })
     }
 
     pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
@@ -270,7 +270,7 @@ impl RendererBackend {
     /// The backend's `Gpu`, which the renderer's frames are submitted
     /// through.
     pub(crate) fn gpu(&self) -> RefMut<'_, VulkanGpu> {
-        self.context.vulkan_gpu_mut()
+        self.gpu.borrow_mut()
     }
 
     /// The name of the GPU.
@@ -289,15 +289,7 @@ impl RendererBackend {
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
-    fn renderer_backend_base(&self) -> &RendererBackendBase {
-        &self.base
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
-
-    fn create_context(&self) -> Rc<dyn GfxContext> {
-        Rc::<Context>::clone(&self.context)
-    }
-
-    /// Vulkan has no context to make current.
-    fn activate(&self) {}
-    fn deactivate(&self) {}
 }

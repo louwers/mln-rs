@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use geometry::Point;
-use mln_gfx::Context;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorDistances, PolylineGeneratorOptions, dist};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
@@ -29,6 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::context::Context;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_layer::RenderLayer;
@@ -300,7 +300,7 @@ impl Bucket for LineBucket {
         Ok(())
     }
 
-    fn upload(&self, _context: &dyn Context) {
+    fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);
     }
 

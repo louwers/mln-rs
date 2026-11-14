@@ -2,10 +2,8 @@ use std::rc::Rc;
 
 use geometry::Point;
 use mln_gfx::attribute::AttributeBindingArray;
-use mln_gfx::bind_group::BindGroup;
 use mln_gfx::buffer::BufferPtr;
 use mln_gfx::color_mode::ColorMode;
-use mln_gfx::context::Context;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
@@ -19,17 +17,19 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr, same_shader};
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::DepthMaskType;
-use mln_gfx::uniform_buffer::UniformBufferArray;
-use mln_gfx::upload;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::time::{Instant, Instant as Time};
 
+use crate::gfx::bind_group::BindGroup;
+use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
+use crate::gfx::texture2d::Texture2DPtr;
+use crate::gfx::uniform_buffer::UniformBufferArray;
+use crate::gfx::upload;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layers::collision_layer_tweaker::CollisionDrawableData;
 use crate::layers::color_relief_layer_tweaker::ColorReliefDrawableData;
@@ -223,13 +223,13 @@ impl Drawable {
 
     /// Uploads the drawable's indexes, vertex attributes and textures, where
     /// they changed since its last upload.
-    pub(crate) fn upload(&mut self, context: &dyn Context) {
+    pub(crate) fn upload(&mut self, context: &Context) {
         if let Err(error) = self.upload_in(context) {
             Log::error(Event::Render, format!("Uploading drawable {} failed: {error}", self.name));
         }
     }
 
-    fn upload_in(&mut self, context: &dyn Context) -> Result<(), GpuError> {
+    fn upload_in(&mut self, context: &Context) -> Result<(), GpuError> {
         let Some(shader) = self.shader.clone() else {
             debug_assert!(false, "drawable {} has no shader", self.name);
             return Ok(());
@@ -556,7 +556,7 @@ fn pipeline_state(
 /// Gives each binding without data a buffer of its format's default value,
 /// for `vertex_count` vertices.
 fn bind_default_values(
-    context: &dyn Context,
+    context: &Context,
     bindings: &mut AttributeBindingArray,
     vertex_count: usize,
 ) -> Result<(), GpuError> {

@@ -7,8 +7,6 @@
 
 use std::sync::mpsc::{Sender, channel};
 
-use mln_gfx::renderer_backend::RendererBackend as _;
-use mln_gfx::{BackendScope, ScopeType};
 use mln_gl::{Device, DeviceOptions, RendererBackend};
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
@@ -56,9 +54,9 @@ fn each_device_logs_its_platform_and_the_first_context_its_gpu() {
     }
     let mut renderer = String::new();
     for device in &devices {
+        // The backend's `GlGpu` is the context's first use, which logs the
+        // GPU.
         let backend = RendererBackend::new(device).unwrap();
-        let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-        backend.get_context();
         renderer = backend.get_renderer_name();
     }
     drop(Log::set_thread_observer(previous));

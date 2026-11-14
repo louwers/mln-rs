@@ -14,7 +14,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::{Context, ShaderRegistry};
+use mln_gfx::{RendererBackend, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -27,6 +27,7 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::logging::{Event, Log};
 
 use crate::change_request::UniqueChangeRequestVec;
+use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
@@ -42,9 +43,9 @@ struct Shared {
     /// Whether a callback ran since the renderer took the host, which then
     /// has to hear that the renderer stopped.
     used: Cell<bool>,
-    /// The context of the frame the host last prerendered for, to wait for
+    /// The backend of the frame the host last prerendered for, to wait for
     /// its work.
-    context: RefCell<Option<Rc<dyn Context>>>,
+    backend: RefCell<Option<Rc<dyn RendererBackend>>>,
 }
 
 impl Shared {
@@ -56,7 +57,7 @@ impl Shared {
     /// finished its work, or that its graphics objects are lost.
     fn end(&self, lost: bool) {
         let Some(host) = self.host.borrow_mut().take() else { return };
-        let context = self.context.borrow_mut().take();
+        let backend = self.backend.borrow_mut().take();
         if !self.used.replace(false) {
             return;
         }
@@ -64,8 +65,8 @@ impl Shared {
             host.context_lost();
         } else {
             // The host frees what it drew with once the GPU is done with it.
-            if let Some(context) = context
-                && let Err(error) = context.gpu().finish()
+            if let Some(backend) = backend
+                && let Err(error) = backend.gpu().finish()
             {
                 Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
             }
@@ -91,7 +92,7 @@ impl RenderCustomLayer {
                 host: RefCell::new(host),
                 frame: Cell::new(None),
                 used: Cell::new(false),
-                context: RefCell::new(None),
+                backend: RefCell::new(None),
             }),
         }
     }
@@ -153,7 +154,7 @@ impl RenderLayer for RenderCustomLayer {
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -171,7 +172,7 @@ impl RenderLayer for RenderCustomLayer {
             return;
         };
         self.shared.frame.set(Some(frame));
-        self.shared.context.replace(Some(Rc::clone(parameters.backend.get_context_ptr())));
+        self.shared.backend.replace(Some(Rc::clone(parameters.context.backend())));
         let Some(host) = self.shared.host() else { return };
         let lent = parameters.context.gpu().lend_to_custom_layer(None, &mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });

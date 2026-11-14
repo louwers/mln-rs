@@ -17,8 +17,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry,
-    VertexAttributeArray,
+    AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
@@ -44,6 +43,7 @@ use crate::buckets::heatmap_bucket::{HeatmapBucket, HeatmapLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable::Drawable;
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::PaintParameters;
@@ -278,7 +278,7 @@ impl RenderLayer for RenderHeatmapLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

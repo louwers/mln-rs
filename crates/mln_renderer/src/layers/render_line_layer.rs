@@ -8,11 +8,11 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
+    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
     VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
@@ -39,6 +39,8 @@ use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, pa
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::line_atlas::LinePatternCap;
@@ -522,7 +524,7 @@ impl RenderLayer for RenderLineLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

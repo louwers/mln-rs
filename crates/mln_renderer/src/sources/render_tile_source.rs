@@ -23,7 +23,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_EXPRESSION_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::{ColorMode, Context, CullFaceMode, UniformBufferPtr};
+use mln_gfx::{ColorMode, CullFaceMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::expression::Dependency;
 use mln_style::layer::{LayerTypeInfo, layer_type_info};
@@ -39,6 +39,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::drawable::Drawable;
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::gfx::context::Context;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 // layers: debug
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -86,7 +88,7 @@ pub(crate) fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
 }
 
 impl RenderItem for TileSourceRenderItem {
-    fn upload(&self, context: &dyn Context) {
+    fn upload(&self, context: &Context) {
         for tile in self.render_tiles.iter() {
             tile.upload(context);
         }

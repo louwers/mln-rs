@@ -22,20 +22,18 @@ use std::ffi::CStr;
 use std::rc::Rc;
 
 use ash::vk;
-use mln_gfx::bind_group::BindGroup;
-use mln_gfx::buffer::{Buffer, BufferPtr};
+use bytemuck::Zeroable as _;
 use mln_gfx::color_mode::ColorMode;
-use mln_gfx::context::Context;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
-    BufferDesc, BufferUsage, ColorAttachment, DepthState, DepthStencilAttachment, Gpu as _, LoadOp, Pass, PipelineKey,
-    PipelineState, RenderCommand, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
-    TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, Viewport,
+    BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
+    DepthStencilAttachment, Gpu as _, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, StencilState,
+    TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute,
+    VertexBufferLayout, VertexStep, Viewport,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -44,7 +42,6 @@ use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
-use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -133,11 +130,6 @@ impl Window {
     fn set_overlay(&self, overlay: Option<Box<dyn Overlay>>) {
         self.target.set_overlay(overlay);
     }
-
-    /// The backend's context, which the renderer draws with.
-    fn context(&self) -> Rc<dyn Context> {
-        self.backend.create_context()
-    }
 }
 
 impl std::ops::Deref for Window {
@@ -175,37 +167,66 @@ fn half_matrix(right: bool) -> [f32; 16] {
     [1.0 / e, 0.0, 0.0, 0.0, 0.0, -2.0 / e, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, x, 1.0, 0.0, 1.0]
 }
 
-/// One opaque tile of the background shader, whose uniform buffers stay from
-/// frame to frame, as a layer's of the renderer do.
+/// One opaque tile of the background shader, whose uniform and storage
+/// buffers stay from frame to frame, as a layer's of the renderer do.
 struct Scene {
     shader: ShaderProgramPtr,
-    vertices: BufferPtr,
-    indexes: BufferPtr,
-    uniform_buffers: RefCell<UniformBufferArray>,
-    bind_group: RefCell<BindGroup>,
+    vertices: BufferId,
+    indexes: BufferId,
+    /// The background's color.
+    props: BufferId,
+    /// The matrices of the half the background covers.
+    drawable: BufferId,
+    projection: BufferId,
+    globals: BindGroupId,
+    layer: BindGroupId,
+}
+
+/// A buffer of `usage` holding `data`.
+fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
+    let buffer = gpu.create_buffer(&BufferDesc { label: "scene", usage, size: data.len() as u64 }).expect("buffer");
+    gpu.write_buffer(buffer, 0, data).expect("buffer write");
+    buffer
 }
 
 impl Scene {
     fn new(backend: &Window) -> Scene {
-        let context = &*backend.context();
+        let gpu = &mut *backend.gpu();
         let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
         let shader = registry.shader("BackgroundShader", ProjectionVariant::Mercator).expect("BackgroundShader");
         let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
         let tile_indexes: [u16; 6] = [0, 1, 2, 1, 2, 3];
+        let props = buffer(gpu, BufferUsage::Uniform, bytemuck::bytes_of(&BackgroundPropsUBO::zeroed()));
+        let drawable = buffer(gpu, BufferUsage::Storage, bytemuck::bytes_of(&BackgroundDrawableUnionUBO::zeroed()));
+        let projection = buffer(gpu, BufferUsage::Storage, bytemuck::bytes_of(&ProjectionUBO::default()));
+        let entry = |id: usize, buffer, size: usize| BindGroupEntry::Buffer {
+            id: id as u32,
+            buffer,
+            offset: 0,
+            size: size as u64,
+        };
+        let entries = [
+            entry(ID_BACKGROUND_PROPS_UBO, props, size_of::<BackgroundPropsUBO>()),
+            entry(ID_BACKGROUND_DRAWABLE_UBO, drawable, size_of::<BackgroundDrawableUnionUBO>()),
+            entry(ID_PROJECTION_UBO, projection, size_of::<ProjectionUBO>()),
+        ];
         Scene {
             shader,
-            vertices: Buffer::create(context, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices))
-                .expect("vertex buffer"),
-            indexes: Buffer::create(context, BufferUsage::Index, bytemuck::cast_slice(&tile_indexes))
-                .expect("index buffer"),
-            uniform_buffers: RefCell::new(UniformBufferArray::new()),
-            bind_group: RefCell::new(BindGroup::default()),
+            vertices: buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices)),
+            indexes: buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&tile_indexes)),
+            props,
+            drawable,
+            projection,
+            globals: gpu.create_bind_group(&BindGroupDesc { label: "globals", entries: &[] }).expect("bind group"),
+            layer: gpu
+                .create_bind_group(&BindGroupDesc { label: "background", entries: &entries })
+                .expect("bind group"),
         }
     }
 
-    /// Writes the background's color into the uniform buffer: the buffer the
-    /// frames before used, once it exists.
-    fn set_color(&self, context: &dyn Context, color: Color) {
+    /// Writes the background's color into its buffer, which the frames
+    /// before used.
+    fn set_color(&self, gpu: &mut VulkanGpu, color: Color) {
         let props = BackgroundPropsUBO {
             color: [color.r, color.g, color.b, color.a],
             opacity: 1.0,
@@ -213,35 +234,26 @@ impl Scene {
             pad2: 0.0,
             pad3: 0.0,
         };
-        self.uniform_buffers.borrow_mut().create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props, context);
+        gpu.write_buffer(self.props, 0, bytemuck::bytes_of(&props)).expect("buffer write");
     }
 
-    /// Writes the half the background covers into the storage buffers: the
-    /// buffers the frames before used, once they exist.
-    fn set_half(&self, context: &dyn Context, right: bool) {
+    /// Writes the half the background covers into the storage buffers,
+    /// which the frames before used.
+    fn set_half(&self, gpu: &mut VulkanGpu, right: bool) {
         let matrix = half_matrix(right);
-        let drawable = [BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix })];
-        let projection = [ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() }];
-        let mut buffers = self.uniform_buffers.borrow_mut();
-        for (id, data) in [
-            (ID_BACKGROUND_DRAWABLE_UBO, bytemuck::cast_slice::<_, u8>(&drawable)),
-            (ID_PROJECTION_UBO, bytemuck::cast_slice::<_, u8>(&projection)),
-        ] {
-            let mut buffer = buffers.get(id).cloned();
-            context.write_storage_buffer(&mut buffer, data);
-            buffers.set(id, buffer);
-        }
+        let drawable = BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix });
+        let projection = ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() };
+        gpu.write_buffer(self.drawable, 0, bytemuck::bytes_of(&drawable)).expect("buffer write");
+        gpu.write_buffer(self.projection, 0, bytemuck::bytes_of(&projection)).expect("buffer write");
     }
 
     /// The commands that draw the tile into attachments of `size` and
     /// `targets`.
-    fn draw(&self, context: &dyn Context, size: Size, targets: TargetFormats) -> Vec<RenderCommand> {
-        let entries = self.uniform_buffers.borrow().entries();
-        let layer = self.bind_group.borrow_mut().get(context, "background", entries).expect("bind group");
+    fn draw(&self, gpu: &mut VulkanGpu, size: Size, targets: TargetFormats) -> Vec<RenderCommand> {
         let attribute = self.shader.attribute_id(VertexStep::Vertex, 0).expect("position attribute");
         let color_mode = ColorMode::unblended();
-        let pipeline = context
-            .pipeline(&PipelineKey {
+        let pipeline = gpu
+            .create_pipeline(&PipelineKey {
                 shader: self.shader.key().clone(),
                 state: PipelineState {
                     vertex_buffers: vec![VertexBufferLayout {
@@ -264,11 +276,11 @@ impl Scene {
             })
             .expect("pipeline");
         vec![
-            RenderCommand::SetBindGroup { slot: 0, group: context.global_bind_group().expect("global group") },
-            RenderCommand::SetBindGroup { slot: 1, group: layer },
+            RenderCommand::SetBindGroup { slot: 0, group: self.globals },
+            RenderCommand::SetBindGroup { slot: 1, group: self.layer },
             RenderCommand::SetGlobalIndex(0),
-            RenderCommand::SetVertexBuffer { slot: 0, buffer: self.vertices.id(), offset: 0 },
-            RenderCommand::SetIndexBuffer { buffer: self.indexes.id(), offset: 0 },
+            RenderCommand::SetVertexBuffer { slot: 0, buffer: self.vertices, offset: 0 },
+            RenderCommand::SetIndexBuffer { buffer: self.indexes, offset: 0 },
             RenderCommand::SetViewport(Viewport {
                 x: 0.0,
                 y: 0.0,
@@ -307,19 +319,18 @@ fn render_frame(
         backend.request_readback();
         assert!(backend.take_readback().is_none(), "nothing is read before the frame is presented");
     }
-    let context = &*backend.context();
     let image = backend.target.begin_frame().expect("a frame");
-    context.begin_frame();
+    let mut gpu = backend.gpu();
 
     let mut commands = Vec::new();
     if let Some(scene) = scene {
         if let Some(color) = change.color {
-            scene.set_color(context, color);
+            scene.set_color(&mut gpu, color);
         }
         if let Some(right) = change.right {
-            scene.set_half(context, right);
+            scene.set_half(&mut gpu, right);
         }
-        commands = scene.draw(context, image.size, image.targets);
+        commands = scene.draw(&mut gpu, image.size, image.targets);
     }
     let pass = Pass {
         label: "main buffer".to_owned(),
@@ -331,9 +342,9 @@ fn render_frame(
         }),
         commands,
     };
-    context.gpu().submit(&[pass]).expect("submit");
+    gpu.submit(&[pass]).expect("submit");
+    drop(gpu);
     backend.target.end_frame();
-    context.end_frame();
 
     let image = backend.take_readback();
     assert_eq!(image.is_some(), read, "a frame is read back when asked, once");

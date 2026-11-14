@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
-use mln_gfx::{AttributeDataType, ColorMode, Context, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
+use mln_gfx::{AttributeDataType, ColorMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -20,6 +20,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use super::{background_crossfade, background_layer_properties};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
@@ -147,7 +148,7 @@ impl RenderLayer for RenderBackgroundLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

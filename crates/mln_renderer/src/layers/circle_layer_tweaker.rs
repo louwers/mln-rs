@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::UniformBufferPtr;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
@@ -14,6 +13,7 @@ use mln_style_types::{AlignmentType, CirclePitchScaleType};
 
 use super::{cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::circle_bucket::CircleBucket;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{
     LayerTweaker, LayerTweakerBase, get_projection_data, globe_extrude_scale, to_projection_ubo,

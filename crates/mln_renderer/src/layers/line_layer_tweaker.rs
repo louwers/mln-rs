@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use mln_gfx::UniformBufferPtr;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
@@ -28,6 +27,7 @@ use mln_util::size::Size;
 
 use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
 use crate::buckets::line_bucket::LineBucket;
+use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::line_atlas::LinePatternCap;

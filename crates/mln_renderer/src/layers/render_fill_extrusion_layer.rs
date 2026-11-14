@@ -20,7 +20,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderRegistry};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
@@ -43,6 +43,7 @@ use crate::buckets::fill_extrusion_bucket::{
 };
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
@@ -315,7 +316,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        _context: &dyn Context,
+        _context: &Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

@@ -1,34 +1,35 @@
 //! Writes drawables' indexes and vertex attributes to buffers of the
-//! backend's [`Gpu`](crate::gpu::Gpu).
+//! backend's [`Gpu`](mln_gfx::gpu::Gpu).
 
 use std::rc::Rc;
 
-use crate::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
-use crate::buffer::{Buffer, BufferPtr};
-use crate::context::Context;
-use crate::gpu::{BufferUsage, GpuError};
-use crate::index_vector::IndexVectorBase;
-use crate::vertex_attribute::{VertexAttribute, VertexAttributeArray};
-use crate::vertex_vector::VertexVectorBasePtr;
+use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
+use mln_gfx::buffer::BufferPtr;
+use mln_gfx::gpu::{BufferUsage, GpuError};
+use mln_gfx::index_vector::IndexVectorBase;
+use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
+use mln_gfx::vertex_vector::VertexVectorBasePtr;
+
+use crate::gfx::context::Context;
 
 /// Writes `indexes` to their buffer, where they have none or changed since
 /// they were written, making one where they have none or don't fit in it.
-pub fn upload_indexes(context: &dyn Context, indexes: &mut IndexVectorBase) -> Result<(), GpuError> {
+pub(crate) fn upload_indexes(context: &Context, indexes: &mut IndexVectorBase) -> Result<(), GpuError> {
     if indexes.get_buffer().is_some() && !indexes.get_dirty() {
         return Ok(());
     }
     #[cfg(target_family = "wasm")]
     if let Some(data) = indexes.host_data() {
-        let buffer = Buffer::create_from_host(context, BufferUsage::Index, data)?;
+        let buffer = context.buffer_from_host(BufferUsage::Index, data)?;
         indexes.set_buffer(Some(buffer));
         indexes.set_dirty(false);
         return Ok(());
     }
     let data: &[u8] = bytemuck::cast_slice(indexes.data());
     match indexes.get_buffer() {
-        Some(buffer) if data.len() <= buffer.size() => buffer.write(context, data)?,
+        Some(buffer) if data.len() <= buffer.size() => context.write(buffer, data)?,
         _ => {
-            let buffer = Buffer::create(context, BufferUsage::Index, data)?;
+            let buffer = context.buffer(BufferUsage::Index, data)?;
             indexes.set_buffer(Some(buffer));
         }
     }
@@ -39,8 +40,8 @@ pub fn upload_indexes(context: &dyn Context, indexes: &mut IndexVectorBase) -> R
 /// The buffer of `vertices`, or `None` where there are none. Where the
 /// vertices changed since their buffer was written, or `force`, it is written
 /// again, or replaced where they don't fit in it.
-pub fn vertex_buffer(
-    context: &dyn Context,
+pub(crate) fn vertex_buffer(
+    context: &Context,
     vertices: &VertexVectorBasePtr,
     force: bool,
 ) -> Result<Option<BufferPtr>, GpuError> {
@@ -50,7 +51,7 @@ pub fn vertex_buffer(
     {
         // A freed vector's data is already in the buffer.
         if vertices.has_raw_data() && (force || vertices.is_modified_after(holds)) {
-            buffer.write(context, &vertices.get_raw_data()[..size])?;
+            context.write(&buffer, &vertices.get_raw_data()[..size])?;
             vertices.set_buffer(Rc::clone(&buffer), vertices.get_last_modified());
         }
         return Ok(Some(buffer));
@@ -60,21 +61,21 @@ pub fn vertex_buffer(
     }
     debug_assert!(vertices.has_raw_data());
     #[cfg(target_family = "wasm")]
-    let host = vertices.get_host_data().map(|data| Buffer::create_from_host(context, BufferUsage::Vertex, &data));
+    let host = vertices.get_host_data().map(|data| context.buffer_from_host(BufferUsage::Vertex, &data));
     #[cfg(target_family = "wasm")]
     if let Some(buffer) = host {
         let buffer = buffer?;
         vertices.set_buffer(Rc::clone(&buffer), vertices.get_last_modified());
         return Ok(Some(buffer));
     }
-    let buffer = Buffer::create(context, BufferUsage::Vertex, &vertices.get_raw_data()[..size])?;
+    let buffer = context.buffer(BufferUsage::Vertex, &vertices.get_raw_data()[..size])?;
     vertices.set_buffer(Rc::clone(&buffer), vertices.get_last_modified());
     Ok(Some(buffer))
 }
 
 /// The buffer of an attribute's own data, made from it, which it then
 /// frees, on first use.
-fn attribute_buffer(context: &dyn Context, attribute: &mut VertexAttribute) -> Result<Option<BufferPtr>, GpuError> {
+fn attribute_buffer(context: &Context, attribute: &mut VertexAttribute) -> Result<Option<BufferPtr>, GpuError> {
     if let Some(buffer) = attribute.get_buffer() {
         return Ok(Some(Rc::clone(buffer)));
     }
@@ -82,7 +83,7 @@ fn attribute_buffer(context: &dyn Context, attribute: &mut VertexAttribute) -> R
         debug_assert!(false, "vertex attribute without data");
         return Ok(None);
     }
-    let buffer = Buffer::create(context, BufferUsage::Vertex, attribute.get_raw_data())?;
+    let buffer = context.buffer(BufferUsage::Vertex, attribute.get_raw_data())?;
     attribute.set_buffer(Some(Rc::clone(&buffer)));
     attribute.set_raw_data(Vec::new());
     attribute.set_dirty(false);
@@ -92,7 +93,7 @@ fn attribute_buffer(context: &dyn Context, attribute: &mut VertexAttribute) -> R
 /// The binding of an attribute the drawable has, `None` where it has no
 /// data.
 fn attribute_binding(
-    context: &dyn Context,
+    context: &Context,
     attribute: &mut VertexAttribute,
     force: bool,
 ) -> Result<Option<AttributeBinding>, GpuError> {
@@ -131,8 +132,8 @@ fn attribute_binding(
 /// drawable doesn't have, or has no data for, binds no buffer, at the
 /// default's type and stride. `force` writes shared vertex data that
 /// appears unchanged (see [`vertex_buffer`]).
-pub fn build_attribute_bindings(
-    context: &dyn Context,
+pub(crate) fn build_attribute_bindings(
+    context: &Context,
     defaults: &VertexAttributeArray,
     overrides: &mut VertexAttributeArray,
     force: bool,

@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use geometry::Point;
-use mln_gfx::Context;
-use mln_gfx::texture2d::{Texture2DPtr, upload_image};
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use shelf_pack::{BinRef, ShelfPack, ShelfPackOptions};
+
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::{Texture2DPtr, upload_image};
 
 /// When copied into the atlas texture, image data is padded by one pixel on
 /// each side. Pattern images are padded with a copy of the image data
@@ -124,7 +125,7 @@ impl PatternAtlas {
 
     /// Uploads the atlas image to its texture, which is made again when the
     /// atlas grew since.
-    pub(crate) fn upload(&mut self, context: &dyn Context) {
+    pub(crate) fn upload(&mut self, context: &Context) {
         let uploaded = match &self.atlas_texture_2d {
             None => {
                 let texture = context.create_texture_2d();

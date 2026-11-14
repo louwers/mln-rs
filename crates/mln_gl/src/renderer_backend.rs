@@ -1,14 +1,13 @@
 // What a GL backend draws into is a target built on it (`OffscreenTarget`,
 // `SurfaceTarget`, `CanvasTarget`, `BorrowedTarget`, `ExportedTarget`).
 
-use std::cell::{Cell, RefMut};
+use std::cell::{Cell, RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::context::Context as GfxContext;
-use mln_gfx::renderer_backend::{self, RendererBackendBase};
+use mln_gfx::gpu::Gpu;
+use mln_gfx::renderer_backend::{self, Hold};
 
-use crate::context::{BackendImpl, Context};
 use crate::gpu::GlGpu;
 use crate::state::State;
 use crate::types::Gl;
@@ -133,8 +132,8 @@ impl GlContext {
 
 /// A renderer's GL context.
 pub struct RendererBackend {
-    base: RendererBackendBase,
-    impl_: Rc<BackendImpl>,
+    /// The `GlGpu` that owns the renderer's resources.
+    gpu: RefCell<GlGpu>,
     context: Rc<GlContext>,
 }
 
@@ -163,8 +162,8 @@ impl RendererBackend {
     }
 
     fn on(context: Rc<GlContext>) -> Self {
-        let impl_ = Rc::new(BackendImpl::new(GlGpu::on(Rc::clone(&context))));
-        RendererBackend { base: RendererBackendBase::new(), impl_, context }
+        let gpu = RefCell::new(GlGpu::on(Rc::clone(&context)));
+        RendererBackend { gpu, context }
     }
 
     /// `GL_RENDERER`: the name of the GL implementation.
@@ -183,35 +182,28 @@ impl RendererBackend {
 
     /// The `GlGpu` that owns the renderer's resources.
     pub(crate) fn gpu(&self) -> RefMut<'_, GlGpu> {
-        self.impl_.gpu()
+        self.gpu.borrow_mut()
     }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
-    fn renderer_backend_base(&self) -> &RendererBackendBase {
-        &self.base
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 
-    fn create_context(&self) -> Rc<dyn GfxContext> {
-        Context::new(Rc::clone(&self.impl_))
-    }
-
-    /// Has the context current until `deactivate`, so that the calls in
-    /// between don't each make it current.
-    fn activate(&self) {
-        self.context.make_current();
-    }
-
-    fn deactivate(&self) {
-        self.context.done_current();
-    }
-}
-
-impl Drop for RendererBackend {
-    /// Drops the context, releasing the resources it caches first.
-    fn drop(&mut self) {
-        if let Some(context) = self.base.reset_context() {
-            context.release_cached_resources();
-        }
+    /// Has the context current until the hold drops, so that the calls in
+    /// between don't each make it current and release it, which flushes on
+    /// Mesa. Releasing it leaves no samplers bound, for what draws on the
+    /// context outside the renderer, and in debug builds logs an error GL
+    /// recorded.
+    fn hold(&self) -> Hold<'_> {
+        let current = self.context.enter();
+        Hold::new(move || {
+            // Not while a panic unwinds through a call that has the `GlGpu`.
+            if let Ok(mut gpu) = self.gpu.try_borrow_mut() {
+                gpu.end_frame();
+            }
+            drop(current);
+        })
     }
 }

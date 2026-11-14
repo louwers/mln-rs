@@ -7,14 +7,13 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
-use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, StencilMode,
-};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, StencilMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::drawable::UniqueDrawable;
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::paint_parameters::PaintParameters;
 use crate::render_static_data::RenderStaticData;
@@ -41,7 +40,7 @@ impl ClipMasks {
     /// `projection` gives its tile.
     pub(crate) fn update(
         &mut self,
-        context: &dyn Context,
+        context: &Context,
         shaders: &ShaderRegistry,
         globe: bool,
         tiles: &BTreeSet<UnwrappedTileID>,

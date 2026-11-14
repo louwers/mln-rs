@@ -456,7 +456,8 @@ mod tests {
         }
     }
 
-    const LIMITS: Limits = Limits { buffer_offset_alignment: 256, max_texture_size: 4096 };
+    const LIMITS: Limits =
+        Limits { buffer_offset_alignment: 256, max_texture_size: 4096, half_float_render_targets: true };
 
     fn fake() -> Fake {
         Fake {

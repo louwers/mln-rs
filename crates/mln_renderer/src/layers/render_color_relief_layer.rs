@@ -20,13 +20,12 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
     ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry,
-    VertexAttributeArray,
+    AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{
@@ -53,6 +52,8 @@ use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweakerPtr;
@@ -341,7 +342,7 @@ impl RenderLayer for RenderColorReliefLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,

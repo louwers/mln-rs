@@ -21,12 +21,12 @@ use mln_gfx::shaders::shader_defines::{
     ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
     ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry,
+    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry,
     VertexAttributeArray,
 };
 use mln_map_types::TransformState;
@@ -47,6 +47,8 @@ use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::drawable_builder::DrawableBuilder;
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweakerPtr;
@@ -106,7 +108,7 @@ impl RenderRasterLayer {
 
     /// Creates the bucket's texture if needed and attaches it to both image
     /// slots.
-    fn set_textures(&mut self, context: &dyn Context, builder: &mut DrawableBuilder, bucket: &RasterBucket) {
+    fn set_textures(&mut self, context: &Context, builder: &mut DrawableBuilder, bucket: &RasterBucket) {
         let Some(image) = &bucket.image else {
             return;
         };
@@ -144,7 +146,7 @@ impl RenderRasterLayer {
     /// drawables each time in this case as well?").
     fn update_image(
         &mut self,
-        context: &dyn Context,
+        context: &Context,
         raster_shader: Option<&ShaderProgramPtr>,
         image_data: &ImageSourceRenderData,
         changes: &mut UniqueChangeRequestVec,
@@ -337,7 +339,7 @@ impl RenderLayer for RenderRasterLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
