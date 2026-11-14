@@ -1,30 +1,23 @@
-// C++'s `SurfaceRenderableResource` is a base class the platforms derive
-// from, to make their surface. Here it is one type: the platform's part is a
-// `SurfaceProvider`.
+// What a `SurfaceTarget` presents to: a swapchain of a platform surface,
+// whose images are textures of the backend's `VulkanGpu`, and a depth and
+// stencil texture of the `Gpu`'s.
 //
-// Differences from C++:
-// - Each swapchain image is a texture of the context's `VulkanGpu`, which
-//   draws the frame into it, and the depth and stencil attachment a `Gpu`
-//   texture.
-// - Android's surface pre-rotation (`hasSurfaceTransformSupport`,
-//   `getRotation`, the polling for a new transform) is not ported: the
-//   swapchain is made with the identity transform.
-// - `getAcquireTimeout` and `SurfaceNotReady` are not ported: acquiring an
-//   image waits.
+// - The swapchain is made with the identity transform, and acquiring an
+//   image waits for one.
 // - A swapchain's images can be copied from when the surface allows it, so
 //   a read needs no new swapchain; when it doesn't, the read is dropped
 //   with a warning.
-// - A swapchain isn't made for an empty extent, which a minimized window
-//   can have: the resource then has no images until it is made again.
+// - No swapchain is made for an empty extent, which a minimized window can
+//   have: the resource then has no images until it is made again.
 //   `current_extent` says whether the surface has one now.
-// - Errors C++ throws (a failed wait for a frame, a surface that stays out
-//   of date) are logged, and the frame is not drawn.
-// - Port-only: `set_overlay` draws over each frame in a render pass of its
-//   own, after the frame's passes and before the frame is read back and
-//   presented (`SurfaceTarget::set_overlay`).
+// - A failed wait for a frame, or a surface that stays out of date, is
+//   logged, and the frame is not drawn.
+// - The overlay (`set_overlay`) draws over each frame in a render pass of
+//   its own, after the frame's passes and before the frame is read back and
+//   presented.
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use ash::vk;
 use mln_gfx::frame::FrameImage;
@@ -35,9 +28,8 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::context::Context;
 use crate::gpu::ImportedImage;
-use crate::renderer_backend::{BackendImpl, SurfaceProvider};
+use crate::renderer_backend::{BackendImpl, RendererBackend, SurfaceProvider};
 use crate::surface_target::{Overlay, OverlayTarget};
 
 const MAXIMUM_SURFACE_UPDATE_RETRIES: u8 = 3;
@@ -45,7 +37,7 @@ const MAXIMUM_SURFACE_UPDATE_RETRIES: u8 = 3;
 /// The format of the depth and stencil attachment.
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 
-/// Port-only: the extent that `surface`, a surface of `backend`'s instance,
+/// The extent that `surface`, a surface of `backend`'s instance,
 /// has now, which is empty for a minimized window's. `None` when the
 /// swapchain sets the surface's extent, as on Wayland, or the surface can't
 /// say, such as once it is lost.
@@ -100,17 +92,16 @@ struct SurfaceState {
 }
 
 /// What a frame target presents to: a swapchain of a platform surface, its
-/// images and a depth and stencil attachment, all textures of the context's
+/// images and a depth and stencil attachment, all textures of the backend's
 /// `Gpu`.
 pub(crate) struct SurfaceResource {
-    backend: Rc<BackendImpl>,
-    context: Weak<Context>,
+    renderer: Rc<RendererBackend>,
     provider: Option<Rc<dyn SurfaceProvider>>,
     /// Whether the resource destroys its surface: one that `provider` made,
     /// and not a host's.
     owns_surface: bool,
     state: RefCell<SurfaceState>,
-    overlay: RefCell<Option<Overlay>>,
+    overlay: RefCell<Option<Box<dyn Overlay>>>,
     /// Whether the next frame presented is read back.
     read_requested: Cell<bool>,
     /// The readback of the last frame read, and its size.
@@ -123,15 +114,14 @@ impl SurfaceResource {
     /// without one, the surface is the host's. `present_mode` is used when
     /// the surface has it, FIFO otherwise.
     pub(crate) fn new(
-        context: &Context,
+        renderer: Rc<RendererBackend>,
         size: Size,
         surface: vk::SurfaceKHR,
         provider: Option<Rc<dyn SurfaceProvider>>,
         present_mode: vk::PresentModeKHR,
-    ) -> Rc<Self> {
-        let resource = Rc::new(SurfaceResource {
-            backend: Rc::clone(context.get_backend()),
-            context: context.weak(),
+    ) -> Self {
+        let resource = SurfaceResource {
+            renderer,
             owns_surface: provider.is_some(),
             provider,
             state: RefCell::new(SurfaceState {
@@ -153,19 +143,23 @@ impl SurfaceResource {
             overlay: RefCell::new(None),
             read_requested: Cell::new(false),
             readback: Cell::new(None),
-        });
-        resource.init(context, size.width, size.height);
+        };
+        resource.init(size.width, size.height);
         resource
     }
 
-    /// Port-only: the extent of the resource's surface now, or `None` when
+    fn backend(&self) -> &BackendImpl {
+        self.renderer.backend_impl()
+    }
+
+    /// The extent of the resource's surface now, or `None` when
     /// it has no surface or its surface doesn't say ([`surface_extent`]).
     pub(crate) fn current_extent(&self) -> Option<vk::Extent2D> {
         let surface = self.state.borrow().surface;
         if surface == vk::SurfaceKHR::null() {
             return None;
         }
-        surface_extent(&self.backend, surface)
+        surface_extent(self.backend(), surface)
     }
 
     /// Whether the resource presents to a surface: a lost one that couldn't
@@ -187,9 +181,9 @@ impl SurfaceResource {
     }
 
     fn init_swapchain(&self, state: &mut SurfaceState, w: u32, h: u32) -> Result<Vec<vk::Image>, String> {
-        let physical_device = self.backend.get_physical_device();
-        let surface_loader = self.backend.get_surface_loader().ok_or("The instance has no surfaces")?;
-        let swapchain_loader = self.backend.get_swapchain_loader().ok_or("The device has no swapchains")?;
+        let physical_device = self.backend().get_physical_device();
+        let surface_loader = self.backend().get_surface_loader().ok_or("The instance has no surfaces")?;
+        let swapchain_loader = self.backend().get_swapchain_loader().ok_or("The device has no swapchains")?;
         let surface = state.surface;
 
         // SAFETY: the surface is the instance's, and the device can present
@@ -215,7 +209,7 @@ impl SurfaceResource {
             })
             .ok_or("No suitable swapchain format found")?;
 
-        // only vk::PresentModeKHR::eFifo (vsync on) is guaranteed
+        // Every surface has FIFO.
         if state.present_mode != vk::PresentModeKHR::FIFO && !present_modes.contains(&state.present_mode) {
             Log::error(
                 Event::Render,
@@ -224,16 +218,15 @@ impl SurfaceResource {
             state.present_mode = vk::PresentModeKHR::FIFO;
         }
 
-        // When reading from the swapchain enable source transfer usage.
+        // Readbacks copy from the images where the surface allows it.
         let mut image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
         state.readable = capabilities.supported_usage_flags.contains(vk::ImageUsageFlags::TRANSFER_SRC);
         if state.readable {
             image_usage |= vk::ImageUsageFlags::TRANSFER_SRC;
         }
 
-        // pick surface size
+        // The surface's extent, or the requested size within its limits.
         let extent = if capabilities.current_extent.width == u32::MAX {
-            // update values based on surface limits
             vk::Extent2D {
                 width: w.max(capabilities.min_image_extent.width).min(capabilities.max_image_extent.width),
                 height: h.max(capabilities.min_image_extent.height).min(capabilities.max_image_extent.height),
@@ -246,7 +239,7 @@ impl SurfaceResource {
         }
 
         let mut swapchain_image_count = capabilities.min_image_count + 1;
-        // check surface limits (0 is unlimited)
+        // A maximum of 0 is unlimited.
         if capabilities.max_image_count > 0 {
             swapchain_image_count = swapchain_image_count.min(capabilities.max_image_count);
         }
@@ -270,7 +263,6 @@ impl SurfaceResource {
             .composite_alpha(composite_alpha)
             // The device's one queue renders and presents.
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-            // update this when recreating
             .old_swapchain(state.swapchain);
 
         // SAFETY: the create info is valid for the surface, and the old
@@ -291,25 +283,25 @@ impl SurfaceResource {
         Ok(images)
     }
 
-    /// `init(w, h)`: the swapchain, its images and their textures, the depth
-    /// and stencil attachment, and the semaphores.
-    fn init(&self, context: &Context, w: u32, h: u32) -> bool {
+    /// Makes the swapchain, its images and their textures, the depth and
+    /// stencil attachment, and the semaphores.
+    fn init(&self, w: u32, h: u32) -> bool {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
-        match self.init_swapchain(state, w, h).and_then(|images| self.init_images(context, state, &images)) {
+        match self.init_swapchain(state, w, h).and_then(|images| self.init_images(state, &images)) {
             Ok(()) => true,
             Err(error) => {
                 Log::error(Event::Render, error);
-                self.destroy_images(Some(context), state);
+                self.destroy_images(state);
                 false
             }
         }
     }
 
-    fn init_images(&self, context: &Context, state: &mut SurfaceState, images: &[vk::Image]) -> Result<(), String> {
-        let device = self.backend.get_device();
+    fn init_images(&self, state: &mut SurfaceState, images: &[vk::Image]) -> Result<(), String> {
+        let device = self.backend().get_device();
         let size = Size::new(state.extent.width, state.extent.height);
-        let mut gpu = context.vulkan_gpu_mut();
+        let mut gpu = self.renderer.gpu();
         for (index, &image) in images.iter().enumerate() {
             let create_info = vk::ImageViewCreateInfo::default()
                 .image(image)
@@ -325,8 +317,8 @@ impl SurfaceResource {
             // SAFETY: the image is live and of the color format.
             let view = unsafe { device.create_image_view(&create_info, None) }
                 .map_err(|e| format!("Vulkan color view creation failed: {e}"))?;
-            self.backend.set_debug_name(image, &format!("SwapchainImage_{index}"));
-            self.backend.set_debug_name(view, &format!("SwapchainImageView_{index}"));
+            self.backend().set_debug_name(image, &format!("SwapchainImage_{index}"));
+            self.backend().set_debug_name(view, &format!("SwapchainImageView_{index}"));
             let imported = gpu.import_image(&ImportedImage {
                 image,
                 view,
@@ -348,16 +340,16 @@ impl SurfaceResource {
             // SAFETY: the create info is valid for the device.
             let semaphore = unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
                 .map_err(|e| format!("Failed to create a semaphore: {e}"))?;
-            self.backend.set_debug_name(semaphore, &format!("PresentSemaphore_{index}"));
+            self.backend().set_debug_name(semaphore, &format!("PresentSemaphore_{index}"));
             if let Some(image) = state.images.last_mut() {
                 image.present_semaphore = semaphore;
             }
         }
-        for index in 0..self.backend.get_max_frames() {
+        for index in 0..self.backend().get_max_frames() {
             // SAFETY: the create info is valid for the device.
             let semaphore = unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
                 .map_err(|e| format!("Failed to create a semaphore: {e}"))?;
-            self.backend.set_debug_name(semaphore, &format!("AcquireSemaphore_{index}"));
+            self.backend().set_debug_name(semaphore, &format!("AcquireSemaphore_{index}"));
             state.acquire_semaphores.push((semaphore, 0));
         }
         let depth_stencil = gpu
@@ -373,18 +365,15 @@ impl SurfaceResource {
     }
 
     /// Destroys what `init` made, but the swapchain and the surface. The
-    /// device is idle. Without the context, its `Gpu` is gone with what it
-    /// had of the resource.
-    fn destroy_images(&self, context: Option<&Context>, state: &mut SurfaceState) {
-        let device = self.backend.get_device();
-        let mut gpu = context.map(Context::vulkan_gpu_mut);
-        if let (Some(gpu), Some((readback, _))) = (gpu.as_mut(), self.readback.take()) {
+    /// device is idle.
+    fn destroy_images(&self, state: &mut SurfaceState) {
+        let device = self.backend().get_device();
+        let mut gpu = self.renderer.gpu();
+        if let Some((readback, _)) = self.readback.take() {
             gpu.destroy_readback(readback);
         }
         for image in state.images.drain(..) {
-            if let Some(gpu) = gpu.as_mut() {
-                gpu.destroy_texture(image.texture);
-            }
+            gpu.destroy_texture(image.texture);
             // SAFETY: the device is idle, and the view and the semaphore are
             // this resource's.
             unsafe {
@@ -397,7 +386,7 @@ impl SurfaceResource {
             // resource's.
             unsafe { device.destroy_semaphore(semaphore, None) };
         }
-        if let (Some(gpu), Some(depth_stencil)) = (gpu.as_mut(), state.depth_stencil.take()) {
+        if let Some(depth_stencil) = state.depth_stencil.take() {
             gpu.destroy_texture(depth_stencil);
         }
         state.next_slot = 0;
@@ -411,13 +400,13 @@ impl SurfaceResource {
         // this resource's.
         unsafe {
             if state.swapchain != vk::SwapchainKHR::null()
-                && let Some(loader) = self.backend.get_swapchain_loader()
+                && let Some(loader) = self.backend().get_swapchain_loader()
             {
                 loader.destroy_swapchain(state.swapchain, None);
             }
             if state.surface != vk::SurfaceKHR::null()
                 && self.owns_surface
-                && let Some(loader) = self.backend.get_surface_loader()
+                && let Some(loader) = self.backend().get_surface_loader()
             {
                 loader.destroy_surface(state.surface, None);
             }
@@ -428,24 +417,24 @@ impl SurfaceResource {
 
     /// Makes the swapchain, and the surface if it was lost, again. Returns
     /// whether it did.
-    fn recreate_swapchain(&self, context: &Context, recreate_surface: bool) -> bool {
+    fn recreate_swapchain(&self, recreate_surface: bool) -> bool {
         let (width, height) = {
             let mut state = self.state.borrow_mut();
             let state = &mut *state;
-            // without a surface there is no swapchain, unless the surface
-            // itself is being recreated
+            // Without a surface there is no swapchain, unless the surface
+            // is made again.
             if state.surface == vk::SurfaceKHR::null() && !recreate_surface {
                 return true;
             }
-            self.backend.wait_idle("swapchain recreation");
-            self.destroy_images(Some(context), state);
+            self.backend().wait_idle("swapchain recreation");
+            self.destroy_images(state);
 
             if recreate_surface {
                 self.destroy_surface(state);
                 let Some(provider) = &self.provider else {
                     return false;
                 };
-                match provider.create_surface(self.backend.entry(), self.backend.get_instance()) {
+                match provider.create_surface(self.backend().entry(), self.backend().get_instance()) {
                     Ok(surface) => state.surface = surface,
                     Err(error) => {
                         Log::error(Event::Render, error.message);
@@ -455,7 +444,7 @@ impl SurfaceResource {
             }
             (state.extent.width, state.extent.height)
         };
-        self.init(context, width, height)
+        self.init(width, height)
     }
 
     /// Sets the size the swapchain is made with when the surface doesn't give
@@ -475,14 +464,14 @@ impl SurfaceResource {
             return;
         }
         state.update_requested = true;
-        state.update_latency = if use_delay { self.backend.get_max_frames() as i32 * 3 } else { 0 };
+        state.update_latency = if use_delay { self.backend().get_max_frames() as i32 * 3 } else { 0 };
     }
 
-    fn update_surface(&self, context: &Context) {
+    fn update_surface(&self) {
         let lost = self.state.borrow().lost;
         // The request stays pending if this fails, so the next frame
         // retries it.
-        if !self.recreate_swapchain(context, lost) {
+        if !self.recreate_swapchain(lost) {
             return;
         }
         let mut state = self.state.borrow_mut();
@@ -501,19 +490,23 @@ impl SurfaceResource {
         self.read_requested.get()
     }
 
-    /// Port-only: draws `overlay` over each frame from now on, or stops
-    /// with `None` (`SurfaceTarget::set_overlay`).
-    pub(crate) fn set_overlay(&self, overlay: Option<Overlay>) {
-        *self.overlay.borrow_mut() = overlay;
+    /// Draws `overlay` over each frame from now on, or stops with `None`
+    /// (`SurfaceTarget::set_overlay`). The overlay it replaces destroys what
+    /// it made.
+    pub(crate) fn set_overlay(&self, overlay: Option<Box<dyn Overlay>>) {
+        let old = self.overlay.replace(overlay);
+        if let Some(mut old) = old {
+            old.destroy(&mut self.renderer.gpu());
+        }
     }
 
     /// Acquires the next image, after the frame that last used its frame in
     /// flight's semaphore, and makes the swapchain again first where a
     /// frame asked for it. `None` where no image could be acquired. Until
     /// [`end_frame`](Self::end_frame), returns the image acquired.
-    pub(crate) fn begin_frame(&self, context: &Context) -> Option<FrameImage> {
+    pub(crate) fn begin_frame(&self) -> Option<FrameImage> {
         if let Some(acquired) = self.state.borrow().acquired {
-            return self.frame_image(context, acquired);
+            return self.frame_image(acquired);
         }
         {
             let mut state = self.state.borrow_mut();
@@ -523,30 +516,33 @@ impl SurfaceResource {
                 state.update_latency -= 1;
                 if state.update_latency <= 0 {
                     drop(state);
-                    self.update_surface(context);
+                    self.update_surface();
                 }
             }
         }
-        let Some(acquired) = self.acquire(context) else {
-            Log::error(Event::Render, "acquireNextImageKHR failed");
-            return None;
+        let acquired = match self.acquire() {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                Log::error(Event::Render, format!("Acquiring a swapchain image failed: {error}"));
+                return None;
+            }
         };
         self.state.borrow_mut().acquired = Some(acquired);
-        let image = self.frame_image(context, acquired)?;
+        let image = self.frame_image(acquired)?;
         let semaphore = self.state.borrow().acquire_semaphores.get(acquired.slot)?.0;
         let stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
-        if let Err(error) = context.vulkan_gpu_mut().wait_before_using(image.color, semaphore, None, stages) {
+        if let Err(error) = self.renderer.gpu().wait_before_using(image.color, semaphore, None, stages) {
             Log::error(Event::Render, format!("Waiting for the acquired image failed: {error}"));
         }
         Some(image)
     }
 
     /// The textures that the frame of `acquired` draws into.
-    fn frame_image(&self, context: &Context, acquired: Acquired) -> Option<FrameImage> {
+    fn frame_image(&self, acquired: Acquired) -> Option<FrameImage> {
         let state = self.state.borrow();
         let color = state.images.get(acquired.image as usize)?.texture;
         let targets = TargetFormats {
-            color: context.vulkan_gpu_mut().texture_format(state.color_format),
+            color: self.renderer.gpu().texture_format(state.color_format),
             depth_stencil: Some(DEPTH_STENCIL),
         };
         Some(FrameImage {
@@ -559,15 +555,15 @@ impl SurfaceResource {
 
     /// Acquires an image with the next frame in flight's semaphore, making
     /// the swapchain again where it is out of date.
-    fn acquire(&self, context: &Context) -> Option<Acquired> {
-        let loader = self.backend.get_swapchain_loader()?;
+    fn acquire(&self) -> Result<Acquired, String> {
+        let loader = self.backend().get_swapchain_loader().ok_or("the device has no swapchains")?;
         for _ in 0..MAXIMUM_SURFACE_UPDATE_RETRIES {
             let (swapchain, slot, semaphore, serial) = {
                 let mut state = self.state.borrow_mut();
                 // A swapchain that couldn't be rebuilt has no images, and a
                 // lost surface that couldn't be made again none either.
                 if state.surface == vk::SurfaceKHR::null() || state.images.is_empty() {
-                    return None;
+                    return Err("the surface has no swapchain".to_owned());
                 }
                 let slot = state.next_slot;
                 state.next_slot = (slot + 1) % state.acquire_semaphores.len();
@@ -576,10 +572,7 @@ impl SurfaceResource {
             };
             // The frame that last acquired with the semaphore has waited for
             // it.
-            if let Err(error) = context.vulkan_gpu_mut().wait_for(serial) {
-                Log::error(Event::Render, format!("waitFrame failed: {error}"));
-                return None;
-            }
+            self.renderer.gpu().wait_for(serial).map_err(|error| format!("waiting for a frame: {error}"))?;
             // SAFETY: the swapchain and the semaphore are the surface's, and
             // the semaphore has no signal pending.
             let result = unsafe { loader.acquire_next_image(swapchain, u64::MAX, semaphore, vk::Fence::null()) };
@@ -588,38 +581,31 @@ impl SurfaceResource {
                     if suboptimal {
                         self.request_surface_update(true);
                     }
-                    return Some(Acquired { image, slot });
+                    return Ok(Acquired { image, slot });
                 }
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     self.request_surface_update(false);
-                    self.update_surface(context);
+                    self.update_surface();
                 }
                 Err(vk::Result::ERROR_SURFACE_LOST_KHR) => {
                     self.state.borrow_mut().lost = true;
                     self.request_surface_update(false);
-                    self.update_surface(context);
+                    self.update_surface();
                 }
-                Err(error) => {
-                    Log::error(Event::Render, format!("acquireNextImageKHR result: {error}"));
-                    return None;
-                }
+                Err(error) => return Err(error.to_string()),
             }
         }
-        None
+        Err("the swapchain stays out of date".to_owned())
     }
 
     /// Has the overlay draw over the acquired image in a submit of its own.
-    /// The `Gpu` isn't borrowed while the overlay records: its uploads go
-    /// through it.
-    fn draw_overlay(&self, context: &Context, texture: TextureId) {
+    fn draw_overlay(&self, texture: TextureId) {
         let mut overlay = self.overlay.borrow_mut();
         let Some(overlay) = overlay.as_mut() else {
             return;
         };
-        let begun = {
-            let mut gpu = context.vulkan_gpu_mut();
-            gpu.load_pass(texture).and_then(|pass| Ok((pass, gpu.begin_recording()?)))
-        };
+        let mut gpu = self.renderer.gpu();
+        let begun = gpu.load_pass(texture).and_then(|pass| Ok((pass, gpu.begin_recording()?)));
         let ((render_pass, framebuffer, extent), command_buffer) = match begun {
             Ok(begun) => begun,
             Err(error) => {
@@ -627,18 +613,19 @@ impl SurfaceResource {
                 return;
             }
         };
-        let device = self.backend.get_device();
+        let backend = self.backend();
+        let device = backend.get_device();
         let begin_info = vk::RenderPassBeginInfo::default()
             .render_pass(render_pass)
             .framebuffer(framebuffer)
             .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent });
-        self.backend.begin_debug_label(command_buffer, "overlay", [0.0; 4]);
+        backend.begin_debug_label(command_buffer, "overlay", [0.0; 4]);
         // SAFETY: the command buffer is recording outside a render pass, and
         // the framebuffer is the render pass's, over the acquired image in
         // the layout the frame's passes left it in.
         unsafe { device.cmd_begin_render_pass(command_buffer, &begin_info, vk::SubpassContents::INLINE) };
-        overlay(&OverlayTarget {
-            context,
+        overlay.draw(&mut OverlayTarget {
+            gpu: &mut gpu,
             device,
             command_buffer,
             render_pass,
@@ -646,8 +633,7 @@ impl SurfaceResource {
         });
         // SAFETY: the command buffer is in the overlay's render pass.
         unsafe { device.cmd_end_render_pass(command_buffer) };
-        self.backend.end_debug_label(command_buffer);
-        let mut gpu = context.vulkan_gpu_mut();
+        backend.end_debug_label(command_buffer);
         gpu.take_waits_into_next_submit(texture);
         if let Err(error) = gpu.submit_recording(command_buffer) {
             Log::error(Event::Render, format!("Submitting the overlay failed: {error}"));
@@ -656,7 +642,7 @@ impl SurfaceResource {
 
     /// Draws the overlay over the acquired image, reads it back if asked,
     /// and presents it. Returns whether the frame had an image to present.
-    pub(crate) fn end_frame(&self, context: &Context) -> bool {
+    pub(crate) fn end_frame(&self) -> bool {
         let Some(acquired) = self.state.borrow_mut().acquired.take() else {
             return false;
         };
@@ -667,8 +653,8 @@ impl SurfaceResource {
             };
             (image.texture, image.present_semaphore, state.swapchain, state.readable)
         };
-        self.draw_overlay(context, texture);
-        let mut gpu = context.vulkan_gpu_mut();
+        self.draw_overlay(texture);
+        let mut gpu = self.renderer.gpu();
         if self.read_requested.take() {
             if readable {
                 let extent = self.get_extent();
@@ -710,7 +696,7 @@ impl SurfaceResource {
             .image_indices(&image_indices);
         // The image was acquired from the swapchain, and the submit signals
         // the semaphore.
-        match self.backend.present(&present_info) {
+        match self.backend().present(&present_info) {
             Ok(true) => self.request_surface_update(true),
             Ok(false) => {}
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => self.request_surface_update(false),
@@ -726,9 +712,9 @@ impl SurfaceResource {
     }
 
     /// The last frame read back, once its readback has finished, if any.
-    pub(crate) fn read_image(&self, context: &Context) -> Option<PremultipliedImage> {
+    pub(crate) fn read_image(&self) -> Option<PremultipliedImage> {
         let (readback, size) = self.readback.take()?;
-        let data = match context.vulkan_gpu_mut().take_readback(readback, true) {
+        let data = match self.renderer.gpu().take_readback(readback, true) {
             Ok(data) => data?,
             Err(error) => {
                 Log::error(Event::Render, format!("Reading the frame back failed: {error}"));
@@ -736,7 +722,7 @@ impl SurfaceResource {
             }
         };
         let mut image = PremultipliedImage::from_vec(size, data);
-        // swizzle pixels to RGBA
+        // Swizzled to RGBA.
         if self.get_color_format() == vk::Format::B8G8R8A8_UNORM {
             for pixel in image.data.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
@@ -748,10 +734,13 @@ impl SurfaceResource {
 
 impl Drop for SurfaceResource {
     fn drop(&mut self) {
-        self.backend.wait_idle("surface deletion");
+        self.backend().wait_idle("surface deletion");
+        if let Some(mut overlay) = self.overlay.take() {
+            overlay.destroy(&mut self.renderer.gpu());
+        }
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
-        self.destroy_images(self.context.upgrade().as_deref(), state);
+        self.destroy_images(state);
         self.destroy_surface(state);
     }
 }

@@ -20,10 +20,9 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_util::size::Size;
 
-use crate::buffer_resource::BufferAllocation;
-use crate::context::{build_descriptor_set_layout, build_pipeline_layout};
+use crate::allocation::{BufferAllocation, ImageAllocation, transition_image};
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
-use crate::descriptor_set::DescriptorPoolGrowable;
+use crate::descriptor_set::{DescriptorPoolGrowable, build_descriptor_set_layout, build_pipeline_layout};
 use crate::device::Device;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::compiler::{self, Stage};
@@ -32,7 +31,6 @@ use crate::shaders::layout::{
     image_sampler_binding, image_texture_binding,
 };
 use crate::shaders::shader_source::{AttributeInfo, TextureInfo, shader_source};
-use crate::texture2d::{ImageAllocation, transition_image};
 use crate::vk_state;
 
 /// The sets each descriptor pool starts with room for.
@@ -224,6 +222,8 @@ enum Garbage {
     Pipeline(vk::Pipeline),
     Framebuffer(vk::Framebuffer),
     DescriptorSet(DescriptorSetType, usize, vk::DescriptorSet),
+    /// A caller's objects, which [`VulkanGpu::destroy_later`] destroys.
+    Task(Box<dyn FnOnce(&ash::Device)>),
 }
 
 /// A [`Gpu`] on a Vulkan [`Device`].
@@ -567,6 +567,34 @@ impl VulkanGpu {
         })
     }
 
+    /// The `VkBuffer` of `buffer`, for commands of the caller's, such as an
+    /// overlay's.
+    #[must_use]
+    pub fn raw_buffer(&self, buffer: BufferId) -> Option<vk::Buffer> {
+        self.buffers.get(buffer).map(|entry| entry.allocation.buffer())
+    }
+
+    /// The view of `texture`, and the layout it is in between commands, for
+    /// commands of the caller's, such as an overlay's.
+    #[must_use]
+    pub fn raw_texture(&self, texture: TextureId) -> Option<(vk::ImageView, vk::ImageLayout)> {
+        self.textures.get(texture).map(|entry| (entry.image.image_view(), entry.layout))
+    }
+
+    /// The `VkSampler` of `sampler`, for commands of the caller's, such as
+    /// an overlay's.
+    #[must_use]
+    pub fn raw_sampler(&self, sampler: SamplerId) -> Option<vk::Sampler> {
+        self.samplers.get(sampler).copied()
+    }
+
+    /// Runs `destroy` with the device once the submits so far, and the
+    /// next one, have finished, or when the `Gpu` is dropped: for objects of
+    /// the caller's that their commands use.
+    pub fn destroy_later(&mut self, destroy: impl FnOnce(&ash::Device) + 'static) {
+        self.discard(Garbage::Task(Box::new(destroy)));
+    }
+
     /// Has the next submit, or lend to a custom layer, whose passes draw
     /// into `texture`, or the next readback of it, wait for `semaphore`
     /// before the commands of `stages` run: a timeline until it reaches
@@ -800,8 +828,9 @@ impl VulkanGpu {
                 Garbage::Pipeline(pipeline) => device.destroy_pipeline(pipeline, None),
                 Garbage::Framebuffer(framebuffer) => device.destroy_framebuffer(framebuffer, None),
                 Garbage::DescriptorSet(type_, pool, set) => {
-                    self.descriptor_pools[type_ as usize].give_back(pool, vec![set]);
+                    self.descriptor_pools[type_ as usize].give_back(pool, set);
                 }
+                Garbage::Task(destroy) => destroy(device),
             }
         }
     }
@@ -1221,10 +1250,9 @@ impl VulkanGpu {
         }
 
         let device = self.backend.get_device();
-        let (sets, pool) = self.descriptor_pools[type_ as usize]
-            .allocate(device, self.set_layouts[type_ as usize], 1)
+        let (set, pool) = self.descriptor_pools[type_ as usize]
+            .allocate(device, self.set_layouts[type_ as usize])
             .ok_or_else(|| GpuError::Invalid("Vulkan couldn't allocate a descriptor set".to_owned()))?;
-        let set = sets[0];
         let writes: Vec<vk::WriteDescriptorSet<'_>> = descriptors
             .iter()
             .map(|&(binding, descriptor_type, index)| {
@@ -1732,13 +1760,6 @@ impl VulkanGpu {
     /// The serial of the last submit, 0 before the first.
     pub(crate) fn last_serial(&self) -> u64 {
         self.next_serial - 1
-    }
-
-    /// The serial of the last submit known to have finished, as every one
-    /// before it has.
-    pub(crate) fn finished_serial(&mut self) -> u64 {
-        self.collect_garbage();
-        self.finished_serial
     }
 
     /// Submits a batch of the writes since the last submit, then

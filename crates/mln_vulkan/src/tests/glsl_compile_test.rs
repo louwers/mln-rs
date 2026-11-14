@@ -225,8 +225,7 @@ impl Buffer {
     }
 }
 
-/// The size of the debug layer's UBO (C++'s `shaders::DebugUBO`), which
-/// `mln_gfx` has no struct for.
+/// The size of the debug layer's UBO, which `mln_gfx` has no struct for.
 const DEBUG_UBO_SIZE: usize = 6 * 16;
 
 /// The buffers of each shader, with the size of what the renderer binds: a
@@ -607,7 +606,7 @@ fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo>
 
 /// The attributes a table has that the GLSL doesn't read, by shader and
 /// index: the color relief's texture position, which its vertex stage works
-/// out from the position, as C++'s does.
+/// out from the position.
 const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 
 // The inputs of a vertex stage are the vertex and instance attributes of the

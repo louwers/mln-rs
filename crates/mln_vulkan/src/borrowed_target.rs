@@ -3,7 +3,7 @@
 // target waits for before it draws into an image the host read.
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::time::Instant;
 
 use ash::vk;
@@ -14,7 +14,6 @@ use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::context::Context;
 use crate::device::Device;
 use crate::gpu::ImportedImage;
 use crate::renderer_backend::{BackendImpl, RendererBackend};
@@ -96,10 +95,10 @@ impl BorrowedImages {
     }
 }
 
-/// The ring's images as textures of the context's `Gpu`, with their depth
+/// The ring's images as textures of the backend's `Gpu`, with their depth
 /// and stencil attachments: the host's, or one of the target's own.
 struct Imports {
-    context: Weak<Context>,
+    backend: Rc<RendererBackend>,
     size: Size,
     targets: TargetFormats,
     color: Vec<TextureId>,
@@ -114,18 +113,18 @@ impl Imports {
     /// format the `Gpu` has no texture of, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't make the
     /// depth and stencil texture.
-    fn new(context: &Context, images: &BorrowedImages) -> Result<Imports, Error> {
+    fn new(backend: &Rc<RendererBackend>, images: &BorrowedImages) -> Result<Imports, Error> {
         let release_to = match images.owner {
             ImageOwner::GraphicsQueue => None,
             ImageOwner::External => Some(vk::QUEUE_FAMILY_EXTERNAL),
             ImageOwner::Foreign => Some(vk::QUEUE_FAMILY_FOREIGN_EXT),
         };
-        let mut gpu = context.vulkan_gpu_mut();
+        let mut gpu = backend.gpu();
         let color_format = gpu
             .texture_format(images.format)
             .ok_or_else(|| Error::unsupported(format!("the Vulkan target draws into no {:?}", images.format)))?;
         let mut imports = Imports {
-            context: context.weak(),
+            backend: Rc::clone(backend),
             size: images.size,
             targets: TargetFormats {
                 color: Some(color_format),
@@ -183,10 +182,7 @@ impl Imports {
 
 impl Drop for Imports {
     fn drop(&mut self) {
-        let Some(context) = self.context.upgrade() else {
-            return;
-        };
-        let mut gpu = context.vulkan_gpu_mut();
+        let mut gpu = self.backend.gpu();
         for texture in self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take()) {
             gpu.destroy_texture(texture);
         }
@@ -308,7 +304,7 @@ impl BorrowedTarget {
         if !device.sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("the Vulkan device can't hand frames over with {producer:?}")));
         }
-        let imports = Imports::new(backend.vulkan_context(), &images)?;
+        let imports = Imports::new(&backend, &images)?;
         let mut this = BorrowedTarget {
             backend,
             slots: RefCell::new(Vec::new()),
@@ -412,8 +408,7 @@ impl BorrowedTarget {
                 // The host's reads went to the queue before the next frame,
                 // which waits for them before it clears the image.
                 self.backend
-                    .vulkan_context()
-                    .vulkan_gpu_mut()
+                    .gpu()
                     .wait_for_queue()
                     .map_err(|error| Error::native(format!("Waiting for the host's reads failed: {error}")))
             }
@@ -508,7 +503,7 @@ impl BorrowedTarget {
     /// Has no submit wait for what `slot` waits for.
     fn detach(&self, slot: &mut Slot) {
         if let Some(texture) = slot.attached.take() {
-            self.backend.vulkan_context().vulkan_gpu_mut().forget_waits(texture);
+            self.backend.gpu().forget_waits(texture);
         }
     }
 
@@ -551,7 +546,7 @@ impl BorrowedTarget {
             }
             images.check(self.backend.backend_impl().device())?;
         }
-        let imports = Imports::new(self.backend.vulkan_context(), &images)?;
+        let imports = Imports::new(&self.backend, &images)?;
         // The frames that drew into the old images are done before the
         // `Gpu` forgets them.
         self.backend.backend_impl().wait_idle("borrowed image replacement");
@@ -581,11 +576,11 @@ impl BorrowedTarget {
 
     /// The sync the host waits for, once the frame was submitted.
     #[cfg_attr(not(unix), expect(unused_variables, reason = "sync files are Unix's"))]
-    fn producer_sync(&self, context: &Context, slot: usize) -> Option<GpuSync> {
+    fn producer_sync(&self, slot: usize) -> Option<GpuSync> {
         use ash::vk::Handle as _;
         match self.producer {
             SyncKind::CpuComplete => {
-                if let Err(error) = context.vulkan_gpu_mut().finish() {
+                if let Err(error) = self.backend.gpu().finish() {
                     Log::error(Event::Render, format!("Waiting for a borrowed image's frame failed: {error}"));
                     return None;
                 }
@@ -644,8 +639,7 @@ impl FrameTarget for BorrowedTarget {
     fn begin_frame(&self) -> Option<FrameImage> {
         let slot = self.selected.get();
         let image = self.imports.borrow().frame_image(slot)?;
-        let context = self.backend.vulkan_context();
-        let mut gpu = context.vulkan_gpu_mut();
+        let mut gpu = self.backend.gpu();
         let stages = vk::PipelineStageFlags::ALL_COMMANDS;
         let mut slots = self.slots.borrow_mut();
         let Some(state) = slots.get_mut(slot) else {
@@ -679,13 +673,12 @@ impl FrameTarget for BorrowedTarget {
     /// Submits what is left of the frame, signaling the producer's sync
     /// after it.
     fn end_frame(&self) -> Handoff {
-        let context = self.backend.vulkan_context();
         let slot = self.selected.get();
         let Some(color) = self.imports.borrow().color.get(slot).copied() else {
             return Handoff::Dropped;
         };
         let submitted = {
-            let mut gpu = context.vulkan_gpu_mut();
+            let mut gpu = self.backend.gpu();
             // What no pass took yet, such as where the frame drew nothing.
             gpu.take_waits_into_next_submit(color);
             match self.producer {
@@ -710,9 +703,7 @@ impl FrameTarget for BorrowedTarget {
         if let Some(ConsumerWait::Imported { semaphore, file }) = consumed {
             drop(file);
             // SAFETY: destroyed once the frame that waits on it is done.
-            context.enqueue_deletion(Box::new(move |context: &Context| unsafe {
-                context.get_backend().get_device().destroy_semaphore(semaphore, None);
-            }));
+            self.backend.gpu().destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
         }
         #[cfg(not(unix))]
         drop(consumed);
@@ -720,7 +711,7 @@ impl FrameTarget for BorrowedTarget {
             Log::error(Event::Render, format!("Submitting a borrowed image's frame failed: {error}"));
             return Handoff::Dropped;
         }
-        match self.producer_sync(context, slot) {
+        match self.producer_sync(slot) {
             Some(sync) => Handoff::GivenBack { slot, sync },
             None => Handoff::Dropped,
         }
