@@ -677,10 +677,9 @@ impl GeometryTileWorker {
                 subdivision_granularity: self.subdivision_granularity,
             };
 
-            let Some(geometry_layer) = data.get_layer(&leader_impl.source_layer)? else {
+            if !data.has_layer(&leader_impl.source_layer)? {
                 continue;
-            };
-            drop(geometry_layer);
+            }
 
             let layer_ids: Vec<String> = group.iter().map(|layer| layer.base_impl.id.clone()).collect();
 
