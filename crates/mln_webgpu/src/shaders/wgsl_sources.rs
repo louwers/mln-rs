@@ -632,9 +632,9 @@ struct ClipUBO {
 };
 
 #ifdef PROJECTION_GLOBE
-@group(0) @binding(0) var<uniform> clip: ProjectionUBO;
+@group(0) @binding(2) var<uniform> clip: ProjectionUBO;
 #else
-@group(0) @binding(0) var<uniform> clip: ClipUBO;
+@group(0) @binding(2) var<uniform> clip: ClipUBO;
 #endif
 
 @vertex

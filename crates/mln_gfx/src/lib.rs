@@ -10,8 +10,12 @@
 //! the backends cannot depend on `mln_renderer`. `LayerTweaker` stays in the
 //! renderer.
 //!
-//! Ownership follows the single render thread of the C++ renderer: shared
-//! pointers are `Rc`, mutation through them uses `RefCell`/`Cell`.
+//! The renderer runs on one thread: shared pointers are `Rc`, mutation
+//! through them uses `RefCell`/`Cell`.
+//!
+//! The `gpu` module is the id-based interface the backends move onto: a
+//! backend owns its resources, and the renderer records passes of plain
+//! commands.
 
 pub mod attribute;
 pub mod backend;
@@ -30,6 +34,7 @@ pub mod export;
 pub mod frame;
 pub mod gfx_types;
 pub mod globe_clip_mask;
+pub mod gpu;
 pub mod index_vector;
 pub mod offscreen_texture;
 pub mod paint_parameters;

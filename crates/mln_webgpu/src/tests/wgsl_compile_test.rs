@@ -1,20 +1,17 @@
 // Compiles every WGSL source of `wgsl_sources` the way webgpu::ShaderGroup +
 // ShaderProgram do (Prelude, then the struct prelude if any, through the
 // preprocessor with the default ProgramParameters defines, in both projection
-// variants) and reports which ones wgpu's WGSL front end (naga) rejects. C++
-// compiles them with Dawn's Tint, so a failure here is a wgpu-vs-Dawn
-// difference.
+// variants) and reports which ones wgpu's WGSL front end (naga) rejects.
 //
 // The shaders on the M1 path must compile; the rest are reported only.
 
 use std::collections::HashMap;
 
-use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shader_group::GLOBE_DEFINE;
 
 use crate::Device;
+use crate::bind_groups::IndexTable;
 use crate::shaders::shader_program::ShaderProgram;
 use crate::shaders::shader_source::{WgslShaderSource, prelude};
 use crate::shaders::wgsl_preprocessor::preprocess_wgsl;
@@ -36,9 +33,9 @@ fn assemble(source: &WgslShaderSource, stage: &str) -> String {
 
 #[test]
 fn all_extracted_wgsl_compiles() {
-    let backend = crate::RendererBackend::new(&Device::new(None).expect("device"));
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let context = backend.get_context().downcast_ref::<crate::context::Context>().unwrap();
+    let device = Device::new(None).expect("device");
+    let device = device.device();
+    let index_table = IndexTable::new(device);
 
     for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
         // ProgramParameters(pixelRatio, overdraw=false): only DEVICE_PIXEL_RATIO.
@@ -54,17 +51,17 @@ fn all_extracted_wgsl_compiles() {
             };
             let vertex = preprocess_wgsl(&assemble(source, vertex), &defines);
             let fragment = preprocess_wgsl(&assemble(source, fragment), &defines);
-            let program = ShaderProgram::new(context, &vertex, &fragment, &[], &[], source.name);
-            assert_eq!(
-                program.get_index_group().is_some(),
-                vertex.contains("globalIndex") || fragment.contains("globalIndex"),
-                "{} binds globalIndex in a group of its own",
-                source.built_in
-            );
-            if program.has_shader_modules() {
-                compiled += 1;
-            } else {
-                failed.push(source.built_in);
+            match ShaderProgram::new(device, index_table.layout(), &vertex, &fragment, &[], &[], source.name) {
+                Ok(program) => {
+                    assert_eq!(
+                        program.index_group().is_some(),
+                        vertex.contains("globalIndex") || fragment.contains("globalIndex"),
+                        "{} binds globalIndex in a group of its own",
+                        source.built_in
+                    );
+                    compiled += 1;
+                }
+                Err(_) => failed.push(source.built_in),
             }
         }
         eprintln!("{variant:?}: compiled {compiled} WGSL shader sources; rejected by naga: {failed:?}");
@@ -94,9 +91,9 @@ fn conditional_symbols(source: &str) -> Vec<String> {
 /// when all data-driven properties are constant). Reported, not asserted.
 #[test]
 fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {
-    let backend = crate::RendererBackend::new(&Device::new(None).expect("device"));
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let context = backend.get_context().downcast_ref::<crate::context::Context>().unwrap();
+    let device = Device::new(None).expect("device");
+    let device = device.device();
+    let index_table = IndexTable::new(device);
     let mut failed = Vec::new();
     let mut compiled = 0;
     for source in ALL {
@@ -110,14 +107,15 @@ fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {
             defines.insert(sym, true);
         }
         let program = ShaderProgram::new(
-            context,
+            device,
+            index_table.layout(),
             &preprocess_wgsl(&vertex, &defines),
             &preprocess_wgsl(&fragment, &defines),
             &[],
             &[],
             source.name,
         );
-        if program.has_shader_modules() {
+        if program.is_ok() {
             compiled += 1;
         } else {
             failed.push(source.built_in);

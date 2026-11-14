@@ -12,3 +12,5 @@ mod background_test;
 // A library device logs the adapter it is on, as maplibre-native-ffi's
 // graphics devices log theirs.
 mod log_test;
+// mln_gfx::gpu::conformance's frame through `WebGpu`.
+mod gpu_test;
