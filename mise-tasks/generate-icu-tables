@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Regenerate the ICU Bidi_Class table from an ICU 78.3 source tree's icu/source/common"
-#USAGE arg "<icu_common>" help="An ICU 78.3 source tree's icu/source/common"
-# crates/mln_text/tools/gen_icu_tables.py says where to get the ICU 78.3
-# sources.
-set -euo pipefail
-python3 -I crates/mln_text/tools/gen_icu_tables.py "$usage_icu_common" > crates/mln_text/src/icu/ubidi_props_data.rs

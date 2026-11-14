@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run cargo clippy to lint the code. Arguments go to each `cargo clippy`"
+#MISE description="Lint the Rust code with clippy"
 # On Linux, also lint the C library with each native backend's feature alone,
 # as maplibre-native-ffi's presets build it: the workspace's build turns them
 # all on.

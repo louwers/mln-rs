@@ -13,15 +13,15 @@ A Rust port of MapLibre Native's map rendering core.
 ## Dev tool commands
 
 `mise install` installs the tools that mise.toml pins. `mise tasks` lists
-every task, and `just <task>` runs one too (the justfile forwards to it).
-The common ones:
+every task. The justfile keeps the tasks' names from before they moved to
+mise, each running its task. The common ones:
 
 - `mise run test`: every test, including the render suite.
 - `mise run fmt`: format with the pinned nightly rustfmt.
-- `CI=true mise run ci-lint`: CI's lint job, warnings as errors.
-- `mise run bench-compare <ref>`: benchmarks against another commit.
-- `mise run web`, `mise run web-check`: build the browser build and its
-  page, and compare it with native renders. `mise run web-dev` serves the
+- `CI=true mise run ci:lint`: CI's lint job, warnings as errors.
+- `mise run bench:compare <ref>`: benchmarks against another commit.
+- `mise run web:build`, `mise run web:check`: build the browser build and its
+  page, and compare it with native renders. `mise run web:dev` serves the
   page from its sources.
 
 ## Documentation

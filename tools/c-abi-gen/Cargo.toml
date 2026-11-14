@@ -10,7 +10,7 @@ include.workspace = true
 # Generates crates/mln_c/src/generated from crates/mln_c/include; a dev tool.
 publish = false
 
-# `mise run generate-c-abi`
+# `mise run generate:c-abi`
 [[bin]]
 name = "c-abi-gen"
 path = "src/main.rs"

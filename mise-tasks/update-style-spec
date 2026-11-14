@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Refresh tools/style-codegen/v8.json from a tag or commit of the MapLibre style spec"
-#USAGE arg "[ref]" default="c2a460f6e55899e4b6e04b44f8e29e08fef3067b" help="A maplibre/maplibre-style-spec tag (such as `v26.6.0`) or commit"
-# The default is a commit after v26.6.0 that replaces `emptyResponse` with
-# vector sources' `sparse`. Run `mise run generate-style-code` after.
-set -euo pipefail
-curl -fsSL "https://raw.githubusercontent.com/maplibre/maplibre-style-spec/$usage_ref/src/reference/v8.json" -o tools/style-codegen/v8.json

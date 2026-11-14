@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#MISE description="Build the browser demo into examples/web/dist"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile: release for the page to ship, dev to debug with names kept"
+# Two modules from one cargo run: the map with its tile workers (mln_web), and
+# the font-face shaper (mln_web_shaper), which the page loads only once a
+# style declares font faces. The map is built again with its `webgl` feature
+# for browsers without WebGPU, which alone download it. Vite then builds the
+# page around them.
+#
+# A release build is also made small: opt-level "s", then wasm-opt -Oz, which
+# inlines a function with one caller only when it is small. Its default, at
+# any size, made the module bigger after brotli and slower to start.
+set -euo pipefail
+profile="$usage_profile"
+if [[ "$profile" == release ]]; then
+    # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
+    export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+fi
+target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/$([[ "$profile" == dev ]] && echo debug || echo "$profile")"
+pkg=examples/web/web/pkg
+if [[ "$profile" != dev ]]; then
+    command -v wasm-opt > /dev/null ||
+        { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (examples/web/README.md)" >&2; exit 1; }
+fi
+# wasm-bindgen's output for a module cargo built, into a directory.
+bind() {
+    wasm-bindgen --target web --out-dir "$2" "$target/$1.wasm"
+    if [[ "$profile" != dev ]]; then
+        wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
+            --strip-debug --strip-producers --strip-target-features "$2/$1_bg.wasm" -o "$2/$1_bg.wasm"
+    fi
+}
+cargo build --profile "$profile" --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+bind mln_web "$pkg"
+bind mln_web_shaper "$pkg"
+# The same file again, with the feature.
+cargo build --profile "$profile" --target wasm32-unknown-unknown -p mln-rs-web --features webgl
+bind mln_web "$pkg/webgl"
+pnpm -C examples/web install --frozen-lockfile
+pnpm -C examples/web build

@@ -3,7 +3,8 @@ import { defineConfig } from 'vite';
 // The page in web/, built into dist/ with every asset's name hashed by its
 // content, so that a browser never mixes files of two builds. Its URLs are
 // relative, so that it works at any path (GitHub Pages serves it under
-// /mln-rs/). web/pkg is wasm-bindgen's output, which `mise run web` writes first.
+// /mln-rs/). web/pkg is wasm-bindgen's output, which `mise run web:build`
+// writes first.
 export default defineConfig({
   root: 'web',
   base: './',

@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Build the code documentation, as docs.rs does, and open it. Arguments go to `cargo doc` (default `--open`)"
-set -euo pipefail
-[[ $# -gt 0 ]] || set -- --open
-DOCS_RS=1 cargo doc --no-deps --workspace "$@"

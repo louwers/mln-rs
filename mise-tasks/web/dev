@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Serve the browser demo with live reload at http://localhost:5173/"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web:build`"
+# Vite reloads the page's scripts as they change; `mise run web:build`
+# rebuilds the modules.
+set -euo pipefail
+mise run web:build --profile "$usage_profile"
+pnpm -C examples/web dev

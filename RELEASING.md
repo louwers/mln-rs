@@ -56,7 +56,7 @@ first.
 4. Creates the tag `v<version>` on the workflow's commit and a GitHub release
    with the `.crate` files.
 
-CI (`release-crate` in `ci.yml`, `mise run ci-package`) runs step 2 on every
+CI (`release-crate` in `ci.yml`, `mise run ci:package`) runs step 2 on every
 push and PR. It catches a manifest crates.io would reject.
 
 ## Locally

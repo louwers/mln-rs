@@ -24,7 +24,7 @@
           # preset EGL and OpenGL ES (libglvnd).
           packages = [ pkgs.cmake ];
 
-          # sqlite-wasm-rs compiles SQLite for wasm32 (`mise run check-wasm`)
+          # sqlite-wasm-rs compiles SQLite for wasm32 (`mise run check:wasm`)
           # through the cc crate, which reads these before CC (gcc here).
           # Unwrapped clang, since the Nix wrapper adds the host's flags.
           CC_wasm32_unknown_unknown = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang";

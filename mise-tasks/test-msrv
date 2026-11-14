@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Check the Cargo workspace with the oldest Rust its packages declare (rust-version)"
-set -euo pipefail
-msrv="$(mise run -q get-msrv)"
-rustup toolchain install "$msrv" --profile minimal --no-self-update
-cargo "+$msrv" check --workspace --all-targets

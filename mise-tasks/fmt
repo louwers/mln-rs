@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Reformat every Rust file with the pinned nightly rustfmt (MLN_NIGHTLY), installing it if needed. Arguments go to rustfmt, such as `--check`"
+#MISE description="Format the Rust code with the pinned nightly rustfmt"
 # Generated files (their first lines say "Do not edit" or "@generated") stay as
 # their generators write them: they are not passed to rustfmt, and their `mod`
 # declarations carry #[rustfmt::skip], so formatting the module that declares

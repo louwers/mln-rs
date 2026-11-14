@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-#MISE description="Build crates/mln_c's browser package for one backend (webgpu or gl) into target/c-web/<backend>"
-#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web`"
+#MISE description="Build the C library's browser package for one backend into target/c-web/<backend>"
+#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web:build`"
 #USAGE arg "[backend]" default="webgpu" help="webgpu, or gl (WebGL2)"
-# maplibre-native-ffi's C ABI (crates/mln_c) as a browser package for a
-# JavaScript host, one per backend, each with that backend only. Into
-# target/c-web/<backend>: wasm-bindgen's bindings of the module
-# (maplibre_native_c.js, whose instance's exports are the raw `mln_*` functions
-# and its memory, beside the JavaScript contract in crates/mln_c/src/web.rs),
-# the tile worker script and shaper loader under snippets/, and the font-face
-# shaper module (mln_web_shaper.js).
+# One package per backend, each with only that backend: wasm-bindgen's
+# bindings (maplibre_native_c.js, whose exports are the raw `mln_*` functions
+# and the module's memory; crates/mln_c/src/web.rs has the JavaScript
+# contract), the tile worker and shaper loader under snippets/, and the
+# font-face shaper.
 set -euo pipefail
 profile="$usage_profile"
 backend="$usage_backend"

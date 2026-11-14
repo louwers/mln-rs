@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run the benchmarks (tools/bench/README.md)"
+#MISE depends=["bench:fixtures"]
+set -euo pipefail
+source tools/dev-shell.sh
+dev_shell cargo run --release -q -p mln-rs-bench -- run "$@"

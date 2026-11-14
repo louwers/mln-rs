@@ -1,7 +1,7 @@
 name: sanitizers
 
 # The runtime's, the Vulkan backend's and the C library's tests under
-# AddressSanitizer (`mise run test-asan`), nightly and on demand. They run round
+# AddressSanitizer (`mise run test:asan`), nightly and on demand. They run round
 # after round for a while: a race between threads can fail one run in a
 # hundred, which the ci workflow's one run per push rarely shows.
 
@@ -41,4 +41,4 @@ jobs:
       - uses: jdx/mise-action@v5
 
       - name: Test
-        run: mise run test-asan "$MINUTES"
+        run: mise run test:asan "$MINUTES"

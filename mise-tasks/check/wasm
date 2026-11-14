@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does"
+#MISE description="Lint the browser build, and check it pulls in no native-only dependencies"
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per
 # Web Worker, each with its own memory) needs the target, which
 # rust-toolchain.toml installs. Clippy, so that examples/web, which only builds
@@ -7,7 +7,7 @@
 # libraries as published (mln_storage's `sqlite` feature on, its SQLite built
 # through sqlite-wasm-rs, which needs a clang that targets wasm32, and the
 # in-process font-face shaper), the browser build's two modules as `mise run
-# web` builds them, which leave both out, with mln_web_host, the glue they
+# web:build` builds them, which leave both out, with mln_web_host, the glue they
 # share, and the map's module with its `webgl` feature. The check fails if
 # anything turns SQLite back on in the browser build, or brings in a C build
 # (`cc`) that would need that clang, or if the module that draws with WebGPU

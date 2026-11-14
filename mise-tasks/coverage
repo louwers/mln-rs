@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Measure the coverage of the tests (`mise run test`) from a clean start, then report it: by default, open the HTML report"
+#MISE description="Measure the tests' coverage and open the report"
 #USAGE arg "[args]..." var=#true help="Arguments to `cargo llvm-cov report` (default `--open`)"
 set -euo pipefail
 source tools/dev-shell.sh

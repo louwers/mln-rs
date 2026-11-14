@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Fail when the repository has uncommitted changes, in CI (CI set) only"
+#MISE description="Fail in CI if the checkout has uncommitted changes"
 #MISE hide=true
 set -euo pipefail
 if [ -n "$(git status --porcelain --untracked-files=all)" ]; then

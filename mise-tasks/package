@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Package every crate from its packaged sources as the release does (RELEASING.md), and compile every test target"
+#MISE description="Package the crates as a release does, and build every test"
 # The desktop app is never released.
 # The verify step serves the packaged crates to each other from a local
 # registry, and Cargo treats a registry crate's name and version as immutable:

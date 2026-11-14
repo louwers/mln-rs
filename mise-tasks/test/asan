@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run the runtime's, the Vulkan backend's and the C library's tests under AddressSanitizer, round after round, for `minutes`"
+#MISE description="Run the runtime, Vulkan and C library tests under AddressSanitizer, over and over for a while"
 #USAGE arg "[minutes]" default="20" help="How long to keep starting rounds, in minutes"
 # AddressSanitizer stops a test at the first read or write of freed or
 # out-of-bounds memory. rustc's sanitizers are unstable, so the pinned nightly
