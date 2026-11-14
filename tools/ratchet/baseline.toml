@@ -126,7 +126,7 @@
 "crates/mln_style/src/property_value.rs" = 3
 "crates/mln_style/src/source_impl.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1
-"crates/mln_style/src/style_impl.rs" = 4
+"crates/mln_style/src/style_impl.rs" = 2
 "crates/mln_text/src/glyph_pbf.rs" = 1
 "crates/mln_text/src/harfbuzz_impl.rs" = 2
 "crates/mln_text/src/hb_ft.rs" = 2

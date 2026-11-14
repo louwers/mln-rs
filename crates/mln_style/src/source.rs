@@ -13,7 +13,7 @@
 // source, as C++ `sources.update(source)` does.
 
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,8 +50,17 @@ impl SourceBase {
         SourceBase { base_impl: RefCell::new(impl_), observer: RefCell::new(None), loaded: Cell::new(false) }
     }
 
+    fn impl_ref(&self) -> Ref<'_, Arc<dyn Impl>> {
+        self.base_impl.borrow()
+    }
+
     pub(crate) fn base_impl(&self) -> Arc<dyn Impl> {
-        self.base_impl.borrow().clone()
+        self.impl_ref().clone()
+    }
+
+    /// Whether the impl's id is `id`, read without copying the impl.
+    pub(crate) fn has_id(&self, id: &str) -> bool {
+        self.impl_ref().id == id
     }
 
     pub(crate) fn set_base_impl(&self, impl_: Arc<dyn Impl>) {

@@ -277,6 +277,19 @@ impl Scene {
         self.map.style_mut().load_json(json);
     }
 
+    /// Adds a layer from its JSON below `before`, or above every layer.
+    pub(crate) fn add_layer_json(&mut self, json: &str, before: Option<&str>) {
+        let value: serde_json::Value = serde_json::from_str(json).expect("a layer is JSON");
+        let mut error = mln_style::conversion::Error::default();
+        let layer = mln_style::conversion::convert_layer(&mln_style::conversion::Convertible::from(&value), &mut error)
+            .expect("a valid layer");
+        self.map.style_mut().add_layer(layer, before).expect("a new layer");
+    }
+
+    pub(crate) fn remove_layer(&mut self, id: &str) {
+        self.map.style_mut().remove_layer(id).expect("the layer");
+    }
+
     /// Adds an image to the style, as a sprite's would be.
     pub(crate) fn add_image(&mut self, id: &str, image: PremultipliedImage) {
         let image =

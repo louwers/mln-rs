@@ -166,6 +166,10 @@ struct ThreadState {
     http_file_source: HTTPFileSource,
     resource_transform: RefCell<Option<ResourceTransform>>,
     tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
+    /// Replaces the backoff after a connection error, so that a test can
+    /// tell the retries it starts apart from the backoff's.
+    #[cfg(test)]
+    connection_backoff: Cell<Option<Duration>>,
 }
 
 pub(crate) struct OnlineFileSourceThread {
@@ -418,6 +422,11 @@ impl OnlineFileRequest {
         // we've encountered, and on the expiration time, if present.
         let error_retry =
             error_retry_timeout(self.failed_request_reason.get(), self.failed_requests.get(), self.retry_after.get());
+        #[cfg(test)]
+        let error_retry = match self.state.upgrade().and_then(|state| state.connection_backoff.get()) {
+            Some(backoff) if self.failed_request_reason.get() == Reason::Connection => Some(backoff),
+            _ => error_retry,
+        };
         let minimum = self.resource.borrow().minimum_update_interval;
         let expiration = expiration_timeout(expires, self.expired_requests.get()).map(|e| e.max(minimum));
         match (expiration, error_retry) {
@@ -516,6 +525,8 @@ impl OnlineFileSourceThread {
             http_file_source,
             resource_transform: RefCell::new(None),
             tasks: RefCell::new(VecMap::new()),
+            #[cfg(test)]
+            connection_backoff: Cell::new(None),
         });
         let weak = Rc::downgrade(&state);
         let reachability = AsyncTask::new(move || {
@@ -614,6 +625,13 @@ impl OnlineFileSource {
     #[cfg(test)]
     pub(crate) fn pause(&self) -> crate::tests::Paused {
         crate::tests::pause(&self.thread.actor())
+    }
+
+    /// Waits `backoff` to retry a request that failed with a connection
+    /// error, in place of the exponential backoff.
+    #[cfg(test)]
+    pub(crate) fn set_connection_backoff(&self, backoff: Duration) {
+        self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.state.connection_backoff.set(Some(backoff)));
     }
 }
 

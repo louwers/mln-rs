@@ -29,17 +29,21 @@ use crate::response::{Reason, ResourceError, Response};
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
 const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
-/// An online file source whose thread has set up its HTTP transport, so that
-/// the tests that time their requests don't count that setup.
 fn online_file_source() -> Rc<OnlineFileSource> {
-    let fs = Rc::new(OnlineFileSource::new(&ResourceOptions::default()));
-    // `pause` returns once the thread runs.
-    drop(fs.pause());
-    fs
+    Rc::new(OnlineFileSource::new(&ResourceOptions::default()))
 }
 
 fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
+}
+
+/// Fails the test with `message` if it still runs in a minute. A test that
+/// waits for a retry only a network status change starts would otherwise
+/// hang when that retry never comes.
+fn fail_after_a_minute(message: &'static str) -> Timer {
+    let timer = Timer::new();
+    timer.start(Duration::from_secs(60), Duration::ZERO, move || panic!("{message}"));
+    timer
 }
 
 /// The seconds since `start`.
@@ -100,6 +104,8 @@ fn temporary_error() {
     let run_loop = RunLoop::new();
     let fs = online_file_source();
 
+    // The test bounds the backoff only from below: a loaded machine can
+    // delay a response any amount. `http_timeout`'s tests check its length.
     let start = Instant::now();
     let counter = Cell::new(0);
 
@@ -111,8 +117,6 @@ fn temporary_error() {
             counter.set(n + 1);
             match n {
                 0 => {
-                    let duration = seconds_since(start);
-                    assert!(0.2 > duration, "Initial error request took too long");
                     let error = res.error.as_ref().expect("error");
                     assert_eq!(Reason::Server, error.reason);
                     assert_eq!("HTTP status code 500", error.message);
@@ -125,7 +129,6 @@ fn temporary_error() {
                 1 => {
                     let duration = seconds_since(start);
                     assert!(0.99 < duration, "Backoff timer didn't wait 1 second");
-                    assert!(1.2 > duration, "Backoff timer fired too late");
                     assert_eq!(None, res.error);
                     assert_eq!(b"Hello World!", data(&res));
                     assert!(res.expires.is_none());
@@ -154,13 +157,10 @@ fn connection_error() {
     // The earliest the next failure can arrive, in seconds since `start`.
     // Each backoff starts when an attempt fails, before the failure reaches
     // this thread, so the backoffs add up from the start however long the
-    // failures take to arrive.
+    // failures take to arrive. The test bounds them only from below: a
+    // loaded machine can delay a failure any amount. `http_timeout`'s tests
+    // check each backoff's length.
     let earliest = Cell::new(CONNECTION_TIMEOUT);
-    // The latest it should arrive. The next backoff has started by the time
-    // a failure arrives, so it is timed from the failure: a slow failure
-    // (NSURLSession's, on GitHub's macOS runners) would otherwise count
-    // again against every later attempt.
-    let latest = Cell::new(CONNECTION_TIMEOUT + 0.3);
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
@@ -169,7 +169,6 @@ fn connection_error() {
         Box::new(move |res: Response| {
             let duration = seconds_since(start);
             assert!(earliest.get() - 0.01 < duration, "Backoff timer didn't wait 1 second");
-            assert!(latest.get() > duration, "Backoff timer fired too late");
             let error = res.error.as_ref().expect("error");
             assert_eq!(Reason::Connection, error.reason);
             assert!(res.data.is_none());
@@ -184,7 +183,6 @@ fn connection_error() {
             }
             let backoff = f64::from(1 << counter.get()) + CONNECTION_TIMEOUT;
             earliest.set(earliest.get() + backoff);
-            latest.set(duration + backoff + 0.3);
             counter.set(counter.get() + 1);
         }),
     ));
@@ -416,8 +414,9 @@ fn network_status_change() {
     run_loop.run();
 }
 
-// Tests that a change in network status preempts requests that failed due to
-// connection or reachability issues.
+// Tests that a change in network status preempts the backoff of a request
+// that failed due to connection or reachability issues: the request retries
+// at once.
 
 // gtest: OnlineFileSource.NetworkStatusChangePreempt
 #[test]
@@ -425,29 +424,20 @@ fn network_status_change_preempt() {
     let _serial = serial();
     let run_loop = RunLoop::new();
     let fs = online_file_source();
-    let paused = fs.pause();
+    // Longer than the test runs, so that only the network status change can
+    // retry the request.
+    fs.set_connection_backoff(Duration::from_secs(3600));
+    let _deadline = fail_after_a_minute("The network status change didn't retry the request");
 
-    let start = Instant::now();
-    let counter = Cell::new(0);
+    let counter = Rc::new(Cell::new(0));
 
     let resource = Resource::new(Kind::Unknown, closed_port_url("/test"));
 
-    let wait = Cell::new(CONNECTION_TIMEOUT);
     let req = req();
-    let (r, stop) = (Rc::clone(&req), run_loop.clone());
+    let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
     *req.borrow_mut() = Some(fs.request(
         &resource,
         Box::new(move |res: Response| {
-            let duration = seconds_since(start);
-            let n = counter.get();
-            if n == 0 {
-                assert!(wait.get() + 0.2 > duration, "Response came in too late");
-            } else if n == 1 {
-                assert!(wait.get() + 0.39 < duration, "Preempted retry triggered too early");
-                assert!(wait.get() + 0.6 > duration, "Preempted retry triggered too late");
-            } else if n > 1 {
-                panic!("Retried too often");
-            }
             let error = res.error.as_ref().expect("error");
             assert_eq!(Reason::Connection, error.reason);
             assert!(res.data.is_none());
@@ -456,27 +446,21 @@ fn network_status_change_preempt() {
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
 
-            wait.set(wait.get() + CONNECTION_TIMEOUT);
-
-            counter.set(n + 1);
-            if n == 1 {
+            c.set(c.get() + 1);
+            if c.get() == 1 {
+                // The request waits out its backoff by now: the failure
+                // reaches this thread after the backoff starts.
+                NetworkStatus::reachable();
+            } else {
                 r.borrow_mut().take();
                 stop.stop();
             }
         }),
     ));
 
-    // After 400 milliseconds + connectionTimeout, we're going to trigger a
-    // NetworkStatus change.
-    let reachable_timer = Timer::new();
-    reachable_timer.start(
-        Duration::from_millis((CONNECTION_TIMEOUT * 1000.0) as u64 + 400),
-        Duration::ZERO,
-        NetworkStatus::reachable,
-    );
-
-    drop(paused);
     run_loop.run();
+
+    assert_eq!(2, counter.get());
 }
 
 // gtest: OnlineFileSource.NetworkStatusOnlineOffline
@@ -494,6 +478,7 @@ fn network_status_online_offline() {
 
     let online_timer = Timer::new();
     online_timer.start(Duration::from_millis(100), Duration::ZERO, || NetworkStatus::set(Status::Online));
+    let _deadline = fail_after_a_minute("Going back Online didn't retry the request");
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());

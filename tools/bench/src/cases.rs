@@ -134,6 +134,7 @@ pub fn all() -> Vec<Case> {
     }
     cases.push(Case::new("Style/Replace600", style_replace));
     cases.push(Case::new("Runtime/Lifecycle", runtime_lifecycle));
+    cases.push(Case::new("Style/AddRemoveLayers", style_add_remove_layers));
     cases.push(Case::new("Load/Concurrent", load_concurrent));
     cases.push(Case::new("Load/GlyphCache/Private", |cx| load_glyph_cache(cx, false)));
     cases.push(Case::new("Load/GlyphCache/Shared", |cx| load_glyph_cache(cx, true)));
@@ -970,6 +971,36 @@ fn runtime_lifecycle(cx: &Context) -> Metrics {
             let runtime = mln_runtime::Runtime::new(&mln_runtime::RuntimeOptions::default()).expect("a runtime");
             runtime.release().expect("a release").wait().expect("the release");
         });
+    }
+    meter.finish()
+}
+
+/// 100 filtered line layers added to the loaded basemap, then removed, as
+/// maplibre-native-ffi's case of the name does, without its frames: the
+/// style's own work for each addition and removal.
+fn style_add_remove_layers(cx: &Context) -> Metrics {
+    const KINDS: [&str; 5] = ["primary", "secondary", "tertiary", "residential", "service"];
+    let layers: Vec<String> = (0..100)
+        .map(|i| {
+            format!(
+                r##"{{"id":"bench-{i}","type":"line","source":"basemap","source-layer":"streets","filter":["==",["get","kind"],"{}"],"paint":{{"line-color":"#{:06x}","line-width":{}}}}}"##,
+                KINDS[i % 5],
+                (i * 2_654_435_761) & 0xff_ffff,
+                1 + i % 4
+            )
+        })
+        .collect();
+    let mut scene = basemap(cx, Mode::Still);
+    let mut meter = Meter::new();
+    for _ in 0..cx.iterations(50) {
+        meter.start();
+        for layer in &layers {
+            scene.add_layer_json(layer, None);
+        }
+        for i in 0..layers.len() {
+            scene.remove_layer(&format!("bench-{i}"));
+        }
+        meter.stop();
     }
     meter.finish()
 }
