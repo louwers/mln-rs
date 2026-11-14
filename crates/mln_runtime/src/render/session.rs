@@ -854,6 +854,7 @@ fn attach_unlocked<R>(
                 scale_factor,
                 glyph_cache: map.glyph_cache(),
                 tile_cache_enabled: map.tile_cache_enabled(),
+                local_font_family: map.local_font_family(),
                 failure: None,
             })),
             resizes_sent: 0,

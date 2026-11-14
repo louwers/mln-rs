@@ -1051,7 +1051,8 @@ pub struct mln_map_options {
  that need complex shaping when `fallback_font_faces` is empty: fonts that
  the platform's font matcher picks for the user's preferred languages.
  Without it, the map does. The first map that uses them waits for them
- to be found.*/
+ to be found. In the browser, the browser draws CJK glyphs in its
+ sans-serif font instead, where `fallback_font_faces` doesn't cover them.*/
     pub system_fonts_enabled: bool,
 }
 /// A point on the screen, in logical pixels from the map's top-left corner.

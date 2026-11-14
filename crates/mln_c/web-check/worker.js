@@ -129,10 +129,17 @@ const map = view().getBigUint64(out, true);
 check(await created.done, "the map");
 log("map", map);
 
-// Red, with a blue polygon over most of the world that tile workers lay out.
+// Red, with a blue polygon over most of the world that tile workers lay out,
+// and a white CJK label below the center, which the browser draws: the map
+// has system fonts by default, and no glyph PBF is fetched for it.
 const style = {
   version: 8,
+  glyphs: "https://glyphs.invalid/{fontstack}/{range}.pbf",
   sources: {
+    label: {
+      type: "geojson",
+      data: { type: "Point", coordinates: [0, -40] },
+    },
     shape: {
       type: "geojson",
       data: {
@@ -161,8 +168,28 @@ const style = {
       source: "shape",
       paint: { "fill-color": "#0000ff" },
     },
+    {
+      id: "label",
+      type: "symbol",
+      source: "label",
+      layout: {
+        "text-field": "中文地图",
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 24,
+      },
+      paint: { "text-color": "#ffffff" },
+    },
   ],
 };
+
+/** Whether the scratch canvas shows the label: white pixels. */
+function showsLabel() {
+  const pixels = scratch.getImageData(0, 0, SIZE, SIZE).data;
+  let white = 0;
+  for (let i = 0; i < pixels.length; i += 4)
+    if (pixels[i] > 200 && pixels[i + 1] > 200 && pixels[i + 2] > 200) white++;
+  return white > 20;
+}
 const styled = completion();
 check(
   wasm.mln_map_set_style_json(
@@ -230,10 +257,17 @@ async function show(label, end) {
         `${label}: demand`,
       );
   };
-  const deadline = performance.now() + 60000;
+  // What the last frame showed. A map that is done drawing renders no more
+  // frames, so a timer, not a frame, fails the session.
+  let seen = "no frame";
   const outcome = new Promise(
     (resolve, reject) => (settled = { resolve, reject }),
   );
+  const timer = setTimeout(
+    () => settled.reject(new Error(`${label}: after 60 s, ${seen}`)),
+    60000,
+  );
+  outcome.finally(() => clearTimeout(timer)).catch(() => {});
   const attach = alloc(96);
   view().setUint32(attach, 96, true);
   // MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD or MLN_RENDER_DRIVER_CORE_WORKER.
@@ -274,9 +308,9 @@ async function show(label, end) {
       scratch.clearRect(0, 0, SIZE, SIZE);
       scratch.drawImage(canvas, 0, 0);
       const [r, g, b] = scratch.getImageData(SIZE / 2, SIZE / 2, 1, 1).data;
-      if (b > 200 && r < 50) settled.resolve();
-      else if (performance.now() > deadline)
-        settled.reject(new Error(`${label}: the center is still ${[r, g, b]}`));
+      const labelled = showsLabel();
+      if (b > 200 && r < 50 && labelled) settled.resolve();
+      seen = `the center ${[r, g, b]}, ${labelled ? "with" : "without"} the label`;
     }),
     true,
   );

@@ -122,6 +122,10 @@ pub(crate) struct Init {
     pub(crate) glyph_cache: Arc<GlyphCache>,
     /// Whether the renderer keeps tiles that left the view.
     pub(crate) tile_cache_enabled: bool,
+    /// The font family, a CSS font-family list, that the renderer draws CJK
+    /// glyphs in rather than downloading them: in the browser, with system
+    /// fonts.
+    pub(crate) local_font_family: Option<String>,
     /// Why the session's device couldn't be made before the build: in the
     /// browser, whose WebGPU makes devices asynchronously.
     pub(crate) failure: Option<Error>,
@@ -244,6 +248,8 @@ struct Gfx {
     /// The target's backend, which the renderer draws with.
     backend: Rc<dyn RendererBackend>,
     glyph_cache: Arc<GlyphCache>,
+    /// The font family the renderer draws CJK glyphs in (`Init`).
+    local_font_family: Option<String>,
 }
 
 impl Gfx {
@@ -252,7 +258,7 @@ impl Gfx {
     const OBJECTS: u32 = 2;
 
     fn new(init: Init) -> Result<Gfx, Error> {
-        let Init { target, size, scale_factor, glyph_cache, tile_cache_enabled, failure } = init;
+        let Init { target, size, scale_factor, glyph_cache, tile_cache_enabled, local_font_family, failure } = init;
         if let Some(failure) = failure {
             return Err(failure);
         }
@@ -267,10 +273,15 @@ impl Gfx {
             }
         };
         let backend = target.backend();
-        let mut renderer = Renderer::with_glyph_cache(Rc::clone(&backend), pixel_ratio, None, Arc::clone(&glyph_cache));
+        let mut renderer = Renderer::with_glyph_cache(
+            Rc::clone(&backend),
+            pixel_ratio,
+            local_font_family.clone(),
+            Arc::clone(&glyph_cache),
+        );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
         set_tile_worker_transport(&mut renderer);
-        Ok(Gfx { renderer, target, backend, glyph_cache })
+        Ok(Gfx { renderer, target, backend, glyph_cache, local_font_family })
     }
 
     fn scope(&self) -> BackendScope<'_> {
@@ -293,8 +304,12 @@ impl Gfx {
     fn renew_renderer(&mut self, events: &RendererEvents) {
         self.backend = self.target.backend();
         let pixel_ratio = self.renderer.get_pixel_ratio();
-        let mut renderer =
-            Renderer::with_glyph_cache(Rc::clone(&self.backend), pixel_ratio, None, Arc::clone(&self.glyph_cache));
+        let mut renderer = Renderer::with_glyph_cache(
+            Rc::clone(&self.backend),
+            pixel_ratio,
+            self.local_font_family.clone(),
+            Arc::clone(&self.glyph_cache),
+        );
         renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
         set_tile_worker_transport(&mut renderer);

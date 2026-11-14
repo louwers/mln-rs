@@ -46,7 +46,10 @@ pub struct MapOptions {
     /// Whether the map falls back to the system's fonts
     /// (`mln_system_fonts::fallback_font_faces`) for CJK and the scripts that
     /// need complex shaping, when `fallback_font_faces` is `None`. On by
-    /// default. The first map that uses them waits for them to be found.
+    /// default. The first map that uses them waits for them to be found. In
+    /// the browser, which has no font files to read, the browser draws CJK
+    /// glyphs in its sans-serif font instead, where `fallback_font_faces`
+    /// doesn't cover them, as MapLibre GL JS does.
     pub system_fonts: bool,
     /// Whether the map's render sessions keep tiles in memory after they
     /// leave the view, so they show again without loading. On by default.
@@ -131,6 +134,7 @@ pub(crate) struct MapShared {
     /// until a session's resize sends another.
     scale_factor: AtomicU64,
     tile_cache_enabled: bool,
+    system_fonts: bool,
     /// The render session attached to the map, from its attach until its
     /// detach completes.
     session: Mutex<Option<SessionClaim>>,
@@ -153,6 +157,7 @@ impl MapShared {
             mode: options.map.map_mode,
             scale_factor: AtomicU64::new(f64::from(options.map.pixel_ratio).to_bits()),
             tile_cache_enabled: options.tile_cache_enabled,
+            system_fonts: options.system_fonts,
             session: Mutex::new(None),
             sent: Mutex::new(1),
             released: AtomicBool::new(false),
@@ -641,6 +646,14 @@ impl Map {
 
     pub(crate) fn tile_cache_enabled(&self) -> bool {
         self.shared.tile_cache_enabled
+    }
+
+    /// The font family that the map's renderers draw CJK glyphs in rather
+    /// than downloading them: in the browser with system fonts, its
+    /// sans-serif font, as MapLibre GL JS's `localIdeographFontFamily`
+    /// defaults to.
+    pub(crate) fn local_font_family(&self) -> Option<String> {
+        (cfg!(target_family = "wasm") && self.shared.system_fonts).then(|| "sans-serif".to_owned())
     }
 
     pub(crate) fn glyph_cache(&self) -> Arc<GlyphCache> {
