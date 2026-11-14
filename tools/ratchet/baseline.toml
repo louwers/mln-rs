@@ -197,7 +197,7 @@
 "crates/mln_renderer/src/gfx/drawable_atlases_tweaker.rs" = 4
 "crates/mln_renderer/src/gfx/dynamic_texture.rs" = 4
 "crates/mln_renderer/src/globe_depth_pass.rs" = 2
-"crates/mln_renderer/src/image_manager.rs" = 23
+"crates/mln_renderer/src/image_manager.rs" = 25
 "crates/mln_renderer/src/layers/background_layer_tweaker.rs" = 4
 "crates/mln_renderer/src/layers/fill_extrusion_layer_tweaker.rs" = 1
 "crates/mln_renderer/src/layers/fill_layer_tweaker.rs" = 1
@@ -220,13 +220,13 @@
 "crates/mln_renderer/src/render_layer.rs" = 2
 "crates/mln_renderer/src/render_orchestrator.rs" = 35
 "crates/mln_renderer/src/render_source.rs" = 2
-"crates/mln_renderer/src/render_target.rs" = 5
+"crates/mln_renderer/src/render_target.rs" = 6
 "crates/mln_renderer/src/render_tree.rs" = 2
 "crates/mln_renderer/src/renderer.rs" = 14
 "crates/mln_renderer/src/renderer_event.rs" = 2
 "crates/mln_renderer/src/sky_pass.rs" = 10
 "crates/mln_renderer/src/sources/render_tile_source.rs" = 8
-"crates/mln_renderer/src/text/glyph_manager.rs" = 26
+"crates/mln_renderer/src/text/glyph_manager.rs" = 27
 "crates/mln_renderer/src/text/placement.rs" = 6
 "crates/mln_renderer/src/tile/geojson_tile.rs" = 2
 "crates/mln_renderer/src/tile/geometry_tile.rs" = 16
