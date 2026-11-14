@@ -4,6 +4,10 @@
 // How long an interaction drags back and forth, and how often it moves.
 const INTERACTION_MS = 2000;
 const FRAME_MS = 1000 / 60;
+// How long the map may go without drawing before the drag waits for it,
+// and the most of the drag's time that one move takes.
+const STALL_MS = 3 * FRAME_MS;
+const STEP_MS = 2 * FRAME_MS;
 
 /** From 0 at `ms`: to 1, then between -1 and 1, each swing half a second, back to 0 after each second. */
 function swing(ms) {
@@ -21,7 +25,10 @@ function swing(ms) {
  * - `pan-zoom`: a two-finger pinch that pans the map 0.65 of a tile east
  *   and west of where it started while it zooms out by 0.9 at each end.
  * It holds still before the release, longer than the recognizer's 40 ms,
- * so that the release starts no momentum.
+ * so that the release starts no momentum. The drag's clock stops while the
+ * map draws nothing for STALL_MS: a map that drew again after a stall
+ * would apply every move it missed at once, and sweep the view past tiles
+ * faster than they load.
  */
 export async function interact(session, interaction) {
   const { x, y } = await session.evaluate(
@@ -71,13 +78,29 @@ export async function interact(session, interaction) {
     release = () =>
       send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   }
+  // When the map last drew, and the request for its next frame.
+  let drawn = performance.now();
+  let frame;
+  const nextFrame = () => {
+    frame ??= session.evaluate("window.mln.nextFrame()").then(() => {
+      drawn = performance.now();
+      frame = undefined;
+    });
+    // A panic rejects it, which `load` reports.
+    frame.catch(() => {});
+    return frame;
+  };
   // A move a frame, at 60 Hz deadlines.
-  const start = performance.now();
-  for (let frame = 0; frame * FRAME_MS < INTERACTION_MS; frame++) {
-    await event(performance.now() - start);
-    await sleep(
-      Math.max(0, start + (frame + 1) * FRAME_MS - performance.now()),
-    );
+  let ms = 0;
+  let last = performance.now();
+  while (ms < INTERACTION_MS) {
+    await event(ms);
+    nextFrame();
+    await sleep(Math.max(0, last + FRAME_MS - performance.now()));
+    while (performance.now() - drawn > STALL_MS) await nextFrame();
+    const now = performance.now();
+    ms += Math.min(now - last, STEP_MS);
+    last = now;
   }
   await event(INTERACTION_MS);
   await sleep(200);
