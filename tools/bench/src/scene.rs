@@ -18,7 +18,6 @@ use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStat
 use mln_renderer::query::SourceQueryOptions;
 use mln_runtime::Device;
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
-use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
 use mln_util::feature::feature_id_to_string;
@@ -276,14 +275,6 @@ impl Scene {
 
     pub(crate) fn load_json(&mut self, json: &str) {
         self.map.style_mut().load_json(json);
-    }
-
-    /// Replaces the data of the GeoJSON source `id` with `json`.
-    pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
-        let geojson: geojson::GeoJson = json.parse().expect("valid GeoJSON");
-        let source = self.map.style().get_source(id).expect("the source");
-        let source = source.downcast_ref::<GeoJSONSource>().expect("a GeoJSON source");
-        source.set_geojson(geojson).expect("the source's data");
     }
 
     /// Adds a layer from its JSON below `before`, or above every layer.

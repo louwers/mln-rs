@@ -2484,7 +2484,6 @@ dependencies = [
 name = "mln-rs-bench"
 version = "0.0.11"
 dependencies = [
- "geojson",
  "libc",
  "mln-rs-actor",
  "mln-rs-conversion",

@@ -22,8 +22,6 @@ test = false
 
 [dependencies]
 feature.workspace = true
-# Parses the GeoJSON that `GeoJson/Replace1000` sets.
-geojson.workspace = true
 mln_actor.workspace = true
 mln_gfx.workspace = true
 # The OpenGL backend's renderer name (scene.rs).
