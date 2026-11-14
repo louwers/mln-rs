@@ -47,15 +47,21 @@ impl SignatureBase {
     }
 }
 
-/// Evaluates the arguments in order, stopping at the first error (both
-/// `Signature::applyImpl` and the varargs `apply`). Up to four stay on the
-/// stack, as C++ evaluates a signature's arguments into a tuple: a filter
-/// evaluates its expressions for every feature of every layer it filters.
+/// Evaluates the arguments into `values` in order, stopping at the first
+/// error (both `Signature::applyImpl` and the varargs `apply`). Up to four
+/// stay on the caller's stack, as C++ evaluates a signature's arguments into
+/// a tuple: a filter evaluates its expressions for every feature of every
+/// layer it filters. Filling the caller's `SmallVec` in place, rather than
+/// returning one, saves copying its four values' worth of bytes per call.
 fn eval_args(
     params: &EvaluationContext<'_>,
     args: &[Box<dyn Expression>],
-) -> Result<SmallVec<[Value; 4]>, EvaluationError> {
-    args.iter().map(|arg| arg.evaluate(params)).collect()
+    values: &mut SmallVec<[Value; 4]>,
+) -> Result<(), EvaluationError> {
+    for arg in args {
+        values.push(arg.evaluate(params)?);
+    }
+    Ok(())
 }
 
 // `*fromExpressionValue<T>(value)`: the type checker guarantees the
@@ -178,7 +184,8 @@ fn filter_property(
     compare_double: fn(&f64, &f64) -> bool,
     compare_string: fn(&str, &str) -> bool,
 ) -> EvaluationResult {
-    let a = eval_args(params, args)?;
+    let mut a = SmallVec::new();
+    eval_args(params, args, &mut a)?;
     let key = string(&a[0]);
     Ok(Value::Bool(match &a[1] {
         Value::Number(value) => feature_property_as_double(params, key).is_some_and(|rhs| compare_double(&rhs, value)),
@@ -193,7 +200,8 @@ fn filter_id(
     compare_double: fn(&f64, &f64) -> bool,
     compare_string: fn(&str, &str) -> bool,
 ) -> EvaluationResult {
-    let a = eval_args(params, args)?;
+    let mut a = SmallVec::new();
+    eval_args(params, args, &mut a)?;
     Ok(Value::Bool(match &a[0] {
         Value::Number(value) => feature_id_as_double(params).is_some_and(|rhs| compare_double(&rhs, value)),
         Value::String(value) => feature_id_as_string(params).is_some_and(|rhs| compare_string(&rhs, value)),
@@ -202,7 +210,8 @@ fn filter_id(
 }
 
 fn math1(params: &EvaluationContext<'_>, args: &[Box<dyn Expression>], f: fn(f64) -> f64) -> EvaluationResult {
-    let a = eval_args(params, args)?;
+    let mut a = SmallVec::new();
+    eval_args(params, args, &mut a)?;
     Ok(Value::Number(f(num(&a[0]))))
 }
 
@@ -216,20 +225,24 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("pi", n.clone(), fixed(&[]), D::NONE, |_, _| Ok(Value::Number(std::f64::consts::PI))),
         sig("ln2", n.clone(), fixed(&[]), D::NONE, |_, _| Ok(Value::Number(std::f64::consts::LN_2))),
         sig("typeof", s.clone(), fixed(&[T::Value]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::String(type_::to_string(&type_of(&a[0]))))
         }),
         sig("to-rgba", T::array_n(T::Number, 4), fixed(&[T::Color]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let Value::Color(color) = &a[0] else { panic!("color argument") };
             Ok(Value::Array(color.to_array().iter().map(|v| Value::Number(*v)).collect()))
         }),
         sig("rgba", T::Color, fixed(&[n.clone(), n.clone(), n.clone(), n.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Color(rgba(num(&a[0]), num(&a[1]), num(&a[2]), num(&a[3]))?))
         }),
         sig("rgb", T::Color, fixed(&[n.clone(), n.clone(), n.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Color(rgba(num(&a[0]), num(&a[1]), num(&a[2]), f64::from(1.0f32))?))
         }),
         sig("zoom", n.clone(), fixed(&[]), D::ZOOM, |p, _| match p.zoom {
@@ -278,7 +291,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Bool(feature.get_value(string(&key)).is_some()))
         }),
         sig("has", T::Boolean, fixed(&[s.clone(), T::Object]), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let Value::Object(object) = &a[1] else { panic!("object argument") };
             Ok(Value::Bool(object.contains_key(string(&a[0]))))
         }),
@@ -293,7 +307,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             }
         }),
         sig("get", T::Value, fixed(&[s.clone(), T::Object]), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let Value::Object(object) = &a[1] else { panic!("object argument") };
             Ok(object.get(string(&a[0])).cloned().unwrap_or(Value::Null))
         }),
@@ -328,7 +343,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(identifier_to_expression_value(&feature.get_id()))
         }),
         sig("+", n.clone(), Params::Varargs(n.clone()), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let mut sum = f64::from(0.0f32);
             for arg in &a {
                 sum += num(arg);
@@ -336,15 +352,18 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Number(sum))
         }),
         sig("-", n.clone(), fixed(&[n.clone(), n.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Number(num(&a[0]) - num(&a[1])))
         }),
         sig("-", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Number(-num(&a[0])))
         }),
         sig("*", n.clone(), Params::Varargs(n.clone()), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let mut prod = f64::from(1.0f32);
             for arg in &a {
                 prod *= num(arg);
@@ -352,7 +371,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Number(prod))
         }),
         sig("/", n.clone(), fixed(&[n.clone(), n.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let (x, y) = (num(&a[0]), num(&a[1]));
             if y == 0.0 {
                 if x == 0.0 {
@@ -368,12 +388,14 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Number(x / y))
         }),
         sig("%", n.clone(), fixed(&[n.clone(), n.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             // Rust's float `%` is C fmod.
             Ok(Value::Number(num(&a[0]) % num(&a[1])))
         }),
         sig("^", n.clone(), fixed(&[n.clone(), n.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Number(num(&a[0]).powf(num(&a[1]))))
         }),
         sig("sqrt", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::sqrt)),
@@ -387,7 +409,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("acos", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::acos)),
         sig("atan", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::atan)),
         sig("min", n.clone(), Params::Varargs(n.clone()), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let mut result = f64::INFINITY;
             for arg in &a {
                 result = fmin(num(arg), result);
@@ -395,7 +418,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Number(result))
         }),
         sig("max", n.clone(), Params::Varargs(n.clone()), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let mut result = f64::NEG_INFINITY;
             for arg in &a {
                 result = fmax(num(arg), result);
@@ -408,23 +432,28 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("ceil", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::ceil)),
         sig("abs", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::abs)),
         sig("!", T::Boolean, fixed(&[T::Boolean]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Bool(!boolean(&a[0])))
         }),
         sig("is-supported-script", T::Boolean, fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Bool(is_supported_script(p, string(&a[0]))))
         }),
         sig("upcase", s.clone(), fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::String(string(&a[0]).to_uppercase()))
         }),
         sig("downcase", s.clone(), fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::String(string(&a[0]).to_lowercase()))
         }),
         sig("concat", s.clone(), Params::Varargs(T::Value), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let mut s = String::new();
             for arg in &a {
                 s += &to_string(arg);
@@ -432,7 +461,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::String(s))
         }),
         sig("split", T::array(s.clone()), fixed(&[s.clone(), s.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let (input, delimiter) = (string(&a[0]), string(&a[1]));
             let mut result = Vec::new();
 
@@ -464,22 +494,26 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Array(result))
         }),
         sig("join", s.clone(), fixed(&[T::array(s.clone()), s.clone()]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let Value::Array(input) = &a[0] else { panic!("array argument") };
             let input: Vec<&str> = input.iter().map(string).collect();
             Ok(Value::String(input.join(string(&a[1]))))
         }),
         sig("resolved-locale", s.clone(), fixed(&[T::Collator]), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let Value::Collator(collator) = &a[0] else { panic!("collator argument") };
             Ok(Value::String(collator.resolved_locale().to_owned()))
         }),
         sig("error", T::Error, fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Err(EvaluationError::new(string(&a[0])))
         }),
         sig("feature-state", T::Value, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let mut state = MbglValue::Null;
             if let Some(feature_state) = p.feature_state
                 && let Some(v) = feature_state.get(string(&a[0]))
@@ -489,7 +523,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(mbgl_to_expression_value(&state))
         }),
         sig("global-state", T::Value, fixed(std::slice::from_ref(&s)), D::GLOBAL_STATE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let mut state = MbglValue::Null;
             if let Some(global_state) = p.global_state
                 && let Some(v) = global_state.get(string(&a[0]))
@@ -500,16 +535,19 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         }),
         // Legacy Filters
         sig("filter-==", T::Boolean, fixed(&[s.clone(), T::Value]), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let rhs = feature_property_as_expression_value(p, string(&a[0]));
             Ok(Value::Bool(rhs.is_some_and(|rhs| a[1] == rhs)))
         }),
         sig("filter-id-==", T::Boolean, fixed(&[T::Value]), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             Ok(Value::Bool(a[0] == feature_id_as_expression_value(p)))
         }),
         sig("filter-type-==", T::Boolean, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let Some(feature) = p.feature else {
                 return Ok(Value::Bool(false));
             };
@@ -540,7 +578,8 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             filter_id(p, args, PartialOrd::ge, PartialOrd::ge)
         }),
         sig("filter-has", T::Boolean, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let feature = p.feature.expect("feature");
             Ok(Value::Bool(feature.get_value(string(&a[0])).is_some()))
         }),
@@ -549,18 +588,21 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Bool(!matches!(feature.get_id(), FeatureIdentifier::Null)))
         }),
         sig("filter-type-in", T::Boolean, Params::Varargs(s.clone()), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let feature = p.feature.expect("feature");
             let t = feature_type_as_string(feature.get_type());
             Ok(Value::Bool(a.iter().any(|v| t == string(v))))
         }),
         sig("filter-id-in", T::Boolean, Params::Varargs(T::Value), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             let id = feature_id_as_expression_value(p);
             Ok(Value::Bool(a.contains(&id)))
         }),
         sig("filter-in", T::Boolean, Params::Varargs(T::Value), D::FEATURE, |p, args| {
-            let a = eval_args(p, args)?;
+            let mut a = SmallVec::new();
+            eval_args(p, args, &mut a)?;
             if a.len() < 2 {
                 return Ok(Value::Bool(false));
             }
