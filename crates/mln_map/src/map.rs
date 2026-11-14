@@ -48,6 +48,8 @@ pub(crate) type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
 /// A call of the style's observer.
 enum StyleEvent {
     SourceChanged(String),
+    /// A source reloads its description, and isn't loaded meanwhile.
+    SourceDescriptionChanged,
     Update,
     StyleLoading,
     StyleLoaded,
@@ -68,6 +70,9 @@ struct StyleEvents(EventQueue<StyleEvent>);
 impl SourceObserver for StyleEvents {
     fn on_source_changed(&self, source: &dyn Source) {
         self.0.push(StyleEvent::SourceChanged(source.get_id()));
+    }
+    fn on_source_description_changed(&self, _source: &dyn Source) {
+        self.0.push(StyleEvent::SourceDescriptionChanged);
     }
 }
 
@@ -319,6 +324,25 @@ impl Map {
         self.events.set_waker(waker);
     }
 
+    /// Whether the style or the renderer reported something that
+    /// [`process_events`](Self::process_events) hasn't handled. A report
+    /// counts once it is queued, though its waker may not have run yet.
+    #[must_use]
+    pub fn has_reports(&self) -> bool {
+        !self.style_events.is_empty() || !self.renderer_events.is_empty()
+    }
+
+    /// Sets a waker as [`set_waker`](Self::set_waker) does, that runs only
+    /// when the style or the renderer reports something for the map to
+    /// handle, which can come from any thread. The events that the map's own
+    /// calls report don't run it, for an owner that drains them after each
+    /// call.
+    pub fn set_reports_waker(&mut self, waker: Option<Waker>) {
+        self.style_events.set_waker(waker.clone());
+        self.renderer_events.set_waker(waker);
+        self.events.set_waker(None);
+    }
+
     /// Handles what the style and the renderer reported since the last
     /// call: loads, frames, errors and missing images. The map's reactions,
     /// such as an update for the renderer or a still image's callback, run
@@ -362,6 +386,8 @@ impl Map {
     fn handle_style_event(&mut self, event: StyleEvent) {
         match event {
             StyleEvent::SourceChanged(source_id) => self.emit(MapEvent::SourceChanged { source_id }),
+            // The style is no longer loaded, which the map's state shows.
+            StyleEvent::SourceDescriptionChanged => self.changed(),
             StyleEvent::Update => self.on_update(),
             StyleEvent::StyleLoading => {
                 self.changed();

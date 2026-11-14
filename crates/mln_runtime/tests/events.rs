@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use httpmock::MockServer;
 use mln_map::MapEvent;
+use mln_renderer::RendererEvent;
 use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
 use parking_lot::Mutex;
 use support::{EMPTY_STYLE, EventLog, map, map_options, runtime, wait, wait_err};
@@ -99,6 +100,27 @@ fn the_event_mask_selects_the_events() {
     assert_eq!(1, types.iter().filter(|t| **t == EventType::MapStyleLoaded).count(), "{types:?}");
     assert!(types.contains(&EventType::MapLoadingStarted), "{types:?}");
     assert!(types[0] == EventType::MapStyleLoaded, "{types:?}");
+}
+
+/// A report queued before a command goes out under the event mask before
+/// the command, though its waker hasn't run yet, as when the renderer's
+/// thread is between queueing a frame and waking the runtime.
+#[test]
+fn a_report_queued_before_a_command_goes_out_before_it() {
+    let runtime = runtime();
+    let log = EventLog::install(&runtime);
+    let (map, created) = runtime.create_map(MapOptions { event_mask: EventMask::ALL, ..map_options() }).unwrap();
+    created.wait().unwrap();
+    // Without the waker, a report waits in the queue as one whose waker
+    // hasn't run.
+    let reports = wait(map.with_core(|core| {
+        core.set_reports_waker(None);
+        core.renderer_events()
+    }));
+    reports.push(RendererEvent::RenderFrameStarted);
+    wait(map.set_event_mask(EventMask::ALL.without(EventType::MapRenderFrameStarted)));
+    let types: Vec<_> = log.events().iter().map(|event| event.kind.event_type()).collect();
+    assert!(types.contains(&EventType::MapRenderFrameStarted), "{types:?}");
 }
 
 #[test]
