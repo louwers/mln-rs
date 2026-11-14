@@ -1,7 +1,9 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, invalid_calls, topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, topologies, transparent_replace,
+    vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
+use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::Color;
 use objc2_metal::MTLCommandBuffer;
 
@@ -83,6 +85,59 @@ fn depth_only_through_gpu() {
 fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     vertex_layouts(&mut MetalGpu::new(&device), read_back).expect("the frames");
+}
+
+#[test]
+fn instanced_walls_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    instanced_walls(&mut MetalGpu::new(&device), read_back).expect("the frame");
+}
+
+#[test]
+fn a_vertex_function_reading_where_vertex_buffers_bind_is_rejected() {
+    // Reads buffer 8, where the instanced fill extrusion shader's second
+    // vertex buffer slot binds, directly.
+    const MSL: &str = "
+#include <metal_stdlib>
+using namespace metal;
+struct VertexStage { short2 pos [[attribute(0)]]; };
+vertex float4 vertexMain(VertexStage in [[stage_in]], device const short2* outline [[buffer(8)]],
+                         uint instance [[instance_id]]) {
+    return float4(float2(in.pos) + float2(outline[instance]), 0.0, 1.0);
+}
+fragment half4 fragmentMain() { return half4(1.0); }
+";
+    let device = Device::new(None).expect("Metal device");
+    let mut gpu = MetalGpu::new(&device);
+    let program = BuiltIn::FillExtrusionInstancedShader;
+    let (vertex, fragment) =
+        compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
+    let source = shader_source(program).expect("the table");
+    let shader = ShaderKey::new(program, []);
+    gpu.shaders.insert(shader.clone(), Shader { source, vertex, fragment });
+    let unblended = mln_gfx::color_mode::ColorMode::unblended();
+    let key = PipelineKey {
+        shader,
+        state: mln_gfx::gpu::PipelineState {
+            vertex_buffers: vec![VertexBufferLayout {
+                stride: 4,
+                step: VertexStep::Vertex,
+                attributes: vec![mln_gfx::gpu::VertexAttribute {
+                    id: mln_gfx::shaders::shader_defines::ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE as u32,
+                    format: AttributeDataType::Short2,
+                    offset: 0,
+                }],
+            }],
+            primitive: DrawModeType::Triangles,
+            cull: CullFaceMode::disabled(),
+            blend: unblended.blend_function,
+            color_mask: unblended.mask,
+            depth: DepthState::from(&mln_gfx::depth_mode::DepthMode::disabled()),
+            stencil: StencilState::from(&mln_gfx::stencil_mode::StencilMode::disabled()),
+        },
+        targets: TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None },
+    };
+    assert!(matches!(gpu.create_pipeline(&key), Err(GpuError::Invalid(_))));
 }
 
 #[test]

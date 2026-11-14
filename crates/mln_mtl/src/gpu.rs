@@ -762,7 +762,7 @@ fn vertex_descriptor(
     layouts: &[VertexBufferLayout],
 ) -> Result<(MTLVertexDescriptorPtr, Vec<Option<usize>>), GpuError> {
     let descriptor = MTLVertexDescriptor::vertexDescriptor();
-    let first = source.attributes.iter().chain(source.instance_attributes).map(|info| info.buffer_index).min();
+    let first = first_vertex_buffer(source);
     let mut buffer_indices: Vec<Option<usize>> = Vec::with_capacity(layouts.len());
     for (slot, layout) in layouts.iter().enumerate() {
         if layout.attributes.is_empty() {
@@ -806,14 +806,25 @@ fn vertex_descriptor(
     Ok((descriptor, buffer_indices))
 }
 
+/// The lowest buffer index of `source`'s attribute tables, past the indexes
+/// of the shader's own buffers, where the vertex buffers bind from.
+fn first_vertex_buffer(source: &ShaderSource) -> Option<usize> {
+    source.attributes.iter().chain(source.instance_attributes).map(|info| info.buffer_index).min()
+}
+
 /// What the pipeline of `reflection` reads, besides its vertex buffers at
 /// `vertex_buffer_indices`: where in its argument tables, and by the
 /// shaders' ids, as the shared checks read it.
+///
+/// Fails for a vertex function that reads a buffer from the indexes the
+/// vertex buffers bind at other than through its attributes: which slot's
+/// buffer it would read depends on the layouts, and no check bounds it.
 fn shader_bindings(
     reflection: &MTLRenderPipelineReflection,
     source: &ShaderSource,
     vertex_buffer_indices: &[Option<usize>],
 ) -> Result<(Vec<Binding>, Vec<ShaderBinding>), GpuError> {
+    let first_vertex_buffer = first_vertex_buffer(source);
     let mut bindings: Vec<Binding> = Vec::new();
     let mut reads: Vec<ShaderBinding> = Vec::new();
     for (vertex, stage) in [(true, reflection.vertexBindings()), (false, reflection.fragmentBindings())] {
@@ -833,6 +844,15 @@ fn shader_bindings(
                     })
             };
             let resource = match binding.r#type() {
+                // An argument of the vertex function, not its `[[stage_in]]`.
+                MTLBindingType::Buffer
+                    if vertex && binding.isArgument() && first_vertex_buffer.is_some_and(|first| index >= first) =>
+                {
+                    return Err(GpuError::Invalid(format!(
+                        "{} reads buffer {index}, where the vertex buffers bind, other than as attributes",
+                        source.name
+                    )));
+                }
                 MTLBindingType::Buffer if vertex && vertex_buffer_indices.contains(&Some(index)) => continue,
                 MTLBindingType::Buffer if index == ID_GLOBAL_UBO_INDEX => Resource::GlobalIndex,
                 MTLBindingType::Buffer => Resource::Buffer(index as u32),

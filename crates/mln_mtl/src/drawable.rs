@@ -277,7 +277,10 @@ impl Drawable {
     ) {
         for binding in bindings.iter().flatten() {
             match binding.vertex_buffer_resource.as_ref().and_then(|r| r.downcast_ref::<VertexBufferResource>()) {
-                Some(buffer) => render_pass.bind_vertex(buffer.get(), 0, binding.buffer_index as usize, 0),
+                Some(buffer) => {
+                    let offset = binding.vertex_offset as usize * binding.vertex_stride as usize;
+                    render_pass.bind_vertex(buffer.get(), offset, binding.buffer_index as usize, 0);
+                }
                 None => {
                     if let Some(empty) = empty {
                         render_pass.set_vertex_buffer(empty, 0, binding.buffer_index as usize);

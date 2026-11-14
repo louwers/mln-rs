@@ -3,7 +3,8 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, invalid_calls, topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, topologies, transparent_replace,
+    vertex_layouts,
 };
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState, Gpu, GpuError,
@@ -108,6 +109,14 @@ fn vertex_layouts_through_gpu() {
         return;
     };
     vertex_layouts(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frames");
+}
+
+#[test]
+fn instanced_walls_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    instanced_walls(&mut gpu, |gpu, texture| gpu.read_rgba8(texture).expect("readback")).expect("the frame");
 }
 
 fn buffer(gpu: &mut GlGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
