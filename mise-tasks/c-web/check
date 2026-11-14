@@ -4,8 +4,9 @@
 #USAGE arg "[backend]" default="webgpu" help="webgpu, or gl (WebGL2)"
 # Drives the package's C ABI from a Web Worker, as a JavaScript host does,
 # until a map with a GeoJSON layer shows on an OffscreenCanvas, for several
-# sessions in a row (crates/mln_c/web-check). Needs Node 24 and Playwright's
-# Chromium (`npx playwright@1.61.1 install chromium`).
+# sessions in a row (crates/mln_c/web-check). Needs the Chromium that
+# examples/web's playwright-core pins (`pnpm -C examples/web exec
+# playwright-core install --no-shell chromium`).
 set -euo pipefail
 mise run c-web:build --profile "$usage_profile" "$usage_backend"
 node crates/mln_c/web-check/check.mjs "${CARGO_TARGET_DIR:-target}/c-web/$usage_backend" "$usage_backend"

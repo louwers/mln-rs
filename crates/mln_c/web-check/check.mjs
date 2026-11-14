@@ -9,8 +9,10 @@
 // page or a worker logs an error.
 //
 // Usage: node crates/mln_c/web-check/check.mjs <package dir> <backend>
-// [--chromium <path>]. Node 24 with no packages, and Playwright's Chromium
-// (`npx playwright@1.61.1 install chromium`), as examples/web/check does.
+// [--chromium <path>]. Node 24 with no packages. The default Chromium is the
+// build that examples/web's playwright-core pins (`pnpm -C examples/web exec
+// playwright-core install --no-shell chromium`): keep chromium-1228 below in
+// step with it.
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";

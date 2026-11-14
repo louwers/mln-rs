@@ -220,7 +220,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-1.61.1-chromium
+          key: playwright-${{ hashFiles('examples/web/pnpm-lock.yaml') }}
 
       - uses: jdx/mise-action@v5
 
@@ -228,10 +228,13 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # The Chromium that check.mjs uses. The runner's own Chrome brings the
-      # system libraries it needs.
+      # The Chromium that examples/web's playwright-core pins, which both
+      # checks use. The runner's own Chrome brings the system libraries it
+      # needs.
       - name: Install Chromium
-        run: npx -y playwright@1.61.1 install chromium
+        run: |
+          pnpm -C examples/web install --frozen-lockfile
+          pnpm -C examples/web exec playwright-core install --no-shell chromium
 
       - name: Check
         run: mise run web:check --profile release --out "$RUNNER_TEMP/web-check"
