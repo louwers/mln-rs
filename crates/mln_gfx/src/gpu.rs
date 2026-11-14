@@ -389,7 +389,7 @@ pub struct Scissor {
 /// A command of a [`Pass`]. State a command sets lasts until the pass ends
 /// or a later command replaces it; a pass starts with no pipeline, bind
 /// groups or buffers, a viewport and scissor over its whole attachments,
-/// and stencil reference, global index and blend constant 0.
+/// stencil reference, global index and blend constant 0, and line width 1.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenderCommand {
     SetPipeline(PipelineId),
@@ -423,6 +423,9 @@ pub enum RenderCommand {
     SetStencilReference(u32),
     /// The constant the pipeline's `Constant*` blend factors read.
     SetBlendConstant(Color),
+    /// The width in pixels of the lines that line primitives draw, on a
+    /// backend that draws wide lines. Others draw them 1 pixel wide.
+    SetLineWidth(f32),
     /// Draws `vertices` of the vertex buffers, for each of `instances`.
     Draw {
         vertices: Range<u32>,

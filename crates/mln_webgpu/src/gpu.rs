@@ -300,6 +300,8 @@ impl WebGpu {
                     b: f64::from(color.b),
                     a: f64::from(color.a),
                 }),
+                // WebGPU draws lines 1 pixel wide.
+                RenderCommand::SetLineWidth(_) => {}
                 RenderCommand::Draw { .. } | RenderCommand::DrawIndexed { .. } => {
                     let id = pipeline
                         .ok_or_else(|| GpuError::Invalid(format!("{}: a draw before a pipeline", pass.label)))?;
