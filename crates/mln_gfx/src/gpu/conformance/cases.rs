@@ -7,16 +7,20 @@ use super::{EXTENT, SIZE, buffer, position_layout, tile_matrix, whole};
 use crate::color_mode::ColorMode;
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
-use crate::gfx_types::DrawModeType;
+use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Gpu, GpuError, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey,
-    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage,
+    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute,
+    VertexBufferLayout, VertexStep,
 };
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
 use crate::shaders::layer_ubo::ProjectionUBO;
 use crate::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
+    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO,
+    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
 use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::StencilMode;
@@ -368,6 +372,94 @@ pub fn depth_only<G: Gpu>(
         assert_eq!(texel(&pixels, SIZE.width / 2 - 1, y), black);
         assert_eq!(texel(&pixels, SIZE.width / 2, y), red, "the other half keeps the cleared depth");
         assert_eq!(texel(&pixels, SIZE.width - 1, y), red);
+    }
+    Ok(())
+}
+
+/// Checks that a pipeline reads its attributes from whichever vertex
+/// buffer slots their layouts put them in: the fill shader's position,
+/// color and opacity, each in a slot of its own, and then the position and
+/// opacity interleaved in one slot and the color in another. Both cover
+/// the target in the color. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn vertex_layouts<G: Gpu>(
+    gpu: &mut G,
+    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
+) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
+    let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
+    let mut drawable = [FillDrawableUnionUBO::default()];
+    drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
+    let props = FillEvaluatedPropsUBO { opacity: 1.0, ..FillEvaluatedPropsUBO::default() };
+    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
+    let props = bytemuck::bytes_of(&props);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let group = gpu.create_bind_group(&BindGroupDesc {
+        label: "fill layer",
+        entries: &[
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(ID_FILL_DRAWABLE_UBO, drawable_buffer, drawable),
+            whole(ID_FILL_EVALUATED_PROPS_UBO, props_buffer, props),
+        ],
+    })?;
+
+    // Opaque red twice, packed two channels a float, and full opacity
+    // twice, each pair mixed at t = 0.
+    let color = [65280.0f32, 255.0, 65280.0, 255.0];
+    let opacity = [1.0f32, 1.0];
+    let e = EXTENT as i16;
+    let positions: [[i16; 2]; 4] = [[0, 0], [e, 0], [0, e], [e, e]];
+    let colors = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[color; 4]))?;
+    let opacities = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[opacity; 4]))?;
+    let mut interleaved = Vec::with_capacity(4 * 12);
+    for position in positions {
+        interleaved.extend_from_slice(bytemuck::cast_slice(&position));
+        interleaved.extend_from_slice(bytemuck::cast_slice(&opacity));
+    }
+    let interleaved = buffer(gpu, BufferUsage::Vertex, &interleaved)?;
+
+    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let layout = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Vertex, attributes };
+    let pos = attribute(ID_FILL_POS_VERTEX_ATTRIBUTE, AttributeDataType::Short2, 0);
+    let color_layout = layout(16, vec![attribute(ID_FILL_COLOR_VERTEX_ATTRIBUTE, AttributeDataType::Float4, 0)]);
+    let separate = (
+        vec![
+            layout(4, vec![pos]),
+            layout(8, vec![attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 0)]),
+            color_layout.clone(),
+        ],
+        [frame.quad, opacities, colors],
+    );
+    let opacity_at_4 = attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 4);
+    let interleaved = (vec![layout(12, vec![pos, opacity_at_4]), color_layout], [interleaved, colors, colors]);
+    for (layouts, buffers) in [separate, interleaved] {
+        let mut key = background();
+        key.shader = ShaderKey::new(BuiltIn::FillShader, []);
+        let slots = layouts.len();
+        key.state.vertex_buffers = layouts;
+        let pipeline = gpu.create_pipeline(&key)?;
+        let mut pass = frame.pass(pipeline, []);
+        pass.commands = [RenderCommand::SetPipeline(pipeline), RenderCommand::SetBindGroup { slot: 0, group }]
+            .into_iter()
+            .chain(buffers[..slots].iter().enumerate().map(|(slot, &buffer)| RenderCommand::SetVertexBuffer {
+                slot: slot as u32,
+                buffer,
+                offset: 0,
+            }))
+            .chain([RenderCommand::SetIndexBuffer { buffer: frame.indices, offset: 0 }, DRAW_QUAD])
+            .collect();
+        gpu.submit(&[pass])?;
+        let pixels = read_back(gpu, frame.target);
+        let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
+        for (x, y) in [(0, 0), (right, 0), (0, bottom), (right, bottom)] {
+            assert_eq!(texel(&pixels, x, y), [255, 0, 0, 255], "{slots} vertex buffers, at ({x}, {y})");
+        }
     }
     Ok(())
 }
