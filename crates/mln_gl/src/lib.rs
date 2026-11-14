@@ -31,6 +31,9 @@
 //! `CanvasTarget` draws into the canvas of a WebGL2 context. An
 //! `ExportedTarget` renders into dmabufs, or on Android into hardware
 //! buffers, that it allocates.
+//!
+//! A `GlGpu` draws through the `mln_gfx::gpu::Gpu` interface instead, on a
+//! context of its own in a device's share group.
 
 #![expect(unsafe_code, reason = "OpenGL through glow is the FFI here")]
 
@@ -65,6 +68,8 @@ mod egl;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod exported_target;
 #[cfg(not(target_arch = "wasm32"))]
+mod gpu;
+#[cfg(not(target_arch = "wasm32"))]
 mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
@@ -82,6 +87,8 @@ pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use exported_target::ExportedTarget;
+#[cfg(not(target_arch = "wasm32"))]
+pub use gpu::GlGpu;
 #[cfg(not(target_arch = "wasm32"))]
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;

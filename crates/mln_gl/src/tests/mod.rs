@@ -9,3 +9,7 @@ mod glsl_compile_test;
 // DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
 // rendered into the offscreen target and read back.
 mod background_test;
+// mln_gfx::gpu::conformance's frame through `GlGpu`, and the draws that
+// `GlGpu` rejects.
+#[cfg(not(target_arch = "wasm32"))]
+mod gpu_test;
