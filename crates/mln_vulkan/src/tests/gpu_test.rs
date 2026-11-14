@@ -1,5 +1,6 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, invalid_calls, topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, topologies, transparent_replace,
+    vertex_layouts,
 };
 use mln_gfx::gpu::{Gpu, GpuError, ShaderKey, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_gfx::shader_group::GLOBE_DEFINE;
@@ -49,6 +50,13 @@ fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     vertex_layouts(&mut gpu, |gpu, texture| gpu.read_texture(texture).expect("readback")).expect("the frames");
+}
+
+#[test]
+fn instanced_walls_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
+    instanced_walls(&mut gpu, |gpu, texture| gpu.read_texture(texture).expect("readback")).expect("the frame");
 }
 
 #[test]

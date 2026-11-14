@@ -1131,17 +1131,7 @@ impl Gpu for GlGpu {
         if !entry.usage.sampled {
             return Err(GpuError::Invalid("a write to a texture that isn't sampled".to_owned()));
         }
-        let bytes_per_texel = entry
-            .format
-            .bytes_per_texel()
-            .ok_or_else(|| GpuError::Invalid(format!("{:?} textures take no writes", entry.format)))?;
-        let expected = u64::from(region.size.width) * u64::from(region.size.height) * u64::from(bytes_per_texel);
-        if data.len() as u64 != expected {
-            return Err(GpuError::Invalid(format!("a write of {} bytes to a region of {expected}", data.len())));
-        }
-        if region.x + region.size.width > entry.size.width || region.y + region.size.height > entry.size.height {
-            return Err(GpuError::Invalid(format!("a write past a texture of {:?}", entry.size)));
-        }
+        region.write_bytes_per_row(entry.size, entry.format, data)?;
         let (object, format) = (entry.object, entry.format);
         let (_, gl_format, type_) = texture_format(format).ok_or(GpuError::UnknownId("texture"))?;
         self.current(|gpu| {

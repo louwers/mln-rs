@@ -122,8 +122,8 @@ pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
 /// `MLN_USE_FILL_EXTRUSION_INSTANCING`
 pub const ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE: usize = 2;
-/// Port-only: the next outline vertex of a wall instance, which the WebGPU
-/// and Vulkan shaders read as attributes (Metal's read the instance buffer).
+/// Port-only: the next outline vertex of a wall instance, which every
+/// backend's shaders read as attributes.
 pub const ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE: usize = 3;
 pub const ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE: usize = 4;
 // Data driven

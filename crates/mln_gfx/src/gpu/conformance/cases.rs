@@ -15,12 +15,19 @@ use crate::gpu::{
     VertexBufferLayout, VertexStep,
 };
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::shaders::fill_extrusion_layer_ubo::{
+    FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
+};
 use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
 use crate::shaders::layer_ubo::ProjectionUBO;
 use crate::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
     ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO,
-    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
+    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+    ID_PROJECTION_UBO,
 };
 use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::StencilMode;
@@ -459,6 +466,124 @@ pub fn vertex_layouts<G: Gpu>(
         let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
         for (x, y) in [(0, 0), (right, 0), (0, bottom), (right, bottom)] {
             assert_eq!(texel(&pixels, x, y), [255, 0, 0, 255], "{slots} vertex buffers, at ({x}, {y})");
+        }
+    }
+    Ok(())
+}
+
+/// Checks that the instanced fill extrusion shader reads an instance's
+/// outline vertex and the next one only through the attributes of its
+/// layouts, in slots of the caller's choosing, and that a draw is checked
+/// against the instances it reads. The outline runs along the bottom of the
+/// tile, through its middle, to its right edge; the middle vertex ends a
+/// ring, so the wall from it draws nothing. The walls stand the height of
+/// the target, and the first covers the left half. The next vertex comes
+/// first, in a slot of its own, and the instance buffer holds the outline's
+/// three vertices and no more. Returns the error of a call that should
+/// succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn instanced_walls<G: Gpu>(
+    gpu: &mut G,
+    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
+) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
+    // Tile x `0..EXTENT` to clip x `-1..1`, elevation `0..1` to clip y
+    // `-1..1`, at clip depth 0.5.
+    let s = 2.0 / EXTENT;
+    let matrix = [s, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, -1.0, -1.0, 0.5, 1.0];
+    let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
+    let drawable = [FillExtrusionDrawableUBO { matrix, ..FillExtrusionDrawableUBO::default() }];
+    let tile_props = [FillExtrusionTilePropsUBO::default()];
+    // Opaque red, lit evenly.
+    let props = FillExtrusionPropsUBO {
+        color: [1.0, 0.0, 0.0, 1.0],
+        light_color: [1.0; 3],
+        light_position: [0.0, 0.0, 1.0],
+        base: 0.0,
+        height: 1.0,
+        opacity: 1.0,
+        ..FillExtrusionPropsUBO::default()
+    };
+    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
+    let (tile_props, props) = (bytemuck::cast_slice(&tile_props), bytemuck::bytes_of(&props));
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let tile_props_buffer = buffer(gpu, BufferUsage::Storage, tile_props)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let group = gpu.create_bind_group(&BindGroupDesc {
+        label: "fill extrusion layer",
+        entries: &[
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(ID_FILL_EXTRUSION_DRAWABLE_UBO, drawable_buffer, drawable),
+            whole(ID_FILL_EXTRUSION_TILE_PROPS_UBO, tile_props_buffer, tile_props),
+            whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
+        ],
+    })?;
+
+    // The wall quad: x picks the instance's vertex (0) or the next one (1),
+    // y the base (0) or the top (1).
+    let corners: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+    let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&corners))?;
+    // Each outline vertex is its position, then `decimals_ed`, whose x is
+    // odd where the vertex ends a ring.
+    let (e, half) = (EXTENT as i16, (EXTENT / 2.0) as i16);
+    let outline: [[i16; 4]; 3] = [[0, 0, 0, 0], [half, 0, 1, 0], [e, 0, 0, 0]];
+    let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&outline))?;
+
+    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let instances = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Instance, attributes };
+    let (short2, ushort2) = (AttributeDataType::Short2, AttributeDataType::UShort2);
+    let mut key = background();
+    key.shader = ShaderKey::new(
+        BuiltIn::FillExtrusionInstancedShader,
+        ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
+    );
+    key.state.vertex_buffers = vec![
+        VertexBufferLayout {
+            stride: 4,
+            step: VertexStep::Vertex,
+            attributes: vec![attribute(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, short2, 0)],
+        },
+        instances(
+            8,
+            vec![
+                attribute(ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ushort2, 4),
+                attribute(ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, short2, 0),
+            ],
+        ),
+        instances(8, vec![attribute(ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, short2, 0)]),
+        instances(8, vec![attribute(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ushort2, 4)]),
+    ];
+    let pipeline = gpu.create_pipeline(&key)?;
+    let walls = |instances| {
+        let mut pass = frame.pass(pipeline, []);
+        pass.commands = vec![
+            RenderCommand::SetPipeline(pipeline),
+            RenderCommand::SetBindGroup { slot: 0, group },
+            RenderCommand::SetVertexBuffer { slot: 0, buffer: corners, offset: 0 },
+            RenderCommand::SetVertexBuffer { slot: 1, buffer: outline, offset: 8 },
+            RenderCommand::SetVertexBuffer { slot: 2, buffer: outline, offset: 0 },
+            RenderCommand::SetVertexBuffer { slot: 3, buffer: outline, offset: 0 },
+            RenderCommand::SetIndexBuffer { buffer: frame.indices, offset: 0 },
+            RenderCommand::DrawIndexed { indices: 0..6, base_vertex: 0, instances },
+        ];
+        pass
+    };
+    assert!(invalid(&gpu.submit(&[walls(0..3)])), "a wall whose next vertex is past the instance buffer");
+    gpu.submit(&[walls(0..2)])?;
+
+    let pixels = read_back(gpu, frame.target);
+    let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
+    for y in [0, bottom / 2, bottom] {
+        for x in [0, right / 2] {
+            let [r, _, _, a] = texel(&pixels, x, y);
+            assert_eq!([r, a], [255, 255], "the first wall covers ({x}, {y})");
+        }
+        for x in [right / 2 + 1, right] {
+            assert_eq!(texel(&pixels, x, y), [0, 0, 0, 255], "the wall that ends a ring leaves ({x}, {y})");
         }
     }
     Ok(())

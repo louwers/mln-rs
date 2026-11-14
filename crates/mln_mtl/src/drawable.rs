@@ -15,14 +15,14 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::drawable::{self, DrawSegment, DrawableBase, UniqueDrawSegment};
-use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::index_vector::{IndexBufferBase, IndexVectorBasePtr};
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::shaders::shader_program_base::{ShaderProgramBasePtr, same_shader};
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::types::{CullFaceSideType, CullFaceWindingType, DepthMaskType};
+use mln_gfx::types::DepthMaskType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::util_hash::{hash, hash_combine};
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
@@ -31,10 +31,11 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 use objc2_metal::{
     MTLCullMode, MTLIndexType, MTLPrimitiveType, MTLRenderCommandEncoder, MTLScissorRect, MTLVertexDescriptor,
-    MTLVertexFormat, MTLVertexStepFunction, MTLWinding,
+    MTLVertexFormat, MTLVertexStepFunction,
 };
 
 use crate::context::Context;
+use crate::gpu::{map_cull_mode, map_winding_mode, primitive_type, vertex_format};
 use crate::mtl_fwd::{MTLBufferPtr, MTLDepthStencilStatePtr, MTLRenderPipelineStatePtr, MTLVertexDescriptorPtr};
 use crate::render_pass::{AttachmentFormats, RenderPass};
 use crate::shaders::shader_program::{ShaderProgram, as_mtl_shader};
@@ -73,74 +74,6 @@ struct DrawableImpl {
 pub(crate) struct Drawable {
     base: DrawableBase,
     impl_: DrawableImpl,
-}
-
-fn get_primitive_type(type_: DrawModeType) -> MTLPrimitiveType {
-    match type_ {
-        DrawModeType::Points => MTLPrimitiveType::Point,
-        DrawModeType::Lines => MTLPrimitiveType::Line,
-        DrawModeType::LineStrip => MTLPrimitiveType::LineStrip,
-        DrawModeType::Triangles => MTLPrimitiveType::Triangle,
-        _ => {
-            debug_assert!(false, "unsupported draw mode");
-            MTLPrimitiveType::Point
-        }
-    }
-}
-
-fn map_cull_mode(side: CullFaceSideType) -> MTLCullMode {
-    match side {
-        CullFaceSideType::Front => MTLCullMode::Front,
-        CullFaceSideType::Back => MTLCullMode::Back,
-        CullFaceSideType::FrontAndBack => MTLCullMode::None,
-    }
-}
-
-fn map_winding_mode(winding: CullFaceWindingType) -> MTLWinding {
-    match winding {
-        CullFaceWindingType::Clockwise => MTLWinding::Clockwise,
-        CullFaceWindingType::CounterClockwise => MTLWinding::CounterClockwise,
-    }
-}
-
-fn mtl_vertex_type_of(type_: AttributeDataType) -> MTLVertexFormat {
-    use AttributeDataType as A;
-    use MTLVertexFormat as F;
-    match type_ {
-        A::Byte => F::Char,
-        A::Byte2 => F::Char2,
-        A::Byte3 => F::Char3,
-        A::Byte4 => F::Char4,
-        A::UByte => F::UChar,
-        A::UByte2 => F::UChar2,
-        A::UByte3 => F::UChar3,
-        A::UByte4 => F::UChar4,
-        A::UByte4Normalized => F::UChar4Normalized,
-        A::Short => F::Short,
-        A::Short2 => F::Short2,
-        A::Short3 => F::Short3,
-        A::Short4 => F::Short4,
-        A::UShort => F::UShort,
-        A::UShort2 => F::UShort2,
-        A::UShort3 => F::UShort3,
-        A::UShort4 => F::UShort4,
-        A::Int => F::Int,
-        A::Int2 => F::Int2,
-        A::Int3 => F::Int3,
-        A::Int4 => F::Int4,
-        A::UInt => F::UInt,
-        A::UInt2 => F::UInt2,
-        A::UInt3 => F::UInt3,
-        A::UInt4 => F::UInt4,
-        A::Float => F::Float,
-        A::Float2 => F::Float2,
-        A::Float3 => F::Float3,
-        A::Float4 => F::Float4,
-        _ => {
-            debug_assert!(false, "Unsupported vertex attribute format");
-            F::Invalid
-        }
-    }
 }
 
 /// Sets each binding's buffer index to the one the shader reads it from.
@@ -290,7 +223,8 @@ impl Drawable {
                         let attrib_desc = vertex_desc.attributes().objectAtIndexedSubscript(index);
                         attrib_desc.setBufferIndex(buffer_index);
                         attrib_desc.setOffset(binding.attribute.offset as usize);
-                        attrib_desc.setFormat(mtl_vertex_type_of(binding.attribute.data_type));
+                        attrib_desc
+                            .setFormat(vertex_format(binding.attribute.data_type).unwrap_or(MTLVertexFormat::Invalid));
 
                         let layout_desc = vertex_desc.layouts().objectAtIndexedSubscript(buffer_index);
                         if layout_desc.stride() == 0 {
@@ -343,7 +277,10 @@ impl Drawable {
     ) {
         for binding in bindings.iter().flatten() {
             match binding.vertex_buffer_resource.as_ref().and_then(|r| r.downcast_ref::<VertexBufferResource>()) {
-                Some(buffer) => render_pass.bind_vertex(buffer.get(), 0, binding.buffer_index as usize, 0),
+                Some(buffer) => {
+                    let offset = binding.vertex_offset as usize * binding.vertex_stride as usize;
+                    render_pass.bind_vertex(buffer.get(), offset, binding.buffer_index as usize, 0);
+                }
                 None => {
                     if let Some(empty) = empty {
                         render_pass.set_vertex_buffer(empty, 0, binding.buffer_index as usize);
@@ -520,7 +457,7 @@ impl drawable::Drawable for Drawable {
             if ml_segment.index_length == 0 {
                 continue;
             }
-            let primitive_type = get_primitive_type(segment.get_mode().type_);
+            let primitive_type = primitive_type(segment.get_mode().type_).unwrap_or(MTLPrimitiveType::Point);
             // In bytes, not indexes.
             let index_offset = size_of::<u16>() * ml_segment.index_offset;
             debug_assert!(ml_segment.index_offset + ml_segment.index_length <= indexes.elements());

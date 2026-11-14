@@ -4,7 +4,8 @@
 // plus the attribute the port adds (`tex_origin`). The vertex buffers follow
 // the shader's UBOs: the layout vertices at `<layer>UBOCount`, then the
 // fill extrusions' instances or the symbols' dynamic and opacity vertices,
-// then the interleaved data-driven vertices.
+// then the interleaved data-driven vertices, then the fill extrusions'
+// instances again, one vertex on, for each instance's next outline vertex.
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::{
@@ -22,7 +23,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_DEBUG_OVERLAY_TEXTURE, ID_DEBUG_POS_VERTEX_ATTRIBUTE, ID_DEBUG_UBO, ID_FILL_COLOR_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
+    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
     ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
     ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
@@ -237,8 +239,9 @@ shader_source!(
     &[]
 );
 
-// src/mln/shaders/mtl/fill_extrusion.cpp. The instanced shaders read the
-// next outline vertex from the instance buffer, `fillExtrusionUBOCount + 1`.
+// src/mln/shaders/mtl/fill_extrusion.cpp. An instance of the instanced
+// shaders is an outline vertex; the port adds the vertex after it, which C++
+// reads from the instance buffer directly.
 const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, UShort2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
@@ -256,6 +259,9 @@ const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(3, Float4, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
     attr(4, Float2, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
     attr(5, Float2, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    // The next outline vertex
+    attr(6, Short2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(7, UShort2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
 const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
@@ -274,6 +280,9 @@ const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &
     attr(4, Float2, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     attr(5, UShort4, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
     attr(6, UShort4, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+    // The next outline vertex
+    attr(7, Short2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(8, UShort2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
 const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
 shader_source!(FILL_EXTRUSION_SHADER, "FillExtrusionShader", FILL_EXTRUSION_ATTRIBUTES, &[]);
