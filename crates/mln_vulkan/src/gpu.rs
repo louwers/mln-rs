@@ -9,14 +9,13 @@ use gpu_allocator::MemoryLocation;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, TargetFormats, TextureDesc, TextureFormat, TextureId,
-    TextureRegion, TextureUsage, VertexStep,
+    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat,
+    TextureId, TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_util::size::Size;
-use slotmap::SlotMap;
 
 use crate::buffer_resource::BufferAllocation;
 use crate::context::{build_descriptor_set_layout, build_pipeline_layout};
