@@ -51,7 +51,7 @@ impl DrawableAtlasesTweaker {
         }
     }
 
-    fn setup_textures(&self, drawable: &mut dyn Drawable, linear_filter_for_icons: bool) {
+    fn setup_textures(&self, drawable: &mut Drawable, linear_filter_for_icons: bool) {
         let Some(shader) = drawable.get_shader().clone() else {
             return;
         };
@@ -77,7 +77,7 @@ impl DrawableAtlasesTweaker {
             });
         }
         if let Some(icon_texture_id) = self.icon_texture_id
-            && shader.get_sampler_location(icon_texture_id).is_some()
+            && shader.samples(icon_texture_id)
         {
             debug_assert_ne!(glyph_texture_id, icon_texture_id);
             drawable.set_texture(glyph, glyph_texture_id);
@@ -89,11 +89,11 @@ impl DrawableAtlasesTweaker {
 }
 
 impl DrawableTweaker for DrawableAtlasesTweaker {
-    fn init(&self, drawable: &mut dyn Drawable) {
+    fn init(&self, drawable: &mut Drawable) {
         self.setup_textures(drawable, true);
     }
 
-    fn execute(&self, drawable: &mut dyn Drawable, parameters: &mut dyn PaintParameters) {
+    fn execute(&self, drawable: &mut Drawable, parameters: &mut dyn PaintParameters) {
         let transformed = self.rotation_alignment == AlignmentType::Map || parameters.state_pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
             parameters.state_is_changing() || transformed || !self.text_size_is_zoom_constant

@@ -28,12 +28,13 @@ use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
+use mln_gfx::drawable_builder::DrawableBuilder;
 use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::render_pass::{RenderPass as GfxRenderPass, RenderPassDescriptor};
-use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
+use mln_gfx::renderer::layer_group::{LayerGroupBasePtr, TileLayerGroup};
 use mln_gfx::renderer::render_pass::RenderPass;
 use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::scissor_rect::ScissorRect;
@@ -242,18 +243,14 @@ struct Scene {
 }
 
 impl Scene {
-    fn new(backend: &Window) -> Scene {
-        let registry = ShaderRegistry::new();
-        backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
-        let context = backend.get_context();
-        let layer_group = context.create_tile_layer_group(0, 64, "background".to_owned()).expect("layer group");
-        let shader = context
-            .get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator)
-            .expect("BackgroundShader");
+    fn new(_backend: &Window) -> Scene {
+        let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
+        let layer_group = TileLayerGroup::new_ptr(0, "background");
+        let shader = registry.shader("BackgroundShader", ProjectionVariant::Mercator).expect("BackgroundShader");
 
         let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
         let passes = RenderPass::Opaque | RenderPass::Translucent;
-        let mut builder = context.create_drawable_builder();
+        let mut builder = DrawableBuilder::new();
         builder.set_render_pass(passes);
         builder.set_shader(Some(shader));
         builder.set_depth_type(DepthMaskType::ReadWrite);
@@ -265,7 +262,7 @@ impl Scene {
             AttributeDataType::Short2,
         );
         builder.set_segments(DrawMode::Triangles(), vec![0, 1, 2, 1, 2, 3], &[SegmentBase::with_lengths(0, 0, 4, 6)]);
-        builder.flush(context);
+        builder.flush();
 
         let tile_id = OverscaledTileID::from_zxy(0, 0, 0);
         {
@@ -273,7 +270,7 @@ impl Scene {
             let tile_group = group.as_tile_layer_group_mut().expect("tile layer group");
             for mut drawable in builder.clear_drawables() {
                 drawable.set_tile_id(tile_id);
-                drawable.set_ubo_index(0);
+                drawable.ubo_index = 0;
                 tile_group.add_drawable(passes, &tile_id, drawable);
             }
         }
@@ -371,14 +368,12 @@ fn render_frame(
             clear_stencil: Some(0),
         },
     ));
-    context.bind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
     if let Some(scene) = scene {
         for pass in [RenderPass::Opaque, RenderPass::Translucent] {
             parameters.pass = pass;
             scene.layer_group.borrow_mut().render(&mut parameters);
         }
     }
-    context.unbind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
     parameters.render_pass = None;
     backend.target.end_frame(&*parameters.encoder);
     context.end_frame();

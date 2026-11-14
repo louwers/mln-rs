@@ -6,17 +6,16 @@ use std::rc::Rc;
 use mln_gfx::gpu::validation::{self, BufferInfo, PipelineInfo, Resources, ShaderBinding, TextureInfo};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, Gpu, GpuError, Limits, LoadOp, Pass,
-    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId,
-    TextureRegion, TextureUsage,
+    PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat,
+    TextureId, TextureRegion, TextureUsage,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::size::Size;
 
 use crate::Device;
-use crate::bind_groups::IndexTable;
-use crate::shaders::shader_group;
-use crate::shaders::shader_program::{BindingInfo, BindingType, ShaderProgram, validated};
+use crate::index_table::IndexTable;
+use crate::shaders::shader_program::{self, BindingInfo, BindingType, ShaderProgram, validated};
 use crate::writes::Writes;
 
 /// The size of the buffers that small uniform and storage buffers share.
@@ -127,19 +126,9 @@ impl WebGpu {
         self.textures.insert(Texture { texture: texture.clone(), view })
     }
 
-    /// The wgpu buffer that holds `buffer`, and where in it and how many
-    /// bytes `buffer` takes.
-    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(&wgpu::Buffer, u64, u64)> {
-        self.buffers.get(buffer).map(|entry| (&entry.buffer, entry.offset, entry.size))
-    }
-
     /// The wgpu texture of `texture`, and its view.
     pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(&wgpu::Texture, &wgpu::TextureView)> {
         self.textures.get(texture).map(|texture| (&texture.texture, &texture.view))
-    }
-
-    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<&wgpu::Sampler> {
-        self.samplers.get(sampler)
     }
 
     /// Submits `command_buffer` after the copies of the writes made so far.
@@ -332,13 +321,43 @@ impl WebGpu {
                 multiview_mask: None,
             })
             .forget_lifetime();
+        self.encode_commands(&mut render_pass, &pass.label, &pass.commands)
+    }
 
+    /// Records `commands` into `render_pass`, of `size` and over attachments
+    /// of `targets`, as the commands of a pass of their own.
+    ///
+    /// The old frame submission encodes the renderer's commands into the
+    /// render pass it has open with this, until frames go through
+    /// [`Gpu::submit`].
+    pub(crate) fn encode_into(
+        &mut self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        size: Size,
+        targets: TargetFormats,
+        commands: &[RenderCommand],
+    ) -> Result<(), GpuError> {
+        validation::check_commands(self, "render pass", targets, commands)?;
+        render_pass.set_viewport(0.0, 0.0, size.width as f32, size.height as f32, 0.0, 1.0);
+        render_pass.set_scissor_rect(0, 0, size.width, size.height);
+        render_pass.set_stencil_reference(0);
+        render_pass.set_blend_constant(wgpu::Color::TRANSPARENT);
+        self.encode_commands(render_pass, "render pass", commands)
+    }
+
+    /// Records `commands`, which the checks passed, into `render_pass`.
+    fn encode_commands(
+        &mut self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        label: &str,
+        commands: &[RenderCommand],
+    ) -> Result<(), GpuError> {
         let mut pipeline: Option<PipelineId> = None;
         let mut bound: Vec<Option<BindGroupId>> = Vec::new();
         let mut global_index = 0u32;
         // Whether the next draw sets its bind groups.
         let mut groups_dirty = true;
-        for command in &pass.commands {
+        for command in commands {
             match command {
                 RenderCommand::SetPipeline(id) => {
                     let entry = self.pipelines.get(*id).ok_or(GpuError::UnknownId("pipeline"))?;
@@ -397,10 +416,9 @@ impl WebGpu {
                 // WebGPU draws lines 1 pixel wide.
                 RenderCommand::SetLineWidth(_) => {}
                 RenderCommand::Draw { .. } | RenderCommand::DrawIndexed { .. } => {
-                    let id = pipeline
-                        .ok_or_else(|| GpuError::Invalid(format!("{}: a draw before a pipeline", pass.label)))?;
+                    let id = pipeline.ok_or_else(|| GpuError::Invalid(format!("{label}: a draw before a pipeline")))?;
                     if groups_dirty {
-                        self.set_groups(&mut render_pass, id, &bound, global_index)?;
+                        self.set_groups(render_pass, id, &bound, global_index)?;
                         groups_dirty = false;
                     }
                     match command {
@@ -535,6 +553,27 @@ impl Resources for WebGpu {
     fn bind_group_entries(&self, id: BindGroupId) -> Option<&[BindGroupEntry]> {
         self.bind_groups.get(id).map(Vec::as_slice)
     }
+}
+
+/// The format of `format`, `None` for a format the interface has no name
+/// for.
+pub(crate) fn from_wgpu_format(format: wgpu::TextureFormat) -> Option<TextureFormat> {
+    Some(match format {
+        wgpu::TextureFormat::R8Unorm => TextureFormat::R8Unorm,
+        wgpu::TextureFormat::R16Float => TextureFormat::R16Float,
+        wgpu::TextureFormat::R32Float => TextureFormat::R32Float,
+        wgpu::TextureFormat::Rgba8Unorm => TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Rgba8UnormSrgb => TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Bgra8Unorm => TextureFormat::Bgra8Unorm,
+        wgpu::TextureFormat::Bgra8UnormSrgb => TextureFormat::Bgra8UnormSrgb,
+        wgpu::TextureFormat::Rgb10a2Unorm => TextureFormat::Rgb10a2Unorm,
+        wgpu::TextureFormat::Rgba16Float => TextureFormat::Rgba16Float,
+        wgpu::TextureFormat::Rgba32Float => TextureFormat::Rgba32Float,
+        wgpu::TextureFormat::Depth32Float => TextureFormat::Depth32Float,
+        wgpu::TextureFormat::Depth24PlusStencil8 => TextureFormat::Depth24PlusStencil8,
+        wgpu::TextureFormat::Depth32FloatStencil8 => TextureFormat::Depth32FloatStencil8,
+        _ => return None,
+    })
 }
 
 impl Gpu for WebGpu {
@@ -736,7 +775,8 @@ impl Gpu for WebGpu {
         let shader = if let Some(shader) = self.shaders.get(&key.shader) {
             Rc::clone(shader)
         } else {
-            let shader = Rc::new(shader_group::compile(self.device.device(), self.index_table.layout(), &key.shader)?);
+            let shader =
+                Rc::new(shader_program::compile(self.device.device(), self.index_table.layout(), &key.shader)?);
             self.shaders.insert(key.shader.clone(), Rc::clone(&shader));
             shader
         };

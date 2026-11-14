@@ -25,8 +25,8 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType}
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, Drawable, ShaderProgramBasePtr,
-    ShaderRegistry,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, Drawable, DrawableBuilder,
+    ShaderProgramPtr, ShaderRegistry, TileLayerGroup, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
@@ -76,8 +76,8 @@ pub(crate) struct RenderHillshadeLayer {
     unevaluated: HillshadePaintProperties::Unevaluated,
     maxzoom: u8,
 
-    hillshade_prepare_shader: Option<ShaderProgramBasePtr>,
-    hillshade_shader: Option<ShaderProgramBasePtr>,
+    hillshade_prepare_shader: Option<ShaderProgramPtr>,
+    hillshade_shader: Option<ShaderProgramPtr>,
     activated_render_targets: Vec<RenderTargetPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
@@ -125,8 +125,8 @@ impl RenderHillshadeLayer {
 
 /// The vertex attributes of a hillshade (or prepare) drawable over
 /// `vertices`.
-fn hillshade_vertex_attributes(context: &dyn Context, vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
-    let vertex_attrs = context.create_vertex_attribute_array();
+fn hillshade_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
+    let vertex_attrs = VertexAttributeArray::new_ptr();
     {
         let mut attrs = vertex_attrs.borrow_mut();
         let stride = size_of::<HillshadeLayoutVertex>() as u32;
@@ -266,14 +266,7 @@ impl RenderLayer for RenderHillshadeLayer {
 
         // Set up a layer group
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -290,12 +283,11 @@ impl RenderLayer for RenderHillshadeLayer {
 
         if self.hillshade_prepare_shader.is_none() {
             self.hillshade_prepare_shader =
-                context.get_generic_shader(shaders, HILLSHADE_PREPARE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
+                shaders.shader(HILLSHADE_PREPARE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
 
         if self.hillshade_shader.is_none() {
-            self.hillshade_shader =
-                context.get_generic_shader(shaders, HILLSHADE_SHADER_GROUP_NAME, self.base.projection_variant);
+            self.hillshade_shader = shaders.shader(HILLSHADE_SHADER_GROUP_NAME, self.base.projection_variant);
         }
 
         let (Some(hillshade_prepare_shader), Some(hillshade_shader)) =
@@ -383,11 +375,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 self.bucket_render_targets.insert(bucket_id, (Rc::clone(&render_target), generation));
                 self.add_render_target(&render_target, changes);
 
-                let Some(single_tile_layer_group) =
-                    context.create_tile_layer_group(0, /*initial_capacity=*/ 1, self.get_id().to_owned())
-                else {
-                    return;
-                };
+                let single_tile_layer_group = TileLayerGroup::new_ptr(0, self.get_id());
                 render_target.borrow_mut().add_layer_group(Rc::clone(&single_tile_layer_group), /*replace=*/ true);
 
                 if self.prepare_layer_tweaker.is_none() {
@@ -403,7 +391,7 @@ impl RenderLayer for RenderHillshadeLayer {
                     Rc::downgrade(&prepare_layer_tweaker),
                 ));
 
-                let mut hillshade_prepare_builder = context.create_drawable_builder();
+                let mut hillshade_prepare_builder = DrawableBuilder::boxed();
                 hillshade_prepare_builder.set_shader(Some(Rc::clone(&hillshade_prepare_shader)));
                 hillshade_prepare_builder.set_depth_type(DepthMaskType::ReadOnly);
                 hillshade_prepare_builder.set_color_mode(&ColorMode::unblended());
@@ -411,7 +399,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 hillshade_prepare_builder.set_render_pass(render_pass);
                 let attrs = Rc::clone(
                     hillshade_prepare_vertex_attrs
-                        .get_or_insert_with(|| hillshade_vertex_attributes(context, &static_data_shared_vertices)),
+                        .get_or_insert_with(|| hillshade_vertex_attributes(&static_data_shared_vertices)),
                 );
                 hillshade_prepare_builder.set_vertex_attributes(Some(attrs));
                 hillshade_prepare_builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
@@ -436,7 +424,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 }
                 hillshade_prepare_builder.set_texture(Some(texture), ID_HILLSHADE_IMAGE_TEXTURE);
 
-                hillshade_prepare_builder.flush(context);
+                hillshade_prepare_builder.flush();
 
                 let mut group = single_tile_layer_group.borrow_mut();
                 let tile_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
@@ -497,7 +485,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 }
             };
 
-            let update_existing = |drawable: &mut dyn Drawable| {
+            let update_existing = |drawable: &mut Drawable| {
                 // Only current drawables are updated, ones produced for a
                 // previous style retain the attribute values for that style.
                 if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {
@@ -510,7 +498,7 @@ impl RenderLayer for RenderHillshadeLayer {
                     .map(|time| time.0);
                 if built_from != Some(geometry_time) {
                     drawable.update_vertex_attributes(
-                        Some(hillshade_vertex_attributes(context, &vertices)),
+                        Some(hillshade_vertex_attributes(&vertices)),
                         vertex_count,
                         DrawMode::Triangles(),
                         Some(Rc::clone(&indices)),
@@ -526,18 +514,18 @@ impl RenderLayer for RenderHillshadeLayer {
                 continue;
             }
 
-            let mut hillshade_builder = context.create_drawable_builder();
+            let mut hillshade_builder = DrawableBuilder::boxed();
             hillshade_builder.set_shader(Some(Rc::clone(&hillshade_shader)));
             hillshade_builder.set_enable_depth(false);
             hillshade_builder.set_color_mode(&ColorMode::alpha_blended());
             hillshade_builder.set_cull_face_mode(&CullFaceMode::disabled());
             hillshade_builder.set_render_pass(render_pass);
-            hillshade_builder.set_vertex_attributes(Some(hillshade_vertex_attributes(context, &vertices)));
+            hillshade_builder.set_vertex_attributes(Some(hillshade_vertex_attributes(&vertices)));
             hillshade_builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
             hillshade_builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
             hillshade_builder.set_texture(Some(Rc::clone(&render_target_texture)), ID_HILLSHADE_IMAGE_TEXTURE);
 
-            hillshade_builder.flush(context);
+            hillshade_builder.flush();
 
             let mut group = layer_group.borrow_mut();
             let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");

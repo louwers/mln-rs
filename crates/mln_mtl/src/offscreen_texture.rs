@@ -36,15 +36,9 @@ fn linear_clamp() -> SamplerState {
     }
 }
 
-/// A depth or stencil texture of `format` that the passes render into.
+/// A depth or depth-stencil texture of `format` that the passes render
+/// into.
 fn depth_stencil_texture(context: &Context, size: Size, format: MTLPixelFormat) -> Option<MTLTexturePtr> {
-    // Intel and AMD GPUs and the iOS simulator need the combined format: the
-    // depth and stencil formats of a pipeline must be identical.
-    let format = if cfg!(target_arch = "x86_64") || cfg!(target_abi = "sim") {
-        MTLPixelFormat::Depth32Float_Stencil8
-    } else {
-        format
-    };
     // SAFETY: the size is non-zero and the format a valid 2D one.
     let descriptor = unsafe {
         MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
@@ -106,12 +100,15 @@ impl OffscreenTextureResource {
             texture.set_render_target();
             texture.set_sampler(linear_clamp());
         }
-        let depth_texture =
-            depth.then(|| depth_stencil_texture(&context, size, MTLPixelFormat::Depth32Float)).flatten();
-        // On the iOS simulator, the depth target is Depth32Float_Stencil8.
-        let stencil_texture = (stencil && !cfg!(target_abi = "sim"))
-            .then(|| depth_stencil_texture(&context, size, MTLPixelFormat::Stencil8))
-            .flatten();
+        // With a stencil, one texture holds depth and stencil, as a
+        // pipeline's formats name them.
+        let stencil_texture =
+            stencil.then(|| depth_stencil_texture(&context, size, MTLPixelFormat::Depth32Float_Stencil8)).flatten();
+        let depth_texture = if stencil {
+            stencil_texture.clone().filter(|_| depth)
+        } else {
+            depth.then(|| depth_stencil_texture(&context, size, MTLPixelFormat::Depth32Float)).flatten()
+        };
         mln_gfx::context::Context::rendering_stats(&*context).num_frame_buffers += 1;
         OffscreenTextureResource {
             context,

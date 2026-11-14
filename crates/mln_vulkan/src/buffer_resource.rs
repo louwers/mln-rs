@@ -34,7 +34,6 @@ pub(crate) fn unique_id() -> u64 {
 
 /// A buffer and its memory, mapped.
 pub(crate) struct BufferAllocation {
-    id: u64,
     backend: Rc<BackendImpl>,
     buffer: vk::Buffer,
     allocation: Option<Allocation>,
@@ -87,18 +86,7 @@ impl BufferAllocation {
             }
         };
         let mapped_buffer = allocation.mapped_ptr().map_or(std::ptr::null_mut(), |p| p.as_ptr().cast::<u8>());
-        Some(BufferAllocation {
-            id: unique_id(),
-            backend: Rc::clone(backend),
-            buffer,
-            allocation: Some(allocation),
-            mapped_buffer,
-        })
-    }
-
-    #[must_use]
-    pub(crate) fn id(&self) -> u64 {
-        self.id
+        Some(BufferAllocation { backend: Rc::clone(backend), buffer, allocation: Some(allocation), mapped_buffer })
     }
 
     #[must_use]

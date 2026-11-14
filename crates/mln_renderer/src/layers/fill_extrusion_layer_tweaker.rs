@@ -203,7 +203,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 pad2: 0.0,
             };
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 

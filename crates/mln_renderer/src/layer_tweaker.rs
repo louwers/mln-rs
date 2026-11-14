@@ -60,6 +60,17 @@ impl LayerTweakerBase {
     }
 }
 
+/// Gives `layer_uniforms`, of a layer whose drawables draw without a
+/// projection, a projection block of zeros if they have none. GL's programs
+/// declare the block whether they read it or not, so a draw binds it all the
+/// same.
+pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &dyn Context) {
+    if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
+        layer_uniforms
+            .set(ID_PROJECTION_UBO, context.create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())));
+    }
+}
+
 /// Base class for layer tweakers, which manipulate layer group per frame.
 pub trait LayerTweaker {
     fn base(&self) -> &LayerTweakerBase;
@@ -96,7 +107,7 @@ pub(crate) fn get_tile_matrix(
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
-    drawable: &dyn Drawable,
+    drawable: &Drawable,
     aligned: bool,
 ) -> Mat4 {
     get_tile_matrix_for(
@@ -125,7 +136,7 @@ pub(crate) fn get_projection_data(
     anchor: TranslateAnchorType,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
-    drawable: &dyn Drawable,
+    drawable: &Drawable,
     aligned: bool,
 ) -> ProjectionData {
     let mut data = parameters.state.get_projection_data_for_matrix(

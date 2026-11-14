@@ -863,8 +863,8 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
     }
 }
 
-/// The shaders `shader_source` has, in the order `initShaders` registers
-/// them.
+/// The shaders `shader_source` has.
+#[cfg(test)]
 pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,

@@ -159,10 +159,34 @@ impl PassFormats {
 /// [`Storage`](BufferUsage::Storage) buffer holds the element at the draw's
 /// global index.
 pub fn check_pass(resources: &impl Resources, pass: &Pass) -> Result<(), GpuError> {
-    let label = &pass.label;
-    let invalid = |problem: String| GpuError::Invalid(format!("{label}: {problem}"));
     let formats = check_attachments(resources, pass)?;
+    check_commands_for(resources, &pass.label, formats, &pass.commands)
+}
 
+/// Checks `commands` as [`check_pass`] checks a pass's, for a pass over
+/// attachments of `targets`.
+///
+/// The old frame submission encodes the renderer's commands into the
+/// backends' own render passes, whose attachments aren't textures of the
+/// `Gpu`, with this, until frames go through [`Gpu::submit`](super::Gpu::submit).
+pub fn check_commands(
+    resources: &impl Resources,
+    label: &str,
+    targets: TargetFormats,
+    commands: &[RenderCommand],
+) -> Result<(), GpuError> {
+    let formats =
+        PassFormats { has_color: targets.color.is_some(), color: targets.color, depth_stencil: targets.depth_stencil };
+    check_commands_for(resources, label, formats, commands)
+}
+
+fn check_commands_for(
+    resources: &impl Resources,
+    label: &str,
+    formats: PassFormats,
+    commands: &[RenderCommand],
+) -> Result<(), GpuError> {
+    let invalid = |problem: String| GpuError::Invalid(format!("{label}: {problem}"));
     let mut pipeline: Option<PipelineInfo<'_>> = None;
     let mut bound: Vec<Option<BindGroupId>> = Vec::new();
     let mut vertex_buffers: Vec<Option<(BufferInfo, u64)>> = Vec::new();
@@ -170,7 +194,7 @@ pub fn check_pass(resources: &impl Resources, pass: &Pass) -> Result<(), GpuErro
     let mut global_index = 0;
     // Whether the bindings of the next draw are checked already.
     let mut bindings_checked = false;
-    for command in &pass.commands {
+    for command in commands {
         match *command {
             RenderCommand::SetPipeline(id) => {
                 let info = resources.pipeline_info(id).ok_or(GpuError::UnknownId("pipeline"))?;

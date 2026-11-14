@@ -316,7 +316,7 @@ impl LayerTweaker for LineLayerTweaker {
                         };
                         if drawable.get_texture(dash_texture_id).is_none() {
                             let texture = dash_pattern_texture.get_texture();
-                            drawable.set_enabled(texture.is_some());
+                            drawable.enabled = texture.is_some();
                             if let Some(texture) = texture {
                                 drawable.set_texture(Some(texture), dash_texture_id);
                             }
@@ -370,7 +370,7 @@ impl LayerTweaker for LineLayerTweaker {
                 }
             }
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 

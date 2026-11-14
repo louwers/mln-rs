@@ -11,7 +11,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::GLOBE_DEFINE;
 
 use crate::Device;
-use crate::bind_groups::IndexTable;
+use crate::index_table::IndexTable;
 use crate::shaders::shader_program::ShaderProgram;
 use crate::shaders::shader_source::{WgslShaderSource, prelude};
 use crate::shaders::wgsl_preprocessor::preprocess_wgsl;

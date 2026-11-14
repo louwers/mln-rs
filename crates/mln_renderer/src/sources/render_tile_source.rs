@@ -26,8 +26,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::{
-    ColorMode, Context, CullFaceMode, Drawable, LayerGroupBase, LayerGroupBasePtr, TileLayerGroup, UniformBufferPtr,
-    UniqueDrawableBuilder,
+    ColorMode, Context, CullFaceMode, Drawable, DrawableBuilder, LayerGroupBase, LayerGroupBasePtr, TileLayerGroup,
+    UniformBufferPtr, UniqueDrawableBuilder,
 };
 use mln_map_types::MapDebugOptions;
 use mln_style::expression::Dependency;
@@ -108,7 +108,6 @@ impl RenderItem for TileSourceRenderItem {
             return;
         }
 
-        let context = parameters.context;
         let render_pass = RenderPass::Translucent;
         let shaders = &*parameters.static_data.shaders;
         let drawable_name = format!("debug-{}", self.name);
@@ -116,7 +115,7 @@ impl RenderItem for TileSourceRenderItem {
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
         // initialize polyline builder
-        let Some(polyline_shader) = shaders.get_shader_group("LineShader").and_then(|shader_group| {
+        let Some(polyline_shader) = shaders.shader_group("LineShader").map(|shader_group| {
             let properties_as_uniforms: StringIDSetsPair = (
                 ["a_color", "a_blur", "a_opacity", "a_gapwidth", "a_offset", "a_width"]
                     .into_iter()
@@ -133,7 +132,7 @@ impl RenderItem for TileSourceRenderItem {
                 .into_iter()
                 .collect(),
             );
-            shader_group.get_or_create_shader(context, &properties_as_uniforms, projection_variant, "a_pos")
+            shader_group.shader(&properties_as_uniforms, projection_variant)
         }) else {
             return;
         };
@@ -146,7 +145,7 @@ impl RenderItem for TileSourceRenderItem {
                                          options: &PolylineGeneratorOptions,
                                          data: Option<Box<dyn Any>>| {
             let builder = polyline_builder.get_or_insert_with(|| {
-                let mut builder = context.create_drawable_builder();
+                let mut builder = DrawableBuilder::boxed();
                 builder.set_shader(Some(Rc::clone(&polyline_shader)));
                 builder.set_render_pass(render_pass);
                 builder.set_enable_depth(false);
@@ -161,7 +160,7 @@ impl RenderItem for TileSourceRenderItem {
             }
 
             // finish
-            builder.flush(context);
+            builder.flush();
             let mut data = data;
             for mut drawable in builder.clear_drawables() {
                 drawable.set_tile_id(tile_id);
@@ -178,8 +177,7 @@ impl RenderItem for TileSourceRenderItem {
             if let Some(layer_group) = debug_layer_groups.get(&type_) {
                 return Some(Rc::clone(layer_group));
             }
-            let layer_group =
-                context.create_tile_layer_group(type_ as i32, /*initial_capacity=*/ 64, layer_name.to_owned())?;
+            let layer_group = TileLayerGroup::new_ptr(type_ as i32, layer_name);
             debug_layer_groups.insert(type_, Rc::clone(&layer_group));
             Some(layer_group)
         };
@@ -225,7 +223,7 @@ impl RenderItem for TileSourceRenderItem {
                     let Some(debug_bucket) = &tile.debug_bucket else {
                         continue;
                     };
-                    let shows_text = |drawable: &mut dyn Drawable| {
+                    let shows_text = |drawable: &mut Drawable| {
                         drawable.get_data().and_then(|data| data.downcast_ref::<Vec<String>>())
                             == Some(&debug_bucket.text)
                     };
@@ -402,11 +400,11 @@ impl LayerTweaker for PolylineLayerTweaker {
     }
 
     fn execute(&mut self, layer_group: &mut dyn LayerGroupBase, parameters: &PaintParameters<'_>) {
+        let context = parameters.context;
         if layer_group.empty() {
             return;
         }
 
-        let context = parameters.context;
         layer_group.mutable_uniform_buffers().create_or_update_pod(
             ID_LINE_EVALUATED_PROPS_UBO,
             &self.props_ubo,
@@ -461,7 +459,7 @@ impl LayerTweaker for PolylineLayerTweaker {
                 pad1: 0.0,
             });
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 

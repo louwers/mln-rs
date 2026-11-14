@@ -17,8 +17,8 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, Drawable, LayerGroupBasePtr, ShaderProgramBasePtr,
-    ShaderRegistry,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, Drawable, DrawableBuilder, LayerGroup,
+    LayerGroupBasePtr, ShaderProgramPtr, ShaderRegistry, TileLayerGroup, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
@@ -88,7 +88,7 @@ pub(crate) struct RenderHeatmapLayer {
     segments: Vec<SegmentBase>,
 
     heatmap_shader_group: Option<ShaderGroupPtr>,
-    heatmap_texture_shader: Option<ShaderProgramBasePtr>,
+    heatmap_texture_shader: Option<ShaderProgramPtr>,
     render_target: Option<RenderTargetPtr>,
 
     shared_texture_vertices: Option<VertexVectorBasePtr>,
@@ -155,7 +155,7 @@ impl RenderHeatmapLayer {
         layer_group: &LayerGroupBasePtr,
         render_pass: RenderPass,
         tile_id: &OverscaledTileID,
-        mut update: impl FnMut(&mut dyn Drawable) -> bool,
+        mut update: impl FnMut(&mut Drawable) -> bool,
     ) -> bool {
         let mut any_updated = false;
         let mut un_updated_drawables = false;
@@ -304,11 +304,7 @@ impl RenderLayer for RenderHeatmapLayer {
             activate_render_target(self.render_target.as_ref(), self.base.is_renderable, changes);
 
             // Set up tile layer group
-            let Some(tile_layer_group) =
-                context.create_tile_layer_group(0, /*initial_capacity=*/ 64, self.get_id().to_owned())
-            else {
-                return;
-            };
+            let tile_layer_group = TileLayerGroup::new_ptr(0, self.get_id());
             render_target.borrow_mut().add_layer_group(tile_layer_group, /*replace=*/ true);
             self.texture_tweaker = None;
         }
@@ -320,7 +316,7 @@ impl RenderLayer for RenderHeatmapLayer {
         };
 
         if self.heatmap_shader_group.is_none() {
-            self.heatmap_shader_group = shaders.get_shader_group(HEATMAP_SHADER_GROUP_NAME);
+            self.heatmap_shader_group = shaders.shader_group(HEATMAP_SHADER_GROUP_NAME);
         }
         let Some(heatmap_shader_group) = self.heatmap_shader_group.clone() else {
             self.remove_all_drawables();
@@ -357,7 +353,7 @@ impl RenderLayer for RenderHeatmapLayer {
         let evaluated = get_evaluated::<HeatmapLayerProperties>(&evaluated_properties);
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
-        let mut heatmap_shader: Option<ShaderProgramBasePtr> = None;
+        let mut heatmap_shader: Option<ShaderProgramPtr> = None;
 
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
@@ -387,7 +383,7 @@ impl RenderLayer for RenderHeatmapLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            let update_existing = |drawable: &mut dyn Drawable| {
+            let update_existing = |drawable: &mut Drawable| {
                 // A drawable produced on a previous style/bucket should not
                 // be updated.
                 drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref())
@@ -399,7 +395,7 @@ impl RenderLayer for RenderHeatmapLayer {
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
-            let heatmap_vertex_attrs = context.create_vertex_attribute_array();
+            let heatmap_vertex_attrs = VertexAttributeArray::new_ptr();
             {
                 let buffer = &paint_property_binders.interleaved_vertex_buffer;
                 let shared =
@@ -431,15 +427,8 @@ impl RenderLayer for RenderHeatmapLayer {
             }
 
             if heatmap_shader.is_none() {
-                heatmap_shader = heatmap_shader_group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    "a_pos",
-                );
-                if heatmap_shader.is_none() {
-                    continue;
-                }
+                heatmap_shader =
+                    Some(heatmap_shader_group.shader(&properties_as_uniforms, self.base.projection_variant));
             }
 
             if let Some(attr) = heatmap_vertex_attrs.borrow_mut().set(
@@ -457,7 +446,7 @@ impl RenderLayer for RenderHeatmapLayer {
                 );
             }
 
-            let mut heatmap_builder = context.create_drawable_builder();
+            let mut heatmap_builder = DrawableBuilder::boxed();
             heatmap_builder.set_shader(heatmap_shader.clone());
             heatmap_builder.set_enable_depth(false);
             heatmap_builder.set_color_mode(&ColorMode::additive());
@@ -471,7 +460,7 @@ impl RenderLayer for RenderHeatmapLayer {
                 &bucket.segments,
             );
 
-            heatmap_builder.flush(context);
+            heatmap_builder.flush();
 
             let mut group = tile_layer_group.borrow_mut();
             let tile_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
@@ -486,22 +475,11 @@ impl RenderLayer for RenderHeatmapLayer {
 
         // Set up texture layer group
         if self.base.layer_group.is_none() {
-            match context.create_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 1,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => {
-                    if let Some(texture_tweaker) = &self.texture_tweaker {
-                        changes.push(ChangeRequest::AddLayerTweaker(
-                            Rc::clone(&layer_group),
-                            Rc::downgrade(texture_tweaker),
-                        ));
-                    }
-                    self.set_layer_group(Some(layer_group), changes);
-                }
-                None => return,
+            let layer_group = LayerGroup::new_ptr(self.base.layer_index, self.get_id());
+            if let Some(texture_tweaker) = &self.texture_tweaker {
+                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(texture_tweaker)));
             }
+            self.set_layer_group(Some(layer_group), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
         if self.texture_tweaker.is_none() {
@@ -516,7 +494,7 @@ impl RenderLayer for RenderHeatmapLayer {
 
         if self.heatmap_texture_shader.is_none() {
             self.heatmap_texture_shader =
-                context.get_generic_shader(shaders, HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
+                shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
         let Some(heatmap_texture_shader) = self.heatmap_texture_shader.clone() else {
             self.remove_all_drawables();
@@ -532,7 +510,7 @@ impl RenderLayer for RenderHeatmapLayer {
         let shared_texture_vertices = self.shared_texture_vertices.clone().expect("texture vertices");
         let texture_vertex_count = 4;
 
-        let texture_vertex_attrs = context.create_vertex_attribute_array();
+        let texture_vertex_attrs = VertexAttributeArray::new_ptr();
         if let Some(attr) =
             texture_vertex_attrs.borrow_mut().set(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
         {
@@ -545,7 +523,7 @@ impl RenderLayer for RenderHeatmapLayer {
             );
         }
 
-        let mut heatmap_texture_builder = context.create_drawable_builder();
+        let mut heatmap_texture_builder = DrawableBuilder::boxed();
         heatmap_texture_builder.set_shader(Some(heatmap_texture_shader));
         heatmap_texture_builder.set_enable_depth(false);
         heatmap_texture_builder.set_color_mode(&ColorMode::alpha_blended());
@@ -578,7 +556,7 @@ impl RenderLayer for RenderHeatmapLayer {
         }
         heatmap_texture_builder.set_texture(Some(texture), ID_HEATMAP_COLOR_RAMP_TEXTURE);
 
-        heatmap_texture_builder.flush(context);
+        heatmap_texture_builder.flush();
 
         let mut group = layer_group.borrow_mut();
         let Some(texture_layer_group) = group.as_layer_group_mut() else {

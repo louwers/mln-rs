@@ -11,7 +11,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
     AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, ShaderRegistry,
-    UniqueDrawableBuilder, VertexAttributeArrayPtr,
+    TileLayerGroup, UniqueDrawableBuilder, VertexAttributeArray, VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
@@ -141,7 +141,7 @@ fn capture_rendered_features(
 }
 
 fn read_fill_attributes(
-    attrs: &mut mln_gfx::vertex_attribute::VertexAttributeArray,
+    attrs: &mut VertexAttributeArray,
     binders: &FillBinders,
     shared: &VertexVectorBasePtr,
     evaluated: &FillPaintProperties::PossiblyEvaluated,
@@ -303,7 +303,7 @@ impl RenderLayer for RenderFillLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &dyn Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -321,19 +321,12 @@ impl RenderLayer for RenderFillLayer {
 
         // Set up a layer group for fill
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
         if self.outline_triangulated_shader_group.is_none() {
-            self.outline_triangulated_shader_group = shaders.get_shader_group(FILL_OUTLINE_TRIANGULATED_SHADER_NAME);
+            self.outline_triangulated_shader_group = shaders.shader_group(FILL_OUTLINE_TRIANGULATED_SHADER_NAME);
         }
 
         if self.base.layer_tweaker.is_none() {
@@ -348,16 +341,16 @@ impl RenderLayer for RenderFillLayer {
         self.update_projection_variant(state);
 
         if self.fill_shader_group.is_none() {
-            self.fill_shader_group = shaders.get_shader_group(FILL_SHADER_NAME);
+            self.fill_shader_group = shaders.shader_group(FILL_SHADER_NAME);
         }
         if self.outline_shader_group.is_none() {
-            self.outline_shader_group = shaders.get_shader_group(FILL_OUTLINE_SHADER_NAME);
+            self.outline_shader_group = shaders.shader_group(FILL_OUTLINE_SHADER_NAME);
         }
         if self.pattern_shader_group.is_none() {
-            self.pattern_shader_group = shaders.get_shader_group(FILL_PATTERN_SHADER_NAME);
+            self.pattern_shader_group = shaders.shader_group(FILL_PATTERN_SHADER_NAME);
         }
         if self.outline_pattern_shader_group.is_none() {
-            self.outline_pattern_shader_group = shaders.get_shader_group(FILL_OUTLINE_PATTERN_SHADER_NAME);
+            self.outline_pattern_shader_group = shaders.shader_group(FILL_OUTLINE_PATTERN_SHADER_NAME);
         }
         let (Some(fill_shader_group), Some(outline_shader_group), Some(_), Some(_)) = (
             self.fill_shader_group.clone(),
@@ -377,7 +370,7 @@ impl RenderLayer for RenderFillLayer {
 
         let render_pass = RenderPass::Translucent;
 
-        let common_init = |builder: &mut dyn DrawableBuilder| {
+        let common_init = |builder: &mut DrawableBuilder| {
             builder.set_cull_face_mode(&CullFaceMode::disabled());
             builder.set_enable_stencil(true);
         };
@@ -440,7 +433,7 @@ impl RenderLayer for RenderFillLayer {
             // Drawables' stored attributes point directly into the bucket's
             // shared vectors; the backend upload guard fires automatically
             // when those change.
-            let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut mln_gfx::Drawable| {
                 let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
                 if current && FillVariant::from_type(drawable.get_type()) != Some(FillVariant::FillOutlineTriangulated)
                 {
@@ -458,7 +451,7 @@ impl RenderLayer for RenderFillLayer {
             properties_as_uniforms.1.clear();
 
             // `Fill*Program` all use `style::FillPaintProperties`
-            let vertex_attrs: VertexAttributeArrayPtr = context.create_vertex_attribute_array();
+            let vertex_attrs: VertexAttributeArrayPtr = VertexAttributeArray::new_ptr();
             read_fill_attributes(
                 &mut vertex_attrs.borrow_mut(),
                 binders,
@@ -491,7 +484,7 @@ impl RenderLayer for RenderFillLayer {
 
             let line_vertex_count = bucket.line_vertices.len();
             let get_triangulated_attributes = || {
-                let attrs = context.create_vertex_attribute_array();
+                let attrs = VertexAttributeArray::new_ptr();
                 let shared = bucket_vertices(geometry, bucket, &bucket.line_vertices);
                 if let Some(attr) =
                     attrs.borrow_mut().set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
@@ -519,8 +512,8 @@ impl RenderLayer for RenderFillLayer {
             };
 
             let layer_id = self.base.base_impl.id.clone();
-            let finish = |builder: &mut dyn DrawableBuilder, type_: FillVariant| {
-                builder.flush(context);
+            let finish = |builder: &mut DrawableBuilder, type_: FillVariant| {
+                builder.flush();
 
                 let mut group = layer_group.borrow_mut();
                 let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
@@ -536,12 +529,7 @@ impl RenderLayer for RenderFillLayer {
 
             if self.unevaluated.get::<FillPattern>().is_undefined() {
                 // Simple fill
-                let fill_shader = fill_shader_group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    "a_pos",
-                );
+                let fill_shader = fill_shader_group.shader(&properties_as_uniforms, self.base.projection_variant);
 
                 let outline_triangulated_shader = if do_outline && !data_driven_outline {
                     let outline_properties_as_uniforms: StringIDSetsPair = (
@@ -554,31 +542,21 @@ impl RenderLayer for RenderFillLayer {
                         .into_iter()
                         .collect(),
                     );
-                    self.outline_triangulated_shader_group.as_ref().and_then(|group| {
-                        group.get_or_create_shader(
-                            context,
-                            &outline_properties_as_uniforms,
-                            self.base.projection_variant,
-                            "a_pos",
-                        )
-                    })
+                    self.outline_triangulated_shader_group
+                        .as_ref()
+                        .map(|group| group.shader(&outline_properties_as_uniforms, self.base.projection_variant))
                 } else {
                     None
                 };
 
                 let outline_shader = if do_outline {
-                    outline_shader_group.get_or_create_shader(
-                        context,
-                        &properties_as_uniforms,
-                        self.base.projection_variant,
-                        "a_pos",
-                    )
+                    Some(outline_shader_group.shader(&properties_as_uniforms, self.base.projection_variant))
                 } else {
                     None
                 };
 
-                if fill_builder.is_none() && fill_shader.is_some() {
-                    let mut builder = context.create_drawable_builder();
+                if fill_builder.is_none() {
+                    let mut builder = DrawableBuilder::boxed();
                     // Only write opaque fills to the depth buffer, matching
                     // `fillRenderPass` in legacy rendering
                     let opaque = evaluated.get::<FillColor>().constant_or(&Color::default()).a >= 1.0
@@ -592,10 +570,9 @@ impl RenderLayer for RenderFillLayer {
                     fill_builder = Some(builder);
                 }
                 if do_outline && outline_builder.is_none() && outline_shader.is_some() {
-                    let mut builder = context.create_drawable_builder();
+                    let mut builder = DrawableBuilder::boxed();
                     common_init(builder.as_mut());
                     builder.set_depth_type(DepthMaskType::ReadOnly);
-                    builder.set_line_width(LINE_WIDTH);
                     builder.set_sub_layer_index(if self.unevaluated.get::<FillOutlineColor>().is_undefined() {
                         2
                     } else {
@@ -609,7 +586,7 @@ impl RenderLayer for RenderFillLayer {
                 if let Some(builder) = fill_builder.as_mut()
                     && !bucket.triangles.is_empty()
                 {
-                    builder.set_shader(fill_shader.clone());
+                    builder.set_shader(Some(Rc::clone(&fill_shader)));
                     if do_outline
                         && data_driven_outline
                         && let Some(outline) = outline_builder.as_mut()
@@ -669,19 +646,9 @@ impl RenderLayer for RenderFillLayer {
                     continue;
                 };
 
-                let fill_shader = pattern_shader_group.get_or_create_shader(
-                    context,
-                    &properties_as_uniforms,
-                    self.base.projection_variant,
-                    "a_pos",
-                );
+                let fill_shader = pattern_shader_group.shader(&properties_as_uniforms, self.base.projection_variant);
                 let outline_shader = if do_outline {
-                    outline_pattern_shader_group.get_or_create_shader(
-                        context,
-                        &properties_as_uniforms,
-                        self.base.projection_variant,
-                        "a_pos",
-                    )
+                    Some(outline_pattern_shader_group.shader(&properties_as_uniforms, self.base.projection_variant))
                 } else {
                     None
                 };
@@ -703,9 +670,9 @@ impl RenderLayer for RenderFillLayer {
                 );
 
                 if pattern_builder.is_none() {
-                    let mut builder = context.create_drawable_builder();
+                    let mut builder = DrawableBuilder::boxed();
                     common_init(builder.as_mut());
-                    builder.set_shader(fill_shader.clone());
+                    builder.set_shader(Some(Rc::clone(&fill_shader)));
                     builder.set_depth_type(DepthMaskType::ReadWrite);
                     builder.set_color_mode(&ColorMode::alpha_blended());
                     builder.set_sub_layer_index(1);
@@ -713,10 +680,9 @@ impl RenderLayer for RenderFillLayer {
                     pattern_builder = Some(builder);
                 }
                 if do_outline && outline_pattern_builder.is_none() {
-                    let mut builder = context.create_drawable_builder();
+                    let mut builder = DrawableBuilder::boxed();
                     common_init(builder.as_mut());
                     builder.set_shader(outline_shader.clone());
-                    builder.set_line_width(LINE_WIDTH);
                     builder.set_depth_type(DepthMaskType::ReadOnly);
                     builder.set_color_mode(&ColorMode::alpha_blended());
                     builder.set_sub_layer_index(2);
@@ -740,7 +706,7 @@ impl RenderLayer for RenderFillLayer {
                 if let Some(builder) = pattern_builder.as_mut()
                     && !bucket.triangles.is_empty()
                 {
-                    builder.set_shader(fill_shader.clone());
+                    builder.set_shader(Some(Rc::clone(&fill_shader)));
                     builder.set_render_pass(render_pass);
                     if do_outline && let Some(outline) = outline_pattern_builder.as_mut() {
                         outline.set_vertex_attributes(Some(Rc::clone(&vertex_attrs)));

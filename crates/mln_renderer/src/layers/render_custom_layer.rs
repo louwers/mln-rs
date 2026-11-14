@@ -3,9 +3,9 @@
 //   upload (`RenderLayer::prerender`), not in `update`, so it gets the frame's
 //   final projection, whose depth range depends on how many layer groups the
 //   frame has.
-// - The drawable is a type of its own whose `draw` lends the backend's live
-//   pass to the host (`gfx::RenderPass::lend_to_custom_layer`), which resets
-//   the pass's cached state after it; C++ adds a tweaker to an empty drawable.
+// - The layer group is a type of its own whose `render` lends the backend's
+//   live pass to the host (`gfx::RenderPass::lend_to_custom_layer`); C++
+//   adds a tweaker to an empty drawable.
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`gfx::Context::finish`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`).
@@ -14,13 +14,10 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::drawable::{self, DrawableBase, UniqueDrawSegment};
-use mln_gfx::index_vector::IndexVectorBasePtr;
 use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
-use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::renderer::layer_group::{LayerGroupBase, LayerGroupBaseData, Type as LayerGroupType};
 use mln_gfx::uniform_buffer::UniformBufferArray;
-use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
-use mln_gfx::{AttributeDataType, Context, DrawMode, ShaderRegistry};
+use mln_gfx::{Context, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::LayerProperties;
@@ -154,7 +151,7 @@ impl RenderLayer for RenderCustomLayer {
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &dyn Context,
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -162,21 +159,16 @@ impl RenderLayer for RenderCustomLayer {
         changes: &mut UniqueChangeRequestVec,
     ) {
         if self.base.layer_group.is_none() {
-            match context.create_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 1,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
-        }
-        let Some(layer_group) = self.base.layer_group.clone() else { return };
-        let mut group = layer_group.borrow_mut();
-        if group.get_drawable_count() == 0
-            && let Some(group) = group.as_layer_group_mut()
-        {
-            group.add_drawable(Box::new(CustomDrawable::new(self.get_id().to_owned(), Rc::clone(&self.shared))));
+            let group = CustomLayerGroup {
+                base: LayerGroupBaseData::new(
+                    self.base.layer_index,
+                    self.get_id().to_owned(),
+                    LayerGroupType::LayerGroup,
+                ),
+                shared: Rc::clone(&self.shared),
+                uniform_buffers: UniformBufferArray::new(),
+            };
+            self.set_layer_group(Some(Rc::new(RefCell::new(group))), changes);
         }
     }
 
@@ -201,33 +193,37 @@ impl RenderLayer for RenderCustomLayer {
     }
 }
 
-/// The drawable of a custom layer: drawing it lends the live pass to the
-/// host.
-struct CustomDrawable {
-    base: DrawableBase,
+/// The layer group of a custom layer: rendering it in the translucent pass
+/// lends the live pass to the host.
+struct CustomLayerGroup {
+    base: LayerGroupBaseData,
     shared: Rc<Shared>,
     uniform_buffers: UniformBufferArray,
 }
 
-impl CustomDrawable {
-    fn new(name: String, shared: Rc<Shared>) -> Self {
-        let mut base = DrawableBase::new(name);
-        base.render_pass = RenderPass::Translucent;
-        CustomDrawable { base, shared, uniform_buffers: UniformBufferArray::new() }
-    }
-}
-
-impl drawable::Drawable for CustomDrawable {
-    fn base(&self) -> &DrawableBase {
+impl LayerGroupBase for CustomLayerGroup {
+    fn base(&self) -> &LayerGroupBaseData {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut DrawableBase {
+    fn base_mut(&mut self) -> &mut LayerGroupBaseData {
         &mut self.base
     }
 
-    fn draw(&mut self, parameters: &mut dyn GfxPaintParameters) {
+    /// The host draws as one drawable.
+    fn get_drawable_count(&self) -> usize {
+        1
+    }
+
+    fn clear_drawables(&mut self) -> usize {
+        0
+    }
+
+    fn render(&mut self, parameters: &mut dyn GfxPaintParameters) {
         let parameters: &dyn GfxPaintParameters = parameters;
+        if !self.base.enabled || parameters.pass() != RenderPass::Translucent {
+            return;
+        }
         let (Some(host), Some(frame), Some(render_pass)) =
             (self.shared.host(), self.shared.frame.get(), parameters.render_pass())
         else {
@@ -241,23 +237,6 @@ impl drawable::Drawable for CustomDrawable {
             self.shared.used.set(true);
         }
     }
-
-    /// The host draws with objects of its own, so there is nothing to upload.
-    fn upload(&mut self, _context: &dyn Context) {}
-
-    fn update_vertex_attributes(
-        &mut self,
-        _vertices: Option<VertexAttributeArrayPtr>,
-        _vertex_count: usize,
-        _mode: DrawMode,
-        _indexes: Option<IndexVectorBasePtr>,
-        _segments: &[SegmentBase],
-    ) {
-    }
-
-    fn set_vertices(&mut self, _data: Vec<u8>, _count: usize, _type: AttributeDataType) {}
-
-    fn set_index_data(&mut self, _indexes: Option<IndexVectorBasePtr>, _segments: Vec<UniqueDrawSegment>) {}
 
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
         &mut self.uniform_buffers

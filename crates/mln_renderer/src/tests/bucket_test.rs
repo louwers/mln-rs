@@ -8,7 +8,7 @@ use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::upload::{upload_indexes, vertex_buffer};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
-use mln_gfx::{AttributeDataType, Context, DrawMode};
+use mln_gfx::{AttributeDataType, Context, DrawMode, DrawableBuilder};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
@@ -380,7 +380,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
 
     // A layer that rebuilds its drawables for the tile builds the segments
     // from the counts.
-    let mut builder = context.create_drawable_builder();
+    let mut builder = DrawableBuilder::boxed();
     builder.set_raw_vertices(vec![0; vertex_count * 4], vertex_count, AttributeDataType::Short2);
     builder.set_segments_shared(
         DrawMode::Triangles(),

@@ -57,8 +57,7 @@ pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 /// The depth and stencil textures of a drawable size.
 struct DepthStencil {
     size: (usize, usize),
-    depth: MTLTexturePtr,
-    stencil: MTLTexturePtr,
+    texture: MTLTexturePtr,
 }
 
 /// What the draw target and the frame target share.
@@ -97,28 +96,16 @@ impl SurfaceState {
         self.backend.get_device().newTextureWithDescriptor(&descriptor)
     }
 
-    /// The depth and stencil textures for a drawable of `size`. Intel and
-    /// AMD GPUs and the simulator take one texture for both.
-    fn depth_stencil_for(&self, size: (usize, usize)) -> Option<(MTLTexturePtr, MTLTexturePtr)> {
+    /// The depth and stencil texture for a drawable of `size`: one texture
+    /// of both, whose format a pipeline's formats name.
+    fn depth_stencil_for(&self, size: (usize, usize)) -> Option<MTLTexturePtr> {
         let mut depth_stencil = self.depth_stencil.borrow_mut();
         if depth_stencil.as_ref().is_none_or(|d| d.size != size) {
-            *depth_stencil = if cfg!(target_arch = "x86_64") || cfg!(target_abi = "sim") {
-                self.texture_2d(MTLPixelFormat::Depth32Float_Stencil8, size.0, size.1).map(|texture| DepthStencil {
-                    size,
-                    depth: texture.clone(),
-                    stencil: texture,
-                })
-            } else {
-                match (
-                    self.texture_2d(MTLPixelFormat::Depth32Float, size.0, size.1),
-                    self.texture_2d(MTLPixelFormat::Stencil8, size.0, size.1),
-                ) {
-                    (Some(depth), Some(stencil)) => Some(DepthStencil { size, depth, stencil }),
-                    _ => None,
-                }
-            };
+            *depth_stencil = self
+                .texture_2d(MTLPixelFormat::Depth32Float_Stencil8, size.0, size.1)
+                .map(|texture| DepthStencil { size, texture });
         }
-        depth_stencil.as_ref().map(|d| (d.depth.clone(), d.stencil.clone()))
+        depth_stencil.as_ref().map(|d| d.texture.clone())
     }
 
     /// Encodes a copy of `texture` into a shared buffer.
@@ -206,9 +193,9 @@ impl TargetResource for SurfaceResource {
         let size = (texture.width(), texture.height());
         // SAFETY: index 0 is in the attachment array's bounds.
         unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) }.setTexture(Some(&texture));
-        if let Some((depth, stencil)) = state.depth_stencil_for(size) {
-            descriptor.depthAttachment().setTexture(Some(&depth));
-            descriptor.stencilAttachment().setTexture(Some(&stencil));
+        if let Some(depth_stencil) = state.depth_stencil_for(size) {
+            descriptor.depthAttachment().setTexture(Some(&depth_stencil));
+            descriptor.stencilAttachment().setTexture(Some(&depth_stencil));
         }
         *state.render_pass_descriptor.borrow_mut() = Some(descriptor);
     }

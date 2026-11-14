@@ -1,6 +1,6 @@
 // All methods take `&self`: the context is reached from everywhere
-// (`PaintParameters`, render layers, uploads) and wgpu's API is `&self` too;
-// the backend keeps mutable state in cells.
+// (`PaintParameters`, render layers, uploads); the backend keeps mutable
+// state in cells.
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
@@ -11,22 +11,18 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::backend::Type as BackendType;
-use crate::buffer::Buffer;
+use crate::bind_group::BindGroup;
+use crate::buffer::{Buffer, BufferPtr};
 use crate::command_encoder::CommandEncoder;
-use crate::drawable_builder::UniqueDrawableBuilder;
-use crate::gpu::{BufferUsage, Gpu, GpuError, SamplerId};
+use crate::gfx_types::AttributeDataType;
+use crate::gpu::{BindGroupId, BufferUsage, Gpu, GpuError, PipelineId, PipelineKey, SamplerId};
 use crate::offscreen_texture::OffscreenTexture;
-use crate::projection_variant::ProjectionVariant;
 use crate::released::Released;
-use crate::render_pass::RenderPass;
-use crate::renderer::layer_group::LayerGroupBasePtr;
 use crate::rendering_stats::RenderingStats;
-use crate::shader_registry::ShaderRegistry;
-use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 use crate::texture2d::{SamplerState, Texture2D, Texture2DPtr};
 use crate::types::TextureChannelDataType;
 use crate::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
-use crate::vertex_attribute::VertexAttributeArrayPtr;
+use crate::vertex_attribute::VertexAttribute;
 
 /// The data members of `gfx::Context`.
 #[derive(Default)]
@@ -36,6 +32,13 @@ pub struct ContextBase {
     pub(crate) released: Rc<Released>,
     /// The sampler of each state a texture is sampled with.
     samplers: RefCell<HashMap<SamplerState, SamplerId>>,
+    /// The pipeline of each key a draw used.
+    pipelines: RefCell<HashMap<PipelineKey, PipelineId>>,
+    /// The buffers of default attribute values, one per format, with the
+    /// vertex count each covers.
+    default_vertex_buffers: RefCell<HashMap<AttributeDataType, (usize, BufferPtr)>>,
+    /// The group of the global uniform buffers.
+    global_bind_group: RefCell<BindGroup>,
 }
 
 impl ContextBase {
@@ -50,9 +53,7 @@ impl ContextBase {
 pub trait Context: Any {
     fn context_base(&self) -> &ContextBase;
 
-    /// The backend this context is of. C++ builds one backend and asks
-    /// `gfx::Backend::GetType()`; the port can build several and asks the
-    /// context.
+    /// The backend this context is of.
     fn backend_type(&self) -> BackendType;
 
     fn begin_frame(&self);
@@ -78,9 +79,6 @@ pub trait Context: Any {
     fn thread_safe_copy_rendering_stats(&self) -> RenderingStats {
         self.rendering_stats().clone()
     }
-
-    fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr;
-    fn create_drawable_builder(&self) -> UniqueDrawableBuilder;
 
     /// The backend's [`Gpu`], which owns the renderer's buffers and
     /// textures.
@@ -110,24 +108,19 @@ pub trait Context: Any {
         write_buffer(self, slot, data, true);
     }
 
+    /// Drops the buffers and bind groups the context keeps for draws, to the
+    /// release queue, before the context goes.
+    fn release_cached_resources(&self) {
+        let base = self.context_base();
+        base.default_vertex_buffers.borrow_mut().clear();
+        *base.global_bind_group.borrow_mut() = BindGroup::default();
+    }
+
     /// Destroys the buffers and textures the renderer dropped. A backend
     /// calls this once the commands that may use them are submitted.
     fn destroy_released(&self) {
         self.context_base().released.destroy(&mut *self.gpu());
     }
-    fn get_generic_shader(
-        &self,
-        registry: &ShaderRegistry,
-        name: &str,
-        variant: ProjectionVariant,
-    ) -> Option<ShaderProgramBasePtr>;
-    fn create_tile_layer_group(
-        &self,
-        layer_index: i32,
-        initial_capacity: usize,
-        name: String,
-    ) -> Option<LayerGroupBasePtr>;
-    fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr>;
     /// A texture without a size, made by its first upload or `create`.
     fn create_texture_2d(&self) -> Texture2DPtr {
         Rc::new(RefCell::new(Texture2D::new(Rc::clone(&self.context_base().released))))
@@ -151,8 +144,45 @@ pub trait Context: Any {
     fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray> {
         self.context_base().global_uniform_buffers.borrow_mut()
     }
-    fn bind_global_uniform_buffers(&self, render_pass: &dyn RenderPass);
-    fn unbind_global_uniform_buffers(&self, render_pass: &dyn RenderPass);
+    /// The group of the global uniform buffers, which every draw binds.
+    fn global_bind_group(&self) -> Result<BindGroupId, GpuError> {
+        let entries = self.global_uniform_buffers().entries();
+        self.context_base().global_bind_group.borrow_mut().get(self, "global uniform buffers", entries)
+    }
+
+    /// The pipeline of `key`, made on first use.
+    fn pipeline(&self, key: &PipelineKey) -> Result<PipelineId, GpuError> {
+        let mut pipelines = self.context_base().pipelines.borrow_mut();
+        if let Some(&pipeline) = pipelines.get(key) {
+            return Ok(pipeline);
+        }
+        let pipeline = self.gpu().create_pipeline(key)?;
+        pipelines.insert(key.clone(), pipeline);
+        Ok(pipeline)
+    }
+
+    /// A vertex buffer of at least `vertex_count` default values of
+    /// `format`, for an attribute a drawable has no data for: zeros, or ones
+    /// for `Float2` and `Float4`. The context keeps one per format, grown
+    /// geometrically; a drawable keeps a replaced smaller one alive.
+    fn default_vertex_buffer(&self, format: AttributeDataType, vertex_count: usize) -> Result<BufferPtr, GpuError> {
+        let mut cache = self.context_base().default_vertex_buffers.borrow_mut();
+        let cached_count = match cache.get(&format) {
+            Some((count, buffer)) if *count >= vertex_count => return Ok(Rc::clone(buffer)),
+            Some((count, _)) => *count,
+            None => 0,
+        };
+        let count = vertex_count.max(2 * cached_count).max(1);
+        let mut data = vec![0u8; VertexAttribute::get_stride_of(format) * count];
+        if matches!(format, AttributeDataType::Float4 | AttributeDataType::Float2) {
+            for value in data.as_chunks_mut::<4>().0 {
+                value.copy_from_slice(&1.0f32.to_ne_bytes());
+            }
+        }
+        let buffer = Buffer::create(self, BufferUsage::Vertex, &data)?;
+        cache.insert(format, (count, Rc::clone(&buffer)));
+        Ok(buffer)
+    }
 }
 
 fn create_buffer<C: Context + ?Sized>(context: &C, data: &[u8], storage: bool) -> Option<UniformBufferPtr> {

@@ -50,7 +50,7 @@ macro_rules! const_or_default {
     };
 }
 
-fn get_tex_size(drawable: &dyn Drawable, tex_id: usize) -> [f32; 2] {
+fn get_tex_size(drawable: &Drawable, tex_id: usize) -> [f32; 2] {
     match drawable.get_texture(tex_id) {
         Some(tex) => {
             let size = tex.borrow().size();
@@ -123,7 +123,7 @@ impl LayerTweaker for SymbolLayerTweaker {
         let self_ptr: *const Self = self;
         let id = self.base.id.clone();
         visit_layer_group_drawables(layer_group, |drawable| {
-            if !drawable.get_enabled() {
+            if !drawable.enabled {
                 return;
             }
             let Some(tile_id) = drawable.get_tile_id() else {
@@ -274,7 +274,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                 gamma_scale,
                 pad1: 0.0,
             });
-            drawable.set_ubo_index((drawable_ubo_vector.len() - 1) as u32);
+            drawable.ubo_index = (drawable_ubo_vector.len() - 1) as u32;
         });
         if drawable_ubo_vector.is_empty() {
             return;

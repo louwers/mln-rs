@@ -46,6 +46,7 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
         }
 
         self.base.properties_updated = false;
+        crate::layer_tweaker::bind_no_projection(layer_group.mutable_uniform_buffers(), parameters.context);
 
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {

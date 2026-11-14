@@ -124,7 +124,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
                 radius_t: binders.heatmap_radius.interpolation_factor(zoom),
                 globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
             };
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 

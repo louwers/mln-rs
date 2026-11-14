@@ -26,8 +26,8 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, LayerGroupBasePtr,
-    ShaderProgramBasePtr, ShaderRegistry,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, LayerGroup,
+    LayerGroupBasePtr, ShaderProgramPtr, ShaderRegistry, TileLayerGroup, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
 use mln_style::layer::downcast_arc;
@@ -68,7 +68,7 @@ pub(crate) struct RenderRasterLayer {
     // Paint properties
     unevaluated: RasterPaintProperties::Unevaluated,
 
-    raster_shader: Option<ShaderProgramBasePtr>,
+    raster_shader: Option<ShaderProgramPtr>,
 
     static_data_vertices: Option<VertexVectorBasePtr>,
     static_data_indices: Option<IndexVectorBasePtr>,
@@ -104,7 +104,7 @@ impl RenderRasterLayer {
 
     /// Creates the bucket's texture if needed and attaches it to both image
     /// slots.
-    fn set_textures(&mut self, context: &dyn Context, builder: &mut dyn DrawableBuilder, bucket: &RasterBucket) {
+    fn set_textures(&mut self, context: &dyn Context, builder: &mut DrawableBuilder, bucket: &RasterBucket) {
         let Some(image) = &bucket.image else {
             return;
         };
@@ -143,7 +143,7 @@ impl RenderRasterLayer {
     fn update_image(
         &mut self,
         context: &dyn Context,
-        raster_shader: Option<&ShaderProgramBasePtr>,
+        raster_shader: Option<&ShaderProgramPtr>,
         image_data: &ImageSourceRenderData,
         changes: &mut UniqueChangeRequestVec,
     ) {
@@ -164,13 +164,7 @@ impl RenderRasterLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
         if self.image_layer_group.is_none() {
             // Set up a layer group
-            let Some(group) = context.create_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) else {
-                return;
-            };
+            let group = LayerGroup::new_ptr(self.base.layer_index, self.get_id());
             if let Some(tweaker) = &layer_tweaker {
                 changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&group), Rc::downgrade(tweaker)));
             }
@@ -182,7 +176,7 @@ impl RenderRasterLayer {
         // Create a drawable for each tile the image is drawn in
         // TODO: Share textures
         for tile_id in &image_data.tile_ids {
-            let mut builder = context.create_drawable_builder();
+            let mut builder = DrawableBuilder::boxed();
             builder.set_shader(raster_shader.cloned());
             builder.set_render_pass(RenderPass::Translucent);
             builder.set_sub_layer_index(0);
@@ -195,7 +189,7 @@ impl RenderRasterLayer {
                 // geometry (shared: vertices, indices and segments are set).
                 let geometry = bucket.geometry();
                 let vertices = shared_vertices(&geometry.vertices);
-                builder.set_vertex_attributes(Some(raster_vertex_attributes(context, &vertices)));
+                builder.set_vertex_attributes(Some(raster_vertex_attributes(&vertices)));
                 builder.set_raw_vertices(Vec::new(), geometry.vertices.len(), AttributeDataType::Short2);
                 builder.set_segments_shared(
                     DrawMode::Triangles(),
@@ -206,7 +200,7 @@ impl RenderRasterLayer {
             self.set_textures(context, builder.as_mut(), &bucket);
 
             // finish
-            builder.flush(context);
+            builder.flush();
 
             let mut group = image_layer_group.borrow_mut();
             let Some(layer_group) = group.as_layer_group_mut() else {
@@ -222,8 +216,8 @@ impl RenderRasterLayer {
 }
 
 /// The vertex attributes of a raster drawable over `vertices`.
-fn raster_vertex_attributes(context: &dyn Context, vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
-    let vertex_attrs = context.create_vertex_attribute_array();
+fn raster_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
+    let vertex_attrs = VertexAttributeArray::new_ptr();
     {
         let mut attrs = vertex_attrs.borrow_mut();
         let stride = size_of::<RasterLayoutVertex>() as u32;
@@ -373,7 +367,7 @@ impl RenderLayer for RenderRasterLayer {
         let render_pass = RenderPass::Translucent;
 
         if self.raster_shader.is_none() {
-            self.raster_shader = context.get_generic_shader(shaders, "RasterShader", self.base.projection_variant);
+            self.raster_shader = shaders.shader("RasterShader", self.base.projection_variant);
             if self.raster_shader.is_none() {
                 return;
             }
@@ -412,16 +406,11 @@ impl RenderLayer for RenderRasterLayer {
             }
         } else {
             // Set up a tile layer group
-            if let Some(layer_group) = context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                if let Some(tweaker) = &layer_tweaker {
-                    changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(tweaker)));
-                }
-                self.set_layer_group(Some(layer_group), changes);
+            let layer_group = TileLayerGroup::new_ptr(self.base.layer_index, self.get_id());
+            if let Some(tweaker) = &layer_tweaker {
+                changes.push(ChangeRequest::AddLayerTweaker(Rc::clone(&layer_group), Rc::downgrade(tweaker)));
             }
+            self.set_layer_group(Some(layer_group), changes);
         }
         let Some(layer_group) = self.base.layer_group.clone() else {
             return;
@@ -488,7 +477,7 @@ impl RenderLayer for RenderRasterLayer {
                     let mut group = layer_group.borrow_mut();
                     if let Some(tile_layer_group) = group.as_tile_layer_group_mut() {
                         tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                            let create_time = drawable.base().create_time;
+                            let create_time = drawable.create_time;
                             if tile_update_time.is_none_or(|t| create_time < t) {
                                 tile_update_time = Some(create_time);
                             }
@@ -505,7 +494,7 @@ impl RenderLayer for RenderRasterLayer {
             if !cleared {
                 // Update existing drawables
                 let mut geometry_changed = false;
-                let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+                let update_existing = |drawable: &mut mln_gfx::Drawable| {
                     // Only current drawables are updated, ones produced for
                     // a previous style retain the attribute values for that
                     // style.
@@ -516,7 +505,7 @@ impl RenderLayer for RenderRasterLayer {
                     // may later add, remove, or change masking. In that
                     // case, the tile's shared data and segments are not
                     // updated, and it needs to be re-created.
-                    if !geometry_changed && drawable.base().create_time < geometry_modified {
+                    if !geometry_changed && drawable.create_time < geometry_modified {
                         // Masking changed, need to rebuild this tile
                         geometry_changed = true;
                     }
@@ -533,7 +522,7 @@ impl RenderLayer for RenderRasterLayer {
             }
 
             // Otherwise, create new ones.
-            let mut builder = context.create_drawable_builder();
+            let mut builder = DrawableBuilder::boxed();
             builder.set_shader(raster_shader.clone());
             builder.set_render_pass(render_pass);
             builder.set_sub_layer_index(0);
@@ -559,7 +548,7 @@ impl RenderLayer for RenderRasterLayer {
                         self.globe_meshes.get(&tile_id.canonical, &geometry.mask, RasterBucket::layout_vertex);
                     let vertices: VertexVectorBasePtr =
                         Rc::<mln_gfx::vertex_vector::VertexVector<RasterLayoutVertex>>::clone(&globe_mesh.vertices);
-                    let attrs = raster_vertex_attributes(context, &vertices);
+                    let attrs = raster_vertex_attributes(&vertices);
                     builder.set_vertex_attributes(Some(attrs));
                     builder.set_raw_vertices(Vec::new(), globe_mesh.vertices.elements(), AttributeDataType::Short2);
                     builder.set_segments_shared(
@@ -569,7 +558,7 @@ impl RenderLayer for RenderRasterLayer {
                     );
                 } else if shared {
                     let vertices = shared_vertices(&geometry.vertices);
-                    let attrs = raster_vertex_attributes(context, &vertices);
+                    let attrs = raster_vertex_attributes(&vertices);
                     builder.set_vertex_attributes(Some(attrs));
                     builder.set_raw_vertices(Vec::new(), geometry.vertices.len(), AttributeDataType::Short2);
                     builder.set_segments_shared(
@@ -578,9 +567,8 @@ impl RenderLayer for RenderRasterLayer {
                         &geometry.segments,
                     );
                 } else {
-                    let attrs = Rc::clone(
-                        static_attrs.get_or_insert_with(|| raster_vertex_attributes(context, &static_vertices)),
-                    );
+                    let attrs =
+                        Rc::clone(static_attrs.get_or_insert_with(|| raster_vertex_attributes(&static_vertices)));
                     builder.set_vertex_attributes(Some(attrs));
                     builder.set_raw_vertices(Vec::new(), 4, AttributeDataType::Short2);
                     builder.set_segments_shared(
@@ -592,7 +580,7 @@ impl RenderLayer for RenderRasterLayer {
             }
 
             // finish
-            builder.flush(context);
+            builder.flush();
             let drawables = builder.clear_drawables();
             let mut group = layer_group.borrow_mut();
             let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {

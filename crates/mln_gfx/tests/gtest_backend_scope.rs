@@ -10,8 +10,6 @@ use std::rc::Rc;
 
 use mln_gfx::context::Context;
 use mln_gfx::renderer_backend::{RendererBackend, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::{BackendScope, ScopeType};
 
 type Callback = RefCell<Option<Box<dyn Fn()>>>;
@@ -36,8 +34,6 @@ impl RendererBackend for StubRendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
     }
-
-    fn init_shaders(&self, _registry: &ShaderRegistry, _parameters: &ProgramParameters) {}
 
     fn create_context(&self) -> Rc<dyn Context> {
         std::process::abort();

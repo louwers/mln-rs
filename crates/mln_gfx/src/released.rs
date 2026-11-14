@@ -1,9 +1,9 @@
 use std::cell::Cell;
 
-use crate::gpu::{BufferId, BufferUsage, Gpu, TextureId};
+use crate::gpu::{BindGroupId, BufferId, BufferUsage, Gpu, TextureId};
 use crate::rendering_stats::RenderingStats;
 
-/// The buffers and textures the renderer dropped. A backend destroys them
+/// The buffers, textures and bind groups the renderer dropped. A backend destroys them
 /// with [`Context::destroy_released`](crate::Context::destroy_released) once
 /// it has submitted the frame that last used them, so a resource dropped
 /// while a frame is recorded outlives that frame's commands. The rendering
@@ -12,6 +12,7 @@ use crate::rendering_stats::RenderingStats;
 pub struct Released {
     buffers: Cell<Vec<BufferId>>,
     textures: Cell<Vec<TextureId>>,
+    bind_groups: Cell<Vec<BindGroupId>>,
     /// What the resources released since the stats were last read took from
     /// them.
     uncounted: Cell<Uncounted>,
@@ -48,6 +49,10 @@ impl Released {
         self.uncounted.set(uncounted);
     }
 
+    pub(crate) fn bind_group(&self, id: BindGroupId) {
+        push(&self.bind_groups, id);
+    }
+
     /// Takes the resources released since the last call out of `stats`.
     pub(crate) fn uncount(&self, stats: &mut RenderingStats) {
         let uncounted = self.uncounted.take();
@@ -72,6 +77,9 @@ impl Released {
         }
         for id in self.textures.take() {
             gpu.destroy_texture(id);
+        }
+        for id in self.bind_groups.take() {
+            gpu.destroy_bind_group(id);
         }
     }
 }

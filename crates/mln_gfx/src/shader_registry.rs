@@ -1,33 +1,39 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use crate::shader_group::ShaderGroupPtr;
+use crate::projection_variant::ProjectionVariant;
+use crate::shader_group::{ShaderGroup, ShaderGroupPtr, StringIDSetsPair};
+use crate::shaders::program_info::{PROGRAMS, program_info};
+use crate::shaders::program_parameters::ProgramParameters;
+use crate::shaders::shader_program::ShaderProgramPtr;
 
-/// A collection of `ShaderGroup`s, registered by name at run time. `&self`
-/// methods: the C++ `shared_mutex` becomes a `RefCell`.
-#[derive(Default)]
+/// The shader group of each built-in program, by the program's name.
 pub struct ShaderRegistry {
-    shader_groups: RefCell<HashMap<String, ShaderGroupPtr>>,
+    shader_groups: HashMap<&'static str, ShaderGroupPtr>,
 }
 
 impl ShaderRegistry {
+    /// The groups of the built-in programs, compiled with `parameters`.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(parameters: &ProgramParameters) -> Self {
+        let shader_groups = PROGRAMS
+            .iter()
+            .filter_map(|&program| program_info(program))
+            .map(|info| (info.name, Rc::new(ShaderGroup::new(info, parameters.clone()))))
+            .collect();
+        ShaderRegistry { shader_groups }
     }
 
-    /// Get a shader group from the registry by name.
-    pub fn get_shader_group(&self, shader_group_name: &str) -> Option<ShaderGroupPtr> {
-        self.shader_groups.borrow().get(shader_group_name).cloned()
+    /// The group of the program named `name`, such as `FillShader`.
+    #[must_use]
+    pub fn shader_group(&self, name: &str) -> Option<ShaderGroupPtr> {
+        self.shader_groups.get(name).cloned()
     }
 
-    /// Register a new shader group. False if the name is already taken.
-    pub fn register_shader_group(&self, shader_group: ShaderGroupPtr, shader_group_name: &str) -> bool {
-        let mut groups = self.shader_groups.borrow_mut();
-        if groups.contains_key(shader_group_name) {
-            return false;
-        }
-        groups.insert(shader_group_name.to_owned(), shader_group);
-        true
+    /// The program named `name` with no paint properties read from uniforms,
+    /// for `variant`'s projection.
+    #[must_use]
+    pub fn shader(&self, name: &str, variant: ProjectionVariant) -> Option<ShaderProgramPtr> {
+        Some(self.shader_groups.get(name)?.shader(&StringIDSetsPair::default(), variant))
     }
 }

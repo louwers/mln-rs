@@ -42,18 +42,14 @@ mod command_encoder;
 mod context;
 mod custom_layer;
 mod draw_target;
-mod drawable;
-mod drawable_builder;
 mod enums;
 mod gpu;
-mod layer_group;
 mod offscreen_texture;
 mod render_pass;
 mod renderer_backend;
 mod shaders;
 mod state;
 mod types;
-mod vertex_array;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod borrowed_target;

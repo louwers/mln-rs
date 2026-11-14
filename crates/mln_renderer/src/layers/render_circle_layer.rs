@@ -6,7 +6,10 @@ use geometry::Point;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
+use mln_gfx::{
+    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, ShaderRegistry,
+    TileLayerGroup, VertexAttributeArray,
+};
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::downcast_arc;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -230,7 +233,7 @@ fn capture_rendered_features(
 }
 
 fn read_circle_attributes(
-    attrs: &mut mln_gfx::vertex_attribute::VertexAttributeArray,
+    attrs: &mut VertexAttributeArray,
     b: &CircleBinders,
     shared: &VertexVectorBasePtr,
     evaluated: &CirclePaintProperties::PossiblyEvaluated,
@@ -501,7 +504,7 @@ impl RenderLayer for RenderCircleLayer {
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &dyn Context,
+        _context: &dyn Context,
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
@@ -518,14 +521,7 @@ impl RenderLayer for RenderCircleLayer {
 
         // Set up a layer group
         if self.base.layer_group.is_none() {
-            match context.create_tile_layer_group(
-                self.base.layer_index,
-                /*initial_capacity=*/ 64,
-                self.get_id().to_owned(),
-            ) {
-                Some(layer_group) => self.set_layer_group(Some(layer_group), changes),
-                None => return,
-            }
+            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -540,7 +536,7 @@ impl RenderLayer for RenderCircleLayer {
         }
 
         if self.circle_shader_group.is_none() {
-            self.circle_shader_group = shaders.get_shader_group(CIRCLE_SHADER_GROUP_NAME);
+            self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
         }
         let Some(circle_shader_group) = self.circle_shader_group.clone() else {
             self.remove_all_drawables();
@@ -620,7 +616,7 @@ impl RenderLayer for RenderCircleLayer {
 
             // If there are already drawables for this tile, update their UBOs
             // and move on to the next tile.
-            let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut mln_gfx::Drawable| {
                 // A drawable produced on a previous style/bucket should not be updated.
                 let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
                 if current {
@@ -643,7 +639,7 @@ impl RenderLayer for RenderCircleLayer {
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
-            let circle_vertex_attrs = context.create_vertex_attribute_array();
+            let circle_vertex_attrs = VertexAttributeArray::new_ptr();
             read_circle_attributes(
                 &mut circle_vertex_attrs.borrow_mut(),
                 paint_property_binders,
@@ -652,14 +648,7 @@ impl RenderLayer for RenderCircleLayer {
                 &mut properties_as_uniforms,
             );
 
-            let Some(circle_shader) = circle_shader_group.get_or_create_shader(
-                context,
-                &properties_as_uniforms,
-                self.base.projection_variant,
-                "a_pos",
-            ) else {
-                continue;
-            };
+            let circle_shader = circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant);
 
             if let Some(attr) =
                 circle_vertex_attrs.borrow_mut().set(ID_CIRCLE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
@@ -673,7 +662,7 @@ impl RenderLayer for RenderCircleLayer {
                 );
             }
 
-            let mut circle_builder = context.create_drawable_builder();
+            let mut circle_builder = DrawableBuilder::boxed();
             circle_builder.set_shader(Some(circle_shader));
             circle_builder.set_depth_type(DepthMaskType::ReadOnly);
             circle_builder.set_color_mode(&ColorMode::alpha_blended());
@@ -689,7 +678,7 @@ impl RenderLayer for RenderCircleLayer {
                 &bucket.segments,
             );
 
-            circle_builder.flush(context);
+            circle_builder.flush();
 
             let mut group = layer_group.borrow_mut();
             let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");

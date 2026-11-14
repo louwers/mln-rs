@@ -209,8 +209,6 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
-    pad1: f32,
-    pad2: f32,
 };
 
 struct GlobalIndexUBO {
@@ -272,8 +270,6 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
-    pad1: f32,
-    pad2: f32,
 };
 
 struct GlobalPaintParamsUBO {

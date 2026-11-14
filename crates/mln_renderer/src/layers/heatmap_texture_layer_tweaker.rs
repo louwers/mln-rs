@@ -56,5 +56,6 @@ impl LayerTweaker for HeatmapTextureLayerTweaker {
             &props_ubo,
             parameters.context,
         );
+        crate::layer_tweaker::bind_no_projection(layer_group.mutable_uniform_buffers(), parameters.context);
     }
 }

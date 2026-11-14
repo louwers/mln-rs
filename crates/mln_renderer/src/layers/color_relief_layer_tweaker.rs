@@ -95,7 +95,7 @@ impl LayerTweaker for ColorReliefLayerTweaker {
                 tile_props_ubo_vector[i as usize] = data.tile_props;
             }
 
-            drawable.set_ubo_index(i);
+            drawable.ubo_index = i;
             i += 1;
         });
 

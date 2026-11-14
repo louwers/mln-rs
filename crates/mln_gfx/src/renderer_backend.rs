@@ -6,8 +6,6 @@ use mln_util::identity::SimpleIdentity;
 
 use crate::backend_scope::BackendScope;
 use crate::context::Context;
-use crate::shader_registry::ShaderRegistry;
-use crate::shaders::program_parameters::ProgramParameters;
 
 /// The data members of `gfx::RendererBackend`.
 pub struct RendererBackendBase {
@@ -62,9 +60,6 @@ pub trait RendererBackend: Any {
     fn unique_id(&self) -> SimpleIdentity {
         self.renderer_backend_base().unique_id
     }
-
-    /// One-time shader initialization
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters);
 
     /// Called when the backend's GL context needs to be made active or
     /// inactive (protected + `friend class BackendScope` in C++).

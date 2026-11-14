@@ -9,8 +9,8 @@ use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramBasePtr, ShaderRegistry, StencilMode,
-    UniqueDrawable,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, DrawableBuilder, ShaderProgramPtr, ShaderRegistry,
+    StencilMode, UniqueDrawable,
 };
 use mln_tile_id::UnwrappedTileID;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -25,7 +25,7 @@ use crate::render_static_data::RenderStaticData;
 pub(crate) struct ClipMasks {
     /// Whether the masks are the globe's.
     globe: bool,
-    shader: Option<ShaderProgramBasePtr>,
+    shader: Option<ShaderProgramPtr>,
     /// The drawables of each tile's mask: on the globe the tile's mesh with
     /// a border and then without, elsewhere its square.
     masks: BTreeMap<UnwrappedTileID, Vec<UniqueDrawable>>,
@@ -51,16 +51,15 @@ impl ClipMasks {
         }
         if self.shader.is_none() {
             let variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
-            self.shader = context.get_generic_shader(shaders, "ClippingMaskProgram", variant);
+            self.shader = shaders.shader("ClippingMaskProgram", variant);
         }
         let ClipMasks { shader: Some(shader), masks, globe_meshes, .. } = self else {
             return;
         };
 
         masks.retain(|tile, _| tiles.contains(tile));
-        let mut builder = context.create_drawable_builder();
+        let mut builder = DrawableBuilder::boxed();
         builder.set_shader(Some(Rc::clone(shader)));
-        builder.set_enable_color(false);
         builder.set_color_mode(&ColorMode::disabled());
         builder.set_enable_depth(false);
         builder.set_vertex_attr_id(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE);
@@ -86,7 +85,7 @@ impl ClipMasks {
                                 AttributeDataType::Short2,
                             );
                             builder.set_segments(DrawMode::Triangles(), mesh.indices.clone(), &mesh.segments);
-                            builder.flush(context);
+                            builder.flush();
                             builder.clear_drawables()
                         })
                         .collect()
@@ -100,7 +99,7 @@ impl ClipMasks {
                         AttributeDataType::Short2,
                     );
                     builder.set_segments(DrawMode::Triangles(), indices, &[segment]);
-                    builder.flush(context);
+                    builder.flush();
                     builder.clear_drawables()
                 }
             });
@@ -127,7 +126,7 @@ impl ClipMasks {
                     debug_assert!(false, "no clipping mask for {tile:?}");
                     continue;
                 };
-                drawable.base_mut().stencil_mode = Some(StencilMode {
+                drawable.stencil_mode = Some(StencilMode {
                     test: Test::Always,
                     ref_: *stencil_ref,
                     mask: 0xFF,
@@ -135,7 +134,7 @@ impl ClipMasks {
                     depth_fail: StencilOpType::Keep,
                     pass: StencilOpType::Replace,
                 });
-                drawable.draw(parameters);
+                drawable.draw(parameters, None);
             }
         }
     }

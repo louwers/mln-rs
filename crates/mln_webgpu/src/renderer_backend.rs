@@ -4,30 +4,23 @@
 // What the backend draws into is a target built on it (`OffscreenTarget`,
 // `SurfaceTarget`), whose draw targets give the render passes their views.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
-use mln_gfx::gpu::{BufferId, SamplerId, TextureId};
+use mln_gfx::gpu::TextureId;
 use mln_gfx::released::Released;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::shader_source::BuiltIn;
 
 use crate::context::Context;
 use crate::device::Device;
 use crate::gpu::WebGpu;
-use crate::shaders::shader_group::ShaderGroup;
-use crate::shaders::shader_source::shader_source;
 
 pub(crate) struct BackendImpl {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
-    color_format: Cell<Option<wgpu::TextureFormat>>,
-    /// The `Gpu` the renderer's buffers belong to. The drawable path writes
-    /// and submits through it too, so that its commands see those writes.
+    /// The `Gpu` the renderer's resources belong to and its draws encode
+    /// through.
     gpu: RefCell<WebGpu>,
     /// The buffers the renderer dropped, which a context destroys at the
     /// end of a frame.
@@ -39,8 +32,6 @@ impl BackendImpl {
         BackendImpl {
             device: device.device().clone(),
             queue: device.queue().clone(),
-            depth_stencil_format: Cell::new(None),
-            color_format: Cell::new(None),
             gpu: RefCell::new(WebGpu::new(device)),
             released: Rc::default(),
         }
@@ -50,21 +41,10 @@ impl BackendImpl {
         &self.gpu
     }
 
-    /// The wgpu buffer that holds `buffer`, and where in it and how many
-    /// bytes `buffer` takes.
-    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(wgpu::Buffer, u64, u64)> {
-        let gpu = self.gpu.borrow();
-        gpu.native_buffer(buffer).map(|(native, offset, size)| (native.clone(), offset, size))
-    }
-
     /// The wgpu texture of `texture`, and its view.
     pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(wgpu::Texture, wgpu::TextureView)> {
         let gpu = self.gpu.borrow();
         gpu.native_texture(texture).map(|(texture, view)| (texture.clone(), view.clone()))
-    }
-
-    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<wgpu::Sampler> {
-        self.gpu.borrow().native_sampler(sampler).cloned()
     }
 
     pub(crate) fn released(&self) -> &Rc<Released> {
@@ -75,24 +55,6 @@ impl BackendImpl {
     }
     pub(crate) fn queue(&self) -> &wgpu::Queue {
         &self.queue
-    }
-    pub(crate) fn set_depth_stencil_format(&self, format: Option<wgpu::TextureFormat>) {
-        self.depth_stencil_format.set(format);
-    }
-    pub(crate) fn get_depth_stencil_format(&self) -> Option<wgpu::TextureFormat> {
-        self.depth_stencil_format.get()
-    }
-    pub(crate) fn set_color_format(&self, format: Option<wgpu::TextureFormat>) {
-        self.color_format.set(format);
-    }
-    pub(crate) fn get_color_format(&self) -> Option<wgpu::TextureFormat> {
-        self.color_format.get()
-    }
-
-    /// The formats of the color and depth-stencil attachments of the pass
-    /// being recorded: what its pipelines must draw into.
-    pub(crate) fn target_formats(&self) -> (wgpu::TextureFormat, Option<wgpu::TextureFormat>) {
-        (self.color_format.get().unwrap_or(wgpu::TextureFormat::Bgra8Unorm), self.depth_stencil_format.get())
     }
 
     /// Submits `command_buffer` after the copies of the writes made to the
@@ -108,45 +70,6 @@ pub struct RendererBackend {
     impl_: Rc<BackendImpl>,
     device: Device,
 }
-
-/// The shader types `init_shaders` registers, with the instanced fill
-/// extrusion shaders after their plain ones.
-const REGISTERED_SHADERS: &[BuiltIn] = &[
-    BuiltIn::BackgroundShader,
-    BuiltIn::BackgroundPatternShader,
-    BuiltIn::SkyShader,
-    BuiltIn::AtmosphereShader,
-    BuiltIn::CircleShader,
-    BuiltIn::ClippingMaskProgram,
-    BuiltIn::CollisionBoxShader,
-    BuiltIn::CollisionCircleShader,
-    BuiltIn::DebugShader,
-    BuiltIn::FillShader,
-    BuiltIn::FillOutlineShader,
-    BuiltIn::FillPatternShader,
-    BuiltIn::FillOutlinePatternShader,
-    BuiltIn::FillOutlineTriangulatedShader,
-    BuiltIn::FillExtrusionShader,
-    BuiltIn::FillExtrusionInstancedShader,
-    BuiltIn::FillExtrusionPatternShader,
-    BuiltIn::FillExtrusionPatternInstancedShader,
-    BuiltIn::HeatmapShader,
-    BuiltIn::HeatmapTextureShader,
-    BuiltIn::HillshadeShader,
-    BuiltIn::HillshadePrepareShader,
-    BuiltIn::ColorReliefShader,
-    BuiltIn::LineShader,
-    BuiltIn::LineGradientShader,
-    BuiltIn::LinePatternShader,
-    BuiltIn::LineSDFShader,
-    BuiltIn::LineGradientSDFShader,
-    BuiltIn::RasterShader,
-    BuiltIn::SymbolIconShader,
-    BuiltIn::SymbolSDFShader,
-    BuiltIn::SymbolTextAndIconShader,
-    BuiltIn::WideVectorShader,
-    BuiltIn::GlobeDepthShader,
-];
 
 impl RendererBackend {
     /// A backend on `device`. Backends on one device render independently,
@@ -169,45 +92,21 @@ impl RendererBackend {
         context.downcast_ref::<Context>().map(Context::rc)
     }
 
-    /// Drops the context, releasing the buffers it caches first
-    /// (`Context::release_cached_buffers`).
+    /// Drops the context, releasing the resources it caches first.
     pub(crate) fn reset_context(&mut self) {
-        if let Some(context) = self.base.reset_context()
-            && let Some(context) = context.downcast_ref::<Context>()
-        {
-            context.release_cached_buffers();
+        if let Some(context) = self.base.reset_context() {
+            context.release_cached_resources();
         }
     }
 
     pub(crate) fn create_context(&self) -> Rc<Context> {
         Context::new(Rc::clone(&self.impl_))
     }
-
-    /// Registers one shader group per built-in shader.
-    ///
-    /// A type whose WGSL is not part of this build is skipped. A duplicate
-    /// registration is an error.
-    #[expect(clippy::unused_self, reason = "each backend registers its shaders through its own `init_shaders`")]
-    pub(crate) fn init_shaders(&self, registry: &ShaderRegistry, program_parameters: &ProgramParameters) {
-        for &shader_id in REGISTERED_SHADERS {
-            let Some(source) = shader_source(shader_id) else {
-                continue;
-            };
-            let group = Rc::new(ShaderGroup::new(shader_id, program_parameters.clone()));
-            if !registry.register_shader_group(group, source.name) {
-                panic!("Failed to register {} with shader registry!", source.name);
-            }
-        }
-    }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
     fn renderer_backend_base(&self) -> &RendererBackendBase {
         &self.base
-    }
-
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
-        RendererBackend::init_shaders(self, registry, parameters);
     }
 
     fn create_context(&self) -> Rc<dyn GfxContext> {

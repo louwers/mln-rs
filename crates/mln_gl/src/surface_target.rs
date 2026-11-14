@@ -629,7 +629,7 @@ impl FrameTarget for SurfaceTarget {
         let size = self.size.get();
         if let Some(overlay) = self.presentation.overlay.borrow_mut().as_mut() {
             context.bind_framebuffer(None, size, true);
-            context.set_stencil_mode(&StencilMode::disabled());
+            context.state().set_stencil_mode(context.gl(), &StencilMode::disabled());
             overlay(&OverlayTarget { gl: context.get_backend().gl_shared(), size });
             context.set_dirty_state();
         }
