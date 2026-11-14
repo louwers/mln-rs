@@ -18,8 +18,11 @@ use kdbush::{KDBush, Nth};
 
 /// `feature_collection<double>`
 pub(crate) type GeoJSONFeatures = Vec<Feature<f64>>;
-/// `feature_collection<std::int16_t>`
-pub(crate) type TileFeatures = Vec<Feature<i16>>;
+/// `feature_collection<std::int16_t>`. A point's feature shares the input
+/// feature's property map.
+pub(crate) type TileFeatures = Vec<Feature<i16, Arc<PropertyMap>>>;
+/// The input features, each property map shared with the tiles' features.
+type SharedFeatures = Vec<Feature<f64, Arc<PropertyMap>>>;
 
 /// `Cluster`
 #[derive(Clone, Debug)]
@@ -168,7 +171,7 @@ struct Zoom {
 
 impl Zoom {
     /// `Zoom(features, options)`: a cluster for each point.
-    fn from_features(features: &GeoJSONFeatures, options: &Options) -> Result<Self, String> {
+    fn from_features(features: &SharedFeatures, options: &Options) -> Result<Self, String> {
         let mut zoom = Zoom::default();
         let mut i: u32 = 0;
         zoom.clusters.reserve(features.len());
@@ -287,7 +290,7 @@ impl Zoom {
 /// `Supercluster`
 #[derive(Debug)]
 pub struct Supercluster {
-    pub(crate) features: GeoJSONFeatures,
+    pub(crate) features: SharedFeatures,
     pub(crate) options: Options,
     zooms: HashMap<u8, Zoom>,
 }
@@ -298,6 +301,10 @@ impl Supercluster {
     /// `Supercluster(features, options)`; `Err` if a feature is not a point
     /// (C++: `bad_variant_access` `"in get<T>()"`).
     pub fn new(features: GeoJSONFeatures, options: Options) -> Result<Self, String> {
+        let features = features
+            .into_iter()
+            .map(|f| Feature { geometry: f.geometry, properties: Arc::new(f.properties), id: f.id })
+            .collect();
         let mut index = Supercluster { features, options, zooms: HashMap::new() };
         let options = &index.options;
 
@@ -350,13 +357,13 @@ impl Supercluster {
                 };
                 result.push(Feature {
                     geometry: Some(Geometry::Point(point)),
-                    properties: original_feature.properties.clone(),
+                    properties: Arc::clone(&original_feature.properties),
                     id: feature_id,
                 });
             } else {
                 result.push(Feature {
                     geometry: Some(Geometry::Point(point)),
-                    properties: c.get_properties(),
+                    properties: Arc::new(c.get_properties()),
                     id: Identifier::Uint(u64::from(c.id)),
                 });
             }
@@ -525,7 +532,12 @@ impl Supercluster {
 
     /// `clusterToGeoJSON(c)`
     fn cluster_to_geojson(&self, c: &Cluster) -> Feature<f64> {
-        if c.num_points == 1 { self.features[c.id as usize].clone() } else { c.to_geojson() }
+        if c.num_points == 1 {
+            let f = &self.features[c.id as usize];
+            Feature { geometry: f.geometry.clone(), properties: PropertyMap::clone(&f.properties), id: f.id.clone() }
+        } else {
+            c.to_geojson()
+        }
     }
 }
 

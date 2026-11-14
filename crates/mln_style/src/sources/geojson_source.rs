@@ -99,7 +99,7 @@ impl GeoJSONOptions {
     }
 }
 
-pub type TileFeatures = Vec<Feature<i16>>;
+pub type TileFeatures = geojson_vt::TileFeatures;
 pub type Features = Vec<Feature<f64>>;
 
 pub trait GeoJSONData: Send + Sync {

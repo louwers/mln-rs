@@ -469,11 +469,11 @@ fn geojson_tiles_cross() {
         |x: i16, y: i16, size: i16| line(vec![p(x, y), p(x + size, y), p(x + size, y + size), p(x, y + size), p(x, y)]);
     let feature = |geometry, id, class: &str| Feature {
         geometry,
-        properties: PropertyMap::from([
+        properties: Arc::new(PropertyMap::from([
             ("class".to_owned(), feature::Value::String(class.to_owned())),
             ("admin_level".to_owned(), feature::Value::Uint(2)),
             ("nested".to_owned(), feature::Value::Array(vec![feature::Value::Double(0.5), feature::Value::Null])),
-        ]),
+        ])),
         id,
     };
     let features = vec![

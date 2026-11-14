@@ -27,6 +27,7 @@ use detail::{InternalTile, VtFeatures};
 use feature::{Feature, Identifier, PropertyMap};
 use geo_traits::GeometryTrait;
 pub(crate) use tile::Tile;
+pub use tile::TileFeatures;
 
 /// The geometry, properties and id of each of `features`, as
 /// [`GeoJSONVT::from_features`] reads them.

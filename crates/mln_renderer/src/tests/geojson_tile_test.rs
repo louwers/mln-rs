@@ -90,7 +90,7 @@ impl GeoJSONData for FakeGeoJSONData {
 }
 
 fn point_data() -> Arc<dyn GeoJSONData> {
-    let features = vec![Feature::new(Point::new(0i16, 0))];
+    let features = vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }];
     Arc::new(FakeGeoJSONData { features })
 }
 
