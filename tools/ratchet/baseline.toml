@@ -147,8 +147,7 @@
 "crates/mln_gl/src/surface_target.rs" = 5
 "crates/mln_headless/src/headless_frontend.rs" = 12
 "crates/mln_map/src/transform.rs" = 3
-"crates/mln_mtl/src/borrowed_target.rs" = 18
-"crates/mln_mtl/src/context.rs" = 1
+"crates/mln_mtl/src/borrowed_target.rs" = 14
 "crates/mln_mtl/src/exported_target.rs" = 8
 "crates/mln_mtl/src/renderer_backend.rs" = 2
 "crates/mln_mtl/src/surface_target.rs" = 13

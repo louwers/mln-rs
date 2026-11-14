@@ -22,9 +22,9 @@ use objc2_metal::{
 };
 
 use crate::device::Device;
-use crate::gpu::texture_format;
+use crate::gpu::{MetalGpu, texture_format};
 use crate::mtl_fwd::MTLTexturePtr;
-use crate::renderer_backend::{BackendImpl, RendererBackend};
+use crate::renderer_backend::RendererBackend;
 
 /// A ring of the host's textures, all of `size` pixels, one pixel format and
 /// one device, with `MTLTextureUsageRenderTarget`.
@@ -178,7 +178,7 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth32FloatStencil8;
 /// The ring's textures as textures of the backend's `Gpu`, with their depth
 /// and stencil textures: the host's, or one of the target's own.
 struct Imports {
-    backend: Rc<BackendImpl>,
+    gpu: Rc<RefCell<MetalGpu>>,
     size: Size,
     targets: TargetFormats,
     color: Vec<TextureId>,
@@ -193,20 +193,20 @@ impl Imports {
     /// pixel format the `Gpu` has no texture of, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't make the
     /// depth and stencil texture.
-    fn new(backend: &Rc<BackendImpl>, textures: &BorrowedTextures) -> Result<Imports, Error> {
+    fn new(gpu: &Rc<RefCell<MetalGpu>>, textures: &BorrowedTextures) -> Result<Imports, Error> {
         let pixel_format = textures.pixel_format();
         let color_format = texture_format(pixel_format)
             .ok_or_else(|| Error::unsupported(format!("the Metal target draws into no {pixel_format:?}")))?;
         let mut imports = Imports {
-            backend: Rc::clone(backend),
+            gpu: Rc::clone(gpu),
             size: textures.size,
             targets: TargetFormats { color: Some(color_format), depth_stencil: Some(DEPTH_STENCIL) },
             color: Vec::new(),
             depth: Vec::new(),
             own_depth: None,
         };
-        let mut gpu = backend.gpu().borrow_mut();
-        let import = |gpu: &mut crate::gpu::MetalGpu, texture: &ProtocolObject<dyn MTLTexture>, format| {
+        let mut gpu = gpu.borrow_mut();
+        let import = |gpu: &mut MetalGpu, texture: &ProtocolObject<dyn MTLTexture>, format| {
             gpu.import_texture(texture, format)
                 .map_err(|error| Error::native(format!("Importing a borrowed texture failed: {error}")))
         };
@@ -244,7 +244,7 @@ impl Imports {
 
 impl Drop for Imports {
     fn drop(&mut self) {
-        let mut gpu = self.backend.gpu().borrow_mut();
+        let mut gpu = self.gpu.borrow_mut();
         for texture in self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take()) {
             gpu.destroy_texture(texture);
         }
@@ -289,7 +289,7 @@ impl BorrowedTarget {
             ),
             _ => None,
         };
-        let imports = Imports::new(backend.backend_impl(), &textures)?;
+        let imports = Imports::new(backend.shared_gpu(), &textures)?;
         let slots = textures.textures.len();
         Ok(BorrowedTarget {
             backend,
@@ -376,7 +376,7 @@ impl BorrowedTarget {
         }
         textures.check(self.backend.device())?;
         // The old imports go with what they wait for: the slots keep it.
-        *self.imports.borrow_mut() = Imports::new(self.backend.backend_impl(), &textures)?;
+        *self.imports.borrow_mut() = Imports::new(self.backend.shared_gpu(), &textures)?;
 
         let old = std::mem::replace(&mut *self.textures.borrow_mut(), textures);
         // A texture that the new ring has again keeps what it waits for, at
@@ -414,7 +414,7 @@ impl BorrowedTarget {
     /// Has no submit wait for what `slot` waits for.
     fn detach(&self, slot: &mut Slot) {
         if let Some(texture) = slot.attached.take() {
-            self.backend.backend_impl().gpu().borrow_mut().forget_waits(texture);
+            self.backend.gpu().forget_waits(texture);
         }
     }
 
@@ -427,7 +427,7 @@ impl BorrowedTarget {
                 value: self.event_value.get(),
             }),
             (SyncKind::QueueOrder, _) => Some(GpuSync::of(SyncKind::QueueOrder)),
-            _ => match self.backend.backend_impl().gpu().borrow_mut().finish() {
+            _ => match self.backend.gpu().finish() {
                 Ok(()) => Some(GpuSync::of(SyncKind::CpuComplete)),
                 Err(error) => {
                     Log::error(Event::Render, format!("Waiting for a borrowed texture's frame failed: {error}"));
@@ -450,7 +450,7 @@ impl FrameTarget for BorrowedTarget {
         };
         // A frame begun again keeps the wait it attached.
         if let (Some((event, value)), None) = (&state.wait, state.attached.filter(|&t| t == image.color)) {
-            let mut gpu = self.backend.backend_impl().gpu().borrow_mut();
+            let mut gpu = self.backend.gpu();
             let event = ProtocolObject::<dyn MTLEvent>::from_ref(&**event);
             if let Err(error) = gpu.wait_before_using(image.color, event, *value) {
                 Log::error(Event::Render, format!("Waiting for the host's reads failed: {error}"));
@@ -468,7 +468,7 @@ impl FrameTarget for BorrowedTarget {
             return Handoff::Dropped;
         };
         let submitted = {
-            let mut gpu = self.backend.backend_impl().gpu().borrow_mut();
+            let mut gpu = self.backend.gpu();
             // What no pass took yet, such as where the frame drew nothing.
             gpu.take_waits_into_next_submit(color);
             if let Some(event) = &self.event {

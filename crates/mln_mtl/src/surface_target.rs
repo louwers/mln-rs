@@ -1,19 +1,11 @@
 // Frames presented to a `CAMetalLayer`. The window stays with the host (such
 // as examples/desktop), which makes the layer and reports framebuffer resizes
-// through `resize`.
-//
-// Differences from C++:
-// - The frame's drawable is a texture of the backend's `MetalGpu`, which
-//   draws the frame into it on the backend's command queue, and presents it
-//   after the frame's last submit. C++ makes a second queue for the window.
-// - The depth and stencil attachment is a `Gpu` texture.
-// - Port-only: `begin_frame` takes the drawable ahead of a frame,
-//   `request_readback` copies a presented frame into an image, with
-//   `cap_frame_rate` off the layer doesn't wait for the display, and
-//   `set_overlay` draws over each frame before it is presented, such as an
-//   app's controls over the map.
+// through `resize`. Each frame's drawable is a texture of the backend's
+// `MetalGpu`, which draws the frame into it on the backend's command queue
+// and presents it after the frame's last submit.
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
@@ -27,7 +19,9 @@ use objc2_core_foundation::CGSize;
 use objc2_metal::{MTLCommandBuffer, MTLDevice, MTLPixelFormat, MTLTexture};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
-use crate::renderer_backend::{BackendImpl, RendererBackend};
+use crate::gpu::MetalGpu;
+use crate::mtl_fwd::MTLDevicePtr;
+use crate::renderer_backend::RendererBackend;
 
 /// The format of the layer's drawables.
 const COLOR_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
@@ -35,7 +29,7 @@ const COLOR: TextureFormat = TextureFormat::Bgra8Unorm;
 /// Metal's one depth and stencil format of every GPU.
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth32FloatStencil8;
 
-/// Port-only: what an overlay draws into (`SurfaceTarget::set_overlay`):
+/// What an overlay draws into (`SurfaceTarget::set_overlay`):
 /// the frame's drawable, after the map and before it is presented.
 pub struct OverlayTarget<'a> {
     pub device: &'a ProtocolObject<dyn MTLDevice>,
@@ -47,7 +41,7 @@ pub struct OverlayTarget<'a> {
     pub size: Size,
 }
 
-/// Port-only: draws over a frame (`SurfaceTarget::set_overlay`).
+/// Draws over a frame (`SurfaceTarget::set_overlay`).
 pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
 /// The frame's drawable, and the texture of the `Gpu` it is.
@@ -89,10 +83,10 @@ impl std::fmt::Debug for Layer {
     }
 }
 
-/// `MetalBackend`'s layer without the window: frames presented to a
-/// `CAMetalLayer`.
+/// Frames presented to a `CAMetalLayer`.
 pub struct SurfaceTarget {
-    backend: std::rc::Rc<BackendImpl>,
+    gpu: Rc<RefCell<MetalGpu>>,
+    device: MTLDevicePtr,
     layer: Retained<CAMetalLayer>,
     size: Cell<Size>,
     /// The frame's drawable, from `begin_frame` until `end_frame`.
@@ -111,7 +105,8 @@ impl SurfaceTarget {
     /// presented without waiting for the display.
     pub fn new(backend: &RendererBackend, layer: Layer, framebuffer_size: Size, cap_frame_rate: bool) -> SurfaceTarget {
         let Layer(layer) = layer;
-        layer.setDevice(Some(backend.get_device()));
+        let device = backend.device().device().clone();
+        layer.setDevice(Some(&device));
         layer.setPixelFormat(COLOR_FORMAT);
         layer.setFramebufferOnly(true);
         #[cfg(target_os = "macos")]
@@ -119,7 +114,8 @@ impl SurfaceTarget {
         #[cfg(not(target_os = "macos"))]
         let _ = cap_frame_rate;
         let target = SurfaceTarget {
-            backend: std::rc::Rc::clone(backend.backend_impl()),
+            gpu: Rc::clone(backend.shared_gpu()),
+            device,
             layer,
             size: Cell::new(Size::new(0, 0)),
             frame: RefCell::new(None),
@@ -150,7 +146,7 @@ impl SurfaceTarget {
         }
     }
 
-    /// Port-only: copy the next presented frame (see `take_readback`). The
+    /// Copies the next presented frame (see `take_readback`). The
     /// layer's drawables can be read until that copy, from the next one it
     /// hands out: a drawable taken ahead of the next frame is given back,
     /// and one that a frame is drawing into now has its copy in the frame
@@ -160,18 +156,18 @@ impl SurfaceTarget {
         self.readback_requested.set(true);
         let taken = self.frame.borrow_mut().take_if(|frame| frame.drawable.texture().isFramebufferOnly());
         if let Some(frame) = taken {
-            self.backend.gpu().borrow_mut().destroy_texture(frame.color);
+            self.gpu.borrow_mut().destroy_texture(frame.color);
         }
     }
 
-    /// Port-only: draws `overlay` over each frame from now on, after the map
+    /// Draws `overlay` over each frame from now on, after the map
     /// and before the frame is presented (and read back), or stops with
     /// `None`.
     pub fn set_overlay(&self, overlay: Option<Overlay>) {
         *self.overlay.borrow_mut() = overlay;
     }
 
-    /// Port-only: the frame copied after `request_readback`, once presented.
+    /// The frame copied after `request_readback`, once presented.
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
         self.readback.borrow_mut().take()
     }
@@ -180,12 +176,12 @@ impl SurfaceTarget {
 impl SurfaceTarget {
     /// The frame's drawable as a texture of the `Gpu`, taken from the layer
     /// unless the frame has one; `None` when the layer has none to give (it
-    /// waits up to a second).
+    /// waits up to a second). Call it in an autorelease pool.
     fn frame_image(&self) -> Option<FrameImage> {
         let mut frame = self.frame.borrow_mut();
-        let mut gpu = self.backend.gpu().borrow_mut();
+        let mut gpu = self.gpu.borrow_mut();
         if frame.is_none() {
-            let drawable = autoreleasepool(|_| self.layer.nextDrawable())?;
+            let drawable = self.layer.nextDrawable()?;
             let color = match gpu.import_texture(&drawable.texture(), COLOR) {
                 Ok(color) => color,
                 Err(error) => {
@@ -232,18 +228,19 @@ impl SurfaceTarget {
     }
 
     /// Draws the overlay over the frame, reads it back if asked, and
-    /// presents it. Returns whether the frame had a drawable.
+    /// presents it. Returns whether the frame had a drawable. Call it in an
+    /// autorelease pool.
     fn present(&self) -> bool {
         let Some(Frame { drawable, color }) = self.frame.borrow_mut().take() else {
             return false;
         };
         let texture = drawable.texture();
         let size = Size::new(texture.width() as u32, texture.height() as u32);
-        let mut gpu = self.backend.gpu().borrow_mut();
+        let mut gpu = self.gpu.borrow_mut();
         if let Some(overlay) = self.overlay.borrow_mut().as_mut() {
             gpu.take_waits_into_next_submit(color);
             let submitted = gpu.submit_native(|command_buffer| {
-                overlay(&OverlayTarget { device: self.backend.get_device(), command_buffer, texture: &texture, size });
+                overlay(&OverlayTarget { device: &self.device, command_buffer, texture: &texture, size });
             });
             if let Err(error) = submitted {
                 Log::error(Event::Render, format!("Submitting the overlay failed: {error}"));
@@ -291,18 +288,18 @@ impl FrameTarget for SurfaceTarget {
     /// render pass without a color attachment trips the drawables' debug
     /// assertions.
     fn begin_frame(&self) -> Option<FrameImage> {
-        self.frame_image()
+        autoreleasepool(|_| self.frame_image())
     }
 
     fn end_frame(&self) -> Handoff {
-        if self.present() { Handoff::Presented } else { Handoff::Dropped }
+        if autoreleasepool(|_| self.present()) { Handoff::Presented } else { Handoff::Dropped }
     }
 }
 
 impl Drop for SurfaceTarget {
     fn drop(&mut self) {
         self.overlay.borrow_mut().take();
-        let mut gpu = self.backend.gpu().borrow_mut();
+        let mut gpu = self.gpu.borrow_mut();
         if let Some(frame) = self.frame.borrow_mut().take() {
             gpu.destroy_texture(frame.color);
         }

@@ -9,8 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below.
-autotests = false
 
 [lib]
 name = "mln_mtl"
@@ -43,12 +41,6 @@ parking_lot.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dev-dependencies]
 mln_gfx = { workspace = true, features = ["gpu-conformance"] }
-
-# Compiles every MSL source extracted from include/mln/shaders/mtl/*.hpp
-# with the system's Metal compiler.
-[[test]]
-name = "msl_compile_test"
-path = "tests/msl_compile_test.rs"
 
 [lints]
 workspace = true

@@ -1,6 +1,9 @@
-//! The Metal shaders: their MSL and its sources.
+//! The Metal shaders: their MSL, and the tables of their inputs and
+//! textures.
 
-/// The C++ core's MSL, with the port's changes.
 #[rustfmt::skip]
-pub mod msl_sources;
-pub mod shader_source;
+pub(crate) mod msl_sources;
+pub(crate) mod shader_source;
+
+#[cfg(test)]
+mod msl_compile_test;

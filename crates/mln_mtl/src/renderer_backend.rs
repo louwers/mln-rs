@@ -1,80 +1,29 @@
-// The device and command queue are shared (`Rc<BackendImpl>`) by the backend
-// and its context: resources reach them through the context, as C++'s do
-// through `Context& -> getBackend()`.
-//
-// What the backend draws into is a target built on it (`OffscreenTarget`,
-// `SurfaceTarget`).
-//
-// C++ drains an autorelease pool around each frame
-// (`MLN_CREATE_AUTORELEASEPOOL` in `Renderer::Impl::render`), which the
-// renderer of the port can't name; the backend opens it when activated
-// and drains it when deactivated, around each frame's explicit
-// `BackendScope`.
-
-use std::cell::RefCell;
-use std::ffi::c_void;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
-use mln_gfx::context::Context as GfxContext;
-use mln_gfx::released::Released;
+use mln_gfx::backend::Type as BackendType;
+use mln_gfx::context::{Context as GfxContext, ContextBase};
+use mln_gfx::gpu::Gpu;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
 
-use crate::context::Context;
 use crate::device::Device;
 use crate::gpu::MetalGpu;
-use crate::mtl_fwd::MTLDevicePtr;
 
-/// The device state the backend and its context share.
-pub(crate) struct BackendImpl {
-    device: MTLDevicePtr,
-    /// The `Gpu` the renderer's resources belong to and its frames are
-    /// submitted through.
-    gpu: RefCell<MetalGpu>,
-    /// The buffers the renderer dropped, which a context destroys at the
-    /// end of a frame.
-    released: Rc<Released>,
-}
-
-impl BackendImpl {
-    #[must_use]
-    pub(crate) fn get_device(&self) -> &MTLDevicePtr {
-        &self.device
-    }
-
-    pub(crate) fn gpu(&self) -> &RefCell<MetalGpu> {
-        &self.gpu
-    }
-
-    pub(crate) fn released(&self) -> &Rc<Released> {
-        &self.released
-    }
-}
-
-/// A renderer's context on a [`Device`].
+/// A renderer's backend on a [`Device`]: the [`MetalGpu`] that its
+/// resources belong to, and that the targets built on it import their
+/// textures into.
 pub struct RendererBackend {
     base: RendererBackendBase,
-    impl_: Rc<BackendImpl>,
+    gpu: Rc<RefCell<MetalGpu>>,
     device: Device,
-    /// The autorelease pools opened by `activate`, innermost last. Scopes
-    /// of other backends can nest between two of this backend's.
-    autorelease_pools: RefCell<Vec<*mut c_void>>,
 }
 
 impl RendererBackend {
     /// A backend on `device`, which submits to the device's command queue.
     #[must_use]
     pub fn new(device: &Device) -> Self {
-        let mtl_device = device.device();
-        RendererBackend {
-            base: RendererBackendBase::new(),
-            impl_: Rc::new(BackendImpl {
-                device: mtl_device.clone(),
-                gpu: RefCell::new(MetalGpu::new(device)),
-                released: Rc::default(),
-            }),
-            device: device.clone(),
-            autorelease_pools: RefCell::new(Vec::new()),
-        }
+        let gpu = Rc::new(RefCell::new(MetalGpu::new(device)));
+        RendererBackend { base: RendererBackendBase::new(), gpu, device: device.clone() }
     }
 
     /// The device the backend renders on.
@@ -82,42 +31,14 @@ impl RendererBackend {
         &self.device
     }
 
-    pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
-        &self.impl_
+    /// The backend's `Gpu`, which targets that outlive a borrow of the
+    /// backend share.
+    pub(crate) fn shared_gpu(&self) -> &Rc<RefCell<MetalGpu>> {
+        &self.gpu
     }
 
-    pub(crate) fn get_device(&self) -> &MTLDevicePtr {
-        self.impl_.get_device()
-    }
-
-    /// Drops the context, releasing what it caches first.
-    pub(crate) fn reset_context(&mut self) {
-        if let Some(context) = self.base.reset_context()
-            && let Some(context) = context.downcast_ref::<Context>()
-        {
-            context.release_resources();
-        }
-    }
-
-    /// Opens the autorelease pool of a frame.
-    pub(crate) fn activate(&self) {
-        // SAFETY: `deactivate` pops it on this thread, after the pools
-        // opened inside the scope (BackendScopes nest on one thread).
-        let pool = unsafe { objc2::ffi::objc_autoreleasePoolPush() };
-        self.autorelease_pools.borrow_mut().push(pool);
-    }
-
-    /// Drains the autorelease pool of the innermost `activate`.
-    pub(crate) fn deactivate(&self) {
-        if let Some(pool) = self.autorelease_pools.borrow_mut().pop() {
-            // SAFETY: `pool` is the innermost pool: the scopes opened inside
-            // the one that pushed it have ended.
-            unsafe { objc2::ffi::objc_autoreleasePoolPop(pool) };
-        }
-    }
-
-    pub(crate) fn create_context(&self) -> Rc<Context> {
-        Context::new(Rc::clone(&self.impl_))
+    pub(crate) fn gpu(&self) -> RefMut<'_, MetalGpu> {
+        self.gpu.borrow_mut()
     }
 }
 
@@ -127,21 +48,37 @@ impl renderer_backend::RendererBackend for RendererBackend {
     }
 
     fn create_context(&self) -> Rc<dyn GfxContext> {
-        RendererBackend::create_context(self)
+        Rc::new(Context { base: ContextBase::default(), gpu: Rc::clone(&self.gpu) })
     }
 
-    fn activate(&self) {
-        RendererBackend::activate(self);
-    }
-
-    fn deactivate(&self) {
-        RendererBackend::deactivate(self);
-    }
+    /// Metal has no context to make current. `MetalGpu` and the targets
+    /// drain autorelease pools of their own.
+    fn activate(&self) {}
+    fn deactivate(&self) {}
 }
 
-impl Drop for RendererBackend {
-    fn drop(&mut self) {
-        self.reset_context();
-        self.deactivate();
+/// The renderer's caches over the backend's [`MetalGpu`].
+struct Context {
+    base: ContextBase,
+    gpu: Rc<RefCell<MetalGpu>>,
+}
+
+impl GfxContext for Context {
+    fn context_base(&self) -> &ContextBase {
+        &self.base
+    }
+
+    fn backend_type(&self) -> BackendType {
+        BackendType::Metal
+    }
+
+    fn begin_frame(&self) {}
+
+    fn end_frame(&self) {}
+
+    fn reduce_memory_usage(&self) {}
+
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 }
