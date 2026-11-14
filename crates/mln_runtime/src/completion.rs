@@ -57,13 +57,26 @@ struct Shared<T> {
 /// [`ErrorKind::Cancelled`](mln_util::ErrorKind::Cancelled).
 #[must_use = "a completion does nothing unless it is received"]
 pub struct Completion<T> {
-    shared: Arc<Shared<T>>,
+    /// `None` for a completion whose result is discarded, which acts as one
+    /// whose result was taken.
+    shared: Option<Arc<Shared<T>>>,
 }
 
 /// The sending side of a [`Completion`]. Dropping it unresolved cancels the
 /// completion.
 pub(crate) struct Resolver<T> {
-    shared: Option<Arc<Shared<T>>>,
+    target: Target<T>,
+}
+
+enum Target<T> {
+    Completion(Arc<Shared<T>>),
+    /// The result is discarded, except for a failure, which goes here.
+    Discard(fn(Error)),
+    Resolved,
+}
+
+fn taken() -> Error {
+    Error::invalid_state("the completion's result was already taken")
 }
 
 impl<T: Send + 'static> Completion<T> {
@@ -79,7 +92,15 @@ impl<T: Send + 'static> Completion<T> {
             ready: Condvar::new(),
             home,
         });
-        (Completion { shared: Arc::clone(&shared) }, Resolver { shared: Some(shared) })
+        (Completion { shared: Some(Arc::clone(&shared)) }, Resolver { target: Target::Completion(shared) })
+    }
+
+    /// A completion whose result is discarded: the completion acts as one
+    /// whose result was taken, and the resolver passes a failure,
+    /// cancellations included, to `on_failure` on the thread that resolves
+    /// it. It allocates nothing.
+    pub(crate) fn discarded(on_failure: fn(Error)) -> (Completion<T>, Resolver<T>) {
+        (Completion { shared: None }, Resolver { target: Target::Discard(on_failure) })
     }
 
     /// A completion that already has its result.
@@ -92,7 +113,7 @@ impl<T: Send + 'static> Completion<T> {
     /// Whether the result has arrived.
     #[must_use]
     pub fn is_complete(&self) -> bool {
-        !matches!(*self.shared.state.lock(), State::Pending { .. })
+        self.shared.as_ref().is_none_or(|shared| !matches!(*shared.state.lock(), State::Pending { .. }))
     }
 
     /// Blocks until the result arrives, and returns it.
@@ -108,7 +129,8 @@ impl<T: Send + 'static> Completion<T> {
     /// browser, whose instance has one thread: await the completion there,
     /// or pass it a callback.
     pub fn wait(self) -> Result<T, Error> {
-        let mut state = self.shared.state.lock();
+        let Some(shared) = &self.shared else { return Err(taken()) };
+        let mut state = shared.state.lock();
         loop {
             match std::mem::replace(&mut *state, State::Taken) {
                 State::Ready(result) => return result,
@@ -116,14 +138,14 @@ impl<T: Send + 'static> Completion<T> {
                     *state = pending;
                     // The browser's one thread runs everything that would
                     // resolve it, after this returns.
-                    if self.shared.home.is_current() || cfg!(target_family = "wasm") {
+                    if shared.home.is_current() || cfg!(target_family = "wasm") {
                         return Err(Error::invalid_state(
                             "a completion can't be waited for on the thread that resolves it",
                         ));
                     }
-                    self.shared.ready.wait(&mut state);
+                    shared.ready.wait(&mut state);
                 }
-                State::Taken => return Err(Error::invalid_state("the completion's result was already taken")),
+                State::Taken => return Err(taken()),
             }
         }
     }
@@ -143,14 +165,15 @@ impl<T: Send + 'static> Completion<T> {
         self,
         callback: F,
     ) -> Option<(F, Result<T, Error>)> {
-        let mut state = self.shared.state.lock();
+        let Some(shared) = &self.shared else { return Some((callback, Err(taken()))) };
+        let mut state = shared.state.lock();
         match std::mem::replace(&mut *state, State::Taken) {
             State::Ready(result) => Some((callback, result)),
             State::Pending { waker, .. } => {
                 *state = State::Pending { waker, callback: Some(Box::new(callback)) };
                 None
             }
-            State::Taken => Some((callback, Err(Error::invalid_state("the completion's result was already taken")))),
+            State::Taken => Some((callback, Err(taken()))),
         }
     }
 }
@@ -159,21 +182,22 @@ impl<T> Future for Completion<T> {
     type Output = Result<T, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut state = self.shared.state.lock();
+        let Some(shared) = &self.shared else { return Poll::Ready(Err(taken())) };
+        let mut state = shared.state.lock();
         match std::mem::replace(&mut *state, State::Taken) {
             State::Ready(result) => Poll::Ready(result),
             State::Pending { callback, .. } => {
                 *state = State::Pending { waker: Some(cx.waker().clone()), callback };
                 Poll::Pending
             }
-            State::Taken => Poll::Ready(Err(Error::invalid_state("the completion's result was already taken"))),
+            State::Taken => Poll::Ready(Err(taken())),
         }
     }
 }
 
 impl<T> std::fmt::Debug for Completion<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let complete = !matches!(*self.shared.state.lock(), State::Pending { .. });
+        let complete = self.shared.as_ref().is_none_or(|shared| !matches!(*shared.state.lock(), State::Pending { .. }));
         f.debug_struct("Completion").field("complete", &complete).finish()
     }
 }
@@ -182,12 +206,27 @@ impl<T> Resolver<T> {
     /// Delivers `result`: to the callback, if one is waiting, or to the
     /// receiver. Nothing is locked while the callback or waker runs.
     pub(crate) fn resolve(mut self, result: Result<T, Error>) {
-        if let Some(shared) = self.shared.take() {
-            Self::deliver(&shared, result);
+        self.deliver(result);
+    }
+
+    /// Whether the result is discarded, so that a success has nowhere to go.
+    pub(crate) fn discards(&self) -> bool {
+        matches!(self.target, Target::Discard(_))
+    }
+
+    fn deliver(&mut self, result: Result<T, Error>) {
+        match std::mem::replace(&mut self.target, Target::Resolved) {
+            Target::Completion(shared) => Self::deliver_to(&shared, result),
+            Target::Discard(on_failure) => {
+                if let Err(error) = result {
+                    on_failure(error);
+                }
+            }
+            Target::Resolved => {}
         }
     }
 
-    fn deliver(shared: &Shared<T>, result: Result<T, Error>) {
+    fn deliver_to(shared: &Shared<T>, result: Result<T, Error>) {
         let (callback, waker) = {
             let mut state = shared.state.lock();
             match std::mem::replace(&mut *state, State::Taken) {
@@ -214,8 +253,8 @@ impl<T> Resolver<T> {
 
 impl<T> Drop for Resolver<T> {
     fn drop(&mut self) {
-        if let Some(shared) = self.shared.take() {
-            Self::deliver(&shared, Err(Error::cancelled("the command was dropped before it ran")));
+        if !matches!(self.target, Target::Resolved) {
+            self.deliver(Err(Error::cancelled("the command was dropped before it ran")));
         }
     }
 }
@@ -267,6 +306,23 @@ mod tests {
         let (completion, resolver) = Completion::<()>::new(Some(std::thread::current().id()));
         assert_eq!(ErrorKind::InvalidState, completion.wait().unwrap_err().kind);
         drop(resolver);
+    }
+
+    #[test]
+    fn a_discarded_completion_passes_on_only_failures() {
+        thread_local! {
+            static FAILURES: std::cell::RefCell<Vec<ErrorKind>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        let on_failure: fn(Error) = |error| FAILURES.with_borrow_mut(|failures| failures.push(error.kind));
+        let (completion, resolver) = Completion::<u32>::discarded(on_failure);
+        assert!(completion.is_complete());
+        assert_eq!(ErrorKind::InvalidState, completion.wait().unwrap_err().kind);
+        resolver.resolve(Ok(1));
+        let (_, resolver) = Completion::<u32>::discarded(on_failure);
+        resolver.resolve(Err(Error::invalid_argument("bad")));
+        let (_, resolver) = Completion::<u32>::discarded(on_failure);
+        drop(resolver);
+        assert_eq!(vec![ErrorKind::InvalidArgument, ErrorKind::Cancelled], FAILURES.take());
     }
 
     struct Flag(AtomicBool);

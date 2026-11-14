@@ -298,6 +298,19 @@ fn a_command_group_holds_updates_back_until_it_ends() {
 }
 
 #[test]
+fn a_handle_that_discards_results_passes_on_only_failures() {
+    static FAILURES: Mutex<Vec<ErrorKind>> = Mutex::new(Vec::new());
+    let runtime = runtime();
+    let map = map(&runtime);
+    let discarding = map.discarding_results(|error| FAILURES.lock().push(error.kind));
+    assert!(discarding.request_repaint().unwrap().is_complete());
+    assert_eq!(ErrorKind::InvalidState, wait_err(discarding.end_command_group()).kind);
+    // Its results went out before the result of a command sent after it.
+    wait(map.request_repaint());
+    assert_eq!(vec![ErrorKind::InvalidState], *FAILURES.lock());
+}
+
+#[test]
 fn the_camera_query_sees_the_commands_before_it() {
     let runtime = runtime();
     let map = map(&runtime);

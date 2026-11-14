@@ -57,10 +57,11 @@ impl<T> EventQueue<T> {
         }
     }
 
-    /// Takes every event in the queue, oldest first.
+    /// Takes every event in the queue, oldest first. The queue keeps its
+    /// buffer for the events pushed next.
     #[must_use]
     pub fn take(&self) -> Vec<T> {
-        std::mem::take(&mut *self.shared.events.lock())
+        self.shared.events.lock().drain(..).collect()
     }
 
     /// Whether the queue has no events. A push counts once it has queued its

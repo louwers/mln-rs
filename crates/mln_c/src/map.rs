@@ -82,9 +82,13 @@ pub(crate) unsafe fn command(
     let object = resolve(map)?;
     // SAFETY: the caller's contract.
     let pending = unsafe { PendingCompletion::optional(completion) }?;
+    let Some(pending) = pending else {
+        let _discarded = send(&object.map.discarding_results(completion::log_discarded_runtime_failure))?;
+        return Ok(());
+    };
     let sent = send(&object.map)?;
     let map = object.map.clone();
-    completion::forward(sent, pending.map(PendingCompletion::accept), move |result| {
+    completion::forward(sent, Some(pending.accept()), move |result| {
         let generations = generations(&map, &result);
         (result.map(drop).map_err(Error::from), generations)
     });

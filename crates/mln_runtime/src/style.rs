@@ -610,7 +610,7 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (source_id, json) = (source_id.into(), json.into());
-        self.shared.send(move |core, outbox, id, sequence, resolver| {
+        self.post(move |core, outbox, id, sequence, resolver| {
             if !core.maps.contains_key(&id) {
                 return outbox.resolve(resolver, Err(missing_map()));
             }

@@ -58,6 +58,9 @@ struct Builder {
 impl Builder {
     /// Text that the batch keeps, and its view.
     fn text(&mut self, text: &str) -> mln_buffer_view {
+        if text.is_empty() {
+            return LentText::empty_view();
+        }
         let text = LentText::new(text);
         let view = text.view();
         self.texts.push(text);
