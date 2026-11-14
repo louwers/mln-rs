@@ -9,6 +9,7 @@ use std::rc::{Rc, Weak};
 use ash::vk;
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context as _;
+use mln_gfx::gpu::TextureRegion;
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_gfx::{frame, offscreen_texture};
@@ -60,7 +61,9 @@ impl OffscreenTextureResource {
     pub(crate) fn read_still_image(&self) -> PremultipliedImage {
         let size = Size::new(self.extent.width, self.extent.height);
         let texture = self.color_texture.borrow().id();
-        let data = texture.zip(self.context.upgrade()).map(|(texture, context)| context.read_texture(texture));
+        let data = texture
+            .zip(self.context.upgrade())
+            .map(|(texture, context)| context.gpu().read_texels(texture, TextureRegion::whole(size)));
         match data {
             Some(Ok(data)) => PremultipliedImage::from_vec(size, data),
             Some(Err(error)) => {

@@ -19,12 +19,13 @@ pub mod conformance;
 mod ids;
 pub mod validation;
 
+use std::any::Any;
 use std::ops::Range;
 
 use mln_util::Color;
 use mln_util::size::Size;
 
-pub use self::ids::{BindGroupId, BufferId, Id, IdData, PipelineId, SamplerId, SlotMap, TextureId};
+pub use self::ids::{BindGroupId, BufferId, Id, IdData, PipelineId, ReadbackId, SamplerId, SlotMap, TextureId};
 use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
@@ -176,18 +177,34 @@ pub struct TextureRegion {
 }
 
 impl TextureRegion {
-    /// The bytes in each row of `data` that
-    /// [`write_texture`](Gpu::write_texture) writes to this region of a
-    /// texture of `size` and `format`. Fails for a depth format, a region
-    /// past the texture's edges, or `data` of another length.
-    pub fn write_bytes_per_row(&self, size: Size, format: TextureFormat, data: &[u8]) -> Result<usize, GpuError> {
-        let bytes_per_texel =
-            format.bytes_per_texel().ok_or_else(|| GpuError::Invalid(format!("{format:?} textures take no writes")))?;
+    /// The whole of a texture of `size`.
+    #[must_use]
+    pub fn whole(size: Size) -> TextureRegion {
+        TextureRegion { x: 0, y: 0, size }
+    }
+
+    /// The bytes in each row of this region of a texture of `size` and
+    /// `format`, as [`write_texture`](Gpu::write_texture) takes them and
+    /// [`take_readback`](Gpu::take_readback) returns them. Fails for a depth
+    /// format, or a region past the texture's edges.
+    pub fn bytes_per_row(&self, size: Size, format: TextureFormat) -> Result<usize, GpuError> {
+        let bytes_per_texel = format
+            .bytes_per_texel()
+            .ok_or_else(|| GpuError::Invalid(format!("{format:?} textures have no texels to copy")))?;
         let past = |start: u32, length: u32, limit: u32| u64::from(start) + u64::from(length) > u64::from(limit);
         if past(self.x, self.size.width, size.width) || past(self.y, self.size.height, size.height) {
-            return Err(GpuError::Invalid(format!("a write to {self:?} of a texture of {size:?}")));
+            return Err(GpuError::Invalid(format!("{self:?} of a texture of {size:?}")));
         }
-        let bytes_per_row = self.size.width as usize * bytes_per_texel as usize;
+        Ok(self.size.width as usize * bytes_per_texel as usize)
+    }
+
+    /// The bytes in each row of `data` that
+    /// [`write_texture`](Gpu::write_texture) writes to this region of a
+    /// texture of `size` and `format`. Fails as
+    /// [`bytes_per_row`](Self::bytes_per_row) does, and for `data` of
+    /// another length.
+    pub fn write_bytes_per_row(&self, size: Size, format: TextureFormat, data: &[u8]) -> Result<usize, GpuError> {
+        let bytes_per_row = self.bytes_per_row(size, format)?;
         let expected = bytes_per_row * self.size.height as usize;
         if data.len() != expected {
             return Err(GpuError::Invalid(format!("a write of {} bytes to a region of {expected}", data.len())));
@@ -553,6 +570,60 @@ pub trait Gpu {
     /// [`validation::check_pass`] checks, such as a draw that lacks a
     /// binding its pipeline's shader reads.
     fn submit(&mut self, passes: &[Pass]) -> Result<(), GpuError>;
+
+    /// Starts copying `region` of `texture`, whose `y` counts rows from the
+    /// top as passes do, out of the GPU, once the work submitted so far is
+    /// done: later submits and writes don't change what the copy holds.
+    /// [`take_readback`](Self::take_readback) reads it. Fails as
+    /// [`validation::check_readback`] checks, or with
+    /// [`GpuError::Unsupported`] for a format the backend reads no texels
+    /// of.
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError>;
+
+    /// The texels that `readback` copied, in the texture's format and with
+    /// no padding, as [`write_texture`](Self::write_texture) takes them, in
+    /// rows from the top as passes count them. (A backend that stores what
+    /// passes draw bottom row first reads a written texture's rows back in
+    /// the other order.) `None` while the GPU
+    /// hasn't finished the copy; with `wait`, the call blocks until it has,
+    /// except on a backend that can't block, which returns `None` as
+    /// without it. Once the call returns texels or fails, `readback` is
+    /// gone.
+    fn take_readback(&mut self, readback: ReadbackId, wait: bool) -> Result<Option<Vec<u8>>, GpuError>;
+
+    /// Drops `readback` without reading it.
+    fn destroy_readback(&mut self, readback: ReadbackId);
+
+    /// The texels of `region` of `texture` once the work submitted so far is
+    /// done: [`read_texture`](Self::read_texture), then a
+    /// [`take_readback`](Self::take_readback) that waits. Fails with
+    /// [`GpuError::Unsupported`] on a backend that can't block.
+    fn read_texels(&mut self, texture: TextureId, region: TextureRegion) -> Result<Vec<u8>, GpuError> {
+        let readback = self.read_texture(texture, region)?;
+        let texels = self.take_readback(readback, true)?;
+        texels.ok_or_else(|| {
+            self.destroy_readback(readback);
+            GpuError::Unsupported("waiting for a readback".to_owned())
+        })
+    }
+
+    /// Blocks until the GPU has finished the work submitted so far, so that
+    /// what it used can go, on a backend that can block. Another does
+    /// nothing.
+    fn finish(&mut self) -> Result<(), GpuError>;
+
+    /// Lends the backend's own commands to a custom layer, which `f` gets as
+    /// the backend's `CustomLayerEncoder` or `CustomLayerPass`, whose docs
+    /// say what it may record. What `f` records runs after the work
+    /// submitted so far, and before the next submit's.
+    ///
+    /// Without `pass`, `f` gets the commands outside any pass. With it, `f`
+    /// gets a pass over `pass`'s attachments that begins with their load
+    /// operations and runs `pass`'s commands, which [`submit`](Self::submit)
+    /// would take, first; the pass ends, storing its attachments, once `f`
+    /// returns. A later pass that loads them sees what `f` drew. Fails,
+    /// without calling `f`, where `submit` would fail for `pass`.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError>;
 }
 
 #[cfg(test)]

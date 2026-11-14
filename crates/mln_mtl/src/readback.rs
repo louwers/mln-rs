@@ -1,7 +1,8 @@
-// Port-only: offscreen and surface targets read their image back through a
-// blit into shared memory (C++ reads the texture with `getBytes`, which on
-// macOS needs a synchronized managed texture).
+// Readbacks blit a texture into shared memory, which reads private textures
+// too, where `getBytes` would need a synchronized managed texture.
 
+use mln_gfx::gpu::TextureRegion;
+use mln_util::size::Size;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLOrigin, MTLSize, MTLTexture,
@@ -15,18 +16,32 @@ pub(crate) fn encode_texture_copy(
     bytes_per_row: usize,
     buffer: &ProtocolObject<dyn MTLBuffer>,
 ) -> bool {
-    let (width, height) = (texture.width(), texture.height());
+    let size = Size::new(texture.width() as u32, texture.height() as u32);
+    encode_region_copy(command_buffer, texture, TextureRegion::whole(size), bytes_per_row, buffer)
+}
+
+/// Encodes a copy of `region` of `texture`, which is inside it, into
+/// `buffer`, rows `bytes_per_row` apart. False if the command buffer has no
+/// blit encoder to give.
+pub(crate) fn encode_region_copy(
+    command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+    texture: &ProtocolObject<dyn MTLTexture>,
+    region: TextureRegion,
+    bytes_per_row: usize,
+    buffer: &ProtocolObject<dyn MTLBuffer>,
+) -> bool {
+    let (width, height) = (region.size.width as usize, region.size.height as usize);
     debug_assert!(buffer.length() >= bytes_per_row * height);
     let Some(blit) = command_buffer.blitCommandEncoder() else {
         return false;
     };
-    // SAFETY: the region is the whole texture and the buffer holds it.
+    // SAFETY: the region is inside the texture and the buffer holds it.
     unsafe {
         blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
             texture,
             0,
             0,
-            MTLOrigin { x: 0, y: 0, z: 0 },
+            MTLOrigin { x: region.x as usize, y: region.y as usize, z: 0 },
             MTLSize { width, height, depth: 1 },
             buffer,
             0,

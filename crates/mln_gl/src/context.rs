@@ -14,7 +14,7 @@ use std::sync::Arc;
 use glow::HasContext;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, TextureRegion};
 use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::Color;
@@ -109,6 +109,11 @@ impl Context {
     /// The GL functions of the backend's context.
     pub(crate) fn gl(&self) -> &Gl {
         self.backend.gl()
+    }
+
+    /// The GL functions, to share with a custom layer.
+    pub(crate) fn gl_shared(&self) -> &Arc<Gl> {
+        self.backend.gl_shared()
     }
 
     /// The GL state the context last set.
@@ -207,39 +212,10 @@ impl Context {
         (self.framebuffer.get(), self.framebuffer_size.get(), self.framebuffer_has_stencil.get())
     }
 
-    /// Reads the RGBA pixels of the bound framebuffer, the top row first.
+    /// Reads the RGBA pixels of the bound framebuffer, of `size`, the top
+    /// row first.
     pub(crate) fn read_framebuffer(&self, size: Size) -> Vec<u8> {
-        let stride = size.width as usize * 4;
-        let mut data = vec![0u8; stride * size.height as usize];
-        if data.is_empty() {
-            return data;
-        }
-        let gl = self.gl();
-        // When reading data from the framebuffer, make sure that we are
-        // storing the values tightly packed into the buffer to avoid buffer
-        // overruns.
-        self.state.set_pixel_store_pack_alignment(gl, 1);
-        // SAFETY: `data` holds width * height RGBA pixels.
-        unsafe {
-            gl.read_pixels(
-                0,
-                0,
-                size.width as i32,
-                size.height as i32,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelPackData::Slice(Some(&mut data)),
-            );
-        }
-        // GL's rows start at the bottom.
-        let (mut top, mut bottom) = (0, size.height as usize - 1);
-        while top < bottom {
-            let (head, tail) = data.split_at_mut(bottom * stride);
-            head[top * stride..(top + 1) * stride].swap_with_slice(&mut tail[..stride]);
-            top += 1;
-            bottom -= 1;
-        }
-        data
+        crate::gpu::read_pixels(self.gl(), &self.state, size.height, TextureRegion::whole(size))
     }
 
     /// The `Gpu` the renderer's resources belong to and its draws encode

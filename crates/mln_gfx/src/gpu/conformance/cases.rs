@@ -1,7 +1,10 @@
 //! Cases that draw a solid color with the background shader, and the calls
 //! every backend rejects.
 
+use std::any::Any;
+
 use mln_util::Color;
+use mln_util::size::Size;
 
 use super::{EXTENT, SIZE, buffer, position_layout, tile_matrix, whole};
 use crate::color_mode::ColorMode;
@@ -11,7 +14,7 @@ use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Gpu, GpuError, LoadOp, Pass, PipelineKey, PipelineState, RenderCommand, ShaderKey,
-    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute,
+    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute,
     VertexBufferLayout, VertexStep,
 };
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -249,28 +252,31 @@ pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError
 }
 
 /// The texel at `x`, `y` of `pixels`, a read back of a target of [`SIZE`].
-fn texel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
+/// The texels of `target`, of [`SIZE`], once the work submitted so far is
+/// done.
+pub(super) fn read(gpu: &mut impl Gpu, target: TextureId) -> Result<Vec<u8>, GpuError> {
+    let pixels = gpu.read_texels(target, TextureRegion::whole(SIZE))?;
+    assert_eq!(pixels.len(), (SIZE.width * SIZE.height * 4) as usize, "a texel for each pixel");
+    Ok(pixels)
+}
+
+pub(super) fn texel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
     let i = ((y * SIZE.width + x) * 4) as usize;
     [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
 }
 
 /// Checks that [`BlendFunction::Replace`](crate::color_mode::BlendFunction)
-/// writes a translucent color as it is, over opaque black. `read_back`
-/// returns a target's texels, as in
-/// [`clip_mask_and_background`](super::clip_mask_and_background). Returns
-/// the error of a call that should succeed.
+/// writes a translucent color as it is, over opaque black. Returns the
+/// error of a call that should succeed.
 ///
 /// # Panics
 ///
 /// Where a check doesn't hold.
-pub fn transparent_replace<G: Gpu>(
-    gpu: &mut G,
-    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
-) -> Result<(), GpuError> {
+pub fn transparent_replace(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 0.6])?;
     let pipeline = gpu.create_pipeline(&background())?;
     gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
-    let pixels = read_back(gpu, frame.target);
+    let pixels = read(gpu, frame.target)?;
     assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), [255, 0, 0, 153], "not blended with the black");
     Ok(())
 }
@@ -284,10 +290,7 @@ pub fn transparent_replace<G: Gpu>(
 /// # Panics
 ///
 /// Where a check doesn't hold.
-pub fn topologies<G: Gpu>(
-    gpu: &mut G,
-    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
-) -> Result<(), GpuError> {
+pub fn topologies(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
     let e = EXTENT as i16;
     let fan: [[i16; 2]; 4] = [[0, 0], [e, 0], [e, e], [0, e]];
@@ -314,7 +317,7 @@ pub fn topologies<G: Gpu>(
             RenderCommand::Draw { vertices: 0..count, instances: 0..1 },
         ];
         gpu.submit(&[frame.pass(pipeline, commands)])?;
-        let pixels = read_back(gpu, frame.target);
+        let pixels = read(gpu, frame.target)?;
         if primitive == DrawModeType::LineLoop {
             assert_eq!(texel(&pixels, 32, 16), red, "the segment that closes the loop");
             continue;
@@ -336,10 +339,7 @@ pub fn topologies<G: Gpu>(
 /// # Panics
 ///
 /// Where a check doesn't hold.
-pub fn depth_only<G: Gpu>(
-    gpu: &mut G,
-    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
-) -> Result<(), GpuError> {
+pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let depth = gpu.create_texture(&TextureDesc {
         label: "depth",
         size: SIZE,
@@ -372,7 +372,7 @@ pub fn depth_only<G: Gpu>(
         Some(DepthStencilAttachment { texture: depth, depth: LoadOp::Load, stencil: LoadOp::Load });
     gpu.submit(&[depth_pass, color_pass])?;
 
-    let pixels = read_back(gpu, frame.target);
+    let pixels = read(gpu, frame.target)?;
     let (red, black) = ([255, 0, 0, 255], [0, 0, 0, 255]);
     for y in [0, SIZE.height / 2, SIZE.height - 1] {
         assert_eq!(texel(&pixels, 0, y), black, "the depth-only pass's half is nearer");
@@ -393,10 +393,7 @@ pub fn depth_only<G: Gpu>(
 /// # Panics
 ///
 /// Where a check doesn't hold.
-pub fn vertex_layouts<G: Gpu>(
-    gpu: &mut G,
-    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
-) -> Result<(), GpuError> {
+pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
     let mut drawable = [FillDrawableUnionUBO::default()];
@@ -462,7 +459,7 @@ pub fn vertex_layouts<G: Gpu>(
             .chain([RenderCommand::SetIndexBuffer { buffer: frame.indices, offset: 0 }, DRAW_QUAD])
             .collect();
         gpu.submit(&[pass])?;
-        let pixels = read_back(gpu, frame.target);
+        let pixels = read(gpu, frame.target)?;
         let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
         for (x, y) in [(0, 0), (right, 0), (0, bottom), (right, bottom)] {
             assert_eq!(texel(&pixels, x, y), [255, 0, 0, 255], "{slots} vertex buffers, at ({x}, {y})");
@@ -485,10 +482,7 @@ pub fn vertex_layouts<G: Gpu>(
 /// # Panics
 ///
 /// Where a check doesn't hold.
-pub fn instanced_walls<G: Gpu>(
-    gpu: &mut G,
-    mut read_back: impl FnMut(&mut G, TextureId) -> Vec<u8>,
-) -> Result<(), GpuError> {
+pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
     // Tile x `0..EXTENT` to clip x `-1..1`, elevation `0..1` to clip y
     // `-1..1`, at clip depth 0.5.
@@ -575,7 +569,7 @@ pub fn instanced_walls<G: Gpu>(
     assert!(invalid(&gpu.submit(&[walls(0..3)])), "a wall whose next vertex is past the instance buffer");
     gpu.submit(&[walls(0..2)])?;
 
-    let pixels = read_back(gpu, frame.target);
+    let pixels = read(gpu, frame.target)?;
     let (right, bottom) = (SIZE.width - 1, SIZE.height - 1);
     for y in [0, bottom / 2, bottom] {
         for x in [0, right / 2] {
@@ -587,4 +581,144 @@ pub fn instanced_walls<G: Gpu>(
         }
     }
     Ok(())
+}
+
+/// Checks readbacks: a region's texels come in rows from the top, a copy
+/// holds what the submits before it drew whatever later submits draw, a
+/// write before a readback reaches it, and a readback is gone once taken or
+/// destroyed. Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    // Red over the top half: tile y 0..EXTENT to clip y 0..1.
+    let mut top_half = tile_matrix(1.0);
+    top_half[5] = 1.0 / EXTENT;
+    top_half[13] = 0.0;
+    let frame = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], top_half)?;
+    let pipeline = gpu.create_pipeline(&background())?;
+    gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
+    let corner = Size { width: 3, height: 2 };
+    let top_right = TextureRegion { x: SIZE.width - corner.width, y: 0, size: corner };
+    let bottom_left = TextureRegion { x: 0, y: SIZE.height - corner.height, size: corner };
+    let whole = gpu.read_texture(frame.target, TextureRegion::whole(SIZE))?;
+    let red_corner = gpu.read_texture(frame.target, top_right)?;
+    let black_corner = gpu.read_texture(frame.target, bottom_left)?;
+    // The same pass without its draw: all black.
+    gpu.submit(&[frame.pass(pipeline, [])])?;
+    let cleared_corner = gpu.read_texture(frame.target, top_right)?;
+
+    let take = |gpu: &mut _, readback| -> Result<Vec<u8>, GpuError> {
+        Gpu::take_readback(gpu, readback, true)?
+            .ok_or_else(|| GpuError::Invalid("a readback that was waited for has no texels".to_owned()))
+    };
+    let (red, black) = ([255, 0, 0, 255], [0, 0, 0, 255]);
+    let pixels = match gpu.take_readback(whole, false)? {
+        Some(pixels) => pixels,
+        None => take(gpu, whole)?,
+    };
+    assert_eq!(pixels.len(), (SIZE.width * SIZE.height * 4) as usize);
+    assert_eq!(texel(&pixels, 0, 0), red, "the top row first");
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height / 2 - 1), red);
+    assert_eq!(texel(&pixels, 0, SIZE.height / 2), black);
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height - 1), black);
+    let expect_all = |texels: Vec<u8>, color: [u8; 4], what: &str| {
+        assert_eq!(texels.len(), (corner.width * corner.height * 4) as usize, "{what}: the region's texels");
+        assert!(texels.chunks(4).all(|texel| texel == color), "{what}: {texels:?}");
+    };
+    expect_all(take(gpu, cleared_corner)?, black, "the later frame");
+    expect_all(take(gpu, red_corner)?, red, "the earlier frame, after the later one's");
+    expect_all(take(gpu, black_corner)?, black, "the bottom left");
+    assert!(matches!(gpu.take_readback(whole, true), Err(GpuError::UnknownId("readback"))), "taken already");
+
+    // Writes before a readback reach it, and those after it don't. The
+    // part written covers both rows, since a backend may read rows back in
+    // another order than it writes them.
+    let size = Size { width: 4, height: 2 };
+    let written = gpu.create_texture(&TextureDesc {
+        label: "written",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() },
+    })?;
+    gpu.write_texture(written, TextureRegion::whole(size), &[1; 4 * 4 * 2])?;
+    let part = TextureRegion { x: 1, y: 0, size: Size { width: 2, height: 2 } };
+    gpu.write_texture(written, part, &[2; 4 * 2 * 2])?;
+    let before = gpu.read_texture(written, TextureRegion::whole(size))?;
+    gpu.write_texture(written, TextureRegion::whole(size), &[3; 4 * 4 * 2])?;
+    let row = [[1; 4], [2; 4], [2; 4], [1; 4]].concat();
+    assert_eq!(take(gpu, before)?, [row.clone(), row].concat(), "the writes before the readback, in order");
+    assert_eq!(gpu.read_texels(written, part)?, [3; 4 * 2 * 2], "the write after it");
+
+    let dropped = gpu.read_texture(written, part)?;
+    gpu.destroy_readback(dropped);
+    assert!(matches!(gpu.take_readback(dropped, true), Err(GpuError::UnknownId("readback"))));
+    let depth = gpu.create_texture(&TextureDesc {
+        label: "depth",
+        size,
+        format: TextureFormat::Depth32Float,
+        usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+    })?;
+    assert!(invalid(&gpu.read_texture(depth, TextureRegion::whole(size))), "a depth texture");
+    assert!(invalid(&gpu.read_texture(written, TextureRegion { x: 1, ..TextureRegion::whole(size) })), "past it");
+    assert!(invalid(&gpu.write_texture(written, TextureRegion::whole(size), &[0; 4])), "a write of too few bytes");
+    gpu.destroy_texture(written);
+    let gone = gpu.read_texture(written, part);
+    assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a destroyed texture");
+    let gone = gpu.write_texture(written, part, &[0; 4 * 2 * 2]);
+    assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a write to a destroyed texture");
+    Ok(())
+}
+
+/// Checks custom-layer lending: `encoder` gets what the backend lends
+/// outside a pass and `pass` what it lends inside one, each once and in
+/// order with the submits around it. The lent pass runs its own commands
+/// first and keeps what they drew, and begins with its load operations. A
+/// pass that `submit` would reject lends nothing. Returns the error of a
+/// call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn custom_layers(
+    gpu: &mut impl Gpu,
+    mut encoder: impl FnMut(&mut dyn Any),
+    mut pass: impl FnMut(&mut dyn Any),
+) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let left = solid_at(gpu, TextureFormat::Rgba8Unorm, [0.0, 1.0, 0.0, 1.0], tile_matrix(0.0))?;
+    let pipeline = gpu.create_pipeline(&background())?;
+    let (mut encoders, mut passes) = (0, 0);
+    gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
+    gpu.lend_to_custom_layer(None, &mut |lent| {
+        encoders += 1;
+        encoder(lent);
+    })?;
+    assert_eq!(encoders, 1, "the encoder is lent once");
+
+    // Green over the left half of the red frame.
+    let mut green_left = left.pass(pipeline, [DRAW_QUAD]);
+    green_left.color = Some(ColorAttachment { texture: frame.target, load: LoadOp::Load });
+    gpu.lend_to_custom_layer(Some(&green_left), &mut |lent| {
+        passes += 1;
+        pass(lent);
+    })?;
+    assert_eq!(passes, 1, "the pass is lent once");
+    let pixels = read(gpu, frame.target)?;
+    let (red, green, black) = ([255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 0, 255]);
+    assert_eq!(texel(&pixels, 0, 0), green, "the lent pass's own draw");
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height - 1), red, "the frame before it, loaded");
+
+    let cleared = Pass { commands: Vec::new(), ..frame.pass(pipeline, []) };
+    gpu.lend_to_custom_layer(Some(&cleared), &mut |lent| pass(lent))?;
+    let pixels = read(gpu, frame.target)?;
+    assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), black, "the lent pass's clear");
+
+    let mut unbound = frame.pass(pipeline, [DRAW_QUAD]);
+    unbound.commands.retain(|command| !matches!(command, RenderCommand::SetBindGroup { .. }));
+    let mut called = false;
+    assert!(invalid(&gpu.lend_to_custom_layer(Some(&unbound), &mut |_| called = true)), "a draw without its buffers");
+    assert!(!called, "nothing lent for a rejected pass");
+    gpu.finish()
 }

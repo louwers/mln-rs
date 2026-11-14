@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_gfx::command_encoder;
 use mln_gfx::debug_group::DebugGroupTarget;
@@ -10,7 +11,7 @@ use mln_gfx::frame::DrawTarget;
 use mln_gfx::render_pass::RenderPassDescriptor;
 
 use crate::context::Context;
-use crate::custom_layer::CustomLayerEncoder;
+use crate::custom_layer::{CustomLayerEncoder, lend_context};
 use crate::render_pass::RenderPass;
 
 pub(crate) struct CommandEncoder {
@@ -51,11 +52,8 @@ impl command_encoder::CommandEncoder for CommandEncoder {
     /// Lends the current context with vertex array 0 bound, then forgets the
     /// GL state it knew; the next pass binds its framebuffer again.
     fn lend_to_custom_layer(&self, _target: &dyn DrawTarget, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
-        self.context.state().bind_vertex_array(self.context.gl(), None);
-        self.context.state().unbind_samplers(self.context.gl());
-        let mut encoder = CustomLayerEncoder { context: Rc::clone(&self.context) };
-        f(&mut encoder);
-        self.context.set_dirty_state();
+        let mut encoder = CustomLayerEncoder { gl: Arc::clone(self.context.gl_shared()) };
+        lend_context(self.context.gl(), self.context.state(), || f(&mut encoder));
         true
     }
 }

@@ -5,15 +5,17 @@ use std::collections::{HashMap, VecDeque};
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use block2::RcBlock;
 use mln_gfx::color_mode::{BlendFunction, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::validation::{self, Resources, ShaderBinding};
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BindGroupId, BufferDesc, BufferId, BufferUsage, DepthState, Gpu, GpuError, Limits,
-    LoadOp, Pass, PipelineId, PipelineKey, RenderCommand, SamplerId, ShaderKey, SlotMap, StencilState, TargetFormats,
-    TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
+    LoadOp, Pass, PipelineId, PipelineKey, ReadbackId, RenderCommand, SamplerId, ShaderKey, SlotMap, StencilState,
+    TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::texture2d::SamplerState;
@@ -28,8 +30,8 @@ use objc2::runtime::{NSObject, ProtocolObject};
 use objc2_foundation::{NSDictionary, NSString};
 use objc2_metal::{
     MTLBinding, MTLBindingType, MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding,
-    MTLClearColor, MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
-    MTLCompareFunction, MTLCompileOptions, MTLCullMode, MTLDepthStencilDescriptor, MTLDevice, MTLGPUFamily,
+    MTLClearColor, MTLColorWriteMask, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction,
+    MTLCompileOptions, MTLCullMode, MTLDepthStencilDescriptor, MTLDevice, MTLDrawable, MTLEvent, MTLGPUFamily,
     MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
     MTLRenderPipelineReflection, MTLResource, MTLResourceOptions, MTLSamplerAddressMode, MTLSamplerDescriptor,
@@ -37,12 +39,16 @@ use objc2_metal::{
     MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor,
     MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLWinding,
 };
+use parking_lot::{Condvar, Mutex};
 
 use crate::Device;
+use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
 use crate::mtl_fwd::{
-    MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderPipelineStatePtr,
-    MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
+    MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderCommandEncoderPtr,
+    MTLRenderPipelineStatePtr, MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
 };
+use crate::readback::{buffer_bytes, encode_region_copy};
+use crate::render_pass::AttachmentFormats;
 use crate::shaders::msl_sources::PRELUDE;
 use crate::shaders::shader_source::{ShaderSource, shader_source};
 
@@ -89,8 +95,10 @@ impl Deref for Buffer {
 
 struct Texture {
     texture: MTLTexturePtr,
-    /// `None` for an imported texture of a format with no [`TextureFormat`].
-    format: Option<TextureFormat>,
+    format: TextureFormat,
+    /// The events that the next command buffer that draws into it, or reads
+    /// it back, waits for: of [`wait_before_using`](MetalGpu::wait_before_using).
+    waits: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
 }
 
 /// A program's library functions.
@@ -137,6 +145,15 @@ struct Pipeline {
     bindings: Vec<Binding>,
     /// What the shader reads from the bind groups, for the shared checks.
     reads: Vec<ShaderBinding>,
+}
+
+/// A texture's texels, copied into shared memory.
+struct Readback {
+    buffer: MTLBufferPtr,
+    /// The bytes of the texels, at the start of `buffer`.
+    len: usize,
+    /// The number of the command buffer that copies them.
+    number: u64,
 }
 
 /// A copy out of the staging buffer of a submit.
@@ -199,12 +216,47 @@ impl Uploads {
     }
 }
 
+/// Whether a committed command buffer has finished, which its completed
+/// handler sets.
+///
+/// The handler, not `MTLCommandBuffer::status`, says when what the command
+/// buffer uses may be freed: the status reads `Completed` before the
+/// handlers run, and Metal's API validation counts the command buffer's
+/// unretained references until it runs its own handler, so a resource
+/// freed on the status alone can fail validation.
+#[derive(Default)]
+struct Completion {
+    done: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl Completion {
+    fn is_done(&self) -> bool {
+        *self.done.lock()
+    }
+
+    /// Blocks until the completed handler has run.
+    fn wait(&self) {
+        let mut done = self.done.lock();
+        self.changed.wait_while(&mut done, |done| !*done);
+    }
+
+    fn set(&self) {
+        *self.done.lock() = true;
+        self.changed.notify_all();
+    }
+}
+
+/// A test's hook into each command buffer before it's committed.
+#[cfg(test)]
+type BeforeCommit = Box<dyn Fn(&ProtocolObject<dyn MTLCommandBuffer>)>;
+
 /// A [`Gpu`] on a Metal [`Device`].
 ///
 /// Command buffers don't retain the resources they use: a destroyed
-/// resource waits in a queue until the GPU finishes the command buffers
-/// submitted before it was destroyed. Writes go into a staging buffer that
-/// the next submit copies in before its passes. Each submit and pipeline
+/// resource waits in a queue until the command buffers submitted before it
+/// was destroyed finish (see [`Completion`]). Writes go into a staging
+/// buffer that the next submit copies in before its passes. Each submit and pipeline
 /// creation drains an autorelease pool of its own.
 pub struct MetalGpu {
     device: Device,
@@ -224,12 +276,23 @@ pub struct MetalGpu {
     uploads: Uploads,
     /// The number of command buffers committed so far.
     submitted: u64,
-    /// The committed command buffers the GPU may not have finished, by
-    /// their number, oldest first.
-    in_flight: VecDeque<(u64, MTLCommandBufferPtr)>,
+    /// The committed command buffers whose completed handlers may not have
+    /// run, by their number, oldest first.
+    in_flight: VecDeque<(u64, Arc<Completion>)>,
     /// What the command buffers up to each number may use, freed once they
     /// finish.
     retired: VecDeque<(u64, Box<dyn Any>)>,
+    readbacks: SlotMap<ReadbackId, Readback>,
+    /// The events the next command buffer waits for, with their values:
+    /// those of the textures it uses.
+    waits: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
+    /// The events the next command buffer signals, with their values.
+    signals: Vec<(Retained<ProtocolObject<dyn MTLEvent>>, u64)>,
+    /// The drawables the next command buffer presents.
+    presents: Vec<Retained<ProtocolObject<dyn MTLDrawable>>>,
+    /// Called with each command buffer just before it's committed.
+    #[cfg(test)]
+    before_commit: Option<BeforeCommit>,
 }
 
 impl MetalGpu {
@@ -253,35 +316,106 @@ impl MetalGpu {
             submitted: 0,
             in_flight: VecDeque::new(),
             retired: VecDeque::new(),
+            readbacks: SlotMap::with_key(),
+            waits: Vec::new(),
+            signals: Vec::new(),
+            presents: Vec::new(),
+            #[cfg(test)]
+            before_commit: None,
         }
     }
 
-    /// Takes a texture made elsewhere, such as a drawable's, as a texture
-    /// of this backend. Destroying it drops this backend's reference.
-    pub fn import_texture(&mut self, texture: &ProtocolObject<dyn MTLTexture>) -> TextureId {
-        let format = texture_format(texture.pixelFormat());
-        self.textures.insert(Texture { texture: texture.retain(), format })
+    /// Takes a texture made elsewhere, such as a drawable's or a host's, as
+    /// a texture of this backend, of `format`, whose pixel format it has (a
+    /// `Depth32Float_Stencil8` texture is of either depth and stencil
+    /// format). Its usage is what its `MTLTextureUsage` allows. Destroying
+    /// it drops this backend's reference.
+    ///
+    /// Fails with [`GpuError::Invalid`] for a texture of another pixel
+    /// format.
+    pub fn import_texture(
+        &mut self,
+        texture: &ProtocolObject<dyn MTLTexture>,
+        format: TextureFormat,
+    ) -> Result<TextureId, GpuError> {
+        if texture.pixelFormat() != pixel_format(format) {
+            return Err(GpuError::Invalid(format!("a texture of {:?} imported as {format:?}", texture.pixelFormat())));
+        }
+        Ok(self.textures.insert(Texture { texture: texture.retain(), format, waits: Vec::new() }))
     }
 
-    /// Waits for the GPU to finish the work submitted so far, and frees what
-    /// it kept for it.
-    pub fn wait_until_completed(&mut self) {
-        if let Some((_, command_buffer)) = self.in_flight.back() {
-            command_buffer.waitUntilCompleted();
+    /// Has the next submit, or lend to a custom layer, whose passes draw
+    /// into `texture`, or the next readback of it, wait for `event` to reach
+    /// `value` before its commands run. The submits before it don't wait.
+    pub fn wait_before_using(
+        &mut self,
+        texture: TextureId,
+        event: &ProtocolObject<dyn MTLEvent>,
+        value: u64,
+    ) -> Result<(), GpuError> {
+        let texture = self.textures.get_mut(texture).ok_or(GpuError::UnknownId("texture"))?;
+        texture.waits.push((event.retain(), value));
+        Ok(())
+    }
+
+    /// Has the next command buffer wait for what `textures` wait for.
+    fn take_waits(&mut self, textures: impl IntoIterator<Item = TextureId>) {
+        for id in textures {
+            if let Some(texture) = self.textures.get_mut(id) {
+                self.waits.append(&mut texture.waits);
+            }
         }
-        self.retire();
+    }
+
+    /// Has the next command buffer wait for what the attachments of
+    /// `passes` wait for.
+    fn take_pass_waits<'a>(&mut self, passes: impl IntoIterator<Item = &'a Pass>) {
+        let attachments = passes
+            .into_iter()
+            .flat_map(|pass| [pass.color.map(|color| color.texture), pass.depth_stencil.map(|depth| depth.texture)]);
+        self.take_waits(attachments.flatten());
+    }
+
+    /// Has the next submit, or the next lend to a custom layer, signal
+    /// `event` with `value` once its commands are done. A submit without
+    /// passes signals it too.
+    pub fn signal_after_next_submit(&mut self, event: &ProtocolObject<dyn MTLEvent>, value: u64) {
+        self.signals.push((event.retain(), value));
+    }
+
+    /// Has the next submit, or the next lend to a custom layer, present
+    /// `drawable` once its commands are done.
+    pub fn present_after_next_submit(&mut self, drawable: &ProtocolObject<dyn MTLDrawable>) {
+        self.presents.push(drawable.retain());
+    }
+
+    /// Whether the next submit has events to wait for or signal, or
+    /// drawables to present.
+    fn has_sync(&self) -> bool {
+        !(self.waits.is_empty() && self.signals.is_empty() && self.presents.is_empty())
     }
 
     /// Frees what the finished command buffers kept.
     fn retire(&mut self) {
-        while self.in_flight.front().is_some_and(|(_, command_buffer)| {
-            matches!(command_buffer.status(), MTLCommandBufferStatus::Completed | MTLCommandBufferStatus::Error)
-        }) {
+        while self.in_flight.front().is_some_and(|(_, completion)| completion.is_done()) {
             self.in_flight.pop_front();
         }
-        let finished = self.in_flight.front().map_or(self.submitted, |(number, _)| number - 1);
+        let finished = self.finished();
         while self.retired.front().is_some_and(|(number, _)| *number <= finished) {
             self.retired.pop_front();
+        }
+    }
+
+    /// The number of the last command buffer known to have finished, as
+    /// every one before it has (see [`Completion`]).
+    fn finished(&self) -> u64 {
+        self.in_flight.front().map_or(self.submitted, |(number, _)| number - 1)
+    }
+
+    /// Blocks until the command buffers up to number `number` finish.
+    fn wait_for(&self, number: u64) {
+        for (_, completion) in self.in_flight.iter().take_while(|(at, _)| *at <= number) {
+            completion.wait();
         }
     }
 
@@ -289,6 +423,67 @@ impl MetalGpu {
     fn retire_later(&mut self, resource: impl Any) {
         self.retired.push_back((self.submitted, Box::new(resource)));
         self.retire();
+    }
+
+    /// Commits a command buffer of the copies of the writes made so far,
+    /// then what `encode` encodes. Where `encode` fails, commits the copies
+    /// alone, and returns its error. With `retained`, the command buffer
+    /// keeps what its commands use alive, for commands that a custom layer
+    /// records with objects of its own. Call it in an autorelease pool.
+    fn commit(
+        &mut self,
+        retained: bool,
+        encode: impl FnOnce(&mut MetalGpu, &ProtocolObject<dyn MTLCommandBuffer>) -> Result<(), GpuError>,
+    ) -> Result<(), GpuError> {
+        self.retire();
+        let staging = if self.uploads.copies.is_empty() {
+            None
+        } else {
+            let data = &self.uploads.data;
+            let staging =
+                new_metal_buffer(self.device.device(), Some(data), data.len(), MTLResourceOptions::StorageModeShared)
+                    .ok_or_else(|| GpuError::Invalid("Metal made no staging buffer".to_owned()))?;
+            Some(staging)
+        };
+        let mut command_buffer = self.command_buffer(retained)?;
+        if let Some(staging) = &staging {
+            self.uploads.encode(&command_buffer, staging);
+        }
+        let result = encode(self, &command_buffer);
+        if result.is_err() {
+            // The writes take effect without what `encode` encoded.
+            let Some(staging) = &staging else {
+                return result;
+            };
+            command_buffer = self.command_buffer(retained)?;
+            self.uploads.encode(&command_buffer, staging);
+        }
+        for (event, value) in self.signals.drain(..) {
+            command_buffer.encodeSignalEvent_value(&event, value);
+        }
+        for drawable in self.presents.drain(..) {
+            command_buffer.presentDrawable(&drawable);
+        }
+        #[cfg(test)]
+        if let Some(before_commit) = &self.before_commit {
+            before_commit(&command_buffer);
+        }
+        let completion = Arc::new(Completion::default());
+        let handler = RcBlock::new({
+            let completion = Arc::clone(&completion);
+            move |_: NonNull<ProtocolObject<dyn MTLCommandBuffer>>| completion.set()
+        });
+        // SAFETY: the block is valid, and Metal copies it.
+        unsafe { command_buffer.addCompletedHandler(RcBlock::as_ptr(&handler)) };
+        command_buffer.commit();
+        self.waits.clear();
+        self.submitted += 1;
+        self.in_flight.push_back((self.submitted, completion));
+        if let Some(staging) = staging {
+            let uploads = std::mem::take(&mut self.uploads);
+            self.retired.push_back((self.submitted, Box::new((uploads, staging))));
+        }
+        result
     }
 
     /// The Metal texture of `texture`.
@@ -304,13 +499,19 @@ impl MetalGpu {
         self.textures.get(id).ok_or(GpuError::UnknownId("texture"))
     }
 
-    fn command_buffer(&self) -> Result<MTLCommandBufferPtr, GpuError> {
-        let command_buffer = self
-            .device
-            .queue()
-            .commandBufferWithUnretainedReferences()
-            .ok_or_else(|| GpuError::Invalid("the command queue gave no command buffer".to_owned()))?;
+    /// A command buffer that waits for the events of
+    /// [`wait_before_using`](Self::wait_before_using), and with
+    /// `retained` keeps what its commands use alive.
+    fn command_buffer(&self, retained: bool) -> Result<MTLCommandBufferPtr, GpuError> {
+        let queue = self.device.queue();
+        let command_buffer =
+            if retained { queue.commandBuffer() } else { queue.commandBufferWithUnretainedReferences() };
+        let command_buffer =
+            command_buffer.ok_or_else(|| GpuError::Invalid("the command queue gave no command buffer".to_owned()))?;
         command_buffer.setLabel(Some(&NSString::from_str("Gpu::submit")));
+        for (event, value) in &self.waits {
+            command_buffer.encodeWaitForEvent_value(event, *value);
+        }
         Ok(command_buffer)
     }
 
@@ -426,6 +627,19 @@ impl MetalGpu {
 
     /// Encodes `pass` into `command_buffer`.
     fn encode(&self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>, pass: &Pass) -> Result<(), GpuError> {
+        let (encoder, size) = self.begin_pass(command_buffer, pass)?;
+        let result = self.encode_commands(&encoder, &pass.label, &pass.commands, size);
+        encoder.endEncoding();
+        result
+    }
+
+    /// Begins `pass` in `command_buffer`, without its commands, and returns
+    /// its encoder and its attachments' size.
+    fn begin_pass(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        pass: &Pass,
+    ) -> Result<(MTLRenderCommandEncoderPtr, (usize, usize)), GpuError> {
         let descriptor = MTLRenderPassDescriptor::new();
         let mut size = None;
         if let Some(attachment) = pass.color {
@@ -479,9 +693,7 @@ impl MetalGpu {
             .renderCommandEncoderWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no render encoder", pass.label)))?;
         encoder.setLabel(Some(&NSString::from_str(&pass.label)));
-        let result = self.encode_commands(&encoder, &pass.label, &pass.commands, size);
-        encoder.endEncoding();
-        result
+        Ok((encoder, size))
     }
 
     /// Encodes `commands` into `encoder`, whose attachments have `size` and
@@ -760,7 +972,7 @@ impl MetalGpu {
 impl Drop for MetalGpu {
     fn drop(&mut self) {
         // The command buffers don't keep what they use alive.
-        self.wait_until_completed();
+        let _ = self.finish();
     }
 }
 
@@ -1211,16 +1423,17 @@ impl Resources for MetalGpu {
     }
 
     fn texture_info(&self, id: TextureId) -> Option<validation::TextureInfo> {
-        let Texture { texture, format } = self.textures.get(id)?;
+        let Texture { texture, format, .. } = self.textures.get(id)?;
         let usage = texture.usage();
         Some(validation::TextureInfo {
-            format: *format,
+            format: Some(*format),
             size: Size { width: texture.width() as u32, height: texture.height() as u32 },
             usage: TextureUsage {
                 sampled: usage.contains(MTLTextureUsage::ShaderRead),
                 render_target: usage.contains(MTLTextureUsage::RenderTarget),
-                // A blit copies out of any texture.
-                copy_src: true,
+                // A blit copies out of any texture but a drawable's that
+                // is only a framebuffer.
+                copy_src: !texture.isFramebufferOnly(),
             },
         })
     }
@@ -1315,16 +1528,15 @@ impl Gpu for MetalGpu {
             .newTextureWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no texture", desc.label)))?;
         texture.setLabel(Some(&NSString::from_str(desc.label)));
-        Ok(self.textures.insert(Texture { texture, format: Some(desc.format) }))
+        Ok(self.textures.insert(Texture { texture, format: desc.format, waits: Vec::new() }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
-        let Texture { texture, format } = self.texture(texture)?;
+        let Texture { texture, format, .. } = self.texture(texture)?;
         if !texture.usage().contains(MTLTextureUsage::ShaderRead) {
             return Err(GpuError::Invalid("a write to a texture that isn't sampled".to_owned()));
         }
-        let format =
-            format.ok_or_else(|| GpuError::Invalid(format!("{:?} textures take no writes", texture.pixelFormat())))?;
+        let format = *format;
         let size = Size { width: texture.width() as u32, height: texture.height() as u32 };
         let bytes_per_row = region.write_bytes_per_row(size, format, data)?;
         if !data.is_empty() {
@@ -1404,45 +1616,102 @@ impl Gpu for MetalGpu {
         for pass in passes {
             validation::check_pass(self, pass)?;
         }
+        self.take_pass_waits(passes);
+        if passes.is_empty() && self.uploads.copies.is_empty() && !self.has_sync() {
+            autoreleasepool(|_| self.retire());
+            return Ok(());
+        }
         autoreleasepool(|_| {
-            self.retire();
-            if passes.is_empty() && self.uploads.copies.is_empty() {
-                return Ok(());
-            }
-            let staging = if self.uploads.copies.is_empty() {
-                None
-            } else {
-                let data = &self.uploads.data;
-                let staging = new_metal_buffer(
-                    self.device.device(),
-                    Some(data),
-                    data.len(),
-                    MTLResourceOptions::StorageModeShared,
-                )
-                .ok_or_else(|| GpuError::Invalid("Metal made no staging buffer".to_owned()))?;
-                Some(staging)
-            };
-            let mut command_buffer = self.command_buffer()?;
-            if let Some(staging) = &staging {
-                self.uploads.encode(&command_buffer, staging);
-            }
-            let result = passes.iter().try_for_each(|pass| self.encode(&command_buffer, pass));
-            if result.is_err() {
-                // The writes take effect without the passes.
-                let Some(staging) = &staging else {
-                    return result;
+            self.commit(false, |gpu, command_buffer| {
+                passes.iter().try_for_each(|pass| gpu.encode(command_buffer, pass))
+            })
+        })
+    }
+
+    /// Blits into shared memory, in a command buffer of its own after the
+    /// writes made so far.
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
+        let readback = validation::check_readback(self, texture, region)?;
+        self.take_waits([texture]);
+        let texture = self.texture(texture)?.texture.clone();
+        autoreleasepool(|_| {
+            let buffer = self
+                .device
+                .device()
+                .newBufferWithLength_options(readback.len(), MTLResourceOptions::StorageModeShared)
+                .ok_or_else(|| GpuError::Invalid("Metal made no readback buffer".to_owned()))?;
+            self.commit(false, |_, command_buffer| {
+                if encode_region_copy(command_buffer, &texture, region, readback.bytes_per_row, &buffer) {
+                    Ok(())
+                } else {
+                    Err(GpuError::Invalid("the command buffer gave no blit encoder".to_owned()))
+                }
+            })?;
+            Ok(self.readbacks.insert(Readback { buffer, len: readback.len(), number: self.submitted }))
+        })
+    }
+
+    fn take_readback(&mut self, readback: ReadbackId, wait: bool) -> Result<Option<Vec<u8>>, GpuError> {
+        let number = self.readbacks.get(readback).ok_or(GpuError::UnknownId("readback"))?.number;
+        if wait {
+            self.wait_for(number);
+        }
+        self.retire();
+        if number > self.finished() {
+            return Ok(None);
+        }
+        let Readback { buffer, len, .. } = self.readbacks.remove(readback).ok_or(GpuError::UnknownId("readback"))?;
+        Ok(Some(buffer_bytes(&buffer, len).to_vec()))
+    }
+
+    fn destroy_readback(&mut self, readback: ReadbackId) {
+        if let Some(readback) = self.readbacks.remove(readback) {
+            self.retire_later(readback.buffer);
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), GpuError> {
+        self.wait_for(self.submitted);
+        self.retire();
+        Ok(())
+    }
+
+    /// Lends a command buffer of its own, after the writes made so far,
+    /// which is committed after `f` returns, with a render encoder of its
+    /// own for `pass`.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError> {
+        if let Some(pass) = pass {
+            validation::check_pass(self, pass)?;
+            self.take_pass_waits([pass]);
+        }
+        autoreleasepool(|_| {
+            self.commit(true, |gpu, command_buffer| {
+                let Some(pass) = pass else {
+                    f(&mut CustomLayerEncoder { command_buffer: command_buffer.retain() });
+                    return Ok(());
                 };
-                command_buffer = self.command_buffer()?;
-                self.uploads.encode(&command_buffer, staging);
-            }
-            command_buffer.commit();
-            self.submitted += 1;
-            self.in_flight.push_back((self.submitted, command_buffer));
-            if let Some(staging) = staging {
-                let uploads = std::mem::take(&mut self.uploads);
-                self.retired.push_back((self.submitted, Box::new((uploads, staging))));
-            }
-            result
+                let format = |attachment: Option<TextureId>| {
+                    attachment.and_then(|id| gpu.textures.get(id)).map(|texture| texture.texture.pixelFormat())
+                };
+                let depth = format(pass.depth_stencil.map(|attachment| attachment.texture));
+                let formats = AttachmentFormats {
+                    color: format(pass.color.map(|attachment| attachment.texture)).unwrap_or(MTLPixelFormat::Invalid),
+                    depth,
+                    stencil: depth.filter(|&format| has_stencil(format)),
+                };
+                let (encoder, size) = gpu.begin_pass(command_buffer, pass)?;
+                let result = gpu.encode_commands(&encoder, &pass.label, &pass.commands, size);
+                if result.is_ok() {
+                    f(&mut CustomLayerPass {
+                        encoder: encoder.clone(),
+                        command_buffer: command_buffer.retain(),
+                        formats,
+                        sample_count: 1,
+                    });
+                }
+                encoder.endEncoding();
+                result
+            })
         })
     }
 }

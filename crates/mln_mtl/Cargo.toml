@@ -19,6 +19,7 @@ doctest = false
 
 # Metal exists on Apple platforms only; elsewhere the crate is empty.
 [target.'cfg(target_vendor = "apple")'.dependencies]
+block2.workspace = true
 bytemuck.workspace = true
 mln_gfx.workspace = true
 mln_tile_id.workspace = true
@@ -36,8 +37,9 @@ objc2-foundation = { workspace = true, features = [
   "NSRange",
 ] }
 objc2-io-surface.workspace = true
-objc2-metal = { workspace = true, features = ["objc2-io-surface"] }
+objc2-metal = { workspace = true, features = ["block2", "objc2-io-surface"] }
 objc2-quartz-core.workspace = true
+parking_lot.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dev-dependencies]
 mln_gfx = { workspace = true, features = ["gpu-conformance"] }
