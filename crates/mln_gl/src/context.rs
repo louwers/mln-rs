@@ -111,6 +111,11 @@ impl Context {
         self.backend.gl()
     }
 
+    /// The GL functions, to share with a custom layer.
+    pub(crate) fn gl_shared(&self) -> &Arc<Gl> {
+        self.backend.gl_shared()
+    }
+
     /// The GL state the context last set.
     pub(crate) fn state(&self) -> &State {
         &self.state

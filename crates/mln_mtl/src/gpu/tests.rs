@@ -1,6 +1,6 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks, topologies,
-    transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks,
+    topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -138,7 +138,22 @@ fn a_destroyed_buffer_waits_for_the_submits_before() {
         // The buffer, the texture and the write's staging buffer.
         assert_eq!(gpu.retired.len(), 3, "the GPU may still be using them");
     }
-    gpu.wait_until_completed();
+    gpu.finish().unwrap();
     assert!(gpu.retired.is_empty());
     assert!(gpu.in_flight.is_empty());
+}
+
+#[test]
+fn custom_layers_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    custom_layers(
+        &mut MetalGpu::new(&device),
+        |lent| assert!(lent.is::<CustomLayerEncoder>()),
+        |lent| {
+            let lent = lent.downcast_mut::<CustomLayerPass>().expect("a Metal pass");
+            assert_eq!(lent.formats.color, MTLPixelFormat::RGBA8Unorm);
+            assert_eq!(lent.formats.depth, None);
+        },
+    )
+    .expect("the frames");
 }

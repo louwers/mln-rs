@@ -1,7 +1,8 @@
+use ash::vk;
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks, topologies,
-    transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks,
+    topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::shader_group::GLOBE_DEFINE;
 
@@ -90,4 +91,19 @@ fn every_program_compiles_for_gpu() {
             }
         }
     }
+}
+
+#[test]
+fn custom_layers_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    custom_layers(
+        &mut VulkanGpu::new(&device).expect("VulkanGpu"),
+        |lent| assert!(lent.is::<crate::CustomLayerEncoder>()),
+        |lent| {
+            let lent = lent.downcast_mut::<crate::CustomLayerPass>().expect("a Vulkan pass");
+            assert_eq!(lent.color_format, vk::Format::R8G8B8A8_UNORM);
+            assert_eq!(lent.depth_stencil_format, vk::Format::UNDEFINED);
+        },
+    )
+    .expect("the frames");
 }

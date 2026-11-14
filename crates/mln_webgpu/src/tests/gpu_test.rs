@@ -1,9 +1,9 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks, topologies,
-    transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks,
+    topologies, transparent_replace, vertex_layouts,
 };
 
-use crate::{Device, WebGpu};
+use crate::{CustomLayerEncoder, CustomLayerPass, Device, WebGpu};
 
 #[test]
 fn clip_mask_and_background_through_gpu() {
@@ -58,4 +58,18 @@ fn instanced_walls_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     let mut gpu = WebGpu::new(&device);
     instanced_walls(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn custom_layers_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    custom_layers(
+        &mut WebGpu::new(&device),
+        |lent| assert!(lent.is::<CustomLayerEncoder>()),
+        |lent| {
+            let lent = lent.downcast_mut::<CustomLayerPass>().expect("a WebGPU pass");
+            assert_eq!(lent.color_format, wgpu::TextureFormat::Rgba8Unorm);
+        },
+    )
+    .expect("the frames");
 }

@@ -1,5 +1,6 @@
 //! The [`Gpu`] interface on OpenGL.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -21,6 +22,7 @@ use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::size::Size;
 
+use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::PlatformContext;
 use crate::shaders::glsl_sources::PRELUDE;
@@ -1460,6 +1462,36 @@ impl Gpu for GlGpu {
 
     fn destroy_readback(&mut self, readback: ReadbackId) {
         self.readbacks.remove(readback);
+    }
+
+    fn finish(&mut self) -> Result<(), GpuError> {
+        // SAFETY: the context is current.
+        self.current(|gpu| unsafe { gpu.gl.finish() });
+        Ok(())
+    }
+
+    /// Lends the current context: with `pass`, with its framebuffer bound
+    /// and the viewport covering it, after its commands.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError> {
+        let Some(pass) = pass else {
+            return self.current(|gpu| {
+                let mut encoder = CustomLayerEncoder { gl: Arc::clone(&gpu.gl) };
+                lend_context(&gpu.gl, &gpu.state, || f(&mut encoder));
+                Ok(())
+            });
+        };
+        self.check(pass)?;
+        let size = self.pass_size(pass)?;
+        self.current(|gpu| {
+            let framebuffer = gpu.framebuffer(pass)?;
+            gpu.encode(pass)?;
+            let gl = &gpu.gl;
+            gpu.state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
+            gpu.state.set_scissor(gl, None);
+            let mut lent = CustomLayerPass { gl: Arc::clone(gl), framebuffer: Some(framebuffer), size };
+            lend_context(gl, &gpu.state, || f(&mut lent));
+            Ok(())
+        })
     }
 }
 

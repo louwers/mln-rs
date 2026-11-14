@@ -3,8 +3,8 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks, topologies,
-    transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, instanced_walls, invalid_calls, readbacks,
+    topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{
     BindGroupDesc, BindGroupEntry, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState, Gpu, GpuError,
@@ -236,4 +236,24 @@ fn draws_read_only_what_is_bound() {
     let mut before_the_start = pass.clone();
     before_the_start.commands.push(RenderCommand::DrawIndexed { indices: 0..6, base_vertex: -1, instances: 0..1 });
     assert!(matches!(gpu.submit(&[before_the_start]), Err(GpuError::Invalid(_))));
+}
+
+#[test]
+fn custom_layers_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    custom_layers(
+        &mut gpu,
+        |lent| assert!(lent.is::<crate::CustomLayerEncoder>()),
+        |lent| {
+            let lent = lent.downcast_mut::<crate::CustomLayerPass>().expect("a GL pass");
+            assert!(lent.framebuffer.is_some());
+            // SAFETY: the lent context is current, and the query writes one
+            // integer.
+            let vertex_array = unsafe { glow::HasContext::get_parameter_i32(lent.gl(), glow::VERTEX_ARRAY_BINDING) };
+            assert_eq!(vertex_array, 0, "the host starts with vertex array 0");
+        },
+    )
+    .expect("the frames");
 }

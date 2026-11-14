@@ -1,5 +1,6 @@
 //! The [`Gpu`] interface on wgpu.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
@@ -14,10 +15,10 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::size::Size;
 
-use crate::Device;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::{self, BindingInfo, BindingType, ShaderProgram, validated};
 use crate::writes::Writes;
+use crate::{CustomLayerEncoder, CustomLayerPass, Device};
 
 /// The size of the buffers that small uniform and storage buffers share.
 const UNIFORM_PAGE: u64 = 16 << 10;
@@ -301,6 +302,16 @@ impl WebGpu {
 
     /// Records `pass` into `encoder`.
     fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, pass: &Pass) -> Result<(), GpuError> {
+        let mut render_pass = self.begin_pass(encoder, pass)?;
+        self.encode_commands(&mut render_pass, &pass.label, &pass.commands)
+    }
+
+    /// Begins `pass` on `encoder`, without its commands.
+    fn begin_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pass: &Pass,
+    ) -> Result<wgpu::RenderPass<'static>, GpuError> {
         let view = |textures: &SlotMap<TextureId, Texture>, id| {
             textures.get(id).map(|texture| texture.view.clone()).ok_or(GpuError::UnknownId("texture"))
         };
@@ -315,7 +326,7 @@ impl WebGpu {
                 Ok((texture.view.clone(), texture.texture.format().has_stencil_aspect(), attachment))
             })
             .transpose()?;
-        let mut render_pass = encoder
+        let render_pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(&pass.label),
                 color_attachments: &[color.as_ref().map(|(view, load)| wgpu::RenderPassColorAttachment {
@@ -359,7 +370,7 @@ impl WebGpu {
                 multiview_mask: None,
             })
             .forget_lifetime();
-        self.encode_commands(&mut render_pass, &pass.label, &pass.commands)
+        Ok(render_pass)
     }
 
     /// Records `commands` into `render_pass`, of `size` and over attachments
@@ -947,5 +958,49 @@ impl Gpu for WebGpu {
 
     fn destroy_readback(&mut self, readback: ReadbackId) {
         self.readbacks.remove(readback);
+    }
+
+    fn finish(&mut self) -> Result<(), GpuError> {
+        #[cfg(not(target_family = "wasm"))]
+        return self.wait_for(None);
+        #[cfg(target_family = "wasm")]
+        Ok(())
+    }
+
+    /// Lends a command encoder of its own, which is submitted after `f`
+    /// returns. A pass that a custom layer draws into has a color
+    /// attachment.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError> {
+        if let Some(pass) = pass {
+            validation::check_pass(self, pass)?;
+        }
+        let (device, queue) = (self.device.device().clone(), self.device.queue().clone());
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("custom layer") });
+        if let Some(pass) = pass {
+            let format = |texture| self.textures.get(texture).map(|texture: &Texture| texture.texture.format());
+            let color_format = pass.color.and_then(|attachment| format(attachment.texture)).ok_or_else(|| {
+                GpuError::Unsupported(format!("{}: a custom layer's pass without a color attachment", pass.label))
+            })?;
+            let depth_stencil_format = pass.depth_stencil.and_then(|attachment| format(attachment.texture));
+            let mut render_pass = self.begin_pass(&mut encoder, pass)?;
+            self.encode_commands(&mut render_pass, &pass.label, &pass.commands)?;
+            let mut lent = CustomLayerPass {
+                device,
+                queue,
+                pass: render_pass,
+                color_format,
+                depth_stencil_format,
+                sample_count: 1,
+            };
+            f(&mut lent);
+        } else {
+            let mut lent = CustomLayerEncoder { device, queue, encoder };
+            f(&mut lent);
+            encoder = lent.encoder;
+        }
+        let command_buffer = self.validated("custom layer", |_| encoder.finish())?;
+        self.submit_native(command_buffer);
+        Ok(())
     }
 }

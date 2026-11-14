@@ -1,5 +1,6 @@
 //! The [`Gpu`] interface on Vulkan.
 
+use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as _;
 use std::rc::{Rc, Weak};
@@ -21,6 +22,7 @@ use mln_util::size::Size;
 
 use crate::buffer_resource::BufferAllocation;
 use crate::context::{build_descriptor_set_layout, build_pipeline_layout};
+use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
 use crate::descriptor_set::DescriptorPoolGrowable;
 use crate::device::Device;
 use crate::renderer_backend::BackendImpl;
@@ -1066,6 +1068,20 @@ impl VulkanGpu {
     /// Records `pass`, which the shared validation passed, into
     /// `command_buffer`.
     fn encode(&mut self, command_buffer: vk::CommandBuffer, pass: &Pass) -> Result<(), GpuError> {
+        let (_, extent) = self.begin_pass(command_buffer, pass)?;
+        let result = self.encode_commands(command_buffer, &pass.label, &pass.commands, extent);
+        self.end_pass(command_buffer);
+        result
+    }
+
+    /// Begins the render pass of `pass`, which the shared validation
+    /// passed, in `command_buffer`, with the dynamic state that a pass
+    /// starts with, and returns it and its attachments' extent.
+    fn begin_pass(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+        pass: &Pass,
+    ) -> Result<(vk::RenderPass, vk::Extent2D), GpuError> {
         let lookup = |id| self.textures.get(id).ok_or(GpuError::UnknownId("texture"));
         let mut size = None;
         let mut key = RenderPassKey { color: None, depth_stencil: None };
@@ -1125,11 +1141,14 @@ impl VulkanGpu {
         // the framebuffer is of the render pass.
         unsafe { device.cmd_begin_render_pass(command_buffer, &begin_info, vk::SubpassContents::INLINE) };
         self.set_pass_defaults(command_buffer, extent);
-        let result = self.encode_commands(command_buffer, &pass.label, &pass.commands, extent);
-        // SAFETY: the render pass begun above.
+        Ok((render_pass, extent))
+    }
+
+    /// Ends the render pass that [`begin_pass`](Self::begin_pass) began.
+    fn end_pass(&self, command_buffer: vk::CommandBuffer) {
+        // SAFETY: the command buffer is recording inside a render pass.
         unsafe { self.device().cmd_end_render_pass(command_buffer) };
         self.backend.end_debug_label(command_buffer);
-        result
     }
 
     /// Records `commands` into `command_buffer`, inside a render pass of
@@ -1361,6 +1380,59 @@ impl VulkanGpu {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Submits a batch of the writes since the last submit, then what
+    /// `record` records into a command buffer of its own. Where `record`
+    /// fails, submits nothing.
+    fn submit_recorded(
+        &mut self,
+        record: Option<impl FnOnce(&mut VulkanGpu, vk::CommandBuffer) -> Result<(), GpuError>>,
+    ) -> Result<(), GpuError> {
+        self.collect_garbage();
+        let mut command_buffers = Vec::with_capacity(2);
+        if let Some(record) = record {
+            let command_buffer = self.begin_command_buffer()?;
+            if let Err(error) = record(self, command_buffer) {
+                // SAFETY: the command buffer is recording, not pending.
+                let _ =
+                    unsafe { self.device().reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty()) };
+                self.free_command_buffers.push(command_buffer);
+                return Err(error);
+            }
+            command_buffers.push(command_buffer);
+        }
+        if let Some(uploads) = self.uploads.take() {
+            memory_barrier(
+                self.device(),
+                uploads,
+                (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::ALL_COMMANDS),
+                (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE),
+            );
+            command_buffers.insert(0, uploads);
+        }
+        let fence = match self.free_fences.pop() {
+            // SAFETY: the fence's submission has finished.
+            Some(fence) => unsafe { self.device().reset_fences(&[fence]) }.map(|()| fence),
+            // SAFETY: the create info is valid for the device.
+            None => unsafe { self.device().create_fence(&vk::FenceCreateInfo::default(), None) },
+        }
+        .map_err(vk_error("making a fence"))?;
+        let device = self.backend.get_device();
+        // SAFETY: the command buffers are recording, and their commands
+        // name live resources.
+        let ended =
+            command_buffers.iter().try_for_each(|&command_buffer| unsafe { device.end_command_buffer(command_buffer) });
+        let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
+        let submitted = ended.and_then(|()| self.backend.submit(&[submit_info], fence));
+        if let Err(error) = submitted {
+            self.free_fences.push(fence);
+            self.free_command_buffers.extend(command_buffers);
+            return Err(vk_error("submitting")(error));
+        }
+        self.in_flight.push_back(Submission { serial: self.next_serial, fence, command_buffers });
+        self.next_serial += 1;
         Ok(())
     }
 
@@ -1882,53 +1954,57 @@ impl Gpu for VulkanGpu {
         for pass in passes {
             validation::check_pass(self, pass)?;
         }
-        self.collect_garbage();
-        let mut command_buffers = Vec::with_capacity(2);
-        if !passes.is_empty() {
-            let command_buffer = self.begin_command_buffer()?;
-            for pass in passes {
-                if let Err(error) = self.encode(command_buffer, pass) {
-                    // SAFETY: the command buffer is recording, not pending.
-                    let _ = unsafe {
-                        self.device().reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())
-                    };
-                    self.free_command_buffers.push(command_buffer);
-                    return Err(error);
-                }
+        if passes.is_empty() {
+            return self.submit_recorded(None::<fn(&mut VulkanGpu, vk::CommandBuffer) -> Result<(), GpuError>>);
+        }
+        self.submit_recorded(Some(|gpu: &mut VulkanGpu, command_buffer| {
+            passes.iter().try_for_each(|pass| gpu.encode(command_buffer, pass))
+        }))
+    }
+
+    fn finish(&mut self) -> Result<(), GpuError> {
+        match self.in_flight.back() {
+            Some(submission) => self.wait_for(submission.serial),
+            None => Ok(()),
+        }
+    }
+
+    /// Lends a command buffer of its own, which is submitted after `f`
+    /// returns, with a render pass of its own for `pass`.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError> {
+        if let Some(pass) = pass {
+            validation::check_pass(self, pass)?;
+        }
+        let device = self.backend.device().raw();
+        self.submit_recorded(Some(|gpu: &mut VulkanGpu, command_buffer| {
+            let Some(pass) = pass else {
+                f(&mut CustomLayerEncoder { device, command_buffer });
+                return Ok(());
+            };
+            let format = |attachment: Option<TextureId>| {
+                attachment
+                    .and_then(|id| gpu.textures.get(id))
+                    .map_or(vk::Format::UNDEFINED, |texture| texture.vk_format)
+            };
+            let color_format = format(pass.color.map(|attachment| attachment.texture));
+            let depth_stencil_format = format(pass.depth_stencil.map(|attachment| attachment.texture));
+            let (render_pass, extent) = gpu.begin_pass(command_buffer, pass)?;
+            let result = gpu.encode_commands(command_buffer, &pass.label, &pass.commands, extent);
+            if result.is_ok() {
+                f(&mut CustomLayerPass {
+                    device,
+                    command_buffer,
+                    render_pass,
+                    subpass: 0,
+                    samples: vk::SampleCountFlags::TYPE_1,
+                    color_format,
+                    depth_stencil_format,
+                    extent,
+                });
             }
-            command_buffers.push(command_buffer);
-        }
-        if let Some(uploads) = self.uploads.take() {
-            memory_barrier(
-                self.device(),
-                uploads,
-                (vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::ALL_COMMANDS),
-                (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE),
-            );
-            command_buffers.insert(0, uploads);
-        }
-        let fence = match self.free_fences.pop() {
-            // SAFETY: the fence's submission has finished.
-            Some(fence) => unsafe { self.device().reset_fences(&[fence]) }.map(|()| fence),
-            // SAFETY: the create info is valid for the device.
-            None => unsafe { self.device().create_fence(&vk::FenceCreateInfo::default(), None) },
-        }
-        .map_err(vk_error("making a fence"))?;
-        let device = self.backend.get_device();
-        // SAFETY: the command buffers are recording, and their commands
-        // name live resources.
-        let ended =
-            command_buffers.iter().try_for_each(|&command_buffer| unsafe { device.end_command_buffer(command_buffer) });
-        let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
-        let submitted = ended.and_then(|()| self.backend.submit(&[submit_info], fence));
-        if let Err(error) = submitted {
-            self.free_fences.push(fence);
-            self.free_command_buffers.extend(command_buffers);
-            return Err(vk_error("submitting")(error));
-        }
-        self.in_flight.push_back(Submission { serial: self.next_serial, fence, command_buffers });
-        self.next_serial += 1;
-        Ok(())
+            gpu.end_pass(command_buffer);
+            result
+        }))
     }
 }
 

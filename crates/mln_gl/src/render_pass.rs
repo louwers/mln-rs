@@ -7,6 +7,7 @@
 
 use std::any::Any;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_gfx::context::Context as _;
 use mln_gfx::debug_group::DebugGroupTarget;
@@ -16,7 +17,7 @@ use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::custom_layer::CustomLayerPass;
+use crate::custom_layer::{CustomLayerPass, lend_context};
 use crate::draw_target::as_gl;
 use crate::types::FramebufferID;
 
@@ -72,11 +73,8 @@ impl render_pass::RenderPass for RenderPass {
     /// GL state the context knew, and binds the framebuffer again.
     fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
         let (framebuffer, size, has_stencil) = self.framebuffer;
-        self.context.state().bind_vertex_array(self.context.gl(), None);
-        self.context.state().unbind_samplers(self.context.gl());
-        let mut pass = CustomLayerPass { context: Rc::clone(&self.context), framebuffer, size };
-        f(&mut pass);
-        self.context.set_dirty_state();
+        let mut pass = CustomLayerPass { gl: Arc::clone(self.context.gl_shared()), framebuffer, size };
+        lend_context(self.context.gl(), self.context.state(), || f(&mut pass));
         self.context.bind_framebuffer(framebuffer, size, has_stencil);
         true
     }

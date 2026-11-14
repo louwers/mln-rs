@@ -39,11 +39,13 @@ use objc2_metal::{
 };
 
 use crate::Device;
+use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
 use crate::mtl_fwd::{
-    MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderPipelineStatePtr,
-    MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
+    MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLFunctionPtr, MTLRenderCommandEncoderPtr,
+    MTLRenderPipelineStatePtr, MTLSamplerStatePtr, MTLTexturePtr, MTLVertexDescriptorPtr,
 };
 use crate::readback::{buffer_bytes, encode_region_copy};
+use crate::render_pass::AttachmentFormats;
 use crate::shaders::msl_sources::PRELUDE;
 use crate::shaders::shader_source::{ShaderSource, shader_source};
 
@@ -275,15 +277,6 @@ impl MetalGpu {
         self.textures.insert(Texture { texture: texture.retain(), format })
     }
 
-    /// Waits for the GPU to finish the work submitted so far, and frees what
-    /// it kept for it.
-    pub fn wait_until_completed(&mut self) {
-        if let Some((_, command_buffer)) = self.in_flight.back() {
-            command_buffer.waitUntilCompleted();
-        }
-        self.retire();
-    }
-
     /// Frees what the finished command buffers kept.
     fn retire(&mut self) {
         while self.in_flight.front().is_some_and(|(_, command_buffer)| {
@@ -311,9 +304,12 @@ impl MetalGpu {
 
     /// Commits a command buffer of the copies of the writes made so far,
     /// then what `encode` encodes. Where `encode` fails, commits the copies
-    /// alone, and returns its error. Call it in an autorelease pool.
+    /// alone, and returns its error. With `retained`, the command buffer
+    /// keeps what its commands use alive, for commands that a custom layer
+    /// records with objects of its own. Call it in an autorelease pool.
     fn commit(
         &mut self,
+        retained: bool,
         encode: impl FnOnce(&mut MetalGpu, &ProtocolObject<dyn MTLCommandBuffer>) -> Result<(), GpuError>,
     ) -> Result<(), GpuError> {
         self.retire();
@@ -326,7 +322,7 @@ impl MetalGpu {
                     .ok_or_else(|| GpuError::Invalid("Metal made no staging buffer".to_owned()))?;
             Some(staging)
         };
-        let mut command_buffer = self.command_buffer()?;
+        let mut command_buffer = self.command_buffer(retained)?;
         if let Some(staging) = &staging {
             self.uploads.encode(&command_buffer, staging);
         }
@@ -336,7 +332,7 @@ impl MetalGpu {
             let Some(staging) = &staging else {
                 return result;
             };
-            command_buffer = self.command_buffer()?;
+            command_buffer = self.command_buffer(retained)?;
             self.uploads.encode(&command_buffer, staging);
         }
         command_buffer.commit();
@@ -362,12 +358,14 @@ impl MetalGpu {
         self.textures.get(id).ok_or(GpuError::UnknownId("texture"))
     }
 
-    fn command_buffer(&self) -> Result<MTLCommandBufferPtr, GpuError> {
-        let command_buffer = self
-            .device
-            .queue()
-            .commandBufferWithUnretainedReferences()
-            .ok_or_else(|| GpuError::Invalid("the command queue gave no command buffer".to_owned()))?;
+    /// A command buffer that, with `retained`, keeps what its commands use
+    /// alive.
+    fn command_buffer(&self, retained: bool) -> Result<MTLCommandBufferPtr, GpuError> {
+        let queue = self.device.queue();
+        let command_buffer =
+            if retained { queue.commandBuffer() } else { queue.commandBufferWithUnretainedReferences() };
+        let command_buffer =
+            command_buffer.ok_or_else(|| GpuError::Invalid("the command queue gave no command buffer".to_owned()))?;
         command_buffer.setLabel(Some(&NSString::from_str("Gpu::submit")));
         Ok(command_buffer)
     }
@@ -484,6 +482,19 @@ impl MetalGpu {
 
     /// Encodes `pass` into `command_buffer`.
     fn encode(&self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>, pass: &Pass) -> Result<(), GpuError> {
+        let (encoder, size) = self.begin_pass(command_buffer, pass)?;
+        let result = self.encode_commands(&encoder, &pass.label, &pass.commands, size);
+        encoder.endEncoding();
+        result
+    }
+
+    /// Begins `pass` in `command_buffer`, without its commands, and returns
+    /// its encoder and its attachments' size.
+    fn begin_pass(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        pass: &Pass,
+    ) -> Result<(MTLRenderCommandEncoderPtr, (usize, usize)), GpuError> {
         let descriptor = MTLRenderPassDescriptor::new();
         let mut size = None;
         if let Some(attachment) = pass.color {
@@ -537,9 +548,7 @@ impl MetalGpu {
             .renderCommandEncoderWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no render encoder", pass.label)))?;
         encoder.setLabel(Some(&NSString::from_str(&pass.label)));
-        let result = self.encode_commands(&encoder, &pass.label, &pass.commands, size);
-        encoder.endEncoding();
-        result
+        Ok((encoder, size))
     }
 
     /// Encodes `commands` into `encoder`, whose attachments have `size` and
@@ -818,7 +827,7 @@ impl MetalGpu {
 impl Drop for MetalGpu {
     fn drop(&mut self) {
         // The command buffers don't keep what they use alive.
-        self.wait_until_completed();
+        let _ = self.finish();
     }
 }
 
@@ -1467,7 +1476,9 @@ impl Gpu for MetalGpu {
             return Ok(());
         }
         autoreleasepool(|_| {
-            self.commit(|gpu, command_buffer| passes.iter().try_for_each(|pass| gpu.encode(command_buffer, pass)))
+            self.commit(false, |gpu, command_buffer| {
+                passes.iter().try_for_each(|pass| gpu.encode(command_buffer, pass))
+            })
         })
     }
 
@@ -1482,7 +1493,7 @@ impl Gpu for MetalGpu {
                 .device()
                 .newBufferWithLength_options(readback.len(), MTLResourceOptions::StorageModeShared)
                 .ok_or_else(|| GpuError::Invalid("Metal made no readback buffer".to_owned()))?;
-            self.commit(|_, command_buffer| {
+            self.commit(false, |_, command_buffer| {
                 if encode_region_copy(command_buffer, &texture, region, readback.bytes_per_row, &buffer) {
                     Ok(())
                 } else {
@@ -1510,6 +1521,52 @@ impl Gpu for MetalGpu {
         if let Some(readback) = self.readbacks.remove(readback) {
             self.retire_later(readback.buffer);
         }
+    }
+
+    fn finish(&mut self) -> Result<(), GpuError> {
+        if let Some((_, command_buffer)) = self.in_flight.back() {
+            command_buffer.waitUntilCompleted();
+        }
+        self.retire();
+        Ok(())
+    }
+
+    /// Lends a command buffer of its own, after the writes made so far,
+    /// which is committed after `f` returns, with a render encoder of its
+    /// own for `pass`.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError> {
+        if let Some(pass) = pass {
+            validation::check_pass(self, pass)?;
+        }
+        autoreleasepool(|_| {
+            self.commit(true, |gpu, command_buffer| {
+                let Some(pass) = pass else {
+                    f(&mut CustomLayerEncoder { command_buffer: command_buffer.retain() });
+                    return Ok(());
+                };
+                let format = |attachment: Option<TextureId>| {
+                    attachment.and_then(|id| gpu.textures.get(id)).map(|texture| texture.texture.pixelFormat())
+                };
+                let depth = format(pass.depth_stencil.map(|attachment| attachment.texture));
+                let formats = AttachmentFormats {
+                    color: format(pass.color.map(|attachment| attachment.texture)).unwrap_or(MTLPixelFormat::Invalid),
+                    depth,
+                    stencil: depth.filter(|&format| has_stencil(format)),
+                };
+                let (encoder, size) = gpu.begin_pass(command_buffer, pass)?;
+                let result = gpu.encode_commands(&encoder, &pass.label, &pass.commands, size);
+                if result.is_ok() {
+                    f(&mut CustomLayerPass {
+                        encoder: encoder.clone(),
+                        command_buffer: command_buffer.retain(),
+                        formats,
+                        sample_count: 1,
+                    });
+                }
+                encoder.endEncoding();
+                result
+            })
+        })
     }
 }
 

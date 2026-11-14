@@ -4,11 +4,12 @@
 //! buffer as an ordinary draw, then the background shader tested against
 //! it. The mask covers the left half, so the background colors only that
 //! half. [`invalid_calls`] checks the calls that every backend rejects, and
-//! [`foreign_ids`] that a backend takes no other backend's ids, and
-//! [`readbacks`] what a readback copies. [`instanced_walls`] draws fill
-//! extrusion walls over the left half. The other cases draw one color over
-//! the whole target, as [`transparent_replace`] does to check that
-//! `Replace` doesn't blend.
+//! [`foreign_ids`] that a backend takes no other backend's ids,
+//! [`readbacks`] what a readback copies, and [`custom_layers`] what a
+//! custom layer is lent. [`instanced_walls`] draws fill extrusion walls
+//! over the left half. The other cases draw one color over the whole
+//! target, as [`transparent_replace`] does to check that `Replace` doesn't
+//! blend.
 
 mod cases;
 

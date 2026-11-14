@@ -1,6 +1,8 @@
 //! Cases that draw a solid color with the background shader, and the calls
 //! every backend rejects.
 
+use std::any::Any;
+
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -667,4 +669,56 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let gone = gpu.write_texture(written, part, &[0; 4 * 2 * 2]);
     assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a write to a destroyed texture");
     Ok(())
+}
+
+/// Checks custom-layer lending: `encoder` gets what the backend lends
+/// outside a pass and `pass` what it lends inside one, each once and in
+/// order with the submits around it. The lent pass runs its own commands
+/// first and keeps what they drew, and begins with its load operations. A
+/// pass that `submit` would reject lends nothing. Returns the error of a
+/// call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn custom_layers(
+    gpu: &mut impl Gpu,
+    mut encoder: impl FnMut(&mut dyn Any),
+    mut pass: impl FnMut(&mut dyn Any),
+) -> Result<(), GpuError> {
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let left = solid_at(gpu, TextureFormat::Rgba8Unorm, [0.0, 1.0, 0.0, 1.0], tile_matrix(0.0))?;
+    let pipeline = gpu.create_pipeline(&background())?;
+    let (mut encoders, mut passes) = (0, 0);
+    gpu.submit(&[frame.pass(pipeline, [DRAW_QUAD])])?;
+    gpu.lend_to_custom_layer(None, &mut |lent| {
+        encoders += 1;
+        encoder(lent);
+    })?;
+    assert_eq!(encoders, 1, "the encoder is lent once");
+
+    // Green over the left half of the red frame.
+    let mut green_left = left.pass(pipeline, [DRAW_QUAD]);
+    green_left.color = Some(ColorAttachment { texture: frame.target, load: LoadOp::Load });
+    gpu.lend_to_custom_layer(Some(&green_left), &mut |lent| {
+        passes += 1;
+        pass(lent);
+    })?;
+    assert_eq!(passes, 1, "the pass is lent once");
+    let pixels = read(gpu, frame.target)?;
+    let (red, green, black) = ([255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 0, 255]);
+    assert_eq!(texel(&pixels, 0, 0), green, "the lent pass's own draw");
+    assert_eq!(texel(&pixels, SIZE.width - 1, SIZE.height - 1), red, "the frame before it, loaded");
+
+    let cleared = Pass { commands: Vec::new(), ..frame.pass(pipeline, []) };
+    gpu.lend_to_custom_layer(Some(&cleared), &mut |lent| pass(lent))?;
+    let pixels = read(gpu, frame.target)?;
+    assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), black, "the lent pass's clear");
+
+    let mut unbound = frame.pass(pipeline, [DRAW_QUAD]);
+    unbound.commands.retain(|command| !matches!(command, RenderCommand::SetBindGroup { .. }));
+    let mut called = false;
+    assert!(invalid(&gpu.lend_to_custom_layer(Some(&unbound), &mut |_| called = true)), "a draw without its buffers");
+    assert!(!called, "nothing lent for a rejected pass");
+    gpu.finish()
 }

@@ -19,6 +19,7 @@ pub mod conformance;
 mod ids;
 pub mod validation;
 
+use std::any::Any;
 use std::ops::Range;
 
 use mln_util::Color;
@@ -605,6 +606,24 @@ pub trait Gpu {
             GpuError::Unsupported("waiting for a readback".to_owned())
         })
     }
+
+    /// Blocks until the GPU has finished the work submitted so far, so that
+    /// what it used can go, on a backend that can block. Another does
+    /// nothing.
+    fn finish(&mut self) -> Result<(), GpuError>;
+
+    /// Lends the backend's own commands to a custom layer, which `f` gets as
+    /// the backend's `CustomLayerEncoder` or `CustomLayerPass`, whose docs
+    /// say what it may record. What `f` records runs after the work
+    /// submitted so far, and before the next submit's.
+    ///
+    /// Without `pass`, `f` gets the commands outside any pass. With it, `f`
+    /// gets a pass over `pass`'s attachments that begins with their load
+    /// operations and runs `pass`'s commands, which [`submit`](Self::submit)
+    /// would take, first; the pass ends, storing its attachments, once `f`
+    /// returns. A later pass that loads them sees what `f` drew. Fails,
+    /// without calling `f`, where `submit` would fail for `pass`.
+    fn lend_to_custom_layer(&mut self, pass: Option<&Pass>, f: &mut dyn FnMut(&mut dyn Any)) -> Result<(), GpuError>;
 }
 
 #[cfg(test)]
