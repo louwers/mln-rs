@@ -21,10 +21,11 @@ mod detail {
     pub(crate) use crate::wrap::wrap;
 }
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use detail::{InternalTile, VtFeatures};
 use feature::{Feature, Identifier, PropertyMap};
+use foldhash::HashMap;
 use geo_traits::GeometryTrait;
 pub(crate) use tile::Tile;
 pub use tile::TileFeatures;
@@ -155,7 +156,7 @@ impl GeoJSONVT {
         features: impl IntoIterator<Item = (Option<&'a G>, &'a PropertyMap, &'a Identifier)>,
         options: Options,
     ) -> Self {
-        let mut vt = GeoJSONVT { options, stats: BTreeMap::new(), total: 0, tiles: HashMap::new() };
+        let mut vt = GeoJSONVT { options, stats: BTreeMap::new(), total: 0, tiles: HashMap::default() };
 
         let z2 = 1u32.wrapping_shl(u32::from(options.max_zoom));
 

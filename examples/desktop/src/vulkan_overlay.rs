@@ -12,12 +12,12 @@
 #![expect(unsafe_code, reason = "Vulkan through ash is the FFI here")]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
 use mln_gfx::texture2d::{SamplerState, Texture2D as _};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_vulkan::{Context, Device, Overlay, OverlayTarget, ShaderStage, Texture2D, compile_glsl};
@@ -184,7 +184,7 @@ impl Painter {
             pools: Vec::new(),
             pool_sets_left: 0,
             free_sets: Rc::default(),
-            textures: HashMap::new(),
+            textures: HashMap::default(),
         };
         painter.set_render_pass(device, target.render_pass)?;
         Ok(painter)

@@ -13,8 +13,10 @@ pub type RandomState = foldhash::fast::RandomState;
 
 /// A [`std::collections::HashMap`] with mln-rs's hasher. Create one with
 /// `default()`, or `with_capacity_and_hasher(n, RandomState::default())`.
+#[expect(clippy::disallowed_types, reason = "the one place that names it")]
 pub type HashMap<K, V> = std::collections::HashMap<K, V, RandomState>;
 
 /// A [`std::collections::HashSet`] with mln-rs's hasher. Create one with
 /// `default()`, or `with_capacity_and_hasher(n, RandomState::default())`.
+#[expect(clippy::disallowed_types, reason = "the one place that names it")]
 pub type HashSet<T> = std::collections::HashSet<T, RandomState>;
