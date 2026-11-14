@@ -67,6 +67,8 @@ fn a_destroyed_buffer_waits_for_the_submits_before() {
         depth_stencil: None,
         commands: Vec::new(),
     };
+    let texel = TextureRegion { x: 0, y: 0, size: Size { width: 1, height: 1 } };
+    assert!(matches!(gpu.write_texture(target, texel, &[0; 4]), Err(GpuError::Invalid(_))), "the target isn't sampled");
     gpu.submit(&[pass]).unwrap();
     gpu.destroy_buffer(buffer);
     gpu.destroy_texture(target);

@@ -1148,6 +1148,9 @@ impl Gpu for MetalGpu {
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
         let Texture { texture, format } = self.texture(texture)?;
+        if !texture.usage().contains(MTLTextureUsage::ShaderRead) {
+            return Err(GpuError::Invalid("a write to a texture that isn't sampled".to_owned()));
+        }
         let format =
             format.ok_or_else(|| GpuError::Invalid(format!("{:?} textures take no writes", texture.pixelFormat())))?;
         let size = Size { width: texture.width() as u32, height: texture.height() as u32 };
