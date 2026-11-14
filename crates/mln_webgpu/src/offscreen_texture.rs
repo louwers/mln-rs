@@ -9,20 +9,17 @@
 use std::cell::{Cell, RefMut};
 use std::rc::Rc;
 
-use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
 use mln_gfx::context::Context as _;
 use mln_gfx::gpu::{Gpu as _, GpuError, ReadbackId, TextureRegion};
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
-use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::WebGpu;
-use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::draw_target::{DrawTarget, TargetResource};
+use crate::draw_target::TargetResource;
 
 fn linear_clamp() -> SamplerState {
     SamplerState {
@@ -158,10 +155,6 @@ impl OffscreenTextureResource {
             }
         }
     }
-
-    pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        Rc::clone(&self.color_texture)
-    }
 }
 
 impl Drop for OffscreenTextureResource {
@@ -191,52 +184,5 @@ impl TargetResource for OffscreenTextureResource {
 
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
         self.depth_texture.as_ref().map(|(texture, _)| texture.format())
-    }
-}
-
-pub(crate) struct OffscreenTexture {
-    target: DrawTarget,
-    resource: Rc<OffscreenTextureResource>,
-}
-
-impl OffscreenTexture {
-    pub(crate) fn new(
-        context: Rc<Context>,
-        size: Size,
-        type_: TextureChannelDataType,
-        depth: bool,
-        stencil: bool,
-    ) -> Self {
-        let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
-        OffscreenTexture { target: DrawTarget::new(size, Rc::<OffscreenTextureResource>::clone(&resource)), resource }
-    }
-
-    fn resource(&self) -> &OffscreenTextureResource {
-        &self.resource
-    }
-}
-
-impl offscreen_texture::OffscreenTexture for OffscreenTexture {
-    fn draw_target(&self) -> &dyn frame::DrawTarget {
-        &self.target
-    }
-
-    /// Check if the texture resource is valid and can be rendered to
-    fn is_renderable(&self) -> bool {
-        self.resource().color().is_some()
-    }
-
-    fn read_still_image(&self) -> PremultipliedImage {
-        self.resource.read_still_image()
-    }
-
-    fn get_texture(&self) -> Texture2DPtr {
-        self.resource().get_texture()
-    }
-
-    fn submit(&self, encoder: &dyn GfxCommandEncoder) {
-        if let Some(encoder) = encoder.downcast_ref::<CommandEncoder>() {
-            encoder.submit_frame(Some(self.target.resource()));
-        }
     }
 }

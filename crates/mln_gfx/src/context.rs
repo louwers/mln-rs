@@ -8,15 +8,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_util::logging::{Event, Log};
-use mln_util::size::Size;
 
 use crate::backend::Type as BackendType;
 use crate::bind_group::BindGroup;
 use crate::buffer::{Buffer, BufferPtr};
 use crate::command_encoder::CommandEncoder;
 use crate::gfx_types::AttributeDataType;
-use crate::gpu::{BindGroupId, BufferUsage, Gpu, GpuError, PipelineId, PipelineKey, SamplerId};
-use crate::offscreen_texture::OffscreenTexture;
+use crate::gpu::{BindGroupId, BufferUsage, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, TextureFormat};
 use crate::released::Released;
 use crate::rendering_stats::RenderingStats;
 use crate::texture2d::{SamplerState, Texture2D, Texture2DPtr};
@@ -65,7 +63,18 @@ pub trait Context: Any {
     fn perform_cleanup(&self);
     fn reduce_memory_usage(&self);
 
-    fn create_offscreen_texture(&self, size: Size, type_: TextureChannelDataType) -> Box<dyn OffscreenTexture>;
+    /// The channel type of a render target's color texture, which
+    /// drawables draw into and then sample, for one asked for of `type_`:
+    /// `type_`, where the backend renders into it.
+    fn render_target_type(&self, type_: TextureChannelDataType) -> TextureChannelDataType {
+        type_
+    }
+
+    /// The format of a render target's depth texture, `None` for render
+    /// targets without one, where every depth test passes.
+    fn render_target_depth(&self) -> Option<TextureFormat> {
+        None
+    }
     fn create_command_encoder(&self) -> Box<dyn CommandEncoder>;
 
     /// The rendering stats, which count the renderer's resources until it

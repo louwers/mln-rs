@@ -22,13 +22,12 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::buffer_resource::{BufferAllocation, unique_id};
+use crate::buffer_resource::BufferAllocation;
 use crate::context::Context;
 use crate::renderer_backend::BackendImpl;
 
 /// An image, its memory and its view.
 pub(crate) struct ImageAllocation {
-    id: u64,
     backend: Rc<BackendImpl>,
     image: vk::Image,
     allocation: Option<Allocation>,
@@ -76,7 +75,6 @@ impl ImageAllocation {
             }
         };
         Some(ImageAllocation {
-            id: unique_id(),
             backend: Rc::clone(backend),
             image,
             allocation: Some(allocation),
@@ -112,11 +110,6 @@ impl ImageAllocation {
             }
             Err(_) => false,
         }
-    }
-
-    #[must_use]
-    pub(crate) fn id(&self) -> u64 {
-        self.id
     }
 
     #[must_use]

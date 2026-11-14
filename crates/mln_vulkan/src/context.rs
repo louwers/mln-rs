@@ -29,16 +29,13 @@ use ash::vk;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::gpu::Gpu;
-use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_util::logging::{Event, Log};
-use mln_util::size::Size;
 
 use crate::buffer_resource::BufferResource;
 use crate::command_encoder::CommandEncoder;
 use crate::device::Device;
 use crate::gpu::VulkanGpu;
-use crate::offscreen_texture::OffscreenTexture;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::layout::{DescriptorSetType, IMAGE_TEXTURE_COUNT, image_sampler_binding, image_texture_binding};
 use crate::surface_resource::SurfaceResource;
@@ -840,16 +837,6 @@ impl GfxContext for Context {
     }
 
     fn reduce_memory_usage(&self) {}
-
-    /// Creates an offscreen texture of `size` with `type_` channels, with
-    /// neither depth nor stencil.
-    fn create_offscreen_texture(
-        &self,
-        size: Size,
-        type_: TextureChannelDataType,
-    ) -> Box<dyn mln_gfx::offscreen_texture::OffscreenTexture> {
-        Box::new(OffscreenTexture::new(self, size, type_))
-    }
 
     fn create_command_encoder(&self) -> Box<dyn mln_gfx::command_encoder::CommandEncoder> {
         Box::new(CommandEncoder::new(self.rc(), self.get_command_buffer()))

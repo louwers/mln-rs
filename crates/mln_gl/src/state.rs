@@ -199,16 +199,6 @@ impl State {
         }
     }
 
-    /// Forgets `texture`, which is being deleted or rendered into: unbinds it
-    /// from the units it is bound to.
-    pub(crate) fn unbind_texture(&self, gl: &Gl, texture: TextureID) {
-        for unit in 0..self.textures.len() {
-            if self.textures[unit].get() == Cached::Known(Some(texture)) {
-                self.bind_texture(gl, unit as u32, None);
-            }
-        }
-    }
-
     /// Binds `sampler` to `unit`, where it overrides the sampling parameters
     /// of the texture bound there.
     pub(crate) fn bind_sampler(&self, gl: &Gl, unit: u32, sampler: Option<SamplerID>) {

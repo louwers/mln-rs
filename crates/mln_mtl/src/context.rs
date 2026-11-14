@@ -8,12 +8,9 @@ use std::rc::{Rc, Weak};
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::gpu::Gpu;
-use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
-use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
-use crate::offscreen_texture::OffscreenTexture;
 use crate::renderer_backend::BackendImpl;
 
 pub(crate) struct Context {
@@ -49,16 +46,6 @@ impl Context {
         self.release_cached_resources();
         self.destroy_released();
     }
-
-    pub(crate) fn create_offscreen_texture_with(
-        &self,
-        size: Size,
-        type_: TextureChannelDataType,
-        depth: bool,
-        stencil: bool,
-    ) -> OffscreenTexture {
-        OffscreenTexture::new(self.rc(), size, type_, depth, stencil)
-    }
 }
 
 impl GfxContext for Context {
@@ -84,16 +71,6 @@ impl GfxContext for Context {
     }
 
     fn reduce_memory_usage(&self) {}
-
-    /// Creates an offscreen texture of `size` with `type_` channels, with
-    /// neither depth nor stencil.
-    fn create_offscreen_texture(
-        &self,
-        size: Size,
-        type_: TextureChannelDataType,
-    ) -> Box<dyn mln_gfx::offscreen_texture::OffscreenTexture> {
-        Box::new(self.create_offscreen_texture_with(size, type_, false, false))
-    }
 
     fn create_command_encoder(&self) -> Box<dyn mln_gfx::command_encoder::CommandEncoder> {
         Box::new(CommandEncoder::new(self.rc()))

@@ -11,6 +11,7 @@
 //! The renderer runs on one thread: shared pointers are `Rc`, mutation
 //! through them uses `RefCell`/`Cell`.
 
+pub mod attachment;
 pub mod attribute;
 pub mod backend;
 pub mod backend_scope;
@@ -28,7 +29,6 @@ pub mod frame;
 pub mod gfx_types;
 pub mod gpu;
 pub mod index_vector;
-pub mod offscreen_texture;
 pub mod polyline_generator;
 pub mod projection_variant;
 pub mod released;
@@ -63,7 +63,6 @@ pub use export::{
 };
 pub use frame::{ConsumerSync, DrawTarget, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
-pub use offscreen_texture::OffscreenTexture;
 pub use render_pass::{RenderPass, RenderPassDescriptor};
 pub use renderer_backend::RendererBackend;
 pub use scissor_rect::ScissorRect;

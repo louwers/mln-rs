@@ -538,7 +538,7 @@ impl Renderer {
         // drawableTargetsPass: draw render targets
         // dem-heatmap
         for render_target in orchestrator.render_targets() {
-            render_target.borrow().render(orchestrator, &mut parameters);
+            render_target.borrow_mut().render(orchestrator, &mut parameters);
         }
 
         // commonClearPass

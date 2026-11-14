@@ -52,12 +52,7 @@ struct Buffer {
 /// stays the caller's.
 enum Image {
     Owned(ImageAllocation),
-    Imported {
-        image: vk::Image,
-        view: vk::ImageView,
-        /// A `buffer_resource::unique_id`, as an allocation has.
-        id: u64,
-    },
+    Imported { image: vk::Image, view: vk::ImageView },
 }
 
 impl Image {
@@ -72,13 +67,6 @@ impl Image {
         match self {
             Image::Owned(allocation) => allocation.image_view(),
             Image::Imported { view, .. } => *view,
-        }
-    }
-
-    fn id(&self) -> u64 {
-        match self {
-            Image::Owned(allocation) => allocation.id(),
-            Image::Imported { id, .. } => *id,
         }
     }
 }
@@ -532,13 +520,6 @@ impl VulkanGpu {
         self.backend.get_device()
     }
 
-    /// The view of the Vulkan image of `texture`, its format, and the id of
-    /// its allocation (`buffer_resource::unique_id`). Between commands, a
-    /// sampled texture is in `SHADER_READ_ONLY_OPTIMAL`.
-    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(vk::ImageView, vk::Format, u64)> {
-        self.textures.get(texture).map(|entry| (entry.image.image_view(), entry.vk_format, entry.image.id()))
-    }
-
     /// Takes an image made elsewhere, such as a swapchain's or a host's, as
     /// a texture of this backend. Its format is one that a
     /// [`TextureFormat`] names, as this backend makes it. Destroying the
@@ -558,11 +539,7 @@ impl VulkanGpu {
             .texture_format(imported.format)
             .ok_or_else(|| GpuError::Unsupported(format!("importing an image of {:?}", imported.format)))?;
         Ok(self.textures.insert(Texture {
-            image: Image::Imported {
-                image: imported.image,
-                view: imported.view,
-                id: crate::buffer_resource::unique_id(),
-            },
+            image: Image::Imported { image: imported.image, view: imported.view },
             format,
             vk_format: imported.format,
             size: imported.size,

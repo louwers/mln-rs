@@ -12,7 +12,6 @@
 //   symbols and fill extrusions, are not ported.
 
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use ash::vk;
 use gpu_allocator::MemoryLocation;
@@ -22,15 +21,6 @@ use mln_util::logging::{Event, Log};
 
 use crate::context::Context;
 use crate::renderer_backend::BackendImpl;
-
-static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-
-/// An id no other buffer, image or sampler has had. Vulkan can give a new
-/// object the handle of a destroyed one, so what a descriptor points at is
-/// told apart by these.
-pub(crate) fn unique_id() -> u64 {
-    NEXT_ID.fetch_add(1, Ordering::Relaxed)
-}
 
 /// A buffer and its memory, mapped.
 pub(crate) struct BufferAllocation {
