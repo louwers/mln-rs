@@ -127,15 +127,19 @@ impl WebGpu {
         self.textures.insert(Texture { texture: texture.clone(), view })
     }
 
-    #[cfg(test)]
-    pub(crate) fn texture(&self, texture: TextureId) -> Option<&wgpu::Texture> {
-        self.textures.get(texture).map(|texture| &texture.texture)
-    }
-
     /// The wgpu buffer that holds `buffer`, and where in it and how many
     /// bytes `buffer` takes.
     pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(&wgpu::Buffer, u64, u64)> {
         self.buffers.get(buffer).map(|entry| (&entry.buffer, entry.offset, entry.size))
+    }
+
+    /// The wgpu texture of `texture`, and its view.
+    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(&wgpu::Texture, &wgpu::TextureView)> {
+        self.textures.get(texture).map(|texture| (&texture.texture, &texture.view))
+    }
+
+    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<&wgpu::Sampler> {
+        self.samplers.get(sampler)
     }
 
     /// Writes `data` at `offset` in `buffer`, a buffer made elsewhere, with
@@ -476,7 +480,8 @@ impl WebGpu {
 
 fn texture_format(format: TextureFormat) -> wgpu::TextureFormat {
     match format {
-        TextureFormat::R8Unorm => wgpu::TextureFormat::R8Unorm,
+        // WGSL reads an alpha texture's one channel as red.
+        TextureFormat::R8Unorm | TextureFormat::A8Unorm => wgpu::TextureFormat::R8Unorm,
         TextureFormat::R16Float => wgpu::TextureFormat::R16Float,
         TextureFormat::R32Float => wgpu::TextureFormat::R32Float,
         TextureFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,

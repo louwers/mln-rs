@@ -8,12 +8,12 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
-use mln_gfx::gpu::BufferId;
+use mln_gfx::gpu::{BufferId, SamplerId, TextureId};
+use mln_gfx::released::Released;
 use mln_gfx::renderer_backend::{self, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
-use mln_gfx::uniform_buffer::Released;
 
 use crate::context::Context;
 use crate::device::Device;
@@ -55,6 +55,16 @@ impl BackendImpl {
     pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(wgpu::Buffer, u64, u64)> {
         let gpu = self.gpu.borrow();
         gpu.native_buffer(buffer).map(|(native, offset, size)| (native.clone(), offset, size))
+    }
+
+    /// The wgpu texture of `texture`, and its view.
+    pub(crate) fn native_texture(&self, texture: TextureId) -> Option<(wgpu::Texture, wgpu::TextureView)> {
+        let gpu = self.gpu.borrow();
+        gpu.native_texture(texture).map(|(texture, view)| (texture.clone(), view.clone()))
+    }
+
+    pub(crate) fn native_sampler(&self, sampler: SamplerId) -> Option<wgpu::Sampler> {
+        self.gpu.borrow().native_sampler(sampler).cloned()
     }
 
     pub(crate) fn released(&self) -> &Rc<Released> {

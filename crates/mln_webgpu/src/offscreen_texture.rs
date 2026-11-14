@@ -15,7 +15,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
-use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
+use mln_gfx::context::Context as _;
+use mln_gfx::texture2d::{SamplerState, Texture2DPtr, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
@@ -26,7 +27,6 @@ use mln_util::time::Instant;
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
 use crate::draw_target::{DrawTarget, TargetResource};
-use crate::texture2d::Texture2D;
 
 const BYTES_PER_ROW_ALIGNMENT: u32 = 256;
 
@@ -45,9 +45,10 @@ fn linear_clamp() -> SamplerState {
 pub(crate) struct OffscreenTextureResource {
     context: Rc<Context>,
     size: Size,
-    type_: TextureChannelDataType,
-    color_texture: RefCell<Option<Rc<RefCell<Texture2D>>>>,
-    depth_texture: Option<Rc<RefCell<Texture2D>>>,
+    /// A texture of the backend's `Gpu`, which the renderer samples.
+    color_texture: Texture2DPtr,
+    /// The depth or depth-stencil attachment, and its view.
+    depth_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// The buffer the color texture is copied into to be read back, kept
     /// for the next read.
     staging_buffer: RefCell<Option<wgpu::Buffer>>,
@@ -67,63 +68,52 @@ impl OffscreenTextureResource {
         stencil: bool,
     ) -> Self {
         debug_assert!(size.width != 0 && size.height != 0);
-        let mut res = OffscreenTextureResource {
+        let color_texture = context.create_texture_2d();
+        {
+            let mut texture = color_texture.borrow_mut();
+            texture.set_size(size);
+            texture.set_format(texture_format(TexturePixelType::RGBA, type_));
+            texture.set_render_target();
+            texture.set_sampler(linear_clamp());
+        }
+        // WebGPU requires a combined depth-stencil texture when both are
+        // needed.
+        let depth_texture = (depth || stencil).then(|| {
+            let format = if depth && !stencil {
+                wgpu::TextureFormat::Depth32Float
+            } else {
+                wgpu::TextureFormat::Depth24PlusStencil8
+            };
+            let texture = context.get_backend().device().create_texture(&wgpu::TextureDescriptor {
+                label: Some("Offscreen depth"),
+                size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            (texture, view)
+        });
+        // Port-only: the C++ WebGPU backend only decrements this count.
+        context.rendering_stats_mut().num_frame_buffers += 1;
+        OffscreenTextureResource {
             context,
             size,
-            type_,
-            color_texture: RefCell::new(None),
-            depth_texture: None,
+            color_texture,
+            depth_texture,
             staging_buffer: RefCell::default(),
             read_back: Cell::default(),
             copied_at: Cell::default(),
-        };
-        // Port-only: the C++ WebGPU backend only decrements this count.
-        res.context.rendering_stats_mut().num_frame_buffers += 1;
-        // Create color texture
-        *res.color_texture.borrow_mut() = Some(res.create_color_texture());
-
-        // Create depth/stencil texture if needed. WebGPU requires a combined
-        // depth-stencil texture when both are needed.
-        if depth || stencil {
-            let depth_texture = res.context.create_webgpu_texture_2d();
-            {
-                let mut t = depth_texture.borrow_mut();
-                t.set_size(size);
-                // Use combined depth-stencil format when both are needed
-                if depth && stencil {
-                    t.set_format(TexturePixelType::Stencil, TextureChannelDataType::UnsignedByte);
-                } else if depth {
-                    t.set_format(TexturePixelType::Depth, TextureChannelDataType::Float);
-                } else {
-                    t.set_format(TexturePixelType::Stencil, TextureChannelDataType::UnsignedByte);
-                }
-                t.set_usage(wgpu::TextureUsages::RENDER_ATTACHMENT);
-                t.set_sampler_configuration(linear_clamp());
-            }
-            res.depth_texture = Some(depth_texture);
         }
-        res
     }
 
-    fn create_color_texture(&self) -> Rc<RefCell<Texture2D>> {
-        let texture = self.context.create_webgpu_texture_2d();
-        {
-            let mut t = texture.borrow_mut();
-            t.set_size(self.size);
-            t.set_format(TexturePixelType::RGBA, self.type_);
-            t.set_usage(
-                wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST
-                    | wgpu::TextureUsages::COPY_SRC
-                    | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            );
-            t.set_sampler_configuration(linear_clamp());
-        }
-        texture
-    }
-
-    fn color(&self) -> Option<Rc<RefCell<Texture2D>>> {
-        self.color_texture.borrow().clone()
+    /// The color texture's wgpu texture, made on first use.
+    fn color(&self) -> Option<wgpu::Texture> {
+        let created = self.color_texture.borrow_mut().create(&*self.context);
+        created.ok().and_then(|texture| self.context.get_backend().native_texture(texture)).map(|(texture, _)| texture)
     }
 
     fn row_strides(&self) -> (u32, u32) {
@@ -134,8 +124,7 @@ impl OffscreenTextureResource {
     /// Records a copy of the color texture into the readback buffer, if
     /// the texture exists.
     fn encode_copy(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> bool {
-        let color = self.color();
-        let Some(texture) = color.as_ref().and_then(|c| c.borrow().get_texture().cloned()) else {
+        let Some(texture) = self.color() else {
             return false;
         };
         let size = self.size;
@@ -246,7 +235,7 @@ impl OffscreenTextureResource {
     }
 
     pub(crate) fn get_texture(&self) -> Texture2DPtr {
-        self.color().expect("offscreen texture without color texture")
+        Rc::clone(&self.color_texture)
     }
 }
 
@@ -257,40 +246,25 @@ impl Drop for OffscreenTextureResource {
 }
 
 impl TargetResource for OffscreenTextureResource {
-    fn bind(&self) {
-        // Create textures if not already created
-        if let Some(color) = self.color() {
-            color.borrow_mut().create();
-        }
-        if let Some(depth) = &self.depth_texture {
-            depth.borrow_mut().create();
-        }
-    }
-
     fn finish_frame(&self, encoder: &mut wgpu::CommandEncoder) {
         self.encode_requested_copy(encoder);
     }
 
     fn get_color_texture_view(&self) -> Option<wgpu::TextureView> {
-        let color = self.color()?;
-        let mut texture = color.borrow_mut();
-        texture.create();
-        texture.get_texture_view().cloned()
+        let created = self.color_texture.borrow_mut().create(&*self.context);
+        created.ok().and_then(|texture| self.context.get_backend().native_texture(texture)).map(|(_, view)| view)
     }
 
     fn get_color_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        self.color()?.borrow().get_native_format()
+        self.color().map(|texture| texture.format())
     }
 
     fn get_depth_stencil_texture_view(&self) -> Option<wgpu::TextureView> {
-        let depth = self.depth_texture.as_ref()?;
-        let mut texture = depth.borrow_mut();
-        texture.create();
-        texture.get_texture_view().cloned()
+        self.depth_texture.as_ref().map(|(_, view)| view.clone())
     }
 
     fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
-        self.depth_texture.as_ref()?.borrow().get_native_format()
+        self.depth_texture.as_ref().map(|(texture, _)| texture.format())
     }
 }
 
@@ -327,7 +301,7 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     }
 
     fn read_still_image(&self) -> PremultipliedImage {
-        self.resource().read_still_image()
+        self.resource.read_still_image()
     }
 
     fn get_texture(&self) -> Texture2DPtr {

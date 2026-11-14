@@ -173,7 +173,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
 
             let mut texture_size = Size::new(0, 0);
             if let Some(tex) = drawable.get_texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE) {
-                texture_size = tex.borrow().get_size();
+                texture_size = tex.borrow().size();
             }
 
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(fill_pattern_value.from.id()));

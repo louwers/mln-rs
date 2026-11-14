@@ -8,8 +8,7 @@
 //   port keeps them until `swap()`, as the headless backend does.
 // - The frame is encoded on the backend's command queue; C++ makes a second
 //   queue for the window.
-// - The depth and stencil attachments are Metal textures of their own, not
-//   `mtl::Texture2D`s, which need the context that `bind` has no access to.
+// - The depth and stencil attachments are Metal textures of their own.
 // - Port-only: `begin_frame` takes the drawable ahead of a frame,
 //   `request_readback` copies a presented frame into an image, with
 //   `cap_frame_rate` off the layer doesn't wait for the display, and
@@ -35,8 +34,8 @@ use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::draw_target::{DrawTarget, TargetResource};
 use crate::mtl_fwd::{MTLCommandBufferPtr, MTLRenderPassDescriptorPtr, MTLTexturePtr};
+use crate::readback::{buffer_bytes, encode_texture_copy};
 use crate::renderer_backend::{BackendImpl, RendererBackend};
-use crate::texture2d::{buffer_bytes, encode_texture_copy};
 
 /// The format of the layer's drawables.
 const COLOR_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
-use mln_gfx::texture2d::{SamplerState, Texture2D as _};
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;

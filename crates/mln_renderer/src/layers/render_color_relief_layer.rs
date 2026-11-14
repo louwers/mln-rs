@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::ColorReliefTilePropsUBO;
@@ -20,7 +21,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
-use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, ShaderProgramBasePtr, ShaderRegistry};
@@ -416,12 +417,12 @@ impl RenderLayer for RenderColorReliefLayer {
             {
                 let mut t = ramp_changed_texture.borrow_mut();
                 // Use RGBA32F instead of R32F for llvmpipe compatibility
-                t.set_format(TexturePixelType::RGBA, TextureChannelDataType::Float);
-                t.upload_data(
-                    Some(bytemuck::cast_slice(&self.elevation_stops_data)),
-                    Size::new(self.color_ramp_size, 1),
-                );
-                t.set_sampler_configuration(SamplerState {
+                t.set_format(TextureFormat::Rgba32Float);
+                let data = bytemuck::cast_slice(&self.elevation_stops_data);
+                if let Err(error) = t.upload_data(context, data, Size::new(self.color_ramp_size, 1)) {
+                    Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
+                }
+                t.set_sampler(SamplerState {
                     filter: TextureFilterType::Nearest,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
@@ -435,7 +436,7 @@ impl RenderLayer for RenderColorReliefLayer {
             {
                 let mut t = color_stops_texture.borrow_mut();
                 t.set_image(Some(Rc::new(self.color_stops.clone())));
-                t.set_sampler_configuration(SamplerState {
+                t.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
@@ -561,7 +562,7 @@ impl RenderLayer for RenderColorReliefLayer {
                     texture
                 }
             };
-            dem_texture.borrow_mut().set_sampler_configuration(dem_sampler);
+            dem_texture.borrow_mut().set_sampler(dem_sampler);
 
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {
                 if !drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref()) {

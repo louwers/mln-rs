@@ -5,6 +5,7 @@ use mln_gfx::UploadPass;
 use mln_gfx::texture2d::{Texture2DPtr, upload_image};
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use shelf_pack::{BinRef, ShelfPack, ShelfPackOptions};
 
@@ -121,30 +122,22 @@ impl PatternAtlas {
         Size::new(self.shelf_pack.width() as u32, self.shelf_pack.height() as u32)
     }
 
-    /// Uploads the atlas image to its texture.
-    ///
-    /// Deviation: when the atlas grew since the texture was created, the
-    /// texture is created again. C++ uploads the larger image into the old
-    /// texture (`webgpu::Texture2D` never resizes an existing texture), which
-    /// Dawn reports as a validation error and wgpu treats as fatal.
+    /// Uploads the atlas image to its texture, which is made again when the
+    /// atlas grew since.
     pub(crate) fn upload(&mut self, upload_pass: &dyn UploadPass) {
-        if let Some(texture) = &self.atlas_texture_2d {
-            let texture_size = texture.borrow().get_size();
-            if texture_size != self.atlas_image.size && !texture_size.is_empty() {
-                self.atlas_texture_2d = None;
-            }
-        }
-        match &self.atlas_texture_2d {
+        let context = upload_pass.get_context();
+        let uploaded = match &self.atlas_texture_2d {
             None => {
-                let texture = upload_pass.get_context().create_texture_2d();
-                upload_image(&mut *texture.borrow_mut(), &self.atlas_image);
+                let texture = context.create_texture_2d();
+                let uploaded = upload_image(context, &mut texture.borrow_mut(), &self.atlas_image);
                 self.atlas_texture_2d = Some(texture);
+                uploaded
             }
-            Some(texture) => {
-                if self.dirty {
-                    upload_image(&mut *texture.borrow_mut(), &self.atlas_image);
-                }
-            }
+            Some(texture) if self.dirty => upload_image(context, &mut texture.borrow_mut(), &self.atlas_image),
+            Some(_) => Ok(()),
+        };
+        if let Err(error) = uploaded {
+            Log::error(Event::Render, format!("Uploading the pattern atlas failed: {error}"));
         }
         self.dirty = false;
     }

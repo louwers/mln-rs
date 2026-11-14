@@ -35,7 +35,6 @@ use mln_util::time::Instant;
 use crate::context::Context;
 use crate::enums;
 use crate::shaders::shader_program::as_gl_shader;
-use crate::texture2d::Texture2D;
 use crate::upload_pass::UploadPass;
 use crate::vertex_array::VertexArray;
 use crate::vertex_buffer_resource::IndexBufferResource;
@@ -223,10 +222,9 @@ impl Drawable {
             debug_assert!(vertex_array.is_some());
         }
 
-        let textures_need_upload = self.base.textures.iter().flatten().any(|t| t.borrow().needs_upload());
-        if textures_need_upload {
-            for texture in self.base.textures.iter().flatten() {
-                texture.borrow_mut().upload();
+        for texture in self.base.textures.iter().flatten() {
+            if let Err(error) = texture.borrow_mut().upload(&**context) {
+                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
         }
 
@@ -253,9 +251,10 @@ impl Drawable {
             let Some(unit) = shader.get_sampler_location(id) else {
                 continue;
             };
-            let mut texture = texture.borrow_mut();
-            if let Some(texture) = texture.downcast_mut::<Texture2D>() {
-                texture.bind(context, unit as u32);
+            let binding = texture.borrow_mut().binding(context);
+            match binding {
+                Ok((texture, sampler)) => context.bind_texture(unit as u32, texture, sampler),
+                Err(error) => Log::error(Event::Render, format!("Binding a texture failed: {error}")),
             }
         }
     }
