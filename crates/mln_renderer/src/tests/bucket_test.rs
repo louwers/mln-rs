@@ -8,7 +8,7 @@ use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::upload::{upload_indexes, vertex_buffer};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
-use mln_gfx::{AttributeDataType, Context, DrawMode, DrawableBuilder};
+use mln_gfx::{AttributeDataType, Context, DrawMode};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::downcast_arc;
@@ -45,6 +45,7 @@ use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::drawable_builder::DrawableBuilder;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 

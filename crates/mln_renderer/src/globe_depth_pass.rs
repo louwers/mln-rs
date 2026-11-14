@@ -6,20 +6,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::uniform_buffer::UniformBufferPtr;
-use mln_gfx::{
-    AttributeDataType, Context, DepthMaskType, DrawMode, DrawableBuilder, ShaderProgramPtr, ShaderRegistry,
-    TileLayerGroup,
-};
+use mln_gfx::{AttributeDataType, Context, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_tile_id::OverscaledTileID;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::drawable_builder::DrawableBuilder;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
+use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::to_projection_ubo;
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
@@ -32,7 +30,7 @@ const GLOBE_DEPTH_SHADER_NAME: &str = "GlobeDepthShader";
 /// layers are by their clip Z.
 #[derive(Default)]
 pub(crate) struct GlobeDepthPass {
-    layer_group: Option<LayerGroupBasePtr>,
+    layer_group: Option<LayerGroupPtr>,
     shader: Option<ShaderProgramPtr>,
     projection_uniform_buffer: Option<UniformBufferPtr>,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
@@ -66,7 +64,7 @@ impl GlobeDepthPass {
             return;
         }
         if self.layer_group.is_none() {
-            self.layer_group = Some(TileLayerGroup::new_ptr(0, "globe-depth"));
+            self.layer_group = Some(LayerGroup::tiles(0, "globe-depth"));
         }
         let Some(layer_group) = self.layer_group.clone() else {
             return;
@@ -88,18 +86,15 @@ impl GlobeDepthPass {
             None,
         );
 
-        let mut group = layer_group.borrow_mut();
-        let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
-            return;
-        };
+        let mut tile_layer_group = layer_group.borrow_mut();
 
         let covered: BTreeSet<OverscaledTileID> = tile_cover.iter().copied().collect();
         tile_layer_group
-            .remove_drawables_if(|drawable| drawable.get_tile_id().is_some_and(|tile_id| !covered.contains(&tile_id)));
+            .remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|tile_id| !covered.contains(&tile_id)));
 
-        let mut builder: Option<mln_gfx::UniqueDrawableBuilder> = None;
+        let mut builder: Option<crate::drawable_builder::UniqueDrawableBuilder> = None;
         for tile_id in &tile_cover {
-            if tile_layer_group.get_drawable_count_for(RenderPass::Translucent, tile_id) > 0 {
+            if tile_layer_group.drawable_count_for(RenderPass::Translucent, tile_id) > 0 {
                 continue;
             }
             let builder = builder.get_or_insert_with(|| {
@@ -111,7 +106,7 @@ impl GlobeDepthPass {
                 builder.set_depth_type(DepthMaskType::ReadWrite);
                 // The far hemisphere is clockwise on screen on every backend,
                 // Vulkan included, since its shaders flip Y.
-                builder.set_cull_face_mode(&CullFaceMode::back_ccw());
+                builder.set_cull_face_mode(CullFaceMode::back_ccw());
                 builder.set_vertex_attr_id(ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE);
                 builder
             });
@@ -129,16 +124,16 @@ impl GlobeDepthPass {
             builder.flush();
 
             for mut drawable in builder.clear_drawables() {
-                drawable.set_tile_id(*tile_id);
-                tile_layer_group.add_drawable(RenderPass::Translucent, tile_id, drawable);
+                drawable.tile_id = Some(*tile_id);
+                tile_layer_group.add_tile_drawable(RenderPass::Translucent, tile_id, drawable);
             }
         }
 
         // The projection blocks live in one layer-level array, indexed like
         // the other consolidated UBOs.
-        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(tile_layer_group.get_drawable_count());
+        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(tile_layer_group.drawable_count());
         tile_layer_group.visit_drawables(|drawable| {
-            let Some(tile_id) = drawable.get_tile_id() else {
+            let Some(tile_id) = drawable.tile_id else {
                 return;
             };
             drawable.ubo_index = projection_ubos.len() as u32;
@@ -147,12 +142,12 @@ impl GlobeDepthPass {
         if !projection_ubos.is_empty() {
             let bytes: &[u8] = bytemuck::cast_slice(&projection_ubos);
             context.write_storage_buffer(&mut self.projection_uniform_buffer, bytes);
-            group.mutable_uniform_buffers().set(ID_PROJECTION_UBO, self.projection_uniform_buffer.clone());
+            tile_layer_group.mutable_uniform_buffers().set(ID_PROJECTION_UBO, self.projection_uniform_buffer.clone());
         }
     }
 
     #[must_use]
-    pub(crate) fn get_layer_group(&self) -> Option<&LayerGroupBasePtr> {
+    pub(crate) fn get_layer_group(&self) -> Option<&LayerGroupPtr> {
         self.layer_group.as_ref()
     }
 }

@@ -7,8 +7,7 @@ use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
-    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, ShaderRegistry,
-    TileLayerGroup, VertexAttributeArray,
+    AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::downcast_arc;
@@ -29,13 +28,14 @@ use mln_util::vectors::{Vec2, Vec3, vec2_gl_fmod};
 
 use super::circle_layer_tweaker::CircleLayerTweaker;
 use super::{
-    TileDrawables, drawable_binders_slot, drawable_has_layer_tweaker, drawable_render_tile_slot,
-    refresh_if_bucket_updated,
+    DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, refresh_if_bucket_updated,
 };
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
+use crate::drawable_builder::DrawableBuilder;
+use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::{PaintPropertyBinder, read_data_driven_paint_property};
 use crate::render_layer::{
@@ -521,7 +521,7 @@ impl RenderLayer for RenderCircleLayer {
 
         // Set up a layer group
         if self.base.layer_group.is_none() {
-            self.set_layer_group(Some(TileLayerGroup::new_ptr(self.base.layer_index, self.get_id())), changes);
+            self.set_layer_group(Some(LayerGroup::tiles(self.base.layer_index, self.get_id())), changes);
         }
         let layer_group = self.base.layer_group.clone().expect("layer group");
 
@@ -550,11 +550,10 @@ impl RenderLayer for RenderCircleLayer {
         }
 
         {
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("circle layer group is a TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             let base = &self.base;
             tile_layer_group.remove_drawables_if(|drawable| {
-                drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
+                drawable.tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
         }
 
@@ -616,7 +615,7 @@ impl RenderLayer for RenderCircleLayer {
 
             // If there are already drawables for this tile, update their UBOs
             // and move on to the next tile.
-            let update_existing = |drawable: &mut mln_gfx::Drawable| {
+            let update_existing = |drawable: &mut crate::drawable::Drawable| {
                 // A drawable produced on a previous style/bucket should not be updated.
                 let current = drawable_has_layer_tweaker(drawable, layer_tweaker.as_ref());
                 if current {
@@ -666,7 +665,7 @@ impl RenderLayer for RenderCircleLayer {
             circle_builder.set_shader(Some(circle_shader));
             circle_builder.set_depth_type(DepthMaskType::ReadOnly);
             circle_builder.set_color_mode(&ColorMode::alpha_blended());
-            circle_builder.set_cull_face_mode(&CullFaceMode::disabled());
+            circle_builder.set_cull_face_mode(CullFaceMode::disabled());
 
             circle_builder.set_render_pass(render_pass);
             circle_builder.set_vertex_attributes(Some(circle_vertex_attrs));
@@ -680,15 +679,14 @@ impl RenderLayer for RenderCircleLayer {
 
             circle_builder.flush();
 
-            let mut group = layer_group.borrow_mut();
-            let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+            let mut tile_layer_group = layer_group.borrow_mut();
             for mut drawable in circle_builder.clear_drawables() {
-                drawable.set_tile_id(tile_id);
-                drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                drawable.set_binders(drawable_binders_slot(&render_data.bucket, self.get_id()));
-                drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
+                drawable.tile_id = Some(tile_id);
+                drawable.layer_tweaker = layer_tweaker.clone();
+                drawable.binders = Some(DrawableBinders::new(&render_data.bucket, self.get_id()));
+                drawable.render_tile = DrawableRenderTile::new(render_tiles.owner(), tile);
 
-                tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
+                tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
             }
         }
     }

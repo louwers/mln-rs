@@ -12,7 +12,7 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
-use mln_gfx::{Context, LayerGroupBasePtr, ShaderRegistry};
+use mln_gfx::{Context, ShaderRegistry};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
 use mln_style::layer::layer_type_info;
@@ -29,6 +29,7 @@ use mln_util::vectors::{Vec2, Vec3, Vec4};
 
 use crate::bucket::BucketPtr;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::layer_group::LayerGroupPtr;
 use crate::layer_tweaker::LayerTweakerPtr;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
@@ -447,7 +448,7 @@ pub struct RenderLayerBase {
     pub(crate) base_impl: Arc<dyn layer::Impl>,
 
     pub(crate) passes: RenderPass,
-    pub(crate) layer_group: Option<LayerGroupBasePtr>,
+    pub(crate) layer_group: Option<LayerGroupPtr>,
     pub(crate) layer_tweaker: Option<LayerTweakerPtr>,
     pub(crate) layer_index: i32,
     pub(crate) style_dependencies: Dependency,
@@ -757,7 +758,7 @@ pub trait RenderLayer {
         false
     }
 
-    fn set_layer_group(&mut self, layer_group: Option<LayerGroupBasePtr>, changes: &mut UniqueChangeRequestVec) {
+    fn set_layer_group(&mut self, layer_group: Option<LayerGroupPtr>, changes: &mut UniqueChangeRequestVec) {
         // Remove the active layer group, if any, before replacing it.
         let old = self.base().layer_group.clone();
         activate_layer_group(old.as_ref(), false, changes);
@@ -832,7 +833,7 @@ fn get_render_tile_bucket_id(base: &RenderLayerBase, tile_id: &OverscaledTileID)
 
 /// (Un-)Register the layer group with the orchestrator.
 pub(crate) fn activate_layer_group(
-    layer_group: Option<&LayerGroupBasePtr>,
+    layer_group: Option<&LayerGroupPtr>,
     activate: bool,
     changes: &mut UniqueChangeRequestVec,
 ) {
@@ -848,13 +849,9 @@ pub(crate) fn activate_layer_group(
     }
 }
 
-pub(crate) fn change_layer_index(
-    group: Option<&LayerGroupBasePtr>,
-    new_index: i32,
-    changes: &mut UniqueChangeRequestVec,
-) {
+pub(crate) fn change_layer_index(group: Option<&LayerGroupPtr>, new_index: i32, changes: &mut UniqueChangeRequestVec) {
     if let Some(group) = group
-        && group.borrow().get_layer_index() != new_index
+        && group.borrow().layer_index != new_index
     {
         changes.push(ChangeRequest::UpdateLayerGroupIndex(Rc::clone(group), new_index));
     }

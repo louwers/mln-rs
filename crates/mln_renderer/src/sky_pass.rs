@@ -3,12 +3,11 @@ use std::f64::consts::PI;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
-use mln_gfx::{Context, DepthMaskType, DrawableBuilder, LayerGroup, ShaderProgramPtr, ShaderRegistry};
+use mln_gfx::{Context, DepthMaskType, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style::light::{LightAnchor, LightPosition};
 use mln_style::sky::{SkyAtmosphereBlend, SkyColor, SkyHorizonBlend, SkyHorizonColor};
@@ -19,6 +18,8 @@ use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 use mln_util::vectors::Vec4;
 
+use crate::drawable_builder::DrawableBuilder;
+use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::bind_no_projection;
 use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
@@ -33,10 +34,10 @@ fn make_fullscreen_layer_group(
     vertex_attribute: usize,
     is_3d: bool,
     depth_mask: DepthMaskType,
-) -> Option<LayerGroupBasePtr> {
+) -> Option<LayerGroupPtr> {
     let shader = shader?;
 
-    let layer_group = LayerGroup::new_ptr(0, name);
+    let layer_group = LayerGroup::plain(0, name);
 
     let mut builder = DrawableBuilder::boxed();
     builder.set_shader(Some(std::rc::Rc::clone(shader)));
@@ -46,14 +47,13 @@ fn make_fullscreen_layer_group(
     builder.set_enable_depth(true);
     builder.set_enable_stencil(false);
     builder.set_color_mode(&ColorMode::alpha_blended());
-    builder.set_cull_face_mode(&CullFaceMode::disabled());
+    builder.set_cull_face_mode(CullFaceMode::disabled());
     builder.set_vertex_attr_id(vertex_attribute);
     builder.add_quad(-1, -1, 1, 1);
     builder.flush();
 
     {
         let mut group = layer_group.borrow_mut();
-        let group = group.as_layer_group_mut()?;
         for drawable in builder.clear_drawables() {
             group.add_drawable(drawable);
         }
@@ -96,8 +96,8 @@ fn color_components(color: &Color) -> [f32; 4] {
 /// after them, against the globe depth prepass, so the planet correctly occludes it.
 #[derive(Default)]
 pub(crate) struct SkyPass {
-    sky_layer_group: Option<LayerGroupBasePtr>,
-    atmosphere_layer_group: Option<LayerGroupBasePtr>,
+    sky_layer_group: Option<LayerGroupPtr>,
+    atmosphere_layer_group: Option<LayerGroupPtr>,
     sky_shader: Option<ShaderProgramPtr>,
     atmosphere_shader: Option<ShaderProgramPtr>,
 }
@@ -204,12 +204,12 @@ impl SkyPass {
     }
 
     #[must_use]
-    pub(crate) fn get_sky_layer_group(&self) -> Option<&LayerGroupBasePtr> {
+    pub(crate) fn get_sky_layer_group(&self) -> Option<&LayerGroupPtr> {
         self.sky_layer_group.as_ref()
     }
 
     #[must_use]
-    pub(crate) fn get_atmosphere_layer_group(&self) -> Option<&LayerGroupBasePtr> {
+    pub(crate) fn get_atmosphere_layer_group(&self) -> Option<&LayerGroupPtr> {
         self.atmosphere_layer_group.as_ref()
     }
 

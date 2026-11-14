@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
-use mln_gfx::{Context, LayerGroupBase, LayerGroupBasePtr, ShaderRegistry};
+use mln_gfx::{Context, ShaderRegistry};
 use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::{Dependency, GlobalStateMap};
@@ -34,6 +34,7 @@ use mln_vec_map::{VecMap, VecSet};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, DynamicTextureAtlasPtr};
 use crate::image_manager::ImageManager;
+use crate::layer_group::{LayerGroup, LayerGroupPtr};
 use crate::layer_tweaker::LayerTweaker;
 use crate::layermanager;
 use crate::line_atlas::LineAtlas;
@@ -218,7 +219,7 @@ pub(crate) struct RenderOrchestrator {
     global_state: Option<Arc<GlobalStateMap>>,
 
     /// Ordered by layer index, and by insertion order within an index.
-    layer_groups_by_layer_index: VecMap<i32, Vec<LayerGroupBasePtr>>,
+    layer_groups_by_layer_index: VecMap<i32, Vec<LayerGroupPtr>>,
 
     /// The `layerTweakers` (weak pointers) each C++ `LayerGroupBase` holds,
     /// keyed by the layer group's id (see `change_request.rs`).
@@ -229,7 +230,7 @@ pub(crate) struct RenderOrchestrator {
     /// The tweaker of each debug layer group, with the group it was made
     /// for. The render items that fill the groups last one frame, so the
     /// orchestrator owns the tweakers (layers: debug).
-    debug_layer_tweakers: VecMap<DebugType, (LayerGroupBasePtr, Rc<RefCell<PolylineLayerTweaker>>)>,
+    debug_layer_tweakers: VecMap<DebugType, (LayerGroupPtr, Rc<RefCell<PolylineLayerTweaker>>)>,
 
     // dem-heatmap: `std::vector<RenderTargetPtr> renderTargets`.
     render_targets: Vec<crate::render_target::RenderTargetPtr>,
@@ -1069,8 +1070,8 @@ impl RenderOrchestrator {
         self.pending_changes.append(changes);
     }
 
-    pub(crate) fn update_layer_index(&mut self, layer_group: &LayerGroupBasePtr, new_index: i32) {
-        let current = layer_group.borrow().get_layer_index();
+    pub(crate) fn update_layer_index(&mut self, layer_group: &LayerGroupPtr, new_index: i32) {
+        let current = layer_group.borrow().layer_index;
         if current == new_index {
             return;
         }
@@ -1081,17 +1082,17 @@ impl RenderOrchestrator {
             if groups.is_empty() {
                 self.layer_groups_by_layer_index.remove(&current);
             }
-            layer_group.borrow_mut().update_layer_index(new_index);
+            layer_group.borrow_mut().layer_index = new_index;
             self.layer_groups_by_layer_index.entry(new_index).or_default().push(Rc::clone(layer_group));
             return;
         }
         // We're not tracking the layer, indicating that it's currently
         // disabled, so update it directly.
-        layer_group.borrow_mut().update_layer_index(new_index);
+        layer_group.borrow_mut().layer_index = new_index;
     }
 
-    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr) -> bool {
-        let index = layer_group.borrow().get_layer_index();
+    pub(crate) fn add_layer_group(&mut self, layer_group: LayerGroupPtr) -> bool {
+        let index = layer_group.borrow().layer_index;
         let groups = self.layer_groups_by_layer_index.entry(index).or_default();
         if groups.iter().any(|g| Rc::ptr_eq(g, &layer_group)) {
             false // not added
@@ -1101,8 +1102,8 @@ impl RenderOrchestrator {
         }
     }
 
-    pub(crate) fn remove_layer_group(&mut self, layer_group: &LayerGroupBasePtr) -> bool {
-        let index = layer_group.borrow().get_layer_index();
+    pub(crate) fn remove_layer_group(&mut self, layer_group: &LayerGroupPtr) -> bool {
+        let index = layer_group.borrow().layer_index;
         if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&index)
             && let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group))
         {
@@ -1120,19 +1121,19 @@ impl RenderOrchestrator {
     }
 
     /// The layer groups in multimap order (ascending layer index).
-    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
+    pub(crate) fn layer_groups(&self) -> Vec<LayerGroupPtr> {
         self.layer_groups_by_layer_index.values().flatten().cloned().collect()
     }
 
-    pub(crate) fn visit_layer_groups(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
+    pub(crate) fn visit_layer_groups(&self, mut f: impl FnMut(&mut LayerGroup)) {
         for group in self.layer_groups() {
-            f(&mut *group.borrow_mut());
+            f(&mut group.borrow_mut());
         }
     }
 
-    pub(crate) fn visit_layer_groups_reversed(&self, mut f: impl FnMut(&mut dyn LayerGroupBase)) {
+    pub(crate) fn visit_layer_groups_reversed(&self, mut f: impl FnMut(&mut LayerGroup)) {
         for group in self.layer_groups().into_iter().rev() {
-            f(&mut *group.borrow_mut());
+            f(&mut group.borrow_mut());
         }
     }
 
@@ -1148,7 +1149,7 @@ impl RenderOrchestrator {
         self.debug_layer_tweakers.retain(|type_, (group, _)| {
             let live = groups.get(type_).is_some_and(|g| Rc::ptr_eq(g, group));
             if !live {
-                group_tweakers.remove(&group.borrow().get_id());
+                group_tweakers.remove(&group.borrow().id);
             }
             live
         });
@@ -1158,27 +1159,27 @@ impl RenderOrchestrator {
             }
             let tweaker = Rc::new(RefCell::new(PolylineLayerTweaker::new(debug_line_properties(*type_))));
             let weak = Rc::downgrade(&tweaker);
-            self.layer_group_tweakers.entry(group.borrow().get_id()).or_default().push(weak);
+            self.layer_group_tweakers.entry(group.borrow().id).or_default().push(weak);
             self.debug_layer_tweakers.insert(*type_, (Rc::clone(group), tweaker));
         }
     }
 
     /// The debug layer groups, in `DebugType` order (`visitDebugLayerGroups`)
     /// (layers: debug).
-    pub(crate) fn debug_layer_groups(&self) -> Vec<LayerGroupBasePtr> {
+    pub(crate) fn debug_layer_groups(&self) -> Vec<LayerGroupPtr> {
         self.debug_layer_groups.values().cloned().collect()
     }
 
     /// Runs the live tweakers of the layer group and drops the expired ones.
-    pub(crate) fn run_tweakers(&mut self, layer_group: &LayerGroupBasePtr, parameters: &PaintParameters<'_>) {
-        let id = layer_group.borrow().get_id();
+    pub(crate) fn run_tweakers(&mut self, layer_group: &LayerGroupPtr, parameters: &PaintParameters<'_>) {
+        let id = layer_group.borrow().id;
         let Some(tweakers) = self.layer_group_tweakers.get_mut(&id) else {
             return;
         };
         let mut i = 0;
         while i < tweakers.len() {
             if let Some(tweaker) = tweakers[i].upgrade() {
-                tweaker.borrow_mut().execute(&mut *layer_group.borrow_mut(), parameters);
+                tweaker.borrow_mut().execute(&mut layer_group.borrow_mut(), parameters);
                 i += 1;
             } else {
                 tweakers.remove(i);
@@ -1262,15 +1263,15 @@ impl RenderOrchestrator {
         std::mem::take(&mut self.frame_rendered_features)
     }
 
-    pub(crate) fn get_sky_layer_group(&self) -> Option<LayerGroupBasePtr> {
+    pub(crate) fn get_sky_layer_group(&self) -> Option<LayerGroupPtr> {
         self.sky_pass.get_sky_layer_group().cloned()
     }
 
-    pub(crate) fn get_atmosphere_layer_group(&self) -> Option<LayerGroupBasePtr> {
+    pub(crate) fn get_atmosphere_layer_group(&self) -> Option<LayerGroupPtr> {
         self.sky_pass.get_atmosphere_layer_group().cloned()
     }
 
-    pub(crate) fn get_globe_depth_layer_group(&self) -> Option<LayerGroupBasePtr> {
+    pub(crate) fn get_globe_depth_layer_group(&self) -> Option<LayerGroupPtr> {
         self.globe_depth_pass.get_layer_group().cloned()
     }
 
@@ -1288,7 +1289,7 @@ impl RenderOrchestrator {
                     self.update_layer_index(&layer_group, new_index);
                 }
                 ChangeRequest::AddLayerTweaker(layer_group, tweaker) => {
-                    let id = layer_group.borrow().get_id();
+                    let id = layer_group.borrow().id;
                     self.layer_group_tweakers.entry(id).or_default().push(tweaker);
                 }
                 // dem-heatmap
