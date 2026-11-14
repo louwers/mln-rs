@@ -1005,6 +1005,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 
 [[package]]
+name = "etagere"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ecb5c40d5683a270e077688f53a99eac51c1cb1ae5ba63b55590370cb3536bf"
+dependencies = [
+ "euclid",
+]
+
+[[package]]
 name = "euclid"
 version = "0.22.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2455,7 +2464,6 @@ dependencies = [
  "mln-rs-polylabel",
  "mln-rs-renderer",
  "mln-rs-runtime",
- "mln-rs-shelf-pack",
  "mln-rs-sprite",
  "mln-rs-storage",
  "mln-rs-storage-offline",
@@ -2891,6 +2899,7 @@ version = "0.0.11"
 dependencies = [
  "bytemuck",
  "earcut",
+ "etagere",
  "geo-types",
  "geojson",
  "glam",
@@ -2906,7 +2915,6 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
- "mln-rs-shelf-pack",
  "mln-rs-sprite",
  "mln-rs-storage",
  "mln-rs-style",
@@ -2966,10 +2974,6 @@ dependencies = [
  "windows",
  "winit",
 ]
-
-[[package]]
-name = "mln-rs-shelf-pack"
-version = "0.0.11"
 
 [[package]]
 name = "mln-rs-sprite"

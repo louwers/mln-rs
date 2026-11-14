@@ -32,6 +32,7 @@ font-face-shaper = []
 [dependencies]
 bytemuck.workspace = true
 earcut.workspace = true
+etagere.workspace = true
 feature.workspace = true
 geo-types.workspace = true
 geometry.workspace = true
@@ -54,7 +55,6 @@ parking_lot.workspace = true
 polylabel.workspace = true
 postcard.workspace = true
 serde.workspace = true
-shelf_pack.workspace = true
 
 [dev-dependencies]
 geojson.workspace = true

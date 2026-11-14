@@ -127,11 +127,12 @@ fn updates() {
     assert!(pattern_atlas.get_pattern("one").is_none());
     assert!(pattern_atlas.add_pattern(&image_b).is_some());
 
+    // The atlas can pack the new image anywhere, not only in the space the
+    // removed one freed.
     let b = pattern_atlas.get_pattern("one").expect("one");
-    assert_eq!(1, b.tl()[0]);
-    assert_eq!(1, b.tl()[1]);
-    assert_eq!(6, b.br()[0]);
-    assert_eq!(6, b.br()[1]);
+    assert_eq!([5, 5], [b.br()[0] - b.tl()[0], b.br()[1] - b.tl()[1]]);
+    let atlas_size = pattern_atlas.get_pixel_size();
+    assert!(u32::from(b.br()[0]) < atlas_size.width && u32::from(b.br()[1]) < atlas_size.height);
     assert_eq!(5.0, b.display_size()[0]);
     assert_eq!(5.0, b.display_size()[1]);
     assert_eq!(1.0f32, b.pixel_ratio);

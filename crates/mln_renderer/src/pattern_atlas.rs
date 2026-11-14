@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
+use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
 use mln_gfx::UploadPass;
 use mln_gfx::texture2d::{Texture2DPtr, upload_image};
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use shelf_pack::{BinRef, ShelfPack, ShelfPackOptions};
 
 /// When copied into the atlas texture, image data is padded by one pixel on
 /// each side. Pattern images are padded with a copy of the image data
@@ -14,17 +14,13 @@ use shelf_pack::{BinRef, ShelfPack, ShelfPackOptions};
 /// `GL_LINEAR` texture sampling mode.
 const PADDING: u16 = 1;
 
-fn shelf_pack_options() -> ShelfPackOptions {
-    ShelfPackOptions { auto_resize: true }
-}
-
 struct Pattern {
-    bin: BinRef,
+    alloc_id: AllocId,
     position: ImagePosition,
 }
 
 pub(crate) struct PatternAtlas {
-    shelf_pack: ShelfPack,
+    allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
     atlas_texture_2d: Option<Texture2DPtr>,
@@ -41,7 +37,7 @@ impl PatternAtlas {
     #[must_use]
     pub(crate) fn new() -> Self {
         PatternAtlas {
-            shelf_pack: ShelfPack::new(64, 64, shelf_pack_options()),
+            allocator: BucketedAtlasAllocator::new(size2(64, 64)),
             patterns: HashMap::new(),
             atlas_image: PremultipliedImage::new(Size::new(0, 0)),
             atlas_texture_2d: None,
@@ -58,22 +54,17 @@ impl PatternAtlas {
         if self.patterns.contains_key(&image.id) {
             return None;
         }
-        let width = (image.image.size.width as u16).wrapping_add(PADDING * 2);
-        let height = (image.image.size.height as u16).wrapping_add(PADDING * 2);
+        let width = u16::try_from(image.image.size.width).ok()?.checked_add(PADDING * 2)?;
+        let height = u16::try_from(image.image.size.height).ok()?.checked_add(PADDING * 2)?;
 
-        let bin = self.shelf_pack.pack_one(-1, i32::from(width), i32::from(height))?;
+        let (alloc_id, bin) = self.allocate(width, height)?;
 
         let size = self.get_pixel_size();
         self.atlas_image.resize(size);
 
         let src = &image.image;
-        let (bx, by, bw, bh) = {
-            let b = self.shelf_pack.bin(bin);
-            (b.x, b.y, b.w, b.h)
-        };
-
-        let x = bx as u32 + u32::from(PADDING);
-        let y = by as u32 + u32::from(PADDING);
+        let x = u32::from(bin.x) + u32::from(PADDING);
+        let y = u32::from(bin.y) + u32::from(PADDING);
         let w = src.size.width;
         let h = src.size.height;
 
@@ -100,25 +91,55 @@ impl PatternAtlas {
 
         self.dirty = true;
 
-        let position = ImagePosition::new(RectU16 { x: bx as u16, y: by as u16, w: bw as u16, h: bh as u16 }, image, 0);
-        self.patterns.insert(image.id.clone(), Pattern { bin, position: position.clone() });
+        let position = ImagePosition::new(bin, image, 0);
+        self.patterns.insert(image.id.clone(), Pattern { alloc_id, position: position.clone() });
         Some(position)
     }
 
     pub(crate) fn remove_pattern(&mut self, id: &str) {
         if let Some(pattern) = self.patterns.remove(id) {
             // Clear pattern from the atlas image.
-            let b = self.shelf_pack.bin(pattern.bin);
-            let (x, y, w, h) = (b.x as u32, b.y as u32, b.w as u32, b.h as u32);
-            let _ = PremultipliedImage::clear(&mut self.atlas_image, Point::new(x, y), Size::new(w, h));
+            let b = pattern.position.padded_rect;
+            let _ = PremultipliedImage::clear(
+                &mut self.atlas_image,
+                Point::new(u32::from(b.x), u32::from(b.y)),
+                Size::new(u32::from(b.w), u32::from(b.h)),
+            );
 
-            self.shelf_pack.unref(pattern.bin);
+            self.allocator.deallocate(pattern.alloc_id);
         }
     }
 
     #[must_use]
     pub(crate) fn get_pixel_size(&self) -> Size {
-        Size::new(self.shelf_pack.width() as u32, self.shelf_pack.height() as u32)
+        let size = self.allocator.size();
+        Size::new(size.width as u32, size.height as u32)
+    }
+
+    /// Allocates a `width` × `height` bin, growing the atlas until it fits:
+    /// each step doubles the shorter side (the width when they're equal),
+    /// or grows a side the bin is longer than to twice the bin's. The bin is
+    /// at the corner of its allocation, which can be larger.
+    fn allocate(&mut self, width: u16, height: u16) -> Option<(AllocId, RectU16)> {
+        let (w, h) = (i32::from(width), i32::from(height));
+        loop {
+            if let Some(allocation) = self.allocator.allocate(size2(w, h)) {
+                let min = allocation.rectangle.min;
+                return Some((allocation.id, RectU16 { x: min.x as u16, y: min.y as u16, w: width, h: height }));
+            }
+            let size = self.allocator.size();
+            let mut grown = size;
+            if size.width <= size.height || w > size.width {
+                grown.width = w.max(size.width) * 2;
+            }
+            if size.height < size.width || h > size.height {
+                grown.height = h.max(size.height) * 2;
+            }
+            if grown.width >= i32::from(u16::MAX) || grown.height >= i32::from(u16::MAX) {
+                return None;
+            }
+            self.allocator.grow(grown);
+        }
     }
 
     /// Uploads the atlas image to its texture.
