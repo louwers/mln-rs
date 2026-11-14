@@ -306,6 +306,39 @@ fn cache_operations_change_what_the_ambient_cache_serves() {
     wait(runtime.release());
 }
 
+#[test]
+fn cache_settings_sent_before_the_first_map_reach_its_requests() {
+    let server = MockServer::start();
+    let style = server.mock(|when, then| {
+        when.method("GET").path("/style.json");
+        then.status(200).header("Cache-Control", "max-age=3600").body(EMPTY_STYLE);
+    });
+    let dir = TempDir::new();
+    let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
+    let runtime = Runtime::new(&options).unwrap();
+    // A cache of no size keeps nothing while the database has no regions.
+    wait(runtime.set_maximum_ambient_cache_size(0));
+    assert_eq!(0, wait(runtime.offline().regions()).len());
+    let map = map(&runtime);
+    wait(map.set_style_url(server.url("/style.json")));
+    wait(map.set_style_url(server.url("/style.json")));
+    assert_eq!(2, style.calls());
+    wait(map.release());
+    wait(runtime.release());
+}
+
+#[test]
+fn a_runtime_without_maps_runs_cache_and_offline_calls_and_releases() {
+    let untouched = runtime();
+    wait(untouched.release());
+
+    let runtime = runtime();
+    assert_eq!(0, wait(runtime.offline().regions()).len());
+    wait(runtime.set_maximum_ambient_cache_size(1 << 20));
+    wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Clear));
+    wait(runtime.release());
+}
+
 /// A provider that holds the thread that drops it, the runtime's, until its
 /// gate opens.
 struct Gate {

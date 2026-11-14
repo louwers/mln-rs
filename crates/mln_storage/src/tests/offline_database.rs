@@ -1427,6 +1427,21 @@ fn incremental_vacuum() {
     check_log_empty(&log);
 }
 
+#[test]
+fn a_new_database_vacuums_incrementally() {
+    let log = FixtureLog::new();
+    let filename = filename();
+    delete_database_files(&filename);
+    // An empty file, as a runtime creates for its cache path.
+    std::fs::File::create(&*filename).unwrap();
+
+    drop(OfflineDatabase::new(&filename));
+
+    assert_eq!(2, database_auto_vacuum(&filename));
+    assert_eq!(6, database_user_version(&filename));
+    check_log_empty(&log);
+}
+
 // gtest: OfflineDatabase.DowngradeSchema
 #[test]
 fn downgrade_schema() {

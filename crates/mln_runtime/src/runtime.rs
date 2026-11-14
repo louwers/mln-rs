@@ -1,7 +1,7 @@
 //! A runtime: the thread that its maps live on, and the file sources, cache
 //! and offline regions that they share.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -260,12 +260,13 @@ pub(crate) struct RuntimeCore {
     hooks: Arc<ResourceHooks>,
     file_sources: FileSourceManager,
     resource_options: ResourceOptions,
-    /// The runtime's file sources, held for its life so that each map, and
-    /// each transform, finds the same ones.
-    _loader: Option<Arc<dyn FileSource>>,
-    #[cfg_attr(target_family = "wasm", expect(dead_code, reason = "the browser build has no database"))]
-    database: Option<Arc<dyn FileSource>>,
-    network: Option<Arc<dyn FileSource>>,
+    /// The runtime's file sources, made at their first use and held for the
+    /// runtime's life, so that each map, and each transform, finds the same
+    /// ones. A runtime that never loads a resource starts none of their
+    /// threads.
+    loader: OnceCell<Option<Arc<dyn FileSource>>>,
+    database: OnceCell<Option<Arc<dyn FileSource>>>,
+    network: OnceCell<Option<Arc<dyn FileSource>>>,
     pub(crate) run_loop: RunLoopHandle,
     /// [`RuntimeShared::queued`].
     queued: Arc<AtomicUsize>,
@@ -286,18 +287,15 @@ impl RuntimeCore {
                 Arc::new(ProviderFileSource::new(options, Arc::clone(&network_hooks)))
             }),
         );
-        let network = file_sources.get_file_source(FileSourceType::Network, &resource_options);
-        let database = file_sources.get_file_source(FileSourceType::Database, &resource_options);
-        let loader = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         RuntimeCore {
             maps: BTreeMap::new(),
             event_handler: None,
             hooks,
             file_sources,
             resource_options,
-            _loader: loader,
-            database,
-            network,
+            loader: OnceCell::new(),
+            database: OnceCell::new(),
+            network: OnceCell::new(),
             run_loop,
             queued,
             burst_left: 0,
@@ -338,8 +336,23 @@ impl RuntimeCore {
         }
     }
 
+    /// The manager that a map takes its file sources from, with the
+    /// runtime's file sources made.
     pub(crate) fn file_sources(&self) -> (&FileSourceManager, &ResourceOptions) {
+        self.file_source(&self.network, FileSourceType::Network);
+        self.file_source(&self.database, FileSourceType::Database);
+        self.file_source(&self.loader, FileSourceType::ResourceLoader);
         (&self.file_sources, &self.resource_options)
+    }
+
+    /// The runtime's file source of `type_` that `cell` holds, made at the
+    /// first call.
+    fn file_source<'a>(
+        &self,
+        cell: &'a OnceCell<Option<Arc<dyn FileSource>>>,
+        type_: FileSourceType,
+    ) -> Option<&'a Arc<dyn FileSource>> {
+        cell.get_or_init(|| self.file_sources.get_file_source(type_, &self.resource_options)).as_ref()
     }
 
     /// Sends `events` to the event handler.
@@ -355,14 +368,14 @@ impl RuntimeCore {
     /// The cache database, which every runtime but the browser build's has.
     #[cfg(not(target_family = "wasm"))]
     pub(crate) fn database(&self) -> Result<&DatabaseFileSource, Error> {
-        self.database
-            .as_ref()
+        self.file_source(&self.database, FileSourceType::Database)
             .and_then(|database| database.downcast_ref::<DatabaseFileSource>())
             .ok_or_else(|| Error::unsupported("the runtime has no cache database"))
     }
 
     fn network(&self) -> Result<&Arc<dyn FileSource>, Error> {
-        self.network.as_ref().ok_or_else(|| Error::unsupported("the runtime has no network file source"))
+        self.file_source(&self.network, FileSourceType::Network)
+            .ok_or_else(|| Error::unsupported("the runtime has no network file source"))
     }
 }
 

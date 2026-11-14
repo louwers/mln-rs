@@ -506,9 +506,14 @@ impl OfflineDatabase {
         if self.get_pragma_i64("PRAGMA auto_vacuum")? == 2 {
             self.get_db()?.exec("PRAGMA incremental_vacuum")?;
         } else {
+            // A database without pages, such as a new one in memory, takes
+            // the setting with its first table, and has nothing to vacuum.
+            let empty = self.get_pragma_i64("PRAGMA page_count")? == 0;
             let db = self.get_db()?;
             db.exec("PRAGMA auto_vacuum = INCREMENTAL")?;
-            db.exec("VACUUM")?;
+            if !empty {
+                db.exec("VACUUM")?;
+            }
         }
         Ok(())
     }

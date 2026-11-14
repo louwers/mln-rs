@@ -133,6 +133,7 @@ pub fn all() -> Vec<Case> {
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
     cases.push(Case::new("Style/Replace600", style_replace));
+    cases.push(Case::new("Runtime/Lifecycle", runtime_lifecycle));
     cases.push(Case::new("Load/Concurrent", load_concurrent));
     cases.push(Case::new("Load/GlyphCache/Private", |cx| load_glyph_cache(cx, false)));
     cases.push(Case::new("Load/GlyphCache/Shared", |cx| load_glyph_cache(cx, true)));
@@ -958,4 +959,17 @@ fn style_replace(cx: &Context) -> Metrics {
     let mut metrics = meter.finish();
     metrics.lead("load_json_cpu_ms", median(&load_json));
     metrics
+}
+
+/// Starting a runtime with the default options and releasing it, as
+/// maplibre-native-ffi's Runtime/Lifecycle does through the C API.
+fn runtime_lifecycle(cx: &Context) -> Metrics {
+    let mut meter = Meter::new();
+    for _ in 0..cx.iterations(50) {
+        meter.time(|| {
+            let runtime = mln_runtime::Runtime::new(&mln_runtime::RuntimeOptions::default()).expect("a runtime");
+            runtime.release().expect("a release").wait().expect("the release");
+        });
+    }
+    meter.finish()
 }
