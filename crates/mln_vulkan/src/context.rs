@@ -30,6 +30,7 @@ use ash::vk;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::shader_group::StringIDSetsPair;
@@ -38,7 +39,7 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
+use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -48,6 +49,7 @@ use crate::command_encoder::CommandEncoder;
 use crate::descriptor_set::{DescriptorPoolGrowable, ImageBinding, UniformDescriptorSet};
 use crate::device::Device;
 use crate::drawable_builder::DrawableBuilder;
+use crate::gpu::VulkanGpu;
 use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
 use crate::render_pass::RenderPass;
@@ -61,7 +63,6 @@ use crate::shaders::shader_source::GlslShaderSource;
 use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
-use crate::uniform_buffer::UniformBuffer;
 
 const GLOBAL_DESCRIPTOR_POOL_SIZE: u32 = 2;
 const LAYER_DESCRIPTOR_POOL_SIZE: u32 = 2 * 256;
@@ -103,7 +104,10 @@ pub struct Context {
     backend: Rc<BackendImpl>,
     weak_self: Weak<Context>,
 
-    global_uniform_buffers: RefCell<UniformBufferArray>,
+    /// The `Gpu` the renderer's uniform buffers belong to. A frame's
+    /// submission comes after its writes, and the buffers the renderer
+    /// drops go after the frame's submission.
+    gpu: RefCell<VulkanGpu>,
     global_descriptor_set: RefCell<Option<UniformDescriptorSet>>,
     descriptor_pools: RefCell<[DescriptorPoolGrowable; DescriptorSetType::COUNT]>,
 
@@ -231,11 +235,12 @@ impl Context {
             DescriptorPoolGrowable::new(DRAWABLE_IMAGE_DESCRIPTOR_POOL_SIZE, 0, 0, IMAGE_TEXTURE_COUNT as u32),
         ];
 
+        let gpu = VulkanGpu::on(Rc::clone(&backend)).map_err(|error| error.to_string())?;
         let context = Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
             weak_self: Weak::clone(weak),
-            global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
+            gpu: RefCell::new(gpu),
             global_descriptor_set: RefCell::new(None),
             descriptor_pools: RefCell::new(descriptor_pools),
             dummy_buffer: RefCell::new(None),
@@ -350,7 +355,8 @@ impl Context {
         self.frame_recording.set(false);
 
         *self.global_descriptor_set.borrow_mut() = None;
-        *self.global_uniform_buffers.borrow_mut() = UniformBufferArray::new();
+        *self.mutable_global_uniform_buffers() = UniformBufferArray::new();
+        self.destroy_released();
         *self.dummy_buffer.borrow_mut() = None;
         *self.dummy_texture.borrow_mut() = None;
 
@@ -393,6 +399,11 @@ impl Context {
                 device.destroy_descriptor_set_layout(layout, None);
             }
         }
+    }
+
+    /// The `Gpu` the renderer's uniform buffers belong to.
+    pub(crate) fn vulkan_gpu(&self) -> Ref<'_, VulkanGpu> {
+        self.gpu.borrow()
     }
 
     /// Runs `function` when the frame being recorded, or the last one, is
@@ -625,10 +636,15 @@ impl Context {
             if device.reset_fences(&[fence]).is_err() {
                 Log::error(Event::Render, "Reset fence failed");
             }
+            // The writes the frame's commands read go first.
+            if let Err(error) = self.gpu.borrow_mut().submit(&[]) {
+                Log::error(Event::Render, format!("Submitting the frame's writes failed: {error}"));
+            }
             if self.backend.submit(&[submit_info], fence).is_err() {
                 Log::error(Event::Render, "Submitting the frame failed");
             }
         }
+        self.destroy_released();
 
         // Present rendered frame.
         if let (Some(surface), Some((_, present))) = (&surface, &semaphores) {
@@ -1105,8 +1121,8 @@ impl GfxContext for Context {
         Box::new(DrawableBuilder::new())
     }
 
-    fn create_uniform_buffer(&self, data: &[u8], persistent: bool, ssbo: bool) -> UniformBufferPtr {
-        Rc::new(UniformBuffer::create(self, data, persistent, ssbo))
+    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
+        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
     }
 
     fn get_generic_shader(
@@ -1136,29 +1152,6 @@ impl GfxContext for Context {
         self.create_vulkan_texture_2d()
     }
 
-    fn emplace_or_update_uniform_buffer(
-        &self,
-        ptr: &mut Option<UniformBufferPtr>,
-        data: &[u8],
-        persistent: bool,
-    ) -> bool {
-        if let Some(buffer) = ptr {
-            buffer.update(data);
-            false
-        } else {
-            *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-            true
-        }
-    }
-
-    fn get_global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow()
-    }
-
-    fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray> {
-        self.global_uniform_buffers.borrow_mut()
-    }
-
     fn bind_global_uniform_buffers(&self, render_pass: &dyn mln_gfx::render_pass::RenderPass) {
         let Some(render_pass) = render_pass.downcast_ref::<RenderPass>() else {
             return;
@@ -1166,7 +1159,7 @@ impl GfxContext for Context {
         let mut descriptor_set = self.global_descriptor_set.borrow_mut();
         let descriptor_set =
             descriptor_set.get_or_insert_with(|| UniformDescriptorSet::new(self, DescriptorSetType::Global));
-        descriptor_set.bind(self, render_pass.get_command_buffer(), &self.global_uniform_buffers.borrow());
+        descriptor_set.bind(self, render_pass.get_command_buffer(), &self.global_uniform_buffers());
     }
 
     fn unbind_global_uniform_buffers(&self, _render_pass: &dyn mln_gfx::render_pass::RenderPass) {}

@@ -4,12 +4,15 @@
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
+use std::rc::Rc;
 
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::backend::Type as BackendType;
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::UniqueDrawableBuilder;
+use crate::gpu::Gpu;
 use crate::offscreen_texture::OffscreenTexture;
 use crate::projection_variant::ProjectionVariant;
 use crate::render_pass::RenderPass;
@@ -19,13 +22,24 @@ use crate::shader_registry::ShaderRegistry;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 use crate::texture2d::Texture2DPtr;
 use crate::types::TextureChannelDataType;
-use crate::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
+use crate::uniform_buffer::{Released, UniformBuffer, UniformBufferArray, UniformBufferPtr};
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
 /// The data members of `gfx::Context`.
 #[derive(Default)]
 pub struct ContextBase {
     stats: RefCell<RenderingStats>,
+    global_uniform_buffers: RefCell<UniformBufferArray>,
+    released: Rc<Released>,
+}
+
+impl ContextBase {
+    /// The data of a context whose dropped buffers go to `released`: a
+    /// queue that outlives the context where its `Gpu` does.
+    #[must_use]
+    pub fn new(released: Rc<Released>) -> ContextBase {
+        ContextBase { released, ..ContextBase::default() }
+    }
 }
 
 pub trait Context: Any {
@@ -57,7 +71,39 @@ pub trait Context: Any {
 
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr;
     fn create_drawable_builder(&self) -> UniqueDrawableBuilder;
-    fn create_uniform_buffer(&self, data: &[u8], persistent: bool, ssbo: bool) -> UniformBufferPtr;
+
+    /// The backend's [`Gpu`], which owns the renderer's uniform buffers.
+    fn gpu(&self) -> RefMut<'_, dyn Gpu>;
+
+    /// A uniform buffer holding `data`, or `None` if the backend can't make
+    /// one.
+    fn create_uniform_buffer(&self, data: &[u8]) -> Option<UniformBufferPtr> {
+        create_buffer(self, data, false)
+    }
+
+    /// A storage buffer holding `data`, or `None` if the backend can't make
+    /// one.
+    fn create_storage_buffer(&self, data: &[u8]) -> Option<UniformBufferPtr> {
+        create_buffer(self, data, true)
+    }
+
+    /// Writes `data` to the uniform buffer in `slot`, first making one if
+    /// the slot has none or `data` doesn't fit in it.
+    fn write_uniform_buffer(&self, slot: &mut Option<UniformBufferPtr>, data: &[u8]) {
+        write_buffer(self, slot, data, false);
+    }
+
+    /// Writes `data` to the storage buffer in `slot`, first making one if
+    /// the slot has none or `data` doesn't fit in it.
+    fn write_storage_buffer(&self, slot: &mut Option<UniformBufferPtr>, data: &[u8]) {
+        write_buffer(self, slot, data, true);
+    }
+
+    /// Destroys the buffers the renderer dropped. A backend calls this once
+    /// the commands that may use them are submitted.
+    fn destroy_released(&self) {
+        self.context_base().released.destroy(&mut *self.gpu(), &mut self.rendering_stats());
+    }
     fn get_generic_shader(
         &self,
         registry: &ShaderRegistry,
@@ -73,18 +119,33 @@ pub trait Context: Any {
     fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr>;
     fn create_texture_2d(&self) -> Texture2DPtr;
 
-    /// Creates the buffer if `ptr` is empty (returns true), else updates it.
-    fn emplace_or_update_uniform_buffer(
-        &self,
-        ptr: &mut Option<UniformBufferPtr>,
-        data: &[u8],
-        persistent: bool,
-    ) -> bool;
-
-    fn get_global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray>;
-    fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray>;
+    /// The buffers every drawable binds, at the ids they bind at.
+    fn global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray> {
+        self.context_base().global_uniform_buffers.borrow()
+    }
+    fn mutable_global_uniform_buffers(&self) -> RefMut<'_, UniformBufferArray> {
+        self.context_base().global_uniform_buffers.borrow_mut()
+    }
     fn bind_global_uniform_buffers(&self, render_pass: &dyn RenderPass);
     fn unbind_global_uniform_buffers(&self, render_pass: &dyn RenderPass);
+}
+
+fn create_buffer<C: Context + ?Sized>(context: &C, data: &[u8], storage: bool) -> Option<UniformBufferPtr> {
+    let released = &context.context_base().released;
+    let created = UniformBuffer::create(&mut *context.gpu(), released, &mut context.rendering_stats(), data, storage);
+    created.inspect_err(|error| Log::error(Event::Render, format!("Making a buffer failed: {error}"))).ok()
+}
+
+fn write_buffer<C: Context + ?Sized>(context: &C, slot: &mut Option<UniformBufferPtr>, data: &[u8], storage: bool) {
+    let fits = |buffer: &&UniformBufferPtr| buffer.is_storage() == storage && buffer.size() >= data.len();
+    let Some(buffer) = slot.as_ref().filter(fits) else {
+        *slot = create_buffer(context, data, storage);
+        return;
+    };
+    let written = buffer.write(&mut *context.gpu(), &mut context.rendering_stats(), data);
+    if let Err(error) = written {
+        Log::error(Event::Render, format!("Writing a buffer failed: {error}"));
+    }
 }
 
 impl dyn Context {
@@ -94,12 +155,9 @@ impl dyn Context {
         any.downcast_ref()
     }
 
-    /// `emplace_or_update_uniform_buffer` with the bytes of a `Pod` UBO.
-    pub fn emplace_or_update_uniform_buffer_pod<T: bytemuck::Pod>(
-        &self,
-        ptr: &mut Option<UniformBufferPtr>,
-        data: &T,
-    ) -> bool {
-        self.emplace_or_update_uniform_buffer(ptr, bytemuck::bytes_of(data), false)
+    /// [`write_uniform_buffer`](Context::write_uniform_buffer) with the bytes
+    /// of a `Pod` UBO.
+    pub fn write_uniform_buffer_pod<T: bytemuck::Pod>(&self, slot: &mut Option<UniformBufferPtr>, data: &T) {
+        self.write_uniform_buffer(slot, bytemuck::bytes_of(data));
     }
 }

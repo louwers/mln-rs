@@ -10,7 +10,7 @@
 //!   (C++: `MLN_UBO_CONSOLIDATION`, which its OpenGL build leaves off).
 //!   OpenGL ES 3.0 has no storage buffers to index in the shader, so a
 //!   drawable binds its element of that buffer as the uniform block
-//!   (`uniform_buffer::UniformBuffer`).
+//!   (`GlGpu::uniform_block_range`).
 //! - Scissor rectangles arrive with a top-left origin and are flipped here.
 //!
 //! The GLSL comes from the C++ headers, with the port's changes
@@ -33,7 +33,8 @@
 //! buffers, that it allocates.
 //!
 //! A `GlGpu` draws through the `mln_gfx::gpu::Gpu` interface instead, on a
-//! context of its own in a device's share group.
+//! context of its own in a device's share group. A backend's context hosts
+//! one too, which owns the renderer's uniform buffers.
 
 #![expect(unsafe_code, reason = "OpenGL through glow is the FFI here")]
 
@@ -44,6 +45,7 @@ mod draw_target;
 mod drawable;
 mod drawable_builder;
 mod enums;
+mod gpu;
 mod layer_group;
 mod offscreen_texture;
 mod render_pass;
@@ -52,7 +54,6 @@ mod shaders;
 mod state;
 mod texture2d;
 mod types;
-mod uniform_buffer;
 mod upload_pass;
 mod vertex_array;
 mod vertex_buffer_resource;
@@ -67,8 +68,6 @@ mod device;
 mod egl;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod exported_target;
-#[cfg(not(target_arch = "wasm32"))]
-mod gpu;
 #[cfg(not(target_arch = "wasm32"))]
 mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple")))]
@@ -87,7 +86,6 @@ pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use exported_target::ExportedTarget;
-#[cfg(not(target_arch = "wasm32"))]
 pub use gpu::GlGpu;
 #[cfg(not(target_arch = "wasm32"))]
 pub use offscreen_target::OffscreenTarget;

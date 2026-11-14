@@ -292,6 +292,11 @@ impl MetalGpu {
         self.retire();
     }
 
+    /// The Metal buffer of `buffer`.
+    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<&ProtocolObject<dyn MTLBuffer>> {
+        self.buffers.get(buffer).map(|buffer| &**buffer)
+    }
+
     fn buffer(&self, id: BufferId) -> Result<&ProtocolObject<dyn MTLBuffer>, GpuError> {
         self.buffers.get(id).map(|buffer| &**buffer).ok_or(GpuError::UnknownId("buffer"))
     }

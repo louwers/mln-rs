@@ -238,10 +238,10 @@ fn tweak(context: &dyn Context, layer_group: &LayerGroupBasePtr, bg: &Background
         i += 1;
     });
     let drawable_uniform_buffer: UniformBufferPtr =
-        context.create_uniform_buffer(bytemuck::cast_slice(&drawable_ubo_vector), false, true);
+        context.create_storage_buffer(bytemuck::cast_slice(&drawable_ubo_vector)).expect("a storage buffer");
     group.mutable_uniform_buffers().set(ID_BACKGROUND_DRAWABLE_UBO, Some(drawable_uniform_buffer));
     let projection_uniform_buffer: UniformBufferPtr =
-        context.create_uniform_buffer(bytemuck::cast_slice(&projection_ubo_vector), false, true);
+        context.create_storage_buffer(bytemuck::cast_slice(&projection_ubo_vector)).expect("a storage buffer");
     group.mutable_uniform_buffers().set(ID_PROJECTION_UBO, Some(projection_uniform_buffer));
 }
 

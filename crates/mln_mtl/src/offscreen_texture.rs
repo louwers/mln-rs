@@ -161,6 +161,7 @@ impl OffscreenTextureResource {
                 self.readback_current.set(copied);
                 *self.readback_copy.borrow_mut() = copied.then(|| command_buffer.clone());
             }
+            self.context.get_backend().flush_writes();
             command_buffer.commit();
         }
         self.render_pass_descriptor.borrow_mut().take();

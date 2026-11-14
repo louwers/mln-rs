@@ -310,12 +310,9 @@ impl Scene {
             (ID_BACKGROUND_DRAWABLE_UBO, bytemuck::cast_slice::<_, u8>(&drawable)),
             (ID_PROJECTION_UBO, bytemuck::cast_slice::<_, u8>(&projection)),
         ] {
-            match buffers.get(id) {
-                Some(buffer) => buffer.update(data),
-                None => {
-                    buffers.set(id, Some(context.create_uniform_buffer(data, false, true)));
-                }
-            }
+            let mut buffer = buffers.get(id).cloned();
+            context.write_storage_buffer(&mut buffer, data);
+            buffers.set(id, buffer);
         }
     }
 }

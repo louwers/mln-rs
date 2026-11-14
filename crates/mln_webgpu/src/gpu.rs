@@ -17,6 +17,28 @@ use crate::Device;
 use crate::bind_groups::IndexTable;
 use crate::shaders::shader_group;
 use crate::shaders::shader_program::{BindingInfo, BindingType, ShaderProgram, validated};
+use crate::writes::Writes;
+
+/// The size of the buffers that small uniform and storage buffers share.
+const UNIFORM_PAGE: u64 = 16 << 10;
+
+/// The alignment of a small uniform or storage buffer in its page: WebGPU's
+/// largest allowed `minUniformBufferOffsetAlignment`, so an offset any
+/// device binds.
+const UNIFORM_ALIGNMENT: u64 = 256;
+
+/// A buffer, or the part of a shared page that a small uniform or storage
+/// buffer takes.
+struct Buffer {
+    buffer: wgpu::Buffer,
+    /// Where the buffer starts in `buffer`.
+    offset: u64,
+    size: u64,
+    /// Of a buffer in a page, the end of the bytes written so far: those
+    /// after it still hold the zeros it was made with. `None` for a buffer
+    /// of its own.
+    written: Option<u64>,
+}
 
 struct Texture {
     texture: wgpu::Texture,
@@ -53,13 +75,21 @@ struct NativeGroupKey {
 /// binds their resources and kept until one of the resources is destroyed.
 /// `globalIndex` is a dynamic offset into a table of indices.
 ///
+/// Small uniform and storage buffers share larger buffers, so that buffers
+/// made together sit together and their writes join one copy. Writes are
+/// gathered and copied into place ahead of the next submit's passes.
+///
 /// On a browser's WebGPU, a `create_*` call returns before the browser
 /// validates it, so a rejected descriptor reaches the device's
 /// uncaptured-error callback instead of the call's result.
 pub struct WebGpu {
     device: Device,
     index_table: IndexTable,
-    buffers: SlotMap<BufferId, wgpu::Buffer>,
+    buffers: SlotMap<BufferId, Buffer>,
+    /// The page that small uniform and storage buffers are taken from, and
+    /// how many of its bytes are taken.
+    uniform_page: Option<(wgpu::Buffer, u64)>,
+    writes: Writes,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, wgpu::Sampler>,
     shaders: HashMap<ShaderKey, Rc<ShaderProgram>>,
@@ -75,6 +105,8 @@ impl WebGpu {
             index_table: IndexTable::new(device.device()),
             device: device.clone(),
             buffers: SlotMap::with_key(),
+            uniform_page: None,
+            writes: Writes::default(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
             shaders: HashMap::new(),
@@ -95,6 +127,78 @@ impl WebGpu {
     #[cfg(test)]
     pub(crate) fn texture(&self, texture: TextureId) -> Option<&wgpu::Texture> {
         self.textures.get(texture).map(|texture| &texture.texture)
+    }
+
+    /// The wgpu buffer that holds `buffer`, and where in it and how many
+    /// bytes `buffer` takes.
+    pub(crate) fn native_buffer(&self, buffer: BufferId) -> Option<(&wgpu::Buffer, u64, u64)> {
+        self.buffers.get(buffer).map(|entry| (&entry.buffer, entry.offset, entry.size))
+    }
+
+    /// Writes `data` at `offset` in `buffer`, a buffer made elsewhere, with
+    /// the writes to this backend's buffers.
+    pub(crate) fn write_native(&mut self, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
+        self.writes.write(self.device.device(), self.device.queue(), buffer, offset, data);
+    }
+
+    /// Writes the bytes of `data` at `offset` in `buffer`, a buffer made
+    /// elsewhere, straight from the JS array they're in
+    /// (`Writes::write_from_host`). `offset` is a multiple of 4; a length
+    /// that isn't is padded with zeros.
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn write_native_from_host(
+        &mut self,
+        buffer: &wgpu::Buffer,
+        offset: u64,
+        data: &mln_util::host_bytes::HostBytes,
+    ) {
+        let (device, queue) = (self.device.device(), self.device.queue());
+        let len = data.len() as u64;
+        let aligned = len & !(wgpu::COPY_BUFFER_ALIGNMENT - 1);
+        self.writes.write_from_host(device, queue, buffer, offset, data, aligned);
+        if aligned < len
+            && let Some(array) = data.array()
+        {
+            // writeBuffer takes whole 4-byte words.
+            let mut tail = [0u8; wgpu::COPY_BUFFER_ALIGNMENT as usize];
+            array.subarray(aligned as u32, len as u32).copy_to(&mut tail[..(len - aligned) as usize]);
+            self.writes.write(device, queue, buffer, offset + aligned, &tail);
+        }
+    }
+
+    /// Submits `command_buffer` after the copies of the writes made so far.
+    pub(crate) fn submit_native(&mut self, command_buffer: wgpu::CommandBuffer) {
+        let writes = self.writes.encode(self.device.device(), self.device.queue());
+        self.device.queue().submit(writes.into_iter().chain([command_buffer]));
+    }
+
+    /// `size` bytes of a page that small uniform and storage buffers share,
+    /// zero filled: the page and their offset in it.
+    fn allocate_uniform(&mut self, size: u64) -> Result<(wgpu::Buffer, u64), GpuError> {
+        let size = size.next_multiple_of(UNIFORM_ALIGNMENT);
+        let (page, taken) = match &mut self.uniform_page {
+            Some((page, taken)) if *taken + size <= UNIFORM_PAGE => (page.clone(), taken),
+            _ => {
+                let page = self.create_uniform_buffer("uniform page", UNIFORM_PAGE)?;
+                let (page, taken) = self.uniform_page.insert((page, 0));
+                (page.clone(), taken)
+            }
+        };
+        let offset = *taken;
+        *taken += size;
+        Ok((page, offset))
+    }
+
+    /// A buffer that binds as a uniform or a storage buffer.
+    fn create_uniform_buffer(&self, label: &str, size: u64) -> Result<wgpu::Buffer, GpuError> {
+        self.validated(label, |device| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        })
     }
 
     /// Runs `create` in a validation error scope, as the error of the call
@@ -163,11 +267,14 @@ impl WebGpu {
         let mut entries = Vec::with_capacity(key.resources.len());
         for &(binding, resource) in &key.resources {
             let resource = match resource {
-                NativeResource::Buffer(buffer, offset, size) => wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?,
-                    offset,
-                    size: wgpu::BufferSize::new(size),
-                }),
+                NativeResource::Buffer(buffer, offset, size) => {
+                    let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+                    wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &entry.buffer,
+                        offset: entry.offset + offset,
+                        size: wgpu::BufferSize::new(size),
+                    })
+                }
                 NativeResource::Sampler(sampler) => {
                     wgpu::BindingResource::Sampler(self.samplers.get(sampler).ok_or(GpuError::UnknownId("sampler"))?)
                 }
@@ -285,12 +392,13 @@ impl WebGpu {
                     groups_dirty = true;
                 }
                 RenderCommand::SetVertexBuffer { slot, buffer, offset } => {
-                    let buffer = self.buffers.get(*buffer).ok_or(GpuError::UnknownId("buffer"))?;
-                    render_pass.set_vertex_buffer(*slot, buffer.slice(*offset..));
+                    let entry = self.buffers.get(*buffer).ok_or(GpuError::UnknownId("buffer"))?;
+                    render_pass.set_vertex_buffer(*slot, entry.buffer.slice(entry.offset + offset..));
                 }
                 RenderCommand::SetIndexBuffer { buffer, offset } => {
-                    let buffer = self.buffers.get(*buffer).ok_or(GpuError::UnknownId("buffer"))?;
-                    render_pass.set_index_buffer(buffer.slice(*offset..), wgpu::IndexFormat::Uint16);
+                    let entry = self.buffers.get(*buffer).ok_or(GpuError::UnknownId("buffer"))?;
+                    let slice = entry.buffer.slice(entry.offset + offset..);
+                    render_pass.set_index_buffer(slice, wgpu::IndexFormat::Uint16);
                 }
                 RenderCommand::SetViewport(viewport) => render_pass.set_viewport(
                     viewport.x,
@@ -476,26 +584,49 @@ impl Gpu for WebGpu {
     }
 
     fn create_buffer(&mut self, desc: &BufferDesc<'_>) -> Result<BufferId, GpuError> {
+        let size = desc.size.next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
         let usage = match desc.usage {
             BufferUsage::Vertex => wgpu::BufferUsages::VERTEX,
             BufferUsage::Index => wgpu::BufferUsages::INDEX,
-            BufferUsage::Uniform => wgpu::BufferUsages::UNIFORM,
-            BufferUsage::Storage => wgpu::BufferUsages::STORAGE,
+            BufferUsage::Uniform | BufferUsage::Storage => {
+                let (buffer, offset, written) = if size <= UNIFORM_PAGE / 4 {
+                    let (page, offset) = self.allocate_uniform(size)?;
+                    (page, offset, Some(0))
+                } else {
+                    (self.create_uniform_buffer(desc.label, size)?, 0, None)
+                };
+                return Ok(self.buffers.insert(Buffer { buffer, offset, size, written }));
+            }
         };
         let buffer = self.validated(desc.label, |device| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(desc.label),
-                size: desc.size.next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT),
+                size,
                 usage: usage | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
         })?;
-        Ok(self.buffers.insert(buffer))
+        Ok(self.buffers.insert(Buffer { buffer, offset: 0, size, written: None }))
     }
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
-        let buffer = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
-        self.device.queue().write_buffer(buffer, offset, data);
+        let entry = self.buffers.get_mut(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        let end = offset + data.len() as u64;
+        if end > entry.size {
+            return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
+        }
+        // Where the rest of a buffer in a page still holds its zeros, they
+        // can be written with the data, so that the copy joins the next
+        // buffer's.
+        let padded = match &mut entry.written {
+            Some(written) if end >= *written => {
+                *written = end;
+                entry.size - offset
+            }
+            _ => data.len() as u64,
+        };
+        let (device, queue) = (self.device.device(), self.device.queue());
+        self.writes.write_padded(device, queue, &entry.buffer, entry.offset + offset, data, padded);
         Ok(())
     }
 
@@ -645,7 +776,7 @@ impl Gpu for WebGpu {
         for pass in passes {
             self.encode(&mut encoder, pass)?;
         }
-        self.device.queue().submit([encoder.finish()]);
+        self.submit_native(encoder.finish());
         Ok(())
     }
 }
