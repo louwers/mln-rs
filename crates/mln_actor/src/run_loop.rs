@@ -36,6 +36,9 @@ pub(crate) struct Core {
     queue: Mutex<VecDeque<Task>>,
     /// The `RunLoop`'s own async handle (`impl->async`), which runs `process`.
     queue_pending: AtomicBool,
+    /// Set by an `AsyncTask` send since `run_once` last looked at the
+    /// handles, for `has_pending`.
+    pub(crate) async_pending: AtomicBool,
     /// Set by every wake-up; `run()` sleeps until it is set.
     signal: Mutex<bool>,
     condvar: Condvar,
@@ -53,6 +56,7 @@ impl Core {
         Core {
             queue: Mutex::new(VecDeque::new()),
             queue_pending: AtomicBool::new(false),
+            async_pending: AtomicBool::new(false),
             signal: Mutex::new(false),
             condvar: Condvar::new(),
             stopped: AtomicBool::new(false),
@@ -260,6 +264,14 @@ impl RunLoop {
         *self.inner.core.waker.lock() = waker;
     }
 
+    /// Whether a task or an `AsyncTask` send is waiting for `run_once`. Timers
+    /// don't count.
+    #[must_use]
+    pub fn has_pending(&self) -> bool {
+        let core = &self.inner.core;
+        core.queue_pending.load(Ordering::SeqCst) || core.async_pending.load(Ordering::SeqCst)
+    }
+
     /// Whether a [`stop`](Self::stop) task ran, for a host that drives the
     /// loop with `run_once` rather than `run`.
     #[must_use]
@@ -275,6 +287,7 @@ impl RunLoop {
             self.inner.core.process();
             did_work = true;
         }
+        self.inner.core.async_pending.store(false, Ordering::SeqCst);
         // Snapshot: callbacks may create or drop async handles.
         let handles: Vec<Rc<AsyncHandle>> = {
             let mut handles = self.inner.handles.borrow_mut();
@@ -445,6 +458,22 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     use super::*;
+
+    #[test]
+    fn has_pending_sees_tasks_and_sends_until_they_run() {
+        let run_loop = RunLoop::new();
+        let _current = run_loop.enter();
+        assert!(!run_loop.has_pending());
+        run_loop.invoke(|| {});
+        assert!(run_loop.has_pending());
+        run_loop.run_once();
+        assert!(!run_loop.has_pending());
+        let task = crate::async_task::AsyncTask::new(|| {});
+        task.sender().send();
+        assert!(run_loop.has_pending());
+        run_loop.run_once();
+        assert!(!run_loop.has_pending());
+    }
 
     #[test]
     fn invoke_runs_on_run_once() {

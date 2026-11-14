@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::value_to_json;
 use mln_style_types::{
@@ -161,6 +163,26 @@ impl From<Vec<Value>> for Value {
 impl From<ObjectType> for Value {
     fn from(v: ObjectType) -> Self {
         Value::Object(v)
+    }
+}
+
+/// Feeds `state` the value, so that values that `==` each other hash alike:
+/// a null, boolean, number or string in full, an array by its elements, and
+/// any other value by its variant alone.
+pub(crate) fn hash_value(value: &Value, mut state: &mut dyn Hasher) {
+    std::mem::discriminant(value).hash(&mut state);
+    match value {
+        Value::Bool(b) => b.hash(&mut state),
+        // 0.0 == -0.0.
+        Value::Number(n) => (if *n == 0.0 { 0.0_f64 } else { *n }).to_bits().hash(&mut state),
+        Value::String(s) => s.hash(&mut state),
+        Value::Array(values) => {
+            values.len().hash(&mut state);
+            for value in values {
+                hash_value(value, state);
+            }
+        }
+        _ => {}
     }
 }
 
