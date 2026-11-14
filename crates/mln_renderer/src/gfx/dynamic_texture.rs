@@ -1,8 +1,8 @@
 // C++ shares a `DynamicTexture` between the worker threads (which reserve
 // bins and queue images) and the render thread (which uploads them). The
-// shelf pack and the queued images are behind a mutex here as there; the GPU
-// texture is render-thread state (`Texture2DPtr` is `Rc`), so it is a
-// `LocalObject` (a Send handle to a render-thread value) created in the
+// atlas allocator and the queued images are behind a mutex here as there;
+// the GPU texture is render-thread state (`Texture2DPtr` is `Rc`), so it is
+// a `LocalObject` (a Send handle to a render-thread value) created in the
 // first `upload_deferred_images`, as the C++ WebGPU texture is
 // (`deferredCreation`). Dropping the DynamicTexture on the render thread
 // frees the GPU texture (and with the last one, the map's device).
@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use etagere::{AllocId, AtlasAllocator, size2};
 use mln_actor::LocalObject;
 use mln_gfx::Context;
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
@@ -20,7 +21,6 @@ use mln_style_types::image::RectU16;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use shelf_pack::{ShelfPack, ShelfPackOptions};
 
 /// A bin of a dynamic texture.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -31,14 +31,6 @@ pub(crate) struct TextureHandle {
 }
 
 impl TextureHandle {
-    fn from_bin(bin: &shelf_pack::Bin) -> Self {
-        TextureHandle {
-            id: bin.id,
-            rectangle: RectU16 { x: bin.x as u16, y: bin.y as u16, w: bin.w as u16, h: bin.h as u16 },
-            needs_upload: bin.refcount() == 1,
-        }
-    }
-
     #[must_use]
     pub(crate) fn get_id(&self) -> i32 {
         self.id
@@ -64,9 +56,20 @@ impl PartialEq for TextureHandle {
 
 impl Eq for TextureHandle {}
 
+/// An allocated bin and the handles that share it.
+struct Bin {
+    alloc_id: AllocId,
+    rectangle: RectU16,
+    refcount: u32,
+}
+
 struct Inner {
-    shelf_pack: ShelfPack,
-    num_textures: i32,
+    allocator: AtlasAllocator,
+    /// The allocated bins, by handle id.
+    bins: HashMap<i32, Bin>,
+    /// The highest handle id given out or asked for; a new bin without an id
+    /// takes the next one.
+    max_id: i32,
     /// The images queued for the next upload pass, keyed by handle id.
     images_to_upload: HashMap<i32, (RectU16, Vec<u8>)>,
 }
@@ -78,8 +81,8 @@ static NEXT_DYNAMIC_TEXTURE_ID: AtomicUsize = AtomicUsize::new(1);
 /// The render-thread GPU texture of a dynamic texture.
 type GpuTexture = LocalObject<RefCell<Option<Texture2DPtr>>>;
 
-/// A texture shelf-packed with images or glyphs. Workers reserve bins and
-/// queue images; the render thread uploads them.
+/// A texture atlas of images or glyphs. Workers reserve bins and queue
+/// images; the render thread uploads them.
 pub(crate) struct DynamicTexture {
     id: usize,
     size: Size,
@@ -108,12 +111,9 @@ impl DynamicTexture {
             size,
             pixel_format: pixel_type,
             inner: Mutex::new(Inner {
-                shelf_pack: ShelfPack::new(
-                    size.width as i32,
-                    size.height as i32,
-                    ShelfPackOptions { auto_resize: false },
-                ),
-                num_textures: 0,
+                allocator: AtlasAllocator::new(size2(size.width as i32, size.height as i32)),
+                bins: HashMap::new(),
+                max_id: 0,
                 images_to_upload: HashMap::new(),
             }),
             gpu_texture: Mutex::new(None),
@@ -140,17 +140,29 @@ impl DynamicTexture {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.inner.lock().num_textures == 0
+        self.inner.lock().bins.is_empty()
     }
 
+    /// Reserves a bin of `size`, or another reference to the bin with id
+    /// `unique_id` if it has one. A `unique_id` of -1 asks for a new bin with
+    /// a fresh id. The handle needs an upload when its bin is new.
     pub(crate) fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
         let mut inner = self.inner.lock();
-        let bin_ref = inner.shelf_pack.pack_one(unique_id, size.width as i32, size.height as i32)?;
-        let bin = *inner.shelf_pack.bin(bin_ref);
-        if bin.refcount() == 1 {
-            inner.num_textures += 1;
+        if let Some(bin) = inner.bins.get_mut(&unique_id) {
+            bin.refcount += 1;
+            return Some(TextureHandle { id: unique_id, rectangle: bin.rectangle, needs_upload: false });
         }
-        Some(TextureHandle::from_bin(&bin))
+        let width = u16::try_from(size.width).ok()?;
+        let height = u16::try_from(size.height).ok()?;
+        let allocation = inner.allocator.allocate(size2(i32::from(width), i32::from(height)))?;
+        let id = if unique_id == -1 { inner.max_id + 1 } else { unique_id };
+        inner.max_id = inner.max_id.max(id);
+        // The allocation can be taller than asked for; the bin is the size
+        // asked for, at its corner.
+        let min = allocation.rectangle.min;
+        let rectangle = RectU16 { x: min.x as u16, y: min.y as u16, w: width, h: height };
+        inner.bins.insert(id, Bin { alloc_id: allocation.id, rectangle, refcount: 1 });
+        Some(TextureHandle { id, rectangle, needs_upload: true })
     }
 
     pub(crate) fn add_image(&self, pixel_data: &[u8], image_size: Size, unique_id: i32) -> Option<TextureHandle> {
@@ -233,16 +245,18 @@ impl DynamicTexture {
     /// Releases `tex_handle`'s bin; true when that was its last reference.
     pub(crate) fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
         let mut inner = self.inner.lock();
-        let Some(bin) = inner.shelf_pack.get_bin(tex_handle.id) else {
+        let Some(bin) = inner.bins.get_mut(&tex_handle.id) else {
             return false;
         };
-        let refcount = inner.shelf_pack.unref(bin);
-        if refcount == 0 {
-            inner.num_textures -= 1;
-            inner.images_to_upload.remove(&tex_handle.id);
-            return true;
+        bin.refcount -= 1;
+        if bin.refcount > 0 {
+            return false;
         }
-        false
+        let alloc_id = bin.alloc_id;
+        inner.bins.remove(&tex_handle.id);
+        inner.allocator.deallocate(alloc_id);
+        inner.images_to_upload.remove(&tex_handle.id);
+        true
     }
 
     /// Drops the render-thread GPU texture (render thread; a no-op

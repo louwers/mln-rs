@@ -84,7 +84,6 @@ mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = 
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
 polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.11" }
 render_test = { package = "mln-rs-render-test", path = "tools/render-test", version = "=0.0.11" }
-shelf_pack = { package = "mln-rs-shelf-pack", path = "vendor/shelf-pack", version = "=0.0.11" }
 style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.11" }
 supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", version = "=0.0.11" }
 
@@ -177,6 +176,8 @@ buffa = { version = "0.9.2", default-features = false }
 # its arithmetic in a different order, so a distance can differ from the C++
 # one in the last bits.
 cheap-ruler = { version = "0.4.0" }
+# Packs the glyph, icon and pattern atlases (mln_renderer).
+etagere = { version = "0.3.0", default-features = false }
 # PMTiles archives (mln_storage's PMTilesFileSource): their header,
 # directories and tile IDs, in place of a port of the C++ core's vendored
 # pmtiles.hpp. The archive reading stays the port's.
@@ -536,7 +537,6 @@ mln_vulkan.workspace = true
 mln_web_host.workspace = true
 mln_webgpu.workspace = true
 polylabel.workspace = true
-shelf_pack.workspace = true
 supercluster.workspace = true
 
 [lints]
