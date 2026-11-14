@@ -277,7 +277,7 @@ impl fmt::Debug for Dependency {
 }
 
 /// The kinds of expression node. Each holds its own operands.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Node {
     Literal(Box<Literal>),
     Compound(Box<CompoundExpression>),
@@ -314,6 +314,19 @@ pub struct Expr {
     node: Node,
     /// The inputs of the node and its operands.
     deps: Dependency,
+}
+
+/// An expression crosses as its node tree; its dependencies follow from it.
+impl serde::Serialize for Expr {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.node.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Expr {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Node::deserialize(deserializer).map(Expr::new)
+    }
 }
 
 impl PartialEq for Expr {

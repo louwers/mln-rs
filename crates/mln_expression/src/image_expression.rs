@@ -51,7 +51,7 @@ impl Drop for UnavailableImages {
 }
 
 /// `["image", id]`: the image of an id, and whether it is available.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ImageExpression {
     image_id: Expr,
 }

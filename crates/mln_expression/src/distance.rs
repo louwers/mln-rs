@@ -1019,33 +1019,48 @@ fn get_geometry(geometry: Option<&geojson::Geometry>, ctx: &mut ParsingContext) 
 }
 
 /// The distance in meters from the feature to a GeoJSON geometry.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "MbglValue", into = "MbglValue")]
 pub(crate) struct Distance {
     geojson_source: GeoJson,
     geometries: Geometry<f64>,
 }
 
+/// A `distance` crosses as the style writes it, and finds its geometry again.
+impl TryFrom<MbglValue> for Distance {
+    type Error = String;
+
+    fn try_from(value: MbglValue) -> Result<Self, String> {
+        let mut ctx = ParsingContext::default();
+        parse_value(&Convertible::from(&value), &mut ctx)
+            .and_then(|geojson_source| Distance::from_source(geojson_source, &mut ctx))
+            .ok_or_else(|| ctx.get_combined_errors())
+    }
+}
+
+impl From<Distance> for MbglValue {
+    fn from(distance: Distance) -> Self {
+        distance.serialize()
+    }
+}
+
 impl Distance {
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let parsed_value = parse_value(value, ctx)?;
+        Distance::from_source(parsed_value, ctx).map(|distance| Expr::new(Node::Distance(Box::new(distance))))
+    }
 
-        let geometries = crate::within::geojson_geometries(&parsed_value);
-        // The first supported geometry wins; every unsupported one before it
-        // reports an error.
-        for geometry in &geometries {
-            if let Some(ret) = get_geometry(*geometry, ctx) {
-                return Some(Expr::new(Node::Distance(Box::new(Distance {
-                    geojson_source: parsed_value.clone(),
-                    geometries: ret,
-                }))));
-            }
-        }
+    /// The `distance` to a GeoJSON value's first supported geometry. Every
+    /// unsupported one before it reports an error.
+    fn from_source(geojson_source: GeoJson, ctx: &mut ParsingContext) -> Option<Distance> {
+        let candidates = crate::within::geojson_geometries(&geojson_source);
+        let found = candidates.iter().find_map(|geometry| get_geometry(*geometry, ctx));
         // C++ reports nothing for an empty collection, and its parser then
         // asserts that a failed parse reported an error.
-        if geometries.is_empty() {
+        if candidates.is_empty() {
             ctx.error(NO_SUPPORTED_GEOMETRY.to_owned());
         }
-        None
+        Some(Distance { geometries: found?, geojson_source })
     }
 }
 
@@ -1090,6 +1105,11 @@ impl Distance {
     }
 
     pub(crate) fn serialize(&self) -> MbglValue {
+        MbglValue::Array(vec![MbglValue::String("distance".to_owned()), self.source_value()])
+    }
+
+    /// The GeoJSON, as a style value.
+    fn source_value(&self) -> MbglValue {
         let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
         let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
             o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect()
@@ -1097,7 +1117,7 @@ impl Distance {
             Log::error(Event::Style, "Failed to serialize 'distance' expression, converted rapidJSON is not an object");
             ValueObject::new()
         };
-        MbglValue::Array(vec![MbglValue::String("distance".to_owned()), MbglValue::Object(serialized)])
+        MbglValue::Object(serialized)
     }
 }
 

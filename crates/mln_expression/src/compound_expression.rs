@@ -10,6 +10,7 @@ use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
 use mln_conversion::Convertible;
 use mln_math::{fmax, fmin};
 use mln_util::geometry::FeatureType;
+use mln_util::hash::HashMap;
 use mln_util::{Color, i18n};
 
 use crate::check_subtype::check_subtype;
@@ -31,7 +32,7 @@ pub(crate) enum Params {
 }
 
 /// The operator of a compound expression signature.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Op {
     E,
     Pi,
@@ -212,9 +213,26 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
     registry
 });
 
+/// The signatures of each name, in definition order.
+static BY_NAME: LazyLock<HashMap<&'static str, Vec<&'static SignatureBase>>> = LazyLock::new(|| {
+    let mut by_name: HashMap<&'static str, Vec<&'static SignatureBase>> = HashMap::default();
+    for signature in REGISTRY.iter() {
+        by_name.entry(signature.name).or_default().push(signature);
+    }
+    by_name
+});
+
+/// The signature of each op.
+static BY_OP: LazyLock<HashMap<Op, &'static SignatureBase>> = LazyLock::new(|| {
+    let by_op: HashMap<Op, &'static SignatureBase> =
+        REGISTRY.iter().map(|signature| (signature.op, signature)).collect();
+    debug_assert_eq!(by_op.len(), REGISTRY.len(), "two signatures share an op");
+    by_op
+});
+
 /// The signatures registered under `name`, in definition order.
-fn definitions(name: &str) -> Vec<&'static SignatureBase> {
-    REGISTRY.iter().filter(|s| s.name == name).collect()
+fn definitions(name: &str) -> &'static [&'static SignatureBase] {
+    BY_NAME.get(name).map_or(&[], Vec::as_slice)
 }
 
 pub(crate) fn feature_unavailable() -> EvaluationError {
@@ -284,10 +302,32 @@ fn ordering_holds(op: Op, ordering: Option<std::cmp::Ordering>) -> bool {
 }
 
 /// An operator with a name and typed arguments.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CompoundExpression {
+    #[serde(with = "signature_by_op")]
     signature: &'static SignatureBase,
     args: Box<[Expr]>,
+}
+
+/// A signature crosses as its op, which only it has.
+mod signature_by_op {
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{BY_OP, Op, SignatureBase};
+
+    #[expect(clippy::trivially_copy_pass_by_ref, reason = "`#[serde(with)]` passes the field by reference")]
+    pub(super) fn serialize<S: Serializer>(
+        signature: &&'static SignatureBase,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        signature.op.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<&'static SignatureBase, D::Error> {
+        let op = Op::deserialize(deserializer)?;
+        BY_OP.get(&op).copied().ok_or_else(|| D::Error::custom(format!("no signature for {op:?}")))
+    }
 }
 
 impl PartialEq for CompoundExpression {
@@ -309,7 +349,7 @@ impl CompoundExpression {
     }
 
     pub(crate) fn exists(name: &str) -> bool {
-        REGISTRY.iter().any(|s| s.name == name)
+        BY_NAME.contains_key(name)
     }
 
     pub(crate) fn serialize(&self) -> MbglValue {
@@ -775,7 +815,7 @@ pub(crate) fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx
     // Each failed overload parses its arguments, so two overloads of one arity
     // would make parsing a nested chain of them exponential in its depth.
     let mut overload_matched_arity = false;
-    for signature in &definitions {
+    for signature in definitions {
         let matches = match &signature.params {
             Params::Varargs(_) => true,
             Params::Fixed(p) => p.len() == length - 1,
@@ -805,7 +845,7 @@ pub(crate) fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx
             // When the args couldn't be coerced to this overload's expected
             // types, move on to the next one.
             if !arg_parse_failed {
-                let parse_with_args = create_compound_expression_from(&definitions, args, ctx);
+                let parse_with_args = create_compound_expression_from(definitions, args, ctx);
                 if parse_with_args.is_some() {
                     return parse_with_args;
                 }
@@ -828,11 +868,11 @@ pub(crate) fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx
         args.push(parsed);
     }
 
-    ctx.error(expected_types_error(&definitions, &args));
+    ctx.error(expected_types_error(definitions, &args));
 
     None
 }
 
 pub fn create_compound_expression(name: &str, args: Vec<Expr>, ctx: &mut ParsingContext) -> ParseResult {
-    create_compound_expression_from(&definitions(name), args, ctx)
+    create_compound_expression_from(definitions(name), args, ctx)
 }

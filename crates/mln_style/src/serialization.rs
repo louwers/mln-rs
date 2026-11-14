@@ -4,17 +4,9 @@
 //
 // A `Layer::Impl` and a `LayerProperties` are trait objects, so each crosses
 // as the concrete type of its layer type, tagged with it. An expression
-// crosses as what the style specification defines it by, the JSON
-// `Expr::serialize` writes, with its type, and is parsed back with that type
-// as the expected one. Where C++'s serialization doesn't parse back (the legacy property
-// functions' errors and steps, literal images, the image and
-// variable-anchor-offset coercions, cubic-bezier control points, colors),
-// the port writes the JSON that parses back to the same expression; each
-// such `serialize` says how, and tools/render-test's `layer_round_trip` test
-// sends every layer of the render and query suites through serde.
-//
-// The symbol layer's `FormatSectionOverride`, an expression that has no
-// style JSON, crosses as its parts.
+// crosses as its parsed node tree, so the other side doesn't parse it again;
+// tools/render-test's `layer_round_trip` test sends every layer of the
+// render and query suites through serde.
 //
 // Layers, layer properties and expressions cross once per pair of sides,
 // then by key (mln_util::serialization::shared): every tile's `setLayers`
@@ -24,16 +16,12 @@
 
 use std::sync::Arc;
 
-use feature::Value;
-use mln_conversion::Convertible;
-use mln_expression::format_section_override::{FormatSectionOverride, OverrideDefault};
-use mln_util::Color;
 use mln_util::serialization::shared::{self, Kind};
 use serde::de::Error as _;
 use serde::ser::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::expression::{Expr, GlobalStateMap, ParsingContext, Type};
+use crate::expression::Expr;
 use crate::layer_impl::Impl;
 use crate::layer_properties::LayerProperties;
 use crate::layers::background_layer_properties::BackgroundLayerProperties;
@@ -177,71 +165,17 @@ pub mod shared_layer_properties {
 /// The `shared::Kind` of the expressions behind `Arc`s.
 pub struct SharedExpression;
 
-/// What an expression crosses as.
-#[derive(Serialize, Deserialize)]
-enum ExpressionDefinition {
-    /// Its style JSON and type.
-    Json(Value, Type),
-    FormatSectionOverride {
-        default_value: OverrideDefaultParts,
-        property_name: String,
-    },
-}
-
-/// What a `format-section-override`'s default crosses as.
-#[derive(Serialize, Deserialize)]
-enum OverrideDefaultParts {
-    Constant(Color),
-    Expression {
-        #[serde(with = "shared_expression")]
-        expression: Arc<Expr>,
-        captured_global_state: Option<Arc<GlobalStateMap>>,
-    },
-}
-
 impl Kind for SharedExpression {
     type Value = Expr;
     const NAME: &'static str = "expression";
 
     fn write<S: Serializer>(expression: &Expr, serializer: S) -> Result<S::Ok, S::Error> {
-        let definition = match expression.as_format_section_override() {
-            Some(format_section_override) => ExpressionDefinition::FormatSectionOverride {
-                default_value: match format_section_override.default_value() {
-                    OverrideDefault::Constant(color) => OverrideDefaultParts::Constant(*color),
-                    OverrideDefault::Expression { expression, captured_global_state } => {
-                        OverrideDefaultParts::Expression {
-                            expression: Arc::clone(expression),
-                            captured_global_state: captured_global_state.clone(),
-                        }
-                    }
-                },
-                property_name: format_section_override.property_name().to_owned(),
-            },
-            None => ExpressionDefinition::Json(expression.serialize(), expression.get_type()),
-        };
-        definition.serialize(serializer)
+        Serialize::serialize(expression, serializer)
     }
 
     fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<Expr>, D::Error> {
-        Ok(match ExpressionDefinition::deserialize(deserializer)? {
-            ExpressionDefinition::Json(json, type_) => Arc::new(parse(&json, type_).map_err(D::Error::custom)?),
-            ExpressionDefinition::FormatSectionOverride { default_value, property_name } => {
-                let default_value = match default_value {
-                    OverrideDefaultParts::Constant(color) => OverrideDefault::Constant(color),
-                    OverrideDefaultParts::Expression { expression, captured_global_state } => {
-                        OverrideDefault::Expression { expression, captured_global_state }
-                    }
-                };
-                Arc::new(FormatSectionOverride::new_expr(default_value, property_name))
-            }
-        })
+        Expr::deserialize(deserializer).map(Arc::new)
     }
-}
-
-/// Parses an expression's serialized form, expecting `type_`.
-pub(crate) fn parse(json: &Value, type_: Type) -> Result<Expr, String> {
-    let mut context = ParsingContext::with_expected(type_);
-    context.parse_expression(&Convertible::from(json), None).ok_or_else(|| context.get_combined_errors())
 }
 
 /// `#[serde(with)]` for an `Arc<Expr>`.
