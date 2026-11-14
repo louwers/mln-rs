@@ -16,13 +16,13 @@
 // shape differently: fallback mark positioning, an inserted U+25CC, and
 // Unicode 18.0 instead of 15.0 properties.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use harfrust::{
     Buffer, Direction, Feature, FontFuncs, GlyphExtents, GlyphId, Language, Script, ShapeOptions, ShapePlan,
     ShaperFont, Tag,
 };
+use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
@@ -80,7 +80,7 @@ impl Impl {
     /// A shaper for the font in `font_file_data`, whose glyphs have type
     /// `type_`.
     pub(crate) fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, _lib: &FreeTypeLibrary) -> Self {
-        Impl { type_, face: Face::from_memory(font_file_data), plans: Mutex::new(HashMap::new()) }
+        Impl { type_, face: Face::from_memory(font_file_data), plans: Mutex::new(HashMap::default()) }
     }
 
     pub(crate) fn valid(&self) -> bool {

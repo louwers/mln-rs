@@ -11,7 +11,8 @@
 //! instance has only that thread.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+
+use crate::hash::HashMap;
 
 thread_local! {
     static ARRAYS: RefCell<HashMap<u64, js_sys::Uint8Array>> = RefCell::default();

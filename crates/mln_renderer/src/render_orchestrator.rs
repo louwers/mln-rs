@@ -4,7 +4,6 @@
 // shares the orchestrator's event sink.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +25,7 @@ use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
@@ -278,8 +278,8 @@ impl RenderOrchestrator {
             image_impls: Arc::new(Vec::new()),
             source_impls: Arc::new(Vec::new()),
             layer_impls: Arc::new(Vec::new()),
-            render_sources: HashMap::new(),
-            render_layers: HashMap::new(),
+            render_sources: HashMap::default(),
+            render_layers: HashMap::default(),
             // conformance: renderLight(makeMutable<Light::Impl>())
             render_light: crate::render_light::RenderLight::new(Arc::new(mln_style::light::Impl::default())),
             render_sky: None,
@@ -294,14 +294,14 @@ impl RenderOrchestrator {
             thread_pool,
             global_state: None,
             layer_groups_by_layer_index: VecMap::new(),
-            layer_group_tweakers: HashMap::new(),
+            layer_group_tweakers: HashMap::default(),
             globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
             debug_layer_groups: VecMap::new(),   // layers: debug
             debug_layer_tweakers: VecMap::new(), // layers: debug
             render_targets: Vec::new(),          // dem-heatmap
             pending_changes: Vec::new(),
-            frame_rendered_features: FrameRenderedFeaturesMap::new(),
+            frame_rendered_features: FrameRenderedFeaturesMap::default(),
         }
     }
 
@@ -1205,7 +1205,7 @@ impl RenderOrchestrator {
         let items = render_tree.get_layer_render_item_map();
 
         let mut changes: UniqueChangeRequestVec = Vec::with_capacity(items.len() * 3);
-        let mut all_features = FrameRenderedFeaturesMap::new();
+        let mut all_features = FrameRenderedFeaturesMap::default();
 
         let mut has_3d = false;
         for item in items.values() {
@@ -1342,7 +1342,7 @@ impl RenderOrchestrator {
         };
         let borrowed: Vec<std::cell::Ref<'_, dyn crate::render_layer::RenderLayer>> =
             render_layers.iter().map(|layer| layer.borrow()).collect();
-        let mut layers = crate::geometry::feature_index::QueryLayers::new();
+        let mut layers = crate::geometry::feature_index::QueryLayers::default();
         for layer in &borrowed {
             layers.entry(layer.get_id().to_owned()).or_insert(&**layer);
         }
@@ -1415,7 +1415,7 @@ impl RenderOrchestrator {
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let mut source_ids: VecSet<String> = VecSet::new();
-        let mut filtered_layers = crate::geometry::feature_index::QueryLayers::new();
+        let mut filtered_layers = crate::geometry::feature_index::QueryLayers::default();
         for (id, layer) in layers {
             if !layer.needs_rendering() || !layer.supports_zoom(self.zoom_history.last_zoom) {
                 continue;
@@ -1426,7 +1426,7 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.transform_state.get_proj_matrix(1, false);
 
-        let mut results_by_layer = crate::geometry::feature_index::QueryResults::new();
+        let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
         for source_id in &source_ids {
             if let Some(render_source) = self.get_render_source(source_id) {
                 let source_results = render_source.query_rendered_features(

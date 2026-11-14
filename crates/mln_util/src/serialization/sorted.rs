@@ -3,10 +3,11 @@
 
 /// `#[serde(with)]` for a `HashMap` with ordered keys.
 pub mod map {
-    use std::collections::HashMap;
     use std::hash::Hash;
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::hash::HashMap;
 
     pub fn serialize<K, V, S>(map: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -31,10 +32,11 @@ pub mod map {
 
 /// `#[serde(with)]` for a `HashSet` of ordered values.
 pub mod set {
-    use std::collections::HashSet;
     use std::hash::Hash;
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::hash::HashSet;
 
     pub fn serialize<T: Ord + Serialize, S: Serializer>(set: &HashSet<T>, serializer: S) -> Result<S::Ok, S::Error> {
         let mut values: Vec<&T> = set.iter().collect();

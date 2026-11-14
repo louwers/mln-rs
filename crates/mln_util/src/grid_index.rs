@@ -4,10 +4,10 @@
 // grid_index.cpp (`GridIndex<RefIndexedSubfeature>`) needs no Rust
 // equivalent.
 
-use std::collections::HashSet;
-
 use geometry::Point;
 use mln_math::{fmax, fmin};
+
+use crate::hash::HashSet;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GeometryBox<T> {
@@ -231,8 +231,8 @@ impl<T: Clone> GridIndex<T> {
 
     /// The private `query(const BBox&, std::function<bool(const T&, const BBox&)>)`.
     fn query_box_fn(&self, query_bbox: &BBox, result_fn: &mut dyn FnMut(&T, &BBox) -> bool) {
-        let mut seen_boxes: HashSet<u32> = HashSet::new();
-        let mut seen_circles: HashSet<u32> = HashSet::new();
+        let mut seen_boxes: HashSet<u32> = HashSet::default();
+        let mut seen_circles: HashSet<u32> = HashSet::default();
 
         if self.no_intersection(query_bbox) {
             return;
@@ -287,8 +287,8 @@ impl<T: Clone> GridIndex<T> {
 
     /// The private `query(const BCircle&, std::function<bool(const T&, const BBox&)>)`.
     fn query_circle_fn(&self, query_bcircle: &BCircle, result_fn: &mut dyn FnMut(&T, &BBox) -> bool) {
-        let mut seen_boxes: HashSet<u32> = HashSet::new();
-        let mut seen_circles: HashSet<u32> = HashSet::new();
+        let mut seen_boxes: HashSet<u32> = HashSet::default();
+        let mut seen_circles: HashSet<u32> = HashSet::default();
 
         let query_bbox = Self::convert_to_box(query_bcircle);
         if self.no_intersection(&query_bbox) {

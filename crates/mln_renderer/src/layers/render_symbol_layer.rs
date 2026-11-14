@@ -6,7 +6,6 @@
 // tile's existing drawables, as C++ `updateTileDrawable` does.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -43,6 +42,7 @@ use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType, Trans
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
@@ -453,7 +453,7 @@ fn capture_rendered_features(
                 m
             };
             if let Some(bound) = compute_feature_ndc_bound(vertex_count, &identity, true, get_vertex) {
-                stats.add_rendered_feature(feature_id, &bound, HashSet::from([overscaled_tile_id]));
+                stats.add_rendered_feature(feature_id, &bound, HashSet::from_iter([overscaled_tile_id]));
             }
         }
     };
@@ -857,7 +857,7 @@ impl RenderSymbolLayer {
             symbol_icon_group: None,
             symbol_sdf_group: None,
             symbol_text_and_icon_group: None,
-            tile_bucket_versions: HashMap::new(),
+            tile_bucket_versions: HashMap::default(),
             collision_box_group: None,
             collision_circle_group: None,
             collision_tile_layer_group: None,
@@ -1505,7 +1505,7 @@ impl RenderLayer for RenderSymbolLayer {
         // We'll be processing renderables across tiles, potentially
         // out-of-order, so keep track of some things by tile ID so we don't
         // have to re-build them multiple times.
-        let mut tile_cache: HashMap<UnwrappedTileID, TileInfo> = HashMap::new();
+        let mut tile_cache: HashMap<UnwrappedTileID, TileInfo> = HashMap::default();
         let mut builder: Option<mln_gfx::UniqueDrawableBuilder> = None;
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 

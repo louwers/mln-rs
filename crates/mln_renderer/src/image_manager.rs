@@ -12,6 +12,7 @@ use std::sync::Arc;
 use mln_actor::scheduler;
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
+use mln_util::hash::RandomState;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
 
@@ -117,7 +118,7 @@ impl ImageManager {
                 requested_images_cache_size: 0,
                 images: ImageMap::new(),
                 available_images: Arc::new(VecSet::new()),
-                updated_image_versions: ImageVersionMap::new(),
+                updated_image_versions: ImageVersionMap::default(),
             }),
             observer: RefCell::new(Rc::new(NullObserver)),
         })
@@ -462,7 +463,7 @@ impl ImageManager {
     fn notification(state: &State, requestor: &Weak<dyn ImageRequestor>, pair: &ImageRequestPair) -> Notification {
         let mut icon_map = ImageMap::new();
         let mut pattern_map = ImageMap::new();
-        let mut version_map = ImageVersionMap::with_capacity(pair.0.len());
+        let mut version_map = ImageVersionMap::with_capacity_and_hasher(pair.0.len(), RandomState::default());
 
         for (id, type_) in &pair.0 {
             if let Some(image) = state.images.get(id) {

@@ -1,5 +1,6 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+
+use mln_util::hash::HashMap;
 
 use crate::shader_group::ShaderGroupPtr;
 

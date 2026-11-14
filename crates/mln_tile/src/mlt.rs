@@ -30,10 +30,10 @@
 // Where mlt-core rejects a tile that the C++ decoder reads (or the other way
 // round), the tile fails here too.
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
+use mln_util::hash::HashMap;
 use mlt_core::wire::{Analyze as _, ColumnDecl, LogicalEncoding, PhysicalEncoding};
 use mlt_core::{GeometryType as WireGeometryType, GeometryValues, ParsedLayer01, ParsedProperty};
 
@@ -213,7 +213,7 @@ impl StringCodes {
             // Past about a quarter as many strings as values, the codes would
             // group little and cost about as much as reading every value.
             let limit = spans.len() / 4 + 8;
-            let mut index: HashMap<&str, u32> = HashMap::new();
+            let mut index: HashMap<&str, u32> = HashMap::default();
             let mut codes = Vec::with_capacity(spans.len());
             for span in spans {
                 codes.push(match *span {
@@ -463,7 +463,7 @@ impl Layer {
             extent: parsed.extent().get(),
             features,
             properties: Vec::new(),
-            property_index: HashMap::new(),
+            property_index: HashMap::default(),
             triangles,
         };
         let mut next = || -> Result<(String, bool), Error> {

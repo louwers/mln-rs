@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use mln_util::hash::HashMap;
 
 use crate::shaders::wgsl_preprocessor::{get_directive_argument, is_directive, preprocess_wgsl};
 

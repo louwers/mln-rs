@@ -223,7 +223,7 @@ impl Serialize for LayoutResult {
 impl<'de> Deserialize<'de> for LayoutResult {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let layout = LayoutOwned::deserialize(deserializer)?;
-        let mut layer_render_data = std::collections::HashMap::new();
+        let mut layer_render_data = mln_util::hash::HashMap::default();
         for (bucket, layers) in layout.buckets {
             let bucket = bucket_ptr(bucket);
             for RenderingLayer(layer_id, layer_properties) in layers {

@@ -17,12 +17,12 @@
 // Anything that reads or changes them first copies them into wasm memory.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
+use mln_util::hash::HashMap;
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;

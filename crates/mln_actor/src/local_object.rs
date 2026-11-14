@@ -12,16 +12,17 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::{self, ThreadId};
 
+use mln_util::hash::HashMap;
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
-    static OBJECTS: RefCell<HashMap<u64, Rc<dyn Any>>> = RefCell::new(HashMap::new());
+    static OBJECTS: RefCell<HashMap<u64, Rc<dyn Any>>> = RefCell::new(HashMap::default());
 }
 
 pub(crate) fn next_id() -> u64 {

@@ -7,8 +7,8 @@
 // device, would never be freed.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
 
 use mln_gfx::backend::Type as BackendType;
@@ -34,6 +34,7 @@ use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;

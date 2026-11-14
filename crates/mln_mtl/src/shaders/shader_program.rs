@@ -7,7 +7,6 @@
 //   state made for one renderable to a pass on another.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::{BlendFunction, ColorMode};
@@ -16,6 +15,7 @@ use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 use mln_gfx::types::{ColorBlendEquationType, ColorBlendFactorType};
 use mln_gfx::vertex_attribute::VertexAttributeArray;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use objc2_foundation::NSString;
@@ -90,10 +90,10 @@ impl ShaderProgram {
             fragment_function,
             vertex_attributes: VertexAttributeArray::new(),
             instance_attributes: VertexAttributeArray::new(),
-            vertex_buffer_indices: HashMap::new(),
-            instance_buffer_indices: HashMap::new(),
+            vertex_buffer_indices: HashMap::default(),
+            instance_buffer_indices: HashMap::default(),
             texture_bindings: [None; MAX_TEXTURE_COUNT_PER_SHADER],
-            render_pipeline_state_cache: RefCell::new(HashMap::new()),
+            render_pipeline_state_cache: RefCell::new(HashMap::default()),
         }
     }
 

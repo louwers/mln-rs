@@ -6,7 +6,7 @@
 // guards) and the render-thread id.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use geometry::Point;
@@ -14,6 +14,7 @@ use glam::Vec2;
 use mln_map_types::{TileProjector, TransformState};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::EXTENT;
+use mln_util::hash::HashSet;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::Bucket;
@@ -362,7 +363,7 @@ impl CrossTileSymbolIndex {
             .or_insert_with(|| CrossTileSymbolLayerIndex::new(max_cross_tile_id));
 
         let mut result = AddLayerResult::NO_CHANGES;
-        let mut current_bucket_ids: HashSet<u32> = HashSet::new();
+        let mut current_bucket_ids: HashSet<u32> = HashSet::default();
 
         layer_index.handle_wrap_jump(lng);
 
@@ -598,7 +599,7 @@ mod tests {
         // matched child tile
         assert_eq!(cross_tile_id(&parent_bucket, 0), 1);
 
-        let mut current_ids: HashSet<u32> = HashSet::new();
+        let mut current_ids: HashSet<u32> = HashSet::default();
         current_ids.insert(main_bucket.bucket_instance_id);
         index.remove_stale_buckets(&current_ids);
 
@@ -664,7 +665,7 @@ mod tests {
         assert_eq!(cross_tile_id(&main_bucket, 0), 1);
 
         // removes the tile
-        let current_ids: HashSet<u32> = HashSet::new();
+        let current_ids: HashSet<u32> = HashSet::default();
         index.remove_stale_buckets(&current_ids);
 
         // assigns a new id

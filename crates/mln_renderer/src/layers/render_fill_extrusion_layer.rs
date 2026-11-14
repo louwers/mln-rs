@@ -6,7 +6,6 @@
 // ring and has no wall.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -36,6 +35,7 @@ use mln_style::layers::fill_extrusion_layer_properties::{
 use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
+use mln_util::hash::HashSet;
 use mln_util::identity::SimpleIdentity;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
@@ -133,7 +133,7 @@ fn capture_rendered_features(
             Some([f64::from(vertex.a1[0]), f64::from(vertex.a1[1]), z])
         };
         if let Some(bound) = view.tile_space_bound(2 * vertex_count, get_vertex) {
-            stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from([*tile_id]));
+            stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from_iter([*tile_id]));
         }
     }
 }

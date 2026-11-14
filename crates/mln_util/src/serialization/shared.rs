@@ -24,11 +24,12 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::hash::HashMap;
 
 /// A type of value that crosses once, then by key.
 pub trait Kind: 'static {
@@ -179,8 +180,8 @@ impl Tables {
         K::Value: Send + Sync,
     {
         let table = Origin::<K::Value> {
-            by_address: HashMap::new(),
-            by_key: HashMap::new(),
+            by_address: HashMap::default(),
+            by_key: HashMap::default(),
             dead: Vec::new(),
             uncommitted: Vec::new(),
             next: 0,
@@ -195,7 +196,7 @@ impl Tables {
     where
         K::Value: Send + Sync,
     {
-        self.0.push((K::NAME, Box::new(Copies::<K::Value> { by_key: HashMap::new(), keys: HashMap::new() })));
+        self.0.push((K::NAME, Box::new(Copies::<K::Value> { by_key: HashMap::default(), keys: HashMap::default() })));
         self
     }
 

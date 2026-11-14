@@ -8,11 +8,12 @@
 //! their calls, and reports the user data that it leaves unreleased to its
 //! `release_abandoned_user_data`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_util::ErrorKind;
+use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::callback::{UserData, Wake};

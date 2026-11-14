@@ -21,7 +21,6 @@
 // glyph/image atlases of the shared DynamicTextureAtlas.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,6 +39,7 @@ use mln_text::BiDi;
 use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;

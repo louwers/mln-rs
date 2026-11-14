@@ -26,7 +26,6 @@
 //   framebuffer for the frame target, and submitted without presenting.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::collections::HashMap;
 use std::fmt::Write;
 use std::rc::{Rc, Weak};
 
@@ -50,6 +49,7 @@ use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -293,7 +293,7 @@ impl Context {
             descriptor_set_layouts: Cell::new([vk::DescriptorSetLayout::null(); DescriptorSetType::COUNT]),
             general_pipeline_layout: Cell::new(vk::PipelineLayout::null()),
             push_constant_pipeline_layout: Cell::new(vk::PipelineLayout::null()),
-            render_passes: RefCell::new(HashMap::new()),
+            render_passes: RefCell::new(HashMap::default()),
             frame_resource_index: Cell::new(0),
             frame_resources: RefCell::new(Vec::new()),
             frame_serial: Cell::new(0),

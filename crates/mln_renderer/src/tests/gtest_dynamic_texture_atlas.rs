@@ -69,7 +69,7 @@ impl DynamicTextureAtlasTest {
 
     fn upload_pattern(&mut self, image: &Arc<ImageImpl>) -> &ImageAtlas {
         let image_atlas =
-            self.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(image), &ImageVersionMap::new());
+            self.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(image), &ImageVersionMap::default());
         self.atlases.push(image_atlas);
         self.atlases.last().unwrap()
     }
@@ -120,7 +120,7 @@ fn icon_and_pattern_usage_do_not_share_allocation() {
     let image = make_image("image", false);
 
     let image_atlas =
-        test.atlas.upload_icons_and_patterns(&image_map(&image), &image_map(&image), &ImageVersionMap::new());
+        test.atlas.upload_icons_and_patterns(&image_map(&image), &image_map(&image), &ImageVersionMap::default());
     test.atlases.push(image_atlas);
     let image_atlas = test.atlases.last().unwrap();
 
@@ -149,7 +149,8 @@ fn resized_image_with_same_area_gets_its_own_shape() {
 fn released_revision_gets_fresh_allocation() {
     let mut test = DynamicTextureAtlasTest::new();
     let image = make_image("pattern", false);
-    let released = test.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(&image), &ImageVersionMap::new());
+    let released =
+        test.atlas.upload_icons_and_patterns(&ImageMap::new(), &image_map(&image), &ImageVersionMap::default());
     let released_id = released.texture_handles[0].get_id();
     test.atlas.remove_textures(&released.texture_handles, released.dynamic_texture.as_ref());
 
@@ -187,7 +188,7 @@ fn font_stacks_share_the_allocation_of_the_same_glyph() {
 impl DynamicTextureAtlasTest {
     /// Uploads `image` as an icon at `version`, keeping its atlas alive.
     fn upload_icon(&mut self, image: &Arc<ImageImpl>, version: u32) -> &ImageAtlas {
-        let version_map = ImageVersionMap::from([(image.id.clone(), version)]);
+        let version_map = ImageVersionMap::from_iter([(image.id.clone(), version)]);
         let image_atlas = self.atlas.upload_icons_and_patterns(&image_map(image), &ImageMap::new(), &version_map);
         self.atlases.push(image_atlas);
         self.atlases.last().unwrap()
@@ -217,7 +218,7 @@ fn updated_icon_gets_fresh_allocation() {
 fn many_live_icon_revisions_get_their_own_allocations() {
     const REVISIONS: u32 = 64;
     let mut test = DynamicTextureAtlasTest::new();
-    let ids: std::collections::HashSet<i32> = (0..REVISIONS)
+    let ids: mln_util::hash::HashSet<i32> = (0..REVISIONS)
         .map(|version| test.upload_icon(&make_image("marker", false), version).texture_handles[0].get_id())
         .collect();
     assert_eq!(ids.len(), REVISIONS as usize);

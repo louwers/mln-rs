@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -15,6 +14,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -100,8 +100,8 @@ impl FillBucket {
             triangle_segments: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             paint_property_binders,
-            sdf_patterns: HashMap::new(),
-            mixed_sdf_pattern_layers: HashSet::new(),
+            sdf_patterns: HashMap::default(),
+            mixed_sdf_pattern_layers: HashSet::default(),
         }
     }
 

@@ -6,7 +6,7 @@
 //! every uniform block is as large as the UBO the renderer writes for it,
 //! and every attribute and sampler the program has is in them.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -15,6 +15,7 @@ use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
+use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
 use crate::shaders::shader_program::as_gl_shader;
@@ -174,7 +175,7 @@ fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
                 // With every property an attribute, the program has every
                 // attribute of its table but the ones its GLSL leaves unused.
                 let attributes = program.get_vertex_attributes();
-                let mut locations = HashSet::new();
+                let mut locations = HashSet::default();
                 for info in source.attributes {
                     if let Some(attribute) = attributes.get(info.id) {
                         assert!(

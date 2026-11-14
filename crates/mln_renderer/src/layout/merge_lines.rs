@@ -6,9 +6,8 @@
 // whose geometry C++ passes by reference, and the key the C++ iterator
 // points at.
 
-use std::collections::HashMap;
-
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
+use mln_util::hash::HashMap;
 
 use crate::layout::symbol_feature::SymbolFeature;
 
@@ -65,8 +64,8 @@ fn merge_from_left(
 }
 
 pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
-    let mut left_index = Index::new();
-    let mut right_index = Index::new();
+    let mut left_index = Index::default();
+    let mut right_index = Index::default();
 
     for k in 0..features.len() {
         let feature = &features[k];

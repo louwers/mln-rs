@@ -6,10 +6,10 @@
 //! table of indices for every drawable, bound at the draw's dynamic offset.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
+use mln_util::hash::HashMap;
 
 /// A resource a bind group entry binds. wgpu handles compare by identity.
 #[derive(Clone, PartialEq, Eq, Hash)]

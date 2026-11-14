@@ -105,8 +105,8 @@ fn circle_bucket() {
         .add_feature(
             &feature(FeatureType::Point, &point),
             &point,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -136,8 +136,8 @@ fn fill_bucket() {
         .add_feature(
             &feature(FeatureType::Polygon, &polygon),
             &polygon,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -159,8 +159,8 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> u
         .add_feature(
             &feature(FeatureType::Polygon, polygon),
             polygon,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -220,8 +220,8 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         .add_feature(
             &feature,
             &polygon,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -338,8 +338,8 @@ fn line_bucket() {
         .add_feature(
             &feature(FeatureType::Point, &point),
             &point,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -351,8 +351,8 @@ fn line_bucket() {
         .add_feature(
             &feature(FeatureType::LineString, &line),
             &line,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             1,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -373,8 +373,8 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         .add_feature(
             &feature(FeatureType::LineString, &line),
             &line,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -455,8 +455,8 @@ fn symbol_bucket() {
         .add_feature(
             &feature(FeatureType::Point, &point),
             &point,
-            &ImagePositions::new(),
-            &PatternLayerMap::new(),
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
         )
@@ -738,8 +738,8 @@ fn line_bucket_vertices(
             .add_feature(
                 &feature,
                 &line,
-                &ImagePositions::new(),
-                &PatternLayerMap::new(),
+                &ImagePositions::default(),
+                &PatternLayerMap::default(),
                 index,
                 &CanonicalTileID::new(0, 0, 0),
             )

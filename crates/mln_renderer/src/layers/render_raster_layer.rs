@@ -10,7 +10,6 @@
 //
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -39,6 +38,7 @@ use mln_style::layers::raster_layer_properties::{
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
@@ -96,7 +96,7 @@ impl RenderRasterLayer {
             static_data_indices: None,
             static_data_segments: None,
             globe_meshes: GlobeTileMeshCache::new(),
-            textures: HashMap::new(),
+            textures: HashMap::default(),
             image_data: None,
             image_layer_group: None,
         }
@@ -443,7 +443,7 @@ impl RenderLayer for RenderRasterLayer {
         let mut static_attrs: Option<VertexAttributeArrayPtr> = None;
 
         // Drop the textures of buckets that are no longer rendered.
-        let live_buckets: std::collections::HashSet<SimpleIdentity> =
+        let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
             render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.base_impl).map(|b| b.get_id())).collect();
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Existing drawables keep their textures, so a changed filter is

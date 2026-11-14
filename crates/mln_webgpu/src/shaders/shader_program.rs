@@ -6,7 +6,6 @@
 
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::{BlendFunction, ColorMode};
@@ -22,6 +21,7 @@ use mln_gfx::types::{
     DepthMaskType, StencilFunctionType, StencilOpType,
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecMap;
@@ -258,7 +258,7 @@ impl ShaderProgram {
             bind_group_order: Vec::new(),
             index_group,
             pipeline_layout: None,
-            render_pipeline_cache: RefCell::new(HashMap::new()),
+            render_pipeline_cache: RefCell::new(HashMap::default()),
             vertex_attributes: VertexAttributeArray::new(),
             instance_attributes: VertexAttributeArray::new(),
             texture_bindings: [None; MAX_TEXTURE_COUNT_PER_SHADER],

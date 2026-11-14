@@ -3,7 +3,6 @@
 // images across worker messages.
 //
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -40,6 +39,7 @@ use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geometry::FeatureType;
+use mln_util::hash::HashMap;
 use mln_util::i18n;
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
@@ -1005,7 +1005,7 @@ impl SymbolLayout {
                 feature,
                 length,
                 feature.index,
-                &ImagePositions::new(),
+                &ImagePositions::default(),
                 None,
                 canonical,
                 &formatted_section,
@@ -1771,7 +1771,7 @@ impl Layout for SymbolLayout {
                             feature,
                             length,
                             symbol_instance.get_data_feature_index(),
-                            &ImagePositions::new(),
+                            &ImagePositions::default(),
                             None,
                             canonical,
                             &Value::Null,

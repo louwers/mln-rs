@@ -2,7 +2,6 @@
 // style through it. A separate test target because it needs `mln_map` and
 // `mln_headless`, which depend on `mln_storage`.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
@@ -10,6 +9,7 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapOptions};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{AsyncRequest, Callback, FileSource, Resource, ResourceOptions, Response};
+use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 

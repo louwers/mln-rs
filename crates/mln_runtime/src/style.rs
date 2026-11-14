@@ -2,7 +2,6 @@
 //! images, layers, the light, the global state and transitions.
 
 use std::any::Any;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
@@ -22,6 +21,7 @@ use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
+use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::range::Range;
 use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};

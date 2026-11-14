@@ -14,7 +14,6 @@
 //   `gfx::Context::render_globe_tile_clipping_masks`).
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use mln_gfx::backend::Type as BackendType;
@@ -38,6 +37,7 @@ use mln_gfx::types::{DepthFunctionType, DepthMaskType, StencilFunctionType, Sten
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;
@@ -167,7 +167,7 @@ impl Context {
             clip_mask_pipeline_state: RefCell::new(None),
             globe_clip_mask_shader: RefCell::new(None),
             globe_clip_mask_pipeline_state: RefCell::new(None),
-            globe_clip_meshes: RefCell::new(HashMap::new()),
+            globe_clip_meshes: RefCell::new(HashMap::default()),
             stencil_state_formats: Cell::new(None),
         })
     }

@@ -11,7 +11,6 @@
 // present to a queue holds a mutex of that queue's, which every device on the
 // queue shares, then the host's queue lock where the host gave one.
 
-use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::io::Write as _;
 use std::sync::{Arc, LazyLock, OnceLock, Weak};
@@ -19,6 +18,7 @@ use std::sync::{Arc, LazyLock, OnceLock, Weak};
 use ash::vk;
 use mln_gfx::{DepthStencilFormat, DepthStencilFormats, ExportKinds, SyncKind, SyncKinds};
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log};
 use parking_lot::Mutex;
 

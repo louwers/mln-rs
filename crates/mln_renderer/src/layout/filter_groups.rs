@@ -2,11 +2,10 @@
 //! tell apart, or once per feature for all the layers that compare the same
 //! value, rather than once per feature for each layer.
 
-use std::collections::HashMap;
-
 use mln_style::expression::{EvaluationContext, Expr, Value};
 use mln_style::filter::Filter;
 use mln_tile_id::geometry_tile_data::{FeatureGroups, GeometryTileFeature, GeometryTileLayer};
+use mln_util::hash::HashMap;
 
 /// A scalar value that an equality filter compares, as a key that equal
 /// values share.
@@ -155,7 +154,7 @@ fn index(
     operand: &Expr,
     context: &EvaluationContext<'_>,
 ) -> Option<HashMap<Key, Vec<u32>>> {
-    let mut features: HashMap<Key, Vec<u32>> = HashMap::new();
+    let mut features: HashMap<Key, Vec<u32>> = HashMap::default();
     for i in 0..layer.feature_count() {
         let feature = layer.get_feature(i).ok()?;
         let value = operand.evaluate(&EvaluationContext { feature: Some(&*feature), ..*context });
@@ -171,7 +170,6 @@ fn index(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     use feature::Value;
@@ -180,6 +178,7 @@ mod tests {
     use mln_tile::{VectorMLTTileData, VectorMVTTileData};
     use mln_tile_id::CanonicalTileID;
     use mln_tile_id::geometry_tile_data::GeometryTileData;
+    use mln_util::hash::HashMap;
     use mlt_core::encoder::{EncoderConfig, Network, Profile};
     use mlt_core::geo_types::Coord;
     use mlt_core::{GeometryType, LayerWriter, PropKind};
@@ -229,7 +228,7 @@ mod tests {
         let classes = ["motorway", "primary", "minor", "path"];
         let mut keys: Vec<String> = Vec::new();
         let mut values: Vec<Vec<u8>> = Vec::new();
-        let mut value_index: HashMap<Vec<u8>, u32> = HashMap::new();
+        let mut value_index: HashMap<Vec<u8>, u32> = HashMap::default();
         let mut features = Vec::new();
         for i in 0..400u64 {
             let mut tags: Vec<(&str, Value)> = vec![

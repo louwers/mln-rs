@@ -25,7 +25,7 @@
 // range still in flight.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -42,6 +42,7 @@ use mln_text::local_glyph_rasterizer::{DefaultLocalGlyphRasterizer, LocalGlyphRa
 use mln_text::tagged_string::font_stack_hash;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};
@@ -197,8 +198,8 @@ impl GlyphManager {
         Rc::new_cyclic(|self_weak| GlyphManager {
             self_weak: Weak::clone(self_weak),
             glyph_url: RefCell::new(String::new()),
-            entries: RefCell::new(HashMap::new()),
-            requestors_missing_glyphs: RefCell::new(HashMap::new()),
+            entries: RefCell::new(HashMap::default()),
+            requestors_missing_glyphs: RefCell::new(HashMap::default()),
             observer: RefCell::new(Rc::new(NullObserver)),
             local_glyph_rasterizer,
             glyph_cache,
@@ -248,7 +249,7 @@ impl GlyphManager {
             for (font_stack, glyph_ids) in &dependencies.glyphs {
                 let entry = entries.entry(font_stack.clone()).or_default();
 
-                let mut ranges: HashSet<GlyphRange> = HashSet::new();
+                let mut ranges: HashSet<GlyphRange> = HashSet::default();
                 for glyph_id in glyph_ids {
                     if self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, *glyph_id) {
                         if !entry.glyphs.contains_key(glyph_id) {

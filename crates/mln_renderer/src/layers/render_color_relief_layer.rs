@@ -7,7 +7,6 @@
 //   re-uploads into the same texture; its size may change with the ramp).
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -38,6 +37,7 @@ use mln_style::layers::color_relief_layer_properties::{
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
@@ -118,7 +118,7 @@ impl RenderColorReliefLayer {
             color_relief_shader: None,
             static_data_shared_vertices: None,
             globe_meshes: GlobeTileMeshCache::new(),
-            dem_textures: HashMap::new(),
+            dem_textures: HashMap::default(),
         };
 
         // Initialize with default color ramp immediately to avoid

@@ -15,10 +15,11 @@
 // creating thread's RunLoop (thread.rs). Nothing changes for a host that
 // doesn't install one.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 use parking_lot::Mutex;
@@ -44,7 +45,7 @@ impl CooperativeScheduler {
     pub fn new() -> Self {
         CooperativeScheduler {
             unique_id: SimpleIdentity::new(),
-            queues: Mutex::new(HashMap::new()),
+            queues: Mutex::new(HashMap::default()),
             task_count: AtomicUsize::new(0),
             waker: Mutex::new(None),
         }

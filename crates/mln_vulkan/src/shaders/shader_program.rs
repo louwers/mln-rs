@@ -6,7 +6,6 @@
 //   `ubo`) is not ported: instance attributes are vertex inputs.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
@@ -14,6 +13,7 @@ use mln_gfx::shader::Shader;
 use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 use mln_gfx::vertex_attribute::VertexAttributeArray;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 
@@ -53,7 +53,7 @@ impl ShaderProgram {
             context: context.weak(),
             vertex_shader,
             fragment_shader,
-            pipelines: RefCell::new(HashMap::new()),
+            pipelines: RefCell::new(HashMap::default()),
             vertex_attributes: VertexAttributeArray::new(),
             instance_attributes: VertexAttributeArray::new(),
             texture_bindings: [None; MAX_TEXTURE_COUNT_PER_SHADER],

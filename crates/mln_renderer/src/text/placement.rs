@@ -19,7 +19,7 @@
 // is unused in C++ and left out.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -43,6 +43,7 @@ use mln_text::{AnchorAlignment, get_anchor_justification};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::grid_index::BBox;
+use mln_util::hash::HashMap;
 use mln_util::mat4::Mat4;
 use mln_util::time::Instant;
 use mln_vec_map::VecMap;
@@ -837,17 +838,17 @@ impl Placement {
             commit_time: None,
             placement_zoom: 0.0,
             prev_zoom_adjustment: 0.0,
-            placements: HashMap::new(),
-            opacities: HashMap::new(),
-            variable_offsets: HashMap::new(),
-            placed_orientations: HashMap::new(),
-            retained_query_data: HashMap::new(),
+            placements: HashMap::default(),
+            opacities: HashMap::default(),
+            variable_offsets: HashMap::default(),
+            placed_orientations: HashMap::default(),
+            retained_query_data: HashMap::default(),
             collision_groups: CollisionGroups::new(true),
             prev_placement: RefCell::new(None),
             show_collision_boxes: false,
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
-            collision_circles: HashMap::new(),
+            collision_circles: HashMap::default(),
         }
     }
 
@@ -868,17 +869,17 @@ impl Placement {
             commit_time: update_parameters.time_point,
             placement_zoom: update_parameters.transform_state.get_zoom() as f32,
             prev_zoom_adjustment: 0.0,
-            placements: HashMap::new(),
-            opacities: HashMap::new(),
-            variable_offsets: HashMap::new(),
-            placed_orientations: HashMap::new(),
-            retained_query_data: HashMap::new(),
+            placements: HashMap::default(),
+            opacities: HashMap::default(),
+            variable_offsets: HashMap::default(),
+            placed_orientations: HashMap::default(),
+            retained_query_data: HashMap::default(),
             collision_groups: CollisionGroups::new(update_parameters.cross_source_collisions),
             prev_placement: RefCell::new(prev_placement),
             show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
-            collision_circles: HashMap::new(),
+            collision_circles: HashMap::default(),
             update_parameters: Some(update_parameters),
         }
     }
@@ -1742,7 +1743,7 @@ impl Placement {
                 vec_east = Vec2::new(east[0] as f32, east[1] as f32);
                 vec_south = Vec2::new(south[0] as f32, south[1] as f32);
             }
-            let mut placed_text_shifts: HashMap<usize, (usize, Vec2)> = HashMap::new();
+            let mut placed_text_shifts: HashMap<usize, (usize, Vec2)> = HashMap::default();
 
             let (text_positions, text_placed_symbols) = bs.text.positions_and_symbols(layer_id);
             text_positions.clear();

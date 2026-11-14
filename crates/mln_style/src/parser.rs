@@ -3,12 +3,11 @@
 // order (mln_conversion's borrowed_conversion.rs). The message of a JSON
 // syntax error is serde_json's.
 
-use std::collections::{HashMap, HashSet};
-
 use mln_conversion::borrowed_conversion::{Json, JsonObject, borrowed_json_to_value, member, members};
 use mln_conversion::{Convertible, Error};
 use mln_util::LatLng;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
@@ -288,7 +287,7 @@ impl Parser {
             let sprite = Sprite::new("default", url);
             self.sprites.push(sprite);
         } else if let Some(array) = value.as_array() {
-            let mut sprite_ids = HashSet::new();
+            let mut sprite_ids = HashSet::default();
             for sprite_value in array {
                 if !sprite_value.is_object() {
                     Log::warning(Event::ParseStyle, "sprite child must be an object");
@@ -322,7 +321,7 @@ impl Parser {
             return;
         };
 
-        let mut layers_map: HashMap<String, LayerEntry<'_>> = HashMap::new();
+        let mut layers_map: HashMap<String, LayerEntry<'_>> = HashMap::default();
 
         for layer_value in array {
             let Some(layer_object) = layer_value.as_object() else {

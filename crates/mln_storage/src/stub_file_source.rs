@@ -5,11 +5,11 @@
 // thread.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use feature::Value;
 use mln_actor::{AsyncTask, LocalObject};
+use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 

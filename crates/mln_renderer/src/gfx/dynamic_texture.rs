@@ -8,7 +8,6 @@
 // frees the GPU texture (and with the last one, the map's device).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,6 +17,7 @@ use mln_gfx::Context;
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
+use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -112,9 +112,9 @@ impl DynamicTexture {
             pixel_format: pixel_type,
             inner: Mutex::new(Inner {
                 allocator: AtlasAllocator::new(size2(size.width as i32, size.height as i32)),
-                bins: HashMap::new(),
+                bins: HashMap::default(),
                 max_id: 0,
-                images_to_upload: HashMap::new(),
+                images_to_upload: HashMap::default(),
             }),
             gpu_texture: Mutex::new(None),
         }

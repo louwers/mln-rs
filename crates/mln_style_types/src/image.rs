@@ -217,7 +217,7 @@ pub enum ImageType {
 /// iteration order, and a `HashMap`'s order changes from process to process,
 /// which would move icons in the atlas and change rendered pixels between runs.
 pub type ImageMap = mln_vec_map::VecMap<String, Arc<Impl>>;
-pub type ImageDependencies = std::collections::HashMap<String, ImageType>;
+pub type ImageDependencies = mln_util::hash::HashMap<String, ImageType>;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RectU16 {
@@ -293,7 +293,7 @@ impl ImagePosition {
     }
 }
 
-pub type ImagePositions = std::collections::HashMap<String, ImagePosition>;
+pub type ImagePositions = mln_util::hash::HashMap<String, ImagePosition>;
 
 /// Port-only: the `shared::Kind` of the images of an `ImageMap`, which cross
 /// once per pair of sides, then by key (`mln_util::serialization::shared)`: a

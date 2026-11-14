@@ -236,7 +236,7 @@ fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) ->
         geometry: polygon.clone(),
     };
     bucket
-        .add_feature(&feature, polygon, &ImagePositions::new(), &PatternLayerMap::new(), 0, tile)
+        .add_feature(&feature, polygon, &ImagePositions::default(), &PatternLayerMap::default(), 0, tile)
         .expect("addFeature");
     let mut segments_end = 0;
     let mut indices_outside_their_segment = 0;

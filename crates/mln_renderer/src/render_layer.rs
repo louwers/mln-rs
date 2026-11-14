@@ -5,7 +5,6 @@
 // they are `Rc<RefCell<dyn RenderLayer>>`.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -22,6 +21,7 @@ use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
@@ -243,7 +243,7 @@ pub(crate) fn capture_retained_features<'a>(
         });
 
         if let Some(bound) = bound(view, vertex_offset, feature.vertex_count) {
-            stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from([*tile_id]));
+            stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from_iter([*tile_id]));
         }
     }
 }
@@ -486,7 +486,7 @@ impl RenderLayerBase {
             stats: Stats::default(),
             render_tiles: None,
             render_tiles_owner: Rc::new(Vec::new()),
-            render_tile_ids: HashMap::new(),
+            render_tile_ids: HashMap::default(),
             placement_data: Vec::new(), // symbols
             follower_data: Vec::new(),  // symbols
             projection_variant: ProjectionVariant::Mercator,

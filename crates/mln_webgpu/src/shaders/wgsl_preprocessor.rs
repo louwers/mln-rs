@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use mln_util::hash::HashMap;
 
 fn is_space(b: u8) -> bool {
     // std::isspace in the "C" locale
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn conditionals() {
-        let mut defines = HashMap::new();
+        let mut defines = HashMap::default();
         defines.insert("A".to_owned(), true);
         let src = "x\n#ifdef A\na\n#else\nnot_a\n#endif\n#ifndef B\nno_b\n#endif\n  #  ifdef  B  \nb\n#endif\ny";
         assert_eq!(preprocess_wgsl(src, &defines), "x\na\nno_b\ny\n");

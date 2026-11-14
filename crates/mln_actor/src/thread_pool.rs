@@ -1,9 +1,10 @@
 use std::cell::Cell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use parking_lot::{Condvar, Mutex};
 
@@ -43,7 +44,7 @@ impl ThreadedScheduler {
             unique_id: SimpleIdentity::new(),
             cv_available: Condvar::new(),
             worker_mutex: Mutex::new(false),
-            tagged_queue: Mutex::new(HashMap::new()),
+            tagged_queue: Mutex::new(HashMap::default()),
             task_count: AtomicUsize::new(0),
         });
         let threads = (0..n).map(|index| make_scheduler_thread(Arc::clone(&shared), index)).collect();

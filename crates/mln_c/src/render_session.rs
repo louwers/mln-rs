@@ -3,7 +3,7 @@
 
 use core::ffi::c_char;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread::ThreadId;
@@ -13,6 +13,7 @@ use ::mln_runtime::{
     FrameResult, LogicalExtent, RenderSession, RenderSessionState, RenderTarget,
 };
 use mln_util::ErrorKind;
+use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 

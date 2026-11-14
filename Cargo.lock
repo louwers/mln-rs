@@ -3191,6 +3191,7 @@ dependencies = [
  "bytemuck",
  "csscolorparser",
  "flate2",
+ "foldhash 0.2.0",
  "geo-types",
  "httpdate",
  "js-sys",

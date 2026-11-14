@@ -4,8 +4,9 @@
 // where needed). The `shared_mutex` becomes a `RefCell` (one render thread).
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+
+use mln_util::hash::{HashMap, HashSet};
 
 use crate::context::Context;
 use crate::projection_variant::ProjectionVariant;

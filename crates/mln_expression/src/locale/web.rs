@@ -14,10 +14,10 @@
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use js_sys::{Object, Reflect};
+use mln_util::hash::HashMap;
 use wasm_bindgen::prelude::*;
 
 use super::keywords::CollationKeywords;
@@ -119,9 +119,9 @@ impl CollatorSettings {
 }
 
 thread_local! {
-    static COLLATORS: RefCell<HashMap<CollatorSettings, intl::Collator>> = RefCell::new(HashMap::new());
+    static COLLATORS: RefCell<HashMap<CollatorSettings, intl::Collator>> = RefCell::new(HashMap::default());
     static NUMBER_FORMATS: RefCell<HashMap<NumberFormatSettings, intl::NumberFormat>> =
-        RefCell::new(HashMap::new());
+        RefCell::new(HashMap::default());
 }
 
 /// An `Intl.Collator`'s settings, with the collator in each thread's cache.
