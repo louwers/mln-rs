@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { WHEEL_NOTCHES, WHEEL_PIXELS } from "./protocol.ts";
-import { wheelDelta } from "./wheel.ts";
+import { wheelDelta, wheelReader } from "./wheel.ts";
 
 const PIXELS = 0;
 const LINES = 1;
@@ -68,4 +68,37 @@ test("precise scrolling is pixels", () => {
   assert.deepEqual(read(PIXELS, 7.5, -22), pixels(7.5));
   // Chromium on Windows and Linux: about −deltaY.
   assert.deepEqual(read(PIXELS, 37, -37), pixels(37));
+});
+
+// A pixel event: deltaY, and its wheelDeltaY.
+const px = (deltaY, wheelDeltaY, ctrlKey = false) => ({
+  deltaMode: PIXELS,
+  deltaY,
+  wheelDeltaY,
+  ctrlKey,
+});
+
+test("Safari: a scroll that starts on a notch keeps reading as notches", () => {
+  const read = wheelReader();
+  assert.deepEqual(read(px(4.000244140625, -12), 0), notches(1));
+  // Accelerated: 40 × NSEvent.deltaY px, and −3 × that in ticks.
+  assert.deepEqual(read(px(12.5, -37), 50), notches(12.5 / 4.000244140625));
+  assert.deepEqual(read(px(-20, 60), 120), notches(-20 / 4.000244140625));
+  // Under 4 px is a trackpad's, and ends it.
+  assert.deepEqual(read(px(2, -6), 150), pixels(2));
+  assert.deepEqual(read(px(12, -36), 200), pixels(12));
+});
+
+test("a scroll's notches end after 400 ms, or with Ctrl", () => {
+  const read = wheelReader();
+  read(px(4.000244140625, -12), 0);
+  assert.deepEqual(read(px(12, -36), 401), pixels(12));
+  read(px(4.000244140625, -12), 1000);
+  assert.deepEqual(read(px(-12, 36, true), 1050), pixels(-12));
+});
+
+test("a trackpad scroll doesn't start reading as notches", () => {
+  const read = wheelReader();
+  assert.deepEqual(read(px(12, -36), 0), pixels(12));
+  assert.deepEqual(read(px(15, -45), 20), pixels(15));
 });

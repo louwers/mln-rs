@@ -79,7 +79,9 @@ which the recognizer eases, from a trackpad's continuous pixels and pinches,
 which it applies at once, by how each browser reports them in its source
 (`wheelDelta` in web/wheel.ts: Firefox's lines, which it gives only to a page
 that reads `deltaMode` first, macOS's 4.000244 px steps, and Chromium's legacy
-`wheelDeltaY` of ±120 a notch). `pnpm test` runs those rules against each
+`wheelDeltaY` of ±120 a notch). As in GL JS, a scroll that starts on a macOS
+notch reads as notches while its events keep coming, since Safari's faster
+notches look like a trackpad's scroll. `pnpm test` runs those rules against each
 browser's events; no one has tried them with each browser's mouse and trackpad
 input yet. A ResizeObserver resizes the map with the window, and the map follows
 the window's pixel ratio. The canvas covers exactly the device pixels the map

@@ -34,8 +34,9 @@ export interface WheelDeltas {
   readonly ctrlKey: boolean;
 }
 
-// WheelEvent's DOM_DELTA_LINE and DOM_DELTA_PAGE, which Node, where the tests
-// run, doesn't have.
+// WheelEvent's DOM_DELTA_PIXEL, DOM_DELTA_LINE and DOM_DELTA_PAGE, which Node,
+// where the tests run, doesn't have.
+const DOM_DELTA_PIXEL = 0;
 const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
 const MAC_NOTCH = 4.000244140625;
@@ -57,4 +58,34 @@ export function wheelDelta(e: WheelDeltas): { wheel: number; amount: number } {
   if (ticks !== undefined && !precise && !pinch)
     return { wheel: WHEEL_NOTCHES, amount: ticks };
   return { wheel: WHEEL_PIXELS, amount: delta };
+}
+
+/**
+ * Reads a scroll's events in turn, as wheelDelta does but for the one case no
+ * single event tells apart: Safari's accelerated notch, 40 × `NSEvent.deltaY`
+ * px with a `wheelDeltaY` of −3 × that, as a trackpad's scroll has. As GL JS's
+ * scroll_zoom.ts does, a scroll that starts on a 4.000244 px notch reads as
+ * notches while its events come within 400 ms of each other and are at least
+ * 4 px, without Ctrl. `time` is the event's, in milliseconds.
+ */
+export function wheelReader(): (
+  e: WheelDeltas,
+  time: number,
+) => { wheel: number; amount: number } {
+  let notchesUntil = -Infinity;
+  return (e, time) => {
+    const read = wheelDelta(e);
+    const delta = e.deltaY;
+    const macNotch =
+      e.deltaMode === DOM_DELTA_PIXEL && delta !== 0 && delta % MAC_NOTCH === 0;
+    const continues =
+      read.wheel === WHEEL_PIXELS &&
+      !e.ctrlKey &&
+      Math.abs(delta) >= 4 &&
+      time <= notchesUntil;
+    notchesUntil = macNotch || continues ? time + 400 : -Infinity;
+    return continues
+      ? { wheel: WHEEL_NOTCHES, amount: delta / MAC_NOTCH }
+      : read;
+  };
 }
