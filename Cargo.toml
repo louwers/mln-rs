@@ -159,8 +159,8 @@ geo-types = { version = "0.7.20", features = ["serde"] }
 # The geometry that geojson-vt reads, so that it takes any geometry type
 # that implements the traits, `geo_types`' among them.
 geo-traits = { version = "0.3.0", features = ["geo-types"] }
-# GeoJSON reading and writing, in place of a port of the C++ core's vendored
-# geojson.hpp. mln-rs-feature converts its types to and from the port's.
+# GeoJSON, in place of a port of the C++ core's vendored geojson.hpp: the
+# sources, the C API and the expressions take its types.
 geojson = { version = "1.0.0" }
 # MVT decoding, instead of porting the C++ reader (vendor/vector-tile).
 fast-mvt = { version = "0.7.3", default-features = false, features = [

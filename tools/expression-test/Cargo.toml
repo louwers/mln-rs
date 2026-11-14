@@ -21,6 +21,7 @@ path = "src/main.rs"
 [dependencies]
 feature.workspace = true
 geo-types.workspace = true
+geojson.workspace = true
 mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_style.workspace = true

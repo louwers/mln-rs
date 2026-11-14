@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
-use feature::{Feature, Identifier, PropertyMap, Value, geojson};
+use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Coord, Geometry, LineString, MultiLineString, Point, Polygon};
 use serde_json::Value as Json;
 
@@ -163,17 +163,15 @@ fn parse_json_tiles(data: &str) -> BTreeMap<String, Vec<Feature<i16>>> {
     d.as_object().unwrap().iter().map(|(k, v)| (k.clone(), parse_json_tile(v))).collect()
 }
 
-fn feature_collection(geojson: &geojson::GeoJSON) -> &Vec<Feature<f64>> {
-    match geojson {
-        geojson::GeoJSON::FeatureCollection(c) => c,
-        _ => panic!("not a feature collection"),
-    }
+/// The features of GeoJSON text.
+fn read(data: &str) -> Result<Vec<Feature<f64>>, geojson::Error> {
+    feature::geojson::features(data.parse()?)
 }
 
 #[test]
 fn get_tile_us_states() {
-    let geojson = geojson::parse(&load_file("test/fixtures/us-states.json")).unwrap();
-    let features = feature_collection(&geojson).iter().map(|f| (f.geometry.as_ref(), &f.properties, &f.id));
+    let geojson = read(&load_file("test/fixtures/us-states.json")).unwrap();
+    let features = geojson.iter().map(|f| (f.geometry.as_ref(), &f.properties, &f.id));
     let mut index = GeoJSONVT::from_features(features, Options::default());
 
     let features = index.get_tile(7, 37, 48).unwrap().features.clone();
@@ -191,7 +189,7 @@ fn get_tile_us_states() {
 
 #[test]
 fn get_tile_generate_ids() {
-    let geojson = geojson::parse(&load_file("test/fixtures/us-states.json")).unwrap();
+    let geojson = read(&load_file("test/fixtures/us-states.json")).unwrap();
     let options = Options {
         tile: TileOptions { extent: 8192, tolerance: 0.0, ..TileOptions::default() },
         max_zoom: 20,
@@ -199,7 +197,7 @@ fn get_tile_generate_ids() {
         ..Options::default()
     };
 
-    let mut index = GeoJSONVT::from_geojson(&geojson, options);
+    let mut index = GeoJSONVT::new(&geojson, options);
 
     let features = index.get_tile(7, 37, 48).unwrap().features.clone();
     let expected = parse_json_tile_str(&load_file("test/fixtures/us-states-z7-37-48-gen-ids.json"));
@@ -208,10 +206,10 @@ fn get_tile_generate_ids() {
 
 #[test]
 fn get_tile_antimeridian_triangle() {
-    let geojson = geojson::parse(&load_file("test/fixtures/dateline-triangle.json")).unwrap();
+    let geojson = read(&load_file("test/fixtures/dateline-triangle.json")).unwrap();
 
     // Using default options.
-    let mut index = GeoJSONVT::from_geojson(&geojson, Options::default());
+    let mut index = GeoJSONVT::new(&geojson, Options::default());
 
     for (z, x, y) in [(1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)] {
         let tile = index.get_tile(z, x, y).unwrap();
@@ -222,12 +220,12 @@ fn get_tile_antimeridian_triangle() {
 
 #[test]
 fn get_tile_polygon_clipping_bug() {
-    let geojson = geojson::parse(&load_file("test/fixtures/polygon-bug.json")).unwrap();
+    let geojson = read(&load_file("test/fixtures/polygon-bug.json")).unwrap();
 
     let mut options = Options::default();
     options.tile.buffer = 1024;
 
-    let mut index = GeoJSONVT::from_geojson(&geojson, options);
+    let mut index = GeoJSONVT::new(&geojson, options);
 
     let tile = index.get_tile(5, 19, 9).unwrap();
     assert_eq!(tile.features.len(), 1);
@@ -241,7 +239,7 @@ fn get_tile_polygon_clipping_bug() {
 
 #[test]
 fn get_tile_projection() {
-    let geojson = geojson::parse(&load_file("test/fixtures/linestring.json")).unwrap();
+    let geojson = read(&load_file("test/fixtures/linestring.json")).unwrap();
 
     let options = Options {
         tile: TileOptions { extent: 8192, tolerance: 0.0, ..TileOptions::default() },
@@ -249,7 +247,7 @@ fn get_tile_projection() {
         ..Options::default()
     };
 
-    let mut index = GeoJSONVT::from_geojson(&geojson, options);
+    let mut index = GeoJSONVT::new(&geojson, options);
 
     let tile_coordinates: [(u8, u32, u32); 21] = [
         (0, 0, 0),
@@ -319,8 +317,8 @@ fn gen_tiles(
         ..Options::default()
     };
 
-    let geojson = geojson::parse(data)?;
-    let mut index = GeoJSONVT::from_geojson(&geojson, options);
+    let geojson = read(data)?;
+    let mut index = GeoJSONVT::new(&geojson, options);
 
     let mut output = BTreeMap::new();
 
@@ -352,9 +350,10 @@ fn tile_test_tiles() {
 
 #[test]
 fn gen_tiles_invalid_geojson() {
+    // C++ asserts geojson.hpp's message; reading fails in the `geojson`
+    // crate here, with its own.
     let err = gen_tiles(r#"{"type": "Pologon"}"#, 0, 10000, false).expect_err("Expected exception");
-    // C++: "Pologon geometry must have a coordinates property".
-    assert!(err.message().starts_with("unknown variant `Pologon`"), "{}", err.message());
+    assert!(matches!(err, geojson::Error::MalformedGeoJson(_)), "{err}");
 }
 
 #[test]
@@ -366,8 +365,7 @@ fn gen_tiles_empty_geojson() {
 #[test]
 fn gen_tiles_no_object_geojson() {
     let err = gen_tiles("42", 0, 10000, false).expect_err("Expected exception");
-    // C++: "GeoJSON must be an object".
-    assert!(err.message().starts_with("invalid type: integer `42`, expected GeoJson object"), "{}", err.message());
+    assert!(matches!(err, geojson::Error::MalformedGeoJson(_)), "{err}");
 }
 
 fn property_string<'a>(props: &'a PropertyMap, key: &str) -> &'a str {
@@ -386,7 +384,7 @@ fn property_double(props: &PropertyMap, key: &str) -> f64 {
 
 #[test]
 fn geojson_to_tile_simple() {
-    let geojson = geojson::parse(&load_file("test/fixtures/single-tile.json")).unwrap();
+    let geojson = read(&load_file("test/fixtures/single-tile.json")).unwrap();
     let tile = geojson_to_tile(&geojson, 12, 1171, 1566, &TileOptions::default(), false, false);
 
     assert_eq!(tile.features.len(), 1);
@@ -396,7 +394,7 @@ fn geojson_to_tile_simple() {
 
 #[test]
 fn geojson_to_tile_clips() {
-    let geojson = geojson::parse(&load_file("test/fixtures/us-states.json")).unwrap();
+    let geojson = read(&load_file("test/fixtures/us-states.json")).unwrap();
     let tile = geojson_to_tile(&geojson, 12, 1171, 1566, &TileOptions::default(), false, true);
 
     assert_eq!(tile.features.len(), 2);
@@ -406,7 +404,7 @@ fn geojson_to_tile_clips() {
 
 #[test]
 fn geojson_to_tile_metrics() {
-    let geojson = geojson::parse(&load_file("test/fixtures/single-tile.json")).unwrap();
+    let geojson = read(&load_file("test/fixtures/single-tile.json")).unwrap();
     let options = TileOptions { line_metrics: true, buffer: 64, tolerance: 3.0, ..TileOptions::default() };
     let k_epsilon = 1e-5;
 

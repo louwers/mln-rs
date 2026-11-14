@@ -2,8 +2,7 @@ use std::fmt::Write;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use feature::{Feature, GeoJSON};
-use geo_types::Point;
+use geojson::{Feature, GeoJson, Geometry};
 use mln_renderer::RenderingStats;
 use mln_style::expression::Formatted;
 use mln_style::layers::symbol_layer::SymbolLayer;
@@ -68,8 +67,8 @@ impl RenderingStatsView {
             let options = CustomGeometrySourceOptions {
                 fetch_tile_function: Some(Arc::new(move |tile_id: &CanonicalTileID| {
                     if let Some(handle) = fetch_handle.get() {
-                        let point = Feature::new(Point::new(0.0, 0.0));
-                        handle.set_tile_data(*tile_id, GeoJSON::FeatureCollection(vec![point]));
+                        let point = Feature::from(Geometry::new_point([0.0, 0.0]));
+                        handle.set_tile_data(*tile_id, GeoJson::from(vec![point]));
                     }
                 })),
                 zoom_range: Range::new(0, 0),

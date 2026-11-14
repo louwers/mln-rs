@@ -3,8 +3,7 @@ mod support;
 
 use std::sync::{Arc, OnceLock};
 
-use feature::{Feature, GeoJSON};
-use geo_types::{Geometry, LineString, Point};
+use geojson::{Feature, GeoJson, Geometry};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
@@ -64,15 +63,15 @@ fn grid() {
             let bounds = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y);
             let mut y = (bounds.north() / grid_spacing).ceil() * grid_spacing;
             while y >= (bounds.south() / grid_spacing).floor() * grid_spacing {
-                let grid_line = LineString::from(vec![(bounds.west(), y), (bounds.east(), y)]);
-                features.push(Feature::new(Geometry::LineString(grid_line)));
+                let grid_line = Geometry::new_line_string([[bounds.west(), y], [bounds.east(), y]]);
+                features.push(Feature::from(grid_line));
                 y -= grid_spacing;
             }
 
             let mut x = (bounds.west() / grid_spacing).floor() * grid_spacing;
             while x <= (bounds.east() / grid_spacing).ceil() * grid_spacing {
-                let grid_line = LineString::from(vec![(x, bounds.south()), (x, bounds.north())]);
-                features.push(Feature::new(Geometry::LineString(grid_line)));
+                let grid_line = Geometry::new_line_string([[x, bounds.south()], [x, bounds.north()]]);
+                features.push(Feature::from(grid_line));
                 x += grid_spacing;
             }
             features
@@ -116,7 +115,7 @@ fn recycle_map_update_images() {
 
     let load_style = |map: &mut Map, marker_name: &str, marker_path: &str| {
         let source = GeoJSONSource::with_default_options("geometry");
-        source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(0.0, 0.0)))).unwrap();
+        source.set_geojson(GeoJson::from(Geometry::new_point([0.0, 0.0]))).unwrap();
 
         let mut layer = SymbolLayer::new("geometry", "geometry");
         layer.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new(marker_name)));

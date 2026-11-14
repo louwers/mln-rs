@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use feature::{GeoJSON, geojson};
+use geojson::GeoJson;
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map_types::{
@@ -670,7 +670,7 @@ fn custom_geometry_source_set_tile_data() {
     let handle = source.handle();
     test.run_loop.invoke(move || {
         // Set Tile Data
-        handle.set_tile_data(CanonicalTileID::new(0, 0, 0), GeoJSON::FeatureCollection(Vec::new()));
+        handle.set_tile_data(CanonicalTileID::new(0, 0, 0), GeoJson::from(Vec::<geojson::Feature>::new()));
     });
 
     test.run();
@@ -811,12 +811,11 @@ fn observe_tile_errors(render_source: &mut dyn RenderSource) -> Rc<RefCell<usize
 fn geojson_source_tiles_after_data_reset() {
     let test = SourceTest::new();
     let source = GeoJSONSource::with_default_options("source");
-    let geojson = geojson::parse(
-        r#"{"geometry": {"type": "Point", "coordinates": [1.1, 1.1]}, "type": "Feature", "properties": {}}"#,
-    )
-    .unwrap();
+    let geojson = r#"{"geometry": {"type": "Point", "coordinates": [1.1, 1.1]}, "type": "Feature", "properties": {}}"#
+        .parse::<GeoJson>()
+        .unwrap();
     let geojson_data =
-        create_geojson_data(&geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
+        create_geojson_data(geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
     source.set_geojson_data(Some(Arc::clone(&geojson_data)));
     let mut render_source =
         RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));
@@ -879,13 +878,12 @@ impl SynchronousUpdateSource {
 
     /// Sets new data and updates the render source, as a frame would.
     fn update(&mut self, test: &SourceTest) {
-        let geojson = geojson::parse(
-            r#"{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {},
-                "geometry": {"type": "Point", "coordinates": [1.1, 1.1]}}]}"#,
-        )
-        .unwrap();
+        let geojson = r#"{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {},
+                "geometry": {"type": "Point", "coordinates": [1.1, 1.1]}}]}"#
+            .parse::<GeoJson>()
+            .unwrap();
         self.source
-            .set_geojson_data(Some(create_geojson_data(&geojson, scheduler::get_sequenced(), &self.options).unwrap()));
+            .set_geojson_data(Some(create_geojson_data(geojson, scheduler::get_sequenced(), &self.options).unwrap()));
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = self.source.is_update_synchronous();
         self.render_source.update(self.source.base_impl(), &self.layers, true, true, &parameters);
@@ -939,13 +937,11 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     // Unclustered data slices on this scheduler while the source is asynchronous.
     let slicer = Arc::new(HeldScheduler::default());
     let source = GeoJSONSource::with_default_options("source");
-    let geojson = geojson::parse(
-        r#"{"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}"#,
-    )
-    .unwrap();
+    let geojson = r#"{"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}"#
+        .parse::<GeoJson>()
+        .unwrap();
     source.set_geojson_data(Some(
-        create_geojson_data(&geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options())
-            .unwrap(),
+        create_geojson_data(geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options()).unwrap(),
     ));
     let mut render_source =
         RenderGeoJSONSource::new(source::downcast_arc::<geojson_source_impl::Impl>(&source.base_impl()));

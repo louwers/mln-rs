@@ -57,6 +57,7 @@ serde.workspace = true
 shelf_pack.workspace = true
 
 [dev-dependencies]
+geojson.workspace = true
 mln_conversion = { package = "mln-rs-conversion", path = "../mln_conversion" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
 mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }

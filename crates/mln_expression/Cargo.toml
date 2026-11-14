@@ -19,6 +19,7 @@ doctest = false
 cheap-ruler.workspace = true
 feature.workspace = true
 geo-types.workspace = true
+geojson.workspace = true
 geometry.workspace = true
 mln_conversion.workspace = true
 mln_math.workspace = true

@@ -45,11 +45,11 @@ pub(crate) trait ConversionTraits {
     /// `i64`, then `f64`.
     fn to_value(&self) -> Option<Value>;
 
-    /// Converts the value to GeoJSON. The JSON front end runs
-    /// `feature::geojson::convert` and reports its error message in `error`. A front
+    /// Converts the value to GeoJSON. The JSON front end deserializes it
+    /// with the `geojson` crate and reports its error message in `error`. A front
     /// end without a GeoJSON conversion reports an error (added by `sources`
     /// for the GeoJSON source).
-    fn to_geojson(&self, error: &mut Error) -> Option<feature::GeoJSON> {
+    fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJson> {
         error.message = "GeoJSON conversion is not supported by this value type".to_owned();
         None
     }
@@ -129,7 +129,7 @@ impl<'a> Convertible<'a> {
         self.traits().to_value()
     }
 
-    pub fn to_geojson(&self, error: &mut Error) -> Option<feature::GeoJSON> {
+    pub fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJson> {
         self.traits().to_geojson(error)
     }
 }
@@ -146,6 +146,6 @@ impl<'a, T: ConversionTraits> From<&'a T> for Convertible<'a> {
     }
 }
 
-pub fn to_geojson(v: &Convertible<'_>, error: &mut Error) -> Option<feature::GeoJSON> {
+pub fn to_geojson(v: &Convertible<'_>, error: &mut Error) -> Option<geojson::GeoJson> {
     v.to_geojson(error)
 }

@@ -88,7 +88,7 @@ fn sum_options(radius: Option<u16>) -> Options {
 #[test]
 fn test_1_default_options() {
     let features = parse_features();
-    let index = Supercluster::new(&features, Options::default()).unwrap();
+    let index = Supercluster::new(features.clone(), Options::default()).unwrap();
 
     let tile = index.get_tile(0, 0, 0);
     assert_eq!(tile.len(), 39);
@@ -142,14 +142,14 @@ fn test_1_default_options() {
 fn test_2_expansion_zoom() {
     let features = parse_features();
     let options2 = Options { radius: 60, extent: 256, max_zoom: 4, ..Options::default() };
-    let index2 = Supercluster::new(&features, options2).unwrap();
+    let index2 = Supercluster::new(features.clone(), options2).unwrap();
     assert_eq!(index2.get_cluster_expansion_zoom(2436).unwrap(), 5);
 }
 
 #[test]
 fn test_3_map_reduce() {
     let features = parse_features();
-    let index3 = Supercluster::new(&features, sum_options(None)).unwrap();
+    let index3 = Supercluster::new(features.clone(), sum_options(None)).unwrap();
 
     let tile3 = index3.get_tile(0, 0, 0);
     assert_ne!(tile3, Vec::<Feature<i16>>::new());
@@ -160,7 +160,7 @@ fn test_3_map_reduce() {
 #[test]
 fn test_4_map_reduce_radius() {
     let features = parse_features();
-    let index4 = Supercluster::new(&features, sum_options(Some(100))).unwrap();
+    let index4 = Supercluster::new(features.clone(), sum_options(Some(100))).unwrap();
 
     let expect_vec0: Vec<u64> = vec![298, 122, 12, 36, 98, 7, 24, 8, 125, 98, 125, 12, 36, 8];
     let expect_vec1: Vec<u64> = vec![146, 84, 63, 23, 34, 12, 19, 29, 8, 8, 80, 35];
@@ -175,7 +175,7 @@ fn test_4_map_reduce_radius() {
 fn test_5_min_points() {
     let features = parse_features();
     let options5 = Options { min_points: 5, ..Options::default() };
-    let index5 = Supercluster::new(&features, options5).unwrap();
+    let index5 = Supercluster::new(features.clone(), options5).unwrap();
 
     let tile5 = index5.get_tile(0, 0, 0);
     assert_eq!(tile5.len(), 49);
@@ -198,7 +198,7 @@ fn test_5_min_points() {
 fn test_generate_id() {
     let features = parse_features();
     let options = Options { generate_id: true, ..Options::default() };
-    let index = Supercluster::new(&features, options).unwrap();
+    let index = Supercluster::new(features.clone(), options).unwrap();
     let ids: Vec<u64> = index
         .get_tile(0, 0, 0)
         .iter()

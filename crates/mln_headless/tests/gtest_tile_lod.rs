@@ -4,8 +4,7 @@ use std::f64::consts::PI;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use feature::Feature;
-use geo_types::Point;
+use geojson::{Feature, Geometry};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions};
@@ -50,7 +49,7 @@ impl TileLODTest {
             fetch_tile_function: Some(answer_with(&handle, move |tile_id| {
                 let center = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y).center();
                 counted.fetch_add(1, Ordering::SeqCst);
-                vec![Feature::new(Point::new(center.longitude(), center.latitude()))]
+                vec![Feature::from(Geometry::new_point([center.longitude(), center.latitude()]))]
             })),
             ..Default::default()
         };

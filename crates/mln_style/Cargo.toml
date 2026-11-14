@@ -17,6 +17,7 @@ doctest = false
 
 [dependencies]
 feature.workspace = true
+geojson.workspace = true
 geo-types.workspace = true
 geojson_vt.workspace = true
 mln_actor.workspace = true

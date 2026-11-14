@@ -6,7 +6,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use feature::GeoJSON;
+use geojson::GeoJson;
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
 use mln_storage::FileSource;
@@ -15,6 +15,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
+use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 
 use super::geojson_source::TileFeatures;
@@ -89,14 +90,19 @@ pub enum CustomGeometrySourceError {
 pub type CustomGeometryTileLoader = CustomTileLoader<Arc<TileFeatures>>;
 
 /// Cuts the host's GeoJSON for a tile, as `CustomGeometryTile::setTileData`
-/// does. Anything but a non-empty feature collection is an empty tile.
-fn tile_features(geojson: &GeoJSON, tile_id: &CanonicalTileID, options: &TileOptions) -> TileFeatures {
-    let GeoJSON::FeatureCollection(features) = geojson else {
-        return TileFeatures::new();
-    };
-    if features.is_empty() {
+/// does. Anything but a non-empty feature collection is an empty tile, and
+/// so is one whose geometry `geo_types` can't hold, which is logged.
+fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOptions) -> TileFeatures {
+    if !matches!(&geojson, GeoJson::FeatureCollection(c) if !c.features.is_empty()) {
         return TileFeatures::new();
     }
+    let features = match feature::geojson::features(geojson) {
+        Ok(features) => features,
+        Err(e) => {
+            Log::error(Event::General, format!("Invalid custom geometry tile data: {e}"));
+            return TileFeatures::new();
+        }
+    };
     // `CustomGeometrySource::new` checked that the tile size divides the
     // extent.
     let scale = f64::from(constants::EXTENT / i32::from(options.tile_size.max(1)));
@@ -106,7 +112,7 @@ fn tile_features(geojson: &GeoJSON, tile_id: &CanonicalTileID, options: &TileOpt
         tolerance: scale * options.tolerance,
         ..Default::default()
     };
-    geojson_vt::geojson_to_tile(geojson, tile_id.z, tile_id.x, tile_id.y, &vt_options, options.wrap, options.clip)
+    geojson_vt::geojson_to_tile(&features, tile_id.z, tile_id.x, tile_id.y, &vt_options, options.wrap, options.clip)
         .features
 }
 
@@ -128,11 +134,11 @@ impl std::fmt::Debug for CustomGeometrySourceHandle {
 impl CustomGeometrySourceHandle {
     /// Hands over the tile's features. The GeoJSON is cut to the tile on the
     /// background thread, and only if a tile needs it.
-    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJSON) {
+    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJson) {
         let options = Arc::clone(&self.tile_options);
         self.loader.invoke(move |loader| {
             if loader.is_required(&tile_id) {
-                let features = tile_features(&data, &tile_id, &options);
+                let features = tile_features(data, &tile_id, &options);
                 loader.set_tile_data(&tile_id, Arc::new(features));
             }
         });
@@ -275,7 +281,7 @@ impl CustomGeometrySource {
     }
 
     /// See [`CustomGeometrySourceHandle::set_tile_data`].
-    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJSON) {
+    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJson) {
         self.handle().set_tile_data(tile_id, data);
     }
 

@@ -237,7 +237,15 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
         }
 
         if let Some(geometry) = feature_object.get("geometry") {
-            feature.geometry = feature::geojson::convert_geometry(geometry).map_err(|e| e.0)?;
+            feature.geometry = match geometry {
+                serde_json::Value::Null => None,
+                json => Some(
+                    serde_json::from_value::<geojson::Geometry>(json.clone())
+                        .map_err(geojson::Error::from)
+                        .and_then(feature::geojson::geometry)
+                        .map_err(|e| e.to_string())?,
+                ),
+            };
         }
 
         if let Some(id) = feature_object.get("id") {

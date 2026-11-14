@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use feature::{GeoJSON, PropertyMap, Value};
-use geo_types::{Geometry, Point};
+use feature::{PropertyMap, Value};
+use geojson::{GeoJson, Geometry};
 use mln_actor::RunLoop;
 use mln_map::{CameraOptions, MapMode};
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
@@ -321,7 +321,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
             // Keep the point away from tile boundaries so source queries return one copy.
             let source = style.get_source("source1").expect("source1");
             let source = source.downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
-            source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(1.003, 1.003)))).unwrap();
+            source.set_geojson(GeoJson::from(Geometry::new_point([1.003, 1.003]))).unwrap();
             style.add_layer(Box::new(CircleLayer::new("circle_layer", "source1")), None).unwrap();
         }
         // std::to_string(int).

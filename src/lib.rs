@@ -11,10 +11,9 @@
 //! and the headless frontend (`mln_headless`) are internal to the port and
 //! not re-exported.
 //!
-//! GeoJSON and feature geometry is `geo_types`', and `geo_traits` geometry
-//! goes into `geojson_vt`. Both crates are re-exported, with the `geojson`
-//! crate that reads and writes GeoJSON; `feature::geojson` converts its
-//! objects to the port's.
+//! GeoJSON is the `geojson` crate's, feature geometry is `geo_types`', and
+//! `geojson_vt` reads any `geo_traits` geometry. The three crates are
+//! re-exported.
 
 pub use feature;
 pub use geo_traits;

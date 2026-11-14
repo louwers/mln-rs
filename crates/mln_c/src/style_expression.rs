@@ -272,11 +272,10 @@ unsafe fn read_inputs(inputs: *const mln_style_expression_inputs) -> Result<Inpu
 }
 
 fn parse_feature(text: &str) -> Result<Feature<f64>, Error> {
-    let document = parse_json(text, "feature")?;
-    match feature::geojson::convert(&document) {
-        Ok(feature::GeoJSON::Feature(feature)) => Ok(feature),
-        Ok(_) => Err(Error::invalid_argument("feature must contain one GeoJSON Feature")),
-        Err(error) => Err(Error::invalid_argument(format!("feature is invalid: {}", error.message()))),
+    let invalid = |error: geojson::Error| Error::invalid_argument(format!("feature is invalid: {error}"));
+    match serde_json::from_value(parse_json(text, "feature")?).map_err(geojson::Error::from).map_err(invalid)? {
+        geojson::GeoJson::Feature(feature) => Feature::try_from(feature).map_err(invalid),
+        _ => Err(Error::invalid_argument("feature must contain one GeoJSON Feature")),
     }
 }
 
@@ -286,7 +285,7 @@ fn parse_object(text: Option<&str>, name: &str) -> Result<Option<ValueObject>, E
     if !document.is_object() {
         return Err(Error::invalid_argument(format!("{name} must contain a JSON object")));
     }
-    match feature::geojson::convert_value(&document) {
+    match JsonValue::from(document) {
         JsonValue::Object(object) => Ok(Some(object)),
         _ => Err(Error::invalid_argument(format!("{name} must contain a JSON object"))),
     }

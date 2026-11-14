@@ -11,8 +11,9 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use feature::{Feature, GeoJSON, Value};
-use geo_types::{Geometry, LineString, Point};
+use feature::Value;
+use geo_types::{LineString, Point};
+use geojson::{GeoJson, Geometry};
 use mln_actor::{RunLoop, Timer};
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::{BackendScope, ScopeType};
@@ -1561,7 +1562,7 @@ fn source_changes_reach_the_observer() {
         let mut map = test.map();
         let style = map.style_mut();
         let source = style.get_source("points").unwrap().downcast_ref::<GeoJSONSource>().unwrap();
-        source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(1.0, 1.0)))).unwrap();
+        source.set_geojson(GeoJson::from(Geometry::new_point([1.0, 1.0]))).unwrap();
         assert!(changed.borrow().is_empty());
     }
     assert_eq!(changed.take(), ["points"]);
@@ -2126,7 +2127,7 @@ fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: 
         Arc::new(move |tile_id: &CanonicalTileID| {
             requested_tiles.fetch_add(1, Ordering::SeqCst);
             if let Some(handle) = handle.get() {
-                handle.set_tile_data(*tile_id, GeoJSON::default());
+                handle.set_tile_data(*tile_id, GeoJson::from(Vec::<geojson::Feature>::new()));
             }
         })
     };
@@ -2916,7 +2917,7 @@ fn stencil_overflow() {
         let handle = Arc::clone(&handle);
         Arc::new(move |tile_id: &CanonicalTileID| {
             if let Some(handle) = handle.get() {
-                handle.set_tile_data(*tile_id, GeoJSON::default());
+                handle.set_tile_data(*tile_id, GeoJson::from(Vec::<geojson::Feature>::new()));
             }
         })
     };
@@ -3663,12 +3664,10 @@ fn line_layer_depth_distribution() {
         let y = (bounds.north() - bounds.south()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(index + 1) / 2.0;
         let x = (bounds.east() - bounds.west()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(index + 1) / 2.0;
 
-        let geo = LineString::from(vec![(-x, y), (x, y), (x, -y), (-x, -y), (-x, y)]);
-
-        let features = vec![Feature::new(Geometry::LineString(geo))];
+        let geo = Geometry::new_line_string([[-x, y], [x, y], [x, -y], [-x, -y], [-x, y]]);
 
         let source = GeoJSONSource::with_default_options(format!("GeoJSONSource_{index}"));
-        source.set_geojson(&GeoJSON::FeatureCollection(features)).unwrap();
+        source.set_geojson(GeoJson::from(vec![geojson::Feature::from(geo)])).unwrap();
 
         source
     };
@@ -3740,7 +3739,7 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     let source_id = format!("point-{index}");
     let options = GeoJSONOptions { synchronous_update: synchronous, ..GeoJSONOptions::default() };
     let source = GeoJSONSource::new(source_id.clone(), Arc::new(options));
-    source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(longitude, 0.0)))).unwrap();
+    source.set_geojson(GeoJson::from(Geometry::new_point([longitude, 0.0]))).unwrap();
     test.map().style_mut().add_source(Box::new(source)).unwrap();
 
     let text = if with_text { "New place" } else { "" };

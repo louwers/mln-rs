@@ -1,6 +1,6 @@
 // Ports vendor/maplibre-native-base/deps/geojson-vt-cpp/include/mapbox/geojsonvt/tile.hpp.
 
-use feature::{Feature, FeatureCollection, Identifier, PropertyMap, Value};
+use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
 use crate::types::{
@@ -11,7 +11,7 @@ use crate::types::{
 /// `Tile`
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tile {
-    pub features: FeatureCollection<i16>,
+    pub features: Vec<Feature<i16>>,
     pub(crate) num_points: u32,
     pub(crate) num_simplified: u32,
 }

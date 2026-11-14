@@ -5,8 +5,9 @@
 
 use std::f64::consts::PI;
 
-use feature::{GeoJSON, Value as MbglValue, ValueObject};
+use feature::{Value as MbglValue, ValueObject};
 use geo_types::{Coord, Geometry, Polygon};
+use geojson::GeoJson;
 use geometry::Point;
 use mln_conversion::{Convertible, Error};
 use mln_tile_id::CanonicalTileID;
@@ -279,7 +280,10 @@ fn feature_within_polygons(
 ) -> bool {
     let mut poly_bbox = DEFAULT_WITHIN_BBOX;
     let polygons = get_tile_polygons(polygon_geo_set, canonical, &mut poly_bbox);
-    debug_assert_ne!(polygons, Vec::<TilePolygon>::new());
+    // An empty multi-polygon contains nothing.
+    if polygons.is_empty() {
+        return false;
+    }
     let geometries = feature.get_geometries();
     match feature.get_type() {
         FeatureType::Point => {
@@ -311,7 +315,7 @@ fn feature_within_polygons(
 
 const POLYGON_REQUIRED: &str = "'within' expression requires valid geojson source that contains polygon geometry type.";
 
-fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJSON> {
+fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJson> {
     if value.is_object() {
         let mut error = Error::default();
         let geojson = value.to_geojson(&mut error);
@@ -327,25 +331,37 @@ fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJ
     None
 }
 
-fn get_polygon_info(geometry: Option<&Geometry<f64>>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
-    if let Some(geometry) = geometry
-        && to_feature_type(Some(geometry)) == FeatureType::Polygon
-    {
-        return Some(geometry.clone());
+fn get_polygon_info(geometry: Option<&geojson::Geometry>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
+    match geometry.map(|g| feature::geojson::geometry(g.clone())) {
+        Some(Ok(geometry)) if to_feature_type(Some(&geometry)) == FeatureType::Polygon => return Some(geometry),
+        Some(Err(e)) => {
+            ctx.error(e.to_string());
+            return None;
+        }
+        _ => {}
     }
     ctx.error(POLYGON_REQUIRED.to_owned());
     None
 }
 
+/// The geometry of each feature of `geojson`; a bare geometry is one.
+pub(crate) fn geojson_geometries(geojson: &GeoJson) -> Vec<Option<&geojson::Geometry>> {
+    match geojson {
+        GeoJson::Geometry(geometry) => vec![Some(geometry)],
+        GeoJson::Feature(feature) => vec![feature.geometry.as_ref()],
+        GeoJson::FeatureCollection(collection) => collection.features.iter().map(|f| f.geometry.as_ref()).collect(),
+    }
+}
+
 pub(crate) struct Within {
     base: ExpressionBase,
-    geojson_source: GeoJSON,
+    geojson_source: GeoJson,
     geometries: Geometry<f64>,
 }
 
 impl Within {
     #[must_use]
-    pub(crate) fn new(geojson: GeoJSON, geometries: Geometry<f64>) -> Self {
+    pub(crate) fn new(geojson: GeoJson, geometries: Geometry<f64>) -> Self {
         Within {
             base: ExpressionBase::new(Kind::Within, Type::Boolean, Dependency::FEATURE),
             geojson_source: geojson,
@@ -366,13 +382,7 @@ impl Within {
 
             let parsed_value = parse_value(&value.array_member(1), ctx)?;
 
-            let geometries: Vec<Option<&Geometry<f64>>> = match &parsed_value {
-                GeoJSON::Geometry(geometry_set) => vec![Some(geometry_set)],
-                GeoJSON::Feature(feature) => vec![feature.geometry.as_ref()],
-                GeoJSON::FeatureCollection(features) => {
-                    features.iter().map(|feature| feature.geometry.as_ref()).collect()
-                }
-            };
+            let geometries = geojson_geometries(&parsed_value);
             // The first polygon wins; every non-polygon before it reports an
             // error.
             for geometry in &geometries {
@@ -449,7 +459,7 @@ impl Expression for Within {
     }
 
     fn serialize(&self) -> MbglValue {
-        let value = feature::geojson::to_json(&self.geojson_source);
+        let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
         let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
             o.iter().map(|(k, v)| (k.clone(), value_converter(v))).collect()
         } else {
@@ -475,5 +485,33 @@ mod tests {
         assert!(ctx.parse_expression(&Convertible::from(&document), None).is_none());
         assert_eq!(ctx.get_errors().len(), 1);
         assert_eq!(ctx.get_errors()[0].message, POLYGON_REQUIRED);
+    }
+
+    struct PointFeature(mln_tile_id::geometry_tile_data::GeometryCollection);
+
+    impl GeometryTileFeature for PointFeature {
+        fn get_type(&self) -> FeatureType {
+            FeatureType::Point
+        }
+
+        fn get_value(&self, _key: &str) -> Option<MbglValue> {
+            None
+        }
+
+        fn get_geometries(&self) -> &mln_tile_id::geometry_tile_data::GeometryCollection {
+            &self.0
+        }
+    }
+
+    /// An empty multi-polygon parses, and contains nothing.
+    #[test]
+    fn nothing_is_within_an_empty_multi_polygon() {
+        let document = serde_json::json!(["within", {"type": "MultiPolygon", "coordinates": []}]);
+        let mut ctx = ParsingContext::new();
+        let within = ctx.parse_expression(&Convertible::from(&document), None).expect("parses");
+        let feature = PointFeature(vec![vec![Point::new(10, 10)]].into());
+        let canonical = CanonicalTileID::new(3, 3, 3);
+        let params = EvaluationContext::from_feature(Some(&feature)).with_canonical_tile_id(Some(&canonical));
+        assert_eq!(within.evaluate(&params), Ok(Value::Bool(false)));
     }
 }

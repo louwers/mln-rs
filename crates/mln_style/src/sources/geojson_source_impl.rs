@@ -1,6 +1,6 @@
 use std::sync::{Arc, Weak};
 
-use feature::{Feature, GeoJSON, PropertyMap, Value};
+use feature::{Feature, PropertyMap, Value};
 use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_expression::expression::evaluate_accumulated;
 use mln_style_types::SourceType;
@@ -108,16 +108,16 @@ fn evaluate_feature(f: &Feature<f64>, expression: &Arc<dyn Expression>, accumula
     Value::default()
 }
 
+/// The data of `features`. Only the features of a feature collection
+/// (`collection`) cluster.
 pub(super) fn create(
-    geojson: &GeoJSON,
+    features: Features,
+    collection: bool,
     sequenced_scheduler: SchedulerPtr,
     options: &Arc<GeoJSONOptions>,
 ) -> Result<Arc<dyn GeoJSONData>, Error> {
     let scale: f64 = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
-    if options.cluster
-        && let GeoJSON::FeatureCollection(features) = geojson
-        && !features.is_empty()
-    {
+    if options.cluster && collection && !features.is_empty() {
         let mut cluster_options = supercluster::Options {
             max_zoom: options.cluster_max_zoom,
             extent: constants::EXTENT as u16,
@@ -169,7 +169,7 @@ pub(super) fn create(
         ..Default::default()
     };
     Ok(Arc::new(GeoJSONVTData {
-        impl_: Arc::new(Mutex::new(geojson_vt::GeoJSONVT::from_geojson(geojson, vt_options))),
+        impl_: Arc::new(Mutex::new(geojson_vt::GeoJSONVT::new(&features, vt_options))),
         sequenced_scheduler,
     }))
 }

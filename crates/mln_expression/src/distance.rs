@@ -5,7 +5,8 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use cheap_ruler::{CheapRuler, DistanceUnit};
-use feature::{GeoJSON, Value as MbglValue, ValueObject};
+use feature::{Value as MbglValue, ValueObject};
+use geojson::GeoJson;
 use geometry::Point;
 use mln_conversion::{Convertible, Error};
 use mln_tile::geometry_tile_data::convert_geometry;
@@ -966,7 +967,7 @@ fn calculate_distance(
     })
 }
 
-fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJSON> {
+fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJson> {
     if value.is_array() {
         // object value, quoted with ["distance", GeoJSONObj]
         let length = value.array_length();
@@ -998,14 +999,21 @@ fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJ
 const NO_SUPPORTED_GEOMETRY: &str =
     "'distance' expression requires valid geojson that contains Point/LineString/Polygon geometries.";
 
-fn get_geometry(geometry: Option<&geo_types::Geometry<f64>>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
-    if let Some(geometry) = geometry
-        && matches!(
-            to_feature_type(Some(geometry)),
-            FeatureType::Point | FeatureType::LineString | FeatureType::Polygon
-        )
-    {
-        return Some(Geometry::from_geo(geometry));
+fn get_geometry(geometry: Option<&geojson::Geometry>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
+    match geometry.map(|g| feature::geojson::geometry(g.clone())) {
+        Some(Ok(geometry))
+            if matches!(
+                to_feature_type(Some(&geometry)),
+                FeatureType::Point | FeatureType::LineString | FeatureType::Polygon
+            ) =>
+        {
+            return Some(Geometry::from_geo(&geometry));
+        }
+        Some(Err(e)) => {
+            ctx.error(e.to_string());
+            return None;
+        }
+        _ => {}
     }
     ctx.error(
         "'distance' expression requires valid geojson object with valid geometry type: Point, LineString or Polygon."
@@ -1017,13 +1025,13 @@ fn get_geometry(geometry: Option<&geo_types::Geometry<f64>>, ctx: &mut ParsingCo
 /// The distance in meters from the feature to a GeoJSON geometry.
 pub(crate) struct Distance {
     base: ExpressionBase,
-    geojson_source: GeoJSON,
+    geojson_source: GeoJson,
     geometries: Geometry<f64>,
 }
 
 impl Distance {
     #[must_use]
-    fn new(geojson: GeoJSON, geometries: Geometry<f64>) -> Self {
+    fn new(geojson: GeoJson, geometries: Geometry<f64>) -> Self {
         Distance {
             base: ExpressionBase::new(Kind::Distance, Type::Number, Dependency::FEATURE),
             geojson_source: geojson,
@@ -1034,11 +1042,7 @@ impl Distance {
     pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
         let parsed_value = parse_value(value, ctx)?;
 
-        let geometries: Vec<Option<&geo_types::Geometry<f64>>> = match &parsed_value {
-            GeoJSON::Geometry(geometry_set) => vec![Some(geometry_set)],
-            GeoJSON::Feature(feature) => vec![feature.geometry.as_ref()],
-            GeoJSON::FeatureCollection(features) => features.iter().map(|feature| feature.geometry.as_ref()).collect(),
-        };
+        let geometries = crate::within::geojson_geometries(&parsed_value);
         // The first supported geometry wins; every unsupported one before it
         // reports an error.
         for geometry in &geometries {
@@ -1115,7 +1119,7 @@ impl Expression for Distance {
     }
 
     fn serialize(&self) -> MbglValue {
-        let value = feature::geojson::to_json(&self.geojson_source);
+        let value = serde_json::to_value(&self.geojson_source).unwrap_or_default();
         let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
             o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect()
         } else {
@@ -1225,7 +1229,9 @@ mod tests {
     fn degenerate_geometry_is_an_evaluation_error() {
         let point = r#"["distance", {"type": "Point", "coordinates": [24.93, 60.17]}]"#;
         let short_line = r#"["distance", {"type": "LineString", "coordinates": [[24.93, 60.17]]}]"#;
-        let short_ring = r#"["distance", {"type": "Polygon", "coordinates": [[[24.93, 60.17], [24.94, 60.17]]]}]"#;
+        // `geo_types` closes rings, so a ring needs a single position to stay
+        // shorter than the three the algorithms need.
+        let short_ring = r#"["distance", {"type": "Polygon", "coordinates": [[[24.93, 60.17]]]}]"#;
         let no_rings = r#"["distance", {"type": "Polygon", "coordinates": []}]"#;
         let empty_points = r#"["distance", {"type": "MultiPoint", "coordinates": []}]"#;
         let good_point = tile_feature(FeatureType::Point, vec![vec![(10, 10)]]);

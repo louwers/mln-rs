@@ -108,10 +108,7 @@ pub(crate) fn to_json_features(features: &[mln_util::feature::Feature]) -> Strin
     for feature in features {
         // type, geometry, id, properties (the `geojson` crate's order), then
         // source, sourceLayer (when not empty) and state.
-        let serde_json::Value::Object(mut result) = feature::geojson::to_json_feature(&feature.to_geojson_feature())
-        else {
-            unreachable!("a feature converts to an object");
-        };
+        let mut result = serde_json::Map::from(&geojson::Feature::from(&feature.to_geojson_feature()));
         result.insert("source".to_owned(), serde_json::Value::String(feature.source.clone()));
         if !feature.source_layer.is_empty() {
             result.insert("sourceLayer".to_owned(), serde_json::Value::String(feature.source_layer.clone()));

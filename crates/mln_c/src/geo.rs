@@ -2,8 +2,8 @@
 //! GeoJSON geometries and tile IDs, checked as they enter and converted to the
 //! core's types.
 
-use feature::{GeoJSON, geojson};
 use geo_types::Geometry;
+use geojson::GeoJson;
 use mln_tile_id::CanonicalTileID;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate};
 
@@ -69,13 +69,15 @@ pub(crate) fn geometry(json: &str, name: &'static str) -> Result<Geometry<f64>, 
     }
     let json = json.to_owned();
     parse_thread::run(move || {
-        let document = serde_json::from_str(&json)
-            .map_err(|error| Error::invalid_argument(format!("{name} is not valid JSON: {error}")))?;
-        match geojson::convert(&document) {
-            Ok(GeoJSON::Geometry(geometry)) => Ok(geometry),
-            Ok(_) => Err(Error::invalid_argument(format!("{name} must contain one GeoJSON Geometry"))),
-            Err(error) => Err(Error::invalid_argument(format!("{name} is invalid: {}", error.message()))),
-        }
+        let geojson: GeoJson = serde_json::from_str(&json).map_err(|error| {
+            let what = if error.is_data() { "is invalid" } else { "is not valid JSON" };
+            Error::invalid_argument(format!("{name} {what}: {error}"))
+        })?;
+        let GeoJson::Geometry(geometry) = geojson else {
+            return Err(Error::invalid_argument(format!("{name} must contain one GeoJSON Geometry")));
+        };
+        feature::geojson::geometry(geometry)
+            .map_err(|error| Error::invalid_argument(format!("{name} is invalid: {error}")))
     })?
 }
 

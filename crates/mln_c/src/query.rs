@@ -174,7 +174,7 @@ unsafe fn source_id(view: mln_buffer_view) -> Result<String, Error> {
 }
 
 fn feature_json(feature: &mln_util::feature::Feature) -> LentText {
-    LentText::new(&feature::geojson::stringify_feature(&feature.to_geojson_feature()))
+    LentText::new(&geojson::Feature::from(&feature.to_geojson_feature()).to_string())
 }
 
 /// The texts of rendered features, which their result lends.
@@ -244,7 +244,7 @@ impl CompletionValue for SourceFeatures {
 }
 
 fn feature_collection(features: &[feature::Feature<f64>]) -> LentText {
-    LentText::new(&feature::geojson::stringify_feature_collection(features))
+    LentText::new(&features.iter().map(geojson::Feature::from).collect::<geojson::FeatureCollection>().to_string())
 }
 
 /// `mln_render_session_query_rendered_features()`.

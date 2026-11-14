@@ -467,11 +467,8 @@ fn distance_expression() {
     };
     let get_feature = |name: &str, type_: FeatureType| {
         let geometry_input = read_geometry_data(name);
-        let geometry = match geojson::parse(&geometry_input).expect("fixture GeoJSON") {
-            feature::GeoJSON::Geometry(geometry_set) => geometry_set,
-            feature::GeoJSON::Feature(feature) => feature.geometry.expect("a geometry"),
-            feature::GeoJSON::FeatureCollection(features) => features[0].geometry.clone().expect("a geometry"),
-        };
+        let features = geojson::features(geometry_input.parse().expect("fixture GeoJSON")).expect("fixture geometry");
+        let geometry = features[0].geometry.clone().expect("a geometry");
         feature(type_, geometry)
     };
 

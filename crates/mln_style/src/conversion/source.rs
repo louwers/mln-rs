@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use feature::GeoJSON;
+use geojson::GeoJson;
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::tileset::{Tileset, VectorEncoding};
@@ -144,8 +144,8 @@ fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) 
     let result = GeoJSONSource::new(id, options);
 
     if data_value.is_object() {
-        let geojson = GeoJSON::convert(&data_value, error)?;
-        if let Err(e) = result.set_geojson(&geojson) {
+        let geojson = GeoJson::convert(&data_value, error)?;
+        if let Err(e) = result.set_geojson(geojson) {
             // C++ lets the Supercluster exception (a clustered
             // non-point feature) propagate out of the style parse.
             error.message = e.message;

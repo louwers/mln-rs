@@ -2514,6 +2514,7 @@ name = "mln-rs-c"
 version = "0.0.11"
 dependencies = [
  "geo-types",
+ "geojson",
  "js-sys",
  "libc",
  "mln-rs-conversion",
@@ -2562,7 +2563,9 @@ dependencies = [
 name = "mln-rs-conversion"
 version = "0.0.11"
 dependencies = [
+ "geojson",
  "mln-rs-feature",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
 ]
@@ -2614,6 +2617,7 @@ dependencies = [
  "cheap-ruler",
  "fixed_decimal",
  "geo-types",
+ "geojson",
  "icu_collator",
  "icu_decimal",
  "icu_experimental",
@@ -2645,6 +2649,7 @@ name = "mln-rs-expression-test"
 version = "0.0.11"
 dependencies = [
  "geo-types",
+ "geojson",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
@@ -2664,7 +2669,6 @@ dependencies = [
  "mln-rs-vec-map",
  "serde",
  "serde_json",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2673,6 +2677,7 @@ version = "0.0.11"
 dependencies = [
  "geo-traits",
  "geo-types",
+ "geojson",
  "mln-rs-feature",
  "mln-rs-geometry",
  "serde_json",
@@ -2735,6 +2740,7 @@ name = "mln-rs-headless"
 version = "0.0.11"
 dependencies = [
  "geo-types",
+ "geojson",
  "glow",
  "mln-rs-actor",
  "mln-rs-feature",
@@ -2786,6 +2792,7 @@ name = "mln-rs-map"
 version = "0.0.11"
 dependencies = [
  "geo-types",
+ "geojson",
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -2850,6 +2857,7 @@ name = "mln-rs-render-test"
 version = "0.0.11"
 dependencies = [
  "fastrand",
+ "geojson",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",
@@ -2879,6 +2887,7 @@ dependencies = [
  "bytemuck",
  "earcut",
  "geo-types",
+ "geojson",
  "glam",
  "mln-rs-actor",
  "mln-rs-conversion",
@@ -2916,6 +2925,7 @@ name = "mln-rs-runtime"
 version = "0.0.11"
 dependencies = [
  "geo-types",
+ "geojson",
  "glow",
  "httpmock",
  "js-sys",
@@ -2977,6 +2987,7 @@ dependencies = [
  "block2 0.6.2",
  "bytes",
  "geo-types",
+ "geojson",
  "httpmock",
  "jni",
  "js-sys",
@@ -3028,6 +3039,7 @@ name = "mln-rs-style"
 version = "0.0.11"
 dependencies = [
  "geo-types",
+ "geojson",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-expression",

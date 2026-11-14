@@ -3,7 +3,7 @@
 // Simplify.Points, Clip.* and GeoJSONVT.ClipVertexOnTileBorder.
 // tests/fixtures.rs has the rest.
 
-use feature::{Value, geojson};
+use feature::Value;
 use geo_types::{Coord, Geometry, LineString};
 
 use crate::clip::Clipper;
@@ -295,7 +295,7 @@ fn geojsonvt_clip_vertex_on_tile_border() {
             ]
         }
     }"#; // The second node is exactly on the (13, 2344, 3134) tile border.
-    let geojson = geojson::parse(data).unwrap();
+    let geojson = feature::geojson::features(data.parse().unwrap()).unwrap();
     let mut options = Options::default();
     options.tile.line_metrics = true;
     options.tile.buffer = 2048;
@@ -303,7 +303,7 @@ fn geojsonvt_clip_vertex_on_tile_border() {
 
     let k_epsilon = 1e-5;
 
-    let mut index = GeoJSONVT::from_geojson(&geojson, options);
+    let mut index = GeoJSONVT::new(&geojson, options);
 
     let tile = index.get_tile(13, 2344, 3134).unwrap();
     assert_ne!(tile.features, Vec::<feature::Feature<i16>>::new());
@@ -338,7 +338,7 @@ fn polygon_rings_are_closed_and_rewound() {
             [[[-40, 0], [-40, 40], [-80, 40], [-80, 0]], [[-50, 10], [-70, 10], [-70, 30], [-50, 30], [-50, 10]]]
         ]
     }"#;
-    let mut index = GeoJSONVT::from_geojson(&geojson::parse(data).unwrap(), Options::default());
+    let mut index = GeoJSONVT::new(&feature::geojson::features(data.parse().unwrap()).unwrap(), Options::default());
     let tile = index.get_tile(0, 0, 0).unwrap();
     let Some(Geometry::MultiPolygon(polygons)) = &tile.features[0].geometry else { panic!("{:?}", tile.features) };
     assert_eq!(polygons.0.len(), 2);

@@ -24,6 +24,7 @@ geo-types.workspace = true
 geometry.workspace = true
 
 [dev-dependencies]
+geojson.workspace = true
 serde_json.workspace = true
 
 [lints]

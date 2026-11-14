@@ -158,7 +158,7 @@ fn geojson_data_checks_its_source_and_its_options() {
     };
     assert!(refused("plain", r#"{"type":"FeatureCollection","features":[]}garbage"#).contains("not valid JSON"));
     let line = r#"{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[0,0],[1,1]]},"properties":{}}]}"#;
-    assert!(refused("clustered", line).contains("feature 0 has line string geometry"));
+    assert!(refused("clustered", line).contains("feature 0 has LineString geometry"));
     assert!(refused("clustered", r#"{"type":"Point","coordinates":[0,0]}"#).contains("the data is a bare geometry"));
     // Clustering's rules belong to clustering alone.
     wait(map.set_geojson_source_data("plain", line));

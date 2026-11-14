@@ -4,7 +4,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
-use feature::{Feature, GeoJSON};
+use feature::Feature;
+use geojson::GeoJson;
 use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_tile_id::CanonicalTileID;
@@ -114,15 +115,18 @@ pub trait GeoJSONData: Send + Sync {
     fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, mln_util::Error>;
 }
 
-/// Prepares GeoJSON for tiling. GeoJSON that can't be clustered, such as a
-/// non-point feature, fails with
+/// Prepares GeoJSON for tiling. GeoJSON whose geometry `geo_types` can't
+/// hold (a position of fewer than two numbers), or that can't be clustered,
+/// such as a non-point feature, fails with
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
 pub fn create_geojson_data(
-    geojson: &GeoJSON,
+    geojson: GeoJson,
     sequenced_scheduler: SchedulerPtr,
     options: &Arc<GeoJSONOptions>,
 ) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
-    geojson_source_impl::create(geojson, sequenced_scheduler, options)
+    let collection = matches!(geojson, GeoJson::FeatureCollection(_));
+    let features = feature::geojson::features(geojson).map_err(|e| mln_util::Error::invalid_argument(e.to_string()))?;
+    geojson_source_impl::create(features, collection, sequenced_scheduler, options)
 }
 
 /// Builds the data of a [`GeoJSONSource`] with the source's options. It is
@@ -135,7 +139,7 @@ pub struct GeoJSONDataBuilder {
 
 impl GeoJSONDataBuilder {
     /// Fails as [`create_geojson_data`] does.
-    pub fn build(&self, geojson: &GeoJSON) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
+    pub fn build(&self, geojson: GeoJson) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
         create_geojson_data(geojson, Arc::clone(&self.sequenced_scheduler), &self.options)
     }
 }
@@ -204,7 +208,7 @@ impl GeoJSONSource {
     }
 
     /// Sets the source's data. Fails as [`create_geojson_data`] does.
-    pub fn set_geojson(&self, geojson: &GeoJSON) -> Result<(), mln_util::Error> {
+    pub fn set_geojson(&self, geojson: GeoJson) -> Result<(), mln_util::Error> {
         let data = create_geojson_data(
             geojson,
             Arc::clone(&self.inner.sequenced_scheduler),
@@ -306,7 +310,7 @@ fn on_description_response(weak: &Weak<Inner>, res: &Response) {
                 let mut error = Error::default();
                 let mut geojson_data = None;
                 if let Some(geojson) = convert_json_geojson(&data, &mut error) {
-                    match create_geojson_data(&geojson, seq_scheduler, &options) {
+                    match create_geojson_data(geojson, seq_scheduler, &options) {
                         Ok(created) => geojson_data = Some(created),
                         // C++ lets the Supercluster exception
                         // escape the background task.
