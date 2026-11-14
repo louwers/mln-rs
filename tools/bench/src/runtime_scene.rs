@@ -3,8 +3,8 @@
 //! its C API: for the cases that measure the runtime's own work, its
 //! commands, rather than a frame.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use mln_map::{CameraOptions, CameraUpdate, MapMode, RenderMode};
@@ -13,6 +13,7 @@ use mln_runtime::{
     RenderSession, RenderTarget, Runtime, RuntimeOptions,
 };
 use mln_util::geo::LatLng;
+use parking_lot::{Condvar, Mutex};
 
 use crate::Context;
 use crate::scene::{BASEMAP_SIZE, BASEMAP_ZOOM, basemap_center, basemap_style};
@@ -45,19 +46,18 @@ struct Wakes {
 
 impl Wakes {
     fn notify(&self) {
-        *self.count.lock().unwrap() += 1;
+        *self.count.lock() += 1;
         self.changed.notify_all();
     }
 
     fn seen(&self) -> u64 {
-        *self.count.lock().unwrap()
+        *self.count.lock()
     }
 
     /// Waits for a wake after `seen`, until `deadline` at the latest.
     fn wait(&self, seen: u64, deadline: Instant) {
-        let count = self.count.lock().unwrap();
-        let timeout = deadline.saturating_duration_since(Instant::now());
-        drop(self.changed.wait_timeout_while(count, timeout, |count| *count == seen).unwrap());
+        let mut count = self.count.lock();
+        while *count == seen && !self.changed.wait_until(&mut count, deadline).timed_out() {}
     }
 }
 

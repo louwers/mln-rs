@@ -144,7 +144,7 @@ pub fn start_counters() {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[must_use]
 pub(crate) fn process_counters() -> Option<Counters> {
-    linux::counters().as_ref().map(linux::Pmus::read)
+    linux::counters().map(linux::Pmus::read)
 }
 
 /// The instructions and cycles every thread of the process has retired so
@@ -247,9 +247,10 @@ mod linux {
     }
 
     /// The counters, opened by the first call.
-    pub(super) fn counters() -> &'static Option<Pmus> {
+    pub(super) fn counters() -> Option<&'static Pmus> {
         static COUNTERS: OnceLock<Option<Pmus>> = OnceLock::new();
-        COUNTERS.get_or_init(|| {
+        COUNTERS
+            .get_or_init(|| {
             let pair = |pmu: u64| {
                 let config = pmu << PERF_PMU_TYPE_SHIFT;
                 Some((open(config | PERF_COUNT_HW_INSTRUCTIONS)?, open(config | PERF_COUNT_HW_CPU_CYCLES)?))
@@ -263,6 +264,7 @@ mod linux {
                 _ => pair(0).map(|pair| Pmus(vec![pair])),
             }
         })
+            .as_ref()
     }
 
     /// The type of each PMU that counts some of the CPUs' cores, where the
