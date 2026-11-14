@@ -74,7 +74,7 @@ pub struct BorrowedTarget {
     /// replaced or the target goes, so that the `GlGpu` keeps the slot's
     /// framebuffer. Whether the depth and stencil texture is imported too,
     /// rather than the target's own.
-    imports: RefCell<Vec<Option<(FrameImage, bool)>>>,
+    imports: Vec<Cell<Option<(FrameImage, bool)>>>,
     /// The slot of the frame begun, until it ends.
     begun: Cell<Option<usize>>,
     /// The target's own depth and stencil texture, of the backend's
@@ -103,7 +103,7 @@ impl BorrowedTarget {
         Ok(BorrowedTarget {
             backend,
             textures: RefCell::new(textures),
-            imports: RefCell::new(vec![None; depth]),
+            imports: (0..depth).map(|_| Cell::new(None)).collect(),
             begun: Cell::new(None),
             depth_stencil: Cell::new(None),
             selected: Cell::new(0),
@@ -133,7 +133,7 @@ impl BorrowedTarget {
     /// stencil texture.
     fn forget_imports(&self) {
         let mut gpu = self.backend.gpu();
-        for (image, depth_imported) in self.imports.borrow_mut().iter_mut().filter_map(Option::take) {
+        for (image, depth_imported) in self.imports.iter().filter_map(Cell::take) {
             let depth_stencil = image.depth_stencil.filter(|_| depth_imported);
             for texture in [Some(image.color), depth_stencil].into_iter().flatten() {
                 gpu.destroy_texture(texture);
@@ -205,12 +205,12 @@ impl BorrowedTarget {
 impl BorrowedTarget {
     /// The textures of `slot`, imported at its first frame.
     fn slot_image(&self, slot: usize) -> Result<FrameImage, Error> {
-        if let Some(Some((image, _))) = self.imports.borrow().get(slot) {
-            return Ok(*image);
+        if let Some((image, _)) = self.imports.get(slot).and_then(Cell::get) {
+            return Ok(image);
         }
         let imported = self.import(slot)?;
-        if let Some(entry) = self.imports.borrow_mut().get_mut(slot) {
-            *entry = Some(imported);
+        if let Some(entry) = self.imports.get(slot) {
+            entry.set(Some(imported));
         }
         Ok(imported.0)
     }
